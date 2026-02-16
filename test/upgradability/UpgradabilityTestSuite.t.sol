@@ -136,8 +136,9 @@ contract UpgradabilityTestSuite is BaseTest {
         newAccountantImpl = new RoycoAccountant();
         vm.label(address(newAccountantImpl), "NewAccountantImpl");
 
-        IRoycoKernel.RoycoKernelConstructionParams memory constructionParams =
-            IRoycoKernel.RoycoKernelConstructionParams({ baseAsset: ETHEREUM_MAINNET_USDC_ADDRESS, seniorTranche: address(ST), stAsset: SNUSD, juniorTranche: address(JT), jtAsset: SNUSD });
+        IRoycoKernel.RoycoKernelConstructionParams memory constructionParams = IRoycoKernel.RoycoKernelConstructionParams({
+            baseAsset: ETHEREUM_MAINNET_USDC_ADDRESS, seniorTranche: address(ST), stAsset: SNUSD, juniorTranche: address(JT), jtAsset: SNUSD
+        });
 
         newKernelImpl = address(new YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel(constructionParams));
         vm.label(newKernelImpl, "NewKernelImpl");
