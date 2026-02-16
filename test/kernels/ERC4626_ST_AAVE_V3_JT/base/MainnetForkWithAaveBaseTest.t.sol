@@ -109,6 +109,7 @@ abstract contract MainnetForkWithAaveTestBase is BaseTest {
             seniorTrancheSymbol: SENIOR_TRANCHE_SYMBOL,
             juniorTrancheName: JUNIOR_TRANCHE_NAME,
             juniorTrancheSymbol: JUNIOR_TRANCHE_SYMBOL,
+            baseAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
             seniorAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
             juniorAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
             stNAVDustTolerance: toNAVUnits(uint256(10 ** 12)), // 10^(18-6) for USDC

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { NAV_UNIT } from "./Units.sol";
+import { BASE_UNIT, NAV_UNIT } from "./Units.sol";
 
 /**
  * @notice Initialization parameters for the Royco Kernel
@@ -20,12 +20,14 @@ struct RoycoKernelInitParams {
 /**
  * @notice Storage state for the Royco Kernel
  * @custom:storage-location erc7201:Royco.storage.RoycoKernelState
+ * @custom:field stLiquidationProceeds - Accumulated liquidation proceeds for the senior tranche, in base asset units
  * @custom:field protocolFeeRecipient - The market's configured protocol fee recipient
  * @custom:field accountant - The address of the Royco accountant used to perform per operation accounting for this kernel
  * @custom:field jtRedemptionDelayInSeconds - The redemption delay in seconds that a JT LP has to wait between requesting and executing a redemption
  * @custom:field jtControllerToIdToRedemptionRequest - A mapping from a controller to a redemption request ID to its state for a junior tranche LP
  */
 struct RoycoKernelState {
+    BASE_UNIT stLiquidationProceeds;
     address protocolFeeRecipient;
     address accountant;
     uint24 jtRedemptionDelayInSeconds;
@@ -62,7 +64,8 @@ library RoycoKernelStorageLib {
         $.protocolFeeRecipient = _params.protocolFeeRecipient;
         $.accountant = _params.accountant;
         $.jtRedemptionDelayInSeconds = _params.jtRedemptionDelayInSeconds;
-        $.nextJTRedemptionRequestId = 1; // Start at 1 to avoid 0 being a valid request ID
+        // Start at 1 to render 0 the sentinel request ID
+        $.nextJTRedemptionRequestId = 1;
     }
 
     /**

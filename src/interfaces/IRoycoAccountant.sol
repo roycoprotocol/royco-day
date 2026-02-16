@@ -392,4 +392,11 @@ interface IRoycoAccountant {
      * @return state The state of the accountant
      */
     function getState() external view returns (RoycoAccountantState memory state);
+
+    /**
+     * @notice Returns the liquidation parameters for this market
+     * @return lltvWAD The liquidation loan to value threshold, scaled to WAD precision
+     * @return betaWAD The junior tranche's sensitivity to downside stress, scaled to WAD precision
+     */
+    function getLiquidationParams() external view returns (uint64 lltvWAD, uint96 betaWAD);
 }

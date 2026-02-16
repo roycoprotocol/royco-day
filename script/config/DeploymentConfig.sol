@@ -67,6 +67,7 @@ abstract contract DeploymentConfig {
         string juniorTrancheName;
         string juniorTrancheSymbol;
         // Assets
+        address baseAsset;
         address seniorAsset;
         address juniorAsset;
         // Dust tolerances
@@ -177,6 +178,7 @@ abstract contract DeploymentConfig {
             seniorTrancheSymbol: _seniorTrancheSymbol(STCUSD),
             juniorTrancheName: _juniorTrancheName(STCUSD),
             juniorTrancheSymbol: _juniorTrancheSymbol(STCUSD),
+            baseAsset: 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48,
             seniorAsset: 0x88887bE419578051FF9F4eb6C858A951921D8888,
             juniorAsset: 0x88887bE419578051FF9F4eb6C858A951921D8888,
             stDustTolerance: 3,
@@ -203,6 +205,7 @@ abstract contract DeploymentConfig {
             seniorTrancheSymbol: _seniorTrancheSymbol(SNUSD),
             juniorTrancheName: _juniorTrancheName(SNUSD),
             juniorTrancheSymbol: _juniorTrancheSymbol(SNUSD),
+            baseAsset: 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48,
             seniorAsset: 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313,
             juniorAsset: 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313,
             stDustTolerance: 3,
@@ -229,6 +232,7 @@ abstract contract DeploymentConfig {
             seniorTrancheSymbol: _seniorTrancheSymbol(SAVUSD),
             juniorTrancheName: _juniorTrancheName(SAVUSD),
             juniorTrancheSymbol: _juniorTrancheSymbol(SAVUSD),
+            baseAsset: 0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E,
             seniorAsset: 0x06d47F3fb376649c3A9Dafe069B3D6E35572219E,
             juniorAsset: 0x06d47F3fb376649c3A9Dafe069B3D6E35572219E,
             stDustTolerance: 3,
@@ -255,6 +259,7 @@ abstract contract DeploymentConfig {
             seniorTrancheSymbol: _seniorTrancheSymbol(AUTOUSD),
             juniorTrancheName: _juniorTrancheName(AUTOUSD),
             juniorTrancheSymbol: _juniorTrancheSymbol(AUTOUSD),
+            baseAsset: 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48,
             seniorAsset: 0xa7569A44f348d3D70d8ad5889e50F78E33d80D35,
             juniorAsset: 0xa7569A44f348d3D70d8ad5889e50F78E33d80D35,
             stDustTolerance: 3,

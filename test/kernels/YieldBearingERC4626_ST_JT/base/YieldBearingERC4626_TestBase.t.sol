@@ -421,6 +421,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
             seniorTrancheSymbol: string(abi.encodePacked("RS-", cfg.name)),
             juniorTrancheName: string(abi.encodePacked("Royco Junior ", cfg.name)),
             juniorTrancheSymbol: string(abi.encodePacked("RJ-", cfg.name)),
+            baseAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
             seniorAsset: cfg.stAsset,
             juniorAsset: cfg.jtAsset,
             stNAVDustTolerance: toNAVUnits(10 ** (18 - cfg.stDecimals)),

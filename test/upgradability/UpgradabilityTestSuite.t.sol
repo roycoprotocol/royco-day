@@ -95,6 +95,7 @@ contract UpgradabilityTestSuite is BaseTest {
             seniorTrancheSymbol: "RS-sNUSD",
             juniorTrancheName: "Royco Junior sNUSD",
             juniorTrancheSymbol: "RJ-sNUSD",
+            baseAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
             seniorAsset: SNUSD,
             juniorAsset: SNUSD,
             stNAVDustTolerance: DUST_TOLERANCE,
@@ -136,7 +137,7 @@ contract UpgradabilityTestSuite is BaseTest {
         vm.label(address(newAccountantImpl), "NewAccountantImpl");
 
         IRoycoKernel.RoycoKernelConstructionParams memory constructionParams =
-            IRoycoKernel.RoycoKernelConstructionParams({ seniorTranche: address(ST), stAsset: SNUSD, juniorTranche: address(JT), jtAsset: SNUSD });
+            IRoycoKernel.RoycoKernelConstructionParams({ baseAsset: ETHEREUM_MAINNET_USDC_ADDRESS, seniorTranche: address(ST), stAsset: SNUSD, juniorTranche: address(JT), jtAsset: SNUSD });
 
         newKernelImpl = address(new YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel(constructionParams));
         vm.label(newKernelImpl, "NewKernelImpl");

@@ -5,6 +5,7 @@ import { RoycoKernelInitParams } from "../libraries/RoycoKernelStorageLib.sol";
 import { RoycoKernel } from "./base/RoycoKernel.sol";
 import { YieldBearingERC20_JT_Kernel } from "./base/junior/YieldBearingERC20_JT_Kernel.sol";
 import { IdenticalERC4626SharesAdminOracleQuoter } from "./base/quoter/IdenticalERC4626SharesAdminOracleQuoter.sol";
+import { AtomicLiquidationFacility } from "./base/liquidation-facility/AtomicLiquidationFacility.sol";
 import { YieldBearingERC20_ST_Kernel } from "./base/senior/YieldBearingERC20_ST_Kernel.sol";
 
 /**
@@ -16,7 +17,8 @@ import { YieldBearingERC20_ST_Kernel } from "./base/senior/YieldBearingERC20_ST_
 contract YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel is
     YieldBearingERC20_ST_Kernel,
     YieldBearingERC20_JT_Kernel,
-    IdenticalERC4626SharesAdminOracleQuoter
+    IdenticalERC4626SharesAdminOracleQuoter,
+    AtomicLiquidationFacility
 {
     /// @notice Constructs the kernel state
     /// @param _params The standard construction parameters for the Royco kernel

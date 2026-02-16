@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { WAD, ZERO_NAV_UNITS } from "./Constants.sol";
 import { ActionMetadataFormat, AssetClaims } from "./Types.sol";
-import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib } from "./Units.sol";
+import { BASE_UNIT, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib } from "./Units.sol";
 
 /**
  * @title UtilsLib
@@ -14,6 +14,7 @@ import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib } from "./Units.sol";
 library UtilsLib {
     using UnitsMathLib for NAV_UNIT;
     using UnitsMathLib for TRANCHE_UNIT;
+    using UnitsMathLib for BASE_UNIT;
     using UnitsMathLib for uint256;
 
     /**
@@ -79,6 +80,7 @@ library UtilsLib {
         scaledClaims.nav = _claims.nav.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
         scaledClaims.stAssets = _claims.stAssets.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
         scaledClaims.jtAssets = _claims.jtAssets.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
+        scaledClaims.liquidationProceeds = _claims.liquidationProceeds.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
     }
 
     /**
@@ -100,6 +102,7 @@ library UtilsLib {
         scaledClaims.nav = _claims.nav.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
         scaledClaims.stAssets = _claims.stAssets.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
         scaledClaims.jtAssets = _claims.jtAssets.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
+        scaledClaims.liquidationProceeds = _claims.liquidationProceeds.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
     }
 
     /**

@@ -12,6 +12,11 @@ type NAV_UNIT is uint256;
 /// @dev `TRANCHE_UNIT` always has the same precision as the asset it represents (base asset of the tranche)
 type TRANCHE_UNIT is uint256;
 
+/// @notice Unit for base asset amounts used in liquidation settlements (e.g., USDC)
+/// @dev `BASE_UNIT` maintains 1:1 value parity with `NAV_UNIT` (1 USDC = 1 NAV unit), but may have a different precision
+/// @dev `BASE_UNIT` always has the same precision as the base asset it represents
+type BASE_UNIT is uint256;
+
 /// @title UnitsMathLib
 /// @notice Typed math helpers for Royco units (NAV_UNIT and TRANCHE_UNIT)
 /// @dev Wraps OpenZeppelin Math helpers and preserves unit typing on return values
@@ -64,6 +69,16 @@ library UnitsMathLib {
     /// @notice Returns `(_a * _b) / _c` where `_a` is a scalar and `_b/_c` are NAV-denominated, with explicit rounding.
     function mulDiv(uint256 _a, NAV_UNIT _b, NAV_UNIT _c, Math.Rounding _rounding) internal pure returns (uint256) {
         return Math.mulDiv(_a, toUint256(_b), toUint256(_c), _rounding);
+    }
+
+    /// @notice Returns `(_a * _b) / _c` where `_a` is base-denominated and `_b/_c` are NAV-denominated, with explicit rounding.
+    function mulDiv(BASE_UNIT _a, NAV_UNIT _b, NAV_UNIT _c, Math.Rounding _rounding) internal pure returns (BASE_UNIT) {
+        return toBaseUnits(Math.mulDiv(toUint256(_a), toUint256(_b), toUint256(_c), _rounding));
+    }
+
+    /// @notice Returns `(_a * _b) / _c` where `_a` is base-denominated and `_b/_c` are scalars, with explicit rounding.
+    function mulDiv(BASE_UNIT _a, uint256 _b, uint256 _c, Math.Rounding _rounding) internal pure returns (BASE_UNIT) {
+        return toBaseUnits(Math.mulDiv(toUint256(_a), _b, _c, _rounding));
     }
 }
 
@@ -208,3 +223,29 @@ using {
     equalsTrancheUnits as ==,
     notEqualsTrancheUnits as !=
 } for TRANCHE_UNIT global;
+
+/// -----------------------------------------------------------------------
+/// Global BASE_UNIT Helpers
+/// -----------------------------------------------------------------------
+
+function toBaseUnits(uint256 _assets) pure returns (BASE_UNIT) {
+    return BASE_UNIT.wrap(_assets);
+}
+
+function toUint256(BASE_UNIT _units) pure returns (uint256) {
+    return BASE_UNIT.unwrap(_units);
+}
+
+function addBaseUnits(BASE_UNIT _a, BASE_UNIT _b) pure returns (BASE_UNIT) {
+    return BASE_UNIT.wrap(BASE_UNIT.unwrap(_a) + BASE_UNIT.unwrap(_b));
+}
+
+function subBaseUnits(BASE_UNIT _a, BASE_UNIT _b) pure returns (BASE_UNIT) {
+    return BASE_UNIT.wrap(BASE_UNIT.unwrap(_a) - BASE_UNIT.unwrap(_b));
+}
+
+function notEqualsBaseUnits(BASE_UNIT _a, BASE_UNIT _b) pure returns (bool) {
+    return BASE_UNIT.unwrap(_a) != BASE_UNIT.unwrap(_b);
+}
+
+using { addBaseUnits as +, subBaseUnits as -, notEqualsBaseUnits as != } for BASE_UNIT global;

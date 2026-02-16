@@ -6,6 +6,7 @@ import { IIdleCDO } from "../interfaces/external/idle-finance/IIdleCDO.sol";
 import { WAD_DECIMALS } from "../libraries/Constants.sol";
 import { RoycoKernelInitParams } from "../libraries/RoycoKernelStorageLib.sol";
 import { IdenticalAssetsOracleQuoter } from "./base/quoter/base/IdenticalAssetsOracleQuoter.sol";
+import { AtomicLiquidationFacility } from "./base/liquidation-facility/AtomicLiquidationFacility.sol";
 import {
     YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsOracleQuoter_Kernel
 } from "./base/recipe/YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsOracleQuoter_Kernel.sol";
@@ -18,7 +19,7 @@ import {
  * @dev Example: Pareto's Falconx's Prime Brokerage Vault at https://app.pareto.credit/vault#0xC26A6Fa2C37b38E549a4a1807543801Db684f99C
  * @dev https://docs.idle.finance/
  */
-contract IdleCdoAA_ST_IdleCdoAA_JT_Kernel is YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsOracleQuoter_Kernel {
+contract IdleCdoAA_ST_IdleCdoAA_JT_Kernel is YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsOracleQuoter_Kernel, AtomicLiquidationFacility {
     /// @notice The address of the IdleCDO
     address public immutable IDLE_CDO;
 

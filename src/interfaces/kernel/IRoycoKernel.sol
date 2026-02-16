@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { AssetClaims, ExecutionModel, SharesRedemptionModel, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
-import { NAV_UNIT, TRANCHE_UNIT } from "../../libraries/Units.sol";
+import { BASE_UNIT, NAV_UNIT, TRANCHE_UNIT } from "../../libraries/Units.sol";
 
 /**
  * @title IRoycoKernel
@@ -12,12 +12,14 @@ import { NAV_UNIT, TRANCHE_UNIT } from "../../libraries/Units.sol";
 interface IRoycoKernel {
     /**
      * @notice Initialization parameters for the Royco Kernel
+     * @custom:field baseAsset - The base asset (e.g., USDC) used for liquidation settlements, with 1:1 value parity with NAV units but may differ in precision
      * @custom:field seniorTranche - The address of the Royco senior tranche associated with this kernel
-     * @custom:field seniorTranche - The address of the base asset of the senior tranche
+     * @custom:field stAsset - The address of the base asset of the senior tranche
      * @custom:field juniorTranche - The address of the Royco junior tranche associated with this kernel
-     * @custom:field seniorTranche - The address of the base asset of the junior tranche
+     * @custom:field jtAsset - The address of the base asset of the junior tranche
      */
     struct RoycoKernelConstructionParams {
+        address baseAsset;
         address seniorTranche;
         address stAsset;
         address juniorTranche;
@@ -41,6 +43,9 @@ interface IRoycoKernel {
 
     /// @notice Thrown when the tranche and the kernel's corresponding tranche assets don't match
     error TRANCHE_AND_KERNEL_ASSETS_MISMATCH();
+
+    /// @notice Thrown when an asset has over WAD decimals of precision
+    error UNSUPPORTED_DECIMALS();
 
     /// @notice Thrown when the caller of a permissioned function isn't the market's senior tranche
     error ONLY_SENIOR_TRANCHE();
@@ -138,6 +143,28 @@ interface IRoycoKernel {
      * @return jtAssets The specified NAV of the assets denominated in the kernel's NAV units converted to assets denominated in JT's tranche units
      */
     function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) external view returns (TRANCHE_UNIT jtAssets);
+
+    /**
+     * @notice Converts base asset amounts to NAV units by scaling to WAD precision
+     * @param _baseAssets The amount of base assets to convert
+     * @return nav The equivalent value in NAV units (WAD precision)
+     */
+    function convertBaseUnitsToNAVUnits(BASE_UNIT _baseAssets) external view returns (NAV_UNIT nav);
+
+    /**
+     * @notice Converts NAV units to base asset amounts by scaling from WAD precision
+     * @param _nav The NAV amount to convert
+     * @return baseAssets The equivalent amount in base asset units
+     */
+    function convertNAVUnitsToBaseUnits(NAV_UNIT _nav) external view returns (BASE_UNIT baseAssets);
+
+    /**
+     * @notice Returns the senior tranche's claims on ST and JT assets that are available for liquidation
+     * @dev Returns zero values if the market is not in a liquidatable state
+     * @return stAssets The senior tranche's claim on ST assets available for liquidation
+     * @return jtAssets The senior tranche's claim on JT assets available for liquidation
+     */
+    function getLiquidatableAssets() external view returns (TRANCHE_UNIT stAssets, TRANCHE_UNIT jtAssets);
 
     /**
      * @notice Synchronizes and persists the raw and effective NAVs of both tranches

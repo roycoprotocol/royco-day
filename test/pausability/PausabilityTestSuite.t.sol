@@ -73,6 +73,7 @@ contract PausabilityTestSuite is BaseTest {
             seniorTrancheSymbol: "RS-sNUSD",
             juniorTrancheName: "Royco Junior sNUSD",
             juniorTrancheSymbol: "RJ-sNUSD",
+            baseAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
             seniorAsset: SNUSD,
             juniorAsset: SNUSD,
             stNAVDustTolerance: DUST_TOLERANCE,

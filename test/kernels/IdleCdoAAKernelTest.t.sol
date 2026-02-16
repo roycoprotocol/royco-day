@@ -87,6 +87,7 @@ contract IdleCdoAAKernelTest is AbstractKernelTestSuite {
             seniorTrancheSymbol: SENIOR_TRANCHE_SYMBOL,
             juniorTrancheName: JUNIOR_TRANCHE_NAME,
             juniorTrancheSymbol: JUNIOR_TRANCHE_SYMBOL,
+            baseAsset: IIdleCDO(IDLE_CDO).token(),
             seniorAsset: AA_TRANCHE_TOKEN,
             juniorAsset: AA_TRANCHE_TOKEN,
             stNAVDustTolerance: toNAVUnits(SCALE_FACTOR),

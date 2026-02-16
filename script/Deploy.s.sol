@@ -173,6 +173,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         string seniorTrancheSymbol;
         string juniorTrancheName;
         string juniorTrancheSymbol;
+        address baseAsset;
         address seniorAsset;
         address juniorAsset;
         NAV_UNIT stNAVDustTolerance;
@@ -241,6 +242,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             seniorTrancheSymbol: marketConfig.seniorTrancheSymbol,
             juniorTrancheName: marketConfig.juniorTrancheName,
             juniorTrancheSymbol: marketConfig.juniorTrancheSymbol,
+            baseAsset: marketConfig.baseAsset,
             seniorAsset: marketConfig.seniorAsset,
             juniorAsset: marketConfig.juniorAsset,
             stNAVDustTolerance: toNAVUnits(marketConfig.stDustTolerance),
@@ -681,6 +683,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         address kernelImpl = _deployKernelImpl(
             _params.kernelType,
             _params.kernelSpecificParams,
+            _params.baseAsset,
             expectedSeniorTrancheAddress,
             expectedJuniorTrancheAddress,
             _params.seniorAsset,
@@ -830,6 +833,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     function _deployKernelImpl(
         KernelType _kernelType,
         bytes memory _kernelSpecificParams,
+        address _baseAsset,
         address _expectedSeniorTrancheAddress,
         address _expectedJuniorTrancheAddress,
         address _seniorAsset,
@@ -839,7 +843,11 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         returns (address)
     {
         IRoycoKernel.RoycoKernelConstructionParams memory constructionParams = IRoycoKernel.RoycoKernelConstructionParams({
-            seniorTranche: _expectedSeniorTrancheAddress, stAsset: _seniorAsset, juniorTranche: _expectedJuniorTrancheAddress, jtAsset: _juniorAsset
+            baseAsset: _baseAsset,
+            seniorTranche: _expectedSeniorTrancheAddress,
+            stAsset: _seniorAsset,
+            juniorTranche: _expectedJuniorTrancheAddress,
+            jtAsset: _juniorAsset
         });
 
         if (_kernelType == KernelType.ERC4626_ST_AaveV3_JT_InKindAssets) {

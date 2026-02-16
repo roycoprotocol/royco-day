@@ -262,6 +262,7 @@ contract reUSD_Test is AbstractKernelTestSuite {
             seniorTrancheSymbol: string(abi.encodePacked("RS-", cfg.name)),
             juniorTrancheName: string(abi.encodePacked("Royco Junior ", cfg.name)),
             juniorTrancheSymbol: string(abi.encodePacked("RJ-", cfg.name)),
+            baseAsset: USDC,
             seniorAsset: cfg.stAsset,
             juniorAsset: cfg.jtAsset,
             stNAVDustTolerance: toNAVUnits(10 ** (18 - cfg.stDecimals)),

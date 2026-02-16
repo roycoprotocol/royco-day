@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { IRoycoAccountant } from "../interfaces/IRoycoAccountant.sol";
 import { IRoycoKernel } from "../interfaces/kernel/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../interfaces/tranche/IRoycoVaultTranche.sol";
-import { NAV_UNIT, TRANCHE_UNIT } from "./Units.sol";
+import { BASE_UNIT, NAV_UNIT, TRANCHE_UNIT } from "./Units.sol";
 
 /**
  * @title MarketState
@@ -33,11 +33,13 @@ enum MarketState {
  * @dev A struct representing claims on senior tranche assets, junior tranche assets, and NAV
  * @custom:field stAssets - The claim on senior tranche assets denominated in ST's tranche units
  * @custom:field jtAssets - The claim on junior tranche assets denominated in JT's tranche units
+ * @custom:field liquidationProceeds - Settlement received from liquidation events, in liquidation asset units (always 0 for JT claims)
  * @custom:field nav - The net asset value of these claims in NAV units
  */
 struct AssetClaims {
     TRANCHE_UNIT stAssets;
     TRANCHE_UNIT jtAssets;
+    BASE_UNIT liquidationProceeds;
     NAV_UNIT nav;
 }
 
@@ -86,12 +88,14 @@ struct SyncedAccountingState {
  * @custom:type ST_REDEEM - A senior tranche redemption that decreases ST's effective NAV
  * @custom:type JT_DEPOSIT - A junior tranche deposit that increases JT's effective NAV
  * @custom:type JT_REDEEM - A junior tranche redemption that decreases JT's effective NAV
+ * @custom:type LIQUIDATION - A liquidation event that decreases JT's effective NAV by the bonus paid to the liquidator
  */
 enum Operation {
     ST_DEPOSIT,
     ST_REDEEM,
     JT_DEPOSIT,
-    JT_REDEEM
+    JT_REDEEM,
+    LIQUIDATION
 }
 
 /**

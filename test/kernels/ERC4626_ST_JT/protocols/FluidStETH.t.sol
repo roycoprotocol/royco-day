@@ -190,6 +190,7 @@ contract FluidStETH_Test is ERC4626_TestBase {
             seniorTrancheSymbol: string(abi.encodePacked("RS-", cfg.name)),
             juniorTrancheName: string(abi.encodePacked("Royco Junior ", cfg.name)),
             juniorTrancheSymbol: string(abi.encodePacked("RJ-", cfg.name)),
+            baseAsset: cfg.stAsset,
             seniorAsset: cfg.stAsset,
             juniorAsset: cfg.jtAsset,
             stNAVDustTolerance: toNAVUnits(5 * 10 ** (18 - cfg.stDecimals)), // 5 wei tolerance for stETH's 1-2 wei rounding per op

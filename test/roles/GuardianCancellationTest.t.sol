@@ -78,6 +78,7 @@ contract GuardianCancellationTest is BaseTest {
             seniorTrancheSymbol: SENIOR_TRANCHE_SYMBOL,
             juniorTrancheName: JUNIOR_TRANCHE_NAME,
             juniorTrancheSymbol: JUNIOR_TRANCHE_SYMBOL,
+            baseAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
             seniorAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
             juniorAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
             stNAVDustTolerance: DUST_TOLERANCE,

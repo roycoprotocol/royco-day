@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { RoycoKernelInitParams } from "../libraries/RoycoKernelStorageLib.sol";
 import { RoycoKernel } from "./base/RoycoKernel.sol";
 import { AaveV3_JT_Kernel } from "./base/junior/AaveV3_JT_Kernel.sol";
+import { AtomicLiquidationFacility } from "./base/liquidation-facility/AtomicLiquidationFacility.sol";
 import { InKindAssetsQuoter } from "./base/quoter/InKindAssetsQuoter.sol";
 import { ERC4626_ST_Kernel } from "./base/senior/ERC4626_ST_Kernel.sol";
 
@@ -15,7 +16,7 @@ import { ERC4626_ST_Kernel } from "./base/senior/ERC4626_ST_Kernel.sol";
  * @notice Tranche units are always expressed in the tranche's assets precision
  * @notice NAV units are always expressed in tranche units scaled to WAD (18 decimals) precision
  */
-contract ERC4626_ST_AaveV3_JT_InKindAssets_Kernel is ERC4626_ST_Kernel, AaveV3_JT_Kernel, InKindAssetsQuoter {
+contract ERC4626_ST_AaveV3_JT_InKindAssets_Kernel is ERC4626_ST_Kernel, AaveV3_JT_Kernel, InKindAssetsQuoter, AtomicLiquidationFacility {
     /**
      * @notice Constructs the Royco kernel
      * @param _params The standard construction parameters for the Royco kernel

@@ -22,9 +22,6 @@ abstract contract InKindAssetsQuoter is RoycoKernel {
     /// @notice The scaling factor to convert JT tranche units to and from WAD precision
     uint256 internal immutable JT_SCALE_FACTOR_TO_WAD;
 
-    /// @notice Thrown when the senior or junior tranche asset has over WAD decimals of precision
-    error UNSUPPORTED_DECIMALS();
-
     /// @notice Constructs the quoter for in-kind tranche assets
     /// @dev Assumes that the two assets are pegged to the same asset, currency, commodity, etc.
     constructor() {

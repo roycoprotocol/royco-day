@@ -212,6 +212,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
             seniorTrancheSymbol: _seniorTrancheSymbol,
             juniorTrancheName: _juniorTrancheName,
             juniorTrancheSymbol: _juniorTrancheSymbol,
+            baseAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
             seniorAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
             juniorAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
             stNAVDustTolerance: DUST_TOLERANCE,

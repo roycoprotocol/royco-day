@@ -5,6 +5,7 @@ import { RoycoKernelInitParams } from "../libraries/RoycoKernelStorageLib.sol";
 import { NAV_UNIT } from "../libraries/Units.sol";
 import { RoycoKernel } from "./base/RoycoKernel.sol";
 import { InKindAssetsQuoter } from "./base/quoter/InKindAssetsQuoter.sol";
+import { AtomicLiquidationFacility } from "./base/liquidation-facility/AtomicLiquidationFacility.sol";
 import { ERC4626_ST_ERC4626_JT_Kernel } from "./base/recipe/ERC4626_ST_ERC4626_JT_Kernel.sol";
 
 /**
@@ -15,7 +16,7 @@ import { ERC4626_ST_ERC4626_JT_Kernel } from "./base/recipe/ERC4626_ST_ERC4626_J
  * @notice The tranche assets are identical in value and can have differing precisions (eg. USDC and USDS, USDT and USDe, etc.)
  * @notice NAV units are always expressed in tranche units scaled to WAD (18 decimals) precision
  */
-contract ERC4626_ST_ERC4626_JT_InKindAssets_Kernel is ERC4626_ST_ERC4626_JT_Kernel, InKindAssetsQuoter {
+contract ERC4626_ST_ERC4626_JT_InKindAssets_Kernel is ERC4626_ST_ERC4626_JT_Kernel, InKindAssetsQuoter, AtomicLiquidationFacility {
     /**
      * @notice Constructs the Royco kernel
      * @param _params The standard construction parameters for the Royco kernel

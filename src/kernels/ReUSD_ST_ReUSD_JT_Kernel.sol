@@ -6,6 +6,7 @@ import { IInsuranceCapitalLayer } from "../interfaces/external/reUSD/IInsuranceC
 import { WAD_DECIMALS } from "../libraries/Constants.sol";
 import { RoycoKernelInitParams } from "../libraries/RoycoKernelStorageLib.sol";
 import { IdenticalAssetsOracleQuoter } from "./base/quoter/base/IdenticalAssetsOracleQuoter.sol";
+import { AtomicLiquidationFacility } from "./base/liquidation-facility/AtomicLiquidationFacility.sol";
 import {
     YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsOracleQuoter_Kernel
 } from "./base/recipe/YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsOracleQuoter_Kernel.sol";
@@ -17,7 +18,7 @@ import {
  * @notice The NAV can be expressed in any quote token supported by reUSD's Insurance Capital Layer (ICL) or manually fixed to an admin set oracle input
  * @dev https://docs.re.xyz/insurance-capital-layers/what-is-reusd
  */
-contract ReUSD_ST_ReUSD_JT_Kernel is YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsOracleQuoter_Kernel {
+contract ReUSD_ST_ReUSD_JT_Kernel is YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsOracleQuoter_Kernel, AtomicLiquidationFacility {
     /// @notice The address of the reUSD token
     address public immutable REUSD;
 

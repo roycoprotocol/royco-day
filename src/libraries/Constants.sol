@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
-import { NAV_UNIT, TRANCHE_UNIT } from "./Units.sol";
+import { BASE_UNIT, NAV_UNIT, TRANCHE_UNIT } from "./Units.sol";
 
 /// @dev Constant for 0 NAV units
 NAV_UNIT constant ZERO_NAV_UNITS = NAV_UNIT.wrap(0);
 
 /// @dev Constant for 0 tranche units
 TRANCHE_UNIT constant ZERO_TRANCHE_UNITS = TRANCHE_UNIT.wrap(0);
+
+/// @dev Constant for 0 base units
+BASE_UNIT constant ZERO_BASE_UNITS = BASE_UNIT.wrap(0);
 
 /// @dev Constant for the max value expressable as tranche units
 TRANCHE_UNIT constant MAX_TRANCHE_UNITS = TRANCHE_UNIT.wrap(type(uint256).max);

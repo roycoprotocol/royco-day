@@ -160,9 +160,11 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         // For deposits, either ST or JT can deposit and increase the NAV (not both)
         // For withdrawals, ST and/or JT NAV can be withdrawn (coverage applied, yield sharing, IL repayments, etc.)
         // A simultaneous deposit and withdrawal is impossible
+        // Liquidation is a special case that bypasses this validation
         require(
-            ((_stDepositPreOpNAV > ZERO_NAV_UNITS ? 1 : 0) + (_jtDepositPreOpNAV > ZERO_NAV_UNITS ? 1 : 0)
-                        + ((_stRedeemPreOpNAV > ZERO_NAV_UNITS || _jtRedeemPreOpNAV > ZERO_NAV_UNITS) ? 1 : 0)) == 1,
+            _op == Operation.LIQUIDATION
+                || ((_stDepositPreOpNAV > ZERO_NAV_UNITS ? 1 : 0) + (_jtDepositPreOpNAV > ZERO_NAV_UNITS ? 1 : 0)
+                            + ((_stRedeemPreOpNAV > ZERO_NAV_UNITS || _jtRedeemPreOpNAV > ZERO_NAV_UNITS) ? 1 : 0)) == 1,
             INVALID_POST_OP_STATE(_op)
         );
 
@@ -178,8 +180,29 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         NAV_UNIT jtCoverageImpermanentLoss = $.lastJTCoverageImpermanentLoss;
         NAV_UNIT jtSelfImpermanentLoss = $.lastJTSelfImpermanentLoss;
 
-        // Apply the effects of the actual operation that was executed (ST/JT deposit or withdrawal)
-        if (_op == Operation.ST_DEPOSIT) {
+        // Apply the effects of the operation that was executed
+        if (_op == Operation.LIQUIDATION) {
+            // Liquidation: raw NAVs set directly from post-op values (includes all withdrawals: demanded + bonus)
+            // ST effective NAV unchanged (liquidation settlement compensates demanded assets)
+            // JT effective NAV decreases by bonus (penalty for allowing position to become underwater)
+            stRawNAV = _stPostOpRawNAV;
+            jtRawNAV = _jtPostOpRawNAV;
+
+            // Bonus NAV = NAV of bonus from ST assets + NAV of bonus from JT assets
+            NAV_UNIT bonusNAV = _stRedeemPreOpNAV + _jtRedeemPreOpNAV;
+            if (bonusNAV != ZERO_NAV_UNITS) {
+                NAV_UNIT preLiquidationJTEffectiveNAV = jtEffectiveNAV;
+                jtEffectiveNAV = preLiquidationJTEffectiveNAV - bonusNAV;
+
+                // Scale JT impermanent losses proportionally for JT's loss from paying the liquidation bonus
+                if (jtCoverageImpermanentLoss != ZERO_NAV_UNITS) {
+                    jtCoverageImpermanentLoss = jtCoverageImpermanentLoss.mulDiv(jtEffectiveNAV, preLiquidationJTEffectiveNAV, Math.Rounding.Floor);
+                }
+                if (jtSelfImpermanentLoss != ZERO_NAV_UNITS && $.lastJTRawNAV != ZERO_NAV_UNITS) {
+                    jtSelfImpermanentLoss = jtSelfImpermanentLoss.mulDiv(jtRawNAV, $.lastJTRawNAV, Math.Rounding.Floor);
+                }
+            }
+        } else if (_op == Operation.ST_DEPOSIT) {
             require(_stDepositPreOpNAV > ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
             // The raw NAV is meant to be increased by the ST NAV deposited
             stRawNAV = stRawNAV + _stDepositPreOpNAV;
@@ -812,6 +835,12 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     /// @inheritdoc IRoycoAccountant
     function getState() external view override(IRoycoAccountant) returns (RoycoAccountantState memory) {
         return _getRoycoAccountantStorage();
+    }
+
+    /// @inheritdoc IRoycoAccountant
+    function getLiquidationParams() external view override(IRoycoAccountant) returns (uint64 lltvWAD, uint96 betaWAD) {
+        RoycoAccountantState storage $ = _getRoycoAccountantStorage();
+        return ($.lltvWAD, $.betaWAD);
     }
 
     /**
