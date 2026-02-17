@@ -13,6 +13,7 @@ import { RoycoKernel } from "../RoycoKernel.sol";
  * @title ERC4626_JT_Kernel
  * @author Shivaansh Kapoor, Ankur Dubey
  * @notice Junior tranche kernel for ERC4626 vault deposits
+ * @dev NOTE: This kernel does not support ERC4626 vaults with slippage on deposit/withdrawal that isn't reflected in the preview functions
  * @dev Manages junior tranche deposits and withdrawals via an ERC4626 compliant vault
  *      Deposited assets are converted to vault shares
  *      Handles illiquidity gracefully by transferring vault shares when withdrawals fail
@@ -89,9 +90,9 @@ abstract contract ERC4626_JT_Kernel is RoycoKernel {
     }
 
     /// @inheritdoc RoycoKernel
-    function _jtDepositAssets(TRANCHE_UNIT _jtAssets) internal override(RoycoKernel) returns (NAV_UNIT jtDepositPreOpNAV) {
+    function _jtDepositAssets(TRANCHE_UNIT _jtAssets) internal override(RoycoKernel) returns (NAV_UNIT jtDepositNAV) {
         // Account for any fees or slippage involved in depositing
-        jtDepositPreOpNAV = _jtPreviewDepositAllocatedNAV(_jtAssets);
+        jtDepositNAV = _jtPreviewDepositAllocatedNAV(_jtAssets);
 
         // Deposit the assets into the underlying investment vault and add to the number of ST controlled shares for this vault
         ERC4626KernelState storage $ = ERC4626KernelStorageLib._getERC4626KernelStorage();
@@ -120,7 +121,7 @@ abstract contract ERC4626_JT_Kernel is RoycoKernel {
     /**
      * @notice Helper function to preview the deposit of assets into the underlying investment vault and convert the allocated assets to NAV units
      * @param _jtAssets The amount of assets to deposit, denominated in the junior tranche's tranche units
-     * @return jtDepositPreOpNAV The value of the assets deposited, denominated in the kernel's NAV units before the deposit is made
+     * @return jtDepositNAV The value of the assets deposited, denominated in the kernel's NAV units before the deposit is made
      */
     function _jtPreviewDepositAllocatedNAV(TRANCHE_UNIT _jtAssets) internal view returns (NAV_UNIT) {
         // Simulate the deposit of the assets into the underlying investment vault

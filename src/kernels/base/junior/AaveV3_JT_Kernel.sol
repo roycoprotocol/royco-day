@@ -156,9 +156,9 @@ abstract contract AaveV3_JT_Kernel is RoycoKernel {
     }
 
     /// @inheritdoc RoycoKernel
-    function _jtDepositAssets(TRANCHE_UNIT _jtAssets) internal override(RoycoKernel) returns (NAV_UNIT jtDepositPreOpNAV) {
+    function _jtDepositAssets(TRANCHE_UNIT _jtAssets) internal override(RoycoKernel) returns (NAV_UNIT jtDepositNAV) {
         // No fees or slippage on supplying to Aave V3
-        jtDepositPreOpNAV = jtConvertTrancheUnitsToNAVUnits(_jtAssets);
+        jtDepositNAV = jtConvertTrancheUnitsToNAVUnits(_jtAssets);
 
         // Supply the specified assets to the pool
         // Max approval already given to the pool on initialization

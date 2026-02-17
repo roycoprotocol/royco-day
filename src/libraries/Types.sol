@@ -88,14 +88,12 @@ struct SyncedAccountingState {
  * @custom:type ST_REDEEM - A senior tranche redemption that decreases ST's effective NAV
  * @custom:type JT_DEPOSIT - A junior tranche deposit that increases JT's effective NAV
  * @custom:type JT_REDEEM - A junior tranche redemption that decreases JT's effective NAV
- * @custom:type LIQUIDATION - A liquidation event that decreases JT's effective NAV by the bonus paid to the liquidator
  */
 enum Operation {
     ST_DEPOSIT,
     ST_REDEEM,
     JT_DEPOSIT,
-    JT_REDEEM,
-    LIQUIDATION
+    JT_REDEEM
 }
 
 /**

@@ -50,19 +50,34 @@ library UtilsLib {
 
     /**
      * @notice Computes the loan to value (LTV) of the Royco market given the market's state
-     * @dev Informally: expected covered capital / (remaining covered capital + remaining loss capital)
-     * @dev Formally: LTV = (ST_EFFECTIVE_NAV + ST_IL) / (ST_EFFECTIVE_NAV + JT_EFFECTIVE_NAV)
+     * @dev Informally: DEBT / (DEBT + EQUITY)
+     * @dev Formally:
+     *      DEBT = (ST_EFFECTIVE_NAV + ST_IL - LIQUIDATION_PROCEEDS)
+     *      EQUITY = JT_EFFECTIVE_NAV
+     *      LTV = (ST_EFFECTIVE_NAV + ST_IL - LIQUIDATION_PROCEEDS) / ((ST_EFFECTIVE_NAV + ST_IL - LIQUIDATION_PROCEEDS) + JT_EFFECTIVE_NAV)
      * @param _stEffectiveNAV The senior tranche net asset value after receiving coverage, ST yield distribution, and ST losses
      * @param _stImpermanentLoss The impermanent loss that the senior tranche has suffered after exhausting JT's loss-absorption buffer
+     * @param _stLiquidationProceeds The NAV of the liquidation proceeds paid to ST via liquidation events
      * @param _jtEffectiveNAV The junior tranche net asset value after giving coverage, JT yield, ST yield distribution, and JT losses
      * @return ltvWAD The loan to value (LTV) of the Royco market, scaled to WAD precision
      */
-    function computeLTV(NAV_UNIT _stEffectiveNAV, NAV_UNIT _stImpermanentLoss, NAV_UNIT _jtEffectiveNAV) internal pure returns (uint256 ltvWAD) {
-        // If there is no remaining capital in the system, LTV is max (market should be in a perpetual state)
-        NAV_UNIT denominator = _stEffectiveNAV + _jtEffectiveNAV;
-        if (denominator == ZERO_NAV_UNITS) return type(uint256).max;
+    function computeLTV(
+        NAV_UNIT _stEffectiveNAV,
+        NAV_UNIT _stImpermanentLoss,
+        NAV_UNIT _stLiquidationProceeds,
+        NAV_UNIT _jtEffectiveNAV
+    )
+        internal
+        pure
+        returns (uint256 ltvWAD)
+    {
+        // Compute debt and value (debt + equity)
+        NAV_UNIT debt = (_stEffectiveNAV + _stImpermanentLoss - _stLiquidationProceeds);
+        NAV_UNIT value = debt + _jtEffectiveNAV;
+        // If total value is zero, LTV is undefined
+        if (value == ZERO_NAV_UNITS) return type(uint256).max;
         // Round in favor of ensuring senior tranche protection
-        ltvWAD = WAD.mulDiv((_stEffectiveNAV + _stImpermanentLoss), denominator, Math.Rounding.Ceil);
+        ltvWAD = WAD.mulDiv(debt, value, Math.Rounding.Ceil);
     }
 
     /**

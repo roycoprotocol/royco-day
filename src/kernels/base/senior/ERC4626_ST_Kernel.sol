@@ -13,6 +13,7 @@ import { RoycoKernel, TrancheType } from "../RoycoKernel.sol";
  * @title ERC4626_ST_Kernel
  * @author Shivaansh Kapoor, Ankur Dubey
  * @notice Senior tranche kernel for ERC4626 vault deposits
+ * @dev NOTE: This kernel does not support ERC4626 vaults with slippage on deposit/withdrawal that isn't reflected in the preview functions
  * @dev Manages senior tranche deposits, withdrawals, and redemptions via an ERC4626 compliant vault
  *      Deposited assets are converted to vault shares
  *      Handles illiquidity gracefully by transferring vault shares when withdrawals fail
@@ -98,9 +99,9 @@ abstract contract ERC4626_ST_Kernel is RoycoKernel {
     }
 
     /// @inheritdoc RoycoKernel
-    function _stDepositAssets(TRANCHE_UNIT _stAssets) internal override(RoycoKernel) returns (NAV_UNIT stDepositPreOpNAV) {
+    function _stDepositAssets(TRANCHE_UNIT _stAssets) internal override(RoycoKernel) returns (NAV_UNIT stDepositNAV) {
         // Account for any fees or slippage involved in depositing
-        stDepositPreOpNAV = _stPreviewDepositAllocatedNAV(_stAssets);
+        stDepositNAV = _stPreviewDepositAllocatedNAV(_stAssets);
 
         // Deposit the assets into the underlying investment vault and add to the number of ST controlled shares for this vault
         ERC4626KernelState storage $ = ERC4626KernelStorageLib._getERC4626KernelStorage();
@@ -129,7 +130,7 @@ abstract contract ERC4626_ST_Kernel is RoycoKernel {
     /**
      * @notice Helper function to preview the deposit of assets into the underlying investment vault and convert the allocated assets to NAV units
      * @param _stAssets The amount of assets to deposit, denominated in the senior tranche's tranche units
-     * @return stDepositPreOpNAV The value of the assets deposited, denominated in the kernel's NAV units before the deposit is made
+     * @return stDepositNAV The value of the assets deposited, denominated in the kernel's NAV units before the deposit is made
      */
     function _stPreviewDepositAllocatedNAV(TRANCHE_UNIT _stAssets) internal view returns (NAV_UNIT) {
         // Simulate the deposit of the assets into the underlying investment vault

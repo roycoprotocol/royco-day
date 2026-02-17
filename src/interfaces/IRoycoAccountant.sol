@@ -64,6 +64,7 @@ interface IRoycoAccountant {
      *                                           This represents the second claim on capital that the junior tranche has on future ST recoveries
      * @custom:field lastJTSelfImpermanentLoss - The impermanent loss that JT has suffered from depreciaiton of its own NAV
      *                                           This represents the first claim on capital that the junior tranche has on future JT recoveries
+     * @custom:field lastSTLiquidationProceeds - The senior tranche's entitlement to liquidation proceeds from prior liquidation events
      * @custom:field twJTYieldShareAccruedWAD - The time-weighted junior tranche yield share (YDM output) since the last yield distribution, scaled to WAD precision
      * @custom:field lastAccrualTimestamp - The timestamp at which the time-weighted JT yield share accumulator was last updated
      * @custom:field lastDistributionTimestamp - The timestamp at which the last ST yield distribution occurred
@@ -90,6 +91,7 @@ interface IRoycoAccountant {
         NAV_UNIT lastSTImpermanentLoss;
         NAV_UNIT lastJTCoverageImpermanentLoss;
         NAV_UNIT lastJTSelfImpermanentLoss;
+        NAV_UNIT lastSTLiquidationProceeds;
         uint192 twJTYieldShareAccruedWAD;
         uint32 lastAccrualTimestamp;
         uint32 lastDistributionTimestamp;
@@ -230,20 +232,22 @@ interface IRoycoAccountant {
      * @param _op The operation being executed in between the pre and post synchronizations
      * @param _stPostOpRawNAV The post-op senior tranche's raw NAV
      * @param _jtPostOpRawNAV The post-op junior tranche's raw NAV
-     * @param _stDepositPreOpNAV The pre-op NAV deposited into the senior tranche (0 if not a ST deposit)
-     * @param _jtDepositPreOpNAV The pre-op NAV deposited into the junior tranche (0 if not a JT deposit)
-     * @param _stRedeemPreOpNAV The pre-op NAV withdrawn from the senior tranche's raw NAV (0 if not a redeem)
-     * @param _jtRedeemPreOpNAV The pre-op NAV withdrawn from the junior tranche's raw NAV (0 if not a redeem)
+     * @param _stDepositNAV The pre-op NAV deposited into the senior tranche (0 if not a ST deposit)
+     * @param _jtDepositNAV The pre-op NAV deposited into the junior tranche (0 if not a JT deposit)
+     * @param _stRedemptionNAV The pre-op NAV withdrawn from the senior tranche's raw NAV (0 if not a redeem)
+     * @param _jtRedemptionNAV The pre-op NAV withdrawn from the junior tranche's raw NAV (0 if not a redeem)
+     * @param _stLiquidationProceedsRedemptionNAV The NAV withdrawn from the senior tranche's liquidation proceeds (0 if not a ST redeem)
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
      */
     function postOpSyncTrancheAccounting(
         Operation _op,
         NAV_UNIT _stPostOpRawNAV,
         NAV_UNIT _jtPostOpRawNAV,
-        NAV_UNIT _stDepositPreOpNAV,
-        NAV_UNIT _jtDepositPreOpNAV,
-        NAV_UNIT _stRedeemPreOpNAV,
-        NAV_UNIT _jtRedeemPreOpNAV
+        NAV_UNIT _stDepositNAV,
+        NAV_UNIT _jtDepositNAV,
+        NAV_UNIT _stRedemptionNAV,
+        NAV_UNIT _jtRedemptionNAV,
+        NAV_UNIT _stLiquidationProceedsRedemptionNAV
     )
         external
         returns (SyncedAccountingState memory state);
@@ -256,26 +260,52 @@ interface IRoycoAccountant {
      * @param _op The operation being executed in between the pre and post synchronizations
      * @param _stPostOpRawNAV The post-op senior tranche's raw NAV
      * @param _jtPostOpRawNAV The post-op junior tranche's raw NAV
-     * @param _stDepositPreOpNAV The pre-op NAV deposited into the senior tranche (0 if not a ST deposit)
-     * @param _jtDepositPreOpNAV The pre-op NAV deposited into the junior tranche (0 if not a JT deposit)
-     * @param _stRedeemPreOpNAV The pre-op NAV withdrawn from the senior tranche's raw NAV
-     * @param _jtRedeemPreOpNAV The pre-op NAV withdrawn from the junior tranche's raw NAV
+     * @param _stDepositNAV The pre-op NAV deposited into the senior tranche (0 if not a ST deposit)
+     * @param _jtDepositNAV The pre-op NAV deposited into the junior tranche (0 if not a JT deposit)
+     * @param _stRedemptionNAV The pre-op NAV withdrawn from the senior tranche's raw NAV
+     * @param _jtRedemptionNAV The pre-op NAV withdrawn from the junior tranche's raw NAV
+     * @param _stLiquidationProceedsRedemptionNAV The NAV withdrawn from the senior tranche's liquidation proceeds (0 if not a ST redeem)
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
      */
     function postOpSyncTrancheAccountingAndEnforceCoverage(
         Operation _op,
         NAV_UNIT _stPostOpRawNAV,
         NAV_UNIT _jtPostOpRawNAV,
-        NAV_UNIT _stDepositPreOpNAV,
-        NAV_UNIT _jtDepositPreOpNAV,
-        NAV_UNIT _stRedeemPreOpNAV,
-        NAV_UNIT _jtRedeemPreOpNAV
+        NAV_UNIT _stDepositNAV,
+        NAV_UNIT _jtDepositNAV,
+        NAV_UNIT _stRedemptionNAV,
+        NAV_UNIT _jtRedemptionNAV,
+        NAV_UNIT _stLiquidationProceedsRedemptionNAV
     )
         external
         returns (SyncedAccountingState memory state);
 
     /**
-     * @notice Returns if the market’s coverage requirement is satisfied
+     * @notice Synchronizes accountant state after a liquidation operation
+     * @dev Handles shortfall waterfall: JT absorbs first, remainder becomes ST bad debt
+     * @param _stPostLiquidationRawNAV The post-liquidation senior tranche's raw NAV
+     * @param _jtPostLiquidationRawNAV The post-liquidation junior tranche's raw NAV
+     * @param _stSeizedNAV The NAV value of ST assets seized/demanded by liquidator from ST effective NAV
+     * @param _jtSeizedNAV The NAV value of JT assets seized/demanded by liquidator from ST effective NAV
+     * @param _stBonusNAV The NAV value of ST assets payed as a bonus incentive to the liquidator from JT effective NAV
+     * @param _jtBonusNAV The NAV value of JT assets payed as a bonus incentive to the liquidator from JT effective NAV
+     * @param _settlementNAV The actual NAV value of the payment received from liquidator in exchange for the demand assets and the bonus
+     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
+     */
+    function postLiquidationSyncTrancheAccounting(
+        NAV_UNIT _stPostLiquidationRawNAV,
+        NAV_UNIT _jtPostLiquidationRawNAV,
+        NAV_UNIT _stSeizedNAV,
+        NAV_UNIT _jtSeizedNAV,
+        NAV_UNIT _stBonusNAV,
+        NAV_UNIT _jtBonusNAV,
+        NAV_UNIT _settlementNAV
+    )
+        external
+        returns (SyncedAccountingState memory state);
+
+    /**
+     * @notice Returns if the market's coverage requirement is satisfied
      * @dev If this condition is unsatisfied, senior deposits and junior withdrawals must be blocked to prevent undercollateralized senior exposure
      * @return satisfied A boolean indicating whether the market's coverage requirement is satisfied based on the persisted NAV checkpoints
      */

@@ -60,9 +60,9 @@ abstract contract YieldBearingERC20_JT_Kernel is RoycoKernel {
     }
 
     /// @inheritdoc RoycoKernel
-    function _jtDepositAssets(TRANCHE_UNIT _jtAssets) internal override(RoycoKernel) returns (NAV_UNIT jtDepositPreOpNAV) {
+    function _jtDepositAssets(TRANCHE_UNIT _jtAssets) internal override(RoycoKernel) returns (NAV_UNIT jtDepositNAV) {
         // No fees or slippage involved in depositing
-        jtDepositPreOpNAV = jtConvertTrancheUnitsToNAVUnits(_jtAssets);
+        jtDepositNAV = jtConvertTrancheUnitsToNAVUnits(_jtAssets);
         // The tranche vault has already transfered the assets to the kernel, so simply credit those assets to the junior tranche
         YieldBearingERC20KernelState storage $ = YieldBearingERC20KernelStorageLib._getYieldBearingERC20KernelStorage();
         $.jtOwnedYieldBearingAssets = $.jtOwnedYieldBearingAssets + _jtAssets;
