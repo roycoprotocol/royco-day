@@ -355,7 +355,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         NAV_UNIT stPostDepositNAV =
         (_postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, stDepositNAV, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS))
         .stEffectiveNAV;
-        // The value allocated after any fees/slippage incurred on deposit
+        // The precise value allocated is the delta between the pre and post deposit NAVs
         valueAllocated = stPostDepositNAV - navToMintAt;
     }
 
@@ -432,7 +432,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         // Execute a post-op sync on accounting and enforce the market's coverage requirement
         NAV_UNIT jtPostDepositNAV =
         (_postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, ZERO_NAV_UNITS, jtDepositNAV, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS)).jtEffectiveNAV;
-        // The value allocated after any fees/slippage incurred on deposit
+        // The precise value allocated is the delta between the pre and post deposit NAVs
         valueAllocated = jtPostDepositNAV - navToMintAt;
     }
 
