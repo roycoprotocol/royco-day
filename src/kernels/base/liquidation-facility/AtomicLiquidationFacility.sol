@@ -175,31 +175,13 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
         _collectProtocolFees(state.stProtocolFeeAccrued, state.jtProtocolFeeAccrued, state.stEffectiveNAV, state.jtEffectiveNAV);
 
         // Decompose effective NAVs into self-backed NAV claims and cross-tranche NAV claims
-        (NAV_UNIT stNAVClaimOnLiquidationProceeds, NAV_UNIT stNAVClaimOnSelf, NAV_UNIT stNAVClaimOnJT, NAV_UNIT jtNAVClaimOnSelf, NAV_UNIT jtNAVClaimOnST) =
+        (NAV_UNIT stNAVClaimOnSelf, NAV_UNIT stNAVClaimOnJT, NAV_UNIT stNAVClaimOnLiquidationProceeds, NAV_UNIT jtNAVClaimOnSelf, NAV_UNIT jtNAVClaimOnST) =
             _decomposeNAVClaims(state);
 
         // Marshal the asset claims for the senior tranche
-        stClaims = _marshalAssetClaims(
-            TrancheType.SENIOR,
-            state.stEffectiveNAV,
-            state.jtEffectiveNAV,
-            stNAVClaimOnSelf,
-            stNAVClaimOnJT,
-            stNAVClaimOnLiquidationProceeds,
-            jtNAVClaimOnSelf,
-            jtNAVClaimOnST
-        );
+        stClaims = _marshalAssetClaims(TrancheType.SENIOR, stNAVClaimOnSelf, stNAVClaimOnJT, stNAVClaimOnLiquidationProceeds, jtNAVClaimOnSelf, jtNAVClaimOnST);
 
         // Marshal the asset claims for the junior tranche
-        jtClaims = _marshalAssetClaims(
-            TrancheType.JUNIOR,
-            state.stEffectiveNAV,
-            state.jtEffectiveNAV,
-            stNAVClaimOnSelf,
-            stNAVClaimOnJT,
-            stNAVClaimOnLiquidationProceeds,
-            jtNAVClaimOnSelf,
-            jtNAVClaimOnST
-        );
+        jtClaims = _marshalAssetClaims(TrancheType.JUNIOR, stNAVClaimOnSelf, stNAVClaimOnJT, stNAVClaimOnLiquidationProceeds, jtNAVClaimOnSelf, jtNAVClaimOnST);
     }
 }
