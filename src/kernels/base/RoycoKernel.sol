@@ -307,7 +307,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         state = _previewSyncTrancheAccounting();
 
         // Decompose effective NAVs into self-backed NAV claims and cross-tranche NAV claims
-        (NAV_UNIT stLiquidationProceedsNAV, NAV_UNIT stNAVClaimOnSelf, NAV_UNIT stNAVClaimOnJT, NAV_UNIT jtNAVClaimOnSelf, NAV_UNIT jtNAVClaimOnST) =
+        (NAV_UNIT stNAVClaimOnLiquidationProceeds, NAV_UNIT stNAVClaimOnSelf, NAV_UNIT stNAVClaimOnJT, NAV_UNIT jtNAVClaimOnSelf, NAV_UNIT jtNAVClaimOnST) =
             _decomposeNAVClaims(state);
 
         // Marshal the tranche claims for this tranche given the decomposed claims
@@ -315,9 +315,9 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
             _trancheType,
             state.stEffectiveNAV,
             state.jtEffectiveNAV,
-            stLiquidationProceedsNAV,
             stNAVClaimOnSelf,
             stNAVClaimOnJT,
+            stNAVClaimOnLiquidationProceeds,
             jtNAVClaimOnSelf,
             jtNAVClaimOnST
         );
@@ -712,7 +712,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         totalTrancheShares = (_trancheType == TrancheType.SENIOR) ? stTotalTrancheSharesAfterMintingFees : jtTotalTrancheSharesAfterMintingFees;
 
         // Decompose effective NAVs into self-backed NAV claims and cross-tranche NAV claims
-        (NAV_UNIT stLiquidationProceedsNAV, NAV_UNIT stNAVClaimOnSelf, NAV_UNIT stNAVClaimOnJT, NAV_UNIT jtNAVClaimOnSelf, NAV_UNIT jtNAVClaimOnST) =
+        (NAV_UNIT stNAVClaimOnLiquidationProceeds, NAV_UNIT stNAVClaimOnSelf, NAV_UNIT stNAVClaimOnJT, NAV_UNIT jtNAVClaimOnSelf, NAV_UNIT jtNAVClaimOnST) =
             _decomposeNAVClaims(state);
 
         // Marshal the tranche claims for this tranche given the decomposed claims
@@ -720,9 +720,9 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
             _trancheType,
             state.stEffectiveNAV,
             state.jtEffectiveNAV,
-            stLiquidationProceedsNAV,
             stNAVClaimOnSelf,
             stNAVClaimOnJT,
+            stNAVClaimOnLiquidationProceeds,
             jtNAVClaimOnSelf,
             jtNAVClaimOnST
         );
@@ -902,9 +902,9 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      * @param _trancheType An enum indicating which tranche to construct the claim for
      * @param _stEffectiveNAV The effective NAV of the senior tranche
      * @param _jtEffectiveNAV The effective NAV of the junior tranche
-     * @param _stLiquidationProceedsNAV The portion of ST's effective NAV funded by liquidation proceeds
      * @param _stNAVClaimOnSelf The portion of ST's effective NAV that must be funded by ST's raw NAV
      * @param _stNAVClaimOnJT The portion of ST's effective NAV that must be funded by JT's raw NAV
+     * @param _stNAVClaimOnLiquidationProceeds The portion of ST's effective NAV funded by liquidation proceeds
      * @param _jtNAVClaimOnSelf The portion of JT's effective NAV that must be funded by JT's raw NAV
      * @param _jtNAVClaimOnST The portion of JT's effective NAV that must be funded by ST's raw NAV
      * @return claims The claims on ST and JT assets that the specified tranche has denominated in tranche-native units
@@ -913,9 +913,9 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         TrancheType _trancheType,
         NAV_UNIT _stEffectiveNAV,
         NAV_UNIT _jtEffectiveNAV,
-        NAV_UNIT _stLiquidationProceedsNAV,
         NAV_UNIT _stNAVClaimOnSelf,
         NAV_UNIT _stNAVClaimOnJT,
+        NAV_UNIT _stNAVClaimOnLiquidationProceeds,
         NAV_UNIT _jtNAVClaimOnSelf,
         NAV_UNIT _jtNAVClaimOnST
     )
@@ -925,9 +925,9 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         returns (AssetClaims memory claims)
     {
         if (_trancheType == TrancheType.SENIOR) {
-            if (_stLiquidationProceedsNAV != ZERO_NAV_UNITS) claims.liquidationProceeds = convertNAVUnitsToBaseUnits(_stLiquidationProceedsNAV);
             if (_stNAVClaimOnSelf != ZERO_NAV_UNITS) claims.stAssets = stConvertNAVUnitsToTrancheUnits(_stNAVClaimOnSelf);
             if (_stNAVClaimOnJT != ZERO_NAV_UNITS) claims.jtAssets = jtConvertNAVUnitsToTrancheUnits(_stNAVClaimOnJT);
+            if (_stNAVClaimOnLiquidationProceeds != ZERO_NAV_UNITS) claims.liquidationProceeds = convertNAVUnitsToBaseUnits(_stNAVClaimOnLiquidationProceeds);
             claims.nav = _stEffectiveNAV;
         } else {
             if (_jtNAVClaimOnST != ZERO_NAV_UNITS) claims.stAssets = stConvertNAVUnitsToTrancheUnits(_jtNAVClaimOnST);

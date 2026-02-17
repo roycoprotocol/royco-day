@@ -175,7 +175,7 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
         _collectProtocolFees(state.stProtocolFeeAccrued, state.jtProtocolFeeAccrued, state.stEffectiveNAV, state.jtEffectiveNAV);
 
         // Decompose effective NAVs into self-backed NAV claims and cross-tranche NAV claims
-        (NAV_UNIT stLiquidationProceedsNAV, NAV_UNIT stNAVClaimOnSelf, NAV_UNIT stNAVClaimOnJT, NAV_UNIT jtNAVClaimOnSelf, NAV_UNIT jtNAVClaimOnST) =
+        (NAV_UNIT stNAVClaimOnLiquidationProceeds, NAV_UNIT stNAVClaimOnSelf, NAV_UNIT stNAVClaimOnJT, NAV_UNIT jtNAVClaimOnSelf, NAV_UNIT jtNAVClaimOnST) =
             _decomposeNAVClaims(state);
 
         // Marshal the asset claims for the senior tranche
@@ -183,9 +183,9 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
             TrancheType.SENIOR,
             state.stEffectiveNAV,
             state.jtEffectiveNAV,
-            stLiquidationProceedsNAV,
             stNAVClaimOnSelf,
             stNAVClaimOnJT,
+            stNAVClaimOnLiquidationProceeds,
             jtNAVClaimOnSelf,
             jtNAVClaimOnST
         );
@@ -195,9 +195,9 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
             TrancheType.JUNIOR,
             state.stEffectiveNAV,
             state.jtEffectiveNAV,
-            stLiquidationProceedsNAV,
             stNAVClaimOnSelf,
             stNAVClaimOnJT,
+            stNAVClaimOnLiquidationProceeds,
             jtNAVClaimOnSelf,
             jtNAVClaimOnST
         );
