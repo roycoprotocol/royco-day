@@ -62,6 +62,9 @@ interface IRoycoVaultTranche is IERC20Metadata, IRoycoAsyncVault, IRoycoAsyncCan
     /// @notice Thrown when the value allocated is zero
     error INVALID_VALUE_ALLOCATED();
 
+    /// @notice Thrown when trying to set an operator when neither flow is async
+    error DEPOSIT_OR_REDEEM_MUST_BE_ASYNC();
+
     /**
      * @notice Returns the raw net asset value of the tranche's invested assets
      * @dev Excludes yield splits, coverage applications, etc.
