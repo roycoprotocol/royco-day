@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { ExecutionModel, IRoycoKernel, SharesRedemptionModel } from "../interfaces/kernel/IRoycoKernel.sol";
-import { TrancheType } from "./Types.sol";
 
 /**
  * @notice Storage state for Royco Tranche contracts
@@ -10,21 +8,11 @@ import { TrancheType } from "./Types.sol";
  * @custom:field kernel - The address of the kernel contract handling strategy logic
  * @custom:field asset - The address of the tranche's deposit asset
  * @custom:field marketId - The identifier of the Royco market this tranche is linked to
- * @custom:field DEPOSIT_EXECUTION_MODEL - The kernel execution model for deposit operations
- * @custom:field WITHDRAW_EXECUTION_MODEL - The kernel execution model for withdrawal operations
- * @custom:field REQUEST_REDEEM_SHARES_ST_BEHAVIOR - The behavior of the shares when a redeem request is made for the senior tranche
- * @custom:field REQUEST_REDEEM_SHARES_JT_BEHAVIOR - The behavior of the shares when a redeem request is made for the junior tranche
- * @custom:field isOperator - Nested mapping tracking operator approvals for owners
  */
 struct RoycoTrancheState {
     address kernel;
     address asset;
     bytes32 marketId;
-    ExecutionModel DEPOSIT_EXECUTION_MODEL;
-    ExecutionModel WITHDRAW_EXECUTION_MODEL;
-    SharesRedemptionModel REQUEST_REDEEM_SHARES_ST_BEHAVIOR;
-    SharesRedemptionModel REQUEST_REDEEM_SHARES_JT_BEHAVIOR;
-    mapping(address owner => mapping(address operator => bool isOperator)) isOperator;
 }
 
 /**
@@ -43,23 +31,13 @@ library RoycoTrancheStorageLib {
      * @param _kernel The address of the kernel contract handling strategy logic
      * @param _asset The address of the tranche's deposit asset
      * @param _marketId The identifier of the Royco market this tranche is linked to
-     * @param _trancheType The type of the tranche
      */
-    function __RoycoTranche_init(address _kernel, address _asset, bytes32 _marketId, TrancheType _trancheType) internal {
+    function __RoycoTranche_init(address _kernel, address _asset, bytes32 _marketId) internal {
         // Set the initial state of the tranche
         RoycoTrancheState storage $ = _getRoycoTrancheStorage();
         $.kernel = _kernel;
         $.asset = _asset;
         $.marketId = _marketId;
-        $.REQUEST_REDEEM_SHARES_ST_BEHAVIOR = IRoycoKernel(_kernel).ST_REQUEST_REDEEM_SHARES_BEHAVIOR();
-        $.REQUEST_REDEEM_SHARES_JT_BEHAVIOR = IRoycoKernel(_kernel).JT_REQUEST_REDEEM_SHARES_BEHAVIOR();
-        if (_trancheType == TrancheType.SENIOR) {
-            $.DEPOSIT_EXECUTION_MODEL = IRoycoKernel(_kernel).ST_DEPOSIT_EXECUTION_MODEL();
-            $.WITHDRAW_EXECUTION_MODEL = IRoycoKernel(_kernel).ST_REDEEM_EXECUTION_MODEL();
-        } else {
-            $.DEPOSIT_EXECUTION_MODEL = IRoycoKernel(_kernel).JT_DEPOSIT_EXECUTION_MODEL();
-            $.WITHDRAW_EXECUTION_MODEL = IRoycoKernel(_kernel).JT_REDEEM_EXECUTION_MODEL();
-        }
     }
 
     /**
