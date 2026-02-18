@@ -278,6 +278,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     )
         external
         override(IRoycoAccountant)
+        onlyRoycoKernel
         returns (SyncedAccountingState memory state)
     {
         // Ensure that the settlement received was non-zero
