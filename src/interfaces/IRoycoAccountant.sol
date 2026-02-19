@@ -56,6 +56,7 @@ interface IRoycoAccountant {
      * @custom:field ydm - The market's Yield Distribution Model (YDM), responsible for determining the ST's yield split between ST and JT
      * @custom:field lastSTRawNAV - The last recorded pure NAV (excluding any coverage taken and yield shared) of the senior tranche
      * @custom:field lastJTRawNAV - The last recorded pure NAV (excluding any coverage given and yield shared) of the junior tranche
+     * @custom:field lastLiquidationProceedsNAV - The liquidation proceeds from prior senior tranche liquidation events
      * @custom:field lastSTEffectiveNAV - The last recorded effective NAV (including any prior applied coverage, ST yield distribution, and uncovered losses) of the senior tranche
      * @custom:field lastJTEffectiveNAV - The last recorded effective NAV (including any prior provided coverage, JT yield, ST yield distribution, and JT losses) of the junior tranche
      * @custom:field lastSTImpermanentLoss - The impermanent loss that ST has suffered after exhausting JT's loss-absorption buffer
@@ -64,7 +65,6 @@ interface IRoycoAccountant {
      *                                           This represents the second claim on capital that the junior tranche has on future ST recoveries
      * @custom:field lastJTSelfImpermanentLoss - The impermanent loss that JT has suffered from depreciaiton of its own NAV
      *                                           This represents the first claim on capital that the junior tranche has on future JT recoveries
-     * @custom:field lastSTLiquidationProceeds - The senior tranche's entitlement to liquidation proceeds from prior liquidation events
      * @custom:field twJTYieldShareAccruedWAD - The time-weighted junior tranche yield share (YDM output) since the last yield distribution, scaled to WAD precision
      * @custom:field lastAccrualTimestamp - The timestamp at which the time-weighted JT yield share accumulator was last updated
      * @custom:field lastDistributionTimestamp - The timestamp at which the last ST yield distribution occurred
@@ -86,12 +86,12 @@ interface IRoycoAccountant {
         address ydm;
         NAV_UNIT lastSTRawNAV;
         NAV_UNIT lastJTRawNAV;
+        NAV_UNIT lastLiquidationProceedsNAV;
         NAV_UNIT lastSTEffectiveNAV;
         NAV_UNIT lastJTEffectiveNAV;
         NAV_UNIT lastSTImpermanentLoss;
         NAV_UNIT lastJTCoverageImpermanentLoss;
         NAV_UNIT lastJTSelfImpermanentLoss;
-        NAV_UNIT lastSTLiquidationProceeds;
         uint192 twJTYieldShareAccruedWAD;
         uint32 lastAccrualTimestamp;
         uint32 lastDistributionTimestamp;
@@ -196,6 +196,9 @@ interface IRoycoAccountant {
 
     /// @notice Thrown when the caller of the function is not the accountant's configured Royco Kernel
     error ONLY_ROYCO_KERNEL();
+
+    /// @notice Thrown a liquidation event leads to a loss in the market's liquidation proceeds
+    error LIQUIDATION_PROCEEDS_MUST_NOT_DECREASE();
 
     /// @notice Thrown when the sum of the raw NAVs don't equal the sum of the effective NAVs of both tranches
     error NAV_CONSERVATION_VIOLATION();

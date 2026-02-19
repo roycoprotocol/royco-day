@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { WAD, ZERO_NAV_UNITS } from "./Constants.sol";
-import { ActionMetadataFormat, AssetClaims } from "./Types.sol";
+import { AssetClaims } from "./Types.sol";
 import { BASE_UNIT, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib } from "./Units.sol";
 
 /**
@@ -120,13 +120,4 @@ library UtilsLib {
         scaledClaims.liquidationProceeds = _claims.liquidationProceeds.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
     }
 
-    /**
-     * @notice Formats the metadata for the action
-     * @param _data The data to format the metadata with
-     * @param _format The format of the metadata
-     * @return formattedMetadata The formatted metadata
-     */
-    function format(bytes memory _data, ActionMetadataFormat _format) internal pure returns (bytes memory) {
-        return abi.encodePacked(uint16(_format), _data);
-    }
 }

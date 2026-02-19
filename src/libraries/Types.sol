@@ -97,17 +97,6 @@ enum Operation {
 }
 
 /**
- * @title Action
- * @dev Defines the action being executed by the user
- * @custom:type DEPOSIT - Depositing assets for shares into the tranche
- * @custom:type REDEEM - Redeeming shares for assets from the tranche
- */
-enum Action {
-    DEPOSIT,
-    REDEEM
-}
-
-/**
  * @title TrancheType
  * @dev Defines the two types of Royco tranches deployed per market.
  * @custom:type SENIOR - The identifier for the senior tranche (protected capital)
@@ -116,38 +105,6 @@ enum Action {
 enum TrancheType {
     SENIOR,
     JUNIOR
-}
-
-/**
- * @title SharesRedemptionModel
- * @dev Defines the behavior of the shares when a redeem request is made
- * @custom:type BURN_ON_REQUEST_REDEEM - The shares are burned when calling requestRedeem
- * @custom:type BURN_ON_CLAIM_REDEEM - The shares are burned when calling redeem
- */
-enum SharesRedemptionModel {
-    BURN_ON_REQUEST_REDEEM,
-    BURN_ON_CLAIM_REDEEM
-}
-
-/**
- * @title ExecutionModel
- * @dev Defines the execution semantics for the deposit or withdrawal flow of a vault
- * @custom:type SYNC - Refers to the flow being synchronous
- * @custom:type ASYNC - Refers to the flow being asynchronous
- */
-enum ExecutionModel {
-    SYNC,
-    ASYNC
-}
-
-/**
- * @title ActionMetadataFormat
- * @dev Defines the format of the metadata for the action
- * @dev Encoded as the first byte of any metadata, indicating the significance and format of the following metadata
- * @custom:type REDEMPTION_CLAIMABLE_AT_TIMESTAMP - Encodes a uint256 representing the claimable at timestamp of the redemption request
- */
-enum ActionMetadataFormat {
-    REDEMPTION_CLAIMABLE_AT_TIMESTAMP
 }
 
 /**
