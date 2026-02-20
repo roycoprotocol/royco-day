@@ -249,8 +249,8 @@ contract reUSD_Test is AbstractKernelTestSuite {
         DeployScript.ReUSDSTReUSDJTKernelParams memory kernelParams =
             DeployScript.ReUSDSTReUSDJTKernelParams({ reusd: REUSD, reusdUsdQuoteToken: USDC, insuranceCapitalLayer: ICL });
 
-        DeployScript.AdaptiveCurveYDMParams memory ydmParams =
-            DeployScript.AdaptiveCurveYDMParams({ jtYieldShareAtTargetUtilWAD: 0.3e18, jtYieldShareAtFullUtilWAD: 1e18 });
+        DeployScript.AdaptiveCurveYDM_V1Params memory ydmParams =
+            DeployScript.AdaptiveCurveYDM_V1Params({ jtYieldShareAtTargetUtilWAD: 0.3e18, jtYieldShareAtFullUtilWAD: 1e18 });
 
         // Build role assignments using the centralized function
         DeployScript.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();

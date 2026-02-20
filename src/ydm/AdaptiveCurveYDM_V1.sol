@@ -8,14 +8,16 @@ import { NAV_UNIT } from "../libraries/Units.sol";
 import { UtilsLib } from "../libraries/UtilsLib.sol";
 
 /**
- * @title AdaptiveCurveYDM
+ * @title AdaptiveCurveYDM_V1
  * @author Shivaansh Kapoor, Ankur Dubey
- * @notice Royco's adaptive curve yield distribution model (YDM)
+ * @notice Royco's adaptive curve yield distribution model (YDM) V1
  * @dev Responsible for computing the yield distribution between the senior and junior tranches of a Royco market
- * @dev The curve is defined as an adaptive piece-wise function parameterized by the utilization of a Royco market
+ * @dev The curve is defined as an adaptive piece-wise function parameterized by the utilization of a Royco market, steepness of the curve, and yield share at the kink (Y_T)
+ * @dev The curve adapts its yield share at the kink up or down based on the market's relative delta from kink utilization over time
+ * @dev The slopes above/below the kink also adapt up or down based on the adaptation of the yield share at the kink
  * @dev Inspired by Morpho's AdaptiveCurveIrm: https://github.com/morpho-org/morpho-blue-irm
  */
-contract AdaptiveCurveYDM is IYDM {
+contract AdaptiveCurveYDM_V1 is IYDM {
     /**
      * @notice The maximum speed at which the curve adapts per second scaled to WAD precision
      * @dev This represents how quickly the curve shifts up or down at the edges, 100% and 0% utilization respectively
@@ -24,20 +26,21 @@ contract AdaptiveCurveYDM is IYDM {
     int256 public constant MAX_ADAPTATION_SPEED_WAD = 50e18 / int256(365 days);
 
     /// @dev The minimum JT yield share at target utilization
-    uint256 public constant MIN_JT_YIELD_SHARE_AT_TARGET = 0.01e18;
+    /// @dev Set to 1 basis point
+    uint256 public constant MIN_JT_YIELD_SHARE_AT_TARGET = 0.0001e18;
 
     /// @dev The maximum JT yield share at target utilization
     uint256 public constant MAX_JT_YIELD_SHARE_AT_TARGET = WAD;
 
     /// @dev The maximum linear adaptation that can be applied to the curve.
-    /// @dev This value is chosen to prevent overflows when appying expWAD
+    /// @dev This value is chosen to prevent overflows when computing expWAD
     int256 private constant MAX_LINEAR_ADAPTATION_WAD = 135_305_999_368_893_231_589 - 1;
 
     /**
      * @notice Represents the state of a market's YDM
-     * @custom:field jtYieldShareAtTargetUtilWAD - The current JT yield share at target utilization
+     * @custom:field jtYieldShareAtTargetUtilWAD - The current JT yield share at target utilization, scaled to WAD precision
      * @custom:field lastAdaptationTimestamp - The last time adaptations were applied to this market's curve
-     * @custom:field steepnessAfterTargetWAD - The steepness of the curve for this market: ratio of yield share at 100% utilization to yield share at target
+     * @custom:field steepnessAfterTargetWAD - The steepness of the curve for this market post-kink: ratio of yield share at 100% utilization to yield share at target
      */
     struct AdaptiveYieldCurve {
         uint64 jtYieldShareAtTargetWAD;
@@ -53,9 +56,9 @@ contract AdaptiveCurveYDM is IYDM {
      * @notice Emitted when the adaptive curve YDM is initialized for a market
      * @param accountant The accountant for the market that the YDM was initialized for
      * @param steepnessAfterTargetWAD The steepness of the curve for this market (ratio of yield share at 100% utilization to yield share at target), scaled to WAD precision
-     * @param jtYieldShareAtTargetWAD The JT yield share at target utilization, scaled to WAD precision
+     * @param initialJTYieldShareAtTargetWAD The initial JT yield share at target utilization, scaled to WAD precision
      */
-    event AdaptiveCurveYdmInitialized(address indexed accountant, uint256 steepnessAfterTargetWAD, uint256 jtYieldShareAtTargetWAD);
+    event AdaptiveCurveYdmInitialized(address indexed accountant, uint256 steepnessAfterTargetWAD, uint256 initialJTYieldShareAtTargetWAD);
 
     /**
      * @notice Emitted when the JT yield share is updated and the curve is adapted (in a PERPETUAL state)
@@ -126,10 +129,7 @@ contract AdaptiveCurveYDM is IYDM {
 
         // Apply the adaptations to the curve
         AdaptiveYieldCurve storage curve = accountantToCurve[msg.sender];
-        // max(newJtYieldShareAtTargetWAD) = WAD
-        // forge-lint: disable-next-item(unsafe-typecast)
         curve.jtYieldShareAtTargetWAD = uint64(newJtYieldShareAtTargetWAD);
-        // forge-lint: disable-next-item(unsafe-typecast)
         curve.lastAdaptationTimestamp = uint32(block.timestamp);
 
         emit YdmAdaptedOutput(msg.sender, jtYieldShareWAD, uint256(newJtYieldShareAtTargetWAD));
@@ -148,7 +148,7 @@ contract AdaptiveCurveYDM is IYDM {
      *                        Equivalent to its remaining loss-absorption buffer to cover ST's and its own drawdowns
      * @return jtYieldShareWAD The percentage of the ST's yield allocated to its JT, scaled to WAD precision
      *                         It is implied that (WAD - jtYieldShareWAD) will be the percentage allocated to ST, excluding any protocol fees
-     * @return newJtYieldShareAtTargetWAD The updated yield share at target utilization after adaptation, scaled to WAD
+     * @return newJtYieldShareAtTargetWAD The updated yield share at target utilization after adaptation, scaled to WAD precision
      */
     function _jtYieldShare(
         MarketState _marketState,
@@ -180,7 +180,7 @@ contract AdaptiveCurveYDM is IYDM {
             int256 currentAdaptationSpeedWAD = (MAX_ADAPTATION_SPEED_WAD * normalizedDeltaFromTargetWAD) / WAD_INT;
             // Compute the linear adaptation that will be applied to the curve based on the speed
             uint256 elapsed = curve.lastAdaptationTimestamp == 0 ? 0 : block.timestamp - curve.lastAdaptationTimestamp;
-            // forge-lint: disable-next-item(unsafe-typecast)
+
             int256 linearAdaptationWAD = currentAdaptationSpeedWAD * int256(elapsed);
 
             // Compute the new JT yield share at target utilization
@@ -189,7 +189,7 @@ contract AdaptiveCurveYDM is IYDM {
 
             // Compute the average JT yield share at target utilization
             uint256 midJtYieldShareAtTargetWAD = _computeJtYieldShareAtTarget(initialJtYieldShareAtTargetWAD, linearAdaptationWAD / 2);
-            avgJtYieldShareAtTargetWAD = (initialJtYieldShareAtTargetWAD + newJtYieldShareAtTargetWAD + 2 * midJtYieldShareAtTargetWAD) / 4;
+            avgJtYieldShareAtTargetWAD = (initialJtYieldShareAtTargetWAD + newJtYieldShareAtTargetWAD + (2 * midJtYieldShareAtTargetWAD)) / 4;
         } else {
             newJtYieldShareAtTargetWAD = avgJtYieldShareAtTargetWAD = curve.jtYieldShareAtTargetWAD;
         }
@@ -216,7 +216,7 @@ contract AdaptiveCurveYDM is IYDM {
         // Exponentiation ensures that the JT yield share is always non-negative
         // Clamp the linear adaptation to the maximum value to prevent overflows when applying expWAD
         _linearAdaptationWAD = _linearAdaptationWAD > MAX_LINEAR_ADAPTATION_WAD ? MAX_LINEAR_ADAPTATION_WAD : _linearAdaptationWAD;
-        // forge-lint: disable-next-item(unsafe-typecast)
+
         jtYieldShareAtTargetWAD = uint256((int256(_lastJtYieldShareAtTargetWAD) * FixedPointMathLib.expWad(_linearAdaptationWAD)) / WAD_INT);
         // Clamp the JT yield share to the market defined bounds
         if (jtYieldShareAtTargetWAD < MIN_JT_YIELD_SHARE_AT_TARGET) return MIN_JT_YIELD_SHARE_AT_TARGET;
@@ -271,8 +271,7 @@ contract AdaptiveCurveYDM is IYDM {
             ? WAD_INT - ((WAD_INT * WAD_INT) / int256(_steepnessWAD))  // 1 - 1/S if below the kink
             : int256(_steepnessWAD) - WAD_INT; // S - 1 if at or above the kink
 
-        // forge-lint: disable-next-item(unsafe-typecast)
         jtYieldShareWAD = uint256((((coefficient * _normalizedDeltaFromTargetWAD / WAD_INT) + WAD_INT) * int256(_jtYieldShareAtTargetWAD)) / WAD_INT);
-        jtYieldShareWAD = jtYieldShareWAD > WAD ? WAD : jtYieldShareWAD;
+        if (jtYieldShareWAD > WAD) jtYieldShareWAD = WAD;
     }
 }

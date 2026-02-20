@@ -275,7 +275,7 @@ abstract contract ERC4626_TestBase is AbstractKernelTestSuite {
         DeployScript.ERC4626STERC4626JTInKindAssetsKernelParams memory kernelParams =
             DeployScript.ERC4626STERC4626JTInKindAssetsKernelParams({ stVault: _getSTVault(), jtVault: _getJTVault() });
 
-        DeployScript.AdaptiveCurveYDMParams memory ydmParams = DeployScript.AdaptiveCurveYDMParams({
+        DeployScript.AdaptiveCurveYDM_V1Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V1Params({
             jtYieldShareAtTargetUtilWAD: 0.3e18, // 30% at target utilization
             jtYieldShareAtFullUtilWAD: 1e18 // 100% at 100% utilization
         });

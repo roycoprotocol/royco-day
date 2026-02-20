@@ -193,7 +193,7 @@ abstract contract DeploymentConfig {
             lltvWAD: 0.91e18,
             fixedTermDurationSeconds: 0, // Market is not expected to have volatility, so no fixed term
             ydmType: DeployScript.YDMType.AdaptiveCurve,
-            ydmSpecificParams: abi.encode(DeployScript.AdaptiveCurveYDMParams({ jtYieldShareAtTargetUtilWAD: 0.053e18, jtYieldShareAtFullUtilWAD: 1e18 }))
+            ydmSpecificParams: abi.encode(DeployScript.AdaptiveCurveYDM_V1Params({ jtYieldShareAtTargetUtilWAD: 0.053e18, jtYieldShareAtFullUtilWAD: 1e18 }))
         });
 
         _marketConfigs[SNUSD] = MarketDeploymentConfig({
@@ -219,7 +219,7 @@ abstract contract DeploymentConfig {
             lltvWAD: 0.91e18,
             fixedTermDurationSeconds: 0, // Market is not expected to have volatility, so no fixed term
             ydmType: DeployScript.YDMType.AdaptiveCurve,
-            ydmSpecificParams: abi.encode(DeployScript.AdaptiveCurveYDMParams({ jtYieldShareAtTargetUtilWAD: 0.1236e18, jtYieldShareAtFullUtilWAD: 1e18 }))
+            ydmSpecificParams: abi.encode(DeployScript.AdaptiveCurveYDM_V1Params({ jtYieldShareAtTargetUtilWAD: 0.1236e18, jtYieldShareAtFullUtilWAD: 1e18 }))
         });
 
         _marketConfigs[SAVUSD] = MarketDeploymentConfig({
@@ -245,7 +245,7 @@ abstract contract DeploymentConfig {
             lltvWAD: 0.82e18,
             fixedTermDurationSeconds: 0, // Market is not expected to have volatility, so no fixed term
             ydmType: DeployScript.YDMType.AdaptiveCurve,
-            ydmSpecificParams: abi.encode(DeployScript.AdaptiveCurveYDMParams({ jtYieldShareAtTargetUtilWAD: 0.1357e18, jtYieldShareAtFullUtilWAD: 1e18 }))
+            ydmSpecificParams: abi.encode(DeployScript.AdaptiveCurveYDM_V1Params({ jtYieldShareAtTargetUtilWAD: 0.1357e18, jtYieldShareAtFullUtilWAD: 1e18 }))
         });
 
         _marketConfigs[AUTOUSD] = MarketDeploymentConfig({
@@ -271,7 +271,7 @@ abstract contract DeploymentConfig {
             lltvWAD: 0.92e18,
             fixedTermDurationSeconds: 2 days,
             ydmType: DeployScript.YDMType.AdaptiveCurve,
-            ydmSpecificParams: abi.encode(DeployScript.AdaptiveCurveYDMParams({ jtYieldShareAtTargetUtilWAD: 0.0661e18, jtYieldShareAtFullUtilWAD: 1e18 }))
+            ydmSpecificParams: abi.encode(DeployScript.AdaptiveCurveYDM_V1Params({ jtYieldShareAtTargetUtilWAD: 0.0661e18, jtYieldShareAtFullUtilWAD: 1e18 }))
         });
     }
 

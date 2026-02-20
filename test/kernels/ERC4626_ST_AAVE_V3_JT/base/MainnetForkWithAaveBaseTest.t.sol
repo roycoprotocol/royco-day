@@ -95,8 +95,8 @@ abstract contract MainnetForkWithAaveTestBase is BaseTest {
         });
 
         // Build YDM params (AdaptiveCurve)
-        DeployScript.AdaptiveCurveYDMParams memory ydmParams =
-            DeployScript.AdaptiveCurveYDMParams({ jtYieldShareAtTargetUtilWAD: 0.225e18, jtYieldShareAtFullUtilWAD: 1e18 });
+        DeployScript.AdaptiveCurveYDM_V1Params memory ydmParams =
+            DeployScript.AdaptiveCurveYDM_V1Params({ jtYieldShareAtTargetUtilWAD: 0.225e18, jtYieldShareAtFullUtilWAD: 1e18 });
 
         // Build role assignments using the centralized function
         DeployScript.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();

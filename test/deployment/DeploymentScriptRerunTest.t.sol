@@ -199,8 +199,8 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
             DeployScript.ERC4626STAaveV3JTInKindAssetsKernelParams({ stVault: _stVault, aaveV3Pool: ETHEREUM_MAINNET_AAVE_V3_POOL_ADDRESS });
 
         // Build YDM params (AdaptiveCurve)
-        DeployScript.AdaptiveCurveYDMParams memory ydmParams =
-            DeployScript.AdaptiveCurveYDMParams({ jtYieldShareAtTargetUtilWAD: 0.225e18, jtYieldShareAtFullUtilWAD: 1e18 });
+        DeployScript.AdaptiveCurveYDM_V1Params memory ydmParams =
+            DeployScript.AdaptiveCurveYDM_V1Params({ jtYieldShareAtTargetUtilWAD: 0.225e18, jtYieldShareAtFullUtilWAD: 1e18 });
 
         // Build role assignments
         DeployScript.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();

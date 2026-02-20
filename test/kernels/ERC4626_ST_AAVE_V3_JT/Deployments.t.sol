@@ -19,7 +19,7 @@ import {
     TrancheDeploymentParams
 } from "../../../src/libraries/Types.sol";
 import { toNAVUnits } from "../../../src/libraries/Units.sol";
-import { AdaptiveCurveYDM } from "../../../src/ydm/AdaptiveCurveYDM.sol";
+import { AdaptiveCurveYDM_V1 } from "../../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { MainnetForkWithAaveTestBase } from "./base/MainnetForkWithAaveBaseTest.t.sol";
 
 contract DeploymentsTest is MainnetForkWithAaveTestBase {
@@ -315,7 +315,7 @@ contract DeploymentsTest is MainnetForkWithAaveTestBase {
                     coverageWAD: COVERAGE_WAD,
                     betaWAD: BETA_WAD,
                     ydm: address(YDM),
-                    ydmInitializationData: abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.225e18, 1e18)),
+                    ydmInitializationData: abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.225e18, 1e18)),
                     fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
                     lltvWAD: LLTV,
                     stNAVDustTolerance: toNAVUnits(uint256(10 ** 21)), // 10^(18-6) for USDC
@@ -457,7 +457,7 @@ contract DeploymentsTest is MainnetForkWithAaveTestBase {
                     coverageWAD: COVERAGE_WAD,
                     betaWAD: BETA_WAD,
                     ydm: address(YDM),
-                    ydmInitializationData: abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.225e18, 1e18)),
+                    ydmInitializationData: abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.225e18, 1e18)),
                     fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
                     lltvWAD: LLTV,
                     stNAVDustTolerance: toNAVUnits(uint256(10 ** 21)), // 10^(18-6) for USDC
@@ -587,7 +587,7 @@ contract DeploymentsTest is MainnetForkWithAaveTestBase {
                     coverageWAD: COVERAGE_WAD,
                     betaWAD: BETA_WAD,
                     ydm: address(YDM),
-                    ydmInitializationData: abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.225e18, 1e18)),
+                    ydmInitializationData: abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.225e18, 1e18)),
                     fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
                     lltvWAD: LLTV,
                     stNAVDustTolerance: toNAVUnits(uint256(10 ** 21)), // 10^(18-6) for USDC

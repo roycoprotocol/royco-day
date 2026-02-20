@@ -12,6 +12,7 @@ import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib } from "./Units.sol";
  * @notice A library providing utility functions for the Royco protocol
  */
 library UtilsLib {
+    using Math for uint256;
     using UnitsMathLib for NAV_UNIT;
     using UnitsMathLib for TRANCHE_UNIT;
     using UnitsMathLib for uint256;

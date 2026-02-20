@@ -10,7 +10,7 @@ import { MAX_PROTOCOL_FEE_WAD, MIN_COVERAGE_WAD, WAD, ZERO_NAV_UNITS } from "../
 import { MarketState, SyncedAccountingState } from "../../src/libraries/Types.sol";
 import { NAV_UNIT, UnitsMathLib, toUint256 } from "../../src/libraries/Units.sol";
 import { UtilsLib } from "../../src/libraries/UtilsLib.sol";
-import { AdaptiveCurveYDM } from "../../src/ydm/AdaptiveCurveYDM.sol";
+import { AdaptiveCurveYDM_V1 } from "../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { BaseTest } from "../base/BaseTest.t.sol";
 import { MockYDMOverWAD, MockYDMWithInit } from "../mock/MockYDM.sol";
 
@@ -53,7 +53,7 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
 
     RoycoAccountant internal accountantImpl;
     IRoycoAccountant internal accountant;
-    AdaptiveCurveYDM internal adaptiveYDM;
+    AdaptiveCurveYDM_V1 internal adaptiveYDM;
     AccessManager internal accessManager;
 
     address internal MOCK_KERNEL;
@@ -70,7 +70,7 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
 
         MOCK_KERNEL = makeAddr("MOCK_KERNEL");
         accessManager = new AccessManager(OWNER_ADDRESS);
-        adaptiveYDM = new AdaptiveCurveYDM();
+        adaptiveYDM = new AdaptiveCurveYDM_V1();
         accountantImpl = new RoycoAccountant();
 
         accountant = _deployAccountant(
@@ -106,7 +106,7 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
         internal
         returns (IRoycoAccountant)
     {
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (jtYieldAtTarget, jtYieldAtFull));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (jtYieldAtTarget, jtYieldAtFull));
 
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             kernel: kernel,
@@ -1229,7 +1229,7 @@ contract RoycoAccountantRevertTest is BaseTest {
 
     RoycoAccountant internal accountantImpl;
     IRoycoAccountant internal accountant;
-    AdaptiveCurveYDM internal adaptiveYDM;
+    AdaptiveCurveYDM_V1 internal adaptiveYDM;
     AccessManager internal accessManager;
 
     address internal MOCK_KERNEL;
@@ -1242,7 +1242,7 @@ contract RoycoAccountantRevertTest is BaseTest {
         MOCK_KERNEL = makeAddr("MOCK_KERNEL");
         NON_KERNEL = makeAddr("NON_KERNEL");
         accessManager = new AccessManager(OWNER_ADDRESS);
-        adaptiveYDM = new AdaptiveCurveYDM();
+        adaptiveYDM = new AdaptiveCurveYDM_V1();
         accountantImpl = new RoycoAccountant();
 
         accountant = _deployAccountant(
@@ -1274,7 +1274,7 @@ contract RoycoAccountantRevertTest is BaseTest {
         internal
         returns (IRoycoAccountant)
     {
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.3e18, 0.9e18));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             kernel: kernel,
@@ -1430,7 +1430,7 @@ contract RoycoAccountantRevertTest is BaseTest {
 
     /// @notice Test initialization reverts on excessive ST protocol fee
     function test_revert_initialization_excessiveSTProtocolFee() public {
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.3e18, 0.9e18));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             kernel: MOCK_KERNEL,
@@ -1453,7 +1453,7 @@ contract RoycoAccountantRevertTest is BaseTest {
 
     /// @notice Test initialization reverts on excessive JT protocol fee
     function test_revert_initialization_excessiveJTProtocolFee() public {
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.3e18, 0.9e18));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             kernel: MOCK_KERNEL,
@@ -1476,7 +1476,7 @@ contract RoycoAccountantRevertTest is BaseTest {
 
     /// @notice Test initialization reverts on coverage below minimum
     function test_revert_initialization_coverageBelowMin() public {
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.3e18, 0.9e18));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             kernel: MOCK_KERNEL,
@@ -1499,7 +1499,7 @@ contract RoycoAccountantRevertTest is BaseTest {
 
     /// @notice Test initialization reverts on coverage >= WAD
     function test_revert_initialization_coverageAboveMax() public {
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.3e18, 0.9e18));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             kernel: MOCK_KERNEL,
@@ -1545,7 +1545,7 @@ contract RoycoAccountantRevertTest is BaseTest {
 
     /// @notice Test initialization reverts on invalid LLTV (too low)
     function test_revert_initialization_lltvTooLow() public {
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.3e18, 0.9e18));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
         // Compute max initial LTV for the coverage config
         uint256 betaCov = uint256(COVERAGE_WAD).mulDiv(BETA_WAD, WAD, Math.Rounding.Floor);
@@ -1574,7 +1574,7 @@ contract RoycoAccountantRevertTest is BaseTest {
 
     /// @notice Test initialization reverts on invalid LLTV (>= WAD)
     function test_revert_initialization_lltvTooHigh() public {
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.3e18, 0.9e18));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             kernel: MOCK_KERNEL,
@@ -1597,7 +1597,7 @@ contract RoycoAccountantRevertTest is BaseTest {
 
     /// @notice Test initialization reverts on coverage * beta >= WAD
     function test_revert_initialization_coverageBetaTooHigh() public {
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.3e18, 0.9e18));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
         // coverage = 0.9e18, beta = 1.2e18 => coverage * beta = 1.08e18 >= WAD
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
@@ -1678,7 +1678,7 @@ contract RoycoAccountantInvariantTest is BaseTest {
 
     RoycoAccountant internal accountantImpl;
     IRoycoAccountant internal accountant;
-    AdaptiveCurveYDM internal adaptiveYDM;
+    AdaptiveCurveYDM_V1 internal adaptiveYDM;
     AccessManager internal accessManager;
     AccountantHandler internal handler;
 
@@ -1690,10 +1690,10 @@ contract RoycoAccountantInvariantTest is BaseTest {
 
         MOCK_KERNEL = makeAddr("MOCK_KERNEL");
         accessManager = new AccessManager(OWNER_ADDRESS);
-        adaptiveYDM = new AdaptiveCurveYDM();
+        adaptiveYDM = new AdaptiveCurveYDM_V1();
         accountantImpl = new RoycoAccountant();
 
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.3e18, 0.9e18));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             kernel: MOCK_KERNEL,
@@ -2004,7 +2004,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
 
     RoycoAccountant internal accountantImpl;
     IRoycoAccountant internal accountant;
-    AdaptiveCurveYDM internal adaptiveYDM;
+    AdaptiveCurveYDM_V1 internal adaptiveYDM;
     AccessManager internal accessManager;
 
     address internal MOCK_KERNEL;
@@ -2017,10 +2017,10 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
 
         MOCK_KERNEL = makeAddr("MOCK_KERNEL");
         accessManager = new AccessManager(OWNER_ADDRESS);
-        adaptiveYDM = new AdaptiveCurveYDM();
+        adaptiveYDM = new AdaptiveCurveYDM_V1();
         accountantImpl = new RoycoAccountant();
 
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.3e18, 0.9e18));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             kernel: MOCK_KERNEL,
@@ -2374,8 +2374,8 @@ contract RoycoAccountantAdminTest is BaseTest {
 
     RoycoAccountant internal accountantImpl;
     IRoycoAccountant internal accountant;
-    AdaptiveCurveYDM internal adaptiveYDM;
-    AdaptiveCurveYDM internal newYDM;
+    AdaptiveCurveYDM_V1 internal adaptiveYDM;
+    AdaptiveCurveYDM_V1 internal newYDM;
     AccessManager internal accessManager;
     MockKernelForAdmin internal mockKernel;
 
@@ -2386,11 +2386,11 @@ contract RoycoAccountantAdminTest is BaseTest {
 
         mockKernel = new MockKernelForAdmin();
         accessManager = new AccessManager(OWNER_ADDRESS);
-        adaptiveYDM = new AdaptiveCurveYDM();
-        newYDM = new AdaptiveCurveYDM();
+        adaptiveYDM = new AdaptiveCurveYDM_V1();
+        newYDM = new AdaptiveCurveYDM_V1();
         accountantImpl = new RoycoAccountant();
 
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.3e18, 0.9e18));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             kernel: address(mockKernel),
@@ -2523,7 +2523,7 @@ contract RoycoAccountantAdminTest is BaseTest {
     // =========================================================================
 
     function test_setYDM_success() public {
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.4e18, 0.8e18));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.4e18, 0.8e18));
 
         vm.prank(OWNER_ADDRESS);
         accountant.setYDM(address(newYDM), ydmInitData);
@@ -2640,7 +2640,7 @@ contract RoycoAccountantEdgeCaseTest is BaseTest {
 
     RoycoAccountant internal accountantImpl;
     IRoycoAccountant internal accountant;
-    AdaptiveCurveYDM internal adaptiveYDM;
+    AdaptiveCurveYDM_V1 internal adaptiveYDM;
     AccessManager internal accessManager;
 
     address internal MOCK_KERNEL;
@@ -2651,10 +2651,10 @@ contract RoycoAccountantEdgeCaseTest is BaseTest {
 
         MOCK_KERNEL = makeAddr("MOCK_KERNEL");
         accessManager = new AccessManager(OWNER_ADDRESS);
-        adaptiveYDM = new AdaptiveCurveYDM();
+        adaptiveYDM = new AdaptiveCurveYDM_V1();
         accountantImpl = new RoycoAccountant();
 
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.3e18, 0.9e18));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             kernel: MOCK_KERNEL,
@@ -3004,7 +3004,7 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
 
     RoycoAccountant internal accountantImpl;
     IRoycoAccountant internal accountant;
-    AdaptiveCurveYDM internal adaptiveYDM;
+    AdaptiveCurveYDM_V1 internal adaptiveYDM;
     AccessManager internal accessManager;
     MockYDMOverWAD internal mockYDMOverWAD;
     MockYDMWithInit internal mockYDMWithInit;
@@ -3017,7 +3017,7 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
 
         MOCK_KERNEL = makeAddr("MOCK_KERNEL");
         accessManager = new AccessManager(OWNER_ADDRESS);
-        adaptiveYDM = new AdaptiveCurveYDM();
+        adaptiveYDM = new AdaptiveCurveYDM_V1();
         accountantImpl = new RoycoAccountant();
         mockYDMOverWAD = new MockYDMOverWAD(2e18); // Return 200% yield share
         mockYDMWithInit = new MockYDMWithInit();
@@ -3055,7 +3055,7 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
         internal
         returns (IRoycoAccountant)
     {
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (jtYieldAtTarget, jtYieldAtFull));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (jtYieldAtTarget, jtYieldAtFull));
 
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             kernel: kernel,
@@ -3331,7 +3331,7 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
 
         uint64 invalidLLTV = 0.82e18; // At or below maxLTV
 
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.3e18, 0.9e18));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             kernel: MOCK_KERNEL,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
@@ -3355,7 +3355,7 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
     function test_lltvValidation_atWAD() public {
         uint64 invalidLLTV = uint64(WAD); // 100% LTV
 
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.3e18, 0.9e18));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             kernel: MOCK_KERNEL,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
@@ -3443,7 +3443,7 @@ contract RoycoAccountantAdditionalBranchTests is BaseTest {
 
     RoycoAccountant internal accountantImpl;
     IRoycoAccountant internal accountant;
-    AdaptiveCurveYDM internal adaptiveYDM;
+    AdaptiveCurveYDM_V1 internal adaptiveYDM;
     AccessManager internal accessManager;
     MockKernelForBranchTests internal mockKernel;
 
@@ -3454,10 +3454,10 @@ contract RoycoAccountantAdditionalBranchTests is BaseTest {
 
         mockKernel = new MockKernelForBranchTests();
         accessManager = new AccessManager(OWNER_ADDRESS);
-        adaptiveYDM = new AdaptiveCurveYDM();
+        adaptiveYDM = new AdaptiveCurveYDM_V1();
         accountantImpl = new RoycoAccountant();
 
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.3e18, 0.9e18));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             kernel: address(mockKernel),
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
@@ -3495,7 +3495,7 @@ contract RoycoAccountantAdditionalBranchTests is BaseTest {
     function test_coverageValidation_belowMin() public {
         uint64 invalidCoverage = uint64(MIN_COVERAGE_WAD - 1);
 
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.3e18, 0.9e18));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             kernel: address(mockKernel),
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
@@ -3519,7 +3519,7 @@ contract RoycoAccountantAdditionalBranchTests is BaseTest {
     function test_coverageValidation_atWAD() public {
         uint64 invalidCoverage = uint64(WAD);
 
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.3e18, 0.9e18));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             kernel: address(mockKernel),
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
@@ -3546,7 +3546,7 @@ contract RoycoAccountantAdditionalBranchTests is BaseTest {
         uint64 highCoverage = 0.9e18;
         uint96 highBeta = 1.2e18;
 
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (0.3e18, 0.9e18));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             kernel: address(mockKernel),
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,

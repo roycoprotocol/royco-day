@@ -406,7 +406,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
                 initialConversionRateWAD: initialConversionRate
             });
 
-        DeployScript.AdaptiveCurveYDMParams memory ydmParams = DeployScript.AdaptiveCurveYDMParams({
+        DeployScript.AdaptiveCurveYDM_V1Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V1Params({
             jtYieldShareAtTargetUtilWAD: 0.3e18, // 30% at target utilization
             jtYieldShareAtFullUtilWAD: 1e18 // 100% at 100% utilization
         });

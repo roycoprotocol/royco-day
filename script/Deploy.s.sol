@@ -30,7 +30,7 @@ import { AssetClaims, MarketDeploymentParams, RolesTargetConfiguration, RoycoMar
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits } from "../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoSeniorTranche } from "../src/tranches/RoycoSeniorTranche.sol";
-import { AdaptiveCurveYDM } from "../src/ydm/AdaptiveCurveYDM.sol";
+import { AdaptiveCurveYDM_V1 } from "../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { StaticCurveYDM } from "../src/ydm/StaticCurveYDM.sol";
 import { DeploymentConfig } from "./config/DeploymentConfig.sol";
 import { Create2DeployUtils } from "./utils/Create2DeployUtils.sol";
@@ -119,8 +119,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         uint64 jtYieldShareAtFullUtilWAD;
     }
 
-    /// @notice Deployment parameters for AdaptiveCurveYDM
-    struct AdaptiveCurveYDMParams {
+    /// @notice Deployment parameters for AdaptiveCurveYDM_V1
+    struct AdaptiveCurveYDM_V1Params {
         uint64 jtYieldShareAtTargetUtilWAD;
         uint64 jtYieldShareAtFullUtilWAD;
     }
@@ -796,7 +796,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             creationCode = type(StaticCurveYDM).creationCode;
             salt = keccak256(abi.encodePacked(YDM_SALT, "STATIC_CURVE"));
         } else if (_ydmType == YDMType.AdaptiveCurve) {
-            creationCode = type(AdaptiveCurveYDM).creationCode;
+            creationCode = type(AdaptiveCurveYDM_V1).creationCode;
             salt = keccak256(abi.encodePacked(YDM_SALT, "ADAPTIVE_CURVE"));
         } else {
             revert UnsupportedYDMType(_ydmType);
@@ -1046,9 +1046,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
                 (ydmParams.jtYieldShareAtZeroUtilWAD, ydmParams.jtYieldShareAtTargetUtilWAD, ydmParams.jtYieldShareAtFullUtilWAD)
             );
         } else if (_ydmType == YDMType.AdaptiveCurve) {
-            AdaptiveCurveYDMParams memory ydmParams = abi.decode(_ydmSpecificParams, (AdaptiveCurveYDMParams));
+            AdaptiveCurveYDM_V1Params memory ydmParams = abi.decode(_ydmSpecificParams, (AdaptiveCurveYDM_V1Params));
             ydmInitializationData =
-                abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (ydmParams.jtYieldShareAtTargetUtilWAD, ydmParams.jtYieldShareAtFullUtilWAD));
+                abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (ydmParams.jtYieldShareAtTargetUtilWAD, ydmParams.jtYieldShareAtFullUtilWAD));
         } else {
             revert UnsupportedYDMType(_ydmType);
         }
