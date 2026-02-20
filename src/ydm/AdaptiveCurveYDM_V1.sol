@@ -27,10 +27,10 @@ contract AdaptiveCurveYDM_V1 is IYDM {
 
     /// @dev The minimum JT yield share at target utilization
     /// @dev Set to 1 basis point
-    uint256 public constant MIN_JT_YIELD_SHARE_AT_TARGET = 0.0001e18;
+    uint256 public constant MIN_JT_YIELD_SHARE_AT_TARGET_WAD = 0.0001e18;
 
     /// @dev The maximum JT yield share at target utilization
-    uint256 public constant MAX_JT_YIELD_SHARE_AT_TARGET = WAD;
+    uint256 public constant MAX_JT_YIELD_SHARE_AT_TARGET_WAD = WAD;
 
     /// @dev The maximum linear adaptation that can be applied to the curve.
     /// @dev This value is chosen to prevent overflows when computing expWAD
@@ -77,7 +77,7 @@ contract AdaptiveCurveYDM_V1 is IYDM {
     function initializeYDMForMarket(uint64 _jtYieldShareAtTargetUtilWAD, uint64 _jtYieldShareAtFullUtilWAD) external {
         // Ensure that the initial YDM curve is valid
         require(
-            _jtYieldShareAtTargetUtilWAD >= MIN_JT_YIELD_SHARE_AT_TARGET && _jtYieldShareAtTargetUtilWAD <= MAX_JT_YIELD_SHARE_AT_TARGET
+            _jtYieldShareAtTargetUtilWAD >= MIN_JT_YIELD_SHARE_AT_TARGET_WAD && _jtYieldShareAtTargetUtilWAD <= MAX_JT_YIELD_SHARE_AT_TARGET_WAD
                 && _jtYieldShareAtTargetUtilWAD <= _jtYieldShareAtFullUtilWAD && _jtYieldShareAtFullUtilWAD <= WAD,
             INVALID_YDM_INITIALIZATION()
         );
@@ -219,8 +219,8 @@ contract AdaptiveCurveYDM_V1 is IYDM {
 
         jtYieldShareAtTargetWAD = uint256((int256(_lastJtYieldShareAtTargetWAD) * FixedPointMathLib.expWad(_linearAdaptationWAD)) / WAD_INT);
         // Clamp the JT yield share to the market defined bounds
-        if (jtYieldShareAtTargetWAD < MIN_JT_YIELD_SHARE_AT_TARGET) return MIN_JT_YIELD_SHARE_AT_TARGET;
-        if (jtYieldShareAtTargetWAD > MAX_JT_YIELD_SHARE_AT_TARGET) return MAX_JT_YIELD_SHARE_AT_TARGET;
+        if (jtYieldShareAtTargetWAD < MIN_JT_YIELD_SHARE_AT_TARGET_WAD) return MIN_JT_YIELD_SHARE_AT_TARGET_WAD;
+        if (jtYieldShareAtTargetWAD > MAX_JT_YIELD_SHARE_AT_TARGET_WAD) return MAX_JT_YIELD_SHARE_AT_TARGET_WAD;
     }
 
     /**
