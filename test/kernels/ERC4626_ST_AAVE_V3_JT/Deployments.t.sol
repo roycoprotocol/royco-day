@@ -315,7 +315,9 @@ contract DeploymentsTest is MainnetForkWithAaveTestBase {
                     coverageWAD: COVERAGE_WAD,
                     betaWAD: BETA_WAD,
                     ydm: address(YDM),
-                    ydmInitializationData: abi.encodeCall(AdaptiveCurveYDM_V2.initializeYDMForMarket, (0.225e18, 0.225e18, 1e18, uint64(30e18 / uint256(365 days)))),
+                    ydmInitializationData: abi.encodeCall(
+                        AdaptiveCurveYDM_V2.initializeYDMForMarket, (0.225e18, 0.225e18, 1e18, uint64(30e18 / uint256(365 days)))
+                    ),
                     fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
                     lltvWAD: LLTV,
                     stNAVDustTolerance: toNAVUnits(uint256(10 ** 21)), // 10^(18-6) for USDC
@@ -457,7 +459,9 @@ contract DeploymentsTest is MainnetForkWithAaveTestBase {
                     coverageWAD: COVERAGE_WAD,
                     betaWAD: BETA_WAD,
                     ydm: address(YDM),
-                    ydmInitializationData: abi.encodeCall(AdaptiveCurveYDM_V2.initializeYDMForMarket, (0.225e18, 0.225e18, 1e18, uint64(30e18 / uint256(365 days)))),
+                    ydmInitializationData: abi.encodeCall(
+                        AdaptiveCurveYDM_V2.initializeYDMForMarket, (0.225e18, 0.225e18, 1e18, uint64(30e18 / uint256(365 days)))
+                    ),
                     fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
                     lltvWAD: LLTV,
                     stNAVDustTolerance: toNAVUnits(uint256(10 ** 21)), // 10^(18-6) for USDC
@@ -587,7 +591,9 @@ contract DeploymentsTest is MainnetForkWithAaveTestBase {
                     coverageWAD: COVERAGE_WAD,
                     betaWAD: BETA_WAD,
                     ydm: address(YDM),
-                    ydmInitializationData: abi.encodeCall(AdaptiveCurveYDM_V2.initializeYDMForMarket, (0.225e18, 0.225e18, 1e18, uint64(30e18 / uint256(365 days)))),
+                    ydmInitializationData: abi.encodeCall(
+                        AdaptiveCurveYDM_V2.initializeYDMForMarket, (0.225e18, 0.225e18, 1e18, uint64(30e18 / uint256(365 days)))
+                    ),
                     fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
                     lltvWAD: LLTV,
                     stNAVDustTolerance: toNAVUnits(uint256(10 ** 21)), // 10^(18-6) for USDC
