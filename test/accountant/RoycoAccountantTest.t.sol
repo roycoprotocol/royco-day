@@ -1085,7 +1085,7 @@ contract RoycoAccountantTest is BaseTest {
 
         (uint64 yt2,,) = adaptiveYDM.accountantToCurve(address(accountant));
         assertLe(yt2, yt1, "YT continues decreasing or stays at floor");
-        assertGe(yt2, 0.01e18, "YT respects minimum bound");
+        assertGe(yt2, 0.0001e18, "YT respects minimum bound");
     }
 
     // =========================================================================

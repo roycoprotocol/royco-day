@@ -139,14 +139,12 @@ contract StaticCurveYDMTest is BaseTest {
         assertNotEq(resultBefore, resultAfter, "Re-initialization should change curve behavior");
     }
 
-    function test_initializeYDMForMarket_allowsAllZeros() public {
+    function test_initializeYDMForMarket_revertsWithAllZeros() public {
         StaticCurveYDM newYdm = new StaticCurveYDM();
+
+        // Y_T must be > 0, so all zeros should revert
+        vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
         newYdm.initializeYDMForMarket(0, 0, 0);
-
-        (NAV_UNIT stRaw, NAV_UNIT jtRaw, uint256 beta, uint256 cov, NAV_UNIT jtEff) = _createInputsForUtilization(0.5e18);
-        uint256 result = newYdm.previewJTYieldShare(MarketState.PERPETUAL, stRaw, jtRaw, beta, cov, jtEff);
-
-        assertEq(result, 0, "All-zero curve should return 0 for all utilizations");
     }
 
     function test_initializeYDMForMarket_allowsAllWAD() public {
@@ -174,9 +172,9 @@ contract StaticCurveYDMTest is BaseTest {
 
     /// @notice Fuzz test: verify curve invariants hold for any valid configuration
     function testFuzz_curveConfiguration_invariants(uint64 _y0, uint64 _yT, uint64 _yFull, uint256 _utilization) public {
-        // Bound curve parameters to valid ordering
-        _y0 = uint64(bound(_y0, 0, WAD));
-        _yT = uint64(bound(_yT, _y0, WAD));
+        // Bound curve parameters to valid ordering (Y_T must be > 0)
+        _yT = uint64(bound(_yT, 1, WAD));
+        _y0 = uint64(bound(_y0, 0, _yT));
         _yFull = uint64(bound(_yFull, _yT, WAD));
         _utilization = bound(_utilization, 0, 2 * WAD);
 
@@ -209,9 +207,9 @@ contract StaticCurveYDMTest is BaseTest {
 
     /// @notice Fuzz test: verify monotonicity for any curve configuration
     function testFuzz_curveConfiguration_monotonicity(uint64 _y0, uint64 _yT, uint64 _yFull, uint256 _util1, uint256 _util2) public {
-        // Bound curve parameters to valid ordering
-        _y0 = uint64(bound(_y0, 0, WAD));
-        _yT = uint64(bound(_yT, _y0, WAD));
+        // Bound curve parameters to valid ordering (Y_T must be > 0)
+        _yT = uint64(bound(_yT, 1, WAD));
+        _y0 = uint64(bound(_y0, 0, _yT));
         _yFull = uint64(bound(_yFull, _yT, WAD));
 
         // Bound utilizations
@@ -239,9 +237,9 @@ contract StaticCurveYDMTest is BaseTest {
 
     /// @notice Fuzz test: verify continuity at target utilization for any curve
     function testFuzz_curveConfiguration_continuityAtTarget(uint64 _y0, uint64 _yT, uint64 _yFull) public {
-        // Bound curve parameters to valid ordering
-        _y0 = uint64(bound(_y0, 0, WAD));
-        _yT = uint64(bound(_yT, _y0, WAD));
+        // Bound curve parameters to valid ordering (Y_T must be > 0)
+        _yT = uint64(bound(_yT, 1, WAD));
+        _y0 = uint64(bound(_y0, 0, _yT));
         _yFull = uint64(bound(_yFull, _yT, WAD));
 
         StaticCurveYDM fuzzedYdm = new StaticCurveYDM();
@@ -673,15 +671,15 @@ contract StaticCurveYDMTest is BaseTest {
         assertNotEq(result1, result2, "Different accountants should have different curves");
     }
 
-    function test_uninitializedAccountant_returnsZero() public {
+    function test_uninitializedAccountant_reverts() public {
         StaticCurveYDM freshYdm = new StaticCurveYDM();
         // Don't initialize
 
         (NAV_UNIT stRaw, NAV_UNIT jtRaw, uint256 beta, uint256 cov, NAV_UNIT jtEff) = _createInputsForUtilization(0.5e18);
-        uint256 result = freshYdm.previewJTYieldShare(MarketState.PERPETUAL, stRaw, jtRaw, beta, cov, jtEff);
 
-        // Uninitialized curve has all zeros, so result should be 0
-        assertEq(result, 0, "Uninitialized accountant should return 0");
+        // Uninitialized curve should revert with UNINITIALIZED_YDM
+        vm.expectRevert(IYDM.UNINITIALIZED_YDM.selector);
+        freshYdm.previewJTYieldShare(MarketState.PERPETUAL, stRaw, jtRaw, beta, cov, jtEff);
     }
 
     // ============================================
