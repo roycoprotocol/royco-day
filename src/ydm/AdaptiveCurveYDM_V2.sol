@@ -199,26 +199,26 @@ contract AdaptiveCurveYDM_V2 is IYDM {
         int256 normalizedDeltaFromTargetWAD = ((int256(utilizationWAD) - TARGET_UTILIZATION_WAD_INT) * WAD_INT) / int256(maxDeltaFromTargetInRegionWAD);
 
         // Retrieve the current YDM curve for the market
-        // Only adapt the curve if the market is in a perpetual state and market forces are enabled to affect utilization
         AdaptiveYieldCurve memory curve = accountantToCurve[msg.sender];
+        uint256 initialJtYieldShareAtTargetWAD = curve.jtYieldShareAtTargetWAD;
+        require(initialJtYieldShareAtTargetWAD != 0, UNINITIALIZED_YDM());
+        // Only adapt the curve if the market is in a perpetual state and market forces are enabled to affect utilization
         uint256 avgJtYieldShareAtTargetWAD;
         if (_marketState == MarketState.PERPETUAL) {
             // Compute the adaptation speed based on the normalized delta: scale the max adaptation speed by the relative delta from the target based on the region
             int256 currentAdaptationSpeedWAD = (int256(uint256(curve.maxAdaptationSpeedWAD)) * normalizedDeltaFromTargetWAD) / WAD_INT;
             // Compute the linear adaptation that will be applied to the curve based on the speed
             uint256 elapsed = curve.lastAdaptationTimestamp == 0 ? 0 : block.timestamp - curve.lastAdaptationTimestamp;
-
             int256 linearAdaptationWAD = currentAdaptationSpeedWAD * int256(elapsed);
 
             // Compute the new JT yield share at target utilization
-            uint256 initialJtYieldShareAtTargetWAD = curve.jtYieldShareAtTargetWAD;
             newJtYieldShareAtTargetWAD = _computeJtYieldShareAtTarget(initialJtYieldShareAtTargetWAD, linearAdaptationWAD);
 
             // Compute the average JT yield share at target utilization
             uint256 midJtYieldShareAtTargetWAD = _computeJtYieldShareAtTarget(initialJtYieldShareAtTargetWAD, linearAdaptationWAD / 2);
             avgJtYieldShareAtTargetWAD = (initialJtYieldShareAtTargetWAD + newJtYieldShareAtTargetWAD + (2 * midJtYieldShareAtTargetWAD)) / 4;
         } else {
-            newJtYieldShareAtTargetWAD = avgJtYieldShareAtTargetWAD = curve.jtYieldShareAtTargetWAD;
+            newJtYieldShareAtTargetWAD = avgJtYieldShareAtTargetWAD = initialJtYieldShareAtTargetWAD;
         }
 
         /**

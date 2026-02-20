@@ -10,7 +10,7 @@ import { UtilsLib } from "../../src/libraries/UtilsLib.sol";
 import { AdaptiveCurveYDM_V1 } from "../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { BaseTest, MarketState } from "../base/BaseTest.t.sol";
 
-contract AdaptiveCurveYDM_V1Test is BaseTest {
+contract AdaptiveCurveYDM_V1_Test is BaseTest {
     using Math for uint256;
 
     // ============================================
@@ -27,7 +27,7 @@ contract AdaptiveCurveYDM_V1Test is BaseTest {
 
     // Contract constants (copied for testing)
     int256 internal constant MAX_ADAPTATION_SPEED_WAD = 50e18 / int256(365 days);
-    uint256 internal constant MIN_JT_YIELD_SHARE_AT_TARGET_WAD = 0.01e18;
+    uint256 internal constant MIN_JT_YIELD_SHARE_AT_TARGET_WAD = 0.0001e18;
     uint256 internal constant MAX_JT_YIELD_SHARE_AT_TARGET_WAD = WAD;
 
     // ============================================

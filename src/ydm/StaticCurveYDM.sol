@@ -26,9 +26,9 @@ contract StaticCurveYDM is IYDM {
      */
     struct StaticYieldCurve {
         uint64 jtYieldShareAtZeroUtilWAD;
-        uint192 slopeLtTargetUtilWAD;
+        uint64 slopeLtTargetUtilWAD;
         uint64 jtYieldShareAtTargetWAD;
-        uint192 slopeGteTargetUtilWAD;
+        uint64 slopeGteTargetUtilWAD;
     }
 
     /// @dev A mapping from market accountants to its market's current YDM curve
@@ -63,7 +63,7 @@ contract StaticCurveYDM is IYDM {
         // Ensure that the static YDM curve is valid
         require(
             _jtYieldShareAtZeroUtilWAD <= _jtYieldShareAtTargetWAD && _jtYieldShareAtTargetWAD <= _jtYieldShareAtFullUtilWAD
-                && _jtYieldShareAtFullUtilWAD <= WAD,
+                && _jtYieldShareAtFullUtilWAD <= WAD && _jtYieldShareAtTargetWAD > 0,
             INVALID_YDM_INITIALIZATION()
         );
 
@@ -148,14 +148,15 @@ contract StaticCurveYDM is IYDM {
 
         // Retrieve the static curve for this market
         StaticYieldCurve storage curve = accountantToCurve[msg.sender];
+        uint256 jtYieldShareAtTargetWAD = curve.jtYieldShareAtTargetWAD;
+        require(jtYieldShareAtTargetWAD != 0, UNINITIALIZED_YDM());
         // Compute Y(U), rounding in favor the senior tranche
         if (utilizationWAD < TARGET_UTILIZATION_WAD) {
             // If utilization is below the target (kink), apply the first leg of Y(U)
             return uint256(curve.slopeLtTargetUtilWAD).mulDiv(utilizationWAD, WAD, Math.Rounding.Floor) + curve.jtYieldShareAtZeroUtilWAD;
         } else {
             // If utilization is at or above the target (kink), apply the second leg of Y(U)
-            return
-                uint256(curve.slopeGteTargetUtilWAD).mulDiv((utilizationWAD - TARGET_UTILIZATION_WAD), WAD, Math.Rounding.Floor) + curve.jtYieldShareAtTargetWAD;
+            return uint256(curve.slopeGteTargetUtilWAD).mulDiv((utilizationWAD - TARGET_UTILIZATION_WAD), WAD, Math.Rounding.Floor) + jtYieldShareAtTargetWAD;
         }
     }
 
@@ -167,7 +168,7 @@ contract StaticCurveYDM is IYDM {
      * @param _x1WAD X coordinate for point 1, scaled to WAD precision
      * @return slopeWAD The slope of the line, scaled to WAD precision
      */
-    function _computeSlope(uint256 _y0WAD, uint256 _y1WAD, uint256 _x0WAD, uint256 _x1WAD) internal pure returns (uint192 slopeWAD) {
-        slopeWAD = uint192((_y1WAD - _y0WAD).mulDiv(WAD, (_x1WAD - _x0WAD), Math.Rounding.Floor));
+    function _computeSlope(uint256 _y0WAD, uint256 _y1WAD, uint256 _x0WAD, uint256 _x1WAD) internal pure returns (uint64 slopeWAD) {
+        slopeWAD = uint64((_y1WAD - _y0WAD).mulDiv(WAD, (_x1WAD - _x0WAD), Math.Rounding.Floor));
     }
 }
