@@ -207,7 +207,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         RoleAssignmentConfiguration[] roleAssignments;
     }
 
-    function run() external {
+    function run() external virtual {
         // Read deployer private key
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
