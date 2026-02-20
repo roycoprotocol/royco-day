@@ -12,7 +12,7 @@ import { UtilsLib } from "../libraries/UtilsLib.sol";
  * @author Shivaansh Kapoor, Ankur Dubey
  * @notice Royco's adaptive curve yield distribution model (YDM) V2
  * @dev Responsible for computing the yield distribution between the senior and junior tranches of a Royco market
- * @dev The curve is defined as a piece-wise linear function with static slopes, parameterized by
+ * @dev The curve is defined as an adaptive piece-wise function parameterized by the utilization of a Royco market, static slopes, and yield share at the kink (Y_T)
  * @dev The curve adapts its yield share at the kink (Y_T) up or down based on the market's relative delta from target utilization over time
  * @dev The slopes above/below the target utilization remain static: only Y_T adapts, translating the curve vertically
  * @dev This provides fixed premiums/discounts to Y_T at each utilization level
