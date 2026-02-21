@@ -10,7 +10,7 @@ import { MAX_PROTOCOL_FEE_WAD, MIN_COVERAGE_WAD, WAD, ZERO_NAV_UNITS } from "../
 import { MarketState, SyncedAccountingState } from "../../src/libraries/Types.sol";
 import { NAV_UNIT, UnitsMathLib, toUint256 } from "../../src/libraries/Units.sol";
 import { UtilsLib } from "../../src/libraries/UtilsLib.sol";
-import { AdaptiveCurveYDM } from "../../src/ydm/AdaptiveCurveYDM.sol";
+import { AdaptiveCurveYDM_V1 } from "../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { BaseTest } from "../base/BaseTest.t.sol";
 
 contract RoycoAccountantTest is BaseTest {
@@ -22,7 +22,7 @@ contract RoycoAccountantTest is BaseTest {
 
     RoycoAccountant internal accountantImpl;
     IRoycoAccountant internal accountant;
-    AdaptiveCurveYDM internal adaptiveYDM;
+    AdaptiveCurveYDM_V1 internal adaptiveYDM;
     AccessManager internal accessManager;
 
     address internal MOCK_KERNEL;
@@ -35,7 +35,7 @@ contract RoycoAccountantTest is BaseTest {
 
         MOCK_KERNEL = makeAddr("MOCK_KERNEL");
         accessManager = new AccessManager(OWNER_ADDRESS);
-        adaptiveYDM = new AdaptiveCurveYDM();
+        adaptiveYDM = new AdaptiveCurveYDM_V1();
         accountantImpl = new RoycoAccountant();
 
         accountant = _deployAccountant(
@@ -69,7 +69,7 @@ contract RoycoAccountantTest is BaseTest {
         internal
         returns (IRoycoAccountant)
     {
-        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (jtYieldAtTarget, jtYieldAtFull));
+        bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (jtYieldAtTarget, jtYieldAtFull));
 
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             kernel: kernel,
@@ -1085,7 +1085,7 @@ contract RoycoAccountantTest is BaseTest {
 
         (uint64 yt2,,) = adaptiveYDM.accountantToCurve(address(accountant));
         assertLe(yt2, yt1, "YT continues decreasing or stays at floor");
-        assertGe(yt2, 0.01e18, "YT respects minimum bound");
+        assertGe(yt2, 0.0001e18, "YT respects minimum bound");
     }
 
     // =========================================================================

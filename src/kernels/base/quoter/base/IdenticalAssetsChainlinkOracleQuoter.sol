@@ -142,7 +142,6 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
         require(answer > 0, PRICE_INVALID());
         require(answeredInRound >= roundId, PRICE_INCOMPLETE());
 
-        // forge-lint: disable-next-item(unsafe-typecast)
         price = uint256(answer);
         precision = 10 ** uint256(_decimalPrecision);
     }

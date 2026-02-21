@@ -11,6 +11,9 @@ interface IYDM {
     /// @dev Thrown when the initilization parameters of the YDM for a market are invalid
     error INVALID_YDM_INITIALIZATION();
 
+    /// @dev Thrown when an accountant attempts to query the JT yield share without initializing the YDM
+    error UNINITIALIZED_YDM();
+
     /**
      * @notice Previews and returns a Royco market's percentage of ST yield that should be allocated to its JT
      * @dev Does not mutate any state

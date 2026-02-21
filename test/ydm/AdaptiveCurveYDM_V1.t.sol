@@ -7,17 +7,17 @@ import { IYDM } from "../../src/interfaces/IYDM.sol";
 import { TARGET_UTILIZATION_WAD, TARGET_UTILIZATION_WAD_INT, WAD, WAD_INT, ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
 import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
 import { UtilsLib } from "../../src/libraries/UtilsLib.sol";
-import { AdaptiveCurveYDM } from "../../src/ydm/AdaptiveCurveYDM.sol";
+import { AdaptiveCurveYDM_V1 } from "../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { BaseTest, MarketState } from "../base/BaseTest.t.sol";
 
-contract AdaptiveCurveYDMTest is BaseTest {
+contract AdaptiveCurveYDM_V1_Test is BaseTest {
     using Math for uint256;
 
     // ============================================
     // Test State
     // ============================================
 
-    AdaptiveCurveYDM internal ydm;
+    AdaptiveCurveYDM_V1 internal ydm;
 
     // Default curve parameters
     uint64 internal constant DEFAULT_YT = 0.3e18; // 30% at target util
@@ -27,8 +27,8 @@ contract AdaptiveCurveYDMTest is BaseTest {
 
     // Contract constants (copied for testing)
     int256 internal constant MAX_ADAPTATION_SPEED_WAD = 50e18 / int256(365 days);
-    uint256 internal constant MIN_JT_YIELD_SHARE_AT_TARGET = 0.01e18;
-    uint256 internal constant MAX_JT_YIELD_SHARE_AT_TARGET = WAD;
+    uint256 internal constant MIN_JT_YIELD_SHARE_AT_TARGET_WAD = 0.0001e18;
+    uint256 internal constant MAX_JT_YIELD_SHARE_AT_TARGET_WAD = WAD;
 
     // ============================================
     // Setup
@@ -36,7 +36,7 @@ contract AdaptiveCurveYDMTest is BaseTest {
 
     function setUp() public {
         _setUpRoyco();
-        ydm = new AdaptiveCurveYDM();
+        ydm = new AdaptiveCurveYDM_V1();
         // Initialize with default curve (caller becomes the "accountant" key)
         ydm.initializeYDMForMarket(DEFAULT_YT, DEFAULT_YFULL);
     }
@@ -73,8 +73,8 @@ contract AdaptiveCurveYDMTest is BaseTest {
     /// @dev Computes expected yield share at target after adaptation
     function _computeAdaptedYT(uint256 _initialYT, int256 _linearAdaptation) internal pure returns (uint256) {
         uint256 result = uint256((int256(_initialYT) * FixedPointMathLib.expWad(_linearAdaptation)) / WAD_INT);
-        if (result < MIN_JT_YIELD_SHARE_AT_TARGET) return MIN_JT_YIELD_SHARE_AT_TARGET;
-        if (result > MAX_JT_YIELD_SHARE_AT_TARGET) return MAX_JT_YIELD_SHARE_AT_TARGET;
+        if (result < MIN_JT_YIELD_SHARE_AT_TARGET_WAD) return MIN_JT_YIELD_SHARE_AT_TARGET_WAD;
+        if (result > MAX_JT_YIELD_SHARE_AT_TARGET_WAD) return MAX_JT_YIELD_SHARE_AT_TARGET_WAD;
         return result;
     }
 
@@ -83,7 +83,7 @@ contract AdaptiveCurveYDMTest is BaseTest {
     // ============================================
 
     function test_initializeYDMForMarket_setsCorrectCurveParams() public {
-        AdaptiveCurveYDM newYdm = new AdaptiveCurveYDM();
+        AdaptiveCurveYDM_V1 newYdm = new AdaptiveCurveYDM_V1();
         newYdm.initializeYDMForMarket(0.2e18, 0.6e18);
 
         (uint64 yT, uint32 lastTimestamp, uint160 steepness) = newYdm.accountantToCurve(address(this));
@@ -95,25 +95,25 @@ contract AdaptiveCurveYDMTest is BaseTest {
     }
 
     function test_initializeYDMForMarket_emitsEvent() public {
-        AdaptiveCurveYDM newYdm = new AdaptiveCurveYDM();
+        AdaptiveCurveYDM_V1 newYdm = new AdaptiveCurveYDM_V1();
 
         uint256 expectedSteepness = (uint256(DEFAULT_YFULL) * WAD) / DEFAULT_YT;
 
         vm.expectEmit(true, false, false, true);
-        emit AdaptiveCurveYDM.AdaptiveCurveYdmInitialized(address(this), expectedSteepness, DEFAULT_YT);
+        emit AdaptiveCurveYDM_V1.AdaptiveCurveYdmInitialized(address(this), expectedSteepness, DEFAULT_YT);
 
         newYdm.initializeYDMForMarket(DEFAULT_YT, DEFAULT_YFULL);
     }
 
     function test_initializeYDMForMarket_revertsWhenYTBelowMin() public {
-        AdaptiveCurveYDM newYdm = new AdaptiveCurveYDM();
+        AdaptiveCurveYDM_V1 newYdm = new AdaptiveCurveYDM_V1();
 
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
-        newYdm.initializeYDMForMarket(uint64(MIN_JT_YIELD_SHARE_AT_TARGET - 1), 0.5e18);
+        newYdm.initializeYDMForMarket(uint64(MIN_JT_YIELD_SHARE_AT_TARGET_WAD - 1), 0.5e18);
     }
 
     function test_initializeYDMForMarket_revertsWhenYTAboveMax() public {
-        AdaptiveCurveYDM newYdm = new AdaptiveCurveYDM();
+        AdaptiveCurveYDM_V1 newYdm = new AdaptiveCurveYDM_V1();
 
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
         // YT > WAD is invalid
@@ -121,29 +121,29 @@ contract AdaptiveCurveYDMTest is BaseTest {
     }
 
     function test_initializeYDMForMarket_revertsWhenYTGreaterThanYFull() public {
-        AdaptiveCurveYDM newYdm = new AdaptiveCurveYDM();
+        AdaptiveCurveYDM_V1 newYdm = new AdaptiveCurveYDM_V1();
 
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
         newYdm.initializeYDMForMarket(0.5e18, 0.3e18); // YT > YFull
     }
 
     function test_initializeYDMForMarket_revertsWhenYFullGreaterThanWAD() public {
-        AdaptiveCurveYDM newYdm = new AdaptiveCurveYDM();
+        AdaptiveCurveYDM_V1 newYdm = new AdaptiveCurveYDM_V1();
 
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
         newYdm.initializeYDMForMarket(0.5e18, uint64(WAD + 1));
     }
 
     function test_initializeYDMForMarket_allowsMinYT() public {
-        AdaptiveCurveYDM newYdm = new AdaptiveCurveYDM();
-        newYdm.initializeYDMForMarket(uint64(MIN_JT_YIELD_SHARE_AT_TARGET), uint64(WAD));
+        AdaptiveCurveYDM_V1 newYdm = new AdaptiveCurveYDM_V1();
+        newYdm.initializeYDMForMarket(uint64(MIN_JT_YIELD_SHARE_AT_TARGET_WAD), uint64(WAD));
 
         (uint64 yT,,) = newYdm.accountantToCurve(address(this));
-        assertEq(yT, MIN_JT_YIELD_SHARE_AT_TARGET, "Should allow min YT");
+        assertEq(yT, MIN_JT_YIELD_SHARE_AT_TARGET_WAD, "Should allow min YT");
     }
 
     function test_initializeYDMForMarket_allowsMaxYT() public {
-        AdaptiveCurveYDM newYdm = new AdaptiveCurveYDM();
+        AdaptiveCurveYDM_V1 newYdm = new AdaptiveCurveYDM_V1();
         newYdm.initializeYDMForMarket(uint64(WAD), uint64(WAD));
 
         (uint64 yT,, uint160 steepness) = newYdm.accountantToCurve(address(this));
@@ -152,7 +152,7 @@ contract AdaptiveCurveYDMTest is BaseTest {
     }
 
     function test_initializeYDMForMarket_allowsYTEqualsYFull() public {
-        AdaptiveCurveYDM newYdm = new AdaptiveCurveYDM();
+        AdaptiveCurveYDM_V1 newYdm = new AdaptiveCurveYDM_V1();
         newYdm.initializeYDMForMarket(0.5e18, 0.5e18);
 
         (uint64 yT,, uint160 steepness) = newYdm.accountantToCurve(address(this));
@@ -277,7 +277,7 @@ contract AdaptiveCurveYDMTest is BaseTest {
 
     function test_adaptation_noAdaptationOnFirstCall() public {
         // Create a fresh YDM
-        AdaptiveCurveYDM freshYdm = new AdaptiveCurveYDM();
+        AdaptiveCurveYDM_V1 freshYdm = new AdaptiveCurveYDM_V1();
         freshYdm.initializeYDMForMarket(DEFAULT_YT, DEFAULT_YFULL);
 
         (NAV_UNIT stRawNAV, NAV_UNIT jtRawNAV, uint256 betaWAD, uint256 coverageWAD, NAV_UNIT jtEffectiveNAV) = _createInputsForUtilization(WAD);
@@ -340,8 +340,8 @@ contract AdaptiveCurveYDMTest is BaseTest {
 
     function test_adaptation_clampsToMinimum() public {
         // Start with minimum YT
-        AdaptiveCurveYDM minYdm = new AdaptiveCurveYDM();
-        minYdm.initializeYDMForMarket(uint64(MIN_JT_YIELD_SHARE_AT_TARGET), uint64(WAD));
+        AdaptiveCurveYDM_V1 minYdm = new AdaptiveCurveYDM_V1();
+        minYdm.initializeYDMForMarket(uint64(MIN_JT_YIELD_SHARE_AT_TARGET_WAD), uint64(WAD));
 
         (NAV_UNIT stRawNAV, NAV_UNIT jtRawNAV, uint256 betaWAD, uint256 coverageWAD, NAV_UNIT jtEffectiveNAV) = _createInputsForUtilization(0); // 0% utilization
 
@@ -353,12 +353,12 @@ contract AdaptiveCurveYDMTest is BaseTest {
         minYdm.jtYieldShare(MarketState.PERPETUAL, stRawNAV, jtRawNAV, betaWAD, coverageWAD, jtEffectiveNAV);
         (uint64 yT,,) = minYdm.accountantToCurve(address(this));
 
-        assertGe(yT, MIN_JT_YIELD_SHARE_AT_TARGET, "YT should not go below minimum");
+        assertGe(yT, MIN_JT_YIELD_SHARE_AT_TARGET_WAD, "YT should not go below minimum");
     }
 
     function test_adaptation_clampsToMaximum() public {
         // Start with YT close to max
-        AdaptiveCurveYDM maxYdm = new AdaptiveCurveYDM();
+        AdaptiveCurveYDM_V1 maxYdm = new AdaptiveCurveYDM_V1();
         maxYdm.initializeYDMForMarket(0.9e18, uint64(WAD));
 
         (NAV_UNIT stRawNAV, NAV_UNIT jtRawNAV, uint256 betaWAD, uint256 coverageWAD, NAV_UNIT jtEffectiveNAV) = _createInputsForUtilization(WAD); // 100% utilization
@@ -373,7 +373,7 @@ contract AdaptiveCurveYDMTest is BaseTest {
 
         (uint64 yT,,) = maxYdm.accountantToCurve(address(this));
 
-        assertLe(yT, MAX_JT_YIELD_SHARE_AT_TARGET, "YT should not exceed maximum");
+        assertLe(yT, MAX_JT_YIELD_SHARE_AT_TARGET_WAD, "YT should not exceed maximum");
     }
 
     function test_adaptation_emitsEvent() public {
@@ -386,7 +386,7 @@ contract AdaptiveCurveYDMTest is BaseTest {
 
         // Expect YdmAdaptedOutput event
         vm.expectEmit(true, false, false, false);
-        emit AdaptiveCurveYDM.YdmAdaptedOutput(address(this), 0, 0); // We don't check exact values
+        emit AdaptiveCurveYDM_V1.YdmAdaptedOutput(address(this), 0, 0); // We don't check exact values
 
         ydm.jtYieldShare(MarketState.PERPETUAL, stRawNAV, jtRawNAV, betaWAD, coverageWAD, jtEffectiveNAV);
     }
@@ -444,12 +444,12 @@ contract AdaptiveCurveYDMTest is BaseTest {
 
     function test_curveOutput_cappedAtWAD() public {
         // Create a curve where S * Y_T > WAD
-        AdaptiveCurveYDM highYdm = new AdaptiveCurveYDM();
+        AdaptiveCurveYDM_V1 highYdm = new AdaptiveCurveYDM_V1();
         highYdm.initializeYDMForMarket(0.9e18, uint64(WAD)); // S = WAD / 0.9 = 1.111...
 
         // With YT = 0.9 and S = 1.111, at full util: Y = S * YT = 1.111 * 0.9 = 1.0 = WAD
         // Let's use a case where we'd go over
-        AdaptiveCurveYDM extremeYdm = new AdaptiveCurveYDM();
+        AdaptiveCurveYDM_V1 extremeYdm = new AdaptiveCurveYDM_V1();
         extremeYdm.initializeYDMForMarket(0.5e18, uint64(WAD)); // S = 2
 
         (NAV_UNIT stRawNAV, NAV_UNIT jtRawNAV, uint256 betaWAD, uint256 coverageWAD, NAV_UNIT jtEffectiveNAV) = _createInputsForUtilization(WAD);
@@ -517,7 +517,7 @@ contract AdaptiveCurveYDMTest is BaseTest {
 
     function test_steepness_flatCurve() public {
         // S = 1 means YT = YFull, flat curve after target
-        AdaptiveCurveYDM flatYdm = new AdaptiveCurveYDM();
+        AdaptiveCurveYDM_V1 flatYdm = new AdaptiveCurveYDM_V1();
         flatYdm.initializeYDMForMarket(0.5e18, 0.5e18);
 
         (NAV_UNIT stRawNAV1, NAV_UNIT jtRawNAV1, uint256 betaWAD1, uint256 coverageWAD1, NAV_UNIT jtEffectiveNAV1) =
@@ -532,7 +532,7 @@ contract AdaptiveCurveYDMTest is BaseTest {
 
     function test_steepness_steepCurve() public {
         // High steepness: S = 10 (YFull = 10 * YT)
-        AdaptiveCurveYDM steepYdm = new AdaptiveCurveYDM();
+        AdaptiveCurveYDM_V1 steepYdm = new AdaptiveCurveYDM_V1();
         steepYdm.initializeYDMForMarket(0.1e18, uint64(WAD)); // S = 1e18 / 0.1e18 = 10
 
         (,, uint160 steepness) = steepYdm.accountantToCurve(address(this));
@@ -673,10 +673,10 @@ contract AdaptiveCurveYDMTest is BaseTest {
     // ============================================
 
     function testFuzz_initializeYDMForMarket_validParams(uint64 _yT, uint64 _yFull) public {
-        _yT = uint64(bound(_yT, MIN_JT_YIELD_SHARE_AT_TARGET, WAD));
+        _yT = uint64(bound(_yT, MIN_JT_YIELD_SHARE_AT_TARGET_WAD, WAD));
         _yFull = uint64(bound(_yFull, _yT, WAD));
 
-        AdaptiveCurveYDM newYdm = new AdaptiveCurveYDM();
+        AdaptiveCurveYDM_V1 newYdm = new AdaptiveCurveYDM_V1();
         newYdm.initializeYDMForMarket(_yT, _yFull);
 
         (uint64 storedYT,, uint160 storedSteepness) = newYdm.accountantToCurve(address(this));
@@ -777,11 +777,11 @@ contract AdaptiveCurveYDMTest is BaseTest {
     }
 
     function testFuzz_curveConfiguration_invariants(uint64 _yT, uint64 _yFull, uint256 _utilization) public {
-        _yT = uint64(bound(_yT, MIN_JT_YIELD_SHARE_AT_TARGET, WAD));
+        _yT = uint64(bound(_yT, MIN_JT_YIELD_SHARE_AT_TARGET_WAD, WAD));
         _yFull = uint64(bound(_yFull, _yT, WAD));
         _utilization = bound(_utilization, 0, WAD);
 
-        AdaptiveCurveYDM testYdm = new AdaptiveCurveYDM();
+        AdaptiveCurveYDM_V1 testYdm = new AdaptiveCurveYDM_V1();
         testYdm.initializeYDMForMarket(_yT, _yFull);
 
         (NAV_UNIT stRawNAV, NAV_UNIT jtRawNAV, uint256 betaWAD, uint256 coverageWAD, NAV_UNIT jtEffectiveNAV) = _createInputsForUtilization(_utilization);
@@ -809,11 +809,11 @@ contract AdaptiveCurveYDMTest is BaseTest {
         (NAV_UNIT stRawNAV, NAV_UNIT jtRawNAV, uint256 betaWAD, uint256 coverageWAD, NAV_UNIT jtEffectiveNAV) = _createInputsForUtilization(utilization);
 
         // Start near the boundary that we're testing
-        AdaptiveCurveYDM testYdm = new AdaptiveCurveYDM();
+        AdaptiveCurveYDM_V1 testYdm = new AdaptiveCurveYDM_V1();
         if (_highUtil) {
             testYdm.initializeYDMForMarket(0.9e18, uint64(WAD)); // Near max
         } else {
-            testYdm.initializeYDMForMarket(uint64(MIN_JT_YIELD_SHARE_AT_TARGET), uint64(WAD)); // At min
+            testYdm.initializeYDMForMarket(uint64(MIN_JT_YIELD_SHARE_AT_TARGET_WAD), uint64(WAD)); // At min
         }
 
         testYdm.jtYieldShare(MarketState.PERPETUAL, stRawNAV, jtRawNAV, betaWAD, coverageWAD, jtEffectiveNAV);
@@ -826,8 +826,8 @@ contract AdaptiveCurveYDMTest is BaseTest {
 
         (uint64 yT,,) = testYdm.accountantToCurve(address(this));
 
-        assertGe(yT, MIN_JT_YIELD_SHARE_AT_TARGET, "YT should be >= MIN");
-        assertLe(yT, MAX_JT_YIELD_SHARE_AT_TARGET, "YT should be <= MAX");
+        assertGe(yT, MIN_JT_YIELD_SHARE_AT_TARGET_WAD, "YT should be >= MIN");
+        assertLe(yT, MAX_JT_YIELD_SHARE_AT_TARGET_WAD, "YT should be <= MAX");
     }
 
     // ============================================
@@ -846,8 +846,8 @@ contract AdaptiveCurveYDMTest is BaseTest {
 
         // Should not revert, curve should still be valid
         (uint64 yT,,) = ydm.accountantToCurve(address(this));
-        assertGe(yT, MIN_JT_YIELD_SHARE_AT_TARGET, "YT should be valid after rapid state changes");
-        assertLe(yT, MAX_JT_YIELD_SHARE_AT_TARGET, "YT should be valid after rapid state changes");
+        assertGe(yT, MIN_JT_YIELD_SHARE_AT_TARGET_WAD, "YT should be valid after rapid state changes");
+        assertLe(yT, MAX_JT_YIELD_SHARE_AT_TARGET_WAD, "YT should be valid after rapid state changes");
     }
 
     function test_adversarial_extremeUtilizationSwings() public {
@@ -862,8 +862,8 @@ contract AdaptiveCurveYDMTest is BaseTest {
 
         // Should not revert, curve should still be valid
         (uint64 yT,,) = ydm.accountantToCurve(address(this));
-        assertGe(yT, MIN_JT_YIELD_SHARE_AT_TARGET, "YT should be valid after extreme swings");
-        assertLe(yT, MAX_JT_YIELD_SHARE_AT_TARGET, "YT should be valid after extreme swings");
+        assertGe(yT, MIN_JT_YIELD_SHARE_AT_TARGET_WAD, "YT should be valid after extreme swings");
+        assertLe(yT, MAX_JT_YIELD_SHARE_AT_TARGET_WAD, "YT should be valid after extreme swings");
     }
 
     function test_adversarial_multipleAccountantsSimultaneous() public {
@@ -871,7 +871,7 @@ contract AdaptiveCurveYDMTest is BaseTest {
         for (uint256 i = 0; i < 5; i++) {
             accountants[i] = address(uint160(i + 100));
             vm.prank(accountants[i]);
-            ydm.initializeYDMForMarket(uint64(MIN_JT_YIELD_SHARE_AT_TARGET + i * 0.1e18), uint64(WAD));
+            ydm.initializeYDMForMarket(uint64(MIN_JT_YIELD_SHARE_AT_TARGET_WAD + i * 0.1e18), uint64(WAD));
         }
 
         // All accountants call in rapid succession
@@ -889,8 +889,8 @@ contract AdaptiveCurveYDMTest is BaseTest {
         // All curves should still be valid and independent
         for (uint256 i = 0; i < 5; i++) {
             (uint64 yT,,) = ydm.accountantToCurve(accountants[i]);
-            assertGe(yT, MIN_JT_YIELD_SHARE_AT_TARGET, "YT should be valid");
-            assertLe(yT, MAX_JT_YIELD_SHARE_AT_TARGET, "YT should be valid");
+            assertGe(yT, MIN_JT_YIELD_SHARE_AT_TARGET_WAD, "YT should be valid");
+            assertLe(yT, MAX_JT_YIELD_SHARE_AT_TARGET_WAD, "YT should be valid");
         }
     }
 

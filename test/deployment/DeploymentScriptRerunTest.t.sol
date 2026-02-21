@@ -198,9 +198,13 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         DeployScript.ERC4626STAaveV3JTInKindAssetsKernelParams memory kernelParams =
             DeployScript.ERC4626STAaveV3JTInKindAssetsKernelParams({ stVault: _stVault, aaveV3Pool: ETHEREUM_MAINNET_AAVE_V3_POOL_ADDRESS });
 
-        // Build YDM params (AdaptiveCurve)
-        DeployScript.AdaptiveCurveYDMParams memory ydmParams =
-            DeployScript.AdaptiveCurveYDMParams({ jtYieldShareAtTargetUtilWAD: 0.225e18, jtYieldShareAtFullUtilWAD: 1e18 });
+        // Build YDM params (AdaptiveCurve_V2)
+        DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
+            jtYieldShareAtZeroUtilWAD: 0.225e18, // Y_0 = Y_T (same as target)
+            jtYieldShareAtTargetUtilWAD: 0.225e18,
+            jtYieldShareAtFullUtilWAD: 1e18,
+            maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
+        });
 
         // Build role assignments
         DeployScript.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
@@ -226,7 +230,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
             betaWAD: BETA_WAD,
             lltvWAD: LLTV,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            ydmType: DeployScript.YDMType.AdaptiveCurve,
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(ydmParams),
             roleAssignments: roleAssignments
         });

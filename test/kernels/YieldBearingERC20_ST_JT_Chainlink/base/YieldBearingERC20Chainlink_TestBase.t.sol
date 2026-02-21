@@ -98,14 +98,12 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
 
     /// @notice Sets the conversion rate for ST (via chainlink mock)
     function setSTConversionRate(uint256 _priceScaled) public virtual {
-        // forge-lint: disable-next-item(unsafe-typecast)
         _mockChainlinkPrice(int256(_priceScaled));
     }
 
     /// @notice Sets the conversion rate for JT (via chainlink mock)
     /// @dev For identical assets, this is the same as ST
     function setJTConversionRate(uint256 _priceScaled) public virtual {
-        // forge-lint: disable-next-item(unsafe-typecast)
         _mockChainlinkPrice(int256(_priceScaled));
     }
 
@@ -139,7 +137,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
     /// @param _percentageWAD The percentage increase in WAD (e.g., 0.05e18 = 5%)
     function simulateChainlinkPriceYield(uint256 _percentageWAD) public virtual {
         int256 currentPrice = _getCurrentChainlinkPrice();
-        // forge-lint: disable-next-item(unsafe-typecast)
+
         int256 newPrice = currentPrice * int256(WAD + _percentageWAD) / int256(WAD);
         _mockChainlinkPrice(newPrice);
     }
@@ -148,7 +146,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
     /// @param _percentageWAD The percentage decrease in WAD (e.g., 0.05e18 = 5%)
     function simulateChainlinkPriceLoss(uint256 _percentageWAD) public virtual {
         int256 currentPrice = _getCurrentChainlinkPrice();
-        // forge-lint: disable-next-item(unsafe-typecast)
+
         int256 newPrice = currentPrice * int256(WAD - _percentageWAD) / int256(WAD);
         _mockChainlinkPrice(newPrice);
     }
@@ -192,7 +190,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
     /// @param _percentageWAD The yield percentage in WAD (e.g., 0.05e18 = 5%)
     function _simulateChainlinkYield(uint256 _percentageWAD) internal {
         int256 currentPrice = _getCurrentChainlinkPrice();
-        // forge-lint: disable-next-item(unsafe-typecast)
+
         int256 newPrice = currentPrice * int256(WAD + _percentageWAD) / int256(WAD);
         _mockChainlinkPrice(newPrice);
     }
@@ -201,7 +199,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
     /// @param _percentageWAD The loss percentage in WAD (e.g., 0.05e18 = 5%)
     function _simulateChainlinkLoss(uint256 _percentageWAD) internal {
         int256 currentPrice = _getCurrentChainlinkPrice();
-        // forge-lint: disable-next-item(unsafe-typecast)
+
         int256 newPrice = currentPrice * int256(WAD - _percentageWAD) / int256(WAD);
         _mockChainlinkPrice(newPrice);
     }
@@ -535,9 +533,11 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
                 initialConversionRateWAD: initialConversionRate
             });
 
-        DeployScript.AdaptiveCurveYDMParams memory ydmParams = DeployScript.AdaptiveCurveYDMParams({
+        DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
+            jtYieldShareAtZeroUtilWAD: 0.3e18, // Y_0 = Y_T (same as target)
             jtYieldShareAtTargetUtilWAD: 0.3e18, // 30% at target utilization
-            jtYieldShareAtFullUtilWAD: 1e18 // 100% at 100% utilization
+            jtYieldShareAtFullUtilWAD: 1e18, // 100% at 100% utilization
+            maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
         });
 
         // Build role assignments using the centralized function
@@ -564,7 +564,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
             betaWAD: 1e18, // Beta = 1 for identical assets
             lltvWAD: LLTV,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            ydmType: DeployScript.YDMType.AdaptiveCurve,
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(ydmParams),
             roleAssignments: roleAssignments
         });

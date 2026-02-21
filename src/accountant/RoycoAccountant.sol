@@ -674,7 +674,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         if (jtYieldShareWAD > WAD) jtYieldShareWAD = WAD;
 
         // Accrue the time-weighted yield share accrued to JT since the last tranche interaction
-        /// forge-lint: disable-next-item(unsafe-typecast)
+
         twJTYieldShareAccruedWAD = $.twJTYieldShareAccruedWAD += uint192(jtYieldShareWAD * elapsed);
         $.lastAccrualTimestamp = uint32(block.timestamp);
 
@@ -706,7 +706,6 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         if (jtYieldShareWAD > WAD) jtYieldShareWAD = WAD;
 
         // Apply the accural of JT yield share to the accumulator, weighted by the time elapsed
-        /// forge-lint: disable-next-item(unsafe-typecast)
         return ($.twJTYieldShareAccruedWAD + uint192(jtYieldShareWAD * elapsed));
     }
 
