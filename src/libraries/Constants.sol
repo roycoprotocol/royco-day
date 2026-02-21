@@ -18,7 +18,7 @@ TRANCHE_UNIT constant MAX_TRANCHE_UNITS = TRANCHE_UNIT.wrap(type(uint256).max);
 uint256 constant WAD = 1e18;
 
 /// @dev Constant for the WAD scaling factor as an integer
-// forge-lint: disable-next-item(unsafe-typecast)
+
 int256 constant WAD_INT = int256(WAD);
 
 /// @dev Constant for the number of decimals of precision a WAD denominated quantity has
