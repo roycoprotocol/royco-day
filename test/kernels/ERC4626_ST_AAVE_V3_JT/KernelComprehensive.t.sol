@@ -4432,11 +4432,11 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
     // Tests for accountant function access control
     // ============================================
 
-    /// @notice Test non-kernel cannot call preOpSyncTrancheAccounting
+    /// @notice Test non-kernel cannot call syncTrancheAccounting
     function test_accessControl_preOpSync_onlyKernel() public {
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert(); // Should revert - only kernel can call
-        ACCOUNTANT.preOpSyncTrancheAccounting(ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        ACCOUNTANT.syncTrancheAccounting(ZERO_NAV_UNITS, ZERO_NAV_UNITS);
     }
 
     /// @notice Test non-kernel cannot call postOpSyncTrancheAccounting

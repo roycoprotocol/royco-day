@@ -173,26 +173,21 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     }
 
     /// @inheritdoc IRoycoVaultTranche
-    function redeem(
-        uint256 _shares,
-        address _receiver,
-        address _owner
-    )
-        public
-        virtual
-        override
-        whenNotPaused
-        restricted
-        returns (AssetClaims memory claims)
-    {
+    function redeem(uint256 _shares, address _receiver, address _owner) public virtual override whenNotPaused restricted returns (AssetClaims memory claims) {
         require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
         require(_shares != 0, MUST_REQUEST_NON_ZERO_SHARES());
 
+        // Spend allowance if caller is not the owner
+        if (msg.sender != _owner) {
+            _spendAllowance(_owner, msg.sender, _shares);
+        }
+
         // Process the withdrawal from the underlying investment opportunity
         // It is expected that the kernel transfers the assets directly to the receiver
-        claims = (TRANCHE_TYPE() == TrancheType.SENIOR
-            ? IRoycoKernel(kernel()).stRedeem(_shares, msg.sender, _owner, _receiver)
-            : IRoycoKernel(kernel()).jtRedeem(_shares, msg.sender, _owner, _receiver));
+        claims =
+        (TRANCHE_TYPE() == TrancheType.SENIOR
+                ? IRoycoKernel(kernel()).stRedeem(_shares, msg.sender, _owner, _receiver)
+                : IRoycoKernel(kernel()).jtRedeem(_shares, msg.sender, _owner, _receiver));
 
         // Burn shares after kernel processes redemption (kernel depends on pre-burn total supply)
         _burn(_owner, _shares);
@@ -280,18 +275,17 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @dev Returns the specified share quantity added to the tranche's virtual shares
     function _withVirtualShares(uint256 _shares) internal pure returns (uint256) {
-        // NAV units are always in WAD precision, therefore virtual shares are 10 ^ (WAD_DECIMALS - 18) = 1
         return _shares + 1;
     }
 
     /// @dev Returns the specified share quantity subtracted from the tranche's virtual shares
     function _withoutVirtualShares(uint256 _shares) internal pure returns (uint256) {
-        // NAV units are always in WAD precision, therefore virtual shares are 10 ^ (WAD_DECIMALS - 18) = 1
         return _shares - 1;
     }
 
     /// @dev Returns the specified NAV added to the tranche's virtual NAV (1)
     function _withVirtualAssets(NAV_UNIT _assets) internal pure returns (NAV_UNIT) {
+        // NAV units are always in WAD precision, therefore 1 wei of NAV_UNITs are the virtual assets corresponding to 1 wei of tranche shares (WAD precision)
         return _assets + toNAVUnits(uint256(1));
     }
 

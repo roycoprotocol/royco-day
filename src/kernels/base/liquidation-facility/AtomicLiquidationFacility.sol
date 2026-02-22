@@ -93,7 +93,7 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
         withQuoterCache
     {
         // Synchronize the tranche accounting and get the liquidatable assets for ST
-        (SyncedAccountingState memory state, AssetClaims memory stClaims, AssetClaims memory jtClaims) = _preOpSyncTrancheAccountingForLiquidation();
+        (SyncedAccountingState memory state, AssetClaims memory stClaims, AssetClaims memory jtClaims) = _syncTrancheAccountingForLiquidation();
 
         // Get liquidation params from accountant
         (uint64 lltvWAD, uint96 betaWAD) = IRoycoAccountant(_accountant()).getLiquidationParams();
@@ -131,9 +131,9 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
         TRANCHE_UNIT totalSTAssetsToFree = _stAssetsToLiquidate + bonusFromSTClaimsOnST;
         TRANCHE_UNIT totalJTAssetsToFree = _jtAssetsToLiquidate + bonusFromJTClaimsOnJT;
 
-        // Free assets from underlying vaults and transfer to liquidator
-        if (totalSTAssetsToFree != ZERO_TRANCHE_UNITS) _stWithdrawAssets(totalSTAssetsToFree, msg.sender);
-        if (totalJTAssetsToFree != ZERO_TRANCHE_UNITS) _jtWithdrawAssets(totalJTAssetsToFree, msg.sender);
+        // Free assets from underlying vaults and transfer to liquidator: no need to specify NAV in claims
+        AssetClaims liquidatorClaimsWithBonus = AssetClaims(totalSTAssetsToFree, totalJTAssetsToFree, ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        _withdrawAssets(liquidatorClaimsWithBonus, msg.sender);
 
         // Call liquidator callback if data is provided
         if (_liquidationCallbackData.length > 0) {
@@ -163,13 +163,13 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
      * @return stClaims The claims on ST and JT assets that the senior tranche has, denominated in tranche-native units
      * @return jtClaims The claims on ST and JT assets that the junior tranche has, denominated in tranche-native units
      */
-    function _preOpSyncTrancheAccountingForLiquidation()
+    function _syncTrancheAccountingForLiquidation()
         internal
         virtual
         returns (SyncedAccountingState memory state, AssetClaims memory stClaims, AssetClaims memory jtClaims)
     {
         // Execute the pre-op sync via the accountant
-        state = _accountant().preOpSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
+        state = _accountant().syncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
 
         // Collect any protocol fees accrued
         _collectProtocolFees(state.stProtocolFeeAccrued, state.jtProtocolFeeAccrued, state.stEffectiveNAV, state.jtEffectiveNAV);

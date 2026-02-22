@@ -29,7 +29,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
 
     /// @dev The base asset used for liquidation settlements, with 1:1 value parity with NAV units but may differ in precision
     /// @dev Constitutes the BASE_UNIT for this market
-    address public immutable BASE_ASSET;
+    address internal immutable BASE_ASSET;
 
     /// @dev The scale factor used to scale base asset quantities to/from NAV unit precision (WAD decimals)
     uint256 internal immutable BASE_UNIT_SCALE_FACTOR_TO_WAD;
@@ -262,7 +262,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         returns (SyncedAccountingState memory state)
     {
         // Execute a pre-op accounting sync via the accountant
-        return _preOpSyncTrancheAccounting();
+        return _syncTrancheAccounting();
     }
 
     /// @inheritdoc IRoycoKernel
@@ -311,7 +311,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         withQuoterCache
         returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintAt)
     {
-        SyncedAccountingState memory state = _preOpSyncTrancheAccounting();
+        SyncedAccountingState memory state = _syncTrancheAccounting();
         // If ST IL exists, ST deposits are disabled to preclude existing ST's from getting diluted and realizing losses
         require(state.stImpermanentLoss == ZERO_NAV_UNITS, ST_DEPOSIT_DISABLED_IN_LOSS());
         // Execute a pre-op sync on accounting
@@ -350,7 +350,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         uint256 totalTrancheShares;
         {
             SyncedAccountingState memory state;
-            (state, userAssetClaims, totalTrancheShares) = _preOpSyncTrancheAccounting(TrancheType.SENIOR);
+            (state, userAssetClaims, totalTrancheShares) = _syncTrancheAccounting(TrancheType.SENIOR);
             MarketState marketState = state.marketState;
 
             // Ensure that the market is in a state where ST redemptions are allowed: PERPETUAL
@@ -389,7 +389,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintAt)
     {
         // Execute a pre-op sync on accounting
-        SyncedAccountingState memory state = _preOpSyncTrancheAccounting();
+        SyncedAccountingState memory state = _syncTrancheAccounting();
         navToMintAt = state.jtEffectiveNAV;
 
         // Ensure that the market is in a state where JT deposits are allowed: PERPETUAL
@@ -426,14 +426,14 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         // Execute a pre-op sync on accounting
         uint256 totalTrancheShares;
         SyncedAccountingState memory state;
-        (state, userAssetClaims, totalTrancheShares) = _preOpSyncTrancheAccounting(TrancheType.JUNIOR);
+        (state, userAssetClaims, totalTrancheShares) = _syncTrancheAccounting(TrancheType.JUNIOR);
 
         // Scale total tranche asset claims by the ratio of shares this user owns of the tranche vault
         // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
         userAssetClaims = UtilsLib.scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares);
 
         // Withdraw the asset claims from each tranche and transfer them to the receiver
-        (NAV_UNIT stRedeemNAV, NAV_UNIT jtRedeemNAV,) = _withdrawAssets(userAssetClaims, _receiver);
+        _withdrawAssets(userAssetClaims, _receiver);
 
         // Execute a post-op sync on accounting and enforce the market's coverage requirement
         _postOpSyncTrancheAccountingAndEnforceCoverage(Operation.JT_REDEEM, ZERO_NAV_UNITS, ZERO_NAV_UNITS, stRedeemNAV, jtRedeemNAV, ZERO_NAV_UNITS);
@@ -491,13 +491,13 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      * @return claims The claims on ST and JT assets that the specified tranche has denominated in tranche-native units
      * @return totalTrancheShares The total shares outstanding in the specified tranche after minting any protocol fee shares
      */
-    function _preOpSyncTrancheAccounting(TrancheType _trancheType)
+    function _syncTrancheAccounting(TrancheType _trancheType)
         internal
         virtual
         returns (SyncedAccountingState memory state, AssetClaims memory claims, uint256 totalTrancheShares)
     {
         // Execute the pre-op sync via the accountant
-        state = _accountant().preOpSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
+        state = _accountant().syncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
 
         // Collect any protocol fees accrued from the sync to the fee recipient
         RoycoKernelState storage $ = RoycoKernelStorageLib._getRoycoKernelStorage();
@@ -531,9 +531,9 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      * @dev Should be called on every NAV mutating user operation
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
      */
-    function _preOpSyncTrancheAccounting() internal virtual returns (SyncedAccountingState memory state) {
+    function _syncTrancheAccounting() internal virtual returns (SyncedAccountingState memory state) {
         // Execute the pre-op sync via the accountant
-        state = _accountant().preOpSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
+        state = _accountant().syncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
 
         // Collect any protocol fees accrued
         _collectProtocolFees(state.stProtocolFeeAccrued, state.jtProtocolFeeAccrued, state.stEffectiveNAV, state.jtEffectiveNAV);
