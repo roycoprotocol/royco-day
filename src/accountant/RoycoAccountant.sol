@@ -7,7 +7,7 @@ import { IYDM } from "../interfaces/IYDM.sol";
 import { IRoycoKernel } from "../interfaces/kernel/IRoycoKernel.sol";
 import { MAX_PROTOCOL_FEE_WAD, MIN_COVERAGE_WAD, WAD, ZERO_NAV_UNITS } from "../libraries/Constants.sol";
 import { MarketState, NAV_UNIT, Operation, SyncedAccountingState } from "../libraries/Types.sol";
-import { UnitsMathLib, toNAVUnits, toInt256, toUint256 } from "../libraries/Units.sol";
+import { UnitsMathLib, toInt256, toNAVUnits, toUint256 } from "../libraries/Units.sol";
 import { Math, UtilsLib } from "../libraries/UtilsLib.sol";
 
 /**
@@ -49,7 +49,11 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         __RoycoBase_init(_initialAuthority);
 
         // Ensure that the protocol fee percentage is valid
-        require(_params.stProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD && _params.jtProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD, MAX_PROTOCOL_FEE_EXCEEDED());
+        require(
+            _params.stProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD && _params.jtProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD
+                && _params.yieldShareProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD,
+            MAX_PROTOCOL_FEE_EXCEEDED()
+        );
         // Validate the market's inital coverage configuration
         _validateCoverageConfig(_params.coverageWAD, _params.betaWAD, _params.lltvWAD);
         // Initialize the YDM for this market
@@ -66,6 +70,8 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         emit SeniorTrancheProtocolFeeUpdated(_params.stProtocolFeeWAD);
         $.jtProtocolFeeWAD = _params.jtProtocolFeeWAD;
         emit JuniorTrancheProtocolFeeUpdated(_params.jtProtocolFeeWAD);
+        $.yieldShareProtocolFeeWAD = _params.yieldShareProtocolFeeWAD;
+        emit YieldShareProtocolFeeUpdated(_params.yieldShareProtocolFeeWAD);
         $.coverageWAD = _params.coverageWAD;
         emit CoverageUpdated(_params.coverageWAD);
         $.betaWAD = _params.betaWAD;
@@ -219,7 +225,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                     $.lastSTImpermanentLoss = stImpermanentLoss;
                 }
             } else if (_op == Operation.JT_REDEEM) {
-                // JT cannot get a bonus from its own NAV
+                // JT cannot be entitled to any liquidation proceeds or get a bonus from its own NAV
                 require((deltaST < 0 || deltaJT < 0) && deltaLP == 0 && _stBonusRedemptionNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
                 NAV_UNIT preWithdrawalJTEffectiveNAV = jtEffectiveNAV;
                 // The actual amount withdrawn from JT effective NAV could be from both tranches (its own share of its NAV, ST yield share, IL repayments, etc.)
@@ -315,7 +321,8 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         // Get the storage pointer to the accountant state
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
         // Preview a NAV sync to get the market's current state
-        (SyncedAccountingState memory state,,,) = _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _liquidationProceedsNAV, ZERO_NAV_UNITS, _previewJTYieldShareAccrual());
+        (SyncedAccountingState memory state,,,) =
+            _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _liquidationProceedsNAV, ZERO_NAV_UNITS, _previewJTYieldShareAccrual());
         // Solve for x, rounding in favor of senior protection
         // Compute the total covered assets by the junior tranche loss absorption buffer
         NAV_UNIT totalCoveredAssets = state.jtEffectiveNAV.mulDiv(WAD, $.coverageWAD, Math.Rounding.Floor);
@@ -394,7 +401,8 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
         uint256 betaWAD = $.betaWAD;
         // Preview a NAV sync to get the market's current state
-        (SyncedAccountingState memory state,,,) = _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _liquidationProceedsNAV, ZERO_NAV_UNITS, _previewJTYieldShareAccrual());
+        (SyncedAccountingState memory state,,,) =
+            _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _liquidationProceedsNAV, ZERO_NAV_UNITS, _previewJTYieldShareAccrual());
         // Compute the total covered exposure of the underlying investment, rounding in favor of senior protection
         NAV_UNIT totalCoveredExposure = _stRawNAV + _jtRawNAV.mulDiv(betaWAD, WAD, Math.Rounding.Ceil);
         // Compute the minimum junior tranche assets required to cover the exposure as per the market's coverage requirement
@@ -566,22 +574,24 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                 // Compute the time weighted average JT share of yield
                 uint256 elapsed = block.timestamp - $.lastDistributionTimestamp;
                 // If the last yield distribution happened in the same block, use the instantaneous JT yield share. Else, use the time-weighted average JT yield share since the last distribution
-                NAV_UNIT jtGain;
+                NAV_UNIT yieldShare;
                 if (elapsed == 0) {
-                    // Get the instantaneous YDM output and ensure that JT cannot earn more than 100% of senior appreciation
+                    // Get the instantaneous YDM output and ensure that the yield share cannot be more than 100% of senior appreciation
                     uint256 instantaneousJtYieldShareWAD =
                         IYDM($.ydm).previewJTYieldShare($.lastMarketState, $.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.coverageWAD, $.lastJTEffectiveNAV);
                     if (instantaneousJtYieldShareWAD > WAD) instantaneousJtYieldShareWAD = WAD;
-                    jtGain = stGain.mulDiv(instantaneousJtYieldShareWAD, WAD, Math.Rounding.Floor);
+                    yieldShare = stGain.mulDiv(instantaneousJtYieldShareWAD, WAD, Math.Rounding.Floor);
                 } else {
-                    jtGain = stGain.mulDiv(_twJTYieldShareAccruedWAD, elapsed * WAD, Math.Rounding.Floor);
+                    yieldShare = stGain.mulDiv(_twJTYieldShareAccruedWAD, elapsed * WAD, Math.Rounding.Floor);
                 }
                 // Apply the yield split to JT's effective NAV
-                if (jtGain != ZERO_NAV_UNITS) {
-                    // Compute the protocol fee taken on this JT yield accrual if it is not attributable to any rounding/dust
-                    if (yieldDistributed) jtProtocolFeeAccrued = (jtProtocolFeeAccrued + jtGain.mulDiv($.jtProtocolFeeWAD, WAD, Math.Rounding.Floor));
-                    jtEffectiveNAV = (jtEffectiveNAV + jtGain);
-                    stGain = (stGain - jtGain);
+                if (yieldShare != ZERO_NAV_UNITS) {
+                    // Compute the protocol fee taken on the yield share accrual if it is not attributable to any rounding/dust
+                    if (yieldDistributed) {
+                        jtProtocolFeeAccrued = (jtProtocolFeeAccrued + yieldShare.mulDiv($.yieldShareProtocolFeeWAD, WAD, Math.Rounding.Floor));
+                    }
+                    jtEffectiveNAV = (jtEffectiveNAV + yieldShare);
+                    stGain = (stGain - yieldShare);
                 }
                 // Compute the protocol fee taken on this ST yield accrual if it is not attributable to any rounding/dust
                 if (yieldDistributed) stProtocolFeeAccrued = stGain.mulDiv($.stProtocolFeeWAD, WAD, Math.Rounding.Floor);
@@ -649,6 +659,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             marketState: resultingMarketState,
             stRawNAV: _stRawNAV,
             jtRawNAV: _jtRawNAV,
+            liquidationProceedsNAV: _liquidationProceedsNAV,
             stEffectiveNAV: stEffectiveNAV,
             jtEffectiveNAV: jtEffectiveNAV,
             stImpermanentLoss: stImpermanentLoss,
@@ -749,6 +760,14 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         require(_jtProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD, MAX_PROTOCOL_FEE_EXCEEDED());
         _getRoycoAccountantStorage().jtProtocolFeeWAD = _jtProtocolFeeWAD;
         emit JuniorTrancheProtocolFeeUpdated(_jtProtocolFeeWAD);
+    }
+
+    /// @inheritdoc IRoycoAccountant
+    function setYieldShareProtocolFee(uint64 _yieldShareProtocolFeeWAD) external override(IRoycoAccountant) restricted withSyncedAccounting {
+        // Ensure that the protocol fee percentage is valid
+        require(_yieldShareProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD, MAX_PROTOCOL_FEE_EXCEEDED());
+        _getRoycoAccountantStorage().yieldShareProtocolFeeWAD = _yieldShareProtocolFeeWAD;
+        emit YieldShareProtocolFeeUpdated(_yieldShareProtocolFeeWAD);
     }
 
     /// @inheritdoc IRoycoAccountant

@@ -497,7 +497,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         returns (SyncedAccountingState memory state, AssetClaims memory claims, uint256 totalTrancheShares)
     {
         // Execute the pre-op sync via the accountant
-        state = _accountant().syncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
+        state = _accountant().syncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV(), _getLiquidationProceedsNAV());
 
         // Collect any protocol fees accrued from the sync to the fee recipient
         RoycoKernelState storage $ = RoycoKernelStorageLib._getRoycoKernelStorage();
@@ -567,6 +567,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
                 _op,
                 _getSeniorTrancheRawNAV(),
                 _getJuniorTrancheRawNAV(),
+                _getLiquidationProceedsNAV(),
                 _stDepositNAV,
                 _jtDepositNAV,
                 _stRedemptionNAV,
@@ -619,32 +620,6 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     }
 
     /**
-     * @notice Internal wrapper to call accountant's postLiquidationSyncTrancheAccounting
-     * @param _stSeizedNAV The NAV value of ST assets seized/demanded by liquidator from ST effective NAV
-     * @param _jtSeizedNAV The NAV value of JT assets seized/demanded by liquidator from ST effective NAV
-     * @param _stBonusNAV The NAV value of ST assets payed as a bonus incentive to the liquidator from JT effective NAV
-     * @param _jtBonusNAV The NAV value of JT assets payed as a bonus incentive to the liquidator from JT effective NAV
-     * @param _settlementNAV The actual NAV value of the payment received from liquidator in exchange for the demand assets and the bonus
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
-     */
-    function _postLiquidationSyncTrancheAccounting(
-        NAV_UNIT _stSeizedNAV,
-        NAV_UNIT _jtSeizedNAV,
-        NAV_UNIT _stBonusNAV,
-        NAV_UNIT _jtBonusNAV,
-        NAV_UNIT _settlementNAV
-    )
-        internal
-        virtual
-        returns (SyncedAccountingState memory state)
-    {
-        state = _accountant()
-            .postLiquidationSyncTrancheAccounting(
-                _getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV(), _stSeizedNAV, _jtSeizedNAV, _stBonusNAV, _jtBonusNAV, _settlementNAV
-            );
-    }
-
-    /**
      * @notice Mints protocol fee shares to the fee recipient based on yield accrued during a sync
      * @dev Shares are minted at the current effective NAV per share ratio, diluting existing holders proportionally
      * @dev Only mints if fees were actually accrued (non-zero)
@@ -690,7 +665,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         )
     {
         // Senior tranche liquidation proceeds from past liquidation events
-        stNAVClaimOnLiquidationProceeds = _getSeniorTrancheLiquidationProceedsNAV();
+        stNAVClaimOnLiquidationProceeds = _getLiquidationProceedsNAV();
 
         // Cross-tranche claims (only one direction should be non-zero under conservation)
         stNAVClaimOnJT = UnitsMathLib.saturatingSub(UnitsMathLib.saturatingSub(_state.stEffectiveNAV, _state.stRawNAV), stNAVClaimOnLiquidationProceeds);
@@ -830,7 +805,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      * @notice Returns the raw net asset value of the senior tranche's liquidation proceeds denominated in the NAV units (USD, BTC, etc.) for this kernel
      * @return liquidationProceedsNAV The net asset value of the liquidation proceeds that the senior tranche is entitled to
      */
-    function _getSeniorTrancheLiquidationProceedsNAV() internal view returns (NAV_UNIT liquidationProceedsNAV) {
+    function _getLiquidationProceedsNAV() internal view returns (NAV_UNIT liquidationProceedsNAV) {
         return convertBaseUnitsToNAVUnits(RoycoKernelStorageLib._getRoycoKernelStorage().stLiquidationProceeds);
     }
 
