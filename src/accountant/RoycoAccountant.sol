@@ -169,31 +169,27 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         // Get the storage pointer to the accountant state
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
 
-        // Cache the last checkpointed NAVs for each tranche
-        NAV_UNIT stRawNAV = $.lastSTRawNAV;
-        NAV_UNIT jtRawNAV = $.lastJTRawNAV;
-        NAV_UNIT liquidationProceedsNAV = $.lastLiquidationProceedsNAV;
+        // Compute the deltas in the three NAVs
+        int256 deltaST = UnitsMathLib.computeNAVDelta(_stRawNAV, $.lastSTRawNAV);
+        int256 deltaJT = UnitsMathLib.computeNAVDelta(_jtRawNAV, $.lastJTRawNAV);
+        int256 deltaLP = UnitsMathLib.computeNAVDelta(_liquidationProceedsNAV, $.lastLiquidationProceedsNAV);
+
+        // Cache the last checkpointed NAVs and impermanent losses for each tranche
         NAV_UNIT stEffectiveNAV = $.lastSTEffectiveNAV;
         NAV_UNIT jtEffectiveNAV = $.lastJTEffectiveNAV;
-
-        // Compute the deltas in the three NAVs
-        int256 deltaST = UnitsMathLib.computeNAVDelta(_stRawNAV, stRawNAV);
-        int256 deltaJT = UnitsMathLib.computeNAVDelta(_jtRawNAV, jtRawNAV);
-        int256 deltaLP = UnitsMathLib.computeNAVDelta(_liquidationProceedsNAV, liquidationProceedsNAV);
+        NAV_UNIT stImpermanentLoss = $.lastSTImpermanentLoss;
+        NAV_UNIT jtCoverageImpermanentLoss = $.lastJTCoverageImpermanentLoss;
+        NAV_UNIT jtSelfImpermanentLoss = $.lastJTSelfImpermanentLoss;
 
         // Apply the effects of the operation that was executed
         if (_op == Operation.ST_DEPOSIT) {
             require(deltaST > 0 && deltaJT == 0 && deltaLP == 0 && _stBonusRedemptionNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
             NAV_UNIT stDepositNAV = toNAVUnits(deltaST);
-            // The raw NAV is meant to be increased by the ST NAV deposited
-            stRawNAV = stRawNAV + stDepositNAV;
             // New ST deposits are treated as an addition to the future ST exposure
             stEffectiveNAV = stEffectiveNAV + stDepositNAV;
         } else if (_op == Operation.JT_DEPOSIT) {
             require(deltaJT > 0 && deltaST == 0 && deltaLP == 0 && _stBonusRedemptionNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
             NAV_UNIT jtDepositNAV = toNAVUnits(deltaJT);
-            // The raw NAV is meant to be increased by the JT NAV deposited
-            jtRawNAV = jtRawNAV + jtDepositNAV;
             // New JT deposits are treated as an addition to the future loss-absorption buffer
             jtEffectiveNAV = jtEffectiveNAV + jtDepositNAV;
         } else {
@@ -202,23 +198,14 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             NAV_UNIT stRedemptionNAV = toNAVUnits(-deltaST);
             NAV_UNIT jtRedemptionNAV = toNAVUnits(-deltaJT);
             NAV_UNIT liquidationProceedsRedemptionNAV = toNAVUnits(-deltaLP);
-
-            // The raw NAVs are meant to be decreased by the NAV withdrawn from each tranche
             NAV_UNIT totalRedemptionNAV = (stRedemptionNAV + jtRedemptionNAV + liquidationProceedsRedemptionNAV);
-            if (stRedemptionNAV != ZERO_NAV_UNITS) stRawNAV = stRawNAV - stRedemptionNAV;
-            if (jtRedemptionNAV != ZERO_NAV_UNITS) jtRawNAV = jtRawNAV - jtRedemptionNAV;
-            if (liquidationProceedsRedemptionNAV != ZERO_NAV_UNITS) liquidationProceedsNAV = liquidationProceedsNAV - liquidationProceedsRedemptionNAV;
 
-            // Cache the impermanent losses
-            NAV_UNIT stImpermanentLoss = $.lastSTImpermanentLoss;
-            NAV_UNIT jtCoverageImpermanentLoss = $.lastJTCoverageImpermanentLoss;
-            NAV_UNIT jtSelfImpermanentLoss = $.lastJTSelfImpermanentLoss;
             if (_op == Operation.ST_REDEEM) {
                 require(deltaST < 0 || deltaJT < 0 || deltaLP < 0, INVALID_POST_OP_STATE(_op));
-                // Reduce ST effective NAV by the total redemptions without the bonus provided from JT effective NAV
-                stEffectiveNAV = stEffectiveNAV - (totalRedemptionNAV - _stBonusRedemptionNAV);
                 // Reduce JT effective NAV by the the bonus provided from its assets
                 jtEffectiveNAV = jtEffectiveNAV - _stBonusRedemptionNAV;
+                // Reduce ST effective NAV by the total redemptions without the bonus provided from JT effective NAV
+                stEffectiveNAV = stEffectiveNAV - (totalRedemptionNAV - _stBonusRedemptionNAV);
                 // The withdrawing senior LP has realized its proportional share of past uncovered losses and associated recovery optionality, rounding in favor of senior
                 if (stImpermanentLoss != ZERO_NAV_UNITS) {
                     stImpermanentLoss = stImpermanentLoss.mulDiv(stEffectiveNAV, $.lastSTEffectiveNAV, Math.Rounding.Ceil);
@@ -238,20 +225,39 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             }
             // JT raw NAV that is leaving the market realized its proportional share of past JT losses from its own depreciation, rounding in favor of senior
             if (jtSelfImpermanentLoss != ZERO_NAV_UNITS && $.lastJTRawNAV != ZERO_NAV_UNITS) {
-                jtSelfImpermanentLoss = jtSelfImpermanentLoss.mulDiv(jtRawNAV, $.lastJTRawNAV, Math.Rounding.Floor);
+                jtSelfImpermanentLoss = jtSelfImpermanentLoss.mulDiv(_jtRawNAV, $.lastJTRawNAV, Math.Rounding.Floor);
                 $.lastJTSelfImpermanentLoss = jtSelfImpermanentLoss;
             }
         }
 
+        // Enforce the NAV conservation invariant
+        require((_stRawNAV + _jtRawNAV + _liquidationProceedsNAV) == (stEffectiveNAV + jtEffectiveNAV), NAV_CONSERVATION_VIOLATION());
+
         // Checkpoint the mark to market NAVs
-        $.lastSTRawNAV = stRawNAV;
-        $.lastJTRawNAV = jtRawNAV;
-        $.lastLiquidationProceedsNAV = liquidationProceedsNAV;
+        $.lastSTRawNAV = _stRawNAV;
+        $.lastJTRawNAV = _jtRawNAV;
+        $.lastLiquidationProceedsNAV = _liquidationProceedsNAV;
         $.lastSTEffectiveNAV = stEffectiveNAV;
         $.lastJTEffectiveNAV = jtEffectiveNAV;
 
-        // If any additional delta exists in the total raw and effective NAVs, reconcile it as underlying PNL (usually due to rounding)
-        return syncTrancheAccounting(_stRawNAV, _jtRawNAV, _liquidationProceedsNAV, ZERO_NAV_UNITS);
+        // Marshal the post-sync state and return to the caller
+        state = SyncedAccountingState({
+            marketState: $.lastMarketState,
+            stRawNAV: _stRawNAV,
+            jtRawNAV: _jtRawNAV,
+            liquidationProceedsNAV: _liquidationProceedsNAV,
+            stEffectiveNAV: stEffectiveNAV,
+            jtEffectiveNAV: jtEffectiveNAV,
+            stImpermanentLoss: stImpermanentLoss,
+            jtCoverageImpermanentLoss: jtCoverageImpermanentLoss,
+            jtSelfImpermanentLoss: jtSelfImpermanentLoss,
+            stProtocolFeeAccrued: ZERO_NAV_UNITS,
+            jtProtocolFeeAccrued: ZERO_NAV_UNITS,
+            // Additional data about the market's post-sync state
+            utilizationWAD: UtilsLib.computeUtilization(_stRawNAV, _jtRawNAV, $.betaWAD, $.coverageWAD, jtEffectiveNAV),
+            ltvWAD: UtilsLib.computeLTV(stEffectiveNAV, stImpermanentLoss, _liquidationProceedsNAV, jtEffectiveNAV),
+            fixedTermEndTimestamp: $.fixedTermEndTimestamp
+        });
     }
 
     /// @inheritdoc IRoycoAccountant
@@ -458,7 +464,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         /// @dev STEP_APPLY_LIQUIDATION_PRCOCEEDS_AND_BONUS: A liquidation event occurred that resulted in a settlement in exchange for seizing exposure and a bonus incentive
         if (deltaLP > 0) {
             // Equivalent to (liquidation proceeds + bonus) - (seized + bonus) = Net gain/loss from liquidation
-            deltaST = deltaST + deltaJT + deltaLP + toInt256(_liquidationBonusNAV);
+            deltaST = (deltaLP + toInt256(_liquidationBonusNAV)) + (deltaST + deltaJT);
             // JT is expected to absorb the entire liquidation bonus paid to the liquidator
             deltaJT = -toInt256(_liquidationBonusNAV);
             // If liquidation resulted in a gain, ST keeps all gains
