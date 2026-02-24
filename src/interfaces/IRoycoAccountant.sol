@@ -227,8 +227,8 @@ interface IRoycoAccountant {
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
      * @param _liquidationProceedsNAV The market's current liquidation proceeds received from prior liquidation events of ST effective NAV
-     * @param _liquidationBonusNAV The liquidation bonus NAV paid to the liquidator (if this sync is to reconcile a liquidation event)
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
+     * @param _liquidationBonusNAV The liquidation bonus NAV paid to the liquidator (if this sync is meant to reconcile a liquidation event)
+     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function syncTrancheAccounting(
         NAV_UNIT _stRawNAV,
@@ -244,8 +244,8 @@ interface IRoycoAccountant {
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
      * @param _liquidationProceedsNAV The market's current liquidation proceeds received from prior liquidation events of ST effective NAV
-     * @param _liquidationBonusNAV The liquidation bonus NAV paid to the liquidator (if this sync is to reconcile a liquidation event)
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
+     * @param _liquidationBonusNAV The liquidation bonus NAV paid to the liquidator (if this sync is meant to reconcile a liquidation event)
+     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function previewSyncTrancheAccounting(
         NAV_UNIT _stRawNAV,
@@ -265,15 +265,15 @@ interface IRoycoAccountant {
      * @param _stRawNAV The post-op senior tranche's raw NAV
      * @param _jtRawNAV The post-op junior tranche's raw NAV
      * @param _liquidationProceedsNAV The market's current liquidation proceeds received from prior liquidation events of ST effective NAV
-     * @param _stBonusRedemptionNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
+     * @param _stRedemptionBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions
+     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function postOpSyncTrancheAccounting(
         Operation _op,
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
         NAV_UNIT _liquidationProceedsNAV,
-        NAV_UNIT _stBonusRedemptionNAV
+        NAV_UNIT _stRedemptionBonusNAV
     )
         external
         returns (SyncedAccountingState memory state);
@@ -287,15 +287,15 @@ interface IRoycoAccountant {
      * @param _stRawNAV The post-op senior tranche's raw NAV
      * @param _jtRawNAV The post-op junior tranche's raw NAV
      * @param _liquidationProceedsNAV The market's current liquidation proceeds received from prior liquidation events of ST effective NAV
-     * @param _stBonusRedemptionNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
+     * @param _stRedemptionBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions
+     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function postOpSyncTrancheAccountingAndEnforceCoverage(
         Operation _op,
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
         NAV_UNIT _liquidationProceedsNAV,
-        NAV_UNIT _stBonusRedemptionNAV
+        NAV_UNIT _stRedemptionBonusNAV
     )
         external
         returns (SyncedAccountingState memory state);

@@ -45,7 +45,7 @@ struct AssetClaims {
 
 /**
  * @title SyncedAccountingState
- * @dev Contains all current mark to market NAV accounting data for the market's tranches
+ * @dev Contains all current mark-to-market NAV accounting data for the market's tranches
  * @custom:field marketState - The current state of the Royco market (perpetual or fixed term)
  * @custom:field stRawNAV - The senior tranche's current raw NAV: the pure value of its invested assets
  * @custom:field jtRawNAV - The junior tranche's current raw NAV: the pure value of its invested assets

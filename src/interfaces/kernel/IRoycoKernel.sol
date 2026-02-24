@@ -17,6 +17,7 @@ interface IRoycoKernel {
      * @custom:field stAsset - The address of the base asset of the senior tranche
      * @custom:field juniorTranche - The address of the Royco junior tranche associated with this kernel
      * @custom:field jtAsset - The address of the base asset of the junior tranche
+     * @custom:field accountant - The address of the accountant for the Royco market
      */
     struct RoycoKernelConstructionParams {
         address baseAsset;
@@ -24,6 +25,32 @@ interface IRoycoKernel {
         address stAsset;
         address juniorTranche;
         address jtAsset;
+        address accountant;
+    }
+
+    /**
+     * @notice Initialization parameters for the Royco Kernel
+     * @custom:field initialAuthority - The access manager for this kernel
+     * @custom:field protocolFeeRecipient - The market's protocol fee recipient
+     */
+    struct RoycoKernelInitParams {
+        address initialAuthority;
+        address protocolFeeRecipient;
+    }
+
+    /**
+     * @notice Storage state for the Royco Kernel
+     * @custom:storage-location erc7201:Royco.storage.RoycoKernelState
+     * @custom:field protocolFeeRecipient - The market's configured protocol fee recipient
+     * @custom:field stOwnedYieldBearingAssets - The yield bearing assets held by the ST, in ST's asset units
+     * @custom:field jtOwnedYieldBearingAssets - The yield bearing assets held by the JT, in JT's asset units
+     * @custom:field liquidationProceeds - Accumulated liquidation proceeds from prior ST liquidation events, in base asset units
+     */
+    struct RoycoKernelState {
+        address protocolFeeRecipient;
+        TRANCHE_UNIT stOwnedYieldBearingAssets;
+        TRANCHE_UNIT jtOwnedYieldBearingAssets;
+        BASE_UNIT liquidationProceeds;
     }
 
     /**
@@ -109,7 +136,7 @@ interface IRoycoKernel {
     /**
      * @notice Synchronizes and persists the raw and effective NAVs of both tranches
      * @dev Only executes a pre-op sync because there is no operation being executed in the same call as this sync
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
+     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function syncTrancheAccounting() external returns (SyncedAccountingState memory state);
 
@@ -117,7 +144,7 @@ interface IRoycoKernel {
      * @notice Previews a synchronization of the raw and effective NAVs of both tranches
      * @dev Does not mutate any state
      * @param _trancheType An enum indicating which tranche to execute this preview for
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
+     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      * @return claims The claims on ST and JT assets that the specified tranche has denominated in tranche-native units
      * @return totalTrancheShares The total number of shares that exist in the specified tranche after minting any protocol fee shares post-sync
      */
@@ -179,15 +206,9 @@ interface IRoycoKernel {
      * @param _caller The address that is depositing the assets
      * @param _receiver The address that is receiving the shares
      * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
-     * @return navToMintAt The NAV at which the shares will be minted, exclusive of valueAllocated
+     * @return navToMintSharesAt The NAV at which the shares will be minted, exclusive of valueAllocated
      */
-    function stDeposit(
-        TRANCHE_UNIT _assets,
-        address _caller,
-        address _receiver
-    )
-        external
-        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintAt);
+    function stDeposit(TRANCHE_UNIT _assets, address _caller, address _receiver) external returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt);
 
     /**
      * @notice Processes the redemption of a specified number of shares from the senior tranche
@@ -198,14 +219,7 @@ interface IRoycoKernel {
      * @param _receiver The address that is receiving the assets
      * @return claims The distribution of assets that were transferred to the receiver on redemption
      */
-    function stRedeem(
-        uint256 _shares,
-        address _caller,
-        address _owner,
-        address _receiver
-    )
-        external
-        returns (AssetClaims memory claims);
+    function stRedeem(uint256 _shares, address _caller, address _owner, address _receiver) external returns (AssetClaims memory claims);
 
     /**
      * @notice Returns the maximum amount of assets that can be deposited into the junior tranche
@@ -260,15 +274,9 @@ interface IRoycoKernel {
      * @param _caller The address that is depositing the assets
      * @param _receiver The address that is receiving the shares
      * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
-     * @return navToMintAt The NAV at which the shares will be minted, exclusive of valueAllocated
+     * @return navToMintSharesAt The NAV at which the shares will be minted, exclusive of valueAllocated
      */
-    function jtDeposit(
-        TRANCHE_UNIT _assets,
-        address _caller,
-        address _receiver
-    )
-        external
-        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintAt);
+    function jtDeposit(TRANCHE_UNIT _assets, address _caller, address _receiver) external returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt);
 
     /**
      * @notice Processes the redemption of a specified number of shares from the junior tranche
@@ -279,14 +287,7 @@ interface IRoycoKernel {
      * @param _receiver The address that is receiving the assets
      * @return claims The distribution of assets that were transferred to the receiver on redemption
      */
-    function jtRedeem(
-        uint256 _shares,
-        address _caller,
-        address _owner,
-        address _receiver
-    )
-        external
-        returns (AssetClaims memory claims);
+    function jtRedeem(uint256 _shares, address _caller, address _owner, address _receiver) external returns (AssetClaims memory claims);
 
     /**
      * @notice Sets the new protocol fee recipient
@@ -295,23 +296,8 @@ interface IRoycoKernel {
     function setProtocolFeeRecipient(address _protocolFeeRecipient) external;
 
     /**
-     * @notice Returns the state of the kernel
-     * @param seniorTranche The address of the Royco senior tranche associated with this kernel
-     * @param stAsset The address of the asset that ST is denominated in: constitutes the ST's tranche units (type and precision)
-     * @param juniorTranche The address of the Royco junior tranche associated with this kernel
-     * @param jtAsset The address of the asset that JT is denominated in: constitutes the ST's tranche units (type and precision)
-     * @param protocolFeeRecipient The market's configured protocol fee recipient
-     * @param accountant The address of the Royco accountant used to perform per operation accounting for this kernel
+     * @notice Gets the currently configured protocol fee recipient
+     * @param protocolFeeRecipient The address of the protocol fee recipient
      */
-    function getState()
-        external
-        view
-        returns (
-            address seniorTranche,
-            address stAsset,
-            address juniorTranche,
-            address jtAsset,
-            address protocolFeeRecipient,
-            address accountant
-        );
+    function getProtocolFeeRecipient() external view returns (address protocolFeeRecipient);
 }

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IRoycoLiquidator } from "../../../interfaces/IRoycoLiquidator.sol";
-import { MAX_TRANCHE_UNITS, MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../../libraries/Constants.sol";
+import { MAX_TRANCHE_UNITS, MAX_TRANCHE_UNITS, WAD, ZERO_BASE_UNITS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../../libraries/Constants.sol";
 import { BASE_UNIT, Math, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toNAVUnits, toUint256 } from "../../../libraries/Units.sol";
 import { AssetClaims, IRoycoAccountant, RoycoKernel, SyncedAccountingState, TrancheType } from "../RoycoKernel.sol";
 
@@ -66,7 +66,7 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
      */
     function getLiquidatableAssets() public view virtual override(RoycoKernel) returns (TRANCHE_UNIT stAssets, TRANCHE_UNIT jtAssets) {
         // Get liquidation params from accountant
-        (uint64 lltvWAD, uint96 betaWAD) = IRoycoAccountant(_accountant()).getLiquidationParams();
+        (uint64 lltvWAD, uint96 betaWAD) = IRoycoAccountant(ACCOUNTANT).getLiquidationParams();
         // The liquidatable assets are the senior tranche's claims on ST and JT assets
         (SyncedAccountingState memory state, AssetClaims memory liquidatableClaims,) = previewSyncTrancheAccounting(TrancheType.SENIOR);
         // No liquidatable assets exist if the market is not in a liquidatable state
@@ -93,10 +93,10 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
         withQuoterCache
     {
         // Synchronize the tranche accounting and get the liquidatable assets for ST
-        (SyncedAccountingState memory state, AssetClaims memory stClaims, AssetClaims memory jtClaims) = _syncTrancheAccountingForLiquidation();
+        (SyncedAccountingState memory state, AssetClaims memory stClaims, AssetClaims memory jtClaims) = _syncTrancheAccountingWithClaims();
 
         // Get liquidation params from accountant
-        (uint64 lltvWAD, uint96 betaWAD) = IRoycoAccountant(_accountant()).getLiquidationParams();
+        (uint64 lltvWAD, uint96 betaWAD) = IRoycoAccountant(ACCOUNTANT).getLiquidationParams();
         // Claims on JT assets aren't liquidatable if beta is 0 since that implies that they are invested in the RFR
         stClaims.jtAssets = betaWAD == 0 ? ZERO_TRANCHE_UNITS : stClaims.jtAssets;
 
@@ -112,7 +112,7 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
         // Convert the assets to liquidate to NAV units and derive the base assets expected as settlement
         NAV_UNIT seizedSTClaimsOnST = stConvertTrancheUnitsToNAVUnits(_stAssetsToLiquidate);
         NAV_UNIT seizedSTClaimsOnJT = jtConvertTrancheUnitsToNAVUnits(_jtAssetsToLiquidate);
-        // The settlement must be the exact mark to market value of the seized claims
+        // The settlement must be the exact mark-to-market value of the seized claims
         NAV_UNIT settlement = seizedSTClaimsOnST + seizedSTClaimsOnJT;
 
         // Compute the liquidation incentive factor for this liquidation
@@ -125,14 +125,14 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
         // Source bonus from JT's claims, prioritizing JT assets first, then ST assets
         TRANCHE_UNIT bonusFromJTClaimsOnJT = UnitsMathLib.min(jtConvertNAVUnitsToTrancheUnits(bonusNAV), jtClaims.jtAssets);
         NAV_UNIT remainingBonusNAV = bonusNAV - jtConvertTrancheUnitsToNAVUnits(bonusFromJTClaimsOnJT);
-        TRANCHE_UNIT bonusFromSTClaimsOnST = UnitsMathLib.min(stConvertNAVUnitsToTrancheUnits(remainingBonusNAV), jtClaims.stAssets);
+        TRANCHE_UNIT bonusFromJTClaimsOnST = UnitsMathLib.min(stConvertNAVUnitsToTrancheUnits(remainingBonusNAV), jtClaims.stAssets);
 
         // Calculate total assets to free (demanded + bonus)
-        TRANCHE_UNIT totalSTAssetsToFree = _stAssetsToLiquidate + bonusFromSTClaimsOnST;
+        TRANCHE_UNIT totalSTAssetsToFree = _stAssetsToLiquidate + bonusFromJTClaimsOnST;
         TRANCHE_UNIT totalJTAssetsToFree = _jtAssetsToLiquidate + bonusFromJTClaimsOnJT;
 
         // Free assets from underlying vaults and transfer to liquidator: no need to specify NAV in claims
-        AssetClaims liquidatorClaimsWithBonus = AssetClaims(totalSTAssetsToFree, totalJTAssetsToFree, ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        AssetClaims memory liquidatorClaimsWithBonus = AssetClaims(totalSTAssetsToFree, totalJTAssetsToFree, ZERO_BASE_UNITS, ZERO_NAV_UNITS);
         _withdrawAssets(liquidatorClaimsWithBonus, msg.sender);
 
         // Call liquidator callback if data is provided
@@ -144,44 +144,9 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
         BASE_UNIT baseAssetSettlement = convertNAVUnitsToBaseUnits(settlement);
         _pullLiquidationProceeds(baseAssetSettlement, msg.sender);
 
-        // Execute a post-liquidation sync using the dedicated liquidation function
-        _postLiquidationSyncTrancheAccounting(
-            seizedSTClaimsOnST,
-            seizedSTClaimsOnJT,
-            stConvertTrancheUnitsToNAVUnits(bonusFromSTClaimsOnST),
-            jtConvertTrancheUnitsToNAVUnits(bonusFromJTClaimsOnJT),
-            settlement
-        );
+        // Execute a post-liquidation sync on tranche accounting
+        _postLiquidationSyncTrancheAccounting(stConvertTrancheUnitsToNAVUnits(bonusFromJTClaimsOnST) + jtConvertTrancheUnitsToNAVUnits(bonusFromJTClaimsOnJT));
 
-        emit Liquidation(msg.sender, totalSTAssetsToFree, totalJTAssetsToFree, bonusFromSTClaimsOnST, bonusFromJTClaimsOnJT, baseAssetSettlement);
-    }
-
-    /**
-     * @notice Invokes the accountant to do a pre-operation NAV sync and returns asset claims for both tranches
-     * @dev Should be called before liquidation to get current claims for both ST and JT
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
-     * @return stClaims The claims on ST and JT assets that the senior tranche has, denominated in tranche-native units
-     * @return jtClaims The claims on ST and JT assets that the junior tranche has, denominated in tranche-native units
-     */
-    function _syncTrancheAccountingForLiquidation()
-        internal
-        virtual
-        returns (SyncedAccountingState memory state, AssetClaims memory stClaims, AssetClaims memory jtClaims)
-    {
-        // Execute the pre-op sync via the accountant
-        state = _accountant().syncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
-
-        // Collect any protocol fees accrued
-        _collectProtocolFees(state.stProtocolFeeAccrued, state.jtProtocolFeeAccrued, state.stEffectiveNAV, state.jtEffectiveNAV);
-
-        // Decompose effective NAVs into self-backed NAV claims and cross-tranche NAV claims
-        (NAV_UNIT stNAVClaimOnSelf, NAV_UNIT stNAVClaimOnJT, NAV_UNIT stNAVClaimOnLiquidationProceeds, NAV_UNIT jtNAVClaimOnSelf, NAV_UNIT jtNAVClaimOnST) =
-            _decomposeNAVClaims(state);
-
-        // Marshal the asset claims for the senior tranche
-        stClaims = _marshalAssetClaims(TrancheType.SENIOR, stNAVClaimOnSelf, stNAVClaimOnJT, stNAVClaimOnLiquidationProceeds, jtNAVClaimOnSelf, jtNAVClaimOnST);
-
-        // Marshal the asset claims for the junior tranche
-        jtClaims = _marshalAssetClaims(TrancheType.JUNIOR, stNAVClaimOnSelf, stNAVClaimOnJT, stNAVClaimOnLiquidationProceeds, jtNAVClaimOnSelf, jtNAVClaimOnST);
+        emit Liquidation(msg.sender, totalSTAssetsToFree, totalJTAssetsToFree, bonusFromJTClaimsOnST, bonusFromJTClaimsOnJT, baseAssetSettlement);
     }
 }
