@@ -42,7 +42,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     address public immutable JUNIOR_TRANCHE;
     address public immutable JT_ASSET;
 
-    /// @dev The accountant responsible for marking tranche NAVs to market for this Royco market
+    /// @dev The accountant responsible for maintaining all accounting state and marking tranche NAVs to market
     IRoycoAccountant public immutable ACCOUNTANT;
 
     /// @dev Permissions the function to only the market's senior tranche
@@ -70,7 +70,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     }
 
     // =============================
-    // Initializer and State Accessor Functions
+    // Construction and Initialization Functions
     // =============================
 
     /// @notice Constructs the base Royco kernel state
@@ -120,7 +120,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     }
 
     // =============================
-    // State Getter Functions
+    // State Accessor Function
     // =============================
 
     /// @inheritdoc IRoycoKernel
@@ -347,18 +347,18 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         withQuoterCache
         returns (AssetClaims memory userAssetClaims)
     {
+        AssetClaims memory trancheAssetClaims;
         uint256 totalTrancheShares;
         {
             // Execute an accounting sync to reconcile underlying PNL
             SyncedAccountingState memory state;
-            (state, userAssetClaims, totalTrancheShares) = _syncTrancheAccounting(TrancheType.SENIOR);
+            (state, trancheAssetClaims, totalTrancheShares) = _syncTrancheAccounting(TrancheType.SENIOR);
             // Ensure that the market is in a state where ST redemptions are allowed: PERPETUAL
             require(state.marketState == MarketState.PERPETUAL, ST_REDEEM_DISABLED_IN_FIXED_TERM_STATE());
         }
 
-        // Scale total tranche asset claims by the ratio of shares this user owns of the tranche vault
-        // Protocol fee shares were minted in the pre-redeem sync, so the total tranche shares are up to date
-        userAssetClaims = UtilsLib.scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares);
+        // Compute user's claims with FCFS LP prioritization
+        userAssetClaims = _previewRedeem(trancheAssetClaims, _shares, totalTrancheShares);
 
         // Withdraw the asset claims from each tranche and transfer them to the receiver
         _withdrawAssets(userAssetClaims, _receiver);
@@ -424,13 +424,12 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         returns (AssetClaims memory userAssetClaims)
     {
         // Execute a pre-op sync on accounting
+        AssetClaims memory trancheAssetClaims;
         uint256 totalTrancheShares;
-        SyncedAccountingState memory state;
-        (state, userAssetClaims, totalTrancheShares) = _syncTrancheAccounting(TrancheType.JUNIOR);
+        (, trancheAssetClaims, totalTrancheShares) = _syncTrancheAccounting(TrancheType.JUNIOR);
 
-        // Scale total tranche asset claims by the ratio of shares this user owns of the tranche vault
-        // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
-        userAssetClaims = UtilsLib.scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares);
+        // Compute user's claims with FCFS LP prioritization
+        userAssetClaims = _previewRedeem(trancheAssetClaims, _shares, totalTrancheShares);
 
         // Withdraw the asset claims from each tranche and transfer them to the receiver
         _withdrawAssets(userAssetClaims, _receiver);
@@ -673,6 +672,49 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         if (jtNAVClaimOnSelf != ZERO_NAV_UNITS) jtClaims.jtAssets = jtConvertNAVUnitsToTrancheUnits(jtNAVClaimOnSelf);
         if (jtNAVClaimOnLiquidationProceeds != ZERO_NAV_UNITS) jtClaims.liquidationProceeds = convertNAVUnitsToBaseUnits(jtNAVClaimOnLiquidationProceeds);
         jtClaims.nav = (jtNAVClaimOnST + jtNAVClaimOnSelf + jtNAVClaimOnLiquidationProceeds);
+    }
+
+    /**
+     * @notice Computes a user's asset claims for redemption with first-come-first-serve liquidation proceed prioritization
+     * @dev Tranche controlled liquidation proceeds satisfy NAV claims first, and remaining NAV comes from exposure scaled proportionally
+     * @param _trancheAssetClaims The tranche's total asset claims
+     * @param _shares The number of shares being redeemed
+     * @param _totalTrancheShares The total supply of tranche shares
+     * @return userClaims The user's asset claims
+     */
+    function _previewRedeem(
+        AssetClaims memory _trancheAssetClaims,
+        uint256 _shares,
+        uint256 _totalTrancheShares
+    )
+        internal
+        view
+        returns (AssetClaims memory userClaims)
+    {
+        // Scale tranche claims proportionally to get user's baseline entitlement
+        AssetClaims memory proportionalClaims = UtilsLib.scaleAssetClaims(_trancheAssetClaims, _shares, _totalTrancheShares);
+        NAV_UNIT userNAVClaim = proportionalClaims.nav;
+
+        // First-come-first-served LP: try to cover NAV claim from tranche's LP allocation first
+        NAV_UNIT availableLiquidationProceedsNAV = convertBaseUnitsToNAVUnits(_trancheAssetClaims.liquidationProceeds);
+        if (availableLiquidationProceedsNAV >= userNAVClaim) {
+            // LP covers entire claim - give only LP, no exposure
+            userClaims.liquidationProceeds = convertNAVUnitsToBaseUnits(userNAVClaim);
+            userClaims.nav = userNAVClaim;
+        } else {
+            // LP doesn't cover - take all available LP, scale down exposure proportionally
+            userClaims.liquidationProceeds = convertNAVUnitsToBaseUnits(availableLiquidationProceedsNAV);
+
+            // Compute the NAV needed from exposure after exhausting the available liquidation proceeds
+            NAV_UNIT exposureNAVNeeded = userNAVClaim - availableLiquidationProceedsNAV;
+            // Compute the original NAV needed from exposure before applying FCFS for available liquidation proceeds
+            NAV_UNIT originalExposureNAV = userNAVClaim - convertBaseUnitsToNAVUnits(proportionalClaims.liquidationProceeds);
+
+            // Scale down the claims to exposure to account for FCFS on the liquidation proceeds
+            userClaims.stAssets = proportionalClaims.stAssets.mulDiv(exposureNAVNeeded, originalExposureNAV, Math.Rounding.Floor);
+            userClaims.jtAssets = proportionalClaims.jtAssets.mulDiv(exposureNAVNeeded, originalExposureNAV, Math.Rounding.Floor);
+            userClaims.nav = userNAVClaim;
+        }
     }
 
     // =============================

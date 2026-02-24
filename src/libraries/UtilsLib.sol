@@ -52,19 +52,19 @@ library UtilsLib {
      * @notice Computes the loan to value (LTV) of the Royco market given the market's state
      * @dev Informally: DEBT / (DEBT + EQUITY)
      * @dev Formally:
-     *      DEBT = (ST_EFFECTIVE_NAV + ST_IL - LIQUIDATION_PROCEEDS)
+     *      DEBT = MAX((ST_EFFECTIVE_NAV + ST_IL - LIQUIDATION_PROCEEDS), 0)
      *      EQUITY = JT_EFFECTIVE_NAV
-     *      LTV = (ST_EFFECTIVE_NAV + ST_IL - LIQUIDATION_PROCEEDS) / ((ST_EFFECTIVE_NAV + ST_IL - LIQUIDATION_PROCEEDS) + JT_EFFECTIVE_NAV)
+     *      LTV = MAX((ST_EFFECTIVE_NAV + ST_IL - LIQUIDATION_PROCEEDS), 0) / (MAX((ST_EFFECTIVE_NAV + ST_IL - LIQUIDATION_PROCEEDS), 0) + JT_EFFECTIVE_NAV)
      * @param _stEffectiveNAV The senior tranche net asset value after receiving coverage, ST yield distribution, and ST losses
      * @param _stImpermanentLoss The impermanent loss that the senior tranche has suffered after exhausting JT's loss-absorption buffer
-     * @param _stLiquidationProceeds The NAV of the liquidation proceeds paid to ST via liquidation events
+     * @param _liquidationProceedsNAV The NAV of the liquidation proceeds paid to ST via liquidation events
      * @param _jtEffectiveNAV The junior tranche net asset value after giving coverage, JT yield, ST yield distribution, and JT losses
      * @return ltvWAD The loan to value (LTV) of the Royco market, scaled to WAD precision
      */
     function computeLTV(
         NAV_UNIT _stEffectiveNAV,
         NAV_UNIT _stImpermanentLoss,
-        NAV_UNIT _stLiquidationProceeds,
+        NAV_UNIT _liquidationProceedsNAV,
         NAV_UNIT _jtEffectiveNAV
     )
         internal
@@ -72,7 +72,8 @@ library UtilsLib {
         returns (uint256 ltvWAD)
     {
         // Compute debt and value (debt + equity)
-        NAV_UNIT debt = (_stEffectiveNAV + _stImpermanentLoss - _stLiquidationProceeds);
+        // Liquidation proceeds can exceed ST_EFFECTIVE_NAV if a liquidation resulted in a profit
+        NAV_UNIT debt = UnitsMathLib.saturatingSub((_stEffectiveNAV + _stImpermanentLoss), _liquidationProceedsNAV);
         NAV_UNIT value = debt + _jtEffectiveNAV;
         // If total value is zero, LTV is undefined
         if (value == ZERO_NAV_UNITS) return type(uint256).max;
@@ -119,5 +120,4 @@ library UtilsLib {
         scaledClaims.jtAssets = _claims.jtAssets.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
         scaledClaims.liquidationProceeds = _claims.liquidationProceeds.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
     }
-
 }
