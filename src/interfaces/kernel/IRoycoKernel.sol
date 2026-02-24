@@ -84,6 +84,12 @@ interface IRoycoKernel {
     error JT_DEPOSIT_DISABLED_IN_FIXED_TERM_STATE();
 
     /**
+     * @notice Retrieves the state of the Royco kernel
+     * @return state The Royco kernel's state, including the protocol fee recipient and the kernel's controlled tranche and base assets
+     */
+    function getState() external view returns (RoycoKernelState memory state);
+
+    /**
      * @notice Converts the specified ST assets denominated in its tranche units to the kernel's NAV units
      * @param _stAssets The ST assets denominated in tranche units to convert to the kernel's NAV units
      * @return nav The specified ST assets denominated in its tranche units converted to the kernel's NAV units
@@ -294,10 +300,4 @@ interface IRoycoKernel {
      * @param _protocolFeeRecipient The address of the new protocol fee recipient
      */
     function setProtocolFeeRecipient(address _protocolFeeRecipient) external;
-
-    /**
-     * @notice Gets the currently configured protocol fee recipient
-     * @param protocolFeeRecipient The address of the protocol fee recipient
-     */
-    function getProtocolFeeRecipient() external view returns (address protocolFeeRecipient);
 }

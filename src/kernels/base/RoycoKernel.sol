@@ -120,6 +120,15 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     }
 
     // =============================
+    // State Getter Functions
+    // =============================
+
+    /// @inheritdoc IRoycoKernel
+    function getState() external view override(IRoycoKernel) returns (RoycoKernelState memory $) {
+        return _getRoycoKernelStorage();
+    }
+
+    // =============================
     // Base Asset Quoter Functions
     // =============================
 
@@ -460,11 +469,6 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         emit ProtocolFeeRecipientUpdated(_protocolFeeRecipient);
     }
 
-    /// @inheritdoc IRoycoKernel
-    function getProtocolFeeRecipient() external view override(IRoycoKernel) returns (address) {
-        return _getRoycoKernelStorage().protocolFeeRecipient;
-    }
-
     // =============================
     // Internal Tranche Accounting Synchronization Functions
     // =============================
@@ -705,18 +709,6 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
             if (stAssetsToClaim != ZERO_TRANCHE_UNITS) IERC20(ST_ASSET).safeTransfer(_receiver, toUint256(stAssetsToClaim));
             if (jtAssetsToClaim != ZERO_TRANCHE_UNITS) IERC20(JT_ASSET).safeTransfer(_receiver, toUint256(jtAssetsToClaim));
         }
-    }
-
-    /**
-     * @notice Previews the amount of ST and JT assets that would be redeemed for a given number of shares
-     * @param _shares The number of shares to redeem
-     * @param _trancheType The type of tranche to preview the redemption for
-     * @return userClaim The amount of ST and JT assets that would be redeemed for the given number of shares
-     */
-    function _previewRedeem(uint256 _shares, TrancheType _trancheType) internal view virtual returns (AssetClaims memory userClaim) {
-        // Get the total claim of ST on the ST and JT assets, and scale it to the number of shares being redeemed
-        (, AssetClaims memory totalClaims, uint256 totalTrancheShares) = previewSyncTrancheAccounting(_trancheType);
-        userClaim = UtilsLib.scaleAssetClaims(totalClaims, _shares, totalTrancheShares);
     }
 
     /**

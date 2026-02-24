@@ -128,7 +128,7 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
 
         // Source bonus from JT's claims, prioritizing JT assets first, then ST assets
         TRANCHE_UNIT bonusFromJTClaimsOnSelf = UnitsMathLib.min(jtConvertNAVUnitsToTrancheUnits(bonusNAV), jtClaims.jtAssets);
-        NAV_UNIT remainingBonusNAV = Math.saturatingSub(bonusNAV, jtConvertTrancheUnitsToNAVUnits(bonusFromJTClaimsOnSelf));
+        NAV_UNIT remainingBonusNAV = UnitsMathLib.saturatingSub(bonusNAV, jtConvertTrancheUnitsToNAVUnits(bonusFromJTClaimsOnSelf));
         TRANCHE_UNIT bonusFromJTClaimsOnST = UnitsMathLib.min(stConvertNAVUnitsToTrancheUnits(remainingBonusNAV), jtClaims.stAssets);
 
         // Calculate total assets to free (demanded + bonus)
