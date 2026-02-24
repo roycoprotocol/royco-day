@@ -201,7 +201,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             NAV_UNIT totalRedemptionNAV = (stRedemptionNAV + jtRedemptionNAV + liquidationProceedsRedemptionNAV);
 
             if (_op == Operation.ST_REDEEM) {
-                require(deltaST < 0 || deltaJT < 0 || deltaLP < 0, INVALID_POST_OP_STATE(_op));
+                require(totalRedemptionNAV > 0, INVALID_POST_OP_STATE(_op));
                 // Reduce JT effective NAV by the the bonus provided from its assets
                 jtEffectiveNAV = jtEffectiveNAV - _stRedemptionBonusNAV;
                 // Reduce ST effective NAV by the total redemptions without the bonus provided from JT effective NAV
@@ -212,8 +212,8 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                     $.lastSTImpermanentLoss = stImpermanentLoss;
                 }
             } else if (_op == Operation.JT_REDEEM) {
-                // JT cannot be entitled to any liquidation proceeds or get a bonus from its own NAV
-                require((deltaST < 0 || deltaJT < 0) && deltaLP == 0 && _stRedemptionBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
+                // JT cannot get a bonus from its own NAV
+                require(totalRedemptionNAV > 0 && _stRedemptionBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
                 NAV_UNIT preWithdrawalJTEffectiveNAV = jtEffectiveNAV;
                 // The actual amount withdrawn from JT effective NAV could be from both tranches (its own share of its NAV, ST yield share, IL repayments, etc.)
                 jtEffectiveNAV = preWithdrawalJTEffectiveNAV - totalRedemptionNAV;
@@ -449,7 +449,6 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         NAV_UNIT jtSelfImpermanentLoss = $.lastJTSelfImpermanentLoss;
         NAV_UNIT stProtocolFeeAccrued;
         NAV_UNIT jtProtocolFeeAccrued;
-        bool syncingLiquidationEvent;
 
         // Compute the delta between the last checkpointed liquidation proceeds and the current value
         int256 deltaLP = UnitsMathLib.computeNAVDelta(_liquidationProceedsNAV, $.lastLiquidationProceedsNAV);
@@ -464,9 +463,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
 
         /// @dev STEP_APPLY_LIQUIDATION_PRCOCEEDS_AND_BONUS: A liquidation event occurred that resulted in a settlement in exchange for seizing exposure and a bonus incentive
         if (deltaLP > 0) {
-            // Mark this sync as reconciliation for a liquidation event
-            syncingLiquidationEvent = true;
-            // Equivalent to (liquidation proceeds + ostensible bonus) - (seized ST assets + bonus) = Net gain/loss from liquidation
+            // Equivalent to (liquidation proceeds + ostensible bonus) - (seized ST assets + real bonus) = Net gain/loss on ST's liquidation
             deltaST = (deltaLP + toInt256(_liquidationBonusNAV)) + (deltaST + deltaJT);
             // JT is expected to absorb the entire liquidation bonus paid to the liquidator
             deltaJT = -toInt256(_liquidationBonusNAV);
@@ -563,7 +560,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             }
             /// @dev STEP_JT_COVERAGE_IMPERMANENT_LOSS_RECOVERY: Second, recover any JT coverage inflicted impermanent losses (second claim on ST appreciation) if this is not a liquidation event
             impermanentLossRecovery = UnitsMathLib.min(stGain, jtCoverageImpermanentLoss);
-            if (impermanentLossRecovery != ZERO_NAV_UNITS && !syncingLiquidationEvent) {
+            if (impermanentLossRecovery != ZERO_NAV_UNITS) {
                 // Recover as much of the JT coverage impermanent loss as possible
                 jtCoverageImpermanentLoss = (jtCoverageImpermanentLoss - impermanentLossRecovery);
                 // Apply the JT coverage IL recovery
@@ -571,7 +568,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                 stGain = (stGain - impermanentLossRecovery);
             }
             /// @dev STEP_DISTRIBUTE_YIELD: There are no remaining impermanent losses that ST yield is obligated to repay and this sync is not for a liquidation event, the residual gains will be used to distribute yield to both tranches
-            if (stGain != ZERO_NAV_UNITS && !syncingLiquidationEvent) {
+            if (stGain != ZERO_NAV_UNITS) {
                 // Mark yield as distributed if the gain is not attributable to any rounding/dust
                 if (stGain > $.stNAVDustTolerance) yieldDistributed = true;
                 // Compute the time weighted average JT share of yield
@@ -598,9 +595,9 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                 }
                 // Compute the protocol fee taken on this ST yield accrual if it is not attributable to any rounding/dust
                 if (yieldDistributed) stProtocolFeeAccrued = stGain.mulDiv($.stProtocolFeeWAD, WAD, Math.Rounding.Floor);
+                // Book the residual gain to the ST
+                stEffectiveNAV = (stEffectiveNAV + stGain);
             }
-            // Book the residual gain to the ST
-            stEffectiveNAV = (stEffectiveNAV + stGain);
         }
 
         // Enforce the NAV conservation invariant
