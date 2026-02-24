@@ -698,11 +698,11 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         // First-come-first-served LP: try to cover NAV claim from tranche's LP allocation first
         NAV_UNIT availableLiquidationProceedsNAV = convertBaseUnitsToNAVUnits(_trancheAssetClaims.liquidationProceeds);
         if (availableLiquidationProceedsNAV >= userNAVClaim) {
-            // LP covers entire claim - give only LP, no exposure
+            // Liquidation proceeds cover the entire claim, so fulfill the entire withdrawal with proceeds
             userClaims.liquidationProceeds = convertNAVUnitsToBaseUnits(userNAVClaim);
             userClaims.nav = userNAVClaim;
         } else {
-            // LP doesn't cover - take all available LP, scale down exposure proportionally
+            // Liquidation proceeds don't cover the entire claim, so fulfill as much of the withdrawal as possible with proceeds
             userClaims.liquidationProceeds = convertNAVUnitsToBaseUnits(availableLiquidationProceedsNAV);
 
             // Compute the NAV needed from exposure after exhausting the available liquidation proceeds
