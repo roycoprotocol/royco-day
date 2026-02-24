@@ -35,6 +35,9 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
     /// @dev Thrown when the liquidator requests more assets than available in ST's liquidatable claims
     error INSUFFICIENT_ASSETS_TO_LIQUIDATE();
 
+    /// @dev Thrown when the computed settlement payment for the liquidation is zero NAV units
+    error MUST_LIQUIDATE_NON_ZERO_NAV();
+
     /// @notice Validates that the kernel has a valid base asset configured for liquidation settlements
     /// @dev Reverts if BASE_ASSET is the zero address since liquidations require transferring base assets
     constructor() {
@@ -44,11 +47,11 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
     /**
      * @notice Emitted when a liquidation is executed
      * @param liquidator The address that executed the liquidation
-     * @param stAssetsSeized Total ST assets transferred to liquidator (demanded + bonus)
-     * @param jtAssetsSeized Total JT assets transferred to liquidator (demanded + bonus)
-     * @param stAssetsBonus ST assets paid as bonus to liquidator from JT's claims on ST
-     * @param jtAssetsBonus JT assets paid as bonus to liquidator from JT's claims on JT
-     * @param baseAssetSettlement Base asset amount paid by liquidator as settlement
+     * @param stAssetsSeized The ST assets, controlled by ST, seized by the liquidator (demanded + bonus)
+     * @param jtAssetsSeized The JT assets, controlled by ST, seized by the liquidator (demanded + bonus)
+     * @param stAssetsBonus The ST assets, controlled by JT, paid as bonus to the liquidator
+     * @param jtAssetsBonus The JT assets, controlled by JT, paid as bonus to the liquidator
+     * @param baseAssetSettlement The base asset amount paid by the liquidator as a settlement for the seized assets
      */
     event Liquidation(
         address indexed liquidator,
@@ -110,10 +113,11 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
         require(stClaims.stAssets >= _stAssetsToLiquidate && stClaims.jtAssets >= _jtAssetsToLiquidate, INSUFFICIENT_ASSETS_TO_LIQUIDATE());
 
         // Convert the assets to liquidate to NAV units and derive the base assets expected as settlement
-        NAV_UNIT seizedSTClaimsOnST = stConvertTrancheUnitsToNAVUnits(_stAssetsToLiquidate);
+        NAV_UNIT seizedSTClaimsOnSelf = stConvertTrancheUnitsToNAVUnits(_stAssetsToLiquidate);
         NAV_UNIT seizedSTClaimsOnJT = jtConvertTrancheUnitsToNAVUnits(_jtAssetsToLiquidate);
         // The settlement must be the exact mark-to-market value of the seized claims
-        NAV_UNIT settlement = seizedSTClaimsOnST + seizedSTClaimsOnJT;
+        NAV_UNIT settlement = seizedSTClaimsOnSelf + seizedSTClaimsOnJT;
+        require(settlement != ZERO_NAV_UNITS, MUST_LIQUIDATE_NON_ZERO_NAV());
 
         // Compute the liquidation incentive factor for this liquidation
         uint256 liquidationIncentiveFactorWAD =
@@ -123,13 +127,13 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
         NAV_UNIT bonusNAV = toNAVUnits(toUint256(settlement).mulDiv(liquidationIncentiveFactorWAD - WAD, WAD, Math.Rounding.Floor));
 
         // Source bonus from JT's claims, prioritizing JT assets first, then ST assets
-        TRANCHE_UNIT bonusFromJTClaimsOnJT = UnitsMathLib.min(jtConvertNAVUnitsToTrancheUnits(bonusNAV), jtClaims.jtAssets);
-        NAV_UNIT remainingBonusNAV = bonusNAV - jtConvertTrancheUnitsToNAVUnits(bonusFromJTClaimsOnJT);
+        TRANCHE_UNIT bonusFromJTClaimsOnSelf = UnitsMathLib.min(jtConvertNAVUnitsToTrancheUnits(bonusNAV), jtClaims.jtAssets);
+        NAV_UNIT remainingBonusNAV = bonusNAV - jtConvertTrancheUnitsToNAVUnits(bonusFromJTClaimsOnSelf);
         TRANCHE_UNIT bonusFromJTClaimsOnST = UnitsMathLib.min(stConvertNAVUnitsToTrancheUnits(remainingBonusNAV), jtClaims.stAssets);
 
         // Calculate total assets to free (demanded + bonus)
         TRANCHE_UNIT totalSTAssetsToFree = _stAssetsToLiquidate + bonusFromJTClaimsOnST;
-        TRANCHE_UNIT totalJTAssetsToFree = _jtAssetsToLiquidate + bonusFromJTClaimsOnJT;
+        TRANCHE_UNIT totalJTAssetsToFree = _jtAssetsToLiquidate + bonusFromJTClaimsOnSelf;
 
         // Free assets from underlying vaults and transfer to liquidator: no need to specify NAV in claims
         AssetClaims memory liquidatorClaimsWithBonus = AssetClaims(totalSTAssetsToFree, totalJTAssetsToFree, ZERO_BASE_UNITS, ZERO_NAV_UNITS);
@@ -137,7 +141,7 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
 
         // Call liquidator callback if data is provided
         if (_liquidationCallbackData.length > 0) {
-            IRoycoLiquidator(msg.sender).onRoycoLiquidate(totalSTAssetsToFree, totalJTAssetsToFree, _liquidationCallbackData);
+            IRoycoLiquidator(msg.sender).executeRoycoLiquidation(totalSTAssetsToFree, totalJTAssetsToFree, _liquidationCallbackData);
         }
 
         // Pull base assets from liquidator as settlement for the liquidated NAV
@@ -145,8 +149,8 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
         _pullLiquidationProceeds(baseAssetSettlement, msg.sender);
 
         // Execute a post-liquidation sync on tranche accounting
-        _postLiquidationSyncTrancheAccounting(stConvertTrancheUnitsToNAVUnits(bonusFromJTClaimsOnST) + jtConvertTrancheUnitsToNAVUnits(bonusFromJTClaimsOnJT));
+        _postLiquidationSyncTrancheAccounting(stConvertTrancheUnitsToNAVUnits(bonusFromJTClaimsOnST) + jtConvertTrancheUnitsToNAVUnits(bonusFromJTClaimsOnSelf));
 
-        emit Liquidation(msg.sender, totalSTAssetsToFree, totalJTAssetsToFree, bonusFromJTClaimsOnST, bonusFromJTClaimsOnJT, baseAssetSettlement);
+        emit Liquidation(msg.sender, totalSTAssetsToFree, totalJTAssetsToFree, bonusFromJTClaimsOnST, bonusFromJTClaimsOnSelf, baseAssetSettlement);
     }
 }
