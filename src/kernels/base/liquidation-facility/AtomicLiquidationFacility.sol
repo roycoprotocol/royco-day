@@ -71,7 +71,7 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
      */
     function getLiquidatableAssets() public view virtual override(RoycoKernel) returns (TRANCHE_UNIT stAssets, TRANCHE_UNIT jtAssets) {
         // Get liquidation params from accountant
-        (uint64 lltvWAD, uint96 betaWAD) = IRoycoAccountant(ACCOUNTANT).getLiquidationParams();
+        (uint64 lltvWAD, uint96 betaWAD) = ACCOUNTANT.getLiquidationParams();
         // The liquidatable assets are the senior tranche's claims on ST and JT assets
         (SyncedAccountingState memory state, AssetClaims memory liquidatableClaims,) = previewSyncTrancheAccounting(TrancheType.SENIOR);
         // No liquidatable assets exist if the market is not in a liquidatable state
@@ -101,7 +101,7 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
         (SyncedAccountingState memory state, AssetClaims memory stClaims, AssetClaims memory jtClaims) = _syncTrancheAccountingWithClaims();
 
         // Get liquidation params from accountant
-        (uint64 lltvWAD, uint96 betaWAD) = IRoycoAccountant(ACCOUNTANT).getLiquidationParams();
+        (uint64 lltvWAD, uint96 betaWAD) = ACCOUNTANT.getLiquidationParams();
         // Claims on JT assets aren't liquidatable if beta is 0 since that implies that they are invested in the RFR
         stClaims.jtAssets = betaWAD == 0 ? ZERO_TRANCHE_UNITS : stClaims.jtAssets;
 
@@ -157,6 +157,8 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
     )
         internal
         view
+        virtual
+        override(RoycoKernel)
         returns (NAV_UNIT bonusNAV, BASE_UNIT bonusFromJTClaimsOnLP, TRANCHE_UNIT bonusFromJTClaimsOnST, TRANCHE_UNIT bonusFromJTClaimsOnSelf)
     {
         // Compute the liquidation incentive factor for this liquidation

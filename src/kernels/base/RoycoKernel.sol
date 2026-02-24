@@ -347,25 +347,38 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         withQuoterCache
         returns (AssetClaims memory userAssetClaims)
     {
+        SyncedAccountingState memory state;
         AssetClaims memory trancheAssetClaims;
         uint256 totalTrancheShares;
-        {
-            // Execute an accounting sync to reconcile underlying PNL
-            SyncedAccountingState memory state;
-            (state, trancheAssetClaims, totalTrancheShares) = _syncTrancheAccounting(TrancheType.SENIOR);
-            // Ensure that the market is in a state where ST redemptions are allowed: PERPETUAL
-            require(state.marketState == MarketState.PERPETUAL, ST_REDEEM_DISABLED_IN_FIXED_TERM_STATE());
-        }
+
+        // Execute an accounting sync to reconcile underlying PNL
+        (state, trancheAssetClaims, totalTrancheShares) = _syncTrancheAccounting(TrancheType.SENIOR);
+        // Ensure that the market is in a state where ST redemptions are allowed: PERPETUAL
+        require(state.marketState == MarketState.PERPETUAL, ST_REDEEM_DISABLED_IN_FIXED_TERM_STATE());
 
         // Compute user's claims with FCFS LP prioritization
-        userAssetClaims = _previewRedeem(trancheAssetClaims, _shares, totalTrancheShares);
+        NAV_UNIT claimsOnExposureNAV;
+        (userAssetClaims, claimsOnExposureNAV) = _previewRedeem(trancheAssetClaims, _shares, totalTrancheShares);
 
-        // Withdraw the asset claims from each tranche and transfer them to the receiver
+        // If LLTV is breached remit the ST LP a self-liquidation bonus
+        (uint64 lltvWAD,) = ACCOUNTANT.getLiquidationParams();
+        NAV_UNIT bonusNAV;
+        if (state.ltvWAD >= lltvWAD) {
+            (, AssetClaims memory jtClaims) = _marshalTrancheAssetClaims(state);
+            (NAV_UNIT bonusNAV, BASE_UNIT bonusFromJTClaimsOnLP, TRANCHE_UNIT bonusFromJTClaimsOnST, TRANCHE_UNIT bonusFromJTClaimsOnSelf) =
+                _computeLiquidationBonus(claimsOnExposureNAV, lltvWAD, jtClaims);
+
+            // Add the bonus to the asset claims to withdraw
+            userAssetClaims.stAssets = userAssetClaims.stAssets + bonusFromJTClaimsOnST;
+            userAssetClaims.jtAssets = userAssetClaims.jtAssets + bonusFromJTClaimsOnSelf;
+            userAssetClaims.liquidationProceeds = userAssetClaims.liquidationProceeds + bonusFromJTClaimsOnLP;
+        }
+
+        // Withdraw the asset claims from each tranche (potentially including a bonus) and transfer them to the receiver
         _withdrawAssets(userAssetClaims, _receiver);
 
-        // Execute a post-redeem sync on accounting
-        // TODO: Add ST redemption bonus if LLTV is breached
-        _postOpSyncTrancheAccounting(Operation.ST_REDEEM, ZERO_NAV_UNITS);
+        // Execute a post-redeem sync on accounting and include any self-liquidation bonus
+        _postOpSyncTrancheAccounting(Operation.ST_REDEEM, bonusNAV);
     }
 
     // =============================
@@ -429,7 +442,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         (, trancheAssetClaims, totalTrancheShares) = _syncTrancheAccounting(TrancheType.JUNIOR);
 
         // Compute user's claims with FCFS LP prioritization
-        userAssetClaims = _previewRedeem(trancheAssetClaims, _shares, totalTrancheShares);
+        (userAssetClaims,) = _previewRedeem(trancheAssetClaims, _shares, totalTrancheShares);
 
         // Withdraw the asset claims from each tranche and transfer them to the receiver
         _withdrawAssets(userAssetClaims, _receiver);
@@ -456,6 +469,16 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      * @param _liquidationCallbackData Arbitrary data passed to the liquidator's callback function
      */
     function liquidate(TRANCHE_UNIT _stAssetsToLiquidate, TRANCHE_UNIT _jtAssetsToLiquidate, bytes calldata _liquidationCallbackData) external virtual;
+
+    function _computeLiquidationBonus(
+        NAV_UNIT stNAVToLiquidate,
+        uint64 _lltvWAD,
+        AssetClaims memory _jtClaims
+    )
+        internal
+        view
+        virtual
+        returns (NAV_UNIT bonusNAV, BASE_UNIT bonusFromJTClaimsOnLP, TRANCHE_UNIT bonusFromJTClaimsOnST, TRANCHE_UNIT bonusFromJTClaimsOnSelf);
 
     // =============================
     // Admin Functions
@@ -681,6 +704,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      * @param _shares The number of shares being redeemed
      * @param _totalTrancheShares The total supply of tranche shares
      * @return userClaims The user's asset claims
+     * @return claimsOnExposureNAV The NAV of the claims excluding liquidation proceeds (tied to exposure)
      */
     function _previewRedeem(
         AssetClaims memory _trancheAssetClaims,
@@ -689,7 +713,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     )
         internal
         view
-        returns (AssetClaims memory userClaims)
+        returns (AssetClaims memory userClaims, NAV_UNIT claimsOnExposureNAV)
     {
         // Scale tranche claims proportionally to get user's baseline entitlement
         AssetClaims memory proportionalClaims = UtilsLib.scaleAssetClaims(_trancheAssetClaims, _shares, _totalTrancheShares);
@@ -706,13 +730,13 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
             userClaims.liquidationProceeds = convertNAVUnitsToBaseUnits(availableLiquidationProceedsNAV);
 
             // Compute the NAV needed from exposure after exhausting the available liquidation proceeds
-            NAV_UNIT exposureNAVNeeded = userNAVClaim - availableLiquidationProceedsNAV;
+            claimsOnExposureNAV = userNAVClaim - availableLiquidationProceedsNAV;
             // Compute the original NAV needed from exposure before applying FCFS for available liquidation proceeds
             NAV_UNIT originalExposureNAV = userNAVClaim - convertBaseUnitsToNAVUnits(proportionalClaims.liquidationProceeds);
 
             // Scale down the claims to exposure to account for FCFS on the liquidation proceeds
-            userClaims.stAssets = proportionalClaims.stAssets.mulDiv(exposureNAVNeeded, originalExposureNAV, Math.Rounding.Floor);
-            userClaims.jtAssets = proportionalClaims.jtAssets.mulDiv(exposureNAVNeeded, originalExposureNAV, Math.Rounding.Floor);
+            userClaims.stAssets = proportionalClaims.stAssets.mulDiv(claimsOnExposureNAV, originalExposureNAV, Math.Rounding.Floor);
+            userClaims.jtAssets = proportionalClaims.jtAssets.mulDiv(claimsOnExposureNAV, originalExposureNAV, Math.Rounding.Floor);
             userClaims.nav = userNAVClaim;
         }
     }
