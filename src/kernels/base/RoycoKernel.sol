@@ -362,11 +362,12 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
 
         // If LLTV is breached remit the ST LP a self-liquidation bonus
         (uint64 lltvWAD,) = ACCOUNTANT.getLiquidationParams();
-        NAV_UNIT bonusNAV;
+        NAV_UNIT stSelfLiquidationBonusNAV;
         if (state.ltvWAD >= lltvWAD) {
             (, AssetClaims memory jtClaims) = _marshalTrancheAssetClaims(state);
             (NAV_UNIT bonusNAV, BASE_UNIT bonusFromJTClaimsOnLP, TRANCHE_UNIT bonusFromJTClaimsOnST, TRANCHE_UNIT bonusFromJTClaimsOnSelf) =
                 _computeLiquidationBonus(claimsOnExposureNAV, lltvWAD, jtClaims);
+            stSelfLiquidationBonusNAV = bonusNAV;
 
             // Add the bonus to the asset claims to withdraw
             userAssetClaims.stAssets = userAssetClaims.stAssets + bonusFromJTClaimsOnST;
@@ -378,7 +379,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         _withdrawAssets(userAssetClaims, _receiver);
 
         // Execute a post-redeem sync on accounting and include any self-liquidation bonus
-        _postOpSyncTrancheAccounting(Operation.ST_REDEEM, bonusNAV);
+        _postOpSyncTrancheAccounting(Operation.ST_REDEEM, stSelfLiquidationBonusNAV);
     }
 
     // =============================
@@ -470,8 +471,20 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      */
     function liquidate(TRANCHE_UNIT _stAssetsToLiquidate, TRANCHE_UNIT _jtAssetsToLiquidate, bytes calldata _liquidationCallbackData) external virtual;
 
+    /**
+     * @notice Computes a liquidation bonus for ST redemptions when LLTV is breached
+     * @dev The bonus incentivizes ST to self-liquidate by redeeming, sourced from JT's claims
+     * @dev Bonus is computed on exposure NAV only (excludes liquidation proceeds which are already safe)
+     * @param _stNAVToLiquidate The NAV of ST's exposure claims being redeemed (excludes LP)
+     * @param _lltvWAD The liquidation loan-to-value threshold, scaled to WAD precision
+     * @param _jtClaims JT's current asset claims, from which the bonus is sourced
+     * @return bonusNAV The total bonus NAV awarded to the redeemer
+     * @return bonusFromJTClaimsOnLP Bonus sourced from JT's claim on liquidation proceeds
+     * @return bonusFromJTClaimsOnST Bonus sourced from JT's claim on ST assets
+     * @return bonusFromJTClaimsOnSelf Bonus sourced from JT's claim on JT assets
+     */
     function _computeLiquidationBonus(
-        NAV_UNIT stNAVToLiquidate,
+        NAV_UNIT _stNAVToLiquidate,
         uint64 _lltvWAD,
         AssetClaims memory _jtClaims
     )
