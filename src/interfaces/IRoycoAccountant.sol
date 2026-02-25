@@ -59,7 +59,6 @@ interface IRoycoAccountant {
      * @custom:field ydm - The market's Yield Distribution Model (YDM), responsible for determining the yield share (risk premium) payed from the senior tranche yield to the junior tranche
      * @custom:field lastSTRawNAV - The last recorded pure NAV (excluding any coverage taken and yield shared) of the senior tranche
      * @custom:field lastJTRawNAV - The last recorded pure NAV (excluding any coverage given and yield shared) of the junior tranche
-     * @custom:field lastLiquidationProceedsNAV - The last recorded liquidation proceeds NAV from prior senior tranche liquidation events
      * @custom:field lastSTEffectiveNAV - The last recorded effective NAV (including any prior applied coverage, ST yield distribution, and uncovered losses) of the senior tranche
      * @custom:field lastJTEffectiveNAV - The last recorded effective NAV (including any prior provided coverage, JT yield, ST yield distribution, and JT losses) of the junior tranche
      * @custom:field lastSTImpermanentLoss - The impermanent loss that ST has suffered after exhausting JT's loss-absorption buffer
@@ -88,7 +87,6 @@ interface IRoycoAccountant {
         address ydm;
         NAV_UNIT lastSTRawNAV;
         NAV_UNIT lastJTRawNAV;
-        NAV_UNIT lastLiquidationProceedsNAV;
         NAV_UNIT lastSTEffectiveNAV;
         NAV_UNIT lastJTEffectiveNAV;
         NAV_UNIT lastSTImpermanentLoss;
@@ -204,9 +202,6 @@ interface IRoycoAccountant {
     /// @notice Thrown when the caller of the function is not the accountant's configured Royco Kernel
     error ONLY_ROYCO_KERNEL();
 
-    /// @notice Thrown a liquidation event leads to a loss in the market's liquidation proceeds
-    error LIQUIDATION_PROCEEDS_MUST_NOT_DECREASE();
-
     /// @notice Thrown when the sum of the raw NAVs don't equal the sum of the effective NAVs of both tranches
     error NAV_CONSERVATION_VIOLATION();
 
@@ -217,81 +212,56 @@ interface IRoycoAccountant {
     error COVERAGE_REQUIREMENT_UNSATISFIED();
 
     /**
-     * @notice Synchronizes the effective NAVs and impermanent losses of both tranches
+     * @notice Synchronizes the effective NAVs and impermanent losses of both tranches by marking them to market
      * @dev Accrues JT yield share over time based on the market's YDM output
-     * @dev Applies unrealized PnL, liquidation settlements, and yield distribution
+     * @dev Applies unrealized PNL and yield distribution (risk premium)
      * @dev Persists updated NAV and impermanent loss checkpoints for the next sync to use as reference
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
-     * @param _liquidationProceedsNAV The market's current liquidation proceeds received from prior liquidation events of ST effective NAV
-     * @param _liquidationBonusNAV The liquidation bonus NAV paid to the liquidator (if this sync is meant to reconcile a liquidation event)
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
-    function syncTrancheAccounting(
-        NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV,
-        NAV_UNIT _liquidationProceedsNAV,
-        NAV_UNIT _liquidationBonusNAV
-    )
-        external
-        returns (SyncedAccountingState memory state);
+    function syncTrancheAccounting(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external returns (SyncedAccountingState memory state);
 
     /**
-     * @notice Previews a synchronization of tranche NAVs based on the underlying PNL(s) and their effects on the current state of the loss waterfall
+     * @notice Previews a synchronization of the effective NAVs and impermanent losses of both tranches by marking them to market
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
-     * @param _liquidationProceedsNAV The market's current liquidation proceeds received from prior liquidation events of ST effective NAV
-     * @param _liquidationBonusNAV The liquidation bonus NAV paid to the liquidator (if this sync is meant to reconcile a liquidation event)
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
-    function previewSyncTrancheAccounting(
-        NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV,
-        NAV_UNIT _liquidationProceedsNAV,
-        NAV_UNIT _liquidationBonusNAV
-    )
-        external
-        view
-        returns (SyncedAccountingState memory state);
+    function previewSyncTrancheAccounting(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external view returns (SyncedAccountingState memory state);
 
     /**
      * @notice Applies post-operation (deposit and withdrawal) raw NAV deltas to effective NAV checkpoints
      * @dev Interprets deltas strictly as deposits/withdrawals with no yield or coverage logic
-     * @dev Exactly one of the following must be true: ST deposited, JT deposited, or withdrawal occurred
-     * @param _op The operation being executed in between the pre and post synchronizations
+     * @param _op The operation being executed in between the pre and post operation synchronizations
      * @param _stRawNAV The post-op senior tranche's raw NAV
      * @param _jtRawNAV The post-op junior tranche's raw NAV
-     * @param _liquidationProceedsNAV The market's current liquidation proceeds received from prior liquidation events of ST effective NAV
-     * @param _stRedemptionBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions
+     * @param _stRedemptionBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions only
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function postOpSyncTrancheAccounting(
         Operation _op,
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
-        NAV_UNIT _liquidationProceedsNAV,
         NAV_UNIT _stRedemptionBonusNAV
     )
         external
         returns (SyncedAccountingState memory state);
 
     /**
-     * @notice Applies post-operation (deposit and withdrawal) raw NAV deltas to effective NAV checkpoints and enforces the coverage condition of the market
+     * @notice Applies post-operation (deposit and withdrawal) raw NAV deltas to effective NAV checkpoints and enforces the market's coverage condition
      * @dev Interprets deltas strictly as deposits/withdrawals with no yield or coverage logic
-     * @dev Reverts if the coverage requirement is unsatisfied
-     * @dev Exactly one of the following must be true: ST deposited, JT deposited, or withdrawal occurred
-     * @param _op The operation being executed in between the pre and post synchronizations
+     * @dev Reverts if the coverage requirement is unsatisfied after the NAVs have been marked to market
+     * @param _op The operation being executed in between the pre and post operation synchronizations
      * @param _stRawNAV The post-op senior tranche's raw NAV
      * @param _jtRawNAV The post-op junior tranche's raw NAV
-     * @param _liquidationProceedsNAV The market's current liquidation proceeds received from prior liquidation events of ST effective NAV
-     * @param _stRedemptionBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions
+     * @param _stRedemptionBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions only
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function postOpSyncTrancheAccountingAndEnforceCoverage(
         Operation _op,
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
-        NAV_UNIT _liquidationProceedsNAV,
         NAV_UNIT _stRedemptionBonusNAV
     )
         external
@@ -299,7 +269,7 @@ interface IRoycoAccountant {
 
     /**
      * @notice Returns if the market's coverage requirement is satisfied
-     * @dev If this condition is unsatisfied, senior deposits and junior withdrawals must be blocked to prevent undercollateralized senior exposure
+     * @dev If this condition is unsatisfied, senior deposits and junior withdrawals must be blocked to prevent undercollateralized exposure
      * @return satisfied A boolean indicating whether the market's coverage requirement is satisfied based on the persisted NAV checkpoints
      */
     function isCoverageRequirementSatisfied() external view returns (bool satisfied);
@@ -309,17 +279,15 @@ interface IRoycoAccountant {
      * @dev Always rounds in favor of senior tranche protection
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
-     * @param _liquidationProceedsNAV The market's current liquidation proceeds received from prior liquidation events of ST effective NAV
      * @return maxSTDeposit The maximum assets depositable into the senior tranche without violating the market's coverage requirement
      */
-    function maxSTDepositGivenCoverage(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV, NAV_UNIT _liquidationProceedsNAV) external view returns (NAV_UNIT maxSTDeposit);
+    function maxSTDepositGivenCoverage(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external view returns (NAV_UNIT maxSTDeposit);
 
     /**
      * @notice Returns the maximum assets withdrawable from the junior tranche without violating the market's coverage requirement
      * @dev Always rounds in favor of senior tranche protection
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
-     * @param _liquidationProceedsNAV The market's current liquidation proceeds received from prior liquidation events of ST effective NAV
      * @param _jtClaimOnStUnits The total claims on ST assets that the junior tranche has denominated in NAV units
      * @param _jtClaimOnJtUnits The total claims on JT assets that the junior tranche has denominated in NAV units
      * @return totalNAVClaimable The maximum NAV that can be claimed from the junior tranche without violating the market's coverage requirement
@@ -329,7 +297,6 @@ interface IRoycoAccountant {
     function maxJTWithdrawalGivenCoverage(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
-        NAV_UNIT _liquidationProceedsNAV,
         NAV_UNIT _jtClaimOnStUnits,
         NAV_UNIT _jtClaimOnJtUnits
     )
@@ -425,11 +392,4 @@ interface IRoycoAccountant {
      * @return state The state of the accountant
      */
     function getState() external view returns (RoycoAccountantState memory state);
-
-    /**
-     * @notice Returns the liquidation parameters for this market
-     * @return lltvWAD The liquidation loan to value threshold, scaled to WAD precision
-     * @return betaWAD The junior tranche's sensitivity to downside stress, scaled to WAD precision
-     */
-    function getLiquidationParams() external view returns (uint64 lltvWAD, uint96 betaWAD);
 }

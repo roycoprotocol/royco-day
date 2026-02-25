@@ -49,7 +49,6 @@ struct AssetClaims {
  * @custom:field marketState - The current state of the Royco market (perpetual or fixed term)
  * @custom:field stRawNAV - The senior tranche's current raw NAV: the pure value of its invested assets
  * @custom:field jtRawNAV - The junior tranche's current raw NAV: the pure value of its invested assets
- * @custom:field liquidationProceedsNAV - The liquidation proceeds NAV from prior senior tranche liquidation events
  * @custom:field stEffectiveNAV - Senior tranche effective NAV: includes applied coverage, its share of ST yield, and uncovered losses
  * @custom:field jtEffectiveNAV - Junior tranche effective NAV: includes provided coverage, JT yield, its share of ST yield, and JT losses
  * @custom:field stImpermanentLoss - The impermanent loss that ST has suffered after exhausting JT's loss-absorption buffer
@@ -67,7 +66,6 @@ struct SyncedAccountingState {
     MarketState marketState;
     NAV_UNIT stRawNAV;
     NAV_UNIT jtRawNAV;
-    NAV_UNIT liquidationProceedsNAV;
     NAV_UNIT stEffectiveNAV;
     NAV_UNIT jtEffectiveNAV;
     NAV_UNIT stImpermanentLoss;
