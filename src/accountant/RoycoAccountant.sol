@@ -37,7 +37,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
 
     /// @dev Synchronizes the market's accounting to reconcile unrealized PNL at the start of the call
     modifier withSyncedAccounting() {
-        IRoycoKernel(KERNEL).preOpSyncTrancheAccounting();
+        IRoycoKernel(KERNEL).syncTrancheAccounting();
         _;
     }
 
@@ -384,7 +384,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     }
 
     // =============================
-    // NAV Synchronization and Yield Share Accrual Internal Utility Functions
+    // Internal NAV Synchronization and Yield Share Accrual Functions
     // =============================
 
     /**
