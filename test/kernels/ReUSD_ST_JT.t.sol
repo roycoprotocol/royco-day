@@ -103,11 +103,6 @@ contract reUSD_Test is AbstractKernelTestSuite {
         return _toSTValue(maxTrancheUnitDelta());
     }
 
-    /// @notice Returns the JT redemption delay
-    function _getJTRedemptionDelay() internal pure virtual override returns (uint24) {
-        return 60;
-    }
-
     // ═══════════════════════════════════════════════════════════════════════════
     // ICL CONVERSION RATE MANIPULATION
     // ═══════════════════════════════════════════════════════════════════════════
@@ -274,7 +269,6 @@ contract reUSD_Test is AbstractKernelTestSuite {
             kernelType: DeployScript.KernelType.ReUSD_ST_ReUSD_JT,
             kernelSpecificParams: abi.encode(kernelParams),
             protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            jtRedemptionDelayInSeconds: _getJTRedemptionDelay(),
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             coverageWAD: COVERAGE_WAD,

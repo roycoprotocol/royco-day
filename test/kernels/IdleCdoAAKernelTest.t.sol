@@ -99,7 +99,6 @@ contract IdleCdoAAKernelTest is AbstractKernelTestSuite {
             kernelType: DeployScript.KernelType.IdleCdoAA_ST_IdleCdoAA_JT,
             kernelSpecificParams: abi.encode(kernelParams),
             protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            jtRedemptionDelayInSeconds: LOCAL_JT_REDEMPTION_DELAY_SECONDS,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             coverageWAD: COVERAGE_WAD,
@@ -113,11 +112,6 @@ contract IdleCdoAAKernelTest is AbstractKernelTestSuite {
 
         // Deploy using the deployment script
         return DEPLOY_SCRIPT.deploy(params, DEPLOYER.privateKey);
-    }
-
-    /// @inheritdoc AbstractKernelTestSuite
-    function _getJTRedemptionDelay() internal pure override returns (uint24) {
-        return LOCAL_JT_REDEMPTION_DELAY_SECONDS;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

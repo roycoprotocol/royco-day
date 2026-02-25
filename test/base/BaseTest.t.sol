@@ -561,13 +561,6 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
         _executeKernelAdminOperation(address(KERNEL), data);
     }
 
-    /// @notice Sets the junior tranche redemption delay via kernel admin (with scheduling)
-    /// @param _newDelay The new redemption delay in seconds
-    function _setJuniorTrancheRedemptionDelay(uint24 _newDelay) internal {
-        bytes memory data = abi.encodeCall(KERNEL.setJuniorTrancheRedemptionDelay, (_newDelay));
-        _executeKernelAdminOperation(address(KERNEL), data);
-    }
-
     /// @notice Sets the coverage via accountant admin (with scheduling)
     /// @param _newCoverageWAD The new coverage in WAD
     function _setCoverage(uint64 _newCoverageWAD) internal {

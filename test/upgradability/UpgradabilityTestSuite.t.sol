@@ -10,11 +10,8 @@ import { DeployScript } from "../../script/Deploy.s.sol";
 import { RoycoAccountant } from "../../src/accountant/RoycoAccountant.sol";
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoKernel } from "../../src/interfaces/kernel/IRoycoKernel.sol";
-import { RoycoKernelInitParams } from "../../src/interfaces/kernel/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/tranche/IRoycoVaultTranche.sol";
-import {
-    YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel
-} from "../../src/kernels/YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel.sol";
+import { IdenticalERC4626SharesAdminOracleQuoter_Kernel } from "../../src/kernels/IdenticalERC4626SharesAdminOracleQuoter_Kernel.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
 import { TrancheDeploymentParams } from "../../src/libraries/Types.sol";
 import { TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../src/libraries/Units.sol";
@@ -79,8 +76,8 @@ contract UpgradabilityTestSuite is BaseTest {
     function _deployMarket() internal returns (DeployScript.DeploymentResult memory) {
         bytes32 marketId = keccak256(abi.encodePacked("UpgradabilityTest", vm.getBlockTimestamp()));
 
-        DeployScript.YieldBearingERC4626STYieldBearingERC4626JTIdenticalERC4626SharesAdminOracleQuoterKernelParams memory kernelParams =
-            DeployScript.YieldBearingERC4626STYieldBearingERC4626JTIdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: WAD });
+        DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams memory kernelParams =
+            DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: WAD });
 
         DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
             jtYieldShareAtZeroUtilWAD: 0.3e18, // Y_0 = Y_T (same as target)
@@ -104,10 +101,9 @@ contract UpgradabilityTestSuite is BaseTest {
             juniorAsset: SNUSD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
-            kernelType: DeployScript.KernelType.YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter,
+            kernelType: DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel,
             kernelSpecificParams: abi.encode(kernelParams),
             protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            jtRedemptionDelayInSeconds: 1000,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             coverageWAD: COVERAGE_WAD,
@@ -144,7 +140,7 @@ contract UpgradabilityTestSuite is BaseTest {
             baseAsset: ETHEREUM_MAINNET_USDC_ADDRESS, seniorTranche: address(ST), stAsset: SNUSD, juniorTranche: address(JT), jtAsset: SNUSD
         });
 
-        newKernelImpl = address(new YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel(constructionParams));
+        newKernelImpl = address(new IdenticalERC4626SharesAdminOracleQuoter_Kernel(constructionParams));
         vm.label(newKernelImpl, "NewKernelImpl");
     }
 
@@ -206,15 +202,11 @@ contract UpgradabilityTestSuite is BaseTest {
 
     /// @notice Test that Kernel implementation cannot be initialized
     function test_kernelImplementation_cannotBeInitialized() external {
-        RoycoKernelInitParams memory params = RoycoKernelInitParams({
-            initialAuthority: address(FACTORY),
-            accountant: address(ACCOUNTANT),
-            protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            jtRedemptionDelayInSeconds: 1000
-        });
+        IRoycoKernel.RoycoKernelInitParams memory params =
+            IRoycoKernel.RoycoKernelInitParams({ initialAuthority: address(FACTORY), protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS });
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel(KERNEL_IMPL).initialize(params, WAD);
+        IdenticalERC4626SharesAdminOracleQuoter_Kernel(KERNEL_IMPL).initialize(params, WAD);
     }
 
     /// @notice Test that new ST implementation cannot be initialized
@@ -255,15 +247,11 @@ contract UpgradabilityTestSuite is BaseTest {
 
     /// @notice Test that new Kernel implementation cannot be initialized
     function test_newKernelImplementation_cannotBeInitialized() external {
-        RoycoKernelInitParams memory params = RoycoKernelInitParams({
-            initialAuthority: address(FACTORY),
-            accountant: address(ACCOUNTANT),
-            protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            jtRedemptionDelayInSeconds: 1000
-        });
+        IRoycoKernel.RoycoKernelInitParams memory params =
+            IRoycoKernel.RoycoKernelInitParams({ initialAuthority: address(FACTORY), protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS });
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel(newKernelImpl).initialize(params, WAD);
+        IdenticalERC4626SharesAdminOracleQuoter_Kernel(newKernelImpl).initialize(params, WAD);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
