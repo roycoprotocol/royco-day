@@ -15,7 +15,7 @@ abstract contract DisabledLiquidationFacility is RoycoKernel {
     error LIQUIDATIONS_DISABLED();
 
     /// @notice Validates that the kernel has no base asset configured since liquidations are disabled
-    /// @dev Reverts if BASE_ASSET is non-zero to prevent misconfiguration of non-liquidatable markets
+    /// @dev Reverts if BASE_ASSET is non-zero to prevent misconfiguration of markets with liquidations disabled
     constructor() {
         require(BASE_ASSET == address(0), LIQUIDATIONS_DISABLED());
     }

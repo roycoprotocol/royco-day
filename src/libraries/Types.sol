@@ -45,18 +45,17 @@ struct AssetClaims {
 
 /**
  * @title SyncedAccountingState
- * @dev Contains all current mark to market NAV accounting data for the market's tranches
+ * @dev Contains all current mark-to-market NAV accounting data for the market's tranches
  * @custom:field marketState - The current state of the Royco market (perpetual or fixed term)
  * @custom:field stRawNAV - The senior tranche's current raw NAV: the pure value of its invested assets
  * @custom:field jtRawNAV - The junior tranche's current raw NAV: the pure value of its invested assets
+ * @custom:field liquidationProceedsNAV - The liquidation proceeds NAV from prior senior tranche liquidation events
  * @custom:field stEffectiveNAV - Senior tranche effective NAV: includes applied coverage, its share of ST yield, and uncovered losses
  * @custom:field jtEffectiveNAV - Junior tranche effective NAV: includes provided coverage, JT yield, its share of ST yield, and JT losses
  * @custom:field stImpermanentLoss - The impermanent loss that ST has suffered after exhausting JT's loss-absorption buffer
  *                                   This represents the first claim on capital that the senior tranche has on future ST and JT recoveries
- * @custom:field jtCoverageImpermanentLoss - The impermanent loss that JT has suffered after providing coverage for ST losses
- *                                           This represents the second claim on capital that the junior tranche has on future ST recoveries
- * @custom:field jtSelfImpermanentLoss - The impermanent loss that JT has suffered from depreciaiton of its own NAV
- *                                       This represents the first claim on capital that the junior tranche has on future JT recoveries
+ * @custom:field jtImpermanentLoss - The impermanent loss that JT has suffered after providing coverage for ST losses
+ *                                   This represents the second claim on capital that the junior tranche has on future ST recoveries
  * @custom:field stProtocolFeeAccrued - Protocol fee taken on ST yield on this sync
  * @custom:field jtProtocolFeeAccrued - Protocol fee taken on JT yield on this sync
  * @custom:field fixedTermDurationSeconds - The duration of the fixed term in seconds
@@ -68,11 +67,11 @@ struct SyncedAccountingState {
     MarketState marketState;
     NAV_UNIT stRawNAV;
     NAV_UNIT jtRawNAV;
+    NAV_UNIT liquidationProceedsNAV;
     NAV_UNIT stEffectiveNAV;
     NAV_UNIT jtEffectiveNAV;
     NAV_UNIT stImpermanentLoss;
-    NAV_UNIT jtCoverageImpermanentLoss;
-    NAV_UNIT jtSelfImpermanentLoss;
+    NAV_UNIT jtImpermanentLoss;
     NAV_UNIT stProtocolFeeAccrued;
     NAV_UNIT jtProtocolFeeAccrued;
     // Additional data about the market's post-sync state
@@ -97,17 +96,6 @@ enum Operation {
 }
 
 /**
- * @title Action
- * @dev Defines the action being executed by the user
- * @custom:type DEPOSIT - Depositing assets for shares into the tranche
- * @custom:type REDEEM - Redeeming shares for assets from the tranche
- */
-enum Action {
-    DEPOSIT,
-    REDEEM
-}
-
-/**
  * @title TrancheType
  * @dev Defines the two types of Royco tranches deployed per market.
  * @custom:type SENIOR - The identifier for the senior tranche (protected capital)
@@ -116,38 +104,6 @@ enum Action {
 enum TrancheType {
     SENIOR,
     JUNIOR
-}
-
-/**
- * @title SharesRedemptionModel
- * @dev Defines the behavior of the shares when a redeem request is made
- * @custom:type BURN_ON_REQUEST_REDEEM - The shares are burned when calling requestRedeem
- * @custom:type BURN_ON_CLAIM_REDEEM - The shares are burned when calling redeem
- */
-enum SharesRedemptionModel {
-    BURN_ON_REQUEST_REDEEM,
-    BURN_ON_CLAIM_REDEEM
-}
-
-/**
- * @title ExecutionModel
- * @dev Defines the execution semantics for the deposit or withdrawal flow of a vault
- * @custom:type SYNC - Refers to the flow being synchronous
- * @custom:type ASYNC - Refers to the flow being asynchronous
- */
-enum ExecutionModel {
-    SYNC,
-    ASYNC
-}
-
-/**
- * @title ActionMetadataFormat
- * @dev Defines the format of the metadata for the action
- * @dev Encoded as the first byte of any metadata, indicating the significance and format of the following metadata
- * @custom:type REDEMPTION_CLAIMABLE_AT_TIMESTAMP - Encodes a uint256 representing the claimable at timestamp of the redemption request
- */
-enum ActionMetadataFormat {
-    REDEMPTION_CLAIMABLE_AT_TIMESTAMP
 }
 
 /**

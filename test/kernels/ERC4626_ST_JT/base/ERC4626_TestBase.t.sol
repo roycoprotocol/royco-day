@@ -275,9 +275,11 @@ abstract contract ERC4626_TestBase is AbstractKernelTestSuite {
         DeployScript.ERC4626STERC4626JTInKindAssetsKernelParams memory kernelParams =
             DeployScript.ERC4626STERC4626JTInKindAssetsKernelParams({ stVault: _getSTVault(), jtVault: _getJTVault() });
 
-        DeployScript.AdaptiveCurveYDMParams memory ydmParams = DeployScript.AdaptiveCurveYDMParams({
+        DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
+            jtYieldShareAtZeroUtilWAD: 0.3e18, // Y_0 = Y_T (same as target)
             jtYieldShareAtTargetUtilWAD: 0.3e18, // 30% at target utilization
-            jtYieldShareAtFullUtilWAD: 1e18 // 100% at 100% utilization
+            jtYieldShareAtFullUtilWAD: 1e18, // 100% at 100% utilization
+            maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
         });
 
         // Build role assignments using the centralized function
@@ -305,7 +307,7 @@ abstract contract ERC4626_TestBase is AbstractKernelTestSuite {
             betaWAD: 1e18, // Beta = 1 for identical vaults
             lltvWAD: LLTV,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            ydmType: DeployScript.YDMType.AdaptiveCurve,
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(ydmParams),
             roleAssignments: roleAssignments
         });

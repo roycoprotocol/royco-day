@@ -200,12 +200,12 @@ contract LossWaterfall is MainnetForkWithAaveTestBase {
 
         if (UtilsLib.computeLTV(postLossState.stEffectiveNAV, postLossState.stImpermanentLoss, postLossState.jtEffectiveNAV) < LLTV) {
             assertGt(
-                toUint256(postLossState.jtCoverageImpermanentLoss),
-                toUint256(postDepositState.jtCoverageImpermanentLoss),
+                toUint256(postLossState.jtImpermanentLoss),
+                toUint256(postDepositState.jtImpermanentLoss),
                 "JT coverage impermanent loss must increase when LTV below threshold"
             );
         } else {
-            assertEq(toUint256(postLossState.jtCoverageImpermanentLoss), 0, "JT coverage impermanent loss must be zero when LTV at or above threshold");
+            assertEq(toUint256(postLossState.jtImpermanentLoss), 0, "JT coverage impermanent loss must be zero when LTV at or above threshold");
         }
         assertGe(toUint256(postLossState.stImpermanentLoss), toUint256(postDepositState.stImpermanentLoss), "ST impermanent loss must increase on loss");
         assertLt(toUint256(postLossState.jtEffectiveNAV), toUint256(postDepositState.jtEffectiveNAV), "JT effective NAV must decrease (providing coverage)");

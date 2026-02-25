@@ -9,8 +9,6 @@ import { IRoycoAccountant } from "../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoAuth } from "../src/interfaces/IRoycoAuth.sol";
 import { IYDM } from "../src/interfaces/IYDM.sol";
 import { IRoycoKernel } from "../src/interfaces/kernel/IRoycoKernel.sol";
-import { IRoycoAsyncCancellableVault } from "../src/interfaces/tranche/IRoycoAsyncCancellableVault.sol";
-import { IRoycoAsyncVault } from "../src/interfaces/tranche/IRoycoAsyncVault.sol";
 import { IRoycoVaultTranche } from "../src/interfaces/tranche/IRoycoVaultTranche.sol";
 import { ERC4626_ST_AaveV3_JT_InKindAssets_Kernel } from "../src/kernels/ERC4626_ST_AaveV3_JT_InKindAssets_Kernel.sol";
 import { ERC4626_ST_ERC4626_JT_InKindAssets_Kernel } from "../src/kernels/ERC4626_ST_ERC4626_JT_InKindAssets_Kernel.sol";
@@ -30,7 +28,8 @@ import { AssetClaims, MarketDeploymentParams, RolesTargetConfiguration, RoycoMar
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits } from "../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoSeniorTranche } from "../src/tranches/RoycoSeniorTranche.sol";
-import { AdaptiveCurveYDM } from "../src/ydm/AdaptiveCurveYDM.sol";
+import { AdaptiveCurveYDM_V1 } from "../src/ydm/AdaptiveCurveYDM_V1.sol";
+import { AdaptiveCurveYDM_V2 } from "../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { StaticCurveYDM } from "../src/ydm/StaticCurveYDM.sol";
 import { DeploymentConfig } from "./config/DeploymentConfig.sol";
 import { Create2DeployUtils } from "./utils/Create2DeployUtils.sol";
@@ -73,7 +72,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     /// @notice Enum for YDM types
     enum YDMType {
         StaticCurve,
-        AdaptiveCurve
+        AdaptiveCurve_V1,
+        AdaptiveCurve_V2
     }
 
     /// @notice Deployment parameters for ERC4626_ST_AaveV3_JT_InKindAssets_Kernel
@@ -119,10 +119,18 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         uint64 jtYieldShareAtFullUtilWAD;
     }
 
-    /// @notice Deployment parameters for AdaptiveCurveYDM
-    struct AdaptiveCurveYDMParams {
+    /// @notice Deployment parameters for AdaptiveCurveYDM_V1
+    struct AdaptiveCurveYDM_V1_Params {
         uint64 jtYieldShareAtTargetUtilWAD;
         uint64 jtYieldShareAtFullUtilWAD;
+    }
+
+    /// @notice Deployment parameters for AdaptiveCurveYDM_V2
+    struct AdaptiveCurveYDM_V2_Params {
+        uint64 jtYieldShareAtZeroUtilWAD;
+        uint64 jtYieldShareAtTargetUtilWAD;
+        uint64 jtYieldShareAtFullUtilWAD;
+        uint64 maxAdaptationSpeedWAD;
     }
 
     /// @notice Complete deployment result containing all deployed contracts
@@ -198,7 +206,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         RoleAssignmentConfiguration[] roleAssignments;
     }
 
-    function run() external {
+    function run() external virtual {
         // Read deployer private key
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
@@ -798,9 +806,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         if (_ydmType == YDMType.StaticCurve) {
             creationCode = type(StaticCurveYDM).creationCode;
             salt = keccak256(abi.encodePacked(YDM_SALT, "STATIC_CURVE"));
-        } else if (_ydmType == YDMType.AdaptiveCurve) {
-            creationCode = type(AdaptiveCurveYDM).creationCode;
-            salt = keccak256(abi.encodePacked(YDM_SALT, "ADAPTIVE_CURVE"));
+        } else if (_ydmType == YDMType.AdaptiveCurve_V1) {
+            creationCode = type(AdaptiveCurveYDM_V1).creationCode;
+            salt = keccak256(abi.encodePacked(YDM_SALT, "ADAPTIVE_CURVE_V1"));
+        } else if (_ydmType == YDMType.AdaptiveCurve_V2) {
+            creationCode = type(AdaptiveCurveYDM_V2).creationCode;
+            salt = keccak256(abi.encodePacked(YDM_SALT, "ADAPTIVE_CURVE_V2"));
         } else {
             revert UnsupportedYDMType(_ydmType);
         }
@@ -1053,10 +1064,21 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
                 StaticCurveYDM.initializeYDMForMarket,
                 (ydmParams.jtYieldShareAtZeroUtilWAD, ydmParams.jtYieldShareAtTargetUtilWAD, ydmParams.jtYieldShareAtFullUtilWAD)
             );
-        } else if (_ydmType == YDMType.AdaptiveCurve) {
-            AdaptiveCurveYDMParams memory ydmParams = abi.decode(_ydmSpecificParams, (AdaptiveCurveYDMParams));
+        } else if (_ydmType == YDMType.AdaptiveCurve_V1) {
+            AdaptiveCurveYDM_V1_Params memory ydmParams = abi.decode(_ydmSpecificParams, (AdaptiveCurveYDM_V1_Params));
             ydmInitializationData =
-                abi.encodeCall(AdaptiveCurveYDM.initializeYDMForMarket, (ydmParams.jtYieldShareAtTargetUtilWAD, ydmParams.jtYieldShareAtFullUtilWAD));
+                abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (ydmParams.jtYieldShareAtTargetUtilWAD, ydmParams.jtYieldShareAtFullUtilWAD));
+        } else if (_ydmType == YDMType.AdaptiveCurve_V2) {
+            AdaptiveCurveYDM_V2_Params memory ydmParams = abi.decode(_ydmSpecificParams, (AdaptiveCurveYDM_V2_Params));
+            ydmInitializationData = abi.encodeCall(
+                AdaptiveCurveYDM_V2.initializeYDMForMarket,
+                (
+                    ydmParams.jtYieldShareAtZeroUtilWAD,
+                    ydmParams.jtYieldShareAtTargetUtilWAD,
+                    ydmParams.jtYieldShareAtFullUtilWAD,
+                    ydmParams.maxAdaptationSpeedWAD
+                )
+            );
         } else {
             revert UnsupportedYDMType(_ydmType);
         }

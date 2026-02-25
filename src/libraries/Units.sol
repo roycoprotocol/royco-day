@@ -31,6 +31,11 @@ library UnitsMathLib {
         return toTrancheUnits(Math.min(toUint256(_a), toUint256(_b)));
     }
 
+    /// @notice Returns the minimum of two tranche-denominated quantities.
+    function min(BASE_UNIT _a, BASE_UNIT _b) internal pure returns (BASE_UNIT) {
+        return toBaseUnits(Math.min(toUint256(_a), toUint256(_b)));
+    }
+
     /// @notice Returns the signed delta `_a - _b` for NAV-denominated quantities.
     function computeNAVDelta(NAV_UNIT _a, NAV_UNIT _b) internal pure returns (int256) {
         return (toInt256(_a) - toInt256(_b));

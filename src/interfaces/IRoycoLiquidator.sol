@@ -14,5 +14,5 @@ interface IRoycoLiquidator {
      * @param _jtAssets The amount of JT assets transferred to the liquidator (demanded assets + bonus)
      * @param _liquidationCallbackData Arbitrary data passed through from the liquidate call
      */
-    function onRoycoLiquidate(TRANCHE_UNIT _stAssets, TRANCHE_UNIT _jtAssets, bytes calldata _liquidationCallbackData) external;
+    function executeRoycoLiquidation(TRANCHE_UNIT _stAssets, TRANCHE_UNIT _jtAssets, bytes calldata _liquidationCallbackData) external;
 }

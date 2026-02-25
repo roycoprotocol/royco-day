@@ -14,10 +14,11 @@ interface IRoycoAccountant {
      * @custom:field kernel - The kernel that this accountant maintains NAV, impermanent loss, and fee accounting for
      * @custom:field stProtocolFeeWAD - The market's configured protocol fee percentage taken from yield earned by the senior tranche, scaled to WAD precision
      * @custom:field jtProtocolFeeWAD - The market's configured protocol fee percentage taken from yield earned by the junior tranche, scaled to WAD precision
+     * @custom:field yieldShareProtocolFeeWAD - The market's configured protocol fee percentage taken from the yield share (risk premium) payed from the senior tranche yield to the junior tranche, scaled to WAD precision
      * @custom:field coverageWAD - The coverage ratio that the senior tranche is expected to be protected by, scaled to WAD precision
      * @custom:field betaWAD - The junior tranche's sensitivity to the same downside stress that affects the senior tranche, scaled to WAD precision
      *                         For example, beta is 0 when JT is in the RFR and 1 when JT is in the same opportunity as senior
-     * @custom:field ydm - The market's Yield Distribution Model (YDM), responsible for determining the ST's yield split between ST and JT
+     * @custom:field ydm - The market's Yield Distribution Model (YDM), responsible for determining the yield share (risk premium) payed from the senior tranche yield to the junior tranche
      * @custom:field ydmInitializationData - The data used to initialize the YDM for this market
      * @custom:field fixedTermDurationSeconds - The duration of a fixed term for this market in seconds
      * @custom:field lltvWAD - The liquidation loan to value (LLTV) for this market, scaled to WAD precision
@@ -30,6 +31,7 @@ interface IRoycoAccountant {
         address kernel;
         uint64 stProtocolFeeWAD;
         uint64 jtProtocolFeeWAD;
+        uint64 yieldShareProtocolFeeWAD;
         uint64 coverageWAD;
         uint96 betaWAD;
         address ydm;
@@ -49,22 +51,21 @@ interface IRoycoAccountant {
      * @custom:field lltvWAD - The liquidation loan to value (LLTV) for this market, scaled to WAD precision
      * @custom:field fixedTermDurationSeconds - The duration of a fixed term for this market in seconds
      * @custom:field coverageWAD - The coverage percentage that the senior tranche is expected to be protected by, scaled to WAD precision
-     * @custom:field stProtocolFeeWAD - The market's configured protocol fee percentage taken from yield earned by the senior tranche, scaled to WAD precision
-     * @custom:field jtProtocolFeeWAD - The market's configured protocol fee percentage taken from yield earned by the junior tranche, scaled to WAD precision
      * @custom:field betaWAD - JT's percentage sensitivity to the same downside stress that affects ST, scaled to WAD precision
      *                         For example, beta is 0 when JT is in the RFR and 1e18 (100%) when JT is in the same opportunity as senior
-     * @custom:field ydm - The market's Yield Distribution Model (YDM), responsible for determining the ST's yield split between ST and JT
+     * @custom:field stProtocolFeeWAD - The market's configured protocol fee percentage charged from yield earned by the senior tranche, scaled to WAD precision
+     * @custom:field jtProtocolFeeWAD - The market's configured protocol fee percentage charged from yield earned by the junior tranche, scaled to WAD precision
+     * @custom:field yieldShareProtocolFeeWAD - The market's configured protocol fee percentage charged from the yield share (risk premium) payed from the senior tranche yield to the junior tranche, scaled to WAD precision
+     * @custom:field ydm - The market's Yield Distribution Model (YDM), responsible for determining the yield share (risk premium) payed from the senior tranche yield to the junior tranche
      * @custom:field lastSTRawNAV - The last recorded pure NAV (excluding any coverage taken and yield shared) of the senior tranche
      * @custom:field lastJTRawNAV - The last recorded pure NAV (excluding any coverage given and yield shared) of the junior tranche
+     * @custom:field lastLiquidationProceedsNAV - The last recorded liquidation proceeds NAV from prior senior tranche liquidation events
      * @custom:field lastSTEffectiveNAV - The last recorded effective NAV (including any prior applied coverage, ST yield distribution, and uncovered losses) of the senior tranche
      * @custom:field lastJTEffectiveNAV - The last recorded effective NAV (including any prior provided coverage, JT yield, ST yield distribution, and JT losses) of the junior tranche
      * @custom:field lastSTImpermanentLoss - The impermanent loss that ST has suffered after exhausting JT's loss-absorption buffer
      *                                   This represents the first claim on capital that the senior tranche has on future ST and JT recoveries
-     * @custom:field lastJTCoverageImpermanentLoss - The impermanent loss that JT has suffered after providing coverage for ST losses
+     * @custom:field lastJTImpermanentLoss - The impermanent loss that JT has suffered after providing coverage for ST losses
      *                                           This represents the second claim on capital that the junior tranche has on future ST recoveries
-     * @custom:field lastJTSelfImpermanentLoss - The impermanent loss that JT has suffered from depreciaiton of its own NAV
-     *                                           This represents the first claim on capital that the junior tranche has on future JT recoveries
-     * @custom:field lastSTLiquidationProceeds - The senior tranche's entitlement to liquidation proceeds from prior liquidation events
      * @custom:field twJTYieldShareAccruedWAD - The time-weighted junior tranche yield share (YDM output) since the last yield distribution, scaled to WAD precision
      * @custom:field lastAccrualTimestamp - The timestamp at which the time-weighted JT yield share accumulator was last updated
      * @custom:field lastDistributionTimestamp - The timestamp at which the last ST yield distribution occurred
@@ -80,18 +81,18 @@ interface IRoycoAccountant {
         uint32 fixedTermEndTimestamp;
         uint64 lltvWAD;
         uint64 coverageWAD;
+        uint96 betaWAD;
         uint64 stProtocolFeeWAD;
         uint64 jtProtocolFeeWAD;
-        uint96 betaWAD;
+        uint64 yieldShareProtocolFeeWAD;
         address ydm;
         NAV_UNIT lastSTRawNAV;
         NAV_UNIT lastJTRawNAV;
+        NAV_UNIT lastLiquidationProceedsNAV;
         NAV_UNIT lastSTEffectiveNAV;
         NAV_UNIT lastJTEffectiveNAV;
         NAV_UNIT lastSTImpermanentLoss;
-        NAV_UNIT lastJTCoverageImpermanentLoss;
-        NAV_UNIT lastJTSelfImpermanentLoss;
-        NAV_UNIT lastSTLiquidationProceeds;
+        NAV_UNIT lastJTImpermanentLoss;
         uint192 twJTYieldShareAccruedWAD;
         uint32 lastAccrualTimestamp;
         uint32 lastDistributionTimestamp;
@@ -138,6 +139,12 @@ interface IRoycoAccountant {
     event JuniorTrancheProtocolFeeUpdated(uint64 jtProtocolFeeWAD);
 
     /**
+     * @notice Emitted when the yield share (risk premium) protocol fee percentage is updated
+     * @param yieldShareProtocolFeeWAD The new protocol fee percentage charged from the yield share (risk premium) payed from the senior tranche yield to the junior tranche, scaled to WAD precision
+     */
+    event YieldShareProtocolFeeUpdated(uint64 yieldShareProtocolFeeWAD);
+
+    /**
      * @notice Emitted when the coverage percentage requirement is updated
      * @param coverageWAD The new coverage percentage, scaled to WAD precision
      */
@@ -175,9 +182,9 @@ interface IRoycoAccountant {
 
     /**
      * @notice Emitted when JT's coverage loss is realized when transitioning from a fixed term state to a perpetual state
-     * @param jtCoverageImpermanentLossErased The amount of JT coverage loss erased when transitioning from a fixed term state to a perpetual state
+     * @param jtImpermanentLossErased The amount of JT coverage loss erased when transitioning from a fixed term state to a perpetual state
      */
-    event JTCoverageImpermanentLossErased(NAV_UNIT jtCoverageImpermanentLossErased);
+    event JTCoverageImpermanentLossErased(NAV_UNIT jtImpermanentLossErased);
 
     /// @notice Thrown when the accountant's coverage config is invalid
     error INVALID_COVERAGE_CONFIG();
@@ -197,6 +204,9 @@ interface IRoycoAccountant {
     /// @notice Thrown when the caller of the function is not the accountant's configured Royco Kernel
     error ONLY_ROYCO_KERNEL();
 
+    /// @notice Thrown a liquidation event leads to a loss in the market's liquidation proceeds
+    error LIQUIDATION_PROCEEDS_MUST_NOT_DECREASE();
+
     /// @notice Thrown when the sum of the raw NAVs don't equal the sum of the effective NAVs of both tranches
     error NAV_CONSERVATION_VIOLATION();
 
@@ -207,47 +217,60 @@ interface IRoycoAccountant {
     error COVERAGE_REQUIREMENT_UNSATISFIED();
 
     /**
-     * @notice Synchronizes the effective NAVs and impermanent losses of both tranches before any tranche operation (deposit or withdrawal)
+     * @notice Synchronizes the effective NAVs and impermanent losses of both tranches
      * @dev Accrues JT yield share over time based on the market's YDM output
-     * @dev Applies unrealized PnL and yield distribution
+     * @dev Applies unrealized PnL, liquidation settlements, and yield distribution
      * @dev Persists updated NAV and impermanent loss checkpoints for the next sync to use as reference
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
+     * @param _liquidationProceedsNAV The market's current liquidation proceeds received from prior liquidation events of ST effective NAV
+     * @param _liquidationBonusNAV The liquidation bonus NAV paid to the liquidator (if this sync is meant to reconcile a liquidation event)
+     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
-    function preOpSyncTrancheAccounting(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external returns (SyncedAccountingState memory state);
+    function syncTrancheAccounting(
+        NAV_UNIT _stRawNAV,
+        NAV_UNIT _jtRawNAV,
+        NAV_UNIT _liquidationProceedsNAV,
+        NAV_UNIT _liquidationBonusNAV
+    )
+        external
+        returns (SyncedAccountingState memory state);
 
     /**
      * @notice Previews a synchronization of tranche NAVs based on the underlying PNL(s) and their effects on the current state of the loss waterfall
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
+     * @param _liquidationProceedsNAV The market's current liquidation proceeds received from prior liquidation events of ST effective NAV
+     * @param _liquidationBonusNAV The liquidation bonus NAV paid to the liquidator (if this sync is meant to reconcile a liquidation event)
+     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
-    function previewSyncTrancheAccounting(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external view returns (SyncedAccountingState memory state);
+    function previewSyncTrancheAccounting(
+        NAV_UNIT _stRawNAV,
+        NAV_UNIT _jtRawNAV,
+        NAV_UNIT _liquidationProceedsNAV,
+        NAV_UNIT _liquidationBonusNAV
+    )
+        external
+        view
+        returns (SyncedAccountingState memory state);
 
     /**
      * @notice Applies post-operation (deposit and withdrawal) raw NAV deltas to effective NAV checkpoints
      * @dev Interprets deltas strictly as deposits/withdrawals with no yield or coverage logic
      * @dev Exactly one of the following must be true: ST deposited, JT deposited, or withdrawal occurred
      * @param _op The operation being executed in between the pre and post synchronizations
-     * @param _stPostOpRawNAV The post-op senior tranche's raw NAV
-     * @param _jtPostOpRawNAV The post-op junior tranche's raw NAV
-     * @param _stDepositNAV The pre-op NAV deposited into the senior tranche (0 if not a ST deposit)
-     * @param _jtDepositNAV The pre-op NAV deposited into the junior tranche (0 if not a JT deposit)
-     * @param _stRedemptionNAV The pre-op NAV withdrawn from the senior tranche's raw NAV (0 if not a redeem)
-     * @param _jtRedemptionNAV The pre-op NAV withdrawn from the junior tranche's raw NAV (0 if not a redeem)
-     * @param _stLiquidationProceedsRedemptionNAV The NAV withdrawn from the senior tranche's liquidation proceeds (0 if not a ST redeem)
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
+     * @param _stRawNAV The post-op senior tranche's raw NAV
+     * @param _jtRawNAV The post-op junior tranche's raw NAV
+     * @param _liquidationProceedsNAV The market's current liquidation proceeds received from prior liquidation events of ST effective NAV
+     * @param _stRedemptionBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions
+     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function postOpSyncTrancheAccounting(
         Operation _op,
-        NAV_UNIT _stPostOpRawNAV,
-        NAV_UNIT _jtPostOpRawNAV,
-        NAV_UNIT _stDepositNAV,
-        NAV_UNIT _jtDepositNAV,
-        NAV_UNIT _stRedemptionNAV,
-        NAV_UNIT _jtRedemptionNAV,
-        NAV_UNIT _stLiquidationProceedsRedemptionNAV
+        NAV_UNIT _stRawNAV,
+        NAV_UNIT _jtRawNAV,
+        NAV_UNIT _liquidationProceedsNAV,
+        NAV_UNIT _stRedemptionBonusNAV
     )
         external
         returns (SyncedAccountingState memory state);
@@ -258,48 +281,18 @@ interface IRoycoAccountant {
      * @dev Reverts if the coverage requirement is unsatisfied
      * @dev Exactly one of the following must be true: ST deposited, JT deposited, or withdrawal occurred
      * @param _op The operation being executed in between the pre and post synchronizations
-     * @param _stPostOpRawNAV The post-op senior tranche's raw NAV
-     * @param _jtPostOpRawNAV The post-op junior tranche's raw NAV
-     * @param _stDepositNAV The pre-op NAV deposited into the senior tranche (0 if not a ST deposit)
-     * @param _jtDepositNAV The pre-op NAV deposited into the junior tranche (0 if not a JT deposit)
-     * @param _stRedemptionNAV The pre-op NAV withdrawn from the senior tranche's raw NAV
-     * @param _jtRedemptionNAV The pre-op NAV withdrawn from the junior tranche's raw NAV
-     * @param _stLiquidationProceedsRedemptionNAV The NAV withdrawn from the senior tranche's liquidation proceeds (0 if not a ST redeem)
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
+     * @param _stRawNAV The post-op senior tranche's raw NAV
+     * @param _jtRawNAV The post-op junior tranche's raw NAV
+     * @param _liquidationProceedsNAV The market's current liquidation proceeds received from prior liquidation events of ST effective NAV
+     * @param _stRedemptionBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions
+     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function postOpSyncTrancheAccountingAndEnforceCoverage(
         Operation _op,
-        NAV_UNIT _stPostOpRawNAV,
-        NAV_UNIT _jtPostOpRawNAV,
-        NAV_UNIT _stDepositNAV,
-        NAV_UNIT _jtDepositNAV,
-        NAV_UNIT _stRedemptionNAV,
-        NAV_UNIT _jtRedemptionNAV,
-        NAV_UNIT _stLiquidationProceedsRedemptionNAV
-    )
-        external
-        returns (SyncedAccountingState memory state);
-
-    /**
-     * @notice Synchronizes accountant state after a liquidation operation
-     * @dev Handles shortfall waterfall: JT absorbs first, remainder becomes ST bad debt
-     * @param _stPostLiquidationRawNAV The post-liquidation senior tranche's raw NAV
-     * @param _jtPostLiquidationRawNAV The post-liquidation junior tranche's raw NAV
-     * @param _stSeizedNAV The NAV value of ST assets seized/demanded by liquidator from ST effective NAV
-     * @param _jtSeizedNAV The NAV value of JT assets seized/demanded by liquidator from ST effective NAV
-     * @param _stBonusNAV The NAV value of ST assets payed as a bonus incentive to the liquidator from JT effective NAV
-     * @param _jtBonusNAV The NAV value of JT assets payed as a bonus incentive to the liquidator from JT effective NAV
-     * @param _settlementNAV The actual NAV value of the payment received from liquidator in exchange for the demand assets and the bonus
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
-     */
-    function postLiquidationSyncTrancheAccounting(
-        NAV_UNIT _stPostLiquidationRawNAV,
-        NAV_UNIT _jtPostLiquidationRawNAV,
-        NAV_UNIT _stSeizedNAV,
-        NAV_UNIT _jtSeizedNAV,
-        NAV_UNIT _stBonusNAV,
-        NAV_UNIT _jtBonusNAV,
-        NAV_UNIT _settlementNAV
+        NAV_UNIT _stRawNAV,
+        NAV_UNIT _jtRawNAV,
+        NAV_UNIT _liquidationProceedsNAV,
+        NAV_UNIT _stRedemptionBonusNAV
     )
         external
         returns (SyncedAccountingState memory state);
@@ -316,15 +309,17 @@ interface IRoycoAccountant {
      * @dev Always rounds in favor of senior tranche protection
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
+     * @param _liquidationProceedsNAV The market's current liquidation proceeds received from prior liquidation events of ST effective NAV
      * @return maxSTDeposit The maximum assets depositable into the senior tranche without violating the market's coverage requirement
      */
-    function maxSTDepositGivenCoverage(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external view returns (NAV_UNIT maxSTDeposit);
+    function maxSTDepositGivenCoverage(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV, NAV_UNIT _liquidationProceedsNAV) external view returns (NAV_UNIT maxSTDeposit);
 
     /**
      * @notice Returns the maximum assets withdrawable from the junior tranche without violating the market's coverage requirement
      * @dev Always rounds in favor of senior tranche protection
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
+     * @param _liquidationProceedsNAV The market's current liquidation proceeds received from prior liquidation events of ST effective NAV
      * @param _jtClaimOnStUnits The total claims on ST assets that the junior tranche has denominated in NAV units
      * @param _jtClaimOnJtUnits The total claims on JT assets that the junior tranche has denominated in NAV units
      * @return totalNAVClaimable The maximum NAV that can be claimed from the junior tranche without violating the market's coverage requirement
@@ -334,6 +329,7 @@ interface IRoycoAccountant {
     function maxJTWithdrawalGivenCoverage(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
+        NAV_UNIT _liquidationProceedsNAV,
         NAV_UNIT _jtClaimOnStUnits,
         NAV_UNIT _jtClaimOnJtUnits
     )
@@ -362,6 +358,13 @@ interface IRoycoAccountant {
      * @param _jtProtocolFeeWAD The new protocol fee percentage charged on junior tranche yield, scaled to WAD precision
      */
     function setJuniorTrancheProtocolFee(uint64 _jtProtocolFeeWAD) external;
+
+    /**
+     * @notice Updates the yield share (risk premium) protocol fee percentage for this market
+     * @dev Only callable by a designated admin
+     * @param _yieldShareProtocolFeeWAD The new protocol fee percentage charged on the yield share (risk premium) payed from senior tranche yield to the junior tranche, scaled to WAD precision
+     */
+    function setYieldShareProtocolFee(uint64 _yieldShareProtocolFeeWAD) external;
 
     /**
      * @notice Updates the coverage percentage requirement for this market

@@ -177,8 +177,12 @@ contract FluidStETH_Test is ERC4626_TestBase {
         DeployScript.ERC4626STERC4626JTInKindAssetsKernelParams memory kernelParams =
             DeployScript.ERC4626STERC4626JTInKindAssetsKernelParams({ stVault: _getSTVault(), jtVault: _getJTVault() });
 
-        DeployScript.AdaptiveCurveYDMParams memory ydmParams =
-            DeployScript.AdaptiveCurveYDMParams({ jtYieldShareAtTargetUtilWAD: 0.3e18, jtYieldShareAtFullUtilWAD: 1e18 });
+        DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
+            jtYieldShareAtZeroUtilWAD: 0.3e18, // Y_0 = Y_T (same as target)
+            jtYieldShareAtTargetUtilWAD: 0.3e18,
+            jtYieldShareAtFullUtilWAD: 1e18,
+            maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
+        });
 
         // Build role assignments using the centralized function
         DeployScript.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
@@ -205,7 +209,7 @@ contract FluidStETH_Test is ERC4626_TestBase {
             betaWAD: 1e18,
             lltvWAD: LLTV,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            ydmType: DeployScript.YDMType.AdaptiveCurve,
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(ydmParams),
             roleAssignments: roleAssignments
         });
@@ -589,7 +593,7 @@ contract FluidStETH_Test is ERC4626_TestBase {
         IRoycoAccountant.RoycoAccountantState memory stateAfter = ACCOUNTANT.getState();
 
         // If there's JT coverage IL > dust tolerance, should be FIXED_TERM
-        if (toUint256(stateAfter.lastJTCoverageImpermanentLoss) > toUint256(ACCOUNTANT.getState().stNAVDustTolerance)) {
+        if (toUint256(stateAfter.lastJTImpermanentLoss) > toUint256(ACCOUNTANT.getState().stNAVDustTolerance)) {
             assertEq(uint256(stateAfter.lastMarketState), uint256(MarketState.FIXED_TERM), "Should transition to FIXED_TERM after loss");
         }
 
@@ -631,7 +635,7 @@ contract FluidStETH_Test is ERC4626_TestBase {
         assertEq(uint256(stateAfterExpiry.lastMarketState), uint256(MarketState.PERPETUAL), "Should return to PERPETUAL after term expiry");
 
         // JT coverage IL should be erased
-        assertEq(toUint256(stateAfterExpiry.lastJTCoverageImpermanentLoss), 0, "JT coverage IL should be erased after term expiry");
+        assertEq(toUint256(stateAfterExpiry.lastJTImpermanentLoss), 0, "JT coverage IL should be erased after term expiry");
     }
 
     /// @notice Test FIXED_TERM → PERPETUAL transition via coverage restoration
@@ -666,9 +670,9 @@ contract FluidStETH_Test is ERC4626_TestBase {
         IRoycoAccountant.RoycoAccountantState memory stateAfterYield = ACCOUNTANT.getState();
 
         // If coverage is restored (JT coverage IL <= dust tolerance), should be PERPETUAL
-        if (toUint256(stateAfterYield.lastJTCoverageImpermanentLoss) <= toUint256(stateAfterYield.stNAVDustTolerance)) {
+        if (toUint256(stateAfterYield.lastJTImpermanentLoss) <= toUint256(stateAfterYield.stNAVDustTolerance)) {
             // Note: May still be FIXED_TERM until IL is completely zero per the accountant logic
-            emit log_named_uint("JT Coverage IL after yield", toUint256(stateAfterYield.lastJTCoverageImpermanentLoss));
+            emit log_named_uint("JT Coverage IL after yield", toUint256(stateAfterYield.lastJTImpermanentLoss));
         }
 
         _assertNAVConservation();
@@ -906,7 +910,7 @@ contract FluidStETH_Test is ERC4626_TestBase {
         _depositST(BOB_ADDRESS, stAmount);
 
         NAV_UNIT initialJTNav = JT.totalAssets().nav;
-        uint256 initialJTCoverageIL = toUint256(ACCOUNTANT.getState().lastJTCoverageImpermanentLoss);
+        uint256 initialJTCoverageIL = toUint256(ACCOUNTANT.getState().lastJTImpermanentLoss);
 
         // Many yield cycles
         uint256 numCycles = 100;
@@ -923,7 +927,7 @@ contract FluidStETH_Test is ERC4626_TestBase {
         }
 
         NAV_UNIT finalJTNav = JT.totalAssets().nav;
-        uint256 finalJTCoverageIL = toUint256(ACCOUNTANT.getState().lastJTCoverageImpermanentLoss);
+        uint256 finalJTCoverageIL = toUint256(ACCOUNTANT.getState().lastJTImpermanentLoss);
 
         emit log_named_uint("Number of yield cycles", numCycles);
         emit log_named_uint("Initial JT NAV", toUint256(initialJTNav));
