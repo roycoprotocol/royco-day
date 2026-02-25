@@ -366,7 +366,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         if (state.ltvWAD >= lltvWAD) {
             (, AssetClaims memory jtClaims) = _marshalTrancheAssetClaims(state);
             (NAV_UNIT bonusNAV, BASE_UNIT bonusFromJTClaimsOnLP, TRANCHE_UNIT bonusFromJTClaimsOnST, TRANCHE_UNIT bonusFromJTClaimsOnSelf) =
-                _computeLiquidationBonus(claimsOnExposureNAV, lltvWAD, jtClaims);
+                _computeSelfLiquidationBonus(claimsOnExposureNAV, lltvWAD, jtClaims);
             stSelfLiquidationBonusNAV = bonusNAV;
 
             // Add the bonus to the asset claims to withdraw
@@ -483,7 +483,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      * @return bonusFromJTClaimsOnST Bonus sourced from JT's claim on ST assets
      * @return bonusFromJTClaimsOnSelf Bonus sourced from JT's claim on JT assets
      */
-    function _computeLiquidationBonus(
+    function _computeSelfLiquidationBonus(
         NAV_UNIT _stNAVToLiquidate,
         uint64 _lltvWAD,
         AssetClaims memory _jtClaims

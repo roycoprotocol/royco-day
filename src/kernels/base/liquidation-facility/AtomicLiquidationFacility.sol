@@ -122,7 +122,7 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
 
         // Get the bonus for the liquidation
         (NAV_UNIT bonusNAV, BASE_UNIT bonusFromJTClaimsOnLP, TRANCHE_UNIT bonusFromJTClaimsOnST, TRANCHE_UNIT bonusFromJTClaimsOnSelf) =
-            _computeLiquidationBonus(settlement, lltvWAD, jtClaims);
+            _computeSelfLiquidationBonus(settlement, lltvWAD, jtClaims);
 
         // Calculate total assets to free (demanded + bonus)
         TRANCHE_UNIT totalSTAssetsToFree = _stAssetsToLiquidate + bonusFromJTClaimsOnST;
@@ -152,10 +152,11 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
 
     /**
      * @inheritdoc RoycoKernel
+     * @dev This bonus is used for self liquidations in addition to third-party liquidations for this facility
      * @dev Computes a dynamic liquidation bonus based on the market's LLTV and the ST NAV to liquidate (only exposure, no liquidation proceeds)
      * @dev The bonus is sourced from JT's claims, prioritizing LP assets first, then JT assets, and then ST assets
      */
-    function _computeLiquidationBonus(
+    function _computeSelfLiquidationBonus(
         NAV_UNIT _stNAVToLiquidate,
         uint64 _lltvWAD,
         AssetClaims memory _jtClaims
@@ -172,6 +173,8 @@ abstract contract AtomicLiquidationFacility is RoycoKernel {
 
         // Compute bonus NAV for the liquidator: (LIF - 1) * navToLiquidate
         NAV_UNIT expectedBonusNAV = toNAVUnits(toUint256(_stNAVToLiquidate).mulDiv(liquidationIncentiveFactorWAD - WAD, WAD, Math.Rounding.Floor));
+        // Bound the bonus NAV to the JT effective NAV
+        expectedBonusNAV = UnitsMathLib.min(expectedBonusNAV, _jtClaims.nav);
 
         // Source bonus from JT's claims, prioritizing LP assets first, then JT assets, and then ST assets
         bonusFromJTClaimsOnLP = UnitsMathLib.min(convertNAVUnitsToBaseUnits(expectedBonusNAV), _jtClaims.liquidationProceeds);
