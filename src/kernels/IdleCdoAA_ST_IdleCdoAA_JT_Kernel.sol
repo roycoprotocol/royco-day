@@ -3,13 +3,10 @@ pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/ERC20Upgradeable.sol";
 import { IIdleCDO } from "../interfaces/external/idle-finance/IIdleCDO.sol";
+import { IRoycoKernel } from "../interfaces/kernel/IRoycoKernel.sol";
 import { WAD_DECIMALS } from "../libraries/Constants.sol";
-import { RoycoKernelInitParams } from "../libraries/RoycoKernelStorageLib.sol";
-import { AtomicLiquidationFacility } from "./base/liquidation-facility/AtomicLiquidationFacility.sol";
+import { RoycoKernel } from "./base/RoycoKernel.sol";
 import { IdenticalAssetsOracleQuoter } from "./base/quoter/base/IdenticalAssetsOracleQuoter.sol";
-import {
-    YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsOracleQuoter_Kernel
-} from "./base/recipe/YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsOracleQuoter_Kernel.sol";
 
 /**
  * @title IdleCdoAA_ST_IdleCdoAA_JT_Kernel
@@ -19,7 +16,7 @@ import {
  * @dev Example: Pareto's Falconx's Prime Brokerage Vault at https://app.pareto.credit/vault#0xC26A6Fa2C37b38E549a4a1807543801Db684f99C
  * @dev https://docs.idle.finance/
  */
-contract IdleCdoAA_ST_IdleCdoAA_JT_Kernel is YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsOracleQuoter_Kernel, AtomicLiquidationFacility {
+contract IdleCdoAA_ST_IdleCdoAA_JT_Kernel is RoycoKernel, IdenticalAssetsOracleQuoter {
     /// @notice The address of the IdleCDO
     address public immutable IDLE_CDO;
 
@@ -37,12 +34,7 @@ contract IdleCdoAA_ST_IdleCdoAA_JT_Kernel is YieldBearingERC20_ST_YieldBearingER
      * @param _params The standard construction parameters for the Royco kernel
      * @param _idleCDO The address of the IdleCDO
      */
-    constructor(
-        RoycoKernelConstructionParams memory _params,
-        address _idleCDO
-    )
-        YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsOracleQuoter_Kernel(_params)
-    {
+    constructor(RoycoKernelConstructionParams memory _params, address _idleCDO) RoycoKernel(_params) {
         require(_idleCDO != address(0), NULL_IDLE_CDO_ADDRESS());
         IDLE_CDO = _idleCDO;
 
@@ -59,9 +51,11 @@ contract IdleCdoAA_ST_IdleCdoAA_JT_Kernel is YieldBearingERC20_ST_YieldBearingER
      * @notice Initializes the Royco Kernel
      * @param _params The standard initialization parameters for the Royco Kernel
      */
-    function initialize(RoycoKernelInitParams calldata _params) external initializer {
-        // The initial conversion rate is set to the sentinel value so that the reUSD -> REUSD_QUOTE_TOKEN conversion rate is queried directly from the insurance capital layer
-        __YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsOracleQuoter_Kernel_init(_params, SENTINEL_CONVERSION_RATE);
+    function initialize(IRoycoKernel.RoycoKernelInitParams calldata _params) external initializer {
+        // Initialize the base kernel state
+        __RoycoKernel_init(_params);
+        // The initial conversion rate is set to the sentinel value so that the IdleCDO's AA tranche virtual price is queried directly from the IdleCDO
+        __IdenticalAssetsOracleQuoter_init_unchained(SENTINEL_CONVERSION_RATE);
     }
 
     /// @inheritdoc IdenticalAssetsOracleQuoter

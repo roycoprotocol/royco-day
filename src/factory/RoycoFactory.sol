@@ -125,9 +125,8 @@ contract RoycoFactory is AccessManager, RolesConfiguration, IRoycoFactory {
         require(address(_roycoMarket.seniorTranche.kernel()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_SENIOR_TRANCHE());
         require(address(_roycoMarket.juniorTranche.kernel()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_JUNIOR_TRANCHE());
 
-        (,,,,, address accountant,) = _roycoMarket.kernel.getState();
         // Check that the accountant is set on the kernel
-        require(address(accountant) == address(_roycoMarket.accountant), INVALID_ACCOUNTANT_ON_KERNEL());
+        require(address(_roycoMarket.kernel.ACCOUNTANT()) == address(_roycoMarket.accountant), INVALID_ACCOUNTANT_ON_KERNEL());
 
         // Check that the kernel is set on the accountant
         require(address(_roycoMarket.accountant.getState().kernel) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_ACCOUNTANT());
