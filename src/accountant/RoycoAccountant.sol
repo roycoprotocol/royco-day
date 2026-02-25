@@ -35,7 +35,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     /// @dev Enforces that the kernel's accounting is synced before the function is called
     /// forge-lint: disable-next-item(unwrapped-modifier-logic)
     modifier withSyncedAccounting() {
-        IRoycoKernel(_getRoycoAccountantStorage().kernel).syncTrancheAccounting();
+        IRoycoKernel(_getRoycoAccountantStorage().kernel).preOpSyncTrancheAccounting();
         _;
     }
 
@@ -85,7 +85,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     }
 
     /// @inheritdoc IRoycoAccountant
-    function syncTrancheAccounting(
+    function preOpSyncTrancheAccounting(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV
     )
@@ -127,7 +127,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
 
         // If the JT Coverage IL was erased, signal the resetting
         if (jtImpermanentLossErased != ZERO_NAV_UNITS) {
-            emit JTCoverageImpermanentLossErased(jtImpermanentLossErased);
+            emit JTImpermanentLossReset(jtImpermanentLossErased);
         }
 
         emit TrancheAccountingSynced(state);
@@ -186,11 +186,11 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             NAV_UNIT totalRedemptionNAV = (toNAVUnits(-deltaST) + toNAVUnits(-deltaJT));
             if (_op == Operation.ST_REDEEM) {
                 require(totalRedemptionNAV > ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
-                // Reduce JT effective NAV by the the bonus provided from its assets (bounded to JT effective NAV)
-                NAV_UNIT clampedBonusNAV = UnitsMathLib.min(_stRedemptionBonusNAV, jtEffectiveNAV);
-                jtEffectiveNAV = jtEffectiveNAV - clampedBonusNAV;
+                // Reduce JT effective NAV by the the bonus provided from its assets (clamped to JT effective NAV)
+                NAV_UNIT clampedSTRedemptionBonusNAV = UnitsMathLib.min(_stRedemptionBonusNAV, jtEffectiveNAV);
+                jtEffectiveNAV = jtEffectiveNAV - clampedSTRedemptionBonusNAV;
                 // Reduce ST effective NAV by the total redemptions without the bonus provided from JT effective NAV
-                stEffectiveNAV = stEffectiveNAV - (totalRedemptionNAV - clampedBonusNAV);
+                stEffectiveNAV = stEffectiveNAV - (totalRedemptionNAV - clampedSTRedemptionBonusNAV);
                 // The withdrawing senior LP has realized its proportional share of past uncovered losses and associated recovery optionality, rounding in favor of senior
                 if (stImpermanentLoss != ZERO_NAV_UNITS) {
                     stImpermanentLoss = stImpermanentLoss.mulDiv(stEffectiveNAV, $.lastSTEffectiveNAV, Math.Rounding.Ceil);
@@ -201,11 +201,11 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                 require(totalRedemptionNAV > ZERO_NAV_UNITS && _stRedemptionBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
                 // The actual amount withdrawn from JT effective NAV could be from both tranches (its own share of its NAV, ST yield share, IL repayments, etc.)
                 jtEffectiveNAV = jtEffectiveNAV - totalRedemptionNAV;
-            }
-            // The withdrawing junior LP has realized its proportional share of past JT losses from coverage applied and its associated recovery optionality, rounding in favor of senior
-            if (jtImpermanentLoss != ZERO_NAV_UNITS) {
-                jtImpermanentLoss = jtImpermanentLoss.mulDiv(jtEffectiveNAV, $.lastJTEffectiveNAV, Math.Rounding.Floor);
-                $.lastJTImpermanentLoss = jtImpermanentLoss;
+                // The withdrawing junior LP has realized its proportional share of past JT losses from coverage applied and its associated recovery optionality, rounding in favor of senior
+                if (jtImpermanentLoss != ZERO_NAV_UNITS) {
+                    jtImpermanentLoss = jtImpermanentLoss.mulDiv(jtEffectiveNAV, $.lastJTEffectiveNAV, Math.Rounding.Floor);
+                    $.lastJTImpermanentLoss = jtImpermanentLoss;
+                }
             }
         }
 
@@ -220,6 +220,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
 
         // Marshal the post-sync state and return to the caller
         state = SyncedAccountingState({
+            // The market state is guaranteed to be identical to the persisted
             marketState: $.lastMarketState,
             stRawNAV: _stRawNAV,
             jtRawNAV: _jtRawNAV,
@@ -227,6 +228,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             jtEffectiveNAV: jtEffectiveNAV,
             stImpermanentLoss: stImpermanentLoss,
             jtImpermanentLoss: jtImpermanentLoss,
+            // No protocol fees taken on deposit or withdrawal
             stProtocolFeeAccrued: ZERO_NAV_UNITS,
             jtProtocolFeeAccrued: ZERO_NAV_UNITS,
             // Additional data about the market's post-sync state
@@ -749,7 +751,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         $.fixedTermDurationSeconds = _fixedTermDurationSeconds;
         // If the specified duration is 0, the market will permanently be in a perpetual state
         if (_fixedTermDurationSeconds == 0) {
-            emit JTCoverageImpermanentLossErased($.lastJTImpermanentLoss);
+            emit JTImpermanentLossReset($.lastJTImpermanentLoss);
             $.lastJTImpermanentLoss = ZERO_NAV_UNITS;
             $.lastMarketState = MarketState.PERPETUAL;
         }

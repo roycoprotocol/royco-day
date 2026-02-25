@@ -144,7 +144,7 @@ interface IRoycoKernel {
      * @dev Only executes a pre-op sync because there is no operation being executed in the same call as this sync
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
-    function syncTrancheAccounting() external returns (SyncedAccountingState memory state);
+    function preOpSyncTrancheAccounting() external returns (SyncedAccountingState memory state);
 
     /**
      * @notice Previews a synchronization of the raw and effective NAVs of both tranches

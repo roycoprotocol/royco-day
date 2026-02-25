@@ -23,10 +23,10 @@ library UtilsLib {
      * @dev Formally: Utilization = ((ST_RAW_NAV + (JT_RAW_NAV * β)) * COV) / JT_EFFECTIVE_NAV
      * @param _stRawNAV The raw net asset value of the senior tranche invested assets
      * @param _jtRawNAV The raw net asset value of the junior tranche invested assets
-     * @param _betaWAD The JT's sensitivity to the same downside stress that affects ST scaled to WAD precision
+     * @param _betaWAD The JT's sensitivity to the same downside stress that affects ST, scaled to WAD precision
      *                 For example, beta is 0 when JT is in the RFR and 1 when JT is in the same opportunity as senior
-     * @param _coverageWAD The ratio of current total exposure that is expected to be covered by the junior capital scaled to WAD precision
-     * @param _jtEffectiveNAV The junior tranche net asset value after giving coverage, JT yield, ST yield distribution, and JT losses
+     * @param _coverageWAD The ratio of current total exposure that is expected to be protected by the market's junior capital, scaled to WAD precision
+     * @param _jtEffectiveNAV The junior tranche net asset value after absorbing JT losses, providing coverage to ST, and accruing JT yield and ST yield share (risk premium)
      * @return utilization The utilization of the Royco market, scaled to WAD precision
      */
     function computeUtilization(
@@ -85,7 +85,6 @@ library UtilsLib {
         scaledClaims.nav = _claims.nav.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
         scaledClaims.stAssets = _claims.stAssets.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
         scaledClaims.jtAssets = _claims.jtAssets.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
-        scaledClaims.liquidationProceeds = _claims.liquidationProceeds.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
     }
 
     /**
@@ -107,6 +106,5 @@ library UtilsLib {
         scaledClaims.nav = _claims.nav.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
         scaledClaims.stAssets = _claims.stAssets.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
         scaledClaims.jtAssets = _claims.jtAssets.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
-        scaledClaims.liquidationProceeds = _claims.liquidationProceeds.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
     }
 }

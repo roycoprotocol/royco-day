@@ -33,13 +33,11 @@ enum MarketState {
  * @dev A struct representing claims on senior tranche assets, junior tranche assets, and NAV
  * @custom:field stAssets - The claim on senior tranche assets denominated in ST's tranche units
  * @custom:field jtAssets - The claim on junior tranche assets denominated in JT's tranche units
- * @custom:field liquidationProceeds - Settlement received from liquidation events, in liquidation asset units (always 0 for JT claims)
  * @custom:field nav - The net asset value of these claims in NAV units
  */
 struct AssetClaims {
     TRANCHE_UNIT stAssets;
     TRANCHE_UNIT jtAssets;
-    BASE_UNIT liquidationProceeds;
     NAV_UNIT nav;
 }
 

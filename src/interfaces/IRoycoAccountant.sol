@@ -179,10 +179,10 @@ interface IRoycoAccountant {
     event JuniorTrancheDustToleranceUpdated(NAV_UNIT jtNAVDustTolerance);
 
     /**
-     * @notice Emitted when JT's coverage loss is realized when transitioning from a fixed term state to a perpetual state
+     * @notice Emitted when JT's coverage loss is realized and reset to zero when transitioning from a fixed term state to a perpetual state
      * @param jtImpermanentLossErased The amount of JT coverage loss erased when transitioning from a fixed term state to a perpetual state
      */
-    event JTCoverageImpermanentLossErased(NAV_UNIT jtImpermanentLossErased);
+    event JTImpermanentLossReset(NAV_UNIT jtImpermanentLossErased);
 
     /// @notice Thrown when the accountant's coverage config is invalid
     error INVALID_COVERAGE_CONFIG();
@@ -213,14 +213,14 @@ interface IRoycoAccountant {
 
     /**
      * @notice Synchronizes the effective NAVs and impermanent losses of both tranches by marking them to market
+     * @dev Must be called before any NAV mutating operation
      * @dev Accrues JT yield share over time based on the market's YDM output
-     * @dev Applies unrealized PNL and yield distribution (risk premium)
      * @dev Persists updated NAV and impermanent loss checkpoints for the next sync to use as reference
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
-    function syncTrancheAccounting(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external returns (SyncedAccountingState memory state);
+    function preOpSyncTrancheAccounting(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external returns (SyncedAccountingState memory state);
 
     /**
      * @notice Previews a synchronization of the effective NAVs and impermanent losses of both tranches by marking them to market
@@ -231,8 +231,8 @@ interface IRoycoAccountant {
     function previewSyncTrancheAccounting(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external view returns (SyncedAccountingState memory state);
 
     /**
-     * @notice Applies post-operation (deposit and withdrawal) raw NAV deltas to effective NAV checkpoints
-     * @dev Interprets deltas strictly as deposits/withdrawals with no yield or coverage logic
+     * @notice Applies post-operation (deposit or redemption) raw NAV deltas to effective NAV checkpoints
+     * @dev Strictly interprets NAV deltas as deposits/redemptions instead of PNL
      * @param _op The operation being executed in between the pre and post operation synchronizations
      * @param _stRawNAV The post-op senior tranche's raw NAV
      * @param _jtRawNAV The post-op junior tranche's raw NAV
@@ -249,8 +249,8 @@ interface IRoycoAccountant {
         returns (SyncedAccountingState memory state);
 
     /**
-     * @notice Applies post-operation (deposit and withdrawal) raw NAV deltas to effective NAV checkpoints and enforces the market's coverage condition
-     * @dev Interprets deltas strictly as deposits/withdrawals with no yield or coverage logic
+     * @notice Applies post-operation (deposit or redemption) raw NAV deltas to effective NAV checkpoints and enforces the market's coverage condition
+     * @dev Strictly interprets NAV deltas as deposits/redemptions instead of PNL
      * @dev Reverts if the coverage requirement is unsatisfied after the NAVs have been marked to market
      * @param _op The operation being executed in between the pre and post operation synchronizations
      * @param _stRawNAV The post-op senior tranche's raw NAV
