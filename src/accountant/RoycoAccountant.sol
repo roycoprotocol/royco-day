@@ -5,7 +5,7 @@ import { RoycoBase } from "../base/RoycoBase.sol";
 import { IRoycoAccountant } from "../interfaces/IRoycoAccountant.sol";
 import { IYDM } from "../interfaces/IYDM.sol";
 import { IRoycoKernel } from "../interfaces/kernel/IRoycoKernel.sol";
-import { MAX_PROTOCOL_FEE_WAD, MIN_COVERAGE_WAD, WAD, ZERO_NAV_UNITS } from "../libraries/Constants.sol";
+import { MAX_COVERAGE_WAD, MAX_PROTOCOL_FEE_WAD, MIN_COVERAGE_WAD, WAD, ZERO_NAV_UNITS } from "../libraries/Constants.sol";
 import { MarketState, NAV_UNIT, Operation, SyncedAccountingState } from "../libraries/Types.sol";
 import { UnitsMathLib, toInt256, toNAVUnits, toUint256 } from "../libraries/Units.sol";
 import { Math, UtilsLib } from "../libraries/UtilsLib.sol";
@@ -783,7 +783,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
      */
     function _validateCoverageConfig(uint64 _coverageWAD, uint96 _betaWAD, uint64 _lltvWAD) internal pure {
         // Ensure that the coverage requirement is valid
-        require((_coverageWAD >= MIN_COVERAGE_WAD) && (_coverageWAD < WAD), INVALID_COVERAGE_CONFIG());
+        require((_coverageWAD >= MIN_COVERAGE_WAD) && (_coverageWAD <= MAX_COVERAGE_WAD), INVALID_COVERAGE_CONFIG());
         // Ensure that JT withdrawals are not permanently bricked
         require(uint256(_coverageWAD).mulDiv(_betaWAD, WAD, Math.Rounding.Ceil) < WAD, INVALID_COVERAGE_CONFIG());
         /**
@@ -820,7 +820,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         uint256 denominator = WAD + _coverageWAD - betaCov;
         uint256 maxLTV = numerator.mulDiv(WAD, denominator, Math.Rounding.Ceil);
         // LLTV must be between the max allowed initial LTV and 100% LTV
-        require(maxLTV < _lltvWAD && _lltvWAD < WAD, INVALID_LLTV());
+        require(maxLTV < _lltvWAD && _lltvWAD < WAD, INVALID_COVERAGE_CONFIG());
     }
 
     /**

@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { WAD, ZERO_NAV_UNITS } from "./Constants.sol";
 import { AssetClaims } from "./Types.sol";
-import { BASE_UNIT, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib } from "./Units.sol";
+import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib } from "./Units.sol";
 
 /**
  * @title UtilsLib
@@ -14,7 +14,6 @@ import { BASE_UNIT, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib } from "./Units.sol";
 library UtilsLib {
     using UnitsMathLib for NAV_UNIT;
     using UnitsMathLib for TRANCHE_UNIT;
-    using UnitsMathLib for BASE_UNIT;
     using UnitsMathLib for uint256;
 
     /**

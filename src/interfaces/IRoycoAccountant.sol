@@ -184,7 +184,7 @@ interface IRoycoAccountant {
      */
     event JTImpermanentLossReset(NAV_UNIT jtImpermanentLossErased);
 
-    /// @notice Thrown when the accountant's coverage config is invalid
+    /// @notice Thrown when the accountant's coverage config is invalid (can be due to coverage, beta, or LLTV)
     error INVALID_COVERAGE_CONFIG();
 
     /// @notice Thrown when the configured protocol fee exceeds the maximum
@@ -192,9 +192,6 @@ interface IRoycoAccountant {
 
     /// @notice Thrown when the YDM address being set is null
     error NULL_YDM_ADDRESS();
-
-    /// @notice Thrown when the market's LLTV being set is an invalid value in the context of the market's coverage
-    error INVALID_LLTV();
 
     /// @notice Thrown when the YDM failed to initialize
     error FAILED_TO_INITIALIZE_YDM(bytes data);
