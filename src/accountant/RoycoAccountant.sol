@@ -198,10 +198,10 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             if (_op == Operation.ST_REDEEM) {
                 require(totalRedemptionNAV > 0, INVALID_POST_OP_STATE(_op));
                 // Reduce JT effective NAV by the the bonus provided from its assets (bounded to JT effective NAV)
-                NAV_UNIT actualBonusNAV = Math.min(_stRedemptionBonusNAV, jtEffectiveNAV);
-                jtEffectiveNAV = jtEffectiveNAV - actualBonusNAV;
+                NAV_UNIT clampedBonusNAV = Math.min(_stRedemptionBonusNAV, jtEffectiveNAV);
+                jtEffectiveNAV = jtEffectiveNAV - clampedBonusNAV;
                 // Reduce ST effective NAV by the total redemptions without the bonus provided from JT effective NAV
-                stEffectiveNAV = stEffectiveNAV - (totalRedemptionNAV - actualBonusNAV);
+                stEffectiveNAV = stEffectiveNAV - (totalRedemptionNAV - clampedBonusNAV);
                 // The withdrawing senior LP has realized its proportional share of past uncovered losses and associated recovery optionality, rounding in favor of senior
                 if (stImpermanentLoss != ZERO_NAV_UNITS) {
                     stImpermanentLoss = stImpermanentLoss.mulDiv(stEffectiveNAV, $.lastSTEffectiveNAV, Math.Rounding.Ceil);
