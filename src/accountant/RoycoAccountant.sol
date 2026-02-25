@@ -454,7 +454,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             deltaJT = -toInt256(_liquidationBonusNAV);
         }
 
-        // The net JT gains after ST IL recovery and JT self inflicted IL is recovered. The JT protocol fee accrued is calculated using this NAV.
+        // The net JT gains after ST IL recovery. The JT protocol fee accrued is calculated using this NAV.
         NAV_UNIT jtNetGain = ZERO_NAV_UNITS;
         // Mark both the tranche NAVs to market
         /// @dev STEP_APPLY_JT_LOSS: The JT assets depreciated in value
