@@ -7,8 +7,8 @@ import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/E
 import { Create2 } from "../../lib/openzeppelin-contracts/contracts/utils/Create2.sol";
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
-import { IRoycoKernel } from "../../src/interfaces/kernel/IRoycoKernel.sol";
-import { IRoycoVaultTranche } from "../../src/interfaces/tranche/IRoycoVaultTranche.sol";
+import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
+import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { MarketDeploymentParams, RolesTargetConfiguration, RoycoMarket } from "../../src/libraries/Types.sol";
 import { RolesConfiguration } from "./RolesConfiguration.sol";
 

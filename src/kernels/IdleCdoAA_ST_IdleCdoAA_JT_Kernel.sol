@@ -2,8 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/ERC20Upgradeable.sol";
+import { IRoycoKernel } from "../interfaces/IRoycoKernel.sol";
 import { IIdleCDO } from "../interfaces/external/idle-finance/IIdleCDO.sol";
-import { IRoycoKernel } from "../interfaces/kernel/IRoycoKernel.sol";
 import { WAD_DECIMALS } from "../libraries/Constants.sol";
 import { RoycoKernel } from "./base/RoycoKernel.sol";
 import { IdenticalAssetsOracleQuoter } from "./base/quoter/base/IdenticalAssetsOracleQuoter.sol";

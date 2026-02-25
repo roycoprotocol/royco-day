@@ -3,8 +3,8 @@ pragma solidity ^0.8.28;
 
 import { RoycoBase } from "../base/RoycoBase.sol";
 import { IRoycoAccountant } from "../interfaces/IRoycoAccountant.sol";
+import { IRoycoKernel } from "../interfaces/IRoycoKernel.sol";
 import { IYDM } from "../interfaces/IYDM.sol";
-import { IRoycoKernel } from "../interfaces/kernel/IRoycoKernel.sol";
 import { MAX_COVERAGE_WAD, MAX_PROTOCOL_FEE_WAD, MIN_COVERAGE_WAD, WAD, ZERO_NAV_UNITS } from "../libraries/Constants.sol";
 import { MarketState, NAV_UNIT, Operation, SyncedAccountingState } from "../libraries/Types.sol";
 import { UnitsMathLib, toInt256, toNAVUnits, toUint256 } from "../libraries/Units.sol";
@@ -25,16 +25,17 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoAccountantState")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ROYCO_ACCOUNTANT_STORAGE_SLOT = 0xc8240830e1172c6f1489139d8edb11776c3d3b2f893e3f4ce0fb541305a63a00;
 
-    /// @notice The kernel that this accountant maintains mark-to-market NAV, impermanent loss, and fee accounting for
-    address public immutable KERNEL;
+    /// @inheritdoc IRoycoAccountant
+    address public immutable override(IRoycoAccountant) KERNEL;
 
-    /// @dev Enforces that the function is called by the accountant's Royco kernel
+    /// @dev Permissions the function to only be callable by the market's kernel
+    /// @dev Should be placed on all state mutating NAV synchronization functions
     modifier onlyRoycoKernel() {
         require(msg.sender == KERNEL, ONLY_ROYCO_KERNEL());
         _;
     }
 
-    /// @dev Enforces that the kernel's accounting is synced before the function is called
+    /// @dev Synchronizes the market's accounting to reconcile unrealized PNL at the start of the call
     modifier withSyncedAccounting() {
         IRoycoKernel(KERNEL).preOpSyncTrancheAccounting();
         _;

@@ -7,8 +7,8 @@ import { ERC20PermitUpgradeable } from "../../../lib/openzeppelin-contracts-upgr
 import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoBase } from "../../base/RoycoBase.sol";
-import { IRoycoKernel } from "../../interfaces/kernel/IRoycoKernel.sol";
-import { IRoycoVaultTranche } from "../../interfaces/tranche/IRoycoVaultTranche.sol";
+import { IRoycoKernel } from "../../interfaces/IRoycoKernel.sol";
+import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { WAD_DECIMALS, ZERO_NAV_UNITS } from "../../libraries/Constants.sol";
 import { RoycoTrancheStorageLib } from "../../libraries/RoycoTrancheStorageLib.sol";
 import { AssetClaims, SyncedAccountingState, TrancheDeploymentParams, TrancheType } from "../../libraries/Types.sol";
@@ -208,8 +208,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @inheritdoc IRoycoVaultTranche
     function previewMintProtocolFeeShares(
-        NAV_UNIT _protocolFeeAssets,
-        NAV_UNIT _trancheTotalAssets
+        NAV_UNIT _protocolFeeNAV,
+        NAV_UNIT _totalTrancheNAV
     )
         public
         view
@@ -221,7 +221,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // Subtract fee assets from total tranche assets because fees are included in total tranche assets
         // Round in favor of the tranche
         uint256 totalShares = totalSupply();
-        protocolFeeSharesMinted = _convertToShares(_protocolFeeAssets, totalShares, (_trancheTotalAssets - _protocolFeeAssets), Math.Rounding.Floor);
+        protocolFeeSharesMinted = _convertToShares(_protocolFeeNAV, totalShares, (_totalTrancheNAV - _protocolFeeNAV), Math.Rounding.Floor);
 
         // The total tranche shares include the protocol fee shares and virtual shares
         totalTrancheShares = _withVirtualShares(totalShares + protocolFeeSharesMinted);
@@ -229,8 +229,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @inheritdoc IRoycoVaultTranche
     function mintProtocolFeeShares(
-        NAV_UNIT _protocolFeeAssets,
-        NAV_UNIT _trancheTotalAssets,
+        NAV_UNIT _protocolFeeNAV,
+        NAV_UNIT _totalTrancheNAV,
         address _protocolFeeRecipient
     )
         external
@@ -242,7 +242,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         require(msg.sender == kernel(), ONLY_KERNEL());
 
         // Mint any protocol fee shares accrued to the specified recipient
-        (protocolFeeSharesMinted, totalTrancheShares) = previewMintProtocolFeeShares(_protocolFeeAssets, _trancheTotalAssets);
+        (protocolFeeSharesMinted, totalTrancheShares) = previewMintProtocolFeeShares(_protocolFeeNAV, _totalTrancheNAV);
         if (protocolFeeSharesMinted != 0) _mint(_protocolFeeRecipient, protocolFeeSharesMinted);
 
         emit ProtocolFeeSharesMinted(_protocolFeeRecipient, protocolFeeSharesMinted, totalTrancheShares);

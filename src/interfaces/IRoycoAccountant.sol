@@ -180,10 +180,13 @@ interface IRoycoAccountant {
      */
     event JTImpermanentLossReset(NAV_UNIT jtImpermanentLossErased);
 
+    /// @notice Thrown when the caller of the function is not the accountant's configured Royco Kernel
+    error ONLY_ROYCO_KERNEL();
+
     /// @notice Thrown when an address is set to the null address
     error NULL_ADDRESS();
 
-    /// @notice Thrown when the accountant's coverage config is invalid (can be due to coverage, beta, or LLTV)
+    /// @notice Thrown when the accountant's coverage configuration is invalid (can be due to incorrect coverage, beta, or LLTV values)
     error INVALID_COVERAGE_CONFIG();
 
     /// @notice Thrown when the configured protocol fee exceeds the maximum
@@ -191,9 +194,6 @@ interface IRoycoAccountant {
 
     /// @notice Thrown when the YDM failed to initialize
     error FAILED_TO_INITIALIZE_YDM(bytes data);
-
-    /// @notice Thrown when the caller of the function is not the accountant's configured Royco Kernel
-    error ONLY_ROYCO_KERNEL();
 
     /// @notice Thrown when the sum of the raw NAVs don't equal the sum of the effective NAVs of both tranches
     error NAV_CONSERVATION_VIOLATION();
