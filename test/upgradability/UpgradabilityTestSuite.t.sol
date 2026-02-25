@@ -10,12 +10,12 @@ import { DeployScript } from "../../script/Deploy.s.sol";
 import { RoycoAccountant } from "../../src/accountant/RoycoAccountant.sol";
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoKernel } from "../../src/interfaces/kernel/IRoycoKernel.sol";
+import { RoycoKernelInitParams } from "../../src/interfaces/kernel/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/tranche/IRoycoVaultTranche.sol";
 import {
     YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel
 } from "../../src/kernels/YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
-import { RoycoKernelInitParams } from "../../src/libraries/RoycoKernelStorageLib.sol";
 import { TrancheDeploymentParams } from "../../src/libraries/Types.sol";
 import { TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../../src/tranches/RoycoJuniorTranche.sol";

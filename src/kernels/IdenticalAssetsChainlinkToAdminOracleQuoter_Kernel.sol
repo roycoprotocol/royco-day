@@ -1,25 +1,17 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { RoycoKernelInitParams } from "../libraries/RoycoKernelStorageLib.sol";
+import { IRoycoKernel } from "../interfaces/kernel/IRoycoKernel.sol";
 import { RoycoKernel } from "./base/RoycoKernel.sol";
-import { YieldBearingERC20_JT_Kernel } from "./base/junior/YieldBearingERC20_JT_Kernel.sol";
-import { AtomicLiquidationFacility } from "./base/liquidation-facility/AtomicLiquidationFacility.sol";
 import { IdenticalAssetsChainlinkToAdminOracleQuoter } from "./base/quoter/IdenticalAssetsChainlinkToAdminOracleQuoter.sol";
-import { YieldBearingERC20_ST_Kernel } from "./base/senior/YieldBearingERC20_ST_Kernel.sol";
 
 /**
- * @title YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel
+ * @title IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel
  * @author Waymont
  * @notice The senior and junior tranches transfer in the same yield bearing asset
  * @notice The kernel uses a Chainlink oracle to convert tranche token units to NAV units, allowing NAVs to sync based on underlying PNL
  */
-contract YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel is
-    YieldBearingERC20_ST_Kernel,
-    YieldBearingERC20_JT_Kernel,
-    IdenticalAssetsChainlinkToAdminOracleQuoter,
-    AtomicLiquidationFacility
-{
+contract IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel is RoycoKernel, IdenticalAssetsChainlinkToAdminOracleQuoter {
     /// @notice Constructs the kernel state
     /// @param _params The standard construction parameters for the Royco kernel
     constructor(RoycoKernelConstructionParams memory _params) RoycoKernel(_params) { }
@@ -32,7 +24,7 @@ contract YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsChainlinkToAdm
      * @param _initialConversionRateWAD The initial reference asset to NAV unit conversion rate, scaled to WAD precision
      */
     function initialize(
-        RoycoKernelInitParams calldata _params,
+        IRoycoKernel.RoycoKernelInitParams calldata _params,
         address _trancheAssetToReferenceAssetOracle,
         uint48 _stalenessThresholdSeconds,
         uint256 _initialConversionRateWAD
