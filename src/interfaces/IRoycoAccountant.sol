@@ -11,7 +11,6 @@ import { NAV_UNIT } from "../libraries/Units.sol";
 interface IRoycoAccountant {
     /**
      * @notice Initialization parameters for the Royco Accountant
-     * @custom:field kernel - The kernel that this accountant maintains NAV, impermanent loss, and fee accounting for
      * @custom:field stProtocolFeeWAD - The market's configured protocol fee percentage taken from yield earned by the senior tranche, scaled to WAD precision
      * @custom:field jtProtocolFeeWAD - The market's configured protocol fee percentage taken from yield earned by the junior tranche, scaled to WAD precision
      * @custom:field yieldShareProtocolFeeWAD - The market's configured protocol fee percentage taken from the yield share (risk premium) payed from the senior tranche yield to the junior tranche, scaled to WAD precision
@@ -28,7 +27,6 @@ interface IRoycoAccountant {
      *               Primarily used for rounding in NAV calculations, and can be safely set to 0 if the underlying investments don't exhibit this behavior
      */
     struct RoycoAccountantInitParams {
-        address kernel;
         uint64 stProtocolFeeWAD;
         uint64 jtProtocolFeeWAD;
         uint64 yieldShareProtocolFeeWAD;
@@ -45,14 +43,13 @@ interface IRoycoAccountant {
     /**
      * @notice Storage state for the Royco Accountant
      * @custom:storage-location erc7201:Royco.storage.RoycoAccountantState
-     * @custom:field kernel - The kernel that this accountant maintains NAV, impermanent loss, and fee accounting for
      * @custom:field lastMarketState - The last recorded state of this market (perpetual or fixed term)
      * @custom:field fixedTermEndTimestamp - The end timestamp of the currently ongoing fixed term (set to 0 if the market is in a perpetual state)
-     * @custom:field lltvWAD - The liquidation loan to value (LLTV) for this market, scaled to WAD precision
      * @custom:field fixedTermDurationSeconds - The duration of a fixed term for this market in seconds
      * @custom:field coverageWAD - The coverage percentage that the senior tranche is expected to be protected by, scaled to WAD precision
      * @custom:field betaWAD - JT's percentage sensitivity to the same downside stress that affects ST, scaled to WAD precision
      *                         For example, beta is 0 when JT is in the RFR and 1e18 (100%) when JT is in the same opportunity as senior
+     * @custom:field lltvWAD - The liquidation loan to value (LLTV) for this market, scaled to WAD precision
      * @custom:field stProtocolFeeWAD - The market's configured protocol fee percentage charged from yield earned by the senior tranche, scaled to WAD precision
      * @custom:field jtProtocolFeeWAD - The market's configured protocol fee percentage charged from yield earned by the junior tranche, scaled to WAD precision
      * @custom:field yieldShareProtocolFeeWAD - The market's configured protocol fee percentage charged from the yield share (risk premium) payed from the senior tranche yield to the junior tranche, scaled to WAD precision
@@ -74,13 +71,12 @@ interface IRoycoAccountant {
      *               Primarily used for rounding in NAV calculations, and can be safely set to 0 if the underlying investments don't exhibit this behavior
      */
     struct RoycoAccountantState {
-        address kernel;
         MarketState lastMarketState;
         uint24 fixedTermDurationSeconds;
         uint32 fixedTermEndTimestamp;
-        uint64 lltvWAD;
         uint64 coverageWAD;
         uint96 betaWAD;
+        uint64 lltvWAD;
         uint64 stProtocolFeeWAD;
         uint64 jtProtocolFeeWAD;
         uint64 yieldShareProtocolFeeWAD;
@@ -184,14 +180,14 @@ interface IRoycoAccountant {
      */
     event JTImpermanentLossReset(NAV_UNIT jtImpermanentLossErased);
 
+    /// @notice Thrown when an address is set to the null address
+    error NULL_ADDRESS();
+
     /// @notice Thrown when the accountant's coverage config is invalid (can be due to coverage, beta, or LLTV)
     error INVALID_COVERAGE_CONFIG();
 
     /// @notice Thrown when the configured protocol fee exceeds the maximum
     error MAX_PROTOCOL_FEE_EXCEEDED();
-
-    /// @notice Thrown when the YDM address being set is null
-    error NULL_YDM_ADDRESS();
 
     /// @notice Thrown when the YDM failed to initialize
     error FAILED_TO_INITIALIZE_YDM(bytes data);
@@ -207,6 +203,12 @@ interface IRoycoAccountant {
 
     /// @notice Thrown when the market's coverage requirement is unsatisfied
     error COVERAGE_REQUIREMENT_UNSATISFIED();
+
+    /**
+     * @notice Retrieves the address of the kernel tied to this accountant
+     * @return kernel The kernel that this accountant maintains mark-to-market NAV, impermanent loss, and fee accounting for
+     */
+    function KERNEL() external view returns (address kernel);
 
     /**
      * @notice Synchronizes the effective NAVs and impermanent losses of both tranches by marking them to market

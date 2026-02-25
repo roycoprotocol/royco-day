@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { IRoycoAccountant } from "../interfaces/IRoycoAccountant.sol";
 import { IRoycoKernel } from "../interfaces/kernel/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../interfaces/tranche/IRoycoVaultTranche.sol";
-import { BASE_UNIT, NAV_UNIT, TRANCHE_UNIT } from "./Units.sol";
+import { NAV_UNIT, TRANCHE_UNIT } from "./Units.sol";
 
 /**
  * @title MarketState

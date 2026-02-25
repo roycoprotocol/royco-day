@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
-import { BASE_UNIT, NAV_UNIT, TRANCHE_UNIT } from "../../libraries/Units.sol";
+import { NAV_UNIT, TRANCHE_UNIT } from "../../libraries/Units.sol";
 import { IRoycoAccountant } from "../IRoycoAccountant.sol";
 
 /**
@@ -51,7 +51,6 @@ interface IRoycoKernel {
         address protocolFeeRecipient;
         TRANCHE_UNIT stOwnedYieldBearingAssets;
         TRANCHE_UNIT jtOwnedYieldBearingAssets;
-        BASE_UNIT liquidationProceeds;
     }
 
     /**
@@ -109,6 +108,7 @@ interface IRoycoKernel {
      * @return jtAsset The JT asset address
      */
     function JT_ASSET() external view returns (address jtAsset);
+
     /**
      * @notice Retrieves the accountant address
      * @return accountant The accountant address
@@ -148,20 +148,6 @@ interface IRoycoKernel {
      * @return jtAssets The specified NAV of the assets denominated in the kernel's NAV units converted to assets denominated in JT's tranche units
      */
     function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) external view returns (TRANCHE_UNIT jtAssets);
-
-    /**
-     * @notice Converts base asset amounts to NAV units by scaling to WAD precision
-     * @param _baseAssets The amount of base assets to convert
-     * @return nav The equivalent value in NAV units (WAD precision)
-     */
-    function convertBaseUnitsToNAVUnits(BASE_UNIT _baseAssets) external view returns (NAV_UNIT nav);
-
-    /**
-     * @notice Converts NAV units to base asset amounts by scaling from WAD precision
-     * @param _nav The NAV amount to convert
-     * @return baseAssets The equivalent amount in base asset units
-     */
-    function convertNAVUnitsToBaseUnits(NAV_UNIT _nav) external view returns (BASE_UNIT baseAssets);
 
     /**
      * @notice Synchronizes and persists the raw and effective NAVs of both tranches
