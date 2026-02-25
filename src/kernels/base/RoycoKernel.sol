@@ -28,7 +28,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
 
     /// @dev Storage slot for RoycoKernelState using ERC-7201 pattern
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoKernelState")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant BASE_KERNEL_STORAGE_SLOT = 0xf8fc0d016168fef0a165a086b5a5dc3ffa533689ceaf1369717758ae5224c600;
+    bytes32 private constant ROYCO_KERNEL_STORAGE_SLOT = 0xf8fc0d016168fef0a165a086b5a5dc3ffa533689ceaf1369717758ae5224c600;
 
     /// @inheritdoc IRoycoKernel
     address public immutable override(IRoycoKernel) SENIOR_TRANCHE;
@@ -272,7 +272,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     // =============================
 
     /// @inheritdoc IRoycoKernel
-    function preOpSyncTrancheAccounting()
+    function syncTrancheAccounting()
         public
         virtual
         override(IRoycoKernel)
@@ -282,7 +282,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         withQuoterCache
         returns (SyncedAccountingState memory state)
     {
-        // Execute a NAV accounting sync via the accountant
+        // Execute a NAV accounting sync via the accountant to reconcile PNL
         return _preOpSyncTrancheAccounting();
     }
 
@@ -710,6 +710,24 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     // =============================
 
     /**
+     * @notice Returns the raw net asset value of the senior tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
+     * @return stRawNAV The pure net asset value of the senior tranche invested assets
+     */
+    function _getSeniorTrancheRawNAV() internal view virtual returns (NAV_UNIT stRawNAV) {
+        // Get the yield bearing assets owned by ST and convert them to NAV units via the configured quoter
+        return stConvertTrancheUnitsToNAVUnits(_getRoycoKernelStorage().stOwnedYieldBearingAssets);
+    }
+
+    /**
+     * @notice Returns the raw net asset value of the junior tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
+     * @return jtRawNAV The pure net asset value of the junior tranche invested assets
+     */
+    function _getJuniorTrancheRawNAV() internal view virtual returns (NAV_UNIT jtRawNAV) {
+        // Get the yield bearing assets owned by JT and convert them to NAV units via the configured quoter
+        return jtConvertTrancheUnitsToNAVUnits(_getRoycoKernelStorage().jtOwnedYieldBearingAssets);
+    }
+
+    /**
      * @notice Withdraws any specified assets from each tranche and transfer them to the receiver
      * @param _claims The ST and JT assets to withdraw and transfer to the specified receiver
      * @param _receiver The receiver of the tranche asset claims
@@ -736,41 +754,19 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     }
 
     // =============================
-    // Internal NAV Retrieval Functions
+    // Internal Quoter Cache Functions
     // =============================
 
     /**
-     * @notice Returns the raw net asset value of the senior tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
-     * @return stRawNAV The pure net asset value of the senior tranche invested assets
-     */
-    function _getSeniorTrancheRawNAV() internal view virtual returns (NAV_UNIT stRawNAV) {
-        // Get the yield bearing assets owned by ST and convert them to NAV units via the configured quoter
-        return stConvertTrancheUnitsToNAVUnits(_getRoycoKernelStorage().stOwnedYieldBearingAssets);
-    }
-
-    /**
-     * @notice Returns the raw net asset value of the junior tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
-     * @return jtRawNAV The pure net asset value of the junior tranche invested assets
-     */
-    function _getJuniorTrancheRawNAV() internal view virtual returns (NAV_UNIT jtRawNAV) {
-        // Get the yield bearing assets owned by JT and convert them to NAV units via the configured quoter
-        return jtConvertTrancheUnitsToNAVUnits(_getRoycoKernelStorage().jtOwnedYieldBearingAssets);
-    }
-
-    // =============================
-    // Internal Quoter Functions
-    // =============================
-
-    /**
-     * @notice Initializes the quoter for a transaction
-     * @dev Should be called at the start of a transaction
+     * @notice Initializes the quoter
+     * @dev Should be called at the start of a call
      * @dev Typically used to initialize the cached tranche unit to NAV unit conversion rate
      */
     function _initializeQuoterCache() internal virtual;
 
     /**
      * @notice Clears the quoter cache
-     * @dev Should be called at the end of a transaction
+     * @dev Should be called at the end of a call
      * @dev Typically used to clear the cached tranche unit to NAV unit conversion rate
      */
     function _clearQuoterCache() internal virtual;
@@ -791,7 +787,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      */
     function _getRoycoKernelStorage() internal pure returns (RoycoKernelState storage $) {
         assembly ("memory-safe") {
-            $.slot := BASE_KERNEL_STORAGE_SLOT
+            $.slot := ROYCO_KERNEL_STORAGE_SLOT
         }
     }
 }
