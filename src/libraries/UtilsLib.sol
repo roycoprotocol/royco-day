@@ -52,9 +52,9 @@ library UtilsLib {
      * @notice Computes the loan to value (LTV) of the Royco market given the market's state
      * @dev Informally: DEBT / (DEBT + EQUITY)
      * @dev Formally:
-     *      DEBT = MAX((ST_EFFECTIVE_NAV + ST_IL - LIQUIDATION_PROCEEDS), 0)
+     *      DEBT = MAX((ST_EFFECTIVE_NAV + ST_IL - LIQUIDATION_PROCEEDS_NAV), 0)
      *      EQUITY = JT_EFFECTIVE_NAV
-     *      LTV = MAX((ST_EFFECTIVE_NAV + ST_IL - LIQUIDATION_PROCEEDS), 0) / (MAX((ST_EFFECTIVE_NAV + ST_IL - LIQUIDATION_PROCEEDS), 0) + JT_EFFECTIVE_NAV)
+     *      LTV = MAX((ST_EFFECTIVE_NAV + ST_IL - LIQUIDATION_PROCEEDS_NAV), 0) / (MAX((ST_EFFECTIVE_NAV + ST_IL - LIQUIDATION_PROCEEDS_NAV), 0) + JT_EFFECTIVE_NAV)
      * @param _stEffectiveNAV The senior tranche net asset value after receiving coverage, ST yield distribution, and ST losses
      * @param _stImpermanentLoss The impermanent loss that the senior tranche has suffered after exhausting JT's loss-absorption buffer
      * @param _liquidationProceedsNAV The NAV of the liquidation proceeds paid to ST via liquidation events

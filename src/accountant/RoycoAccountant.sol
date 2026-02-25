@@ -102,8 +102,8 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         // Preview synchronization of the tranche NAVs and impermanent losses
         MarketState initialMarketState;
         bool yieldDistributed;
-        NAV_UNIT jtCoverageImpermanentLossErased;
-        (state, initialMarketState, yieldDistributed, jtCoverageImpermanentLossErased) =
+        NAV_UNIT jtImpermanentLossErased;
+        (state, initialMarketState, yieldDistributed, jtImpermanentLossErased) =
             _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _liquidationProceedsNAV, _liquidationBonusNAV, _accrueJTYieldShare());
 
         // ST yield was split between ST and JT
@@ -121,8 +121,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         $.lastSTEffectiveNAV = state.stEffectiveNAV;
         $.lastJTEffectiveNAV = state.jtEffectiveNAV;
         $.lastSTImpermanentLoss = state.stImpermanentLoss;
-        $.lastJTCoverageImpermanentLoss = state.jtCoverageImpermanentLoss;
-        $.lastJTSelfImpermanentLoss = state.jtSelfImpermanentLoss;
+        $.lastJTImpermanentLoss = state.jtImpermanentLoss;
 
         // If the market transitioned from a perpetual to a fixed term state, set the end timestamp of the fixed term
         if (initialMarketState == MarketState.PERPETUAL && state.marketState == MarketState.FIXED_TERM) {
@@ -131,8 +130,8 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         }
 
         // If the JT Coverage IL was erased, signal the resetting
-        if (jtCoverageImpermanentLossErased != ZERO_NAV_UNITS) {
-            emit JTCoverageImpermanentLossErased(jtCoverageImpermanentLossErased);
+        if (jtImpermanentLossErased != ZERO_NAV_UNITS) {
+            emit JTCoverageImpermanentLossErased(jtImpermanentLossErased);
         }
 
         emit TrancheAccountingSynced(state);
@@ -178,8 +177,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         NAV_UNIT stEffectiveNAV = $.lastSTEffectiveNAV;
         NAV_UNIT jtEffectiveNAV = $.lastJTEffectiveNAV;
         NAV_UNIT stImpermanentLoss = $.lastSTImpermanentLoss;
-        NAV_UNIT jtCoverageImpermanentLoss = $.lastJTCoverageImpermanentLoss;
-        NAV_UNIT jtSelfImpermanentLoss = $.lastJTSelfImpermanentLoss;
+        NAV_UNIT jtImpermanentLoss = $.lastJTImpermanentLoss;
 
         // Apply the effects of the operation that was executed
         if (_op == Operation.ST_DEPOSIT) {
@@ -194,11 +192,10 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             require(deltaST <= 0 && deltaJT <= 0 && deltaLP <= 0, INVALID_POST_OP_STATE(_op));
             // Get the total value redeemed
             NAV_UNIT totalRedemptionNAV = (toNAVUnits(-deltaST) + toNAVUnits(-deltaJT) + toNAVUnits(-deltaLP));
-
             if (_op == Operation.ST_REDEEM) {
-                require(totalRedemptionNAV > 0, INVALID_POST_OP_STATE(_op));
+                require(totalRedemptionNAV > ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
                 // Reduce JT effective NAV by the the bonus provided from its assets (bounded to JT effective NAV)
-                NAV_UNIT clampedBonusNAV = Math.min(_stRedemptionBonusNAV, jtEffectiveNAV);
+                NAV_UNIT clampedBonusNAV = UnitsMathLib.min(_stRedemptionBonusNAV, jtEffectiveNAV);
                 jtEffectiveNAV = jtEffectiveNAV - clampedBonusNAV;
                 // Reduce ST effective NAV by the total redemptions without the bonus provided from JT effective NAV
                 stEffectiveNAV = stEffectiveNAV - (totalRedemptionNAV - clampedBonusNAV);
@@ -209,19 +206,14 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                 }
             } else if (_op == Operation.JT_REDEEM) {
                 // JT cannot get a bonus from its own NAV
-                require(totalRedemptionNAV > 0 && _stRedemptionBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
+                require(totalRedemptionNAV > ZERO_NAV_UNITS && _stRedemptionBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
                 // The actual amount withdrawn from JT effective NAV could be from both tranches (its own share of its NAV, ST yield share, IL repayments, etc.)
                 jtEffectiveNAV = jtEffectiveNAV - totalRedemptionNAV;
             }
             // The withdrawing junior LP has realized its proportional share of past JT losses from coverage applied and its associated recovery optionality, rounding in favor of senior
-            if (jtCoverageImpermanentLoss != ZERO_NAV_UNITS) {
-                jtCoverageImpermanentLoss = jtCoverageImpermanentLoss.mulDiv(jtEffectiveNAV, $.lastJTEffectiveNAV, Math.Rounding.Floor);
-                $.lastJTCoverageImpermanentLoss = jtCoverageImpermanentLoss;
-            }
-            // JT raw NAV that is leaving the market realized its proportional share of past JT losses from its own depreciation, rounding in favor of senior
-            if (jtSelfImpermanentLoss != ZERO_NAV_UNITS && $.lastJTRawNAV != ZERO_NAV_UNITS) {
-                jtSelfImpermanentLoss = jtSelfImpermanentLoss.mulDiv(_jtRawNAV, $.lastJTRawNAV, Math.Rounding.Floor);
-                $.lastJTSelfImpermanentLoss = jtSelfImpermanentLoss;
+            if (jtImpermanentLoss != ZERO_NAV_UNITS) {
+                jtImpermanentLoss = jtImpermanentLoss.mulDiv(jtEffectiveNAV, $.lastJTEffectiveNAV, Math.Rounding.Floor);
+                $.lastJTImpermanentLoss = jtImpermanentLoss;
             }
         }
 
@@ -244,8 +236,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             stEffectiveNAV: stEffectiveNAV,
             jtEffectiveNAV: jtEffectiveNAV,
             stImpermanentLoss: stImpermanentLoss,
-            jtCoverageImpermanentLoss: jtCoverageImpermanentLoss,
-            jtSelfImpermanentLoss: jtSelfImpermanentLoss,
+            jtImpermanentLoss: jtImpermanentLoss,
             stProtocolFeeAccrued: ZERO_NAV_UNITS,
             jtProtocolFeeAccrued: ZERO_NAV_UNITS,
             // Additional data about the market's post-sync state
@@ -420,7 +411,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
      * @return state A struct containing all mark-to-market NAV, impermanent losses, and fee data after executing the sync
      * @return initialMarketState The initial state the market was in before the synchronization
      * @return yieldDistributed A boolean indicating whether ST yield was split between ST and JT
-     * @return jtCoverageImpermanentLossErased The amount of JT coverage loss erased (reset to 0)
+     * @return jtImpermanentLossErased The amount of JT coverage loss erased (reset to 0)
      */
     function _previewSyncTrancheAccounting(
         NAV_UNIT _stRawNAV,
@@ -431,7 +422,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     )
         internal
         view
-        returns (SyncedAccountingState memory state, MarketState initialMarketState, bool yieldDistributed, NAV_UNIT jtCoverageImpermanentLossErased)
+        returns (SyncedAccountingState memory state, MarketState initialMarketState, bool yieldDistributed, NAV_UNIT jtImpermanentLossErased)
     {
         // Get the storage pointer to the accountant state
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
@@ -440,8 +431,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         NAV_UNIT stEffectiveNAV = $.lastSTEffectiveNAV;
         NAV_UNIT jtEffectiveNAV = $.lastJTEffectiveNAV;
         NAV_UNIT stImpermanentLoss = $.lastSTImpermanentLoss;
-        NAV_UNIT jtCoverageImpermanentLoss = $.lastJTCoverageImpermanentLoss;
-        NAV_UNIT jtSelfImpermanentLoss = $.lastJTSelfImpermanentLoss;
+        NAV_UNIT jtImpermanentLoss = $.lastJTImpermanentLoss;
         NAV_UNIT stProtocolFeeAccrued;
         NAV_UNIT jtProtocolFeeAccrued;
 
@@ -475,8 +465,6 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             if (jtAbsorbableLoss != ZERO_NAV_UNITS) {
                 // Incur the maximum absorbable losses to remaining JT loss capital
                 jtEffectiveNAV = (jtEffectiveNAV - jtAbsorbableLoss);
-                // This is booked as JT self inflicted impermanent loss
-                jtSelfImpermanentLoss = (jtSelfImpermanentLoss + jtAbsorbableLoss);
                 jtLoss = (jtLoss - jtAbsorbableLoss);
             }
             /// @dev STEP_ST_INCURS_RESIDUAL_LOSSES: Residual loss after emptying JT's remaning loss-absorption buffer are incurred by ST
@@ -498,16 +486,8 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                 stEffectiveNAV = (stEffectiveNAV + stImpermanentLossRecovery);
                 jtGain = (jtGain - stImpermanentLossRecovery);
             }
-            /// @dev STEP_JT_SELF_IMPERMANENT_LOSS_RECOVERY: Second, recover any JT self inflicted impermanent losses (second claim on JT appreciation)
-            NAV_UNIT jtSelfImpermanentLossRecovery = UnitsMathLib.min(jtGain, jtSelfImpermanentLoss);
-            if (jtSelfImpermanentLossRecovery != ZERO_NAV_UNITS) {
-                // Recover as much of the JT self impermanent loss as possible
-                jtSelfImpermanentLoss = (jtSelfImpermanentLoss - jtSelfImpermanentLossRecovery);
-                // Apply the JT self IL recovery
-                jtEffectiveNAV = (jtEffectiveNAV + jtSelfImpermanentLossRecovery);
-                jtGain = (jtGain - jtSelfImpermanentLossRecovery);
-            }
-            /// @dev STEP_JT_ACCRUES_RESIDUAL_GAINS: JT accrues any remaining appreciation after clearing ST IL and JT self inflicted IL
+
+            /// @dev STEP_JT_ACCRUES_RESIDUAL_GAINS: JT accrues any remaining appreciation after clearing ST IL
             if (jtGain != ZERO_NAV_UNITS) {
                 jtNetGain = jtGain;
                 // Compute the protocol fee taken on this JT yield accrual if it is not attributable to any rounding/dust
@@ -531,7 +511,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                 // Apply the coverage to JT effective NAV
                 jtEffectiveNAV = (jtEffectiveNAV - coverageApplied);
                 // Any coverage provided is a ST liability to JT
-                jtCoverageImpermanentLoss = (jtCoverageImpermanentLoss + coverageApplied);
+                jtImpermanentLoss = (jtImpermanentLoss + coverageApplied);
                 stLoss = stLoss - coverageApplied;
             }
             /// @dev STEP_ST_INCURS_RESIDUAL_LOSSES: Apply any uncovered losses by JT to ST
@@ -554,10 +534,10 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                 stGain = (stGain - impermanentLossRecovery);
             }
             /// @dev STEP_JT_COVERAGE_IMPERMANENT_LOSS_RECOVERY: Second, recover any JT coverage inflicted impermanent losses (second claim on ST appreciation) if this is not a liquidation event
-            impermanentLossRecovery = UnitsMathLib.min(stGain, jtCoverageImpermanentLoss);
+            impermanentLossRecovery = UnitsMathLib.min(stGain, jtImpermanentLoss);
             if (impermanentLossRecovery != ZERO_NAV_UNITS) {
                 // Recover as much of the JT coverage impermanent loss as possible
-                jtCoverageImpermanentLoss = (jtCoverageImpermanentLoss - impermanentLossRecovery);
+                jtImpermanentLoss = (jtImpermanentLoss - impermanentLossRecovery);
                 // Apply the JT coverage IL recovery
                 jtEffectiveNAV = (jtEffectiveNAV + impermanentLossRecovery);
                 stGain = (stGain - impermanentLossRecovery);
@@ -618,15 +598,15 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             // If the current fixed term has elapsed, the market needs to transition to a perpetual state since the transient JT protection period is complete
             // If LLTV has been breached without existant ST IL, the market is approaching an uncollateralized state: ST needs to be able to withdraw to avoid losses and the YDM needs to kick in to reinstate proper collateralization
             // If ST IL exists, the market is in a distressed state: STs need to be able to book losses and any future appreciation will go to making ST whole again
-            jtCoverageImpermanentLossErased = jtCoverageImpermanentLoss;
-            jtCoverageImpermanentLoss = ZERO_NAV_UNITS;
+            jtImpermanentLossErased = jtImpermanentLoss;
+            jtImpermanentLoss = ZERO_NAV_UNITS;
             // Reset the fixed term end timestamp
             fixedTermEndTimestamp = 0;
             // If the market has less than dust coverage provided by JT
-        } else if (jtCoverageImpermanentLoss <= $.stNAVDustTolerance) {
+        } else if (jtImpermanentLoss <= $.stNAVDustTolerance) {
             // JT coverage IL is either non-existant or can be attributed to dust ST losses (eg. rounding in the underlying ST NAV)
             // If market was in a perpetual state or the coverage IL was completely wiped, transition to a perpetual state
-            if (initialMarketState == MarketState.PERPETUAL || jtCoverageImpermanentLoss == ZERO_NAV_UNITS) {
+            if (initialMarketState == MarketState.PERPETUAL || jtImpermanentLoss == ZERO_NAV_UNITS) {
                 resultingMarketState = MarketState.PERPETUAL;
                 // Reset the fixed term end timestamp
                 fixedTermEndTimestamp = 0;
@@ -658,8 +638,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             stEffectiveNAV: stEffectiveNAV,
             jtEffectiveNAV: jtEffectiveNAV,
             stImpermanentLoss: stImpermanentLoss,
-            jtCoverageImpermanentLoss: jtCoverageImpermanentLoss,
-            jtSelfImpermanentLoss: jtSelfImpermanentLoss,
+            jtImpermanentLoss: jtImpermanentLoss,
             stProtocolFeeAccrued: stProtocolFeeAccrued,
             jtProtocolFeeAccrued: jtProtocolFeeAccrued,
             // Additional data about the market's post-sync state
@@ -821,8 +800,8 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         $.fixedTermDurationSeconds = _fixedTermDurationSeconds;
         // If the specified duration is 0, the market will permanently be in a perpetual state
         if (_fixedTermDurationSeconds == 0) {
-            emit JTCoverageImpermanentLossErased($.lastJTCoverageImpermanentLoss);
-            $.lastJTCoverageImpermanentLoss = ZERO_NAV_UNITS;
+            emit JTCoverageImpermanentLossErased($.lastJTImpermanentLoss);
+            $.lastJTImpermanentLoss = ZERO_NAV_UNITS;
             $.lastMarketState = MarketState.PERPETUAL;
         }
         emit FixedTermDurationUpdated(_fixedTermDurationSeconds);

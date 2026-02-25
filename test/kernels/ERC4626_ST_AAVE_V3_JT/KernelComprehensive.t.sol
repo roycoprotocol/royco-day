@@ -521,9 +521,9 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
         // ST impermanent loss should increase
         assertTrue(stateAfter.stImpermanentLoss > stateBefore.stImpermanentLoss, "ST impermanent loss must increase");
 
-        // JT should be providing coverage (jtCoverageImpermanentLoss > 0 or JT effective NAV decreased)
+        // JT should be providing coverage (jtImpermanentLoss > 0 or JT effective NAV decreased)
         assertTrue(
-            stateAfter.jtEffectiveNAV < stateBefore.jtEffectiveNAV || stateAfter.jtCoverageImpermanentLoss > stateBefore.jtCoverageImpermanentLoss,
+            stateAfter.jtEffectiveNAV < stateBefore.jtEffectiveNAV || stateAfter.jtImpermanentLoss > stateBefore.jtImpermanentLoss,
             "JT must provide coverage for ST loss"
         );
     }
@@ -805,7 +805,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
 
         IRoycoAccountant.RoycoAccountantState memory state2 = ACCOUNTANT.getState();
         // May be FIXED_TERM or PERPETUAL depending on LLTV
-        if (toUint256(state2.lastJTCoverageImpermanentLoss) > 0 && toUint256(state2.lastSTImpermanentLoss) == 0) {
+        if (toUint256(state2.lastJTImpermanentLoss) > 0 && toUint256(state2.lastSTImpermanentLoss) == 0) {
             assertEq(uint256(state2.lastMarketState), uint256(MarketState.FIXED_TERM), "Should be FIXED_TERM with JT coverage IL");
 
             // Step 3: Verify restrictions in FIXED_TERM
@@ -821,7 +821,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
             // Step 5: Verify transition back to PERPETUAL
             IRoycoAccountant.RoycoAccountantState memory state3 = ACCOUNTANT.getState();
             assertEq(uint256(state3.lastMarketState), uint256(MarketState.PERPETUAL), "Should return to PERPETUAL after term expires");
-            assertEq(toUint256(state3.lastJTCoverageImpermanentLoss), 0, "JT coverage IL should be cleared");
+            assertEq(toUint256(state3.lastJTImpermanentLoss), 0, "JT coverage IL should be cleared");
         }
     }
 
@@ -1336,7 +1336,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
         assertTrue(ltv > 0, "LTV must be positive when ST has loss");
 
         // JT effective NAV should be providing coverage
-        assertTrue(state.jtCoverageImpermanentLoss > ZERO_NAV_UNITS || state.jtEffectiveNAV < state.jtRawNAV, "JT must be providing coverage");
+        assertTrue(state.jtImpermanentLoss > ZERO_NAV_UNITS || state.jtEffectiveNAV < state.jtRawNAV, "JT must be providing coverage");
     }
 
     // ============================================
@@ -1568,7 +1568,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
         SyncedAccountingState memory syncedState = KERNEL.syncTrancheAccounting();
 
         // If JT coverage IL exists and no ST IL, should be FIXED_TERM
-        if (toUint256(syncedState.jtCoverageImpermanentLoss) > 0 && toUint256(syncedState.stImpermanentLoss) == 0) {
+        if (toUint256(syncedState.jtImpermanentLoss) > 0 && toUint256(syncedState.stImpermanentLoss) == 0) {
             assertEq(uint256(syncedState.marketState), uint256(MarketState.FIXED_TERM), "Market must transition to FIXED_TERM when JT provides coverage");
         }
     }
@@ -2183,7 +2183,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
 
         // All impermanent losses must be non-negative
         assertTrue(toUint256(state.stImpermanentLoss) >= 0, "ST impermanent loss must be non-negative");
-        assertTrue(toUint256(state.jtCoverageImpermanentLoss) >= 0, "JT coverage impermanent loss must be non-negative");
+        assertTrue(toUint256(state.jtImpermanentLoss) >= 0, "JT coverage impermanent loss must be non-negative");
         assertTrue(toUint256(state.jtSelfImpermanentLoss) >= 0, "JT self impermanent loss must be non-negative");
     }
 
@@ -2233,7 +2233,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
         SyncedAccountingState memory afterLossState = KERNEL.syncTrancheAccounting();
 
         // If JT coverage impermanent loss > 0, market should be in FIXED_TERM
-        if (toUint256(afterLossState.jtCoverageImpermanentLoss) > 0) {
+        if (toUint256(afterLossState.jtImpermanentLoss) > 0) {
             assertEq(uint256(afterLossState.marketState), uint256(MarketState.FIXED_TERM), "Should transition to FIXED_TERM when JT provides coverage");
         }
     }
@@ -2708,7 +2708,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
         // Verify: ST effective NAV increased, JT effective NAV may increase (yield share)
         assertGt(toUint256(state.stEffectiveNAV), 50_000e18, "ST effective NAV must increase from gain");
         assertEq(toUint256(state.stImpermanentLoss), 0, "No ST impermanent loss on gain");
-        assertEq(toUint256(state.jtCoverageImpermanentLoss), 0, "No JT coverage IL on ST gain");
+        assertEq(toUint256(state.jtImpermanentLoss), 0, "No JT coverage IL on ST gain");
         assertEq(uint256(state.marketState), uint256(MarketState.PERPETUAL), "Market must stay PERPETUAL");
         _verifyNAVConservation(state, "ST gain only");
     }
@@ -2750,7 +2750,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
         // Verify: JT provided coverage, ST effective NAV unchanged
         assertApproxEqAbs(toUint256(state.stEffectiveNAV), 50_000e18, toUint256(AAVE_MAX_ABS_NAV_DELTA), "ST effective NAV should be maintained");
         assertLt(toUint256(state.jtEffectiveNAV), 100_000e18, "JT effective NAV must decrease from coverage");
-        assertGt(toUint256(state.jtCoverageImpermanentLoss), 0, "JT coverage IL must be recorded");
+        assertGt(toUint256(state.jtImpermanentLoss), 0, "JT coverage IL must be recorded");
         assertEq(toUint256(state.stImpermanentLoss), 0, "No ST IL when fully covered");
         _verifyNAVConservation(state, "ST loss with JT coverage");
     }
@@ -2875,7 +2875,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
         SyncedAccountingState memory state = KERNEL.syncTrancheAccounting();
 
         // ST loss covered by JT
-        assertGt(toUint256(state.jtCoverageImpermanentLoss), 0, "JT coverage IL from ST loss");
+        assertGt(toUint256(state.jtImpermanentLoss), 0, "JT coverage IL from ST loss");
         _verifyNAVConservation(state, "ST loss with JT coverage");
     }
 
@@ -2893,7 +2893,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
         SyncedAccountingState memory state = KERNEL.syncTrancheAccounting();
 
         // JT provides coverage for ST loss
-        assertGt(toUint256(state.jtCoverageImpermanentLoss), 0, "JT coverage IL from ST loss");
+        assertGt(toUint256(state.jtImpermanentLoss), 0, "JT coverage IL from ST loss");
         _verifyNAVConservation(state, "ST loss");
     }
 
@@ -2960,7 +2960,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
 
         vm.prank(SYNC_ROLE_ADDRESS);
         SyncedAccountingState memory lossState = KERNEL.syncTrancheAccounting();
-        uint256 jtCoverageILBefore = toUint256(lossState.jtCoverageImpermanentLoss);
+        uint256 jtCoverageILBefore = toUint256(lossState.jtImpermanentLoss);
 
         // Check if JT coverage IL was created
         if (jtCoverageILBefore > 0) {
@@ -2973,7 +2973,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
             SyncedAccountingState memory recoveryState = KERNEL.syncTrancheAccounting();
 
             // JT coverage IL should decrease or be eliminated
-            assertLe(toUint256(recoveryState.jtCoverageImpermanentLoss), jtCoverageILBefore, "JT coverage IL must decrease from ST gain");
+            assertLe(toUint256(recoveryState.jtImpermanentLoss), jtCoverageILBefore, "JT coverage IL must decrease from ST gain");
             _verifyNAVConservation(recoveryState, "JT coverage IL recovery from ST gain");
         }
     }
@@ -3068,7 +3068,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
         SyncedAccountingState memory state = KERNEL.syncTrancheAccounting();
 
         assertEq(uint256(state.marketState), uint256(MarketState.PERPETUAL), "Must stay PERPETUAL without coverage IL");
-        assertEq(toUint256(state.jtCoverageImpermanentLoss), 0, "No coverage IL");
+        assertEq(toUint256(state.jtImpermanentLoss), 0, "No coverage IL");
     }
 
     /// @notice Test PERPETUAL -> FIXED_TERM transition when JT provides coverage
@@ -3084,7 +3084,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
         SyncedAccountingState memory state = KERNEL.syncTrancheAccounting();
 
         // If JT coverage IL exists and LLTV not breached, should be FIXED_TERM
-        if (toUint256(state.jtCoverageImpermanentLoss) > 0 && toUint256(state.stImpermanentLoss) == 0) {
+        if (toUint256(state.jtImpermanentLoss) > 0 && toUint256(state.stImpermanentLoss) == 0) {
             assertEq(uint256(state.marketState), uint256(MarketState.FIXED_TERM), "Should transition to FIXED_TERM");
         }
     }
@@ -3108,7 +3108,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
         SyncedAccountingState memory afterTermState = KERNEL.syncTrancheAccounting();
 
         assertEq(uint256(afterTermState.marketState), uint256(MarketState.PERPETUAL), "Should return to PERPETUAL after term");
-        assertEq(toUint256(afterTermState.jtCoverageImpermanentLoss), 0, "JT coverage IL should be cleared");
+        assertEq(toUint256(afterTermState.jtImpermanentLoss), 0, "JT coverage IL should be cleared");
     }
 
     /// @notice Test market stays PERPETUAL when severe loss creates ST IL
@@ -3909,7 +3909,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
     // impermanent losses and other state variables
     // ============================================
 
-    /// @notice Test that jtCoverageImpermanentLoss increases when JT provides coverage for ST loss
+    /// @notice Test that jtImpermanentLoss increases when JT provides coverage for ST loss
     function test_accountant_jtCoverageIL_increasesOnSTLoss() public {
         // Setup: JT deposits, then ST deposits
         _depositJT(1_000_000e6, ALICE_ADDRESS);
@@ -3917,7 +3917,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
 
         // Get initial state
         IRoycoAccountant.RoycoAccountantState memory stateBefore = ACCOUNTANT.getState();
-        assertEq(toUint256(stateBefore.lastJTCoverageImpermanentLoss), 0, "Initial jtCoverageIL should be 0");
+        assertEq(toUint256(stateBefore.lastJTImpermanentLoss), 0, "Initial jtCoverageIL should be 0");
 
         // Simulate ST loss by transferring USDC out of the mock vault
         // The ST vault loses value, JT must provide coverage
@@ -3931,11 +3931,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
 
         // Verify jtCoverageIL increased
         IRoycoAccountant.RoycoAccountantState memory stateAfter = ACCOUNTANT.getState();
-        assertGt(
-            toUint256(stateAfter.lastJTCoverageImpermanentLoss),
-            toUint256(stateBefore.lastJTCoverageImpermanentLoss),
-            "jtCoverageIL should increase after ST loss"
-        );
+        assertGt(toUint256(stateAfter.lastJTImpermanentLoss), toUint256(stateBefore.lastJTImpermanentLoss), "jtCoverageIL should increase after ST loss");
     }
 
     /// @notice Test that jtSelfImpermanentLoss tracks JT losses correctly
@@ -4028,7 +4024,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
     // Tests that verify impermanent losses are recovered correctly
     // ============================================
 
-    /// @notice Test that ST gains recover jtCoverageImpermanentLoss
+    /// @notice Test that ST gains recover jtImpermanentLoss
     function test_ILRecovery_stGains_recoverJTCoverageIL() public {
         // Setup: Create jtCoverageIL by simulating ST loss
         _depositJT(1_000_000e6, ALICE_ADDRESS);
@@ -4043,7 +4039,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
         KERNEL.syncTrancheAccounting();
 
         IRoycoAccountant.RoycoAccountantState memory stateWithIL = ACCOUNTANT.getState();
-        uint256 ilBefore = toUint256(stateWithIL.lastJTCoverageImpermanentLoss);
+        uint256 ilBefore = toUint256(stateWithIL.lastJTImpermanentLoss);
 
         // Now simulate ST gain to recover the IL
         uint256 yieldAmount = lossAmount + 1000e6;
@@ -4053,7 +4049,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
         KERNEL.syncTrancheAccounting();
 
         IRoycoAccountant.RoycoAccountantState memory stateAfterRecovery = ACCOUNTANT.getState();
-        uint256 ilAfter = toUint256(stateAfterRecovery.lastJTCoverageImpermanentLoss);
+        uint256 ilAfter = toUint256(stateAfterRecovery.lastJTImpermanentLoss);
 
         // IL should have decreased (recovered)
         assertLt(ilAfter, ilBefore, "jtCoverageIL should decrease after ST gains");
@@ -4077,7 +4073,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
 
         // JT IL tracking may have small amounts due to Aave yield tracking
         assertTrue(toUint256(state.lastJTSelfImpermanentLoss) >= 0, "jtSelfIL should be non-negative");
-        assertTrue(toUint256(state.lastJTCoverageImpermanentLoss) >= 0, "jtCoverageIL should be non-negative");
+        assertTrue(toUint256(state.lastJTImpermanentLoss) >= 0, "jtCoverageIL should be non-negative");
     }
 
     // ============================================
@@ -4112,7 +4108,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
         IRoycoAccountant.RoycoAccountantState memory stateAfter = ACCOUNTANT.getState();
 
         // If jtCoverageIL > stNAVDustTolerance, should be FIXED_TERM
-        if (toUint256(stateAfter.lastJTCoverageImpermanentLoss) > toUint256(stateAfter.stNAVDustTolerance)) {
+        if (toUint256(stateAfter.lastJTImpermanentLoss) > toUint256(stateAfter.stNAVDustTolerance)) {
             assertEq(uint256(stateAfter.lastMarketState), uint256(MarketState.FIXED_TERM), "Should transition to FIXED_TERM");
             assertGt(stateAfter.fixedTermEndTimestamp, 0, "fixedTermEndTimestamp should be set");
         }
@@ -4142,7 +4138,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
         IRoycoAccountant.RoycoAccountantState memory stateAfterRecovery = ACCOUNTANT.getState();
 
         // If IL is 0, should be PERPETUAL
-        if (toUint256(stateAfterRecovery.lastJTCoverageImpermanentLoss) == 0) {
+        if (toUint256(stateAfterRecovery.lastJTImpermanentLoss) == 0) {
             assertEq(uint256(stateAfterRecovery.lastMarketState), uint256(MarketState.PERPETUAL), "Should return to PERPETUAL");
         }
     }
@@ -4197,7 +4193,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
             IRoycoAccountant.RoycoAccountantState memory stateAfterExpiry = ACCOUNTANT.getState();
             assertEq(uint256(stateAfterExpiry.lastMarketState), uint256(MarketState.PERPETUAL), "Should be PERPETUAL after expiry");
             // IL is erased (cleared to 0) when fixed term expires, transitioning back to PERPETUAL
-            assertEq(toUint256(stateAfterExpiry.lastJTCoverageImpermanentLoss), 0, "JT coverage IL should be cleared after expiry");
+            assertEq(toUint256(stateAfterExpiry.lastJTImpermanentLoss), 0, "JT coverage IL should be cleared after expiry");
         }
     }
 
@@ -4541,7 +4537,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
         KERNEL.syncTrancheAccounting();
 
         IRoycoAccountant.RoycoAccountantState memory stateBefore = ACCOUNTANT.getState();
-        uint256 ilBefore = toUint256(stateBefore.lastJTCoverageImpermanentLoss);
+        uint256 ilBefore = toUint256(stateBefore.lastJTImpermanentLoss);
 
         // JT partial redeem
         uint256 jtShares = JT.balanceOf(ALICE_ADDRESS);
@@ -4560,7 +4556,7 @@ contract KernelComprehensiveTest is MainnetForkWithAaveTestBase {
             vm.stopPrank();
 
             IRoycoAccountant.RoycoAccountantState memory stateAfter = ACCOUNTANT.getState();
-            uint256 ilAfter = toUint256(stateAfter.lastJTCoverageImpermanentLoss);
+            uint256 ilAfter = toUint256(stateAfter.lastJTImpermanentLoss);
 
             // IL should have scaled down (not necessarily by exact ratio due to NAV changes)
             if (ilBefore > 0) {

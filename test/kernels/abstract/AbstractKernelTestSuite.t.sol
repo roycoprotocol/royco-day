@@ -2879,7 +2879,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         assertEq(uint256(ACCOUNTANT.getState().lastMarketState), uint256(MarketState.PERPETUAL), "Market should still be PERPETUAL after all deposit cycles");
 
         // Verify no JT coverage impermanent loss accumulated
-        NAV_UNIT jtCoverageIL = ACCOUNTANT.getState().lastJTCoverageImpermanentLoss;
+        NAV_UNIT jtCoverageIL = ACCOUNTANT.getState().lastJTImpermanentLoss;
         assertEq(toUint256(jtCoverageIL), 0, "JT coverage IL should be 0 with no yield/loss - only deposits");
     }
 
@@ -2983,7 +2983,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // Verify no significant impermanent losses accumulated from pure deposit/withdraw
         // (allow for dust tolerance from underlying protocol rounding)
         NAV_UNIT stIL = ACCOUNTANT.getState().lastSTImpermanentLoss;
-        NAV_UNIT jtCoverageIL = ACCOUNTANT.getState().lastJTCoverageImpermanentLoss;
+        NAV_UNIT jtCoverageIL = ACCOUNTANT.getState().lastJTImpermanentLoss;
         NAV_UNIT jtSelfIL = ACCOUNTANT.getState().lastJTSelfImpermanentLoss;
         NAV_UNIT stNAVDustTolerance = ACCOUNTANT.getState().stNAVDustTolerance;
 

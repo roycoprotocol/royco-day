@@ -54,10 +54,8 @@ struct AssetClaims {
  * @custom:field jtEffectiveNAV - Junior tranche effective NAV: includes provided coverage, JT yield, its share of ST yield, and JT losses
  * @custom:field stImpermanentLoss - The impermanent loss that ST has suffered after exhausting JT's loss-absorption buffer
  *                                   This represents the first claim on capital that the senior tranche has on future ST and JT recoveries
- * @custom:field jtCoverageImpermanentLoss - The impermanent loss that JT has suffered after providing coverage for ST losses
- *                                           This represents the second claim on capital that the junior tranche has on future ST recoveries
- * @custom:field jtSelfImpermanentLoss - The impermanent loss that JT has suffered from depreciaiton of its own NAV
- *                                       This represents the first claim on capital that the junior tranche has on future JT recoveries
+ * @custom:field jtImpermanentLoss - The impermanent loss that JT has suffered after providing coverage for ST losses
+ *                                   This represents the second claim on capital that the junior tranche has on future ST recoveries
  * @custom:field stProtocolFeeAccrued - Protocol fee taken on ST yield on this sync
  * @custom:field jtProtocolFeeAccrued - Protocol fee taken on JT yield on this sync
  * @custom:field fixedTermDurationSeconds - The duration of the fixed term in seconds
@@ -73,8 +71,7 @@ struct SyncedAccountingState {
     NAV_UNIT stEffectiveNAV;
     NAV_UNIT jtEffectiveNAV;
     NAV_UNIT stImpermanentLoss;
-    NAV_UNIT jtCoverageImpermanentLoss;
-    NAV_UNIT jtSelfImpermanentLoss;
+    NAV_UNIT jtImpermanentLoss;
     NAV_UNIT stProtocolFeeAccrued;
     NAV_UNIT jtProtocolFeeAccrued;
     // Additional data about the market's post-sync state

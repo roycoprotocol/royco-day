@@ -64,10 +64,8 @@ interface IRoycoAccountant {
      * @custom:field lastJTEffectiveNAV - The last recorded effective NAV (including any prior provided coverage, JT yield, ST yield distribution, and JT losses) of the junior tranche
      * @custom:field lastSTImpermanentLoss - The impermanent loss that ST has suffered after exhausting JT's loss-absorption buffer
      *                                   This represents the first claim on capital that the senior tranche has on future ST and JT recoveries
-     * @custom:field lastJTCoverageImpermanentLoss - The impermanent loss that JT has suffered after providing coverage for ST losses
+     * @custom:field lastJTImpermanentLoss - The impermanent loss that JT has suffered after providing coverage for ST losses
      *                                           This represents the second claim on capital that the junior tranche has on future ST recoveries
-     * @custom:field lastJTSelfImpermanentLoss - The impermanent loss that JT has suffered from depreciaiton of its own NAV
-     *                                           This represents the first claim on capital that the junior tranche has on future JT recoveries
      * @custom:field twJTYieldShareAccruedWAD - The time-weighted junior tranche yield share (YDM output) since the last yield distribution, scaled to WAD precision
      * @custom:field lastAccrualTimestamp - The timestamp at which the time-weighted JT yield share accumulator was last updated
      * @custom:field lastDistributionTimestamp - The timestamp at which the last ST yield distribution occurred
@@ -94,8 +92,7 @@ interface IRoycoAccountant {
         NAV_UNIT lastSTEffectiveNAV;
         NAV_UNIT lastJTEffectiveNAV;
         NAV_UNIT lastSTImpermanentLoss;
-        NAV_UNIT lastJTCoverageImpermanentLoss;
-        NAV_UNIT lastJTSelfImpermanentLoss;
+        NAV_UNIT lastJTImpermanentLoss;
         uint192 twJTYieldShareAccruedWAD;
         uint32 lastAccrualTimestamp;
         uint32 lastDistributionTimestamp;
@@ -185,9 +182,9 @@ interface IRoycoAccountant {
 
     /**
      * @notice Emitted when JT's coverage loss is realized when transitioning from a fixed term state to a perpetual state
-     * @param jtCoverageImpermanentLossErased The amount of JT coverage loss erased when transitioning from a fixed term state to a perpetual state
+     * @param jtImpermanentLossErased The amount of JT coverage loss erased when transitioning from a fixed term state to a perpetual state
      */
-    event JTCoverageImpermanentLossErased(NAV_UNIT jtCoverageImpermanentLossErased);
+    event JTCoverageImpermanentLossErased(NAV_UNIT jtImpermanentLossErased);
 
     /// @notice Thrown when the accountant's coverage config is invalid
     error INVALID_COVERAGE_CONFIG();
