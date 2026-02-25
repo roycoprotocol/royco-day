@@ -3,9 +3,9 @@ pragma solidity ^0.8.28;
 
 import { RoycoBase } from "../base/RoycoBase.sol";
 import { IRoycoAccountant } from "../interfaces/IRoycoAccountant.sol";
+import { IRoycoKernel } from "../interfaces/IRoycoKernel.sol";
 import { IYDM } from "../interfaces/IYDM.sol";
-import { IRoycoKernel } from "../interfaces/kernel/IRoycoKernel.sol";
-import { MAX_PROTOCOL_FEE_WAD, MIN_COVERAGE_WAD, WAD, ZERO_NAV_UNITS } from "../libraries/Constants.sol";
+import { MAX_COVERAGE_WAD, MAX_PROTOCOL_FEE_WAD, MIN_COVERAGE_WAD, WAD, ZERO_NAV_UNITS } from "../libraries/Constants.sol";
 import { MarketState, NAV_UNIT, Operation, SyncedAccountingState } from "../libraries/Types.sol";
 import { UnitsMathLib, toInt256, toNAVUnits, toUint256 } from "../libraries/Units.sol";
 import { Math, UtilsLib } from "../libraries/UtilsLib.sol";
@@ -25,18 +25,32 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoAccountantState")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ROYCO_ACCOUNTANT_STORAGE_SLOT = 0xc8240830e1172c6f1489139d8edb11776c3d3b2f893e3f4ce0fb541305a63a00;
 
-    /// @dev Enforces that the function is called by the accountant's Royco kernel
-    /// forge-lint: disable-next-item(unwrapped-modifier-logic)
+    /// @inheritdoc IRoycoAccountant
+    address public immutable override(IRoycoAccountant) KERNEL;
+
+    /// @dev Permissions the function to only be callable by the market's kernel
+    /// @dev Should be placed on all state mutating NAV synchronization functions
     modifier onlyRoycoKernel() {
-        require(msg.sender == _getRoycoAccountantStorage().kernel, ONLY_ROYCO_KERNEL());
+        require(msg.sender == KERNEL, ONLY_ROYCO_KERNEL());
         _;
     }
 
-    /// @dev Enforces that the kernel's accounting is synced before the function is called
-    /// forge-lint: disable-next-item(unwrapped-modifier-logic)
+    /// @dev Synchronizes the market's accounting to reconcile unrealized PNL at the start of the call
     modifier withSyncedAccounting() {
-        IRoycoKernel(_getRoycoAccountantStorage().kernel).syncTrancheAccounting();
+        IRoycoKernel(KERNEL).preOpSyncTrancheAccounting();
         _;
+    }
+
+    // =============================
+    // Construction and Initialization Functions
+    // =============================
+
+    /// @dev Constructs the accountant with the specified kernel
+    /// @param _kernel - The kernel that this accountant maintains mark-to-market NAV, impermanent loss, and fee accounting for
+    constructor(address _kernel) {
+        // Ensure the specified kernel is not null and immutably set it
+        require(_kernel != address(0), NULL_ADDRESS());
+        KERNEL = _kernel;
     }
 
     /**
@@ -61,7 +75,6 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
 
         // Initialize the state of the accountant
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
-        $.kernel = _params.kernel;
         $.lltvWAD = _params.lltvWAD;
         emit LLTVUpdated(_params.lltvWAD);
         $.fixedTermDurationSeconds = _params.fixedTermDurationSeconds;
@@ -84,12 +97,14 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         emit JuniorTrancheDustToleranceUpdated(_params.jtNAVDustTolerance);
     }
 
+    // =============================
+    // NAV Synchronization Functions
+    // =============================
+
     /// @inheritdoc IRoycoAccountant
-    function syncTrancheAccounting(
+    function preOpSyncTrancheAccounting(
         NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV,
-        NAV_UNIT _liquidationProceedsNAV,
-        NAV_UNIT _liquidationBonusNAV
+        NAV_UNIT _jtRawNAV
     )
         public
         override(IRoycoAccountant)
@@ -103,8 +118,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         MarketState initialMarketState;
         bool yieldDistributed;
         NAV_UNIT jtImpermanentLossErased;
-        (state, initialMarketState, yieldDistributed, jtImpermanentLossErased) =
-            _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _liquidationProceedsNAV, _liquidationBonusNAV, _accrueJTYieldShare());
+        (state, initialMarketState, yieldDistributed, jtImpermanentLossErased) = _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _accrueJTYieldShare());
 
         // ST yield was split between ST and JT
         if (yieldDistributed) {
@@ -117,13 +131,12 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         $.lastMarketState = state.marketState;
         $.lastSTRawNAV = _stRawNAV;
         $.lastJTRawNAV = _jtRawNAV;
-        $.lastLiquidationProceedsNAV = _liquidationProceedsNAV;
         $.lastSTEffectiveNAV = state.stEffectiveNAV;
         $.lastJTEffectiveNAV = state.jtEffectiveNAV;
         $.lastSTImpermanentLoss = state.stImpermanentLoss;
         $.lastJTImpermanentLoss = state.jtImpermanentLoss;
 
-        // If the market transitioned from a perpetual to a fixed term state, set the end timestamp of the fixed term
+        // If the market transitioned from a perpetual to a fixed-term state, set the end timestamp of the fixed-term
         if (initialMarketState == MarketState.PERPETUAL && state.marketState == MarketState.FIXED_TERM) {
             $.fixedTermEndTimestamp = state.fixedTermEndTimestamp;
             emit FixedTermCommenced(state.fixedTermEndTimestamp);
@@ -131,7 +144,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
 
         // If the JT Coverage IL was erased, signal the resetting
         if (jtImpermanentLossErased != ZERO_NAV_UNITS) {
-            emit JTCoverageImpermanentLossErased(jtImpermanentLossErased);
+            emit JTImpermanentLossReset(jtImpermanentLossErased);
         }
 
         emit TrancheAccountingSynced(state);
@@ -140,16 +153,14 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     /// @inheritdoc IRoycoAccountant
     function previewSyncTrancheAccounting(
         NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV,
-        NAV_UNIT _liquidationProceedsNAV,
-        NAV_UNIT _liquidationBonusNAV
+        NAV_UNIT _jtRawNAV
     )
         public
         view
         override(IRoycoAccountant)
         returns (SyncedAccountingState memory state)
     {
-        (state,,,) = _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _liquidationProceedsNAV, _liquidationBonusNAV, _previewJTYieldShareAccrual());
+        (state,,,) = _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _previewJTYieldShareAccrual());
     }
 
     /// @inheritdoc IRoycoAccountant
@@ -157,7 +168,6 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         Operation _op,
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
-        NAV_UNIT _liquidationProceedsNAV,
         NAV_UNIT _stRedemptionBonusNAV
     )
         public
@@ -168,10 +178,9 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         // Get the storage pointer to the accountant state
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
 
-        // Compute the deltas in the three NAVs
+        // Compute the deltas in the raw NAVs of each tranche
         int256 deltaST = UnitsMathLib.computeNAVDelta(_stRawNAV, $.lastSTRawNAV);
         int256 deltaJT = UnitsMathLib.computeNAVDelta(_jtRawNAV, $.lastJTRawNAV);
-        int256 deltaLP = UnitsMathLib.computeNAVDelta(_liquidationProceedsNAV, $.lastLiquidationProceedsNAV);
 
         // Cache the last checkpointed NAVs and impermanent losses for each tranche
         NAV_UNIT stEffectiveNAV = $.lastSTEffectiveNAV;
@@ -181,24 +190,24 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
 
         // Apply the effects of the operation that was executed
         if (_op == Operation.ST_DEPOSIT) {
-            require(deltaST > 0 && deltaJT == 0 && deltaLP == 0 && _stRedemptionBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
+            require(deltaST > 0 && deltaJT == 0 && _stRedemptionBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
             // New ST deposits are treated as an addition to the future ST exposure
             stEffectiveNAV = stEffectiveNAV + toNAVUnits(deltaST);
         } else if (_op == Operation.JT_DEPOSIT) {
-            require(deltaJT > 0 && deltaST == 0 && deltaLP == 0 && _stRedemptionBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
+            require(deltaJT > 0 && deltaST == 0 && _stRedemptionBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
             // New JT deposits are treated as an addition to the future loss-absorption buffer
             jtEffectiveNAV = jtEffectiveNAV + toNAVUnits(deltaJT);
         } else {
-            require(deltaST <= 0 && deltaJT <= 0 && deltaLP <= 0, INVALID_POST_OP_STATE(_op));
+            require(deltaST <= 0 && deltaJT <= 0, INVALID_POST_OP_STATE(_op));
             // Get the total value redeemed
-            NAV_UNIT totalRedemptionNAV = (toNAVUnits(-deltaST) + toNAVUnits(-deltaJT) + toNAVUnits(-deltaLP));
+            NAV_UNIT totalRedemptionNAV = (toNAVUnits(-deltaST) + toNAVUnits(-deltaJT));
             if (_op == Operation.ST_REDEEM) {
                 require(totalRedemptionNAV > ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
-                // Reduce JT effective NAV by the the bonus provided from its assets (bounded to JT effective NAV)
-                NAV_UNIT clampedBonusNAV = UnitsMathLib.min(_stRedemptionBonusNAV, jtEffectiveNAV);
-                jtEffectiveNAV = jtEffectiveNAV - clampedBonusNAV;
+                // Reduce JT effective NAV by the the bonus provided from its assets (clamped to JT effective NAV)
+                NAV_UNIT clampedSTRedemptionBonusNAV = UnitsMathLib.min(_stRedemptionBonusNAV, jtEffectiveNAV);
+                jtEffectiveNAV = jtEffectiveNAV - clampedSTRedemptionBonusNAV;
                 // Reduce ST effective NAV by the total redemptions without the bonus provided from JT effective NAV
-                stEffectiveNAV = stEffectiveNAV - (totalRedemptionNAV - clampedBonusNAV);
+                stEffectiveNAV = stEffectiveNAV - (totalRedemptionNAV - clampedSTRedemptionBonusNAV);
                 // The withdrawing senior LP has realized its proportional share of past uncovered losses and associated recovery optionality, rounding in favor of senior
                 if (stImpermanentLoss != ZERO_NAV_UNITS) {
                     stImpermanentLoss = stImpermanentLoss.mulDiv(stEffectiveNAV, $.lastSTEffectiveNAV, Math.Rounding.Ceil);
@@ -209,39 +218,39 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                 require(totalRedemptionNAV > ZERO_NAV_UNITS && _stRedemptionBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
                 // The actual amount withdrawn from JT effective NAV could be from both tranches (its own share of its NAV, ST yield share, IL repayments, etc.)
                 jtEffectiveNAV = jtEffectiveNAV - totalRedemptionNAV;
-            }
-            // The withdrawing junior LP has realized its proportional share of past JT losses from coverage applied and its associated recovery optionality, rounding in favor of senior
-            if (jtImpermanentLoss != ZERO_NAV_UNITS) {
-                jtImpermanentLoss = jtImpermanentLoss.mulDiv(jtEffectiveNAV, $.lastJTEffectiveNAV, Math.Rounding.Floor);
-                $.lastJTImpermanentLoss = jtImpermanentLoss;
+                // The withdrawing junior LP has realized its proportional share of past JT losses from coverage applied and its associated recovery optionality, rounding in favor of senior
+                if (jtImpermanentLoss != ZERO_NAV_UNITS) {
+                    jtImpermanentLoss = jtImpermanentLoss.mulDiv(jtEffectiveNAV, $.lastJTEffectiveNAV, Math.Rounding.Floor);
+                    $.lastJTImpermanentLoss = jtImpermanentLoss;
+                }
             }
         }
 
         // Enforce the NAV conservation invariant
-        require((_stRawNAV + _jtRawNAV + _liquidationProceedsNAV) == (stEffectiveNAV + jtEffectiveNAV), NAV_CONSERVATION_VIOLATION());
+        require((_stRawNAV + _jtRawNAV) == (stEffectiveNAV + jtEffectiveNAV), NAV_CONSERVATION_VIOLATION());
 
         // Checkpoint the mark-to-market NAVs
         $.lastSTRawNAV = _stRawNAV;
         $.lastJTRawNAV = _jtRawNAV;
-        $.lastLiquidationProceedsNAV = _liquidationProceedsNAV;
         $.lastSTEffectiveNAV = stEffectiveNAV;
         $.lastJTEffectiveNAV = jtEffectiveNAV;
 
         // Marshal the post-sync state and return to the caller
         state = SyncedAccountingState({
+            // The market state is guaranteed to be identical to the persisted
             marketState: $.lastMarketState,
             stRawNAV: _stRawNAV,
             jtRawNAV: _jtRawNAV,
-            liquidationProceedsNAV: _liquidationProceedsNAV,
             stEffectiveNAV: stEffectiveNAV,
             jtEffectiveNAV: jtEffectiveNAV,
             stImpermanentLoss: stImpermanentLoss,
             jtImpermanentLoss: jtImpermanentLoss,
+            // No protocol fees taken on deposit or withdrawal
             stProtocolFeeAccrued: ZERO_NAV_UNITS,
             jtProtocolFeeAccrued: ZERO_NAV_UNITS,
             // Additional data about the market's post-sync state
             utilizationWAD: UtilsLib.computeUtilization(_stRawNAV, _jtRawNAV, $.betaWAD, $.coverageWAD, jtEffectiveNAV),
-            ltvWAD: UtilsLib.computeLTV(stEffectiveNAV, stImpermanentLoss, _liquidationProceedsNAV, jtEffectiveNAV),
+            ltvWAD: UtilsLib.computeLTV(stEffectiveNAV, stImpermanentLoss, jtEffectiveNAV),
             fixedTermEndTimestamp: $.fixedTermEndTimestamp
         });
     }
@@ -251,7 +260,6 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         Operation _op,
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
-        NAV_UNIT _liquidationProceedsNAV,
         NAV_UNIT _stRedemptionBonusNAV
     )
         external
@@ -259,24 +267,16 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         returns (SyncedAccountingState memory state)
     {
         // Execute a post-op NAV synchronization
-        state = postOpSyncTrancheAccounting(_op, _stRawNAV, _jtRawNAV, _liquidationProceedsNAV, _stRedemptionBonusNAV);
+        state = postOpSyncTrancheAccounting(_op, _stRawNAV, _jtRawNAV, _stRedemptionBonusNAV);
         // Enforce the market's coverage requirement
         require(_isCoverageRequirementSatisfied(state.utilizationWAD), COVERAGE_REQUIREMENT_UNSATISFIED());
     }
 
-    /**
-     * @inheritdoc IRoycoAccountant
-     * @dev Junior capital must be sufficient to absorb losses to the senior exposure up to the coverage ratio
-     * @dev Informally: junior loss absorbtion buffer >= total covered exposure
-     * @dev Formally: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * COV
-     *      JT_EFFECTIVE_NAV is JT's current loss absorbtion buffer after applying all prior JT yield accrual and coverage adjustments
-     *      ST_RAW_NAV and JT_RAW_NAV are the mark-to-market NAVs of the tranches
-     *      β is the JT's sensitivity to the same downside stress that affects ST (eg. 0 if JT is in RFR and 1 if JT and ST are in the same opportunity)
-     * @dev If we rearrange the coverage requirement, we get:
-     *      1 >= ((ST_RAW_NAV + (JT_RAW_NAV * β)) * COV) / JT_EFFECTIVE_NAV
-     *      Notice that the RHS is identical to how we define utilization
-     *      Hence, the coverage requirement can be written as 1 >= Utilization, or equivalently, Utilization <= 1
-     */
+    // =============================
+    // Coverage Checking Functions
+    // =============================
+
+    ///@inheritdoc IRoycoAccountant
     function isCoverageRequirementSatisfied() public view override(IRoycoAccountant) returns (bool) {
         // Get the storage pointer to the accountant state
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
@@ -286,35 +286,16 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     }
 
     /**
-     * @notice Returns whether the coverage requirement is satisfied given the utilization
-     * @param _utilizationWAD The utilization of the market, scaled to WAD precision
-     * @return satisfied A boolean indicating whether the coverage requirement is satisfied
-     */
-    function _isCoverageRequirementSatisfied(uint256 _utilizationWAD) internal pure returns (bool) {
-        return (_utilizationWAD <= WAD);
-    }
-
-    /**
      * @inheritdoc IRoycoAccountant
      * @dev Coverage Invariant: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * COV
      * @dev Max assets depositable into ST, x: JT_EFFECTIVE_NAV = ((ST_RAW_NAV + x) + (JT_RAW_NAV * β)) * COV
      *      Isolate x: x = (JT_EFFECTIVE_NAV / COV) - (JT_RAW_NAV * β) - ST_RAW_NAV
      */
-    function maxSTDepositGivenCoverage(
-        NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV,
-        NAV_UNIT _liquidationProceedsNAV
-    )
-        external
-        view
-        override(IRoycoAccountant)
-        returns (NAV_UNIT maxSTDeposit)
-    {
+    function maxSTDepositGivenCoverage(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external view override(IRoycoAccountant) returns (NAV_UNIT maxSTDeposit) {
         // Get the storage pointer to the accountant state
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
         // Preview a NAV sync to get the market's current state
-        (SyncedAccountingState memory state,,,) =
-            _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _liquidationProceedsNAV, ZERO_NAV_UNITS, _previewJTYieldShareAccrual());
+        (SyncedAccountingState memory state,,,) = _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _previewJTYieldShareAccrual());
         // Solve for x, rounding in favor of senior protection
         // Compute the total covered assets by the junior tranche loss absorption buffer
         NAV_UNIT totalCoveredAssets = state.jtEffectiveNAV.mulDiv(WAD, $.coverageWAD, Math.Rounding.Floor);
@@ -339,7 +320,6 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     function maxJTWithdrawalGivenCoverage(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
-        NAV_UNIT _liquidationProceedsNAV,
         NAV_UNIT _jtClaimOnStUnits,
         NAV_UNIT _jtClaimOnJtUnits
     )
@@ -349,8 +329,17 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         returns (NAV_UNIT totalNAVClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable)
     {
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
+
         // Get the surplus JT assets in NAV units
-        NAV_UNIT surplusJTAssets = _calculateSurplusJtAssetsInNav(_stRawNAV, _jtRawNAV, _liquidationProceedsNAV);
+        // Preview a NAV sync to get the market's current state
+        (SyncedAccountingState memory state,,,) = _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _previewJTYieldShareAccrual());
+        uint256 betaWAD = $.betaWAD;
+        // Compute the total covered exposure of the underlying investment, rounding in favor of senior protection
+        NAV_UNIT totalCoveredExposure = _stRawNAV + _jtRawNAV.mulDiv(betaWAD, WAD, Math.Rounding.Ceil);
+        // Compute the minimum junior tranche assets required to cover the exposure as per the market's coverage requirement
+        NAV_UNIT requiredJTAssets = totalCoveredExposure.mulDiv($.coverageWAD, WAD, Math.Rounding.Ceil);
+        // Compute the surplus coverage currently provided by the junior tranche based on its currently remaining loss-absorption buffer
+        NAV_UNIT surplusJTAssets = state.jtEffectiveNAV.saturatingSub(requiredJTAssets);
 
         // Compute the total JT claim on NAV and preemptively return if zero
         NAV_UNIT totalJTClaims = _jtClaimOnStUnits + _jtClaimOnJtUnits;
@@ -361,10 +350,11 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         uint256 kJ_WAD = toUint256(_jtClaimOnJtUnits.mulDiv(WAD, totalJTClaims, Math.Rounding.Floor));
         // Compute how much coverage the system retains per 1 nav unit of JT assets withdrawn scaled to WAD precision
         uint256 coverageRetentionWAD =
-            (WAD - uint256($.coverageWAD).mulDiv(kS_WAD + uint256($.betaWAD).mulDiv(kJ_WAD, WAD, Math.Rounding.Floor), WAD, Math.Rounding.Floor));
+            (WAD - uint256($.coverageWAD).mulDiv(kS_WAD + uint256(betaWAD).mulDiv(kJ_WAD, WAD, Math.Rounding.Floor), WAD, Math.Rounding.Floor));
         // Calculate how much of the surplus can be withdrawn while satisfying the coverage requirement
         totalNAVClaimable = surplusJTAssets.mulDiv(WAD, coverageRetentionWAD, Math.Rounding.Floor);
         if (totalNAVClaimable == ZERO_NAV_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+
         // Split it into individual tranche's claims
         stClaimable = totalNAVClaimable.mulDiv(kS_WAD, WAD, Math.Rounding.Floor);
         jtClaimable = totalNAVClaimable.mulDiv(kJ_WAD, WAD, Math.Rounding.Floor);
@@ -375,33 +365,27 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     }
 
     /**
-     * @notice Calculates the surplus JT assets in NAV units
-     * @param _stRawNAV The senior tranche's current raw NAV in the market's NAV units
-     * @param _jtRawNAV The junior tranche's current raw NAV in the market's NAV units
-     * @return surplusJTAssets The surplus JT assets in NAV units
+     * @notice Returns whether the coverage requirement is satisfied given the utilization
+     * @dev Junior capital must be sufficient to absorb losses to the senior exposure up to the coverage ratio
+     * @dev Informally: junior loss absorbtion buffer >= total covered exposure
+     * @dev Formally: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * COV
+     *      JT_EFFECTIVE_NAV is JT's current loss absorbtion buffer after applying all prior JT yield accrual and coverage adjustments
+     *      ST_RAW_NAV and JT_RAW_NAV are the mark-to-market NAVs of the tranches
+     *      β is the JT's sensitivity to the same downside stress that affects ST (eg. 0 if JT is in RFR and 1 if JT and ST are in the same opportunity)
+     * @dev If we rearrange the coverage requirement, we get:
+     *      1 >= ((ST_RAW_NAV + (JT_RAW_NAV * β)) * COV) / JT_EFFECTIVE_NAV
+     *      Notice that the RHS is identical to how we define utilization
+     *      Hence, the coverage requirement can be written as 1 >= Utilization, or equivalently, Utilization <= 1
+     * @param _utilizationWAD The utilization of the market, scaled to WAD precision
+     * @return satisfied A boolean indicating whether the coverage requirement is satisfied
      */
-    function _calculateSurplusJtAssetsInNav(
-        NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV,
-        NAV_UNIT _liquidationProceedsNAV
-    )
-        internal
-        view
-        returns (NAV_UNIT surplusJTAssets)
-    {
-        // Get the storage pointer to the accountant state and cache beta and coverage
-        RoycoAccountantState storage $ = _getRoycoAccountantStorage();
-        uint256 betaWAD = $.betaWAD;
-        // Preview a NAV sync to get the market's current state
-        (SyncedAccountingState memory state,,,) =
-            _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _liquidationProceedsNAV, ZERO_NAV_UNITS, _previewJTYieldShareAccrual());
-        // Compute the total covered exposure of the underlying investment, rounding in favor of senior protection
-        NAV_UNIT totalCoveredExposure = _stRawNAV + _jtRawNAV.mulDiv(betaWAD, WAD, Math.Rounding.Ceil);
-        // Compute the minimum junior tranche assets required to cover the exposure as per the market's coverage requirement
-        NAV_UNIT requiredJTAssets = totalCoveredExposure.mulDiv($.coverageWAD, WAD, Math.Rounding.Ceil);
-        // Compute the surplus coverage currently provided by the junior tranche based on its currently remaining loss-absorption buffer
-        surplusJTAssets = state.jtEffectiveNAV.saturatingSub(requiredJTAssets);
+    function _isCoverageRequirementSatisfied(uint256 _utilizationWAD) internal pure returns (bool) {
+        return (_utilizationWAD <= WAD);
     }
+
+    // =============================
+    // NAV Synchronization and Yield Share Accrual Internal Utility Functions
+    // =============================
 
     /**
      * @notice Synchronizes all tranche NAVs and impermanent losses based on unrealized PNLs of the underlying investment(s)
@@ -416,8 +400,6 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     function _previewSyncTrancheAccounting(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
-        NAV_UNIT _liquidationProceedsNAV,
-        NAV_UNIT _liquidationBonusNAV,
         uint192 _twJTYieldShareAccruedWAD
     )
         internal
@@ -428,6 +410,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
 
         // Cache the last checkpointed market state, effective NAV, and impermanent losses for each tranche
+        initialMarketState = $.lastMarketState;
         NAV_UNIT stEffectiveNAV = $.lastSTEffectiveNAV;
         NAV_UNIT jtEffectiveNAV = $.lastJTEffectiveNAV;
         NAV_UNIT stImpermanentLoss = $.lastSTImpermanentLoss;
@@ -435,24 +418,10 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         NAV_UNIT stProtocolFeeAccrued;
         NAV_UNIT jtProtocolFeeAccrued;
 
-        // Compute the delta between the last checkpointed liquidation proceeds and the current value
-        int256 deltaLP = UnitsMathLib.computeNAVDelta(_liquidationProceedsNAV, $.lastLiquidationProceedsNAV);
-        // Ensure that liquidation events never decrease existing proceeds
-        // If there was no liquidation event, there is no liquidation bonus
-        require(deltaLP >= 0 && (deltaLP != 0 || (_liquidationBonusNAV == ZERO_NAV_UNITS)), LIQUIDATION_PROCEEDS_MUST_NOT_DECREASE());
-
         // Compute the deltas in the raw NAVs of each tranche
         // The deltas represent the unrealized PNL of the underlying investment since the last NAV checkpoints
         int256 deltaST = UnitsMathLib.computeNAVDelta(_stRawNAV, $.lastSTRawNAV);
         int256 deltaJT = UnitsMathLib.computeNAVDelta(_jtRawNAV, $.lastJTRawNAV);
-
-        /// @dev STEP_APPLY_LIQUIDATION_PRCOCEEDS_AND_BONUS: A liquidation event occurred that resulted in a settlement in exchange for seizing exposure and a bonus incentive
-        if (deltaLP > 0) {
-            // Equivalent to (liquidation proceeds + ostensible bonus) - (seized ST assets + real bonus) = Net gain/loss on ST's liquidation
-            deltaST = (deltaLP + toInt256(_liquidationBonusNAV)) + (deltaST + deltaJT);
-            // JT is expected to absorb the entire liquidation bonus paid to the liquidator
-            deltaJT = -toInt256(_liquidationBonusNAV);
-        }
 
         // The net JT gains after ST IL recovery. The JT protocol fee accrued is calculated using this NAV.
         NAV_UNIT jtNetGain = ZERO_NAV_UNITS;
@@ -486,7 +455,6 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                 stEffectiveNAV = (stEffectiveNAV + stImpermanentLossRecovery);
                 jtGain = (jtGain - stImpermanentLossRecovery);
             }
-
             /// @dev STEP_JT_ACCRUES_RESIDUAL_GAINS: JT accrues any remaining appreciation after clearing ST IL
             if (jtGain != ZERO_NAV_UNITS) {
                 jtNetGain = jtGain;
@@ -497,7 +465,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             }
         }
 
-        /// @dev STEP_APPLY_ST_LOSS: The ST assets depreciated in value or their was a loss on a liquidation event
+        /// @dev STEP_APPLY_ST_LOSS: The ST assets depreciated in value
         if (deltaST < 0) {
             NAV_UNIT stLoss = toNAVUnits(-deltaST);
             /// @dev STEP_APPLY_JT_COVERAGE_TO_ST: Apply any possible coverage to ST provided by JT's loss-absorption buffer
@@ -521,7 +489,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                 // The uncovered portion of the ST loss is a JT liability to ST
                 stImpermanentLoss = (stImpermanentLoss + stLoss);
             }
-            /// @dev STEP_APPLY_ST_GAIN: The ST assets appreciated in value or their was a gain on a liquidation event
+            /// @dev STEP_APPLY_ST_GAIN: The ST assets appreciated in value
         } else if (deltaST > 0) {
             NAV_UNIT stGain = toNAVUnits(deltaST);
             /// @dev STEP_ST_IMPERMANENT_LOSS_RECOVERY: First, recover any ST impermanent losses (first claim on ST appreciation)
@@ -533,7 +501,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                 stEffectiveNAV = (stEffectiveNAV + impermanentLossRecovery);
                 stGain = (stGain - impermanentLossRecovery);
             }
-            /// @dev STEP_JT_COVERAGE_IMPERMANENT_LOSS_RECOVERY: Second, recover any JT coverage inflicted impermanent losses (second claim on ST appreciation) if this is not a liquidation event
+            /// @dev STEP_JT_COVERAGE_IMPERMANENT_LOSS_RECOVERY: Second, recover any JT coverage inflicted impermanent losses (second claim on ST appreciation)
             impermanentLossRecovery = UnitsMathLib.min(stGain, jtImpermanentLoss);
             if (impermanentLossRecovery != ZERO_NAV_UNITS) {
                 // Recover as much of the JT coverage impermanent loss as possible
@@ -542,7 +510,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                 jtEffectiveNAV = (jtEffectiveNAV + impermanentLossRecovery);
                 stGain = (stGain - impermanentLossRecovery);
             }
-            /// @dev STEP_DISTRIBUTE_YIELD: There are no remaining impermanent losses that ST yield is obligated to repay and this sync is not for a liquidation event, the residual gains will be used to distribute yield to both tranches
+            /// @dev STEP_DISTRIBUTE_YIELD: There are no remaining impermanent losses that ST yield is obligated to repay, the residual gains will be used to distribute yield to both tranches
             if (stGain != ZERO_NAV_UNITS) {
                 // Mark yield as distributed if the gain is not attributable to any rounding/dust
                 if (stGain > $.stNAVDustTolerance) yieldDistributed = true;
@@ -553,7 +521,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                 if (elapsed == 0) {
                     // Get the instantaneous YDM output and ensure that the yield share cannot be more than 100% of senior appreciation
                     uint256 instantaneousJtYieldShareWAD =
-                        IYDM($.ydm).previewJTYieldShare($.lastMarketState, $.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.coverageWAD, $.lastJTEffectiveNAV);
+                        IYDM($.ydm).previewJTYieldShare(initialMarketState, $.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.coverageWAD, $.lastJTEffectiveNAV);
                     if (instantaneousJtYieldShareWAD > WAD) instantaneousJtYieldShareWAD = WAD;
                     yieldShare = stGain.mulDiv(instantaneousJtYieldShareWAD, WAD, Math.Rounding.Floor);
                 } else {
@@ -576,57 +544,54 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         }
 
         // Enforce the NAV conservation invariant
-        require((_stRawNAV + _jtRawNAV + _liquidationProceedsNAV) == (stEffectiveNAV + jtEffectiveNAV), NAV_CONSERVATION_VIOLATION());
+        require((_stRawNAV + _jtRawNAV) == (stEffectiveNAV + jtEffectiveNAV), NAV_CONSERVATION_VIOLATION());
 
         // Determine the resulting market state:
-        // 1. Forced Perpetual: The fixed term duration is set to 0 (permanently perpetual), current fixed term elapsed, or LLTV has been breached (undercollateralized) or ST IL exists (distressed)
-        // 2. Normal Perpetual: JT coverage IL is within dust tolerance (staying perpetual) or fully recovered (exiting fixed term for perpetual)
-        // 3. Fixed term: The JT coverage IL is above the dust tolerance of the market, fixed term duration hasn't elapsed, LLTV hasn't been breached, and ST IL nonexistant
-        initialMarketState = $.lastMarketState;
+        // 1. Forced Perpetual: The fixed-term duration is set to 0 (permanently perpetual), current fixed-term elapsed, or LLTV has been breached (undercollateralized) or ST IL exists (distressed)
+        // 2. Normal Perpetual: JT coverage IL is within dust tolerance (staying perpetual) or fully recovered (exiting fixed-term for perpetual)
+        // 3. Fixed-term: The JT coverage IL is above the dust tolerance of the market, fixed-term duration hasn't elapsed, LLTV hasn't been breached, and ST IL nonexistant
         MarketState resultingMarketState;
         uint32 fixedTermEndTimestamp = $.fixedTermEndTimestamp;
         uint24 fixedTermDurationSeconds = $.fixedTermDurationSeconds;
-        uint256 ltvWAD = UtilsLib.computeLTV(stEffectiveNAV, stImpermanentLoss, _liquidationProceedsNAV, jtEffectiveNAV);
-        // If the market is permanently perpetual, the fixed term elapsed, undercollateralized, or distressed, the market must be in a a perpetual state
+        uint256 ltvWAD = UtilsLib.computeLTV(stEffectiveNAV, stImpermanentLoss, jtEffectiveNAV);
+        // If the market is permanently perpetual, the fixed-term elapsed, undercollateralized, or distressed, the market must be in a a perpetual state
         if (
             fixedTermDurationSeconds == 0 || (initialMarketState == MarketState.FIXED_TERM && fixedTermEndTimestamp <= block.timestamp) || ltvWAD >= $.lltvWAD
                 || stImpermanentLoss != ZERO_NAV_UNITS
         ) {
-            resultingMarketState = MarketState.PERPETUAL;
             // JT coverage impermanent loss has to be explicitly cleared in this branch:
-            // If the fixed term duration is 0, the market is permanently in a perpetual state and never incurs any JT coverage IL
-            // If the current fixed term has elapsed, the market needs to transition to a perpetual state since the transient JT protection period is complete
+            // If the fixed-term duration is 0, the market is permanently in a perpetual state and never incurs any JT coverage IL
+            // If the current fixed-term has elapsed, the market needs to transition to a perpetual state since the transient JT protection period is complete
             // If LLTV has been breached without existant ST IL, the market is approaching an uncollateralized state: ST needs to be able to withdraw to avoid losses and the YDM needs to kick in to reinstate proper collateralization
             // If ST IL exists, the market is in a distressed state: STs need to be able to book losses and any future appreciation will go to making ST whole again
             jtImpermanentLossErased = jtImpermanentLoss;
             jtImpermanentLoss = ZERO_NAV_UNITS;
-            // Reset the fixed term end timestamp
+            // Transition to a perpetual state
+            resultingMarketState = MarketState.PERPETUAL;
             fixedTermEndTimestamp = 0;
             // If the market has less than dust coverage provided by JT
         } else if (jtImpermanentLoss <= $.stNAVDustTolerance) {
             // JT coverage IL is either non-existant or can be attributed to dust ST losses (eg. rounding in the underlying ST NAV)
             // If market was in a perpetual state or the coverage IL was completely wiped, transition to a perpetual state
             if (initialMarketState == MarketState.PERPETUAL || jtImpermanentLoss == ZERO_NAV_UNITS) {
+                // Transition to a perpetual state
                 resultingMarketState = MarketState.PERPETUAL;
-                // Reset the fixed term end timestamp
                 fixedTermEndTimestamp = 0;
-                // If market was in a fixed term state, remain in it until dust tolerance is completely restored
+                // If market was in a fixed-term state, remain in it until dust tolerance is completely restored
             } else {
                 // This ensures that we always have a buffer of at least the dust tolerance when entering a fresh perpetual state
                 resultingMarketState = MarketState.FIXED_TERM;
-                // Fees are not taken in a fixed term state
-                stProtocolFeeAccrued = ZERO_NAV_UNITS; // Formality: Should naturally never be non-zero in a fixed term state
+                // Fees are not taken in a fixed-term state
+                stProtocolFeeAccrued = ZERO_NAV_UNITS; // Formality: Should naturally never be non-zero in a fixed-term state
                 jtProtocolFeeAccrued = ZERO_NAV_UNITS;
             }
         } else {
             resultingMarketState = MarketState.FIXED_TERM;
-            // Fees are not taken in a fixed term state
-            stProtocolFeeAccrued = ZERO_NAV_UNITS; // Formality: Should naturally never be non-zero in a fixed term state
+            // Fees are not taken in a fixed-term state
+            stProtocolFeeAccrued = ZERO_NAV_UNITS; // Formality: Should naturally never be non-zero in a fixed-term state
             jtProtocolFeeAccrued = ZERO_NAV_UNITS;
-            // If the market was in a perpetual state, update the fixed term end timestamp
-            if (initialMarketState == MarketState.PERPETUAL) {
-                fixedTermEndTimestamp = uint32(block.timestamp + fixedTermDurationSeconds);
-            }
+            // If the market was in a perpetual state, update the fixed-term end timestamp
+            if (initialMarketState == MarketState.PERPETUAL) fixedTermEndTimestamp = uint32(block.timestamp + fixedTermDurationSeconds);
         }
 
         // Marshal the post-sync state and return to the caller
@@ -634,7 +599,6 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             marketState: resultingMarketState,
             stRawNAV: _stRawNAV,
             jtRawNAV: _jtRawNAV,
-            liquidationProceedsNAV: _liquidationProceedsNAV,
             stEffectiveNAV: stEffectiveNAV,
             jtEffectiveNAV: jtEffectiveNAV,
             stImpermanentLoss: stImpermanentLoss,
@@ -650,7 +614,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
 
     /**
      * @notice Accrues the JT yield share since the last yield distribution
-     * @dev Gets the instantaneous JT yield share and accumulates it over the time elapsed since the last accrual
+     * @dev Gets the instantaneous JT yield share and weights it by the time elapsed since the last accrual
      * @return twJTYieldShareAccruedWAD The updated time-weighted JT yield share since the last yield distribution
      */
     function _accrueJTYieldShare() internal returns (uint192 twJTYieldShareAccruedWAD) {
@@ -686,7 +650,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
 
     /**
      * @notice Computes and returns the currently accrued JT yield share since the last yield distribution
-     * @dev Gets the instantaneous JT yield share and accumulates it over the time elapsed since the last accrual
+     * @dev Gets the instantaneous JT yield share and weights it by the time elapsed since the last accrual
      * @return The updated time-weighted JT yield share since the last yield distribution
      */
     function _previewJTYieldShareAccrual() internal view returns (uint192) {
@@ -711,6 +675,10 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         // Apply the accural of JT yield share to the accumulator, weighted by the time elapsed
         return ($.twJTYieldShareAccruedWAD + uint192(jtYieldShareWAD * elapsed));
     }
+
+    // =============================
+    // Administrative Functions
+    // =============================
 
     /// @inheritdoc IRoycoAccountant
     function setYDM(address _ydm, bytes calldata _ydmInitializationData) external override(IRoycoAccountant) restricted withSyncedAccounting {
@@ -800,7 +768,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         $.fixedTermDurationSeconds = _fixedTermDurationSeconds;
         // If the specified duration is 0, the market will permanently be in a perpetual state
         if (_fixedTermDurationSeconds == 0) {
-            emit JTCoverageImpermanentLossErased($.lastJTImpermanentLoss);
+            emit JTImpermanentLossReset($.lastJTImpermanentLoss);
             $.lastJTImpermanentLoss = ZERO_NAV_UNITS;
             $.lastMarketState = MarketState.PERPETUAL;
         }
@@ -819,16 +787,9 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         emit JuniorTrancheDustToleranceUpdated(_jtNAVDustTolerance);
     }
 
-    /// @inheritdoc IRoycoAccountant
-    function getState() external view override(IRoycoAccountant) returns (RoycoAccountantState memory) {
-        return _getRoycoAccountantStorage();
-    }
-
-    /// @inheritdoc IRoycoAccountant
-    function getLiquidationParams() external view override(IRoycoAccountant) returns (uint64 lltvWAD, uint96 betaWAD) {
-        RoycoAccountantState storage $ = _getRoycoAccountantStorage();
-        return ($.lltvWAD, $.betaWAD);
-    }
+    // =============================
+    // Internal Utility Functions
+    // =============================
 
     /**
      * @notice Validates the coverage requirement parameters of the market
@@ -838,16 +799,16 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
      */
     function _validateCoverageConfig(uint64 _coverageWAD, uint96 _betaWAD, uint64 _lltvWAD) internal pure {
         // Ensure that the coverage requirement is valid
-        require((_coverageWAD >= MIN_COVERAGE_WAD) && (_coverageWAD < WAD), INVALID_COVERAGE_CONFIG());
+        require((_coverageWAD >= MIN_COVERAGE_WAD) && (_coverageWAD <= MAX_COVERAGE_WAD), INVALID_COVERAGE_CONFIG());
         // Ensure that JT withdrawals are not permanently bricked
         require(uint256(_coverageWAD).mulDiv(_betaWAD, WAD, Math.Rounding.Ceil) < WAD, INVALID_COVERAGE_CONFIG());
         /**
          * Ensure that the LLTV is set correctly (between the max allowed initial LTV and 100%)
          * Maximum Initial LTV Derivation:
          * Given:
-         *   LTV = (ST_EFFECTIVE_NAV + ST_IL - LIQUIDATION_PROCEEDS) / ((ST_EFFECTIVE_NAV + ST_IL - LIQUIDATION_PROCEEDS) + JT_EFFECTIVE_NAV)
+         *   LTV = (ST_EFFECTIVE_NAV + ST_IL) / ((ST_EFFECTIVE_NAV + ST_IL) + JT_EFFECTIVE_NAV)
          *   Initial Utilization = ((ST_EFFECTIVE_NAV + JT_RAW_NAV * β) * COV) / JT_EFFECTIVE_NAV
-         *   Note: Initially, JT_RAW_NAV == JT_EFFECTIVE_NAV, ST_IL == 0, and LIQUIDATION_PROCEEDS == 0 since no losses have been incurred by ST
+         *   NOTE: Initially, JT_RAW_NAV == JT_EFFECTIVE_NAV and ST_IL == 0 since no losses have been incurred by ST
          *   Initial LTV = ST_EFFECTIVE_NAV / (ST_EFFECTIVE_NAV + JT_EFFECTIVE_NAV)
          *   Initial Utilization = ((ST_EFFECTIVE_NAV + JT_EFFECTIVE_NAV * β) * COV) / JT_EFFECTIVE_NAV
          *
@@ -861,7 +822,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
          *
          * Substituting JT_EFFECTIVE_NAV into initial LTV:
          *   LTV = ST_EFFECTIVE_NAV / (ST_EFFECTIVE_NAV + (ST_EFFECTIVE_NAV * COV / (1 - β * COV))
-         *       = 1 / (1 + COV / (1 - β * COV))
+         *       = (1 / (1 + COV / (1 - β * COV)))
          *       = (1 - β * COV) / (1 - β * COV + COV)
          *       = (1 - β * COV) / (1 + COV - β * COV)
          *       = (1 - β * COV) / (1 + COV * (1 - β))
@@ -875,7 +836,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         uint256 denominator = WAD + _coverageWAD - betaCov;
         uint256 maxLTV = numerator.mulDiv(WAD, denominator, Math.Rounding.Ceil);
         // LLTV must be between the max allowed initial LTV and 100% LTV
-        require(maxLTV < _lltvWAD && _lltvWAD < WAD, INVALID_LLTV());
+        require(maxLTV < _lltvWAD && _lltvWAD < WAD, INVALID_COVERAGE_CONFIG());
     }
 
     /**
@@ -885,12 +846,21 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
      */
     function _initializeYDM(address _ydm, bytes calldata _ydmInitializationData) internal {
         // Ensure that the YDM is not null
-        require(_ydm != address(0), NULL_YDM_ADDRESS());
+        require(_ydm != address(0), NULL_ADDRESS());
         // Initialize the YDM if required
         if (_ydmInitializationData.length != 0) {
             (bool success, bytes memory data) = _ydm.call(_ydmInitializationData);
             require(success, FAILED_TO_INITIALIZE_YDM(data));
         }
+    }
+
+    // =============================
+    // Accountant State Accessor Functions
+    // =============================
+
+    /// @inheritdoc IRoycoAccountant
+    function getState() external view override(IRoycoAccountant) returns (RoycoAccountantState memory) {
+        return _getRoycoAccountantStorage();
     }
 
     /**

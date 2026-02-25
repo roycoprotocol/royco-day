@@ -7,11 +7,11 @@ import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/E
 import { ReentrancyGuardTransient } from "../../../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuardTransient.sol";
 import { RoycoBase } from "../../base/RoycoBase.sol";
 import { IRoycoAccountant } from "../../interfaces/IRoycoAccountant.sol";
-import { IRoycoKernel } from "../../interfaces/kernel/IRoycoKernel.sol";
-import { IRoycoVaultTranche } from "../../interfaces/tranche/IRoycoVaultTranche.sol";
-import { MAX_TRANCHE_UNITS, WAD, WAD_DECIMALS, ZERO_BASE_UNITS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../libraries/Constants.sol";
+import { IRoycoKernel } from "../../interfaces/IRoycoKernel.sol";
+import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
+import { MAX_TRANCHE_UNITS, WAD, WAD_DECIMALS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../libraries/Constants.sol";
 import { AssetClaims, MarketState, Operation, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
-import { BASE_UNIT, Math, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toBaseUnits, toNAVUnits, toUint256 } from "../../libraries/Units.sol";
+import { Math, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toNAVUnits, toUint256 } from "../../libraries/Units.sol";
 import { UtilsLib } from "../../libraries/UtilsLib.sol";
 
 /**
@@ -29,39 +29,37 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     /// @dev Storage slot for RoycoKernelState using ERC-7201 pattern
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoKernelState")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant BASE_KERNEL_STORAGE_SLOT = 0xf8fc0d016168fef0a165a086b5a5dc3ffa533689ceaf1369717758ae5224c600;
-    /// @dev The scale factor used to scale base asset quantities to/from NAV unit precision (WAD decimals)
-    uint256 internal immutable BASE_UNIT_SCALE_FACTOR_TO_WAD;
 
-    /// @dev The base asset used for liquidation settlements, with 1:1 value parity with NAV units but may differ in precision
-    /// @dev Constitutes the BASE_UNIT for this market
-    address public immutable override BASE_ASSET;
+    /// @inheritdoc IRoycoKernel
+    address public immutable override(IRoycoKernel) SENIOR_TRANCHE;
 
-    /// @dev Immutable addresses for the senior tranche, ST asset, junior tranche, and JT asset
-    address public immutable override SENIOR_TRANCHE;
-    address public immutable override ST_ASSET;
-    address public immutable override JUNIOR_TRANCHE;
-    address public immutable override JT_ASSET;
+    /// @inheritdoc IRoycoKernel
+    address public immutable override(IRoycoKernel) ST_ASSET;
 
-    /// @dev The accountant responsible for maintaining all accounting state and marking tranche NAVs to market
-    IRoycoAccountant public immutable override ACCOUNTANT;
+    /// @inheritdoc IRoycoKernel
+    address public immutable override(IRoycoKernel) JUNIOR_TRANCHE;
 
-    /// @dev Permissions the function to only the market's senior tranche
-    /// @dev Should be placed on all ST deposit and redeem functions
-    // forge-lint: disable-next-item(unwrapped-modifier-logic)
+    /// @inheritdoc IRoycoKernel
+    address public immutable override(IRoycoKernel) JT_ASSET;
+
+    /// @inheritdoc IRoycoKernel
+    address public immutable override(IRoycoKernel) ACCOUNTANT;
+
+    /// @dev Permissions the function to only be callable by the market's senior tranche
+    /// @dev Should be placed on ST deposit and redeem functions
     modifier onlySeniorTranche() {
         require(msg.sender == SENIOR_TRANCHE, ONLY_SENIOR_TRANCHE());
         _;
     }
 
-    /// @dev Permissions the function to only the market's junior tranche
-    /// @dev Should be placed on all JT deposit and redeem functions
-    // forge-lint: disable-next-item(unwrapped-modifier-logic)
+    /// @dev Permissions the function to only be callable by the market's junior tranche
+    /// @dev Should be placed on JT deposit and redeem functions
     modifier onlyJuniorTranche() {
         require(msg.sender == JUNIOR_TRANCHE, ONLY_JUNIOR_TRANCHE());
         _;
     }
 
-    /// @dev Modifier to initialize and clear the quoter cache
+    /// @dev Initializes and clears the quoter cache at the start and end of the call respectively
     /// @dev Should be placed on all functions that use the quoter cache
     modifier withQuoterCache() {
         _initializeQuoterCache();
@@ -76,26 +74,19 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     /// @notice Constructs the base Royco kernel state
     /// @param _params The standard construction parameters for the Royco kernel
     constructor(RoycoKernelConstructionParams memory _params) {
-        // Ensure that the tranche addresses are not null
+        // Ensure that the tranche and accountant addresses are not null
         require(
             _params.seniorTranche != address(0) && _params.stAsset != address(0) && _params.juniorTranche != address(0) && _params.jtAsset != address(0)
                 && _params.accountant != address(0),
             NULL_ADDRESS()
         );
 
-        // Compute the scaling factor that will scale base asset quantities to and from WAD precision
-        // Base asset can be set to the null address if liquidations are not supported for this market
-        uint8 baseAssetDecimals = _params.baseAsset != address(0) ? IERC20Metadata(_params.baseAsset).decimals() : 0;
-        require(baseAssetDecimals <= WAD_DECIMALS, UNSUPPORTED_DECIMALS());
-        BASE_ASSET = _params.baseAsset;
-        BASE_UNIT_SCALE_FACTOR_TO_WAD = 10 ** (WAD_DECIMALS - baseAssetDecimals);
-
         // Set the immutable addresses
         SENIOR_TRANCHE = _params.seniorTranche;
         ST_ASSET = _params.stAsset;
         JUNIOR_TRANCHE = _params.juniorTranche;
         JT_ASSET = _params.jtAsset;
-        ACCOUNTANT = IRoycoAccountant(_params.accountant);
+        ACCOUNTANT = _params.accountant;
     }
 
     /**
@@ -117,27 +108,6 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         _getRoycoKernelStorage().protocolFeeRecipient = _params.protocolFeeRecipient;
 
         emit ProtocolFeeRecipientUpdated(_params.protocolFeeRecipient);
-    }
-
-    // =============================
-    // State Accessor Function
-    // =============================
-
-    /// @inheritdoc IRoycoKernel
-    function getState() external view override(IRoycoKernel) returns (RoycoKernelState memory $) {
-        return _getRoycoKernelStorage();
-    }
-
-    // =============================
-    // Base Asset Quoter Functions
-    // =============================
-
-    function convertBaseUnitsToNAVUnits(BASE_UNIT _baseAssets) public view virtual override(IRoycoKernel) returns (NAV_UNIT) {
-        return toNAVUnits(toUint256(_baseAssets) * BASE_UNIT_SCALE_FACTOR_TO_WAD);
-    }
-
-    function convertNAVUnitsToBaseUnits(NAV_UNIT _nav) public view virtual override(IRoycoKernel) returns (BASE_UNIT) {
-        return toBaseUnits(toUint256(_nav) / BASE_UNIT_SCALE_FACTOR_TO_WAD);
     }
 
     // =============================
@@ -215,7 +185,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         if (_previewSyncTrancheAccounting().stImpermanentLoss != ZERO_NAV_UNITS) return ZERO_TRANCHE_UNITS;
         // ST deposits are enabled as long as ST IL is nonexistant and coverage is satisfied
         // No need to include ST liquidation proceeds in the raw NAV because those assets are not exposed to any volatility
-        NAV_UNIT stMaxDepositableNAV = ACCOUNTANT.maxSTDepositGivenCoverage(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV(), _getLiquidationProceedsNAV());
+        NAV_UNIT stMaxDepositableNAV = IRoycoAccountant(ACCOUNTANT).maxSTDepositGivenCoverage(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
         return stConvertNAVUnitsToTrancheUnits(stMaxDepositableNAV);
     }
 
@@ -281,13 +251,13 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         (state, jtNotionalClaims, totalTrancheSharesAfterMintingFees) = previewSyncTrancheAccounting(TrancheType.JUNIOR);
 
         // Get the max withdrawable ST and JT assets in NAV units from the accountant consider coverage requirement
-        (, NAV_UNIT stClaimableGivenCoverage, NAV_UNIT jtClaimableGivenCoverage) = ACCOUNTANT.maxJTWithdrawalGivenCoverage(
-            state.stRawNAV,
-            state.jtRawNAV,
-            state.liquidationProceedsNAV,
-            stConvertTrancheUnitsToNAVUnits(jtNotionalClaims.stAssets),
-            jtConvertTrancheUnitsToNAVUnits(jtNotionalClaims.jtAssets)
-        );
+        (, NAV_UNIT stClaimableGivenCoverage, NAV_UNIT jtClaimableGivenCoverage) = IRoycoAccountant(ACCOUNTANT)
+            .maxJTWithdrawalGivenCoverage(
+                state.stRawNAV,
+                state.jtRawNAV,
+                stConvertTrancheUnitsToNAVUnits(jtNotionalClaims.stAssets),
+                jtConvertTrancheUnitsToNAVUnits(jtNotionalClaims.jtAssets)
+            );
 
         claimOnStNAV = stConvertTrancheUnitsToNAVUnits(jtNotionalClaims.stAssets);
         claimOnJtNAV = jtConvertTrancheUnitsToNAVUnits(jtNotionalClaims.jtAssets);
@@ -302,7 +272,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     // =============================
 
     /// @inheritdoc IRoycoKernel
-    function syncTrancheAccounting()
+    function preOpSyncTrancheAccounting()
         public
         virtual
         override(IRoycoKernel)
@@ -313,7 +283,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         returns (SyncedAccountingState memory state)
     {
         // Execute a NAV accounting sync via the accountant
-        return _syncTrancheAccounting();
+        return _preOpSyncTrancheAccounting();
     }
 
     /// @inheritdoc IRoycoKernel
@@ -327,15 +297,13 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         // Preview an accounting sync via the accountant
         state = _previewSyncTrancheAccounting();
 
-        // Marshal the asset claims
-        (AssetClaims memory stClaims, AssetClaims memory jtClaims) = _marshalTrancheAssetClaims(state);
+        // Marshal the asset claims for this tranche
+        claims = _marshalTrancheAssetClaims(_trancheType, state);
 
         // Return the requested tranche claims and total shares
         if (_trancheType == TrancheType.SENIOR) {
-            claims = stClaims;
             (, totalTrancheShares) = IRoycoVaultTranche(SENIOR_TRANCHE).previewMintProtocolFeeShares(state.stProtocolFeeAccrued, state.stEffectiveNAV);
         } else {
-            claims = jtClaims;
             (, totalTrancheShares) = IRoycoVaultTranche(JUNIOR_TRANCHE).previewMintProtocolFeeShares(state.jtProtocolFeeAccrued, state.jtEffectiveNAV);
         }
     }
@@ -361,7 +329,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt)
     {
         // Execute an accounting sync to reconcile underlying PNL
-        SyncedAccountingState memory state = _syncTrancheAccounting();
+        SyncedAccountingState memory state = _preOpSyncTrancheAccounting();
         // If ST IL exists, ST deposits are disabled to preclude existing ST's from getting diluted and realizing losses
         require(state.stImpermanentLoss == ZERO_NAV_UNITS, ST_DEPOSIT_DISABLED_IN_LOSS());
 
@@ -400,7 +368,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         uint256 totalTrancheShares;
 
         // Execute an accounting sync to reconcile underlying PNL
-        (state, trancheAssetClaims, totalTrancheShares) = _syncTrancheAccounting(TrancheType.SENIOR);
+        (state, trancheAssetClaims, totalTrancheShares) = _preOpSyncTrancheAccounting(TrancheType.SENIOR);
         // Ensure that the market is in a state where ST redemptions are allowed: PERPETUAL
         require(state.marketState == MarketState.PERPETUAL, ST_REDEEM_DISABLED_IN_FIXED_TERM_STATE());
 
@@ -409,25 +377,24 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         (userAssetClaims, claimsOnExposureNAV) = _previewRedeem(trancheAssetClaims, _shares, totalTrancheShares);
 
         // If LLTV is breached remit the ST LP a self-liquidation bonus
-        (uint64 lltvWAD,) = ACCOUNTANT.getLiquidationParams();
-        NAV_UNIT stSelfLiquidationBonusNAV;
-        if (state.ltvWAD >= lltvWAD) {
-            (, AssetClaims memory jtClaims) = _marshalTrancheAssetClaims(state);
-            (NAV_UNIT bonusNAV, BASE_UNIT bonusFromJTClaimsOnLP, TRANCHE_UNIT bonusFromJTClaimsOnST, TRANCHE_UNIT bonusFromJTClaimsOnSelf) =
-                _computeSelfLiquidationBonus(claimsOnExposureNAV, lltvWAD, jtClaims);
-            stSelfLiquidationBonusNAV = bonusNAV;
+        // (uint64 lltvWAD,) = IRoycoAccountant(ACCOUNTANT).getLiquidationParams();
+        // NAV_UNIT stSelfLiquidationBonusNAV;
+        // if (state.ltvWAD >= lltvWAD) {
+        //     (, AssetClaims memory jtClaims) = _marshalTrancheAssetClaims(state);
+        //     (NAV_UNIT bonusNAV, TRANCHE_UNIT bonusFromJTClaimsOnST, TRANCHE_UNIT bonusFromJTClaimsOnSelf) =
+        //         _computeSelfLiquidationBonus(claimsOnExposureNAV, lltvWAD, jtClaims);
+        //     stSelfLiquidationBonusNAV = bonusNAV;
 
-            // Add the bonus to the asset claims to withdraw
-            userAssetClaims.stAssets = userAssetClaims.stAssets + bonusFromJTClaimsOnST;
-            userAssetClaims.jtAssets = userAssetClaims.jtAssets + bonusFromJTClaimsOnSelf;
-            userAssetClaims.liquidationProceeds = userAssetClaims.liquidationProceeds + bonusFromJTClaimsOnLP;
-        }
+        //     // Add the bonus to the asset claims to withdraw
+        //     userAssetClaims.stAssets = userAssetClaims.stAssets + bonusFromJTClaimsOnST;
+        //     userAssetClaims.jtAssets = userAssetClaims.jtAssets + bonusFromJTClaimsOnSelf;
+        // }
 
         // Withdraw the asset claims from each tranche (potentially including a bonus) and transfer them to the receiver
         _withdrawAssets(userAssetClaims, _receiver);
 
         // Execute a post-redeem sync on accounting and include any self-liquidation bonus
-        _postOpSyncTrancheAccounting(Operation.ST_REDEEM, stSelfLiquidationBonusNAV);
+        _postOpSyncTrancheAccounting(Operation.ST_REDEEM, ZERO_NAV_UNITS);
     }
 
     // =============================
@@ -451,7 +418,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt)
     {
         // Execute an accounting sync to reconcile underlying PNL
-        SyncedAccountingState memory state = _syncTrancheAccounting();
+        SyncedAccountingState memory state = _preOpSyncTrancheAccounting();
         // Ensure that the market is in a state where JT deposits are allowed: PERPETUAL
         require(state.marketState == MarketState.PERPETUAL, JT_DEPOSIT_DISABLED_IN_FIXED_TERM_STATE());
 
@@ -488,7 +455,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         // Execute a pre-op sync on accounting
         AssetClaims memory trancheAssetClaims;
         uint256 totalTrancheShares;
-        (, trancheAssetClaims, totalTrancheShares) = _syncTrancheAccounting(TrancheType.JUNIOR);
+        (, trancheAssetClaims, totalTrancheShares) = _preOpSyncTrancheAccounting(TrancheType.JUNIOR);
 
         // Compute user's claims with FCFS LP prioritization
         (userAssetClaims,) = _previewRedeem(trancheAssetClaims, _shares, totalTrancheShares);
@@ -508,7 +475,6 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      * @param _lltvWAD The liquidation loan-to-value threshold, scaled to WAD precision
      * @param _jtClaims JT's current asset claims, from which the bonus is sourced
      * @return bonusNAV The total bonus NAV awarded to the redeemer
-     * @return bonusFromJTClaimsOnLP Bonus sourced from JT's claim on liquidation proceeds
      * @return bonusFromJTClaimsOnST Bonus sourced from JT's claim on ST assets
      * @return bonusFromJTClaimsOnSelf Bonus sourced from JT's claim on JT assets
      * TODO: DELETE
@@ -520,7 +486,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     )
         internal
         view
-        returns (NAV_UNIT bonusNAV, BASE_UNIT bonusFromJTClaimsOnLP, TRANCHE_UNIT bonusFromJTClaimsOnST, TRANCHE_UNIT bonusFromJTClaimsOnSelf)
+        returns (NAV_UNIT bonusNAV, TRANCHE_UNIT bonusFromJTClaimsOnST, TRANCHE_UNIT bonusFromJTClaimsOnSelf)
     {
         revert("TODO: DELETE");
     }
@@ -546,7 +512,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      */
     function _previewSyncTrancheAccounting() internal view virtual returns (SyncedAccountingState memory state) {
         // Preview an accounting sync via the accountant
-        state = ACCOUNTANT.previewSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV(), _getLiquidationProceedsNAV(), ZERO_NAV_UNITS);
+        state = IRoycoAccountant(ACCOUNTANT).previewSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
     }
 
     /**
@@ -555,32 +521,12 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      * @dev Should not be called to sync post-liquidation NAVs: use `_postLiquidationSyncTrancheAccounting` instead
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
-    function _syncTrancheAccounting() internal virtual returns (SyncedAccountingState memory state) {
+    function _preOpSyncTrancheAccounting() internal virtual returns (SyncedAccountingState memory state) {
         // Execute the pre-op sync via the accountant
-        state = ACCOUNTANT.syncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV(), _getLiquidationProceedsNAV(), ZERO_NAV_UNITS);
+        state = IRoycoAccountant(ACCOUNTANT).preOpSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
 
         // Collect any protocol fees accrued
         _collectProtocolFees(state.stProtocolFeeAccrued, state.jtProtocolFeeAccrued, state.stEffectiveNAV, state.jtEffectiveNAV);
-    }
-
-    /**
-     * @notice Invokes the accountant to do a sync and returns asset claims for both tranches
-     * @dev A sync must be executed before every NAV mutating operation (deposit, withdrawal, and liquidation)
-     * @dev Should not be called to sync post-liquidation NAVs: use `_postLiquidationSyncTrancheAccounting` instead
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
-     * @return stClaims The claims on ST, JT, and liquidation proceed assets that the senior tranche has, denominated in tranche-native units
-     * @return jtClaims The claims on ST, JT, and liquidation proceed assets that the junior tranche has, denominated in tranche-native units
-     */
-    function _syncTrancheAccountingWithClaims()
-        internal
-        virtual
-        returns (SyncedAccountingState memory state, AssetClaims memory stClaims, AssetClaims memory jtClaims)
-    {
-        // Execute the NAV sync via the accountant
-        state = _syncTrancheAccounting();
-
-        // Marshal the asset claims
-        (stClaims, jtClaims) = _marshalTrancheAssetClaims(state);
     }
 
     /**
@@ -593,13 +539,13 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      * @return claims The claims on ST, JT, and liquidation proceed assets that the specified tranche has denominated in tranche-native units
      * @return totalTrancheShares The total shares outstanding in the specified tranche after minting any protocol fee shares
      */
-    function _syncTrancheAccounting(TrancheType _trancheType)
+    function _preOpSyncTrancheAccounting(TrancheType _trancheType)
         internal
         virtual
         returns (SyncedAccountingState memory state, AssetClaims memory claims, uint256 totalTrancheShares)
     {
         // Execute the pre-op sync via the accountant
-        state = ACCOUNTANT.syncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV(), _getLiquidationProceedsNAV(), ZERO_NAV_UNITS);
+        state = IRoycoAccountant(ACCOUNTANT).preOpSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
 
         // Collect any protocol fees accrued from the sync to the fee recipient
         RoycoKernelState storage $ = _getRoycoKernelStorage();
@@ -617,31 +563,11 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
                 IRoycoVaultTranche(JUNIOR_TRANCHE).mintProtocolFeeShares(state.jtProtocolFeeAccrued, state.jtEffectiveNAV, protocolFeeRecipient);
         }
 
-        // Marshal the asset claims
-        (AssetClaims memory stClaims, AssetClaims memory jtClaims) = _marshalTrancheAssetClaims(state);
+        // Assign the total supply of tranche shares for the specified tranche
+        totalTrancheShares = (_trancheType == TrancheType.SENIOR ? stTotalTrancheSharesAfterMintingFees : jtTotalTrancheSharesAfterMintingFees);
 
-        // Return the requested tranche claims and total shares
-        if (_trancheType == TrancheType.SENIOR) {
-            claims = stClaims;
-            totalTrancheShares = stTotalTrancheSharesAfterMintingFees;
-        } else {
-            claims = jtClaims;
-            totalTrancheShares = jtTotalTrancheSharesAfterMintingFees;
-        }
-    }
-
-    /**
-     * @notice Invokes the accountant to do a pre-operation (deposit and withdrawal) NAV sync and mints any protocol fee shares accrued
-     * @dev Should be called on every NAV mutating user operation
-     * @param _liquidationBonusNAV The liquidation bonus NAV paid to the liquidator (if this sync is meant to reconcile a liquidation event)
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
-     */
-    function _postLiquidationSyncTrancheAccounting(NAV_UNIT _liquidationBonusNAV) internal virtual returns (SyncedAccountingState memory state) {
-        // Execute the pre-op sync via the accountant
-        state = ACCOUNTANT.syncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV(), _getLiquidationProceedsNAV(), _liquidationBonusNAV);
-
-        // Collect any protocol fees accrued
-        _collectProtocolFees(state.stProtocolFeeAccrued, state.jtProtocolFeeAccrued, state.stEffectiveNAV, state.jtEffectiveNAV);
+        // Marshal the asset claims for the specified tranche
+        claims = _marshalTrancheAssetClaims(_trancheType, state);
     }
 
     /**
@@ -653,9 +579,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      */
     function _postOpSyncTrancheAccounting(Operation _op, NAV_UNIT _stRedemptionBonusNAV) internal virtual returns (SyncedAccountingState memory state) {
         // Execute the post-op sync on the accountant
-        state = ACCOUNTANT.postOpSyncTrancheAccounting(
-            _op, _getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV(), _getLiquidationProceedsNAV(), _stRedemptionBonusNAV
-        );
+        state = IRoycoAccountant(ACCOUNTANT).postOpSyncTrancheAccounting(_op, _getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV(), _stRedemptionBonusNAV);
     }
 
     /**
@@ -674,9 +598,8 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         returns (SyncedAccountingState memory state)
     {
         // Execute the post-op sync on the accountant
-        state = ACCOUNTANT.postOpSyncTrancheAccountingAndEnforceCoverage(
-            _op, _getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV(), _getLiquidationProceedsNAV(), _stRedemptionBonusNAV
-        );
+        state = IRoycoAccountant(ACCOUNTANT)
+            .postOpSyncTrancheAccountingAndEnforceCoverage(_op, _getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV(), _stRedemptionBonusNAV);
     }
 
     /**
@@ -704,42 +627,38 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     }
 
     /**
-     * @notice Marshals each tranche's cumulative asset claims given an accounting sync packet
-     * @param _state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
-     * @return stClaims The senior tranche's cumulative asset claims
-     * @return jtClaims The junior tranche's cumulative asset claims
+     * @notice Marshals the asset claims for the specified tranche
+     * @param _trancheType An enum indicating which tranche to construct the asset claims for
+     * @param _state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
+     * @return claims The asset claims that the specified tranche is entitled to
      */
-    function _marshalTrancheAssetClaims(SyncedAccountingState memory _state)
+    function _marshalTrancheAssetClaims(
+        TrancheType _trancheType,
+        SyncedAccountingState memory _state
+    )
         internal
         view
         virtual
-        returns (AssetClaims memory stClaims, AssetClaims memory jtClaims)
+        returns (AssetClaims memory claims)
     {
-        // Liquidation settlement claims
-        // ST has the first claim on liquidation proceeds
-        NAV_UNIT stNAVClaimOnLiquidationProceeds = UnitsMathLib.min(_state.stEffectiveNAV, _state.liquidationProceedsNAV);
-        // JT has the second claim on liquidation proceeds: the remaining after ST has been made whole
-        NAV_UNIT jtNAVClaimOnLiquidationProceeds = UnitsMathLib.saturatingSub(_state.liquidationProceedsNAV, stNAVClaimOnLiquidationProceeds);
+        // Cross-tranche claims (only one direction should be non-zero under conservation)
+        NAV_UNIT stNAVClaimOnJT = UnitsMathLib.saturatingSub(_state.stEffectiveNAV, _state.stRawNAV);
+        NAV_UNIT jtNAVClaimOnST = UnitsMathLib.saturatingSub(_state.jtEffectiveNAV, _state.jtRawNAV);
 
-        // Cross-tranche claims
-        NAV_UNIT stNAVClaimOnJT = UnitsMathLib.saturatingSub((_state.stEffectiveNAV - stNAVClaimOnLiquidationProceeds), _state.stRawNAV);
-        NAV_UNIT jtNAVClaimOnST = UnitsMathLib.saturatingSub((_state.jtEffectiveNAV - jtNAVClaimOnLiquidationProceeds), _state.jtRawNAV);
+        // Self-backed portions (the remainder of each tranche’s effective NAV)
+        // NOTE: Since NAV conservation is enforced in the accountant, these will never underflow
+        NAV_UNIT stNAVClaimOnSelf = (_state.stRawNAV - jtNAVClaimOnST);
+        NAV_UNIT jtNAVClaimOnSelf = (_state.jtRawNAV - stNAVClaimOnJT);
 
-        // Self-backed claims
-        NAV_UNIT stNAVClaimOnSelf = UnitsMathLib.saturatingSub(_state.stRawNAV, jtNAVClaimOnST);
-        NAV_UNIT jtNAVClaimOnSelf = UnitsMathLib.saturatingSub(_state.jtRawNAV, stNAVClaimOnJT);
-
-        // Marshal senior tranche claims
-        if (stNAVClaimOnSelf != ZERO_NAV_UNITS) stClaims.stAssets = stConvertNAVUnitsToTrancheUnits(stNAVClaimOnSelf);
-        if (stNAVClaimOnJT != ZERO_NAV_UNITS) stClaims.jtAssets = jtConvertNAVUnitsToTrancheUnits(stNAVClaimOnJT);
-        if (stNAVClaimOnLiquidationProceeds != ZERO_NAV_UNITS) stClaims.liquidationProceeds = convertNAVUnitsToBaseUnits(stNAVClaimOnLiquidationProceeds);
-        stClaims.nav = (stNAVClaimOnSelf + stNAVClaimOnJT + stNAVClaimOnLiquidationProceeds);
-
-        // Marshal junior tranche claims
-        if (jtNAVClaimOnST != ZERO_NAV_UNITS) jtClaims.stAssets = stConvertNAVUnitsToTrancheUnits(jtNAVClaimOnST);
-        if (jtNAVClaimOnSelf != ZERO_NAV_UNITS) jtClaims.jtAssets = jtConvertNAVUnitsToTrancheUnits(jtNAVClaimOnSelf);
-        if (jtNAVClaimOnLiquidationProceeds != ZERO_NAV_UNITS) jtClaims.liquidationProceeds = convertNAVUnitsToBaseUnits(jtNAVClaimOnLiquidationProceeds);
-        jtClaims.nav = (jtNAVClaimOnST + jtNAVClaimOnSelf + jtNAVClaimOnLiquidationProceeds);
+        if (_trancheType == TrancheType.SENIOR) {
+            if (stNAVClaimOnSelf != ZERO_NAV_UNITS) claims.stAssets = stConvertNAVUnitsToTrancheUnits(stNAVClaimOnSelf);
+            if (stNAVClaimOnJT != ZERO_NAV_UNITS) claims.jtAssets = jtConvertNAVUnitsToTrancheUnits(stNAVClaimOnJT);
+            claims.nav = _state.stEffectiveNAV;
+        } else {
+            if (jtNAVClaimOnST != ZERO_NAV_UNITS) claims.stAssets = stConvertNAVUnitsToTrancheUnits(jtNAVClaimOnST);
+            if (jtNAVClaimOnSelf != ZERO_NAV_UNITS) claims.jtAssets = jtConvertNAVUnitsToTrancheUnits(jtNAVClaimOnSelf);
+            claims.nav = _state.jtEffectiveNAV;
+        }
     }
 
     /**
@@ -760,30 +679,30 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         view
         returns (AssetClaims memory userClaims, NAV_UNIT claimsOnExposureNAV)
     {
-        // Scale tranche claims proportionally to get user's baseline entitlement
-        AssetClaims memory proportionalClaims = UtilsLib.scaleAssetClaims(_trancheAssetClaims, _shares, _totalTrancheShares);
-        NAV_UNIT userNAVClaim = proportionalClaims.nav;
+        // // Scale tranche claims proportionally to get user's baseline entitlement
+        // AssetClaims memory proportionalClaims = UtilsLib.scaleAssetClaims(_trancheAssetClaims, _shares, _totalTrancheShares);
+        // NAV_UNIT userNAVClaim = proportionalClaims.nav;
 
-        // First-come-first-served LP: try to cover NAV claim from tranche's LP allocation first
-        NAV_UNIT availableLiquidationProceedsNAV = convertBaseUnitsToNAVUnits(_trancheAssetClaims.liquidationProceeds);
-        if (availableLiquidationProceedsNAV >= userNAVClaim) {
-            // Liquidation proceeds cover the entire claim, so fulfill the entire withdrawal with proceeds
-            userClaims.liquidationProceeds = convertNAVUnitsToBaseUnits(userNAVClaim);
-            userClaims.nav = userNAVClaim;
-        } else {
-            // Liquidation proceeds don't cover the entire claim, so fulfill as much of the withdrawal as possible with proceeds
-            userClaims.liquidationProceeds = convertNAVUnitsToBaseUnits(availableLiquidationProceedsNAV);
+        // // First-come-first-served LP: try to cover NAV claim from tranche's LP allocation first
+        // NAV_UNIT availableLiquidationProceedsNAV = convertBaseUnitsToNAVUnits(_trancheAssetClaims.liquidationProceeds);
+        // if (availableLiquidationProceedsNAV >= userNAVClaim) {
+        //     // Liquidation proceeds cover the entire claim, so fulfill the entire withdrawal with proceeds
+        //     userClaims.liquidationProceeds = convertNAVUnitsToBaseUnits(userNAVClaim);
+        //     userClaims.nav = userNAVClaim;
+        // } else {
+        //     // Liquidation proceeds don't cover the entire claim, so fulfill as much of the withdrawal as possible with proceeds
+        //     userClaims.liquidationProceeds = convertNAVUnitsToBaseUnits(availableLiquidationProceedsNAV);
 
-            // Compute the NAV needed from exposure after exhausting the available liquidation proceeds
-            claimsOnExposureNAV = userNAVClaim - availableLiquidationProceedsNAV;
-            // Compute the original NAV needed from exposure before applying FCFS for available liquidation proceeds
-            NAV_UNIT originalExposureNAV = userNAVClaim - convertBaseUnitsToNAVUnits(proportionalClaims.liquidationProceeds);
+        //     // Compute the NAV needed from exposure after exhausting the available liquidation proceeds
+        //     claimsOnExposureNAV = userNAVClaim - availableLiquidationProceedsNAV;
+        //     // Compute the original NAV needed from exposure before applying FCFS for available liquidation proceeds
+        //     NAV_UNIT originalExposureNAV = userNAVClaim - convertBaseUnitsToNAVUnits(proportionalClaims.liquidationProceeds);
 
-            // Scale down the claims to exposure to account for FCFS on the liquidation proceeds
-            userClaims.stAssets = proportionalClaims.stAssets.mulDiv(claimsOnExposureNAV, originalExposureNAV, Math.Rounding.Floor);
-            userClaims.jtAssets = proportionalClaims.jtAssets.mulDiv(claimsOnExposureNAV, originalExposureNAV, Math.Rounding.Floor);
-            userClaims.nav = userNAVClaim;
-        }
+        //     // Scale down the claims to exposure to account for FCFS on the liquidation proceeds
+        //     userClaims.stAssets = proportionalClaims.stAssets.mulDiv(claimsOnExposureNAV, originalExposureNAV, Math.Rounding.Floor);
+        //     userClaims.jtAssets = proportionalClaims.jtAssets.mulDiv(claimsOnExposureNAV, originalExposureNAV, Math.Rounding.Floor);
+        //     userClaims.nav = userNAVClaim;
+        // }
     }
 
     // =============================
@@ -799,18 +718,12 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         // Cache the individual claims
         TRANCHE_UNIT stAssetsToClaim = _claims.stAssets;
         TRANCHE_UNIT jtAssetsToClaim = _claims.jtAssets;
-        BASE_UNIT liquidationProceedsToClaim = _claims.liquidationProceeds;
 
         // Debit the yield bearing assets being withdrawn from the junior tranche
         RoycoKernelState storage $ = _getRoycoKernelStorage();
         // Account for the ST and JT assets being withdrawn from each tranche if non-zero
         if (stAssetsToClaim != ZERO_TRANCHE_UNITS) $.stOwnedYieldBearingAssets = $.stOwnedYieldBearingAssets - stAssetsToClaim;
         if (jtAssetsToClaim != ZERO_TRANCHE_UNITS) $.jtOwnedYieldBearingAssets = $.jtOwnedYieldBearingAssets - jtAssetsToClaim;
-        // Transfer any liquidation proceeds to the receiver
-        if (liquidationProceedsToClaim != ZERO_BASE_UNITS) {
-            $.liquidationProceeds = $.liquidationProceeds - liquidationProceedsToClaim;
-            IERC20(BASE_ASSET).safeTransfer(_receiver, toUint256(liquidationProceedsToClaim));
-        }
 
         // Transfer the yield bearing assets being withdrawn to the receiver
         // Do one batch transfer if they are the same asset, else do two separate transfers
@@ -820,18 +733,6 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
             if (stAssetsToClaim != ZERO_TRANCHE_UNITS) IERC20(ST_ASSET).safeTransfer(_receiver, toUint256(stAssetsToClaim));
             if (jtAssetsToClaim != ZERO_TRANCHE_UNITS) IERC20(JT_ASSET).safeTransfer(_receiver, toUint256(jtAssetsToClaim));
         }
-    }
-
-    /**
-     * @notice Pulls base assets from a liquidator and increments the liquidation proceeds balance
-     * @dev Used during liquidation to collect settlement from the liquidator
-     * @param _amount The amount of base assets to pull
-     * @param _liquidator The address of the liquidator providing the base assets
-     */
-    function _pullLiquidationProceeds(BASE_UNIT _amount, address _liquidator) internal {
-        IERC20(BASE_ASSET).safeTransferFrom(_liquidator, address(this), toUint256(_amount));
-        RoycoKernelState storage $ = _getRoycoKernelStorage();
-        $.liquidationProceeds = $.liquidationProceeds + _amount;
     }
 
     // =============================
@@ -856,15 +757,6 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         return jtConvertTrancheUnitsToNAVUnits(_getRoycoKernelStorage().jtOwnedYieldBearingAssets);
     }
 
-    /**
-     * @notice Returns the raw net asset value of the liquidation proceeds denominated in the NAV units (USD, BTC, etc.) for this kernel
-     * @return liquidationProceedsNAV The net asset value of the liquidation proceeds from past liquidation events
-     * TODO: DELETE
-     */
-    function _getLiquidationProceedsNAV() internal view returns (NAV_UNIT liquidationProceedsNAV) {
-        revert("TODO: DELETE");
-    }
-
     // =============================
     // Internal Quoter Functions
     // =============================
@@ -884,8 +776,13 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     function _clearQuoterCache() internal virtual;
 
     // =============================
-    // Kernel Storage Functions
+    // Kernel State Accessor Functions
     // =============================
+
+    /// @inheritdoc IRoycoKernel
+    function getState() external view override(IRoycoKernel) returns (RoycoKernelState memory $) {
+        return _getRoycoKernelStorage();
+    }
 
     /**
      * @notice Returns a storage pointer to the RoycoKernelState storage

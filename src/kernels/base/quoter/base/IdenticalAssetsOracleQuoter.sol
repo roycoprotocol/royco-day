@@ -97,12 +97,12 @@ abstract contract IdenticalAssetsOracleQuoter is RoycoKernel {
      */
     function setConversionRate(uint256 _conversionRateWAD) public virtual restricted {
         // Sync the tranche accounting to reflect the PNL up to this point in time
-        _syncTrancheAccounting();
+        _preOpSyncTrancheAccounting();
         // Set the new conversion rate
         _getIdenticalAssetsOracleQuoterStorage().conversionRateWAD = _conversionRateWAD;
         emit ConversionRateUpdated(_conversionRateWAD);
         // Sync the tranche accounting to reflect the PNL from the updated conversion rate
-        _syncTrancheAccounting();
+        _preOpSyncTrancheAccounting();
     }
 
     /// @notice Returns the value of 1 Tranche Unit in NAV Units, scaled to WAD precision

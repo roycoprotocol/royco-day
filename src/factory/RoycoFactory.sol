@@ -7,8 +7,8 @@ import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/E
 import { Create2 } from "../../lib/openzeppelin-contracts/contracts/utils/Create2.sol";
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
-import { IRoycoKernel } from "../../src/interfaces/kernel/IRoycoKernel.sol";
-import { IRoycoVaultTranche } from "../../src/interfaces/tranche/IRoycoVaultTranche.sol";
+import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
+import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { MarketDeploymentParams, RolesTargetConfiguration, RoycoMarket } from "../../src/libraries/Types.sol";
 import { RolesConfiguration } from "./RolesConfiguration.sol";
 
@@ -129,7 +129,7 @@ contract RoycoFactory is AccessManager, RolesConfiguration, IRoycoFactory {
         require(address(_roycoMarket.kernel.ACCOUNTANT()) == address(_roycoMarket.accountant), INVALID_ACCOUNTANT_ON_KERNEL());
 
         // Check that the kernel is set on the accountant
-        require(address(_roycoMarket.accountant.getState().kernel) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_ACCOUNTANT());
+        require(address(_roycoMarket.accountant.KERNEL()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_ACCOUNTANT());
     }
 
     /// @notice Validates the deployment parameters

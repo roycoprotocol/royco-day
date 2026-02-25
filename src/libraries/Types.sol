@@ -2,9 +2,9 @@
 pragma solidity ^0.8.28;
 
 import { IRoycoAccountant } from "../interfaces/IRoycoAccountant.sol";
-import { IRoycoKernel } from "../interfaces/kernel/IRoycoKernel.sol";
-import { IRoycoVaultTranche } from "../interfaces/tranche/IRoycoVaultTranche.sol";
-import { BASE_UNIT, NAV_UNIT, TRANCHE_UNIT } from "./Units.sol";
+import { IRoycoKernel } from "../interfaces/IRoycoKernel.sol";
+import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
+import { NAV_UNIT, TRANCHE_UNIT } from "./Units.sol";
 
 /**
  * @title MarketState
@@ -33,13 +33,11 @@ enum MarketState {
  * @dev A struct representing claims on senior tranche assets, junior tranche assets, and NAV
  * @custom:field stAssets - The claim on senior tranche assets denominated in ST's tranche units
  * @custom:field jtAssets - The claim on junior tranche assets denominated in JT's tranche units
- * @custom:field liquidationProceeds - Settlement received from liquidation events, in liquidation asset units (always 0 for JT claims)
  * @custom:field nav - The net asset value of these claims in NAV units
  */
 struct AssetClaims {
     TRANCHE_UNIT stAssets;
     TRANCHE_UNIT jtAssets;
-    BASE_UNIT liquidationProceeds;
     NAV_UNIT nav;
 }
 
@@ -49,7 +47,6 @@ struct AssetClaims {
  * @custom:field marketState - The current state of the Royco market (perpetual or fixed term)
  * @custom:field stRawNAV - The senior tranche's current raw NAV: the pure value of its invested assets
  * @custom:field jtRawNAV - The junior tranche's current raw NAV: the pure value of its invested assets
- * @custom:field liquidationProceedsNAV - The liquidation proceeds NAV from prior senior tranche liquidation events
  * @custom:field stEffectiveNAV - Senior tranche effective NAV: includes applied coverage, its share of ST yield, and uncovered losses
  * @custom:field jtEffectiveNAV - Junior tranche effective NAV: includes provided coverage, JT yield, its share of ST yield, and JT losses
  * @custom:field stImpermanentLoss - The impermanent loss that ST has suffered after exhausting JT's loss-absorption buffer
@@ -67,7 +64,6 @@ struct SyncedAccountingState {
     MarketState marketState;
     NAV_UNIT stRawNAV;
     NAV_UNIT jtRawNAV;
-    NAV_UNIT liquidationProceedsNAV;
     NAV_UNIT stEffectiveNAV;
     NAV_UNIT jtEffectiveNAV;
     NAV_UNIT stImpermanentLoss;

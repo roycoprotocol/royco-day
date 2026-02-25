@@ -255,11 +255,11 @@ contract AdaptiveCurveYDM_V2 is IYDM {
         int256 adjustmentToJTYieldShareAtTargetWAD = ((normalizedDeltaFromTargetWAD * int256(maxAdjustment)) / WAD_INT);
 
         // Apply the adjustment and bound the JT yield share between 0% and 100%
-        int256 signedResultWAD = int256(avgJtYieldShareAtTargetWAD) + adjustmentToJTYieldShareAtTargetWAD;
-        if (signedResultWAD < 0) {
+        int256 signedJTYieldShareWAD = int256(avgJtYieldShareAtTargetWAD) + adjustmentToJTYieldShareAtTargetWAD;
+        if (signedJTYieldShareWAD <= 0) {
             jtYieldShareWAD = 0;
         } else {
-            jtYieldShareWAD = uint256(signedResultWAD);
+            jtYieldShareWAD = uint256(signedJTYieldShareWAD);
             if (jtYieldShareWAD > WAD) jtYieldShareWAD = WAD;
         }
     }

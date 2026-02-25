@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { WAD, ZERO_NAV_UNITS } from "./Constants.sol";
 import { AssetClaims } from "./Types.sol";
-import { BASE_UNIT, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib } from "./Units.sol";
+import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib } from "./Units.sol";
 
 /**
  * @title UtilsLib
@@ -14,7 +14,6 @@ import { BASE_UNIT, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib } from "./Units.sol";
 library UtilsLib {
     using UnitsMathLib for NAV_UNIT;
     using UnitsMathLib for TRANCHE_UNIT;
-    using UnitsMathLib for BASE_UNIT;
     using UnitsMathLib for uint256;
 
     /**
@@ -23,10 +22,10 @@ library UtilsLib {
      * @dev Formally: Utilization = ((ST_RAW_NAV + (JT_RAW_NAV * β)) * COV) / JT_EFFECTIVE_NAV
      * @param _stRawNAV The raw net asset value of the senior tranche invested assets
      * @param _jtRawNAV The raw net asset value of the junior tranche invested assets
-     * @param _betaWAD The JT's sensitivity to the same downside stress that affects ST scaled to WAD precision
+     * @param _betaWAD The JT's sensitivity to the same downside stress that affects ST, scaled to WAD precision
      *                 For example, beta is 0 when JT is in the RFR and 1 when JT is in the same opportunity as senior
-     * @param _coverageWAD The ratio of current total exposure that is expected to be covered by the junior capital scaled to WAD precision
-     * @param _jtEffectiveNAV The junior tranche net asset value after giving coverage, JT yield, ST yield distribution, and JT losses
+     * @param _coverageWAD The ratio of current total exposure that is expected to be protected by the market's junior capital, scaled to WAD precision
+     * @param _jtEffectiveNAV The junior tranche net asset value after absorbing JT losses, providing coverage to ST, and accruing JT yield and ST yield share (risk premium)
      * @return utilization The utilization of the Royco market, scaled to WAD precision
      */
     function computeUtilization(
@@ -52,29 +51,18 @@ library UtilsLib {
      * @notice Computes the loan to value (LTV) of the Royco market given the market's state
      * @dev Informally: DEBT / (DEBT + EQUITY)
      * @dev Formally:
-     *      DEBT = MAX((ST_EFFECTIVE_NAV + ST_IL - LIQUIDATION_PROCEEDS_NAV), 0)
+     *      DEBT = (ST_EFFECTIVE_NAV + ST_IL)
      *      EQUITY = JT_EFFECTIVE_NAV
-     *      LTV = MAX((ST_EFFECTIVE_NAV + ST_IL - LIQUIDATION_PROCEEDS_NAV), 0) / (MAX((ST_EFFECTIVE_NAV + ST_IL - LIQUIDATION_PROCEEDS_NAV), 0) + JT_EFFECTIVE_NAV)
+     *      LTV = (ST_EFFECTIVE_NAV + ST_IL) / ((ST_EFFECTIVE_NAV + ST_IL) + JT_EFFECTIVE_NAV)
      * @param _stEffectiveNAV The senior tranche net asset value after receiving coverage, ST yield distribution, and ST losses
      * @param _stImpermanentLoss The impermanent loss that the senior tranche has suffered after exhausting JT's loss-absorption buffer
-     * @param _liquidationProceedsNAV The NAV of the liquidation proceeds paid to ST via liquidation events
      * @param _jtEffectiveNAV The junior tranche net asset value after giving coverage, JT yield, ST yield distribution, and JT losses
      * @return ltvWAD The loan to value (LTV) of the Royco market, scaled to WAD precision
      */
-    function computeLTV(
-        NAV_UNIT _stEffectiveNAV,
-        NAV_UNIT _stImpermanentLoss,
-        NAV_UNIT _liquidationProceedsNAV,
-        NAV_UNIT _jtEffectiveNAV
-    )
-        internal
-        pure
-        returns (uint256 ltvWAD)
-    {
+    function computeLTV(NAV_UNIT _stEffectiveNAV, NAV_UNIT _stImpermanentLoss, NAV_UNIT _jtEffectiveNAV) internal pure returns (uint256 ltvWAD) {
         // Compute debt and value (debt + equity)
-        // Liquidation proceeds can exceed ST_EFFECTIVE_NAV if a liquidation resulted in a profit
-        NAV_UNIT debt = UnitsMathLib.saturatingSub((_stEffectiveNAV + _stImpermanentLoss), _liquidationProceedsNAV);
-        NAV_UNIT value = debt + _jtEffectiveNAV;
+        NAV_UNIT debt = (_stEffectiveNAV + _stImpermanentLoss);
+        NAV_UNIT value = (debt + _jtEffectiveNAV);
         // If total value is zero, LTV is undefined
         if (value == ZERO_NAV_UNITS) return type(uint256).max;
         // Round in favor of ensuring senior tranche protection
@@ -96,7 +84,6 @@ library UtilsLib {
         scaledClaims.nav = _claims.nav.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
         scaledClaims.stAssets = _claims.stAssets.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
         scaledClaims.jtAssets = _claims.jtAssets.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
-        scaledClaims.liquidationProceeds = _claims.liquidationProceeds.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
     }
 
     /**
@@ -118,6 +105,5 @@ library UtilsLib {
         scaledClaims.nav = _claims.nav.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
         scaledClaims.stAssets = _claims.stAssets.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
         scaledClaims.jtAssets = _claims.jtAssets.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
-        scaledClaims.liquidationProceeds = _claims.liquidationProceeds.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
     }
 }
