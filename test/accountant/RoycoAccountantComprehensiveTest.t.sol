@@ -951,7 +951,8 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
         vm.warp(vm.getBlockTimestamp() + 1 days);
 
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.syncTrancheAccounting(_nav(uint256(int256(initialST) + deltaST)), _nav(uint256(int256(initialJT) + deltaJT)));
+        SyncedAccountingState memory state =
+            accountant.syncTrancheAccounting(_nav(uint256(int256(initialST) + deltaST)), _nav(uint256(int256(initialJT) + deltaJT)));
 
         _assertNonNegativity(state);
     }

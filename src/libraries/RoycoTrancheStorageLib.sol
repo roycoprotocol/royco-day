@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-
 /**
  * @notice Storage state for Royco Tranche contracts
  * @custom:storage-location erc7201:Royco.storage.RoycoTrancheState

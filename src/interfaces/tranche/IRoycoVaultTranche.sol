@@ -77,12 +77,17 @@ interface IRoycoVaultTranche is IERC20Metadata {
     function previewMintProtocolFeeShares(
         NAV_UNIT _protocolFeeAssets,
         NAV_UNIT _trancheTotalAssets
-    ) external view returns (uint256 mintedProtocolFeeShares, uint256 totalTrancheShares);
+    )
+        external
+        view
+        returns (uint256 mintedProtocolFeeShares, uint256 totalTrancheShares);
 
     /// @notice Mints protocol fee shares
     function mintProtocolFeeShares(
         NAV_UNIT _protocolFeeAssets,
         NAV_UNIT _trancheTotalAssets,
         address _protocolFeeRecipient
-    ) external returns (uint256 mintedProtocolFeeShares, uint256 totalTrancheShares);
+    )
+        external
+        returns (uint256 mintedProtocolFeeShares, uint256 totalTrancheShares);
 }
