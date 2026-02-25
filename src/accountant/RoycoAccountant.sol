@@ -184,28 +184,24 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         // Apply the effects of the operation that was executed
         if (_op == Operation.ST_DEPOSIT) {
             require(deltaST > 0 && deltaJT == 0 && deltaLP == 0 && _stRedemptionBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
-            NAV_UNIT stDepositNAV = toNAVUnits(deltaST);
             // New ST deposits are treated as an addition to the future ST exposure
-            stEffectiveNAV = stEffectiveNAV + stDepositNAV;
+            stEffectiveNAV = stEffectiveNAV + toNAVUnits(deltaST);
         } else if (_op == Operation.JT_DEPOSIT) {
             require(deltaJT > 0 && deltaST == 0 && deltaLP == 0 && _stRedemptionBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
-            NAV_UNIT jtDepositNAV = toNAVUnits(deltaJT);
             // New JT deposits are treated as an addition to the future loss-absorption buffer
-            jtEffectiveNAV = jtEffectiveNAV + jtDepositNAV;
+            jtEffectiveNAV = jtEffectiveNAV + toNAVUnits(deltaJT);
         } else {
             require(deltaST <= 0 && deltaJT <= 0 && deltaLP <= 0, INVALID_POST_OP_STATE(_op));
-            // Get the value redeemed from each NAV
-            NAV_UNIT stRedemptionNAV = toNAVUnits(-deltaST);
-            NAV_UNIT jtRedemptionNAV = toNAVUnits(-deltaJT);
-            NAV_UNIT liquidationProceedsRedemptionNAV = toNAVUnits(-deltaLP);
-            NAV_UNIT totalRedemptionNAV = (stRedemptionNAV + jtRedemptionNAV + liquidationProceedsRedemptionNAV);
+            // Get the total value redeemed
+            NAV_UNIT totalRedemptionNAV = (toNAVUnits(-deltaST) + toNAVUnits(-deltaJT) + toNAVUnits(-deltaLP));
 
             if (_op == Operation.ST_REDEEM) {
                 require(totalRedemptionNAV > 0, INVALID_POST_OP_STATE(_op));
-                // Reduce JT effective NAV by the the bonus provided from its assets
-                jtEffectiveNAV = jtEffectiveNAV - _stRedemptionBonusNAV;
+                // Reduce JT effective NAV by the the bonus provided from its assets (bounded to JT effective NAV)
+                NAV_UNIT actualBonusNAV = Math.min(_stRedemptionBonusNAV, jtEffectiveNAV);
+                jtEffectiveNAV = jtEffectiveNAV - actualBonusNAV;
                 // Reduce ST effective NAV by the total redemptions without the bonus provided from JT effective NAV
-                stEffectiveNAV = stEffectiveNAV - (totalRedemptionNAV - _stRedemptionBonusNAV);
+                stEffectiveNAV = stEffectiveNAV - (totalRedemptionNAV - actualBonusNAV);
                 // The withdrawing senior LP has realized its proportional share of past uncovered losses and associated recovery optionality, rounding in favor of senior
                 if (stImpermanentLoss != ZERO_NAV_UNITS) {
                     stImpermanentLoss = stImpermanentLoss.mulDiv(stEffectiveNAV, $.lastSTEffectiveNAV, Math.Rounding.Ceil);
@@ -214,9 +210,8 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             } else if (_op == Operation.JT_REDEEM) {
                 // JT cannot get a bonus from its own NAV
                 require(totalRedemptionNAV > 0 && _stRedemptionBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
-                NAV_UNIT preWithdrawalJTEffectiveNAV = jtEffectiveNAV;
                 // The actual amount withdrawn from JT effective NAV could be from both tranches (its own share of its NAV, ST yield share, IL repayments, etc.)
-                jtEffectiveNAV = preWithdrawalJTEffectiveNAV - totalRedemptionNAV;
+                jtEffectiveNAV = jtEffectiveNAV - totalRedemptionNAV;
             }
             // The withdrawing junior LP has realized its proportional share of past JT losses from coverage applied and its associated recovery optionality, rounding in favor of senior
             if (jtCoverageImpermanentLoss != ZERO_NAV_UNITS) {
