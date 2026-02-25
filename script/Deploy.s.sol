@@ -10,22 +10,11 @@ import { IRoycoAuth } from "../src/interfaces/IRoycoAuth.sol";
 import { IYDM } from "../src/interfaces/IYDM.sol";
 import { IRoycoKernel } from "../src/interfaces/kernel/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../src/interfaces/tranche/IRoycoVaultTranche.sol";
-import { ERC4626_ST_AaveV3_JT_InKindAssets_Kernel } from "../src/kernels/ERC4626_ST_AaveV3_JT_InKindAssets_Kernel.sol";
-import { ERC4626_ST_ERC4626_JT_InKindAssets_Kernel } from "../src/kernels/ERC4626_ST_ERC4626_JT_InKindAssets_Kernel.sol";
+import { IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel } from "../src/kernels/IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel.sol";
+import { IdenticalERC4626SharesAdminOracleQuoter_Kernel } from "../src/kernels/IdenticalERC4626SharesAdminOracleQuoter_Kernel.sol";
 import { IdleCdoAA_ST_IdleCdoAA_JT_Kernel } from "../src/kernels/IdleCdoAA_ST_IdleCdoAA_JT_Kernel.sol";
 import { ReUSD_ST_ReUSD_JT_Kernel } from "../src/kernels/ReUSD_ST_ReUSD_JT_Kernel.sol";
-import {
-    YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel
-} from "../src/kernels/YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel.sol";
-import {
-    YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel
-} from "../src/kernels/YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel.sol";
-import { IdenticalERC4626SharesAdminOracleQuoter } from "../src/kernels/base/quoter/IdenticalERC4626SharesAdminOracleQuoter.sol";
-import { IdenticalAssetsChainlinkOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
-import { IdenticalAssetsOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
-import { RoycoKernelInitParams } from "../src/libraries/RoycoKernelStorageLib.sol";
-import { AssetClaims, MarketDeploymentParams, RolesTargetConfiguration, RoycoMarket, TrancheDeploymentParams } from "../src/libraries/Types.sol";
-import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits } from "../src/libraries/Units.sol";
+import { NAV_UNIT, toNAVUnits } from "../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoSeniorTranche } from "../src/tranches/RoycoSeniorTranche.sol";
 import { AdaptiveCurveYDM_V1 } from "../src/ydm/AdaptiveCurveYDM_V1.sol";
@@ -64,8 +53,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         ERC4626_ST_AaveV3_JT_InKindAssets,
         ERC4626_ST_ERC4626_JT_InKindAssets,
         ReUSD_ST_ReUSD_JT,
-        YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsChainlinkOracleQuoter,
-        YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter,
+        IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel,
+        IdenticalERC4626SharesAdminOracleQuoter_Kernel,
         IdleCdoAA_ST_IdleCdoAA_JT
     }
 
@@ -95,15 +84,15 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         address insuranceCapitalLayer;
     }
 
-    /// @notice Deployment parameters for YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel
-    struct YieldBearingERC20STYieldBearingERC20JTIdenticalAssetsChainlinkOracleQuoterKernelParams {
+    /// @notice Deployment parameters for IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel
+    struct IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams {
         address trancheAssetToReferenceAssetOracle;
         uint48 stalenessThresholdSeconds;
         uint256 initialConversionRateWAD;
     }
 
-    /// @notice Deployment parameters for YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel
-    struct YieldBearingERC4626STYieldBearingERC4626JTIdenticalERC4626SharesAdminOracleQuoterKernelParams {
+    /// @notice Deployment parameters for IdenticalERC4626SharesAdminOracleQuoter_Kernel
+    struct IdenticalERC4626SharesAdminOracleQuoterKernelParams {
         uint256 initialConversionRateWAD;
     }
 

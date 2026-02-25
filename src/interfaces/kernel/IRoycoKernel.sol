@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
 import { BASE_UNIT, NAV_UNIT, TRANCHE_UNIT } from "../../libraries/Units.sol";
+import { IRoycoAccountant } from "../IRoycoAccountant.sol";
 
 /**
  * @title IRoycoKernel
@@ -84,6 +85,37 @@ interface IRoycoKernel {
     error JT_DEPOSIT_DISABLED_IN_FIXED_TERM_STATE();
 
     /**
+     * @notice Retrieves the base asset used for liquidation settlements
+     * @return baseAsset The base asset used for liquidation settlements
+     */
+    function BASE_ASSET() external view returns (address baseAsset);
+    /**
+     * @notice Retrieves the senior tranche address
+     * @return seniorTranche The senior tranche address
+     */
+    function SENIOR_TRANCHE() external view returns (address seniorTranche);
+    /**
+     * @notice Retrieves the ST asset address
+     * @return stAsset The ST asset address
+     */
+    function ST_ASSET() external view returns (address stAsset);
+    /**
+     * @notice Retrieves the junior tranche address
+     * @return juniorTranche The junior tranche address
+     */
+    function JUNIOR_TRANCHE() external view returns (address juniorTranche);
+    /**
+     * @notice Retrieves the JT asset address
+     * @return jtAsset The JT asset address
+     */
+    function JT_ASSET() external view returns (address jtAsset);
+    /**
+     * @notice Retrieves the accountant address
+     * @return accountant The accountant address
+     */
+    function ACCOUNTANT() external view returns (IRoycoAccountant accountant);
+
+    /**
      * @notice Retrieves the state of the Royco kernel
      * @return state The Royco kernel's state, including the protocol fee recipient and the kernel's controlled tranche and base assets
      */
@@ -130,14 +162,6 @@ interface IRoycoKernel {
      * @return baseAssets The equivalent amount in base asset units
      */
     function convertNAVUnitsToBaseUnits(NAV_UNIT _nav) external view returns (BASE_UNIT baseAssets);
-
-    /**
-     * @notice Returns the senior tranche's claims on ST and JT assets that are available for liquidation
-     * @dev Returns zero values if the market is not in a liquidatable state
-     * @return stAssets The senior tranche's claim on ST assets available for liquidation
-     * @return jtAssets The senior tranche's claim on JT assets available for liquidation
-     */
-    function getLiquidatableAssets() external view returns (TRANCHE_UNIT stAssets, TRANCHE_UNIT jtAssets);
 
     /**
      * @notice Synchronizes and persists the raw and effective NAVs of both tranches

@@ -3,13 +3,10 @@ pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/ERC20Upgradeable.sol";
 import { IInsuranceCapitalLayer } from "../interfaces/external/reUSD/IInsuranceCapitalLayer.sol";
+import { IRoycoKernel } from "../interfaces/kernel/IRoycoKernel.sol";
 import { WAD_DECIMALS } from "../libraries/Constants.sol";
-import { RoycoKernelInitParams } from "../libraries/RoycoKernelStorageLib.sol";
-import { AtomicLiquidationFacility } from "./base/liquidation-facility/AtomicLiquidationFacility.sol";
+import { RoycoKernel } from "./base/RoycoKernel.sol";
 import { IdenticalAssetsOracleQuoter } from "./base/quoter/base/IdenticalAssetsOracleQuoter.sol";
-import {
-    YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsOracleQuoter_Kernel
-} from "./base/recipe/YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsOracleQuoter_Kernel.sol";
 
 /**
  * @title ReUSD_ST_ReUSD_JT_Kernel
@@ -18,7 +15,7 @@ import {
  * @notice The NAV can be expressed in any quote token supported by reUSD's Insurance Capital Layer (ICL) or manually fixed to an admin set oracle input
  * @dev https://docs.re.xyz/insurance-capital-layers/what-is-reusd
  */
-contract ReUSD_ST_ReUSD_JT_Kernel is YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsOracleQuoter_Kernel, AtomicLiquidationFacility {
+contract ReUSD_ST_ReUSD_JT_Kernel is RoycoKernel, IdenticalAssetsOracleQuoter {
     /// @notice The address of the reUSD token
     address public immutable REUSD;
 
@@ -44,7 +41,7 @@ contract ReUSD_ST_ReUSD_JT_Kernel is YieldBearingERC20_ST_YieldBearingERC20_JT_I
         address _reusdUsdQuoteToken,
         address _insuranceCapitalLayer
     )
-        YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsOracleQuoter_Kernel(_params)
+        RoycoKernel(_params)
     {
         // Set the reUSD specific state
         require(_reusd != address(0) && _reusdUsdQuoteToken != address(0) && _insuranceCapitalLayer != address(0), NULL_ADDRESS());
@@ -60,9 +57,11 @@ contract ReUSD_ST_ReUSD_JT_Kernel is YieldBearingERC20_ST_YieldBearingERC20_JT_I
      * @notice Initializes the Royco Kernel
      * @param _params The standard initialization parameters for the Royco Kernel
      */
-    function initialize(RoycoKernelInitParams calldata _params) external initializer {
+    function initialize(IRoycoKernel.RoycoKernelInitParams calldata _params) external initializer {
+        // Initialize the base kernel state
+        __RoycoKernel_init(_params);
         // The initial conversion rate is set to the sentinel value so that the reUSD -> REUSD_QUOTE_TOKEN conversion rate is queried directly from the insurance capital layer
-        __YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsOracleQuoter_Kernel_init(_params, SENTINEL_CONVERSION_RATE);
+        __IdenticalAssetsOracleQuoter_init_unchained(SENTINEL_CONVERSION_RATE);
     }
 
     /// @inheritdoc IdenticalAssetsOracleQuoter

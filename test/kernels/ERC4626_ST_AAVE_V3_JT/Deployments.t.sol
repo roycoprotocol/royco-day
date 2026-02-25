@@ -7,9 +7,8 @@ import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoFactory } from "../../../src/interfaces/IRoycoFactory.sol";
 import { IPool } from "../../../src/interfaces/external/aave/IPool.sol";
 import { TrancheType } from "../../../src/interfaces/kernel/IRoycoKernel.sol";
-import { ERC4626_ST_AaveV3_JT_InKindAssets_Kernel } from "../../../src/kernels/ERC4626_ST_AaveV3_JT_InKindAssets_Kernel.sol";
+import { RoycoKernelInitParams } from "../../../src/interfaces/kernel/IRoycoKernel.sol";
 import { ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../../src/libraries/Constants.sol";
-import { RoycoKernelInitParams } from "../../../src/libraries/RoycoKernelStorageLib.sol";
 import {
     IRoycoAccountant,
     IRoycoKernel,
