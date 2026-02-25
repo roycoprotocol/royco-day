@@ -2116,12 +2116,10 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // (allow for dust tolerance from underlying protocol rounding)
         NAV_UNIT stIL = ACCOUNTANT.getState().lastSTImpermanentLoss;
         NAV_UNIT jtCoverageIL = ACCOUNTANT.getState().lastJTImpermanentLoss;
-        NAV_UNIT jtSelfIL = ACCOUNTANT.getState().lastJTSelfImpermanentLoss;
         NAV_UNIT stNAVDustTolerance = ACCOUNTANT.getState().stNAVDustTolerance;
 
         assertEq(toUint256(stIL), 0, "ST IL should be 0 with no yield/loss");
         assertLe(toUint256(jtCoverageIL), toUint256(stNAVDustTolerance), "JT coverage IL should be within dust tolerance");
-        assertLe(toUint256(jtSelfIL), toUint256(stNAVDustTolerance), "JT self IL should be within dust tolerance");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

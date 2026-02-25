@@ -91,7 +91,6 @@ contract IdleCdoAAKernelTest is AbstractKernelTestSuite {
             seniorTrancheSymbol: SENIOR_TRANCHE_SYMBOL,
             juniorTrancheName: JUNIOR_TRANCHE_NAME,
             juniorTrancheSymbol: JUNIOR_TRANCHE_SYMBOL,
-            baseAsset: IIdleCDO(IDLE_CDO).token(),
             seniorAsset: AA_TRANCHE_TOKEN,
             juniorAsset: AA_TRANCHE_TOKEN,
             stNAVDustTolerance: toNAVUnits(SCALE_FACTOR),
@@ -383,7 +382,7 @@ contract IdleCdoAAKernelTest is AbstractKernelTestSuite {
         uint256 depositAmount = 10_000 * (10 ** AA_TRANCHE_DECIMALS);
         vm.startPrank(ALICE_ADDRESS);
         AA_TRANCHE.approve(address(JT), depositAmount);
-        JT.deposit(toTrancheUnits(depositAmount), ALICE_ADDRESS, ALICE_ADDRESS);
+        JT.deposit(toTrancheUnits(depositAmount), ALICE_ADDRESS);
         vm.stopPrank();
 
         // NAV should now be non-zero
@@ -401,7 +400,7 @@ contract IdleCdoAAKernelTest is AbstractKernelTestSuite {
         uint256 depositAmount = 10_000 * (10 ** AA_TRANCHE_DECIMALS);
         vm.startPrank(ALICE_ADDRESS);
         AA_TRANCHE.approve(address(JT), depositAmount);
-        JT.deposit(toTrancheUnits(depositAmount), ALICE_ADDRESS, ALICE_ADDRESS);
+        JT.deposit(toTrancheUnits(depositAmount), ALICE_ADDRESS);
         vm.stopPrank();
 
         AssetClaims memory claims = JT.totalAssets();

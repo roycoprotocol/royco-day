@@ -8,7 +8,7 @@ import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/I
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { RolesConfiguration, RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
-import { IRoycoKernel } from "../../src/interfaces/kernel/IRoycoKernel.sol";
+import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/tranche/IRoycoVaultTranche.sol";
 import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
 import { ERC4626Mock } from "../mock/ERC4626Mock.sol";
@@ -209,31 +209,30 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         // Build role assignments
         DeployScript.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
-        return DeployScript.DeploymentParams({
-            factoryAdmin: OWNER_ADDRESS,
-            marketId: marketID,
-            seniorTrancheName: _seniorTrancheName,
-            seniorTrancheSymbol: _seniorTrancheSymbol,
-            juniorTrancheName: _juniorTrancheName,
-            juniorTrancheSymbol: _juniorTrancheSymbol,
-            baseAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
-            seniorAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
-            juniorAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
-            stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE,
-            kernelType: DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel,
-            kernelSpecificParams: abi.encode(kernelParams),
-            protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
-            jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            coverageWAD: COVERAGE_WAD,
-            betaWAD: BETA_WAD,
-            lltvWAD: LLTV,
-            fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
-            ydmSpecificParams: abi.encode(ydmParams),
-            roleAssignments: roleAssignments
-        });
+        DeployScript.DeploymentParams memory params;
+        params.factoryAdmin = OWNER_ADDRESS;
+        params.marketId = marketID;
+        params.seniorTrancheName = _seniorTrancheName;
+        params.seniorTrancheSymbol = _seniorTrancheSymbol;
+        params.juniorTrancheName = _juniorTrancheName;
+        params.juniorTrancheSymbol = _juniorTrancheSymbol;
+        params.seniorAsset = ETHEREUM_MAINNET_USDC_ADDRESS;
+        params.juniorAsset = ETHEREUM_MAINNET_USDC_ADDRESS;
+        params.stNAVDustTolerance = DUST_TOLERANCE;
+        params.jtNAVDustTolerance = DUST_TOLERANCE;
+        params.kernelType = DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel;
+        params.kernelSpecificParams = abi.encode(kernelParams);
+        params.protocolFeeRecipient = PROTOCOL_FEE_RECIPIENT_ADDRESS;
+        params.stProtocolFeeWAD = ST_PROTOCOL_FEE_WAD;
+        params.jtProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
+        params.coverageWAD = COVERAGE_WAD;
+        params.betaWAD = BETA_WAD;
+        params.lltvWAD = LLTV;
+        params.fixedTermDurationSeconds = FIXED_TERM_DURATION_SECONDS;
+        params.ydmType = DeployScript.YDMType.AdaptiveCurve_V2;
+        params.ydmSpecificParams = abi.encode(ydmParams);
+        params.roleAssignments = roleAssignments;
+        return params;
     }
 
     // ============================================

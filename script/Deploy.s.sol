@@ -7,8 +7,8 @@ import { RoycoAccountant } from "../src/accountant/RoycoAccountant.sol";
 import { RolesConfiguration, RoycoFactory } from "../src/factory/RoycoFactory.sol";
 import { IRoycoAccountant } from "../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoAuth } from "../src/interfaces/IRoycoAuth.sol";
+import { IRoycoKernel } from "../src/interfaces/IRoycoKernel.sol";
 import { IYDM } from "../src/interfaces/IYDM.sol";
-import { IRoycoKernel } from "../src/interfaces/kernel/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../src/interfaces/tranche/IRoycoVaultTranche.sol";
 import { IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel } from "../src/kernels/IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel.sol";
 import { IdenticalERC4626SharesAdminOracleQuoter_Kernel } from "../src/kernels/IdenticalERC4626SharesAdminOracleQuoter_Kernel.sol";
@@ -159,7 +159,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         string seniorTrancheSymbol;
         string juniorTrancheName;
         string juniorTrancheSymbol;
-        address baseAsset;
         address seniorAsset;
         address juniorAsset;
         NAV_UNIT stNAVDustTolerance;
@@ -227,7 +226,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             seniorTrancheSymbol: marketConfig.seniorTrancheSymbol,
             juniorTrancheName: marketConfig.juniorTrancheName,
             juniorTrancheSymbol: marketConfig.juniorTrancheSymbol,
-            baseAsset: marketConfig.baseAsset,
             seniorAsset: marketConfig.seniorAsset,
             juniorAsset: marketConfig.juniorAsset,
             stNAVDustTolerance: toNAVUnits(marketConfig.stDustTolerance),
@@ -427,23 +425,21 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         roles[index++] = RolesTargetConfiguration({ target: _juniorTranche, selectors: jtSelectors, roles: jtRoles });
 
         // Kernel roles
-        bytes4[] memory kernelSelectors = new bytes4[](7);
-        uint64[] memory kernelRoleValues = new uint64[](7);
+        bytes4[] memory kernelSelectors = new bytes4[](6);
+        uint64[] memory kernelRoleValues = new uint64[](6);
 
         kernelSelectors[0] = IRoycoKernel.setProtocolFeeRecipient.selector;
         kernelRoleValues[0] = ADMIN_KERNEL_ROLE;
-        kernelSelectors[1] = IRoycoKernel.syncTrancheAccounting.selector;
-        kernelRoleValues[1] = SYNC_ROLE;
-        kernelSelectors[2] = IRoycoAuth.pause.selector;
+        kernelSelectors[1] = IRoycoAuth.pause.selector;
+        kernelRoleValues[1] = ADMIN_PAUSER_ROLE;
+        kernelSelectors[2] = IRoycoAuth.unpause.selector;
         kernelRoleValues[2] = ADMIN_PAUSER_ROLE;
-        kernelSelectors[3] = IRoycoAuth.unpause.selector;
-        kernelRoleValues[3] = ADMIN_PAUSER_ROLE;
-        kernelSelectors[4] = IdenticalAssetsOracleQuoter.setConversionRate.selector;
+        kernelSelectors[3] = IdenticalAssetsOracleQuoter.setConversionRate.selector;
+        kernelRoleValues[3] = ADMIN_ORACLE_QUOTER_ROLE;
+        kernelSelectors[4] = IdenticalAssetsChainlinkOracleQuoter.setTrancheAssetToReferenceAssetOracle.selector;
         kernelRoleValues[4] = ADMIN_ORACLE_QUOTER_ROLE;
-        kernelSelectors[5] = IdenticalAssetsChainlinkOracleQuoter.setTrancheAssetToReferenceAssetOracle.selector;
-        kernelRoleValues[5] = ADMIN_ORACLE_QUOTER_ROLE;
-        kernelSelectors[6] = UUPSUpgradeable.upgradeToAndCall.selector;
-        kernelRoleValues[6] = ADMIN_UPGRADER_ROLE;
+        kernelSelectors[5] = UUPSUpgradeable.upgradeToAndCall.selector;
+        kernelRoleValues[5] = ADMIN_UPGRADER_ROLE;
 
         roles[index++] = RolesTargetConfiguration({ target: _kernel, selectors: kernelSelectors, roles: kernelRoleValues });
 
@@ -648,7 +644,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         address kernelImpl = _deployKernelImpl(
             _params.kernelType,
             _params.kernelSpecificParams,
-            _params.baseAsset,
             expectedSeniorTrancheAddress,
             expectedJuniorTrancheAddress,
             _params.seniorAsset,
@@ -802,7 +797,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     function _deployKernelImpl(
         KernelType _kernelType,
         bytes memory _kernelSpecificParams,
-        address _baseAsset,
         address _expectedSeniorTrancheAddress,
         address _expectedJuniorTrancheAddress,
         address _seniorAsset,
@@ -813,7 +807,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         returns (address)
     {
         IRoycoKernel.RoycoKernelConstructionParams memory constructionParams = IRoycoKernel.RoycoKernelConstructionParams({
-            baseAsset: _baseAsset,
             seniorTranche: _expectedSeniorTrancheAddress,
             stAsset: _seniorAsset,
             juniorTranche: _expectedJuniorTrancheAddress,
@@ -988,7 +981,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         returns (bytes memory)
     {
         IRoycoAccountant.RoycoAccountantInitParams memory accountantParams = IRoycoAccountant.RoycoAccountantInitParams({
-            kernel: _expectedKernelAddress,
             stProtocolFeeWAD: _params.stProtocolFeeWAD,
             jtProtocolFeeWAD: _params.jtProtocolFeeWAD,
             yieldShareProtocolFeeWAD: 0,
@@ -1016,9 +1008,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         returns (bytes memory)
     {
         TrancheDeploymentParams memory trancheParams =
-            TrancheDeploymentParams({ name: _params.seniorTrancheName, symbol: _params.seniorTrancheSymbol, kernel: _expectedKernelAddress });
+            TrancheDeploymentParams({ name: _params.seniorTrancheName, symbol: _params.seniorTrancheSymbol, initialAuthority: _factoryAddress });
 
-        return abi.encodeCall(RoycoSeniorTranche.initialize, (trancheParams, _params.seniorAsset, _factoryAddress, _marketId));
+        return abi.encodeCall(RoycoSeniorTranche.initialize, (trancheParams));
     }
 
     function _buildJuniorTrancheInitializationData(
@@ -1032,9 +1024,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         returns (bytes memory)
     {
         TrancheDeploymentParams memory trancheParams =
-            TrancheDeploymentParams({ name: _params.juniorTrancheName, symbol: _params.juniorTrancheSymbol, kernel: _expectedKernelAddress });
+            TrancheDeploymentParams({ name: _params.juniorTrancheName, symbol: _params.juniorTrancheSymbol, initialAuthority: _factoryAddress });
 
-        return abi.encodeCall(RoycoJuniorTranche.initialize, (trancheParams, _params.juniorAsset, _factoryAddress, _marketId));
+        return abi.encodeCall(RoycoJuniorTranche.initialize, (trancheParams));
     }
 
     function _transferFactoryOwnership(RoycoFactory _factory, address _deployer, address _newAdmin) internal {

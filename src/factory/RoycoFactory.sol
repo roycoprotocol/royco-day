@@ -8,7 +8,7 @@ import { Create2 } from "../../lib/openzeppelin-contracts/contracts/utils/Create
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
-import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
+import { IRoycoVaultTranche } from "../../src/interfaces/tranche/IRoycoVaultTranche.sol";
 import { MarketDeploymentParams, RolesTargetConfiguration, RoycoMarket } from "../../src/libraries/Types.sol";
 import { RolesConfiguration } from "./RolesConfiguration.sol";
 
@@ -122,8 +122,8 @@ contract RoycoFactory is AccessManager, RolesConfiguration, IRoycoFactory {
         require(AccessManagedUpgradeable(address(_roycoMarket.juniorTranche)).authority() == address(this), INVALID_ACCESS_MANAGER());
 
         // Check that the kernel is set on the tranches
-        require(address(_roycoMarket.seniorTranche.kernel()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_SENIOR_TRANCHE());
-        require(address(_roycoMarket.juniorTranche.kernel()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_JUNIOR_TRANCHE());
+        require(address(_roycoMarket.seniorTranche.KERNEL()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_SENIOR_TRANCHE());
+        require(address(_roycoMarket.juniorTranche.KERNEL()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_JUNIOR_TRANCHE());
 
         // Check that the accountant is set on the kernel
         require(address(_roycoMarket.kernel.ACCOUNTANT()) == address(_roycoMarket.accountant), INVALID_ACCOUNTANT_ON_KERNEL());

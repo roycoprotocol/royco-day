@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IRoycoAccountant } from "../interfaces/IRoycoAccountant.sol";
 import { IRoycoKernel } from "../interfaces/IRoycoKernel.sol";
-import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
+import { IRoycoVaultTranche } from "../interfaces/tranche/IRoycoVaultTranche.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "./Units.sol";
 
 /**
@@ -153,12 +153,12 @@ struct MarketDeploymentParams {
 /**
  * @custom:field name - The name of the tranche share token (should be prefixed with "Royco-ST" or "Royco-JT")
  * @custom:field symbol - The symbol of the tranche share token (should be prefixed with "ST" or "JT")
- * @custom:field kernel - The tranche kernel responsible for defining the execution model and core logic of the market
+ * @custom:field initialAuthority - The initial authority for the tranche
  */
 struct TrancheDeploymentParams {
     string name;
     string symbol;
-    address kernel;
+    address initialAuthority;
 }
 
 /**
