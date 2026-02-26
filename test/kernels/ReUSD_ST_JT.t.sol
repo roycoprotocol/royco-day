@@ -238,46 +238,40 @@ contract reUSD_Test is AbstractKernelTestSuite {
 
     /// @notice Deploys the ReUSD kernel and market
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
-        ProtocolConfig memory cfg = getProtocolConfig();
-
-        DeployScript.ReUSDSTReUSDJTKernelParams memory kernelParams =
-            DeployScript.ReUSDSTReUSDJTKernelParams({ reusd: REUSD, reusdUsdQuoteToken: USDC, insuranceCapitalLayer: ICL });
-
-        DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
-            jtYieldShareAtZeroUtilWAD: 0.3e18, // Y_0 = Y_T (same as target)
-            jtYieldShareAtTargetUtilWAD: 0.3e18,
-            jtYieldShareAtFullUtilWAD: 1e18,
-            maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
-        });
-
-        // Build role assignments using the centralized function
-        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
-
-        DeployScript.DeploymentParams memory params = DeployScript.DeploymentParams({
-            factoryAdmin: OWNER_ADDRESS,
-            seniorTrancheName: string(abi.encodePacked("Royco Senior ", cfg.name)),
-            seniorTrancheSymbol: string(abi.encodePacked("RS-", cfg.name)),
-            juniorTrancheName: string(abi.encodePacked("Royco Junior ", cfg.name)),
-            juniorTrancheSymbol: string(abi.encodePacked("RJ-", cfg.name)),
-            seniorAsset: cfg.stAsset,
-            juniorAsset: cfg.jtAsset,
-            stNAVDustTolerance: toNAVUnits(10 ** (18 - cfg.stDecimals)),
-            jtNAVDustTolerance: toNAVUnits(10 ** (18 - cfg.jtDecimals)),
-            kernelType: DeployScript.KernelType.ReUSD_ST_ReUSD_JT,
-            kernelSpecificParams: abi.encode(kernelParams),
-            stSelfLiquidationBonusWAD: 0,
-            protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
-            jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            coverageWAD: COVERAGE_WAD,
-            betaWAD: 1e18,
-            lltvWAD: LLTV,
-            fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
-            ydmSpecificParams: abi.encode(ydmParams),
-            roleAssignments: roleAssignments
-        });
-
+        DeployScript.DeploymentParams memory params = _buildReUSDDeploymentParams();
         return DEPLOY_SCRIPT.deploy(params, DEPLOYER.privateKey);
+    }
+
+    function _buildReUSDDeploymentParams() private view returns (DeployScript.DeploymentParams memory params) {
+        ProtocolConfig memory cfg = getProtocolConfig();
+        params.factoryAdmin = OWNER_ADDRESS;
+        params.seniorTrancheName = string(abi.encodePacked("Royco Senior ", cfg.name));
+        params.seniorTrancheSymbol = string(abi.encodePacked("RS-", cfg.name));
+        params.juniorTrancheName = string(abi.encodePacked("Royco Junior ", cfg.name));
+        params.juniorTrancheSymbol = string(abi.encodePacked("RJ-", cfg.name));
+        params.seniorAsset = cfg.stAsset;
+        params.juniorAsset = cfg.jtAsset;
+        params.stNAVDustTolerance = toNAVUnits(10 ** (18 - cfg.stDecimals));
+        params.jtNAVDustTolerance = toNAVUnits(10 ** (18 - cfg.jtDecimals));
+        params.kernelType = DeployScript.KernelType.ReUSD_ST_ReUSD_JT;
+        params.kernelSpecificParams =
+            abi.encode(DeployScript.ReUSDSTReUSDJTKernelParams({ reusd: REUSD, reusdUsdQuoteToken: USDC, insuranceCapitalLayer: ICL }));
+        params.protocolFeeRecipient = PROTOCOL_FEE_RECIPIENT_ADDRESS;
+        params.stProtocolFeeWAD = ST_PROTOCOL_FEE_WAD;
+        params.jtProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
+        params.coverageWAD = COVERAGE_WAD;
+        params.betaWAD = 1e18;
+        params.lltvWAD = LLTV;
+        params.fixedTermDurationSeconds = FIXED_TERM_DURATION_SECONDS;
+        params.ydmType = DeployScript.YDMType.AdaptiveCurve_V2;
+        params.ydmSpecificParams = abi.encode(
+            DeployScript.AdaptiveCurveYDM_V2_Params({
+                jtYieldShareAtZeroUtilWAD: 0.3e18,
+                jtYieldShareAtTargetUtilWAD: 0.3e18,
+                jtYieldShareAtFullUtilWAD: 1e18,
+                maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
+            })
+        );
+        params.roleAssignments = _generateRoleAssignments();
     }
 }

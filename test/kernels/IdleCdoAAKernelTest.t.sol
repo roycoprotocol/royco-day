@@ -126,7 +126,7 @@ contract IdleCdoAAKernelTest is AbstractKernelTestSuite {
             jtAsset: AA_TRANCHE_TOKEN,
             stDecimals: AA_TRANCHE_DECIMALS,
             jtDecimals: AA_TRANCHE_DECIMALS,
-            initialFunding: 10_000 * (10 ** AA_TRANCHE_DECIMALS)
+            initialFunding: 200_000 * (10 ** AA_TRANCHE_DECIMALS)
         });
     }
 
