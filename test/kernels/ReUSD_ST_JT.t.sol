@@ -259,6 +259,7 @@ contract reUSD_Test is AbstractKernelTestSuite {
         params.protocolFeeRecipient = PROTOCOL_FEE_RECIPIENT_ADDRESS;
         params.stProtocolFeeWAD = ST_PROTOCOL_FEE_WAD;
         params.jtProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
+        params.jtYieldShareProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
         params.coverageWAD = COVERAGE_WAD;
         params.betaWAD = 1e18;
         params.lltvWAD = LLTV;

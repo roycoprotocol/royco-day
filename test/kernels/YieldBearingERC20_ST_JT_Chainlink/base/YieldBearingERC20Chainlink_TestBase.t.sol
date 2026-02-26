@@ -496,7 +496,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Deploys the YieldBearingERC20 Chainlink kernel and market
-    function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
+    function _deployKernelAndMarket() internal virtual override returns (DeployScript.DeploymentResult memory) {
         ProtocolConfig memory cfg = getProtocolConfig();
 
         // Store the chainlink oracle address for mocking
@@ -544,6 +544,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
             protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
+            jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             coverageWAD: COVERAGE_WAD,
             betaWAD: 1e18, // Beta = 1 for identical assets
             lltvWAD: LLTV,

@@ -32,6 +32,7 @@ abstract contract DeploymentConfig {
     string internal constant SNUSD = "sNUSD";
     string internal constant SAVUSD = "savUSD";
     string internal constant AUTOUSD = "autoUSD";
+    string internal constant MFONE = "mF-ONE ";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CHAIN-SPECIFIC CONFIG (defined once per chain)
@@ -67,7 +68,6 @@ abstract contract DeploymentConfig {
         string juniorTrancheName;
         string juniorTrancheSymbol;
         // Assets
-        address baseAsset;
         address seniorAsset;
         address juniorAsset;
         // Dust tolerances
@@ -80,6 +80,7 @@ abstract contract DeploymentConfig {
         // Accountant
         uint64 stProtocolFeeWAD;
         uint64 jtProtocolFeeWAD;
+        uint64 jtYieldShareProtocolFeeWAD;
         uint64 coverageWAD;
         uint96 betaWAD;
         uint64 lltvWAD;
@@ -177,7 +178,6 @@ abstract contract DeploymentConfig {
             seniorTrancheSymbol: _seniorTrancheSymbol(STCUSD),
             juniorTrancheName: _juniorTrancheName(STCUSD),
             juniorTrancheSymbol: _juniorTrancheSymbol(STCUSD),
-            baseAsset: 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48,
             seniorAsset: 0x88887bE419578051FF9F4eb6C858A951921D8888,
             juniorAsset: 0x88887bE419578051FF9F4eb6C858A951921D8888,
             stDustTolerance: 3,
@@ -187,6 +187,7 @@ abstract contract DeploymentConfig {
             stSelfLiquidationBonusWAD: 0, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
+            jtYieldShareProtocolFeeWAD: 0.2e18,
             coverageWAD: 0.1e18,
             betaWAD: 1e18,
             lltvWAD: 0.91e18,
@@ -209,7 +210,6 @@ abstract contract DeploymentConfig {
             seniorTrancheSymbol: _seniorTrancheSymbol(SNUSD),
             juniorTrancheName: _juniorTrancheName(SNUSD),
             juniorTrancheSymbol: _juniorTrancheSymbol(SNUSD),
-            baseAsset: 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48,
             seniorAsset: 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313,
             juniorAsset: 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313,
             stDustTolerance: 3,
@@ -219,6 +219,7 @@ abstract contract DeploymentConfig {
             stSelfLiquidationBonusWAD: 0, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
+            jtYieldShareProtocolFeeWAD: 0.2e18,
             coverageWAD: 0.1e18,
             betaWAD: 1e18,
             lltvWAD: 0.91e18,
@@ -241,7 +242,6 @@ abstract contract DeploymentConfig {
             seniorTrancheSymbol: _seniorTrancheSymbol(SAVUSD),
             juniorTrancheName: _juniorTrancheName(SAVUSD),
             juniorTrancheSymbol: _juniorTrancheSymbol(SAVUSD),
-            baseAsset: 0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E,
             seniorAsset: 0x06d47F3fb376649c3A9Dafe069B3D6E35572219E,
             juniorAsset: 0x06d47F3fb376649c3A9Dafe069B3D6E35572219E,
             stDustTolerance: 3,
@@ -251,6 +251,7 @@ abstract contract DeploymentConfig {
             stSelfLiquidationBonusWAD: 0, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
+            jtYieldShareProtocolFeeWAD: 0.2e18,
             coverageWAD: 0.2e18,
             betaWAD: 1e18,
             lltvWAD: 0.82e18,
@@ -273,7 +274,6 @@ abstract contract DeploymentConfig {
             seniorTrancheSymbol: _seniorTrancheSymbol(AUTOUSD),
             juniorTrancheName: _juniorTrancheName(AUTOUSD),
             juniorTrancheSymbol: _juniorTrancheSymbol(AUTOUSD),
-            baseAsset: 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48,
             seniorAsset: 0xa7569A44f348d3D70d8ad5889e50F78E33d80D35,
             juniorAsset: 0xa7569A44f348d3D70d8ad5889e50F78E33d80D35,
             stDustTolerance: 3,
@@ -283,12 +283,52 @@ abstract contract DeploymentConfig {
             stSelfLiquidationBonusWAD: 0, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
+            jtYieldShareProtocolFeeWAD: 0.2e18,
             coverageWAD: 0.1e18,
             betaWAD: 1e18,
             lltvWAD: 0.92e18,
             fixedTermDurationSeconds: 2 days,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
+                DeployScript.AdaptiveCurveYDM_V2_Params({
+                    jtYieldShareAtZeroUtilWAD: 0.05e18,
+                    jtYieldShareAtTargetUtilWAD: 0.05e18,
+                    jtYieldShareAtFullUtilWAD: 0.4e18,
+                    maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
+                })
+            )
+        });
+
+        _marketConfigs[MFONE] = MarketDeploymentConfig({
+            marketName: MFONE,
+            chainId: MAINNET,
+            seniorTrancheName: _seniorTrancheName(MFONE),
+            seniorTrancheSymbol: _seniorTrancheSymbol(MFONE),
+            juniorTrancheName: _juniorTrancheName(MFONE),
+            juniorTrancheSymbol: _juniorTrancheSymbol(MFONE),
+            seniorAsset: 0x238a700eD6165261Cf8b2e544ba797BC11e466Ba,
+            juniorAsset: 0x238a700eD6165261Cf8b2e544ba797BC11e466Ba,
+            stDustTolerance: 3,
+            jtDustTolerance: 3,
+            kernelType: DeployScript.KernelType.IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel,
+            kernelSpecificParams: abi.encode(
+                DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams({
+                        trancheAssetToReferenceAssetOracle: 0x8D51DBC85cEef637c97D02bdaAbb5E274850e68C,
+                        stalenessThresholdSeconds: 1800, // TODO
+                        initialConversionRateWAD: 1e18
+                    })
+            ),
+            stSelfLiquidationBonusWAD: 0, // TODO
+            stProtocolFeeWAD: 0.1e18,
+            jtProtocolFeeWAD: 0.2e18,
+            jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
+            coverageWAD: 0.1e18, // TODO
+            betaWAD: 1e18,
+            lltvWAD: 0.91e18, // TODO
+            fixedTermDurationSeconds: 2 days, // TODO
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
+            ydmSpecificParams: // TODO
+            abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
                     jtYieldShareAtZeroUtilWAD: 0.05e18,
                     jtYieldShareAtTargetUtilWAD: 0.05e18,

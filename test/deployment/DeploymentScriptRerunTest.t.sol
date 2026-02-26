@@ -202,6 +202,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         params.protocolFeeRecipient = PROTOCOL_FEE_RECIPIENT_ADDRESS;
         params.stProtocolFeeWAD = ST_PROTOCOL_FEE_WAD;
         params.jtProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
+        params.jtYieldShareProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
         params.coverageWAD = COVERAGE_WAD;
         params.betaWAD = BETA_WAD;
         params.lltvWAD = LLTV;

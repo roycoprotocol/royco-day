@@ -422,6 +422,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
             protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
+            jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             coverageWAD: COVERAGE_WAD,
             betaWAD: 1e18, // Beta = 1 for identical assets
             lltvWAD: LLTV,

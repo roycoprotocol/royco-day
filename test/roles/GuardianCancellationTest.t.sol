@@ -88,6 +88,7 @@ contract GuardianCancellationTest is BaseTest {
             protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
+            jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             coverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
             lltvWAD: LLTV,

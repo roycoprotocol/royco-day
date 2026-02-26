@@ -157,6 +157,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         // Accountant params
         uint64 stProtocolFeeWAD;
         uint64 jtProtocolFeeWAD;
+        uint64 jtYieldShareProtocolFeeWAD;
         uint64 coverageWAD;
         uint96 betaWAD;
         uint64 lltvWAD;
@@ -221,6 +222,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             stSelfLiquidationBonusWAD: marketConfig.stSelfLiquidationBonusWAD,
             stProtocolFeeWAD: marketConfig.stProtocolFeeWAD,
             jtProtocolFeeWAD: marketConfig.jtProtocolFeeWAD,
+            jtYieldShareProtocolFeeWAD: marketConfig.jtYieldShareProtocolFeeWAD,
             coverageWAD: marketConfig.coverageWAD,
             betaWAD: marketConfig.betaWAD,
             lltvWAD: marketConfig.lltvWAD,
@@ -968,7 +970,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         IRoycoAccountant.RoycoAccountantInitParams memory accountantParams = IRoycoAccountant.RoycoAccountantInitParams({
             stProtocolFeeWAD: _params.stProtocolFeeWAD,
             jtProtocolFeeWAD: _params.jtProtocolFeeWAD,
-            yieldShareProtocolFeeWAD: 0,
+            yieldShareProtocolFeeWAD: _params.jtYieldShareProtocolFeeWAD,
             coverageWAD: _params.coverageWAD,
             betaWAD: _params.betaWAD,
             ydm: _ydmAddress,
