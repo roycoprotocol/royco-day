@@ -212,9 +212,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
     }
 
     function _setEncodedParams(DeployScript.DeploymentParams memory params) private pure {
-        params.kernelSpecificParams = abi.encode(
-            DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })
-        );
+        params.kernelSpecificParams = abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 }));
         params.ydmSpecificParams = abi.encode(
             DeployScript.AdaptiveCurveYDM_V2_Params({
                 jtYieldShareAtZeroUtilWAD: 0.225e18,

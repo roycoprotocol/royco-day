@@ -384,11 +384,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         roles[3] = _buildAccountantRolesConfig(_accountant);
     }
 
-    function _buildTrancheRolesConfig(address _tranche, uint64 _lpRole)
-        private
-        pure
-        returns (IRoycoFactory.RolesTargetConfiguration memory)
-    {
+    function _buildTrancheRolesConfig(address _tranche, uint64 _lpRole) private pure returns (IRoycoFactory.RolesTargetConfiguration memory) {
         bytes4[] memory selectors = new bytes4[](5);
         uint64[] memory roleValues = new uint64[](5);
 
