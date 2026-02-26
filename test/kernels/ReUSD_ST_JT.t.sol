@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
+import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IInsuranceCapitalLayer } from "../../src/interfaces/external/reUSD/IInsuranceCapitalLayer.sol";
 import { ReUSD_ST_ReUSD_JT_Kernel } from "../../src/kernels/ReUSD_ST_ReUSD_JT_Kernel.sol";
 import { IdenticalAssetsOracleQuoter } from "../../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
@@ -101,11 +102,6 @@ contract reUSD_Test is AbstractKernelTestSuite {
     /// @dev Converts the tranche unit tolerance to NAV using the kernel's conversion
     function maxNAVDelta() public view override returns (NAV_UNIT) {
         return _toSTValue(maxTrancheUnitDelta());
-    }
-
-    /// @notice Returns the JT redemption delay
-    function _getJTRedemptionDelay() internal pure virtual override returns (uint24) {
-        return 60;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -257,7 +253,7 @@ contract reUSD_Test is AbstractKernelTestSuite {
         });
 
         // Build role assignments using the centralized function
-        DeployScript.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
         DeployScript.DeploymentParams memory params = DeployScript.DeploymentParams({
             factoryAdmin: OWNER_ADDRESS,
@@ -266,15 +262,14 @@ contract reUSD_Test is AbstractKernelTestSuite {
             seniorTrancheSymbol: string(abi.encodePacked("RS-", cfg.name)),
             juniorTrancheName: string(abi.encodePacked("Royco Junior ", cfg.name)),
             juniorTrancheSymbol: string(abi.encodePacked("RJ-", cfg.name)),
-            baseAsset: USDC,
             seniorAsset: cfg.stAsset,
             juniorAsset: cfg.jtAsset,
             stNAVDustTolerance: toNAVUnits(10 ** (18 - cfg.stDecimals)),
             jtNAVDustTolerance: toNAVUnits(10 ** (18 - cfg.jtDecimals)),
             kernelType: DeployScript.KernelType.ReUSD_ST_ReUSD_JT,
             kernelSpecificParams: abi.encode(kernelParams),
+            stSelfLiquidationBonusWAD: 0,
             protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            jtRedemptionDelayInSeconds: _getJTRedemptionDelay(),
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             coverageWAD: COVERAGE_WAD,

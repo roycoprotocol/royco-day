@@ -6,7 +6,8 @@ import { IAccessManager } from "../../lib/openzeppelin-contracts/contracts/acces
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
-import { IRoycoKernel } from "../../src/interfaces/kernel/IRoycoKernel.sol";
+import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
+import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
 import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
 import { BaseTest } from "../base/BaseTest.t.sol";
 import { ERC4626Mock } from "../mock/ERC4626Mock.sol";
@@ -59,9 +60,8 @@ contract GuardianCancellationTest is BaseTest {
         bytes32 marketID = keccak256(abi.encodePacked(SENIOR_TRANCHE_NAME, JUNIOR_TRANCHE_NAME, vm.getBlockTimestamp()));
 
         // Build kernel-specific params
-        DeployScript.ERC4626STAaveV3JTInKindAssetsKernelParams memory kernelParams = DeployScript.ERC4626STAaveV3JTInKindAssetsKernelParams({
-            stVault: address(MOCK_UNDERLYING_ST_VAULT), aaveV3Pool: ETHEREUM_MAINNET_AAVE_V3_POOL_ADDRESS
-        });
+        DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams memory kernelParams =
+            DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 });
 
         // Build YDM params (AdaptiveCurve_V2)
         DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
@@ -72,7 +72,7 @@ contract GuardianCancellationTest is BaseTest {
         });
 
         // Build role assignments using the centralized function
-        DeployScript.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
         // Build deployment params
         DeployScript.DeploymentParams memory params = DeployScript.DeploymentParams({
@@ -82,15 +82,14 @@ contract GuardianCancellationTest is BaseTest {
             seniorTrancheSymbol: SENIOR_TRANCHE_SYMBOL,
             juniorTrancheName: JUNIOR_TRANCHE_NAME,
             juniorTrancheSymbol: JUNIOR_TRANCHE_SYMBOL,
-            baseAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
-            seniorAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
-            juniorAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
+            seniorAsset: address(MOCK_UNDERLYING_ST_VAULT),
+            juniorAsset: address(MOCK_UNDERLYING_ST_VAULT),
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
-            kernelType: DeployScript.KernelType.ERC4626_ST_AaveV3_JT_InKindAssets,
+            kernelType: DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel,
             kernelSpecificParams: abi.encode(kernelParams),
+            stSelfLiquidationBonusWAD: 0,
             protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            jtRedemptionDelayInSeconds: JT_REDEMPTION_DELAY_SECONDS,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             coverageWAD: COVERAGE_WAD,
@@ -145,26 +144,6 @@ contract GuardianCancellationTest is BaseTest {
         vm.warp(block.timestamp + 1 days + 1);
         vm.prank(KERNEL_ADMIN_ADDRESS);
         vm.expectRevert(); // Should revert - operation was cancelled
-        FACTORY.execute(address(KERNEL), data);
-    }
-
-    /// @notice Test that guardian can cancel a scheduled kernel admin operation (setJuniorTrancheRedemptionDelay)
-    function test_guardian_canCancelKernelAdminSetRedemptionDelay() public {
-        uint24 newDelay = 500_000;
-        bytes memory data = abi.encodeCall(KERNEL.setJuniorTrancheRedemptionDelay, (newDelay));
-
-        // Schedule the operation as kernel admin
-        vm.prank(KERNEL_ADMIN_ADDRESS);
-        FACTORY.schedule(address(KERNEL), data, 0);
-
-        // Guardian cancels the operation
-        vm.prank(ROLE_GUARDIAN_ADDRESS);
-        FACTORY.cancel(KERNEL_ADMIN_ADDRESS, address(KERNEL), data);
-
-        // Verify the operation cannot be executed
-        vm.warp(block.timestamp + 1 days + 1);
-        vm.prank(KERNEL_ADMIN_ADDRESS);
-        vm.expectRevert();
         FACTORY.execute(address(KERNEL), data);
     }
 

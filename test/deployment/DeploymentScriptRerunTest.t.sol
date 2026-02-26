@@ -8,7 +8,8 @@ import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/I
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { RolesConfiguration, RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
-import { IRoycoKernel } from "../../src/interfaces/kernel/IRoycoKernel.sol";
+import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
+import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/tranche/IRoycoVaultTranche.sol";
 import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
 import { ERC4626Mock } from "../mock/ERC4626Mock.sol";
@@ -70,7 +71,6 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
 
     // Constants
     address internal constant ETHEREUM_MAINNET_USDC_ADDRESS = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
-    address internal constant ETHEREUM_MAINNET_AAVE_V3_POOL_ADDRESS = 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2;
 
     // Deployment params
     uint64 internal COVERAGE_WAD = 0.2e18;
@@ -163,7 +163,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         return wallet;
     }
 
-    function _generateRoleAssignments() internal view returns (DeployScript.RoleAssignmentConfiguration[] memory) {
+    function _generateRoleAssignments() internal view returns (IRoycoFactory.RoleAssignmentConfiguration[] memory) {
         return DEPLOY_SCRIPT.generateRolesAssignments(
             DeployScript.RoleAssignmentAddresses({
                 pauserAddress: PAUSER_ADDRESS,
@@ -195,8 +195,8 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         bytes32 marketID = keccak256(abi.encodePacked(_seniorTrancheName, _juniorTrancheName, vm.getBlockTimestamp()));
 
         // Build kernel-specific params
-        DeployScript.ERC4626STAaveV3JTInKindAssetsKernelParams memory kernelParams =
-            DeployScript.ERC4626STAaveV3JTInKindAssetsKernelParams({ stVault: _stVault, aaveV3Pool: ETHEREUM_MAINNET_AAVE_V3_POOL_ADDRESS });
+        DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams memory kernelParams =
+            DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 });
 
         // Build YDM params (AdaptiveCurve_V2)
         DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
@@ -207,34 +207,32 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         });
 
         // Build role assignments
-        DeployScript.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
-        return DeployScript.DeploymentParams({
-            factoryAdmin: OWNER_ADDRESS,
-            marketId: marketID,
-            seniorTrancheName: _seniorTrancheName,
-            seniorTrancheSymbol: _seniorTrancheSymbol,
-            juniorTrancheName: _juniorTrancheName,
-            juniorTrancheSymbol: _juniorTrancheSymbol,
-            baseAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
-            seniorAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
-            juniorAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
-            stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE,
-            kernelType: DeployScript.KernelType.ERC4626_ST_AaveV3_JT_InKindAssets,
-            kernelSpecificParams: abi.encode(kernelParams),
-            protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            jtRedemptionDelayInSeconds: JT_REDEMPTION_DELAY_SECONDS,
-            stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
-            jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            coverageWAD: COVERAGE_WAD,
-            betaWAD: BETA_WAD,
-            lltvWAD: LLTV,
-            fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
-            ydmSpecificParams: abi.encode(ydmParams),
-            roleAssignments: roleAssignments
-        });
+        DeployScript.DeploymentParams memory params;
+        params.factoryAdmin = OWNER_ADDRESS;
+        params.marketId = marketID;
+        params.seniorTrancheName = _seniorTrancheName;
+        params.seniorTrancheSymbol = _seniorTrancheSymbol;
+        params.juniorTrancheName = _juniorTrancheName;
+        params.juniorTrancheSymbol = _juniorTrancheSymbol;
+        params.seniorAsset = _stVault;
+        params.juniorAsset = _stVault;
+        params.stNAVDustTolerance = DUST_TOLERANCE;
+        params.jtNAVDustTolerance = DUST_TOLERANCE;
+        params.kernelType = DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel;
+        params.kernelSpecificParams = abi.encode(kernelParams);
+        params.protocolFeeRecipient = PROTOCOL_FEE_RECIPIENT_ADDRESS;
+        params.stProtocolFeeWAD = ST_PROTOCOL_FEE_WAD;
+        params.jtProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
+        params.coverageWAD = COVERAGE_WAD;
+        params.betaWAD = BETA_WAD;
+        params.lltvWAD = LLTV;
+        params.fixedTermDurationSeconds = FIXED_TERM_DURATION_SECONDS;
+        params.ydmType = DeployScript.YDMType.AdaptiveCurve_V2;
+        params.ydmSpecificParams = abi.encode(ydmParams);
+        params.roleAssignments = roleAssignments;
+        return params;
     }
 
     // ============================================
@@ -365,13 +363,10 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
 
         // Get expected addresses
         bytes32 salt2 = keccak256(abi.encodePacked("MARKET_2_SALT"));
-        address expectedST = factory.predictERC1967ProxyAddress(address(result1.stTrancheImplementation), salt2);
-        address expectedJT = factory.predictERC1967ProxyAddress(address(result1.jtTrancheImplementation), salt2);
-        address expectedKernel = factory.predictERC1967ProxyAddress(result1.kernelImplementation, salt2);
-        address expectedAccountant = factory.predictERC1967ProxyAddress(address(result1.accountantImplementation), salt2);
-
-        // Build roles configuration
-        DEPLOY_SCRIPT.buildRolesTargetConfiguration(expectedST, expectedJT, expectedKernel, expectedAccountant);
+        address expectedST = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-ST")));
+        address expectedJT = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-JT")));
+        address expectedKernel = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-KERNEL")));
+        address expectedAccountant = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-ACCOUNTANT")));
 
         // Note: For a full test, we would need to build all the initialization data
         // This test demonstrates that the DEPLOYER role is properly configured

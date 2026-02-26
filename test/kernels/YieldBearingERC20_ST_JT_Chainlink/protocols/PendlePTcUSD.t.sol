@@ -66,11 +66,6 @@ contract PendlePTcUSD_Test is YieldBearingERC20Chainlink_TestBase {
         return WAD;
     }
 
-    /// @notice Returns the JT redemption delay
-    function _getJTRedemptionDelay() internal pure virtual override returns (uint24) {
-        return 60;
-    }
-
     // ═══════════════════════════════════════════════════════════════════════════
     // TOLERANCE OVERRIDES
     // ═══════════════════════════════════════════════════════════════════════════

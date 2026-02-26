@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IERC20Metadata } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { AssetClaims, TrancheType } from "../libraries/Types.sol";
-import { NAV_UNIT, TRANCHE_UNIT } from "../libraries/Units.sol";
+import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import { AssetClaims, TrancheType } from "../../libraries/Types.sol";
+import { NAV_UNIT, TRANCHE_UNIT } from "../../libraries/Units.sol";
 
 /**
  * @title IRoycoVaultTranche
@@ -49,24 +49,38 @@ interface IRoycoVaultTranche is IERC20Metadata {
     /// @notice Thrown when the value allocated from a deposit does not match the expected value
     error INVALID_VALUE_ALLOCATED();
 
+    /// @notice Thrown when the asset, kernel, or market ID is null
+    error NULL_ADDRESS();
+
+    /**
+     * @custom:field name - The name of the tranche share token (should be prefixed with "Royco-ST" or "Royco-JT")
+     * @custom:field symbol - The symbol of the tranche share token (should be prefixed with "ST" or "JT")
+     * @custom:field initialAuthority - The initial authority for the tranche
+     */
+    struct TrancheDeploymentParams {
+        string name;
+        string symbol;
+        address initialAuthority;
+    }
+
+    /**
+     * @notice Returns the address of the kernel that this tranche is associated with
+     * @return kernel The address of the kernel responsible for executing deposits and redemptions for this tranche
+     */
+    function KERNEL() external view returns (address kernel);
+
+    /**
+     * @notice Returns the address of the market that this tranche is associated with
+     * @return marketId The bytes32 market identifier
+     */
+    function MARKET_ID() external view returns (bytes32 marketId);
+
     /**
      * @notice Returns the raw NAV of the tranche's invested assets
      * @dev The raw NAV represents the pure value of the tranche's assets before any coverage adjustments or yield sharing
      * @return nav The raw NAV of the tranche's invested assets, denominated in the kernel's NAV units
      */
     function getRawNAV() external view returns (NAV_UNIT nav);
-
-    /**
-     * @notice Returns the address of the kernel that this tranche is associated with
-     * @return kernel The address of the kernel responsible for executing deposits and redemptions for this tranche
-     */
-    function kernel() external view returns (address kernel);
-
-    /**
-     * @notice Returns the unique market identifier for the Royco market that this tranche belongs to
-     * @return marketId The bytes32 market identifier
-     */
-    function marketId() external view returns (bytes32 marketId);
 
     /**
      * @notice Returns the total effective assets held by this tranche

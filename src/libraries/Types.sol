@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IRoycoAccountant } from "../interfaces/IRoycoAccountant.sol";
 import { IRoycoKernel } from "../interfaces/IRoycoKernel.sol";
-import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
+import { IRoycoVaultTranche } from "../interfaces/tranche/IRoycoVaultTranche.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "./Units.sol";
 
 /**
@@ -112,87 +112,3 @@ enum TrancheType {
     JUNIOR
 }
 
-/**
- * @notice Parameters for deploying a new market
- * @custom:field seniorTrancheName - The name of the senior tranche
- * @custom:field seniorTrancheSymbol - The symbol of the senior tranche
- * @custom:field juniorTrancheName - The name of the junior tranche
- * @custom:field juniorTrancheSymbol - The symbol of the junior tranche
- * @custom:field seniorAsset - The underlying asset for the senior tranche
- * @custom:field juniorAsset - The underlying asset for the junior tranche
- * @custom:field marketId - The identifier of the Royco market
- * @custom:field kernelImplementation - The implementation address for the kernel
- * @custom:field accountantImplementation - The implementation address for the accountant
- * @custom:field seniorTrancheImplementation - The implementation address for the senior tranche
- * @custom:field juniorTrancheImplementation - The implementation address for the junior tranche
- * @custom:field kernelInitializationData - The initialization data for the kernel
- * @custom:field accountantInitializationData - The initialization data for the accountant
- * @custom:field seniorTrancheInitializationData - The initialization data for the senior tranche
- * @custom:field juniorTrancheInitializationData - The initialization data for the junior tranche
- * @custom:field seniorTrancheProxyDeploymentSalt - The salt for the senior tranche proxy deployment
- * @custom:field juniorTrancheProxyDeploymentSalt - The salt for the junior tranche proxy deployment
- * @custom:field kernelProxyDeploymentSalt - The salt for the kernel proxy deployment
- * @custom:field accountantProxyDeploymentSalt - The salt for the accountant proxy deployment
- */
-struct MarketDeploymentParams {
-    // Tranche Deployment Parameters
-    string seniorTrancheName;
-    string seniorTrancheSymbol;
-    string juniorTrancheName;
-    string juniorTrancheSymbol;
-    bytes32 marketId;
-    // Implementation Addresses
-    IRoycoVaultTranche seniorTrancheImplementation;
-    IRoycoVaultTranche juniorTrancheImplementation;
-    IRoycoKernel kernelImplementation;
-    IRoycoAccountant accountantImplementation;
-    // Proxy Initialization Data
-    bytes seniorTrancheInitializationData;
-    bytes juniorTrancheInitializationData;
-    bytes kernelInitializationData;
-    bytes accountantInitializationData;
-    // Create2 Salts
-    bytes32 seniorTrancheProxyDeploymentSalt;
-    bytes32 juniorTrancheProxyDeploymentSalt;
-    bytes32 kernelProxyDeploymentSalt;
-    bytes32 accountantProxyDeploymentSalt;
-    // Initial Roles Configuration
-    RolesTargetConfiguration[] roles;
-}
-
-/**
- * @custom:field name - The name of the tranche share token (should be prefixed with "Royco-ST" or "Royco-JT")
- * @custom:field symbol - The symbol of the tranche share token (should be prefixed with "ST" or "JT")
- * @custom:field kernel - The tranche kernel responsible for defining the execution model and core logic of the market
- */
-struct TrancheDeploymentParams {
-    string name;
-    string symbol;
-    address kernel;
-}
-
-/**
- * @notice For a given target address, the configuration for a role
- * @custom:field target - The target address of the role
- * @custom:field selectors - The selectors of the role
- * @custom:field roles - The roles of the role
- */
-struct RolesTargetConfiguration {
-    address target;
-    bytes4[] selectors;
-    uint64[] roles;
-}
-
-/**
- * @notice The contracts constituting a Royco market
- * @custom:field seniorTranche - The senior tranche contract
- * @custom:field juniorTranche - The junior tranche contract
- * @custom:field kernel - The kernel contract
- * @custom:field accountant - The accountant contract
- */
-struct RoycoMarket {
-    IRoycoVaultTranche seniorTranche;
-    IRoycoVaultTranche juniorTranche;
-    IRoycoKernel kernel;
-    IRoycoAccountant accountant;
-}

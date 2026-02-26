@@ -7,13 +7,16 @@ import { RoycoAccountant } from "../src/accountant/RoycoAccountant.sol";
 import { RolesConfiguration, RoycoFactory } from "../src/factory/RoycoFactory.sol";
 import { IRoycoAccountant } from "../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoAuth } from "../src/interfaces/IRoycoAuth.sol";
+import { IRoycoFactory } from "../src/interfaces/IRoycoFactory.sol";
+import { IRoycoKernel } from "../src/interfaces/IRoycoKernel.sol";
 import { IYDM } from "../src/interfaces/IYDM.sol";
-import { IRoycoKernel } from "../src/interfaces/kernel/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../src/interfaces/tranche/IRoycoVaultTranche.sol";
 import { IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel } from "../src/kernels/IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel.sol";
 import { IdenticalERC4626SharesAdminOracleQuoter_Kernel } from "../src/kernels/IdenticalERC4626SharesAdminOracleQuoter_Kernel.sol";
 import { IdleCdoAA_ST_IdleCdoAA_JT_Kernel } from "../src/kernels/IdleCdoAA_ST_IdleCdoAA_JT_Kernel.sol";
 import { ReUSD_ST_ReUSD_JT_Kernel } from "../src/kernels/ReUSD_ST_ReUSD_JT_Kernel.sol";
+import { IdenticalAssetsChainlinkOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
+import { IdenticalAssetsOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
 import { NAV_UNIT, toNAVUnits } from "../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoSeniorTranche } from "../src/tranches/RoycoSeniorTranche.sol";
@@ -50,8 +53,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
 
     /// @notice Enum for kernel types
     enum KernelType {
-        ERC4626_ST_AaveV3_JT_InKindAssets,
-        ERC4626_ST_ERC4626_JT_InKindAssets,
         ReUSD_ST_ReUSD_JT,
         IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel,
         IdenticalERC4626SharesAdminOracleQuoter_Kernel,
@@ -63,18 +64,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         StaticCurve,
         AdaptiveCurve_V1,
         AdaptiveCurve_V2
-    }
-
-    /// @notice Deployment parameters for ERC4626_ST_AaveV3_JT_InKindAssets_Kernel
-    struct ERC4626STAaveV3JTInKindAssetsKernelParams {
-        address stVault;
-        address aaveV3Pool;
-    }
-
-    /// @notice Deployment parameters for ERC4626_ST_ERC4626_JT_InKindAssets_Kernel
-    struct ERC4626STERC4626JTInKindAssetsKernelParams {
-        address stVault;
-        address jtVault;
     }
 
     /// @notice Deployment parameters for ReUSD_ST_ReUSD_JT_Kernel
@@ -152,14 +141,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         address deployerAdminAddress;
     }
 
-    /// @notice Configuration for assigning a role to an address
-    struct RoleAssignmentConfiguration {
-        uint64 role; // The role to assign
-        uint64 roleAdminRole; // The admin role that can assign the role, 0 if none
-        address assignee; // The address to assign the role to
-        uint32 executionDelay; // The delay after which the role can be assigned
-    }
-
     /// @notice Main deployment parameters struct
     struct DeploymentParams {
         // Factory params
@@ -170,7 +151,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         string seniorTrancheSymbol;
         string juniorTrancheName;
         string juniorTrancheSymbol;
-        address baseAsset;
         address seniorAsset;
         address juniorAsset;
         NAV_UNIT stNAVDustTolerance;
@@ -180,7 +160,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         bytes kernelSpecificParams; // Encoded kernel-specific params
         // Kernel initialization params
         address protocolFeeRecipient;
-        uint24 jtRedemptionDelayInSeconds;
+        uint64 stSelfLiquidationBonusWAD;
         // Accountant params
         uint64 stProtocolFeeWAD;
         uint64 jtProtocolFeeWAD;
@@ -192,7 +172,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         YDMType ydmType;
         bytes ydmSpecificParams; // Encoded YDM-specific params
         // Roles
-        RoleAssignmentConfiguration[] roleAssignments;
+        IRoycoFactory.RoleAssignmentConfiguration[] roleAssignments;
     }
 
     function run() external virtual {
@@ -215,7 +195,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         MarketDeploymentConfig memory marketConfig = getMarketConfig(marketName);
 
         // Build role assignments from chain config
-        RoleAssignmentConfiguration[] memory roleAssignments = generateRolesAssignments(
+        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = generateRolesAssignments(
             RoleAssignmentAddresses({
                 pauserAddress: chainConfig.pauserAddress,
                 upgraderAddress: chainConfig.upgraderAddress,
@@ -239,7 +219,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             seniorTrancheSymbol: marketConfig.seniorTrancheSymbol,
             juniorTrancheName: marketConfig.juniorTrancheName,
             juniorTrancheSymbol: marketConfig.juniorTrancheSymbol,
-            baseAsset: marketConfig.baseAsset,
             seniorAsset: marketConfig.seniorAsset,
             juniorAsset: marketConfig.juniorAsset,
             stNAVDustTolerance: toNAVUnits(marketConfig.stDustTolerance),
@@ -247,7 +226,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             kernelType: marketConfig.kernelType,
             kernelSpecificParams: marketConfig.kernelSpecificParams,
             protocolFeeRecipient: chainConfig.protocolFeeRecipient,
-            jtRedemptionDelayInSeconds: marketConfig.jtRedemptionDelaySeconds,
+            stSelfLiquidationBonusWAD: marketConfig.stSelfLiquidationBonusWAD,
             stProtocolFeeWAD: marketConfig.stProtocolFeeWAD,
             jtProtocolFeeWAD: marketConfig.jtProtocolFeeWAD,
             coverageWAD: marketConfig.coverageWAD,
@@ -302,7 +281,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         // Kernel Config
         console2.log("--- Kernel Config ---");
         console2.log("Kernel Type:", uint256(params.kernelType));
-        console2.log("JT Redemption Delay (seconds):", uint256(params.jtRedemptionDelayInSeconds));
         console2.log("");
 
         // Accountant Config
@@ -345,19 +323,19 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         address deployer = vm.addr(_deployerPrivateKey);
 
         // Deploy implementations using CREATE2
-        RoycoAccountant accountantImpl = _deployAccountantImpl();
-        RoycoSeniorTranche stTrancheImpl = _deploySTTrancheImpl();
-        RoycoJuniorTranche jtTrancheImpl = _deployJTTrancheImpl();
         IYDM ydm = _deployYDM(_params.ydmType);
 
-        // Deploy factory with deployer as admin and deployer as deployer
-        RoycoFactory factory = _deployFactory(deployer, deployer);
+        // Deploy factory with factory admin as admin and deployer as deployer
+        RoycoFactory factory = _deployFactory(_params.factoryAdmin, deployer, _params.roleAssignments);
 
-        // Deploy market using factory (kernel implementation is deployed inside _deployMarket)
-        (RoycoMarket memory market, address kernelImpl) = _deployMarket(factory, accountantImpl, stTrancheImpl, jtTrancheImpl, address(ydm), _params, deployer);
-
-        // Transfer factory ownership to factory admin
-        _transferFactoryOwnership(factory, deployer, _params.factoryAdmin);
+        // Deploy all implementations. Then deploy the market using the factory
+        (
+            IRoycoFactory.RoycoMarket memory market,
+            RoycoSeniorTranche stTrancheImpl,
+            RoycoJuniorTranche jtTrancheImpl,
+            address kernelImpl,
+            RoycoAccountant accountantImpl
+        ) = _deployMarket(factory, address(ydm), _params, deployer);
 
         // Build deployment result
         DeploymentResult memory result = DeploymentResult({
@@ -409,75 +387,68 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     )
         public
         pure
-        returns (RolesTargetConfiguration[] memory roles)
+        returns (IRoycoFactory.RolesTargetConfiguration[] memory roles)
     {
         // Count how many role configurations we need
         uint256 roleCount = 4; // ST, JT, Kernel, Accountant
 
-        roles = new RolesTargetConfiguration[](roleCount);
+        roles = new IRoycoFactory.RolesTargetConfiguration[](roleCount);
         uint256 index = 0;
 
         // Senior Tranche roles
-        bytes4[] memory stSelectors = new bytes4[](13);
-        uint64[] memory stRoles = new uint64[](13);
+        bytes4[] memory stSelectors = new bytes4[](5);
+        uint64[] memory stRoles = new uint64[](5);
 
         stSelectors[0] = IRoycoVaultTranche.deposit.selector;
-        stRoles[0] = LP_ROLE;
+        stRoles[0] = ST_LP_ROLE;
         stSelectors[1] = IRoycoVaultTranche.redeem.selector;
-        stRoles[1] = LP_ROLE;
-        stSelectors[2] = IRoycoAsyncVault.requestDeposit.selector;
-        stRoles[2] = LP_ROLE;
-        stSelectors[3] = IRoycoAsyncVault.requestRedeem.selector;
-        stRoles[3] = LP_ROLE;
-        stSelectors[4] = IRoycoAsyncCancellableVault.cancelDepositRequest.selector;
-        stRoles[4] = LP_ROLE;
-        stSelectors[5] = IRoycoAsyncCancellableVault.claimCancelDepositRequest.selector;
-        stRoles[5] = LP_ROLE;
-        stSelectors[6] = IRoycoAsyncCancellableVault.cancelRedeemRequest.selector;
-        stRoles[6] = LP_ROLE;
-        stSelectors[7] = IRoycoAsyncCancellableVault.claimCancelRedeemRequest.selector;
-        stRoles[7] = LP_ROLE;
-        stSelectors[8] = IRoycoAuth.pause.selector;
-        stRoles[8] = ADMIN_PAUSER_ROLE;
-        stSelectors[9] = IRoycoAuth.unpause.selector;
-        stRoles[9] = ADMIN_PAUSER_ROLE;
-        stSelectors[10] = bytes4(0xe4cca4b0); // deposit(uint256,address,address,uint256)
-        stRoles[10] = LP_ROLE;
-        stSelectors[11] = bytes4(0x9f40a7b3); // redeem(uint256,address,address,uint256)
-        stRoles[11] = LP_ROLE;
-        stSelectors[12] = UUPSUpgradeable.upgradeToAndCall.selector;
-        stRoles[12] = ADMIN_UPGRADER_ROLE;
+        stRoles[1] = ST_LP_ROLE;
+        stSelectors[2] = IRoycoAuth.pause.selector;
+        stRoles[2] = ADMIN_PAUSER_ROLE;
+        stSelectors[3] = IRoycoAuth.unpause.selector;
+        stRoles[3] = ADMIN_PAUSER_ROLE;
+        stSelectors[4] = UUPSUpgradeable.upgradeToAndCall.selector;
+        stRoles[4] = ADMIN_UPGRADER_ROLE;
 
-        roles[index++] = RolesTargetConfiguration({ target: _seniorTranche, selectors: stSelectors, roles: stRoles });
+        roles[index++] = IRoycoFactory.RolesTargetConfiguration({ target: _seniorTranche, selectors: stSelectors, roles: stRoles });
 
         // Junior Tranche roles (same as senior)
-        bytes4[] memory jtSelectors = stSelectors;
-        uint64[] memory jtRoles = stRoles;
+        bytes4[] memory jtSelectors = new bytes4[](5);
+        uint64[] memory jtRoles = new uint64[](5);
 
-        roles[index++] = RolesTargetConfiguration({ target: _juniorTranche, selectors: jtSelectors, roles: jtRoles });
+        jtSelectors[0] = IRoycoVaultTranche.deposit.selector;
+        jtRoles[0] = JT_LP_ROLE;
+        jtSelectors[1] = IRoycoVaultTranche.redeem.selector;
+        jtRoles[1] = JT_LP_ROLE;
+        jtSelectors[2] = IRoycoAuth.pause.selector;
+        jtRoles[2] = ADMIN_PAUSER_ROLE;
+        jtSelectors[3] = IRoycoAuth.unpause.selector;
+        jtRoles[3] = ADMIN_PAUSER_ROLE;
+        jtSelectors[4] = UUPSUpgradeable.upgradeToAndCall.selector;
+        jtRoles[4] = ADMIN_UPGRADER_ROLE;
+
+        roles[index++] = IRoycoFactory.RolesTargetConfiguration({ target: _juniorTranche, selectors: jtSelectors, roles: jtRoles });
 
         // Kernel roles
-        bytes4[] memory kernelSelectors = new bytes4[](8);
-        uint64[] memory kernelRoleValues = new uint64[](8);
+        bytes4[] memory kernelSelectors = new bytes4[](7);
+        uint64[] memory kernelRoleValues = new uint64[](7);
 
         kernelSelectors[0] = IRoycoKernel.setProtocolFeeRecipient.selector;
         kernelRoleValues[0] = ADMIN_KERNEL_ROLE;
-        kernelSelectors[1] = IRoycoKernel.syncTrancheAccounting.selector;
-        kernelRoleValues[1] = SYNC_ROLE;
-        kernelSelectors[2] = IRoycoAuth.pause.selector;
+        kernelSelectors[1] = IRoycoAuth.pause.selector;
+        kernelRoleValues[1] = ADMIN_PAUSER_ROLE;
+        kernelSelectors[2] = IRoycoAuth.unpause.selector;
         kernelRoleValues[2] = ADMIN_PAUSER_ROLE;
-        kernelSelectors[3] = IRoycoAuth.unpause.selector;
-        kernelRoleValues[3] = ADMIN_PAUSER_ROLE;
-        kernelSelectors[4] = IRoycoKernel.setJuniorTrancheRedemptionDelay.selector;
-        kernelRoleValues[4] = ADMIN_KERNEL_ROLE;
-        kernelSelectors[5] = IdenticalAssetsOracleQuoter.setConversionRate.selector;
-        kernelRoleValues[5] = ADMIN_ORACLE_QUOTER_ROLE;
-        kernelSelectors[6] = IdenticalAssetsChainlinkOracleQuoter.setTrancheAssetToReferenceAssetOracle.selector;
-        kernelRoleValues[6] = ADMIN_ORACLE_QUOTER_ROLE;
-        kernelSelectors[7] = UUPSUpgradeable.upgradeToAndCall.selector;
-        kernelRoleValues[7] = ADMIN_UPGRADER_ROLE;
+        kernelSelectors[3] = IdenticalAssetsOracleQuoter.setConversionRate.selector;
+        kernelRoleValues[3] = ADMIN_ORACLE_QUOTER_ROLE;
+        kernelSelectors[4] = IdenticalAssetsChainlinkOracleQuoter.setTrancheAssetToReferenceAssetOracle.selector;
+        kernelRoleValues[4] = ADMIN_ORACLE_QUOTER_ROLE;
+        kernelSelectors[5] = UUPSUpgradeable.upgradeToAndCall.selector;
+        kernelRoleValues[5] = ADMIN_UPGRADER_ROLE;
+        kernelSelectors[6] = IRoycoKernel.syncTrancheAccounting.selector;
+        kernelRoleValues[6] = SYNC_ROLE;
 
-        roles[index++] = RolesTargetConfiguration({ target: _kernel, selectors: kernelSelectors, roles: kernelRoleValues });
+        roles[index++] = IRoycoFactory.RolesTargetConfiguration({ target: _kernel, selectors: kernelSelectors, roles: kernelRoleValues });
 
         // Accountant roles
         bytes4[] memory accountantSelectors = new bytes4[](11);
@@ -506,14 +477,18 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         accountantSelectors[10] = IRoycoAccountant.setSeniorTrancheDustTolerance.selector;
         accountantRoleValues[10] = ADMIN_ACCOUNTANT_ROLE;
 
-        roles[index++] = RolesTargetConfiguration({ target: _accountant, selectors: accountantSelectors, roles: accountantRoleValues });
+        roles[index++] = IRoycoFactory.RolesTargetConfiguration({ target: _accountant, selectors: accountantSelectors, roles: accountantRoleValues });
     }
 
     /// @notice Generates role assignments from addresses
-    /// @dev LP_ROLE is included with assignee=address(0) so its admin role gets configured
+    /// @dev ST_LP_ROLE and JT_LP_ROLE are included with assignee=address(0) so their admin roles get configured
     /// @param _addresses The addresses for role assignments
-    function generateRolesAssignments(RoleAssignmentAddresses memory _addresses) public pure returns (RoleAssignmentConfiguration[] memory roleAssignments) {
-        roleAssignments = new RoleAssignmentConfiguration[](12);
+    function generateRolesAssignments(RoleAssignmentAddresses memory _addresses)
+        public
+        pure
+        returns (IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments)
+    {
+        roleAssignments = new IRoycoFactory.RoleAssignmentConfiguration[](13);
 
         // Get role configs from RolesConfiguration
         RoleConfig memory pauserConfig = getRoleConfig(ADMIN_PAUSER_ROLE);
@@ -524,76 +499,82 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         RoleConfig memory feeSetterConfig = getRoleConfig(ADMIN_PROTOCOL_FEE_SETTER_ROLE);
         RoleConfig memory oracleQuoterConfig = getRoleConfig(ADMIN_ORACLE_QUOTER_ROLE);
         RoleConfig memory lpRoleAdminConfig = getRoleConfig(LP_ROLE_ADMIN_ROLE);
-        RoleConfig memory lpRoleConfig = getRoleConfig(LP_ROLE);
+        RoleConfig memory stLpRoleConfig = getRoleConfig(ST_LP_ROLE);
+        RoleConfig memory jtLpRoleConfig = getRoleConfig(JT_LP_ROLE);
         RoleConfig memory roleGuardianConfig = getRoleConfig(GUARDIAN_ROLE);
         RoleConfig memory deployerConfig = getRoleConfig(DEPLOYER_ROLE);
         RoleConfig memory deployerAdminConfig = getRoleConfig(DEPLOYER_ROLE_ADMIN_ROLE);
 
-        roleAssignments[0] = RoleAssignmentConfiguration({
+        roleAssignments[0] = IRoycoFactory.RoleAssignmentConfiguration({
             role: ADMIN_PAUSER_ROLE, roleAdminRole: pauserConfig.adminRole, assignee: _addresses.pauserAddress, executionDelay: pauserConfig.executionDelay
         });
 
-        roleAssignments[1] = RoleAssignmentConfiguration({
+        roleAssignments[1] = IRoycoFactory.RoleAssignmentConfiguration({
             role: ADMIN_UPGRADER_ROLE,
             roleAdminRole: upgraderConfig.adminRole,
             assignee: _addresses.upgraderAddress,
             executionDelay: upgraderConfig.executionDelay
         });
 
-        roleAssignments[2] = RoleAssignmentConfiguration({
+        roleAssignments[2] = IRoycoFactory.RoleAssignmentConfiguration({
             role: SYNC_ROLE, roleAdminRole: syncConfig.adminRole, assignee: _addresses.syncRoleAddress, executionDelay: syncConfig.executionDelay
         });
 
-        roleAssignments[3] = RoleAssignmentConfiguration({
+        roleAssignments[3] = IRoycoFactory.RoleAssignmentConfiguration({
             role: ADMIN_KERNEL_ROLE, roleAdminRole: kernelConfig.adminRole, assignee: _addresses.adminKernelAddress, executionDelay: kernelConfig.executionDelay
         });
 
-        roleAssignments[4] = RoleAssignmentConfiguration({
+        roleAssignments[4] = IRoycoFactory.RoleAssignmentConfiguration({
             role: ADMIN_ACCOUNTANT_ROLE,
             roleAdminRole: accountantConfig.adminRole,
             assignee: _addresses.adminAccountantAddress,
             executionDelay: accountantConfig.executionDelay
         });
 
-        roleAssignments[5] = RoleAssignmentConfiguration({
+        roleAssignments[5] = IRoycoFactory.RoleAssignmentConfiguration({
             role: ADMIN_PROTOCOL_FEE_SETTER_ROLE,
             roleAdminRole: feeSetterConfig.adminRole,
             assignee: _addresses.adminProtocolFeeSetterAddress,
             executionDelay: feeSetterConfig.executionDelay
         });
 
-        roleAssignments[6] = RoleAssignmentConfiguration({
+        roleAssignments[6] = IRoycoFactory.RoleAssignmentConfiguration({
             role: ADMIN_ORACLE_QUOTER_ROLE,
             roleAdminRole: oracleQuoterConfig.adminRole,
             assignee: _addresses.adminOracleQuoterAddress,
             executionDelay: oracleQuoterConfig.executionDelay
         });
 
-        roleAssignments[7] = RoleAssignmentConfiguration({
+        roleAssignments[7] = IRoycoFactory.RoleAssignmentConfiguration({
             role: LP_ROLE_ADMIN_ROLE,
             roleAdminRole: lpRoleAdminConfig.adminRole,
             assignee: _addresses.lpRoleAdminAddress,
             executionDelay: lpRoleAdminConfig.executionDelay
         });
 
-        // LP_ROLE with address(0) assignee - role admin will be set but no direct assignment
-        // LP roles are granted separately via GrantLPRolesScript
-        roleAssignments[8] = RoleAssignmentConfiguration({
-            role: LP_ROLE, roleAdminRole: lpRoleConfig.adminRole, assignee: address(0), executionDelay: lpRoleConfig.executionDelay
+        // ST_LP_ROLE with address(0) assignee - role admin will be set but no direct assignment
+        // LP roles are granted separately per-provider
+        roleAssignments[8] = IRoycoFactory.RoleAssignmentConfiguration({
+            role: ST_LP_ROLE, roleAdminRole: stLpRoleConfig.adminRole, assignee: address(0), executionDelay: stLpRoleConfig.executionDelay
         });
 
-        roleAssignments[9] = RoleAssignmentConfiguration({
+        // JT_LP_ROLE with address(0) assignee - role admin will be set but no direct assignment
+        roleAssignments[9] = IRoycoFactory.RoleAssignmentConfiguration({
+            role: JT_LP_ROLE, roleAdminRole: jtLpRoleConfig.adminRole, assignee: address(0), executionDelay: jtLpRoleConfig.executionDelay
+        });
+
+        roleAssignments[10] = IRoycoFactory.RoleAssignmentConfiguration({
             role: GUARDIAN_ROLE,
             roleAdminRole: roleGuardianConfig.adminRole,
             assignee: _addresses.guardianAddress,
             executionDelay: roleGuardianConfig.executionDelay
         });
 
-        roleAssignments[10] = RoleAssignmentConfiguration({
+        roleAssignments[11] = IRoycoFactory.RoleAssignmentConfiguration({
             role: DEPLOYER_ROLE, roleAdminRole: deployerConfig.adminRole, assignee: _addresses.deployerAddress, executionDelay: deployerConfig.executionDelay
         });
 
-        roleAssignments[11] = RoleAssignmentConfiguration({
+        roleAssignments[12] = IRoycoFactory.RoleAssignmentConfiguration({
             role: DEPLOYER_ROLE_ADMIN_ROLE,
             roleAdminRole: deployerAdminConfig.adminRole,
             assignee: _addresses.deployerAdminAddress,
@@ -601,92 +582,63 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         });
     }
 
-    /// @notice Grants all relevant roles to the addresses specified in the deployment parameters
-    /// @param _factory The factory contract (which acts as the AccessManager)
-    /// @param _params The deployment parameters containing role addresses
-    function grantAllRoles(RoycoFactory _factory, DeploymentParams memory _params, address _deployer) public {
-        IAccessManager accessManager = IAccessManager(address(_factory));
-
-        (bool hasRole,) = accessManager.hasRole(_ADMIN_ROLE, _deployer);
-        if (!hasRole) {
-            console2.log("This script invoker does not have ADMIN_ROLE, skipping the role assignments step");
-            return;
-        }
-
-        console2.log("Granting roles on AccessManager:", address(_factory));
-
-        for (uint256 i = 0; i < _params.roleAssignments.length; i++) {
-            RoleAssignmentConfiguration memory roleAssignment = _params.roleAssignments[i];
-
-            // Get role config to set up admin and guardian
-            RoleConfig memory roleConfig = getRoleConfig(roleAssignment.role);
-
-            // Grant the role to the assignee (skip if assignee is zero, e.g., LP_ROLE which is handled separately)
-            if (roleAssignment.assignee != address(0)) {
-                (hasRole,) = accessManager.hasRole(roleAssignment.role, roleAssignment.assignee);
-                if (!hasRole) {
-                    console2.log("  - Granting role: %s to: %s with delay: %s", roleAssignment.role, roleAssignment.assignee, roleAssignment.executionDelay);
-                    accessManager.grantRole(roleAssignment.role, roleAssignment.assignee, roleAssignment.executionDelay);
-                } else {
-                    console2.log("  - %s already granted to: %s skipping role grant", roleAssignment.role, roleAssignment.assignee);
-                }
-            } else {
-                console2.log("  - Skipping role grant for %s: assignee is zero address", roleAssignment.role);
-            }
-
-            // Set the role admin if different from default (0)
-            if (roleConfig.adminRole != _ADMIN_ROLE) {
-                console2.log("  - Setting role admin for: %s to: %s", roleAssignment.role, roleConfig.adminRole);
-                accessManager.setRoleAdmin(roleAssignment.role, roleConfig.adminRole);
-            }
-
-            // Set the role guardian
-            console2.log("  - Setting role guardian for: %s to: %s", roleAssignment.role, roleConfig.guardianRole);
-            accessManager.setRoleGuardian(roleAssignment.role, roleConfig.guardianRole);
-        }
-
-        console2.log("All roles granted successfully!");
-    }
-
     /// @notice Deploys all contracts for a market
     /// @param factory The deployed factory
-    /// @param accountantImpl The deployed accountant implementation
-    /// @param stTrancheImpl The deployed ST tranche implementation
-    /// @param jtTrancheImpl The deployed JT tranche implementation
     /// @param ydmAddress The address of the deployed YDM
     /// @param _params The deployment parameters
     /// @return deployedContracts The deployed market contracts
+    /// @return stImpl The deployed senior tranche implementation address
+    /// @return jtImpl The deployed junior tranche implementation address
     /// @return kernelImpl The deployed kernel implementation address
+    /// @return accountantImpl The deployed accountant implementation address
     function _deployMarket(
         RoycoFactory factory,
-        RoycoAccountant accountantImpl,
-        RoycoSeniorTranche stTrancheImpl,
-        RoycoJuniorTranche jtTrancheImpl,
         address ydmAddress,
         DeploymentParams memory _params,
         address _deployer
     )
         internal
-        returns (RoycoMarket memory, address)
+        returns (
+            IRoycoFactory.RoycoMarket memory deployedContracts,
+            RoycoSeniorTranche stImpl,
+            RoycoJuniorTranche jtImpl,
+            address kernelImpl,
+            RoycoAccountant accountantImpl
+        )
     {
         // Precompute expected proxy addresses using salt derived from market ID
-        // This ensures each market deployment has a unique salt to avoid Create2 collisions
         bytes32 salt = keccak256(abi.encodePacked(MARKET_DEPLOYMENT_SALT, _params.marketId));
-        address expectedSeniorTrancheAddress = factory.predictERC1967ProxyAddress(address(stTrancheImpl), salt);
-        address expectedJuniorTrancheAddress = factory.predictERC1967ProxyAddress(address(jtTrancheImpl), salt);
-        address expectedAccountantAddress = factory.predictERC1967ProxyAddress(address(accountantImpl), salt);
+
+        // Predict the deterministic addresses of the contracts
+        // The salt is unique for each contract type to prevent CREATE3 collisions
+        bytes32 seniorTrancheSalt = keccak256(abi.encodePacked(salt, "-ST"));
+        bytes32 juniorTrancheSalt = keccak256(abi.encodePacked(salt, "-JT"));
+        bytes32 accountantSalt = keccak256(abi.encodePacked(salt, "-ACCOUNTANT"));
+        bytes32 kernelSalt = keccak256(abi.encodePacked(salt, "-KERNEL"));
+        address expectedSeniorTrancheAddress = factory.predictDeterministicAddress(seniorTrancheSalt);
+        address expectedJuniorTrancheAddress = factory.predictDeterministicAddress(juniorTrancheSalt);
+        address expectedAccountantAddress = factory.predictDeterministicAddress(accountantSalt);
+        address expectedKernelAddress = factory.predictDeterministicAddress(kernelSalt);
+
+        // Deploy the senior tranche implementation
+        stImpl = _deploySTTrancheImpl(_params.seniorAsset, expectedKernelAddress, _params.marketId);
+
+        // Deploy the junior tranche implementation
+        jtImpl = _deployJTTrancheImpl(_params.juniorAsset, expectedKernelAddress, _params.marketId);
+
+        // Deploy the accountant implementation
+        accountantImpl = _deployAccountantImpl(expectedKernelAddress);
 
         // Deploy the kernel implementation based on kernel type
-        address kernelImpl = _deployKernelImpl(
+        kernelImpl = _deployKernelImpl(
             _params.kernelType,
             _params.kernelSpecificParams,
-            _params.baseAsset,
             expectedSeniorTrancheAddress,
             expectedJuniorTrancheAddress,
             _params.seniorAsset,
-            _params.juniorAsset
+            _params.juniorAsset,
+            expectedAccountantAddress
         );
-        address expectedKernelAddress = factory.predictERC1967ProxyAddress(address(kernelImpl), salt);
 
         console2.log("Expected Senior Tranche Address:", expectedSeniorTrancheAddress);
         console2.log("Expected Junior Tranche Address:", expectedJuniorTrancheAddress);
@@ -698,55 +650,50 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         bytes memory kernelInitializationData =
             _buildKernelInitializationData(_params.kernelType, _params.kernelSpecificParams, expectedAccountantAddress, factoryAddress, _params);
         bytes memory accountantInitializationData = _buildAccountantInitializationData(expectedKernelAddress, ydmAddress, factoryAddress, _params);
-        bytes memory seniorTrancheInitializationData = _buildSeniorTrancheInitializationData(expectedKernelAddress, _params.marketId, factoryAddress, _params);
-        bytes memory juniorTrancheInitializationData = _buildJuniorTrancheInitializationData(expectedKernelAddress, _params.marketId, factoryAddress, _params);
+        bytes memory seniorTrancheInitializationData = _buildSeniorTrancheInitializationData(factoryAddress, _params);
+        bytes memory juniorTrancheInitializationData = _buildJuniorTrancheInitializationData(factoryAddress, _params);
 
         // Build roles configuration
-        RolesTargetConfiguration[] memory roles =
+        IRoycoFactory.RolesTargetConfiguration[] memory roles =
             buildRolesTargetConfiguration(expectedSeniorTrancheAddress, expectedJuniorTrancheAddress, expectedKernelAddress, expectedAccountantAddress);
 
         // Build market deployment params
-        MarketDeploymentParams memory marketParams = MarketDeploymentParams({
+        IRoycoFactory.MarketDeploymentParams memory marketParams = IRoycoFactory.MarketDeploymentParams({
             seniorTrancheName: _params.seniorTrancheName,
             seniorTrancheSymbol: _params.seniorTrancheSymbol,
             juniorTrancheName: _params.juniorTrancheName,
             juniorTrancheSymbol: _params.juniorTrancheSymbol,
             marketId: _params.marketId,
-            seniorTrancheImplementation: IRoycoVaultTranche(address(stTrancheImpl)),
-            juniorTrancheImplementation: IRoycoVaultTranche(address(jtTrancheImpl)),
+            seniorTrancheImplementation: IRoycoVaultTranche(address(stImpl)),
+            juniorTrancheImplementation: IRoycoVaultTranche(address(jtImpl)),
             kernelImplementation: IRoycoKernel(address(kernelImpl)),
             accountantImplementation: IRoycoAccountant(address(accountantImpl)),
             seniorTrancheInitializationData: seniorTrancheInitializationData,
             juniorTrancheInitializationData: juniorTrancheInitializationData,
             kernelInitializationData: kernelInitializationData,
             accountantInitializationData: accountantInitializationData,
-            seniorTrancheProxyDeploymentSalt: salt,
-            juniorTrancheProxyDeploymentSalt: salt,
-            kernelProxyDeploymentSalt: salt,
-            accountantProxyDeploymentSalt: salt,
+            seniorTrancheProxyDeploymentSalt: seniorTrancheSalt,
+            juniorTrancheProxyDeploymentSalt: juniorTrancheSalt,
+            kernelProxyDeploymentSalt: kernelSalt,
+            accountantProxyDeploymentSalt: accountantSalt,
             roles: roles
         });
 
         // Deploy market
         console2.log("Deploying market...");
-        RoycoMarket memory deployedContracts = factory.deployMarket(marketParams);
+        deployedContracts = factory.deployMarket(marketParams);
 
         console2.log("Market deployed successfully!");
         console2.log("Senior Tranche:", address(deployedContracts.seniorTranche));
         console2.log("Junior Tranche:", address(deployedContracts.juniorTranche));
         console2.log("Kernel:", address(deployedContracts.kernel));
         console2.log("Accountant:", address(deployedContracts.accountant));
-
-        // Grant all roles to the specified addresses
-        grantAllRoles(factory, _params, _deployer);
-
-        return (deployedContracts, kernelImpl);
     }
 
     /// @notice Deploys accountant implementation
     /// @return The deployed accountant implementation
-    function _deployAccountantImpl() internal returns (RoycoAccountant) {
-        bytes memory creationCode = type(RoycoAccountant).creationCode;
+    function _deployAccountantImpl(address _kernel) internal returns (RoycoAccountant) {
+        bytes memory creationCode = abi.encodePacked(type(RoycoAccountant).creationCode, abi.encode(_kernel));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(ACCOUNTANT_IMPL_SALT, creationCode, false);
         if (alreadyDeployed) {
@@ -759,8 +706,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
 
     /// @notice Deploys ST tranche implementation
     /// @return The deployed ST tranche implementation
-    function _deploySTTrancheImpl() internal returns (RoycoSeniorTranche) {
-        bytes memory creationCode = type(RoycoSeniorTranche).creationCode;
+    function _deploySTTrancheImpl(address _asset, address _kernel, bytes32 _marketId) internal returns (RoycoSeniorTranche) {
+        bytes memory creationCode = abi.encodePacked(type(RoycoSeniorTranche).creationCode, abi.encode(_asset, _kernel, _marketId));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(ST_TRANCHE_IMPL_SALT, creationCode, false);
         if (alreadyDeployed) {
@@ -773,8 +720,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
 
     /// @notice Deploys JT tranche implementation
     /// @return The deployed JT tranche implementation
-    function _deployJTTrancheImpl() internal returns (RoycoJuniorTranche) {
-        bytes memory creationCode = type(RoycoJuniorTranche).creationCode;
+    function _deployJTTrancheImpl(address _asset, address _kernel, bytes32 _marketId) internal returns (RoycoJuniorTranche) {
+        bytes memory creationCode = abi.encodePacked(type(RoycoJuniorTranche).creationCode, abi.encode(_asset, _kernel, _marketId));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(JT_TRANCHE_IMPL_SALT, creationCode, false);
         if (alreadyDeployed) {
@@ -817,98 +764,70 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     /// @notice Deploys factory implementation
     /// @param _factoryAdmin The address of the factory admin
     /// @return The deployed factory implementation
-    function _deployFactory(address _factoryAdmin, address _deployer) internal returns (RoycoFactory) {
-        bytes memory creationCode = abi.encodePacked(type(RoycoFactory).creationCode, abi.encode(_factoryAdmin, _deployer));
-
-        (address addr, bool alreadyDeployed) = deployWithSanityChecks(FACTORY_SALT_BASE, creationCode, false);
+    function _deployFactory(
+        address _factoryAdmin,
+        address _deployer,
+        IRoycoFactory.RoleAssignmentConfiguration[] memory _roleAssignments
+    )
+        internal
+        returns (RoycoFactory)
+    {
+        // Deploy the factory implementation
+        (address factoryImplAddr, bool alreadyDeployed) = deployWithSanityChecks(FACTORY_SALT_BASE, type(RoycoFactory).creationCode, false);
         if (alreadyDeployed) {
-            console2.log("Factory already deployed at:", addr);
+            console2.log("Factory Implementation already deployed at:", factoryImplAddr);
         } else {
-            console2.log("Factory deployed at:", addr);
+            console2.log("Factory Implementation deployed at:", factoryImplAddr);
         }
-        return RoycoFactory(addr);
+
+        // Deploy the factory proxy
+        address factoryProxyAddress;
+        (factoryProxyAddress, alreadyDeployed) = deployWithSanityChecks(
+            FACTORY_SALT_BASE,
+            getERC1967ProxyCreationCode(factoryImplAddr, abi.encodeCall(RoycoFactory.initialize, (_factoryAdmin, _deployer, _roleAssignments))),
+            false
+        );
+        if (alreadyDeployed) {
+            console2.log("Factory proxy already deployed at:", factoryProxyAddress);
+        } else {
+            console2.log("Factory proxy deployed at:", factoryProxyAddress);
+        }
+
+        return RoycoFactory(factoryProxyAddress);
     }
 
     /// @notice Deploys kernel implementation based on kernel type
     function _deployKernelImpl(
         KernelType _kernelType,
         bytes memory _kernelSpecificParams,
-        address _baseAsset,
         address _expectedSeniorTrancheAddress,
         address _expectedJuniorTrancheAddress,
         address _seniorAsset,
-        address _juniorAsset
+        address _juniorAsset,
+        address _expectedAccountantAddress
     )
         internal
         returns (address)
     {
         IRoycoKernel.RoycoKernelConstructionParams memory constructionParams = IRoycoKernel.RoycoKernelConstructionParams({
-            baseAsset: _baseAsset,
             seniorTranche: _expectedSeniorTrancheAddress,
             stAsset: _seniorAsset,
             juniorTranche: _expectedJuniorTrancheAddress,
-            jtAsset: _juniorAsset
+            jtAsset: _juniorAsset,
+            accountant: _expectedAccountantAddress
         });
 
-        if (_kernelType == KernelType.ERC4626_ST_AaveV3_JT_InKindAssets) {
-            return address(_deployERC4626STAaveV3JTInKindAssetsKernelImpl(constructionParams, _kernelSpecificParams));
-        } else if (_kernelType == KernelType.ERC4626_ST_ERC4626_JT_InKindAssets) {
-            return address(_deployERC4626STERC4626JTInKindAssetsKernelImpl(constructionParams, _kernelSpecificParams));
-        } else if (_kernelType == KernelType.ReUSD_ST_ReUSD_JT) {
+        if (_kernelType == KernelType.ReUSD_ST_ReUSD_JT) {
             return address(_deployReUSDSTReUSDJTKernelImpl(constructionParams, _kernelSpecificParams));
-        } else if (_kernelType == KernelType.YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsChainlinkOracleQuoter) {
-            return address(_deployYieldBearingERC20STYieldBearingERC20JTIdenticalAssetsChainlinkOracleQuoterKernelImpl(constructionParams));
-        } else if (_kernelType == KernelType.YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter) {
-            return address(_deployYieldBearingERC4626STYieldBearingERC4626JTIdenticalERC4626SharesAdminOracleQuoterKernelImpl(constructionParams));
+        } else if (_kernelType == KernelType.IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel) {
+            return address(_deployIdenticalAssetsChainlinkToAdminOracleQuoterKernelImpl(constructionParams));
+        } else if (_kernelType == KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel) {
+            return address(_deployIdenticalERC4626SharesAdminOracleQuoterKernelImpl(constructionParams));
         } else if (_kernelType == KernelType.IdleCdoAA_ST_IdleCdoAA_JT) {
             return address(_deployIdleCdoAASTIdleCdoAAJTKernelImpl(constructionParams, _kernelSpecificParams));
         } else {
             revert UnsupportedKernelType(_kernelType);
         }
-    }
-
-    function _deployERC4626STAaveV3JTInKindAssetsKernelImpl(
-        IRoycoKernel.RoycoKernelConstructionParams memory _constructionParams,
-        bytes memory _params
-    )
-        internal
-        returns (ERC4626_ST_AaveV3_JT_InKindAssets_Kernel)
-    {
-        ERC4626STAaveV3JTInKindAssetsKernelParams memory kernelParams = abi.decode(_params, (ERC4626STAaveV3JTInKindAssetsKernelParams));
-
-        bytes memory creationCode = abi.encodePacked(
-            type(ERC4626_ST_AaveV3_JT_InKindAssets_Kernel).creationCode, abi.encode(_constructionParams, kernelParams.stVault, kernelParams.aaveV3Pool)
-        );
-
-        (address addr, bool alreadyDeployed) = deployWithSanityChecks(KERNEL_IMPL_SALT, creationCode, false);
-        if (alreadyDeployed) {
-            console2.log("Kernel implementation already deployed at:", addr);
-        } else {
-            console2.log("Kernel implementation deployed at:", addr);
-        }
-        return ERC4626_ST_AaveV3_JT_InKindAssets_Kernel(addr);
-    }
-
-    function _deployERC4626STERC4626JTInKindAssetsKernelImpl(
-        IRoycoKernel.RoycoKernelConstructionParams memory _constructionParams,
-        bytes memory _params
-    )
-        internal
-        returns (ERC4626_ST_ERC4626_JT_InKindAssets_Kernel)
-    {
-        ERC4626STERC4626JTInKindAssetsKernelParams memory kernelParams = abi.decode(_params, (ERC4626STERC4626JTInKindAssetsKernelParams));
-
-        bytes memory creationCode = abi.encodePacked(
-            type(ERC4626_ST_ERC4626_JT_InKindAssets_Kernel).creationCode, abi.encode(_constructionParams, kernelParams.stVault, kernelParams.jtVault)
-        );
-
-        (address addr, bool alreadyDeployed) = deployWithSanityChecks(KERNEL_IMPL_SALT, creationCode, false);
-        if (alreadyDeployed) {
-            console2.log("Kernel implementation already deployed at:", addr);
-        } else {
-            console2.log("Kernel implementation deployed at:", addr);
-        }
-        return ERC4626_ST_ERC4626_JT_InKindAssets_Kernel(addr);
     }
 
     function _deployReUSDSTReUSDJTKernelImpl(
@@ -934,15 +853,11 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         return ReUSD_ST_ReUSD_JT_Kernel(addr);
     }
 
-    function _deployYieldBearingERC20STYieldBearingERC20JTIdenticalAssetsChainlinkOracleQuoterKernelImpl(
-        IRoycoKernel.RoycoKernelConstructionParams memory _constructionParams
-    )
+    function _deployIdenticalAssetsChainlinkToAdminOracleQuoterKernelImpl(IRoycoKernel.RoycoKernelConstructionParams memory _constructionParams)
         internal
-        returns (YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel)
+        returns (IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel)
     {
-        bytes memory creationCode = abi.encodePacked(
-            type(YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel).creationCode, abi.encode(_constructionParams)
-        );
+        bytes memory creationCode = abi.encodePacked(type(IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel).creationCode, abi.encode(_constructionParams));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(KERNEL_IMPL_SALT, creationCode, false);
         if (alreadyDeployed) {
@@ -950,18 +865,14 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         } else {
             console2.log("Kernel implementation deployed at:", addr);
         }
-        return YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel(addr);
+        return IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel(addr);
     }
 
-    function _deployYieldBearingERC4626STYieldBearingERC4626JTIdenticalERC4626SharesAdminOracleQuoterKernelImpl(
-        IRoycoKernel.RoycoKernelConstructionParams memory _constructionParams
-    )
+    function _deployIdenticalERC4626SharesAdminOracleQuoterKernelImpl(IRoycoKernel.RoycoKernelConstructionParams memory _constructionParams)
         internal
-        returns (YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel)
+        returns (IdenticalERC4626SharesAdminOracleQuoter_Kernel)
     {
-        bytes memory creationCode = abi.encodePacked(
-            type(YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel).creationCode, abi.encode(_constructionParams)
-        );
+        bytes memory creationCode = abi.encodePacked(type(IdenticalERC4626SharesAdminOracleQuoter_Kernel).creationCode, abi.encode(_constructionParams));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(KERNEL_IMPL_SALT, creationCode, false);
         if (alreadyDeployed) {
@@ -969,7 +880,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         } else {
             console2.log("Kernel implementation deployed at:", addr);
         }
-        return YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel(addr);
+        return IdenticalERC4626SharesAdminOracleQuoter_Kernel(addr);
     }
 
     function _deployIdleCdoAASTIdleCdoAAJTKernelImpl(
@@ -1003,24 +914,17 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         pure
         returns (bytes memory)
     {
-        RoycoKernelInitParams memory kernelParams = RoycoKernelInitParams({
-            initialAuthority: _factoryAddress,
-            accountant: _expectedAccountantAddress,
-            protocolFeeRecipient: _params.protocolFeeRecipient,
-            jtRedemptionDelayInSeconds: _params.jtRedemptionDelayInSeconds
+        IRoycoKernel.RoycoKernelInitParams memory kernelParams = IRoycoKernel.RoycoKernelInitParams({
+            initialAuthority: _factoryAddress, protocolFeeRecipient: _params.protocolFeeRecipient, stSelfLiquidationBonusWAD: _params.stSelfLiquidationBonusWAD
         });
 
-        if (_kernelType == KernelType.ERC4626_ST_AaveV3_JT_InKindAssets) {
-            return abi.encodeCall(ERC4626_ST_AaveV3_JT_InKindAssets_Kernel.initialize, (kernelParams));
-        } else if (_kernelType == KernelType.ERC4626_ST_ERC4626_JT_InKindAssets) {
-            return abi.encodeCall(ERC4626_ST_ERC4626_JT_InKindAssets_Kernel.initialize, (kernelParams));
-        } else if (_kernelType == KernelType.ReUSD_ST_ReUSD_JT) {
+        if (_kernelType == KernelType.ReUSD_ST_ReUSD_JT) {
             return abi.encodeCall(ReUSD_ST_ReUSD_JT_Kernel.initialize, (kernelParams));
-        } else if (_kernelType == KernelType.YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsChainlinkOracleQuoter) {
-            YieldBearingERC20STYieldBearingERC20JTIdenticalAssetsChainlinkOracleQuoterKernelParams memory kernelParams2 =
-                abi.decode(_kernelSpecificParams, (YieldBearingERC20STYieldBearingERC20JTIdenticalAssetsChainlinkOracleQuoterKernelParams));
+        } else if (_kernelType == KernelType.IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel) {
+            IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams memory kernelParams2 =
+                abi.decode(_kernelSpecificParams, (IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams));
             return abi.encodeCall(
-                YieldBearingERC20_ST_YieldBearingERC20_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel.initialize,
+                IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel.initialize,
                 (
                     kernelParams,
                     kernelParams2.trancheAssetToReferenceAssetOracle,
@@ -1028,13 +932,10 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
                     kernelParams2.initialConversionRateWAD
                 )
             );
-        } else if (_kernelType == KernelType.YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter) {
-            YieldBearingERC4626STYieldBearingERC4626JTIdenticalERC4626SharesAdminOracleQuoterKernelParams memory kernelParams2 =
-                abi.decode(_kernelSpecificParams, (YieldBearingERC4626STYieldBearingERC4626JTIdenticalERC4626SharesAdminOracleQuoterKernelParams));
-            return abi.encodeCall(
-                YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel.initialize,
-                (kernelParams, kernelParams2.initialConversionRateWAD)
-            );
+        } else if (_kernelType == KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel) {
+            IdenticalERC4626SharesAdminOracleQuoterKernelParams memory kernelParams2 =
+                abi.decode(_kernelSpecificParams, (IdenticalERC4626SharesAdminOracleQuoterKernelParams));
+            return abi.encodeCall(IdenticalERC4626SharesAdminOracleQuoter_Kernel.initialize, (kernelParams, kernelParams2.initialConversionRateWAD));
         } else if (_kernelType == KernelType.IdleCdoAA_ST_IdleCdoAA_JT) {
             return abi.encodeCall(IdleCdoAA_ST_IdleCdoAA_JT_Kernel.initialize, (kernelParams));
         } else {
@@ -1084,15 +985,15 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         returns (bytes memory)
     {
         IRoycoAccountant.RoycoAccountantInitParams memory accountantParams = IRoycoAccountant.RoycoAccountantInitParams({
-            kernel: _expectedKernelAddress,
             stProtocolFeeWAD: _params.stProtocolFeeWAD,
             jtProtocolFeeWAD: _params.jtProtocolFeeWAD,
+            yieldShareProtocolFeeWAD: 0,
             coverageWAD: _params.coverageWAD,
             betaWAD: _params.betaWAD,
-            lltvWAD: _params.lltvWAD,
             ydm: _ydmAddress,
             ydmInitializationData: _buildYDMInitializationData(_params.ydmType, _params.ydmSpecificParams),
             fixedTermDurationSeconds: _params.fixedTermDurationSeconds,
+            lltvWAD: _params.lltvWAD,
             stNAVDustTolerance: _params.stNAVDustTolerance,
             jtNAVDustTolerance: _params.jtNAVDustTolerance
         });
@@ -1100,55 +1001,19 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         return abi.encodeCall(RoycoAccountant.initialize, (accountantParams, _factoryAddress));
     }
 
-    function _buildSeniorTrancheInitializationData(
-        address _expectedKernelAddress,
-        bytes32 _marketId,
-        address _factoryAddress,
-        DeploymentParams memory _params
-    )
-        internal
-        pure
-        returns (bytes memory)
-    {
-        TrancheDeploymentParams memory trancheParams =
-            TrancheDeploymentParams({ name: _params.seniorTrancheName, symbol: _params.seniorTrancheSymbol, kernel: _expectedKernelAddress });
+    function _buildSeniorTrancheInitializationData(address _factoryAddress, DeploymentParams memory _params) internal pure returns (bytes memory) {
+        IRoycoVaultTranche.TrancheDeploymentParams memory trancheParams = IRoycoVaultTranche.TrancheDeploymentParams({
+            name: _params.seniorTrancheName, symbol: _params.seniorTrancheSymbol, initialAuthority: _factoryAddress
+        });
 
-        return abi.encodeCall(RoycoSeniorTranche.initialize, (trancheParams, _params.seniorAsset, _factoryAddress, _marketId));
+        return abi.encodeCall(RoycoSeniorTranche.initialize, (trancheParams));
     }
 
-    function _buildJuniorTrancheInitializationData(
-        address _expectedKernelAddress,
-        bytes32 _marketId,
-        address _factoryAddress,
-        DeploymentParams memory _params
-    )
-        internal
-        pure
-        returns (bytes memory)
-    {
-        TrancheDeploymentParams memory trancheParams =
-            TrancheDeploymentParams({ name: _params.juniorTrancheName, symbol: _params.juniorTrancheSymbol, kernel: _expectedKernelAddress });
+    function _buildJuniorTrancheInitializationData(address _factoryAddress, DeploymentParams memory _params) internal pure returns (bytes memory) {
+        IRoycoVaultTranche.TrancheDeploymentParams memory trancheParams = IRoycoVaultTranche.TrancheDeploymentParams({
+            name: _params.juniorTrancheName, symbol: _params.juniorTrancheSymbol, initialAuthority: _factoryAddress
+        });
 
-        return abi.encodeCall(RoycoJuniorTranche.initialize, (trancheParams, _params.juniorAsset, _factoryAddress, _marketId));
-    }
-
-    function _transferFactoryOwnership(RoycoFactory _factory, address _deployer, address _newAdmin) internal {
-        // Check if new admin is already admin
-        (bool isNewAdminAdmin,) = IAccessManager(address(_factory)).hasRole(0, _newAdmin);
-        if (isNewAdminAdmin) {
-            console2.log("New admin already has ADMIN_ROLE, skipping transfer");
-            return;
-        }
-
-        console2.log("Transferring factory ownership to:", _newAdmin);
-
-        // Grant ADMIN_ROLE to new admin (execution delay = 0 for immediate effect)
-        IAccessManager(address(_factory)).grantRole(0, _newAdmin, 0);
-
-        // Revoke ADMIN_ROLE from old admin (the deploy script itself)
-        IAccessManager(address(_factory)).revokeRole(0, _deployer);
-
-        console2.log("Factory ownership transferred successfully");
-        console2.log("New factory admin:", _newAdmin);
+        return abi.encodeCall(RoycoJuniorTranche.initialize, (trancheParams));
     }
 }

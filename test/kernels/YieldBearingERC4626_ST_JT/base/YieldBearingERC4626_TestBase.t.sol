@@ -4,16 +4,15 @@ pragma solidity ^0.8.28;
 import { IERC20Metadata, IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
 
 import { DeployScript } from "../../../../script/Deploy.s.sol";
-import {
-    YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel
-} from "../../../../src/kernels/YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel.sol";
+import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
+import { IdenticalERC4626SharesAdminOracleQuoter_Kernel } from "../../../../src/kernels/IdenticalERC4626SharesAdminOracleQuoter_Kernel.sol";
 import { WAD, WAD, WAD_DECIMALS } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
 
 import { AbstractKernelTestSuite } from "../../abstract/AbstractKernelTestSuite.t.sol";
 
 /// @title YieldBearingERC4626_TestBase
-/// @notice Base test contract for YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel
+/// @notice Base test contract for IdenticalERC4626SharesAdminOracleQuoter_Kernel
 /// @dev Implements the test hooks for yield-bearing ERC4626 assets where ST and JT use identical assets
 ///
 /// IMPORTANT: This kernel stores the `vaultAsset-to-NAV` conversion rate (e.g., NUSD->USD for sNUSD).
@@ -40,11 +39,6 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
     function _getInitialConversionRate() internal view virtual returns (uint256) {
         // Default: 1:1 conversion in WAD precision (for stablecoins)
         return WAD;
-    }
-
-    /// @notice Returns the JT redemption delay
-    function _getJTRedemptionDelay() internal view virtual override returns (uint24) {
-        return 7 days;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -176,14 +170,14 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
 
     /// @notice Gets the current conversion rate using the kernel's getter (in WAD precision)
     function _getConversionRate() internal view returns (uint256) {
-        return YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel(address(KERNEL)).getStoredConversionRateWAD();
+        return IdenticalERC4626SharesAdminOracleQuoter_Kernel(address(KERNEL)).getStoredConversionRateWAD();
     }
 
     /// @notice Sets the conversion rate using the kernel's setter (in WAD precision)
     /// @dev Requires ADMIN_ORACLE_QUOTER_ROLE, which is granted to ORACLE_QUOTER_ADMIN_ADDRESS
     function _setConversionRate(uint256 _newRateWAD) internal {
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel(address(KERNEL)).setConversionRate(_newRateWAD);
+        IdenticalERC4626SharesAdminOracleQuoter_Kernel(address(KERNEL)).setConversionRate(_newRateWAD);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -401,10 +395,8 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
         // Get initial conversion rate (vault asset to NAV, in WAD precision)
         uint256 initialConversionRate = _getInitialConversionRate();
 
-        DeployScript.YieldBearingERC4626STYieldBearingERC4626JTIdenticalERC4626SharesAdminOracleQuoterKernelParams memory kernelParams =
-            DeployScript.YieldBearingERC4626STYieldBearingERC4626JTIdenticalERC4626SharesAdminOracleQuoterKernelParams({
-                initialConversionRateWAD: initialConversionRate
-            });
+        DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams memory kernelParams =
+            DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: initialConversionRate });
 
         DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
             jtYieldShareAtZeroUtilWAD: 0.3e18, // Y_0 = Y_T (same as target)
@@ -414,7 +406,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
         });
 
         // Build role assignments using the centralized function
-        DeployScript.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
         DeployScript.DeploymentParams memory params = DeployScript.DeploymentParams({
             factoryAdmin: OWNER_ADDRESS,
@@ -423,15 +415,14 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
             seniorTrancheSymbol: string(abi.encodePacked("RS-", cfg.name)),
             juniorTrancheName: string(abi.encodePacked("Royco Junior ", cfg.name)),
             juniorTrancheSymbol: string(abi.encodePacked("RJ-", cfg.name)),
-            baseAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
             seniorAsset: cfg.stAsset,
             juniorAsset: cfg.jtAsset,
             stNAVDustTolerance: toNAVUnits(10 ** (18 - cfg.stDecimals)),
             jtNAVDustTolerance: toNAVUnits(10 ** (18 - cfg.jtDecimals)),
-            kernelType: DeployScript.KernelType.YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter,
+            kernelType: DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel,
             kernelSpecificParams: abi.encode(kernelParams),
+            stSelfLiquidationBonusWAD: 0,
             protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            jtRedemptionDelayInSeconds: _getJTRedemptionDelay(),
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             coverageWAD: COVERAGE_WAD,

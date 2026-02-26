@@ -6,6 +6,7 @@ import { IERC20Metadata } from "../../lib/openzeppelin-contracts/contracts/token
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IIdleCDO } from "../../src/interfaces/external/idle-finance/IIdleCDO.sol";
 import { IdleCdoAA_ST_IdleCdoAA_JT_Kernel } from "../../src/kernels/IdleCdoAA_ST_IdleCdoAA_JT_Kernel.sol";
 import { IdenticalAssetsOracleQuoter } from "../../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
@@ -81,7 +82,7 @@ contract IdleCdoAAKernelTest is AbstractKernelTestSuite {
         });
 
         // Build role assignments using the centralized function
-        DeployScript.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
         // Build deployment params
         DeployScript.DeploymentParams memory params = DeployScript.DeploymentParams({
@@ -91,15 +92,14 @@ contract IdleCdoAAKernelTest is AbstractKernelTestSuite {
             seniorTrancheSymbol: SENIOR_TRANCHE_SYMBOL,
             juniorTrancheName: JUNIOR_TRANCHE_NAME,
             juniorTrancheSymbol: JUNIOR_TRANCHE_SYMBOL,
-            baseAsset: IIdleCDO(IDLE_CDO).token(),
             seniorAsset: AA_TRANCHE_TOKEN,
             juniorAsset: AA_TRANCHE_TOKEN,
             stNAVDustTolerance: toNAVUnits(SCALE_FACTOR),
             jtNAVDustTolerance: toNAVUnits(SCALE_FACTOR),
             kernelType: DeployScript.KernelType.IdleCdoAA_ST_IdleCdoAA_JT,
+            stSelfLiquidationBonusWAD: 0,
             kernelSpecificParams: abi.encode(kernelParams),
             protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            jtRedemptionDelayInSeconds: LOCAL_JT_REDEMPTION_DELAY_SECONDS,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             coverageWAD: COVERAGE_WAD,
@@ -113,11 +113,6 @@ contract IdleCdoAAKernelTest is AbstractKernelTestSuite {
 
         // Deploy using the deployment script
         return DEPLOY_SCRIPT.deploy(params, DEPLOYER.privateKey);
-    }
-
-    /// @inheritdoc AbstractKernelTestSuite
-    function _getJTRedemptionDelay() internal pure override returns (uint24) {
-        return LOCAL_JT_REDEMPTION_DELAY_SECONDS;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -389,7 +384,7 @@ contract IdleCdoAAKernelTest is AbstractKernelTestSuite {
         uint256 depositAmount = 10_000 * (10 ** AA_TRANCHE_DECIMALS);
         vm.startPrank(ALICE_ADDRESS);
         AA_TRANCHE.approve(address(JT), depositAmount);
-        JT.deposit(toTrancheUnits(depositAmount), ALICE_ADDRESS, ALICE_ADDRESS);
+        JT.deposit(toTrancheUnits(depositAmount), ALICE_ADDRESS);
         vm.stopPrank();
 
         // NAV should now be non-zero
@@ -407,7 +402,7 @@ contract IdleCdoAAKernelTest is AbstractKernelTestSuite {
         uint256 depositAmount = 10_000 * (10 ** AA_TRANCHE_DECIMALS);
         vm.startPrank(ALICE_ADDRESS);
         AA_TRANCHE.approve(address(JT), depositAmount);
-        JT.deposit(toTrancheUnits(depositAmount), ALICE_ADDRESS, ALICE_ADDRESS);
+        JT.deposit(toTrancheUnits(depositAmount), ALICE_ADDRESS);
         vm.stopPrank();
 
         AssetClaims memory claims = JT.totalAssets();
