@@ -7,10 +7,7 @@ import { IAccessManager } from "../../lib/openzeppelin-contracts/contracts/acces
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { RolesConfiguration, RoycoFactory } from "../../src/factory/RoycoFactory.sol";
-import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
-import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
-import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
 import { ERC4626Mock } from "../mock/ERC4626Mock.sol";
 

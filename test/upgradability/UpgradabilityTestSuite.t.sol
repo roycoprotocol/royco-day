@@ -15,7 +15,7 @@ import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { IdenticalERC4626SharesAdminOracleQuoter_Kernel } from "../../src/kernels/IdenticalERC4626SharesAdminOracleQuoter_Kernel.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
-import { TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../src/libraries/Units.sol";
+import { toTrancheUnits } from "../../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoSeniorTranche } from "../../src/tranches/RoycoSeniorTranche.sol";
 
