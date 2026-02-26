@@ -141,16 +141,16 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @inheritdoc IRoycoVaultTranche
     function deposit(TRANCHE_UNIT _assets, address _receiver) public virtual override whenNotPaused restricted returns (uint256 shares) {
+        require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
         require(_assets != toTrancheUnits(0), MUST_DEPOSIT_NON_ZERO_ASSETS());
-        address caller = msg.sender;
 
         // Transfer the assets to the kernel
-        IERC20(ASSET).safeTransferFrom(caller, KERNEL, toUint256(_assets));
+        IERC20(ASSET).safeTransferFrom(msg.sender, KERNEL, toUint256(_assets));
 
         // Deposit the assets into the underlying investment opportunity and get the fraction of total assets allocated
         (NAV_UNIT valueAllocated, NAV_UNIT effectiveNAVToMintAt) = (TRANCHE_TYPE() == TrancheType.SENIOR
-                ? IRoycoKernel(KERNEL).stDeposit(_assets, caller, _receiver)
-                : IRoycoKernel(KERNEL).jtDeposit(_assets, caller, _receiver));
+                ? IRoycoKernel(KERNEL).stDeposit(_assets, msg.sender, _receiver)
+                : IRoycoKernel(KERNEL).jtDeposit(_assets, msg.sender, _receiver));
 
         // effectiveNAVToMint at can be zero initially when the tranche is deployed
         require(valueAllocated != ZERO_NAV_UNITS, INVALID_VALUE_ALLOCATED());
@@ -171,23 +171,22 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
         require(_shares != 0, MUST_REQUEST_NON_ZERO_SHARES());
 
-        // Spend allowance if caller is not the owner
-        address caller = msg.sender;
-        if (caller != _owner) {
-            _spendAllowance(_owner, caller, _shares);
+        // Spend allowance if msg.sender is not the owner
+        if (msg.sender != _owner) {
+            _spendAllowance(_owner, msg.sender, _shares);
         }
 
         // Process the withdrawal from the underlying investment opportunity
         // It is expected that the kernel transfers the assets directly to the receiver
         claims =
         (TRANCHE_TYPE() == TrancheType.SENIOR
-                ? IRoycoKernel(KERNEL).stRedeem(_shares, caller, _owner, _receiver)
-                : IRoycoKernel(KERNEL).jtRedeem(_shares, caller, _owner, _receiver));
+                ? IRoycoKernel(KERNEL).stRedeem(_shares, msg.sender, _owner, _receiver)
+                : IRoycoKernel(KERNEL).jtRedeem(_shares, msg.sender, _owner, _receiver));
 
         // Burn shares after kernel processes redemption (kernel depends on pre-burn total supply)
         _burn(_owner, _shares);
 
-        emit Redeem(caller, _receiver, claims, _shares);
+        emit Redeem(msg.sender, _receiver, claims, _shares);
     }
 
     /// @inheritdoc IRoycoVaultTranche
