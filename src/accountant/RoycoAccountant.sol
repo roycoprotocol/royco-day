@@ -75,10 +75,10 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
 
         // Initialize the state of the accountant
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
-        $.lltvWAD = _params.lltvWAD;
-        emit LLTVUpdated(_params.lltvWAD);
         $.fixedTermDurationSeconds = _params.fixedTermDurationSeconds;
         emit FixedTermDurationUpdated(_params.fixedTermDurationSeconds);
+        $.lltvWAD = _params.lltvWAD;
+        emit LLTVUpdated(_params.lltvWAD);
         $.stProtocolFeeWAD = _params.stProtocolFeeWAD;
         emit SeniorTrancheProtocolFeeUpdated(_params.stProtocolFeeWAD);
         $.jtProtocolFeeWAD = _params.jtProtocolFeeWAD;
@@ -236,6 +236,8 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         $.lastJTEffectiveNAV = jtEffectiveNAV;
 
         // Marshal the post-sync state and return to the caller
+        uint256 betaWAD = $.betaWAD;
+        uint256 coverageWAD = $.coverageWAD;
         state = SyncedAccountingState({
             // The market state is guaranteed to be identical to the persisted
             marketState: $.lastMarketState,
@@ -249,9 +251,13 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             stProtocolFeeAccrued: ZERO_NAV_UNITS,
             jtProtocolFeeAccrued: ZERO_NAV_UNITS,
             // Additional data about the market's post-sync state
-            utilizationWAD: UtilsLib.computeUtilization(_stRawNAV, _jtRawNAV, $.betaWAD, $.coverageWAD, jtEffectiveNAV),
+            utilizationWAD: UtilsLib.computeUtilization(_stRawNAV, _jtRawNAV, betaWAD, coverageWAD, jtEffectiveNAV),
             ltvWAD: UtilsLib.computeLTV(stEffectiveNAV, stImpermanentLoss, jtEffectiveNAV),
-            fixedTermEndTimestamp: $.fixedTermEndTimestamp
+            fixedTermEndTimestamp: $.fixedTermEndTimestamp,
+            // Market's coverage configuration
+            coverageWAD: coverageWAD,
+            betaWAD: betaWAD,
+            lltvWAD: $.lltvWAD
         });
     }
 
@@ -554,9 +560,10 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         uint32 fixedTermEndTimestamp = $.fixedTermEndTimestamp;
         uint24 fixedTermDurationSeconds = $.fixedTermDurationSeconds;
         uint256 ltvWAD = UtilsLib.computeLTV(stEffectiveNAV, stImpermanentLoss, jtEffectiveNAV);
+        uint256 lltvWAD = $.lltvWAD;
         // If the market is permanently perpetual, the fixed-term elapsed, undercollateralized, or distressed, the market must be in a a perpetual state
         if (
-            fixedTermDurationSeconds == 0 || (initialMarketState == MarketState.FIXED_TERM && fixedTermEndTimestamp <= block.timestamp) || ltvWAD >= $.lltvWAD
+            fixedTermDurationSeconds == 0 || (initialMarketState == MarketState.FIXED_TERM && fixedTermEndTimestamp <= block.timestamp) || ltvWAD >= lltvWAD
                 || stImpermanentLoss != ZERO_NAV_UNITS
         ) {
             // JT coverage impermanent loss has to be explicitly cleared in this branch:
@@ -595,6 +602,8 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         }
 
         // Marshal the post-sync state and return to the caller
+        uint256 betaWAD = $.betaWAD;
+        uint256 coverageWAD = $.coverageWAD;
         state = SyncedAccountingState({
             marketState: resultingMarketState,
             stRawNAV: _stRawNAV,
@@ -606,9 +615,13 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             stProtocolFeeAccrued: stProtocolFeeAccrued,
             jtProtocolFeeAccrued: jtProtocolFeeAccrued,
             // Additional data about the market's post-sync state
-            utilizationWAD: UtilsLib.computeUtilization(_stRawNAV, _jtRawNAV, $.betaWAD, $.coverageWAD, jtEffectiveNAV),
+            utilizationWAD: UtilsLib.computeUtilization(_stRawNAV, _jtRawNAV, betaWAD, coverageWAD, jtEffectiveNAV),
             ltvWAD: ltvWAD,
-            fixedTermEndTimestamp: fixedTermEndTimestamp
+            fixedTermEndTimestamp: fixedTermEndTimestamp,
+            // Market's coverage configuration
+            coverageWAD: coverageWAD,
+            betaWAD: betaWAD,
+            lltvWAD: lltvWAD
         });
     }
 

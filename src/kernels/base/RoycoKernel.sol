@@ -127,7 +127,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view virtual override(IRoycoKernel) returns (TRANCHE_UNIT);
 
     // =============================
-    // Senior and Junior Tranche Preview Deposit and Redeem Functions
+    // Tranche Preview Functions
     // =============================
 
     /// @inheritdoc IRoycoKernel
@@ -175,7 +175,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     }
 
     // =============================
-    // Senior and Junior Tranche Max Deposit and Redeem Functions
+    // Tranche Max Deposit and Redeem Functions
     // =============================
 
     /// @inheritdoc IRoycoKernel
@@ -313,7 +313,8 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     // =============================
 
     /// @inheritdoc IRoycoKernel
-    /// @dev ST deposits are allowed if the market is in a PERPETUAL or FIXED_TERM state, granted that the market's coverage requirement is satisfied post-deposit
+    /// @dev ST deposits are enabled if the market is in a PERPETUAL or FIXED_TERM state, granted that the market's coverage requirement is satisfied post-deposit
+    /// @dev ST deposits are disabled if the senior tranche has incurred any impermanent loss to prevent dilution
     function stDeposit(
         TRANCHE_UNIT _assets,
         address,
@@ -347,7 +348,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     }
 
     /// @inheritdoc IRoycoKernel
-    /// @dev ST redemptions are allowed if the market is in a PERPETUAL state
+    /// @dev ST redemptions are enabled if the market is in a PERPETUAL state
     function stRedeem(
         uint256 _shares,
         address,
@@ -364,19 +365,17 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         returns (AssetClaims memory userAssetClaims)
     {
         SyncedAccountingState memory state;
-        AssetClaims memory trancheAssetClaims;
         uint256 totalTrancheShares;
-
         // Execute an accounting sync to reconcile underlying PNL
-        (state, trancheAssetClaims, totalTrancheShares) = _preOpSyncTrancheAccounting(TrancheType.SENIOR);
+        (state, userAssetClaims, totalTrancheShares) = _preOpSyncTrancheAccounting(TrancheType.SENIOR);
         // Ensure that the market is in a state where ST redemptions are allowed: PERPETUAL
         require(state.marketState == MarketState.PERPETUAL, ST_REDEEM_DISABLED_IN_FIXED_TERM_STATE());
 
-        // Compute user's claims with FCFS LP prioritization
-        NAV_UNIT claimsOnExposureNAV;
-        (userAssetClaims, claimsOnExposureNAV) = _previewRedeem(trancheAssetClaims, _shares, totalTrancheShares);
+        // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
+        // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
+        userAssetClaims = UtilsLib.scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares);
 
-        // If LLTV is breached remit the ST LP a self-liquidation bonus
+        // If LLTV is breached, also remit the ST LP a self-liquidation bonus
         // (uint64 lltvWAD,) = IRoycoAccountant(ACCOUNTANT).getLiquidationParams();
         // NAV_UNIT stSelfLiquidationBonusNAV;
         // if (state.ltvWAD >= lltvWAD) {
@@ -402,7 +401,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     // =============================
 
     /// @inheritdoc IRoycoKernel
-    /// @dev JT deposits are allowed if the market is in a PERPETUAL state
+    /// @dev JT deposits are enabled if the market is in a PERPETUAL state
     function jtDeposit(
         TRANCHE_UNIT _assets,
         address,
@@ -419,7 +418,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     {
         // Execute an accounting sync to reconcile underlying PNL
         SyncedAccountingState memory state = _preOpSyncTrancheAccounting();
-        // Ensure that the market is in a state where JT deposits are allowed: PERPETUAL
+        // Ensure that the market is in a state where JT deposits are enabled: PERPETUAL
         require(state.marketState == MarketState.PERPETUAL, JT_DEPOSIT_DISABLED_IN_FIXED_TERM_STATE());
 
         // The tranche vault has already transfered the assets to the kernel, so simply credit those assets to the junior tranche
@@ -436,7 +435,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     }
 
     /// @inheritdoc IRoycoKernel
-    /// @dev JT redemptions are allowed if the market is in a PERPETUAL or FIXED_TERM state, granted that the market's coverage requirement is satisfied post-redemption
+    /// @dev JT redemptions are enabled if the market is in a PERPETUAL or FIXED_TERM state, granted that the market's coverage requirement is satisfied post-redemption
     function jtRedeem(
         uint256 _shares,
         address,
@@ -453,12 +452,12 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         returns (AssetClaims memory userAssetClaims)
     {
         // Execute a pre-op sync on accounting
-        AssetClaims memory trancheAssetClaims;
         uint256 totalTrancheShares;
-        (, trancheAssetClaims, totalTrancheShares) = _preOpSyncTrancheAccounting(TrancheType.JUNIOR);
+        (, userAssetClaims, totalTrancheShares) = _preOpSyncTrancheAccounting(TrancheType.JUNIOR);
 
-        // Compute user's claims with FCFS LP prioritization
-        (userAssetClaims,) = _previewRedeem(trancheAssetClaims, _shares, totalTrancheShares);
+        // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
+        // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
+        userAssetClaims = UtilsLib.scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares);
 
         // Withdraw the asset claims from each tranche and transfer them to the receiver
         _withdrawAssets(userAssetClaims, _receiver);
@@ -627,10 +626,10 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     }
 
     /**
-     * @notice Marshals the asset claims for the specified tranche
+     * @notice Marshals the cumulative asset claims for the specified tranche
      * @param _trancheType An enum indicating which tranche to construct the asset claims for
      * @param _state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
-     * @return claims The asset claims that the specified tranche is entitled to
+     * @return claims The cumulative asset claims that the specified tranche is entitled to
      */
     function _marshalTrancheAssetClaims(
         TrancheType _trancheType,

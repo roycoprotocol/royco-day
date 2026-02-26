@@ -59,6 +59,10 @@ struct AssetClaims {
  * @custom:field utilizationWAD - The current utilization of the market, scaled to WAD precision
  * @custom:field ltvWAD - The current loan to value of the market, scaled to WAD precision
  * @custom:field fixedTermEndTimestamp - The timestamp at which the fixed term ends. Set to 0 if the market is not in a fixed term state
+ * @custom:field coverageWAD - The coverage percentage that the senior tranche is expected to be protected by, scaled to WAD precision
+ * @custom:field betaWAD - JT's percentage sensitivity to the same downside stress that affects ST, scaled to WAD precision
+ *                         For example, beta is 0 when JT is in the RFR and 1e18 (100%) when JT is in the same opportunity as senior
+ * @custom:field lltvWAD - The liquidation loan to value (LLTV) for this market, scaled to WAD precision
  */
 struct SyncedAccountingState {
     MarketState marketState;
@@ -74,6 +78,10 @@ struct SyncedAccountingState {
     uint256 utilizationWAD;
     uint256 ltvWAD;
     uint32 fixedTermEndTimestamp;
+    // Market's coverage configuration
+    uint256 coverageWAD;
+    uint256 betaWAD;
+    uint256 lltvWAD;
 }
 
 /**
