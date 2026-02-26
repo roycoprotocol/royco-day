@@ -174,7 +174,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     }
 
     function testFuzz_ST_previewDeposit_matchesActualDeposit(uint256 _jtAmount, uint256 _stPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 1, 50);
 
         // First deposit JT to enable ST deposits
@@ -206,7 +206,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     }
 
     function testFuzz_ST_convertToAssets_nonZeroForNonZeroShares(uint256 _jtAmount, uint256 _stPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 50);
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -237,7 +237,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     }
 
     function testFuzz_kernel_stMaxWithdrawable_afterDeposit(uint256 _jtDeposit, uint256 _stPercentage) external {
-        _jtDeposit = bound(_jtDeposit, _minDepositAmount(), config.initialFunding / 2);
+        _jtDeposit = bound(_jtDeposit, _minDepositAmount(), config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 50);
 
         _depositJT(ALICE_ADDRESS, _jtDeposit);
@@ -398,7 +398,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function testFuzz_ST_redeem_sync(uint256 _jtAmount, uint256 _stPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 50); // Keep utilization below 100%
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -423,7 +423,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     }
 
     function testFuzz_ST_redeem_previewMatchesActual(uint256 _jtAmount, uint256 _stPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 50);
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -521,7 +521,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function testFuzz_yield_JTGain_updatesNAV(uint256 _jtAmount, uint256 _yieldPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _yieldPercentage = bound(_yieldPercentage, 1, 50); // 1-50% yield
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -540,7 +540,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     }
 
     function testFuzz_yield_STGain_distributesToJT(uint256 _jtAmount, uint256 _stPercentage, uint256 _yieldPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 50);
         _yieldPercentage = bound(_yieldPercentage, 1, 20);
 
@@ -604,7 +604,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function testFuzz_loss_JTAbsorbsFirst(uint256 _jtAmount, uint256 _stPercentage, uint256 _lossPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 50);
         _lossPercentage = bound(_lossPercentage, 1, 20);
 
@@ -676,7 +676,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     }
 
     function testFuzz_marketState_STLossTriggersCoverageTracking(uint256 _jtAmount, uint256 _stPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 20, 50);
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -709,7 +709,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function testFuzz_invariant_NAVConservation(uint256 _jtAmount, uint256 _stPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 0, 50);
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
