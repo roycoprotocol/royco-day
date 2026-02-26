@@ -8,5 +8,5 @@
 	path = lib/openzeppelin-contracts-upgradeable
 	url = https://github.com/openzeppelin/openzeppelin-contracts-upgradeable
 [submodule "lib/solady"]
-    path = lib/solady
-    url = https://github.com/Vectorized/solady
+	path = lib/solady
+	url = https://github.com/lib/solady

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IAccessManager } from "../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { UUPSUpgradeable } from "../lib/openzeppelin-contracts/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { RoycoAccountant } from "../src/accountant/RoycoAccountant.sol";
 import { RolesConfiguration, RoycoFactory } from "../src/factory/RoycoFactory.sol";
@@ -38,10 +37,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     // Custom errors
     error UnsupportedKernelType(KernelType kernelType);
     error UnsupportedYDMType(YDMType ydmType);
-    error DeployerNotFactoryAdmin(address deployer);
-    error RoleAssignmentAdminRoleNotFound(uint64 role);
-    error RoleAssignmentAssigneeAddressIsZero(address assignee);
-
     // Deployment salts for CREATE2
     bytes32 constant ACCOUNTANT_IMPL_SALT = keccak256("ROYCO_ACCOUNTANT_IMPLEMENTATION_V2");
     bytes32 constant KERNEL_IMPL_SALT = keccak256("ROYCO_KERNEL_IMPLEMENTATION_V2");

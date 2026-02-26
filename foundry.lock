@@ -12,12 +12,15 @@
     }
   },
   "lib/openzeppelin-contracts": {
-    "rev": "fcbae5394ae8ad52d8e580a3477db99814b9d565"
+    "tag": {
+      "name": "v5.6.0",
+      "rev": "56a3de2cea907c9a500d32e70c275f68393b7ba6"
+    }
   },
   "lib/openzeppelin-contracts-upgradeable": {
     "tag": {
-      "name": "v5.5.0",
-      "rev": "aa677e9d28ed78fc427ec47ba2baef2030c58e7c"
+      "name": "v5.6.0",
+      "rev": "c9f48f0d6c470a3edab20dcbb3cc35dcfc7f4f1f"
     }
   },
   "lib/solady": {

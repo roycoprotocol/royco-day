@@ -20,9 +20,6 @@ interface IRoycoFactory {
     /// @notice Thrown when an invalid symbol is provided
     error INVALID_SYMBOL();
 
-    /// @notice Thrown when an invalid asset is provided
-    error INVALID_ASSET();
-
     /// @notice Thrown when an invalid market id is provided
     error INVALID_MARKET_ID();
 
@@ -83,12 +80,6 @@ interface IRoycoFactory {
     /// @notice Thrown when the junior tranche address configured on the kernel is invalid
     error INVALID_JUNIOR_TRANCHE_ON_KERNEL();
 
-    /// @notice Thrown when the senior tranche address configured on the accountant is invalid
-    error INVALID_SENIOR_TRANCHE_ON_ACCOUNTANT();
-
-    /// @notice Thrown when the junior tranche address configured on the accountant is invalid
-    error INVALID_JUNIOR_TRANCHE_ON_ACCOUNTANT();
-
     /// @notice Thrown when the ST asset address configured on the kernel is invalid
     error INVALID_ST_ASSET_ON_KERNEL();
 
@@ -97,9 +88,6 @@ interface IRoycoFactory {
 
     /// @notice Emitted when a new market is deployed
     event MarketDeployed(RoycoMarket roycoMarket, MarketDeploymentParams params);
-
-    /// @notice Emitted when a role delay is set
-    event RoleDelaySet(uint64 role, uint256 delay);
 
     /**
      * @notice Parameters for deploying a new market
