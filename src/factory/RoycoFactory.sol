@@ -74,26 +74,26 @@ contract RoycoFactory is AccessManager, RolesConfiguration, IRoycoFactory {
      * @param roycoMarket The deployed components constituting the Royco market
      */
     function _deployMarket(MarketDeploymentParams calldata _params) internal virtual returns (RoycoMarket memory roycoMarket) {
-        // Deploy the senior tranche with empty initialization data
+        // Deploy the senior tranche
         roycoMarket.seniorTranche = IRoycoVaultTranche(
             _deployERC1967ProxyDeterministic(
                 address(_params.seniorTrancheImplementation), _params.seniorTrancheInitializationData, _params.seniorTrancheProxyDeploymentSalt
             )
         );
 
-        // Deploy the junior tranche with empty initialization data
+        // Deploy the junior tranche
         roycoMarket.juniorTranche = IRoycoVaultTranche(
             _deployERC1967ProxyDeterministic(
                 address(_params.juniorTrancheImplementation), _params.juniorTrancheInitializationData, _params.juniorTrancheProxyDeploymentSalt
             )
         );
 
-        // Deploy the kernel with empty initialization data
+        // Deploy the kernel
         roycoMarket.kernel = IRoycoKernel(
             _deployERC1967ProxyDeterministic(address(_params.kernelImplementation), _params.kernelInitializationData, _params.kernelProxyDeploymentSalt)
         );
 
-        // Deploy the accountant with empty initialization data
+        // Deploy the accountant
         roycoMarket.accountant = IRoycoAccountant(
             _deployERC1967ProxyDeterministic(
                 address(_params.accountantImplementation), _params.accountantInitializationData, _params.accountantProxyDeploymentSalt

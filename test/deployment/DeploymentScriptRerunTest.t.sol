@@ -70,7 +70,6 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
 
     // Constants
     address internal constant ETHEREUM_MAINNET_USDC_ADDRESS = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
-    address internal constant ETHEREUM_MAINNET_AAVE_V3_POOL_ADDRESS = 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2;
 
     // Deployment params
     uint64 internal COVERAGE_WAD = 0.2e18;
@@ -216,8 +215,8 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         params.seniorTrancheSymbol = _seniorTrancheSymbol;
         params.juniorTrancheName = _juniorTrancheName;
         params.juniorTrancheSymbol = _juniorTrancheSymbol;
-        params.seniorAsset = ETHEREUM_MAINNET_USDC_ADDRESS;
-        params.juniorAsset = ETHEREUM_MAINNET_USDC_ADDRESS;
+        params.seniorAsset = _stVault;
+        params.juniorAsset = _stVault;
         params.stNAVDustTolerance = DUST_TOLERANCE;
         params.jtNAVDustTolerance = DUST_TOLERANCE;
         params.kernelType = DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel;
@@ -363,10 +362,10 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
 
         // Get expected addresses
         bytes32 salt2 = keccak256(abi.encodePacked("MARKET_2_SALT"));
-        address expectedST = factory.predictERC1967ProxyAddress(address(result1.stTrancheImplementation), salt2);
-        address expectedJT = factory.predictERC1967ProxyAddress(address(result1.jtTrancheImplementation), salt2);
-        address expectedKernel = factory.predictERC1967ProxyAddress(result1.kernelImplementation, salt2);
-        address expectedAccountant = factory.predictERC1967ProxyAddress(address(result1.accountantImplementation), salt2);
+        address expectedST = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-ST")));
+        address expectedJT = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-JT")));
+        address expectedKernel = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-KERNEL")));
+        address expectedAccountant = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-ACCOUNTANT")));
 
         // Build roles configuration
         DEPLOY_SCRIPT.buildRolesTargetConfiguration(expectedST, expectedJT, expectedKernel, expectedAccountant);

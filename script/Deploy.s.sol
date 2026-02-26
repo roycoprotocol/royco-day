@@ -428,8 +428,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         roles[index++] = IRoycoFactory.RolesTargetConfiguration({ target: _juniorTranche, selectors: jtSelectors, roles: jtRoles });
 
         // Kernel roles
-        bytes4[] memory kernelSelectors = new bytes4[](6);
-        uint64[] memory kernelRoleValues = new uint64[](6);
+        bytes4[] memory kernelSelectors = new bytes4[](7);
+        uint64[] memory kernelRoleValues = new uint64[](7);
 
         kernelSelectors[0] = IRoycoKernel.setProtocolFeeRecipient.selector;
         kernelRoleValues[0] = ADMIN_KERNEL_ROLE;
@@ -443,6 +443,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         kernelRoleValues[4] = ADMIN_ORACLE_QUOTER_ROLE;
         kernelSelectors[5] = UUPSUpgradeable.upgradeToAndCall.selector;
         kernelRoleValues[5] = ADMIN_UPGRADER_ROLE;
+        kernelSelectors[6] = IRoycoKernel.syncTrancheAccounting.selector;
+        kernelRoleValues[6] = SYNC_ROLE;
 
         roles[index++] = IRoycoFactory.RolesTargetConfiguration({ target: _kernel, selectors: kernelSelectors, roles: kernelRoleValues });
 

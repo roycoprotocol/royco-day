@@ -2932,6 +2932,7 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
         returns (IRoycoAccountant)
     {
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (jtYieldAtTarget, jtYieldAtFull));
+        RoycoAccountant newAccountantImpl = new RoycoAccountant(kernel);
 
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             stProtocolFeeWAD: stProtocolFeeWAD,
@@ -2948,7 +2949,7 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
         });
 
         bytes memory initData = abi.encodeCall(RoycoAccountant.initialize, (params, address(accessManager)));
-        address proxy = address(new ERC1967Proxy(address(accountantImpl), initData));
+        address proxy = address(new ERC1967Proxy(address(newAccountantImpl), initData));
         return IRoycoAccountant(proxy);
     }
 
@@ -3166,7 +3167,7 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
 
         // Create new YDM with init
         MockYDMWithInit newYDM = new MockYDMWithInit();
-        bytes memory initData = abi.encodeWithSelector(MockYDMWithInit.initialize.selector, false);
+        bytes memory initData = abi.encodeCall(MockYDMWithInit.initialize, (false));
 
         // Set new YDM with init data
         accountantForAdmin.setYDM(address(newYDM), initData);

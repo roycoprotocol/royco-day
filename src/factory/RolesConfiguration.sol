@@ -41,9 +41,6 @@ abstract contract RolesConfiguration {
     uint64 public constant LP_ROLE_ADMIN_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_LP_ROLE_ADMIN_ROLE"))));
     uint64 public constant DEPLOYER_ROLE_ADMIN_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_DEPLOYER_ROLE_ADMIN_ROLE"))));
 
-    /// Liquidator roles
-    uint64 public constant ATOMIC_LIQUIDATOR_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ATOMIC_LIQUIDATOR_ROLE"))));
-
     /// Guardian role - can cancel delayed operations for all roles
     uint64 public constant GUARDIAN_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_GUARDIAN_ROLE"))));
 
@@ -112,12 +109,6 @@ abstract contract RolesConfiguration {
                 adminRole: _ADMIN_ROLE,
                 guardianRole: GUARDIAN_ROLE,
                 executionDelay: 0 // Oracle updates should be immediate
-            });
-        } else if (role == ATOMIC_LIQUIDATOR_ROLE) {
-            return RoleConfig({
-                adminRole: _ADMIN_ROLE,
-                guardianRole: GUARDIAN_ROLE,
-                executionDelay: 0 // Atomic liquidations need to be immediate
             });
         } else if (role == GUARDIAN_ROLE) {
             return RoleConfig({

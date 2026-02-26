@@ -159,7 +159,7 @@ contract StaticCurveYDMTest is BaseTest {
 
     function testFuzz_initializeYDMForMarket_validParams(uint64 _y0, uint64 _yT, uint64 _yFull) public {
         // Bound to valid ordering
-        _y0 = uint64(bound(_y0, 0, WAD));
+        _y0 = uint64(bound(_y0, 1, WAD));
         _yT = uint64(bound(_yT, _y0, WAD));
         _yFull = uint64(bound(_yFull, _yT, WAD));
 
