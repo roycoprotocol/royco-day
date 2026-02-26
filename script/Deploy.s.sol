@@ -7,6 +7,7 @@ import { RoycoAccountant } from "../src/accountant/RoycoAccountant.sol";
 import { RolesConfiguration, RoycoFactory } from "../src/factory/RoycoFactory.sol";
 import { IRoycoAccountant } from "../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoAuth } from "../src/interfaces/IRoycoAuth.sol";
+import { IRoycoFactory } from "../src/interfaces/IRoycoFactory.sol";
 import { IRoycoKernel } from "../src/interfaces/IRoycoKernel.sol";
 import { IYDM } from "../src/interfaces/IYDM.sol";
 import { IRoycoVaultTranche } from "../src/interfaces/tranche/IRoycoVaultTranche.sol";
@@ -16,7 +17,6 @@ import { IdleCdoAA_ST_IdleCdoAA_JT_Kernel } from "../src/kernels/IdleCdoAA_ST_Id
 import { ReUSD_ST_ReUSD_JT_Kernel } from "../src/kernels/ReUSD_ST_ReUSD_JT_Kernel.sol";
 import { IdenticalAssetsChainlinkOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
 import { IdenticalAssetsOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
-import { MarketDeploymentParams, RolesTargetConfiguration, RoycoMarket, TrancheDeploymentParams } from "../src/libraries/Types.sol";
 import { NAV_UNIT, toNAVUnits } from "../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoSeniorTranche } from "../src/tranches/RoycoSeniorTranche.sol";
@@ -329,16 +329,19 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         address deployer = vm.addr(_deployerPrivateKey);
 
         // Deploy implementations using CREATE2
-        RoycoAccountant accountantImpl = _deployAccountantImpl();
-        RoycoSeniorTranche stTrancheImpl = _deploySTTrancheImpl();
-        RoycoJuniorTranche jtTrancheImpl = _deployJTTrancheImpl();
         IYDM ydm = _deployYDM(_params.ydmType);
 
         // Deploy factory with deployer as admin and deployer as deployer
         RoycoFactory factory = _deployFactory(deployer, deployer);
 
-        // Deploy market using factory (kernel implementation is deployed inside _deployMarket)
-        (RoycoMarket memory market, address kernelImpl) = _deployMarket(factory, accountantImpl, stTrancheImpl, jtTrancheImpl, address(ydm), _params, deployer);
+        // Deploy all implementations. Then deploy the market using the factory
+        (
+            IRoycoFactory.RoycoMarket memory market,
+            RoycoSeniorTranche stTrancheImpl,
+            RoycoJuniorTranche jtTrancheImpl,
+            address kernelImpl,
+            RoycoAccountant accountantImpl
+        ) = _deployMarket(factory, address(ydm), _params, deployer);
 
         // Transfer factory ownership to factory admin
         _transferFactoryOwnership(factory, deployer, _params.factoryAdmin);
@@ -393,12 +396,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     )
         public
         pure
-        returns (RolesTargetConfiguration[] memory roles)
+        returns (IRoycoFactory.RolesTargetConfiguration[] memory roles)
     {
         // Count how many role configurations we need
         uint256 roleCount = 4; // ST, JT, Kernel, Accountant
 
-        roles = new RolesTargetConfiguration[](roleCount);
+        roles = new IRoycoFactory.RolesTargetConfiguration[](roleCount);
         uint256 index = 0;
 
         // Senior Tranche roles
@@ -416,13 +419,13 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         stSelectors[4] = UUPSUpgradeable.upgradeToAndCall.selector;
         stRoles[4] = ADMIN_UPGRADER_ROLE;
 
-        roles[index++] = RolesTargetConfiguration({ target: _seniorTranche, selectors: stSelectors, roles: stRoles });
+        roles[index++] = IRoycoFactory.RolesTargetConfiguration({ target: _seniorTranche, selectors: stSelectors, roles: stRoles });
 
         // Junior Tranche roles (same as senior)
         bytes4[] memory jtSelectors = stSelectors;
         uint64[] memory jtRoles = stRoles;
 
-        roles[index++] = RolesTargetConfiguration({ target: _juniorTranche, selectors: jtSelectors, roles: jtRoles });
+        roles[index++] = IRoycoFactory.RolesTargetConfiguration({ target: _juniorTranche, selectors: jtSelectors, roles: jtRoles });
 
         // Kernel roles
         bytes4[] memory kernelSelectors = new bytes4[](6);
@@ -441,7 +444,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         kernelSelectors[5] = UUPSUpgradeable.upgradeToAndCall.selector;
         kernelRoleValues[5] = ADMIN_UPGRADER_ROLE;
 
-        roles[index++] = RolesTargetConfiguration({ target: _kernel, selectors: kernelSelectors, roles: kernelRoleValues });
+        roles[index++] = IRoycoFactory.RolesTargetConfiguration({ target: _kernel, selectors: kernelSelectors, roles: kernelRoleValues });
 
         // Accountant roles
         bytes4[] memory accountantSelectors = new bytes4[](11);
@@ -470,7 +473,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         accountantSelectors[10] = IRoycoAccountant.setSeniorTrancheDustTolerance.selector;
         accountantRoleValues[10] = ADMIN_ACCOUNTANT_ROLE;
 
-        roles[index++] = RolesTargetConfiguration({ target: _accountant, selectors: accountantSelectors, roles: accountantRoleValues });
+        roles[index++] = IRoycoFactory.RolesTargetConfiguration({ target: _accountant, selectors: accountantSelectors, roles: accountantRoleValues });
     }
 
     /// @notice Generates role assignments from addresses
@@ -614,34 +617,53 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
 
     /// @notice Deploys all contracts for a market
     /// @param factory The deployed factory
-    /// @param accountantImpl The deployed accountant implementation
-    /// @param stTrancheImpl The deployed ST tranche implementation
-    /// @param jtTrancheImpl The deployed JT tranche implementation
     /// @param ydmAddress The address of the deployed YDM
     /// @param _params The deployment parameters
     /// @return deployedContracts The deployed market contracts
+    /// @return stImpl The deployed senior tranche implementation address
+    /// @return jtImpl The deployed junior tranche implementation address
     /// @return kernelImpl The deployed kernel implementation address
+    /// @return accountantImpl The deployed accountant implementation address
     function _deployMarket(
         RoycoFactory factory,
-        RoycoAccountant accountantImpl,
-        RoycoSeniorTranche stTrancheImpl,
-        RoycoJuniorTranche jtTrancheImpl,
         address ydmAddress,
         DeploymentParams memory _params,
         address _deployer
     )
         internal
-        returns (RoycoMarket memory, address)
+        returns (
+            IRoycoFactory.RoycoMarket memory deployedContracts,
+            RoycoSeniorTranche stImpl,
+            RoycoJuniorTranche jtImpl,
+            address kernelImpl,
+            RoycoAccountant accountantImpl
+        )
     {
         // Precompute expected proxy addresses using salt derived from market ID
-        // This ensures each market deployment has a unique salt to avoid Create2 collisions
         bytes32 salt = keccak256(abi.encodePacked(MARKET_DEPLOYMENT_SALT, _params.marketId));
-        address expectedSeniorTrancheAddress = factory.predictERC1967ProxyAddress(address(stTrancheImpl), salt);
-        address expectedJuniorTrancheAddress = factory.predictERC1967ProxyAddress(address(jtTrancheImpl), salt);
-        address expectedAccountantAddress = factory.predictERC1967ProxyAddress(address(accountantImpl), salt);
+
+        // Predict the deterministic addresses of the contracts
+        // The salt is unique for each contract type to prevent CREATE3 collisions
+        bytes32 seniorTrancheSalt = keccak256(abi.encodePacked(salt, "-ST"));
+        bytes32 juniorTrancheSalt = keccak256(abi.encodePacked(salt, "-JT"));
+        bytes32 accountantSalt = keccak256(abi.encodePacked(salt, "-ACCOUNTANT"));
+        bytes32 kernelSalt = keccak256(abi.encodePacked(salt, "-KERNEL"));
+        address expectedSeniorTrancheAddress = factory.predictDeterministicAddress(seniorTrancheSalt);
+        address expectedJuniorTrancheAddress = factory.predictDeterministicAddress(juniorTrancheSalt);
+        address expectedAccountantAddress = factory.predictDeterministicAddress(accountantSalt);
+        address expectedKernelAddress = factory.predictDeterministicAddress(kernelSalt);
+
+        // Deploy the senior tranche implementation
+        stImpl = _deploySTTrancheImpl(_params.seniorAsset, expectedKernelAddress, _params.marketId);
+
+        // Deploy the junior tranche implementation
+        jtImpl = _deployJTTrancheImpl(_params.juniorAsset, expectedKernelAddress, _params.marketId);
+
+        // Deploy the accountant implementation
+        accountantImpl = _deployAccountantImpl(expectedKernelAddress);
 
         // Deploy the kernel implementation based on kernel type
-        address kernelImpl = _deployKernelImpl(
+        kernelImpl = _deployKernelImpl(
             _params.kernelType,
             _params.kernelSpecificParams,
             expectedSeniorTrancheAddress,
@@ -650,7 +672,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             _params.juniorAsset,
             expectedAccountantAddress
         );
-        address expectedKernelAddress = factory.predictERC1967ProxyAddress(address(kernelImpl), salt);
 
         console2.log("Expected Senior Tranche Address:", expectedSeniorTrancheAddress);
         console2.log("Expected Junior Tranche Address:", expectedJuniorTrancheAddress);
@@ -662,38 +683,38 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         bytes memory kernelInitializationData =
             _buildKernelInitializationData(_params.kernelType, _params.kernelSpecificParams, expectedAccountantAddress, factoryAddress, _params);
         bytes memory accountantInitializationData = _buildAccountantInitializationData(expectedKernelAddress, ydmAddress, factoryAddress, _params);
-        bytes memory seniorTrancheInitializationData = _buildSeniorTrancheInitializationData(expectedKernelAddress, _params.marketId, factoryAddress, _params);
-        bytes memory juniorTrancheInitializationData = _buildJuniorTrancheInitializationData(expectedKernelAddress, _params.marketId, factoryAddress, _params);
+        bytes memory seniorTrancheInitializationData = _buildSeniorTrancheInitializationData(factoryAddress, _params);
+        bytes memory juniorTrancheInitializationData = _buildJuniorTrancheInitializationData(factoryAddress, _params);
 
         // Build roles configuration
-        RolesTargetConfiguration[] memory roles =
+        IRoycoFactory.RolesTargetConfiguration[] memory roles =
             buildRolesTargetConfiguration(expectedSeniorTrancheAddress, expectedJuniorTrancheAddress, expectedKernelAddress, expectedAccountantAddress);
 
         // Build market deployment params
-        MarketDeploymentParams memory marketParams = MarketDeploymentParams({
+        IRoycoFactory.MarketDeploymentParams memory marketParams = IRoycoFactory.MarketDeploymentParams({
             seniorTrancheName: _params.seniorTrancheName,
             seniorTrancheSymbol: _params.seniorTrancheSymbol,
             juniorTrancheName: _params.juniorTrancheName,
             juniorTrancheSymbol: _params.juniorTrancheSymbol,
             marketId: _params.marketId,
-            seniorTrancheImplementation: IRoycoVaultTranche(address(stTrancheImpl)),
-            juniorTrancheImplementation: IRoycoVaultTranche(address(jtTrancheImpl)),
+            seniorTrancheImplementation: IRoycoVaultTranche(address(stImpl)),
+            juniorTrancheImplementation: IRoycoVaultTranche(address(jtImpl)),
             kernelImplementation: IRoycoKernel(address(kernelImpl)),
             accountantImplementation: IRoycoAccountant(address(accountantImpl)),
             seniorTrancheInitializationData: seniorTrancheInitializationData,
             juniorTrancheInitializationData: juniorTrancheInitializationData,
             kernelInitializationData: kernelInitializationData,
             accountantInitializationData: accountantInitializationData,
-            seniorTrancheProxyDeploymentSalt: salt,
-            juniorTrancheProxyDeploymentSalt: salt,
-            kernelProxyDeploymentSalt: salt,
-            accountantProxyDeploymentSalt: salt,
+            seniorTrancheProxyDeploymentSalt: seniorTrancheSalt,
+            juniorTrancheProxyDeploymentSalt: juniorTrancheSalt,
+            kernelProxyDeploymentSalt: kernelSalt,
+            accountantProxyDeploymentSalt: accountantSalt,
             roles: roles
         });
 
         // Deploy market
         console2.log("Deploying market...");
-        RoycoMarket memory deployedContracts = factory.deployMarket(marketParams);
+        deployedContracts = factory.deployMarket(marketParams);
 
         console2.log("Market deployed successfully!");
         console2.log("Senior Tranche:", address(deployedContracts.seniorTranche));
@@ -703,14 +724,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
 
         // Grant all roles to the specified addresses
         grantAllRoles(factory, _params, _deployer);
-
-        return (deployedContracts, kernelImpl);
     }
 
     /// @notice Deploys accountant implementation
     /// @return The deployed accountant implementation
-    function _deployAccountantImpl() internal returns (RoycoAccountant) {
-        bytes memory creationCode = type(RoycoAccountant).creationCode;
+    function _deployAccountantImpl(address _kernel) internal returns (RoycoAccountant) {
+        bytes memory creationCode = abi.encodePacked(type(RoycoAccountant).creationCode, abi.encode(_kernel));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(ACCOUNTANT_IMPL_SALT, creationCode, false);
         if (alreadyDeployed) {
@@ -723,8 +742,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
 
     /// @notice Deploys ST tranche implementation
     /// @return The deployed ST tranche implementation
-    function _deploySTTrancheImpl() internal returns (RoycoSeniorTranche) {
-        bytes memory creationCode = type(RoycoSeniorTranche).creationCode;
+    function _deploySTTrancheImpl(address _asset, address _kernel, bytes32 _marketId) internal returns (RoycoSeniorTranche) {
+        bytes memory creationCode = abi.encodePacked(type(RoycoSeniorTranche).creationCode, abi.encode(_asset, _kernel, _marketId));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(ST_TRANCHE_IMPL_SALT, creationCode, false);
         if (alreadyDeployed) {
@@ -737,8 +756,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
 
     /// @notice Deploys JT tranche implementation
     /// @return The deployed JT tranche implementation
-    function _deployJTTrancheImpl() internal returns (RoycoJuniorTranche) {
-        bytes memory creationCode = type(RoycoJuniorTranche).creationCode;
+    function _deployJTTrancheImpl(address _asset, address _kernel, bytes32 _marketId) internal returns (RoycoJuniorTranche) {
+        bytes memory creationCode = abi.encodePacked(type(RoycoJuniorTranche).creationCode, abi.encode(_asset, _kernel, _marketId));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(JT_TRANCHE_IMPL_SALT, creationCode, false);
         if (alreadyDeployed) {
@@ -997,34 +1016,18 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         return abi.encodeCall(RoycoAccountant.initialize, (accountantParams, _factoryAddress));
     }
 
-    function _buildSeniorTrancheInitializationData(
-        address _expectedKernelAddress,
-        bytes32 _marketId,
-        address _factoryAddress,
-        DeploymentParams memory _params
-    )
-        internal
-        pure
-        returns (bytes memory)
-    {
-        TrancheDeploymentParams memory trancheParams =
-            TrancheDeploymentParams({ name: _params.seniorTrancheName, symbol: _params.seniorTrancheSymbol, initialAuthority: _factoryAddress });
+    function _buildSeniorTrancheInitializationData(address _factoryAddress, DeploymentParams memory _params) internal pure returns (bytes memory) {
+        IRoycoVaultTranche.TrancheDeploymentParams memory trancheParams = IRoycoVaultTranche.TrancheDeploymentParams({
+            name: _params.seniorTrancheName, symbol: _params.seniorTrancheSymbol, initialAuthority: _factoryAddress
+        });
 
         return abi.encodeCall(RoycoSeniorTranche.initialize, (trancheParams));
     }
 
-    function _buildJuniorTrancheInitializationData(
-        address _expectedKernelAddress,
-        bytes32 _marketId,
-        address _factoryAddress,
-        DeploymentParams memory _params
-    )
-        internal
-        pure
-        returns (bytes memory)
-    {
-        TrancheDeploymentParams memory trancheParams =
-            TrancheDeploymentParams({ name: _params.juniorTrancheName, symbol: _params.juniorTrancheSymbol, initialAuthority: _factoryAddress });
+    function _buildJuniorTrancheInitializationData(address _factoryAddress, DeploymentParams memory _params) internal pure returns (bytes memory) {
+        IRoycoVaultTranche.TrancheDeploymentParams memory trancheParams = IRoycoVaultTranche.TrancheDeploymentParams({
+            name: _params.juniorTrancheName, symbol: _params.juniorTrancheSymbol, initialAuthority: _factoryAddress
+        });
 
         return abi.encodeCall(RoycoJuniorTranche.initialize, (trancheParams));
     }

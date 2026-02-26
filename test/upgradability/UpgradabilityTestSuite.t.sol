@@ -13,7 +13,6 @@ import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/tranche/IRoycoVaultTranche.sol";
 import { IdenticalERC4626SharesAdminOracleQuoter_Kernel } from "../../src/kernels/IdenticalERC4626SharesAdminOracleQuoter_Kernel.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
-import { TrancheDeploymentParams } from "../../src/libraries/Types.sol";
 import { TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoSeniorTranche } from "../../src/tranches/RoycoSeniorTranche.sol";
@@ -165,7 +164,7 @@ contract UpgradabilityTestSuite is BaseTest {
 
     /// @notice Test that ST implementation cannot be initialized
     function test_stImplementation_cannotBeInitialized() external {
-        TrancheDeploymentParams memory params = TrancheDeploymentParams({ name: "Test ST", symbol: "TST", initialAuthority: address(FACTORY) });
+        IRoycoVaultTranche.TrancheDeploymentParams memory params = IRoycoVaultTranche.TrancheDeploymentParams({ name: "Test ST", symbol: "TST", initialAuthority: address(FACTORY) });
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         ST_IMPL.initialize(params);
@@ -173,7 +172,7 @@ contract UpgradabilityTestSuite is BaseTest {
 
     /// @notice Test that JT implementation cannot be initialized
     function test_jtImplementation_cannotBeInitialized() external {
-        TrancheDeploymentParams memory params = TrancheDeploymentParams({ name: "Test JT", symbol: "TJT", initialAuthority: address(FACTORY) });
+        IRoycoVaultTranche.TrancheDeploymentParams memory params = IRoycoVaultTranche.TrancheDeploymentParams({ name: "Test JT", symbol: "TJT", initialAuthority: address(FACTORY) });
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         JT_IMPL.initialize(params);
@@ -210,7 +209,7 @@ contract UpgradabilityTestSuite is BaseTest {
 
     /// @notice Test that new ST implementation cannot be initialized
     function test_newSTImplementation_cannotBeInitialized() external {
-        TrancheDeploymentParams memory params = TrancheDeploymentParams({ name: "Test ST", symbol: "TST", initialAuthority: address(FACTORY) });
+        IRoycoVaultTranche.TrancheDeploymentParams memory params = IRoycoVaultTranche.TrancheDeploymentParams({ name: "Test ST", symbol: "TST", initialAuthority: address(FACTORY) });
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         newSTImpl.initialize(params);
@@ -218,7 +217,7 @@ contract UpgradabilityTestSuite is BaseTest {
 
     /// @notice Test that new JT implementation cannot be initialized
     function test_newJTImplementation_cannotBeInitialized() external {
-        TrancheDeploymentParams memory params = TrancheDeploymentParams({ name: "Test JT", symbol: "TJT", initialAuthority: address(FACTORY) });
+        IRoycoVaultTranche.TrancheDeploymentParams memory params = IRoycoVaultTranche.TrancheDeploymentParams({ name: "Test JT", symbol: "TJT", initialAuthority: address(FACTORY) });
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         newJTImpl.initialize(params);

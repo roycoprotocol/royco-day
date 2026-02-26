@@ -53,6 +53,17 @@ interface IRoycoVaultTranche is IERC20Metadata {
     error NULL_ADDRESS();
 
     /**
+     * @custom:field name - The name of the tranche share token (should be prefixed with "Royco-ST" or "Royco-JT")
+     * @custom:field symbol - The symbol of the tranche share token (should be prefixed with "ST" or "JT")
+     * @custom:field initialAuthority - The initial authority for the tranche
+     */
+    struct TrancheDeploymentParams {
+        string name;
+        string symbol;
+        address initialAuthority;
+    }
+
+    /**
      * @notice Returns the address of the kernel that this tranche is associated with
      * @return kernel The address of the kernel responsible for executing deposits and redemptions for this tranche
      */

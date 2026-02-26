@@ -4,12 +4,11 @@ pragma solidity ^0.8.28;
 import { AccessManagedUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/access/manager/AccessManagedUpgradeable.sol";
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import { Create2 } from "../../lib/openzeppelin-contracts/contracts/utils/Create2.sol";
-import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
-import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
-import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
-import { IRoycoVaultTranche } from "../../src/interfaces/tranche/IRoycoVaultTranche.sol";
-import { MarketDeploymentParams, RolesTargetConfiguration, RoycoMarket } from "../../src/libraries/Types.sol";
+import { CREATE3 } from "../../lib/solady/src/utils/CREATE3.sol";
+import { IRoycoAccountant } from "../interfaces/IRoycoAccountant.sol";
+import { IRoycoFactory } from "../interfaces/IRoycoFactory.sol";
+import { IRoycoKernel } from "../interfaces/IRoycoKernel.sol";
+import { IRoycoVaultTranche } from "../interfaces/tranche/IRoycoVaultTranche.sol";
 import { RolesConfiguration } from "./RolesConfiguration.sol";
 
 /**
@@ -65,8 +64,8 @@ contract RoycoFactory is AccessManager, RolesConfiguration, IRoycoFactory {
     }
 
     /// @inheritdoc IRoycoFactory
-    function predictERC1967ProxyAddress(address _implementation, bytes32 _salt) external view override(IRoycoFactory) returns (address proxy) {
-        proxy = Create2.computeAddress(_salt, keccak256(abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(_implementation, ""))));
+    function predictDeterministicAddress(bytes32 _salt) external view override(IRoycoFactory) returns (address deployed) {
+        deployed = CREATE3.predictDeterministicAddress(_salt);
     }
 
     /**
@@ -75,41 +74,31 @@ contract RoycoFactory is AccessManager, RolesConfiguration, IRoycoFactory {
      * @param roycoMarket The deployed components constituting the Royco market
      */
     function _deployMarket(MarketDeploymentParams calldata _params) internal virtual returns (RoycoMarket memory roycoMarket) {
-        // Deploy the tranches, kernel, and accountant for the market with empty initialization data
-        // It is expected that the kernel initialization data contains the address of the accountant and vice versa
-        // Therefore, it is expected that the proxy address is precomputed based on an uninitialized erc1967 proxy initcode
-        // and that the proxy is initalized separately after deployment, in the same transaction
-
         // Deploy the senior tranche with empty initialization data
-        roycoMarket.seniorTranche =
-            IRoycoVaultTranche(_deployERC1967ProxyDeterministic(address(_params.seniorTrancheImplementation), _params.seniorTrancheProxyDeploymentSalt));
+        roycoMarket.seniorTranche = IRoycoVaultTranche(
+            _deployERC1967ProxyDeterministic(
+                address(_params.seniorTrancheImplementation), _params.seniorTrancheInitializationData, _params.seniorTrancheProxyDeploymentSalt
+            )
+        );
 
         // Deploy the junior tranche with empty initialization data
-        roycoMarket.juniorTranche =
-            IRoycoVaultTranche(_deployERC1967ProxyDeterministic(address(_params.juniorTrancheImplementation), _params.juniorTrancheProxyDeploymentSalt));
+        roycoMarket.juniorTranche = IRoycoVaultTranche(
+            _deployERC1967ProxyDeterministic(
+                address(_params.juniorTrancheImplementation), _params.juniorTrancheInitializationData, _params.juniorTrancheProxyDeploymentSalt
+            )
+        );
 
         // Deploy the kernel with empty initialization data
-        roycoMarket.kernel = IRoycoKernel(_deployERC1967ProxyDeterministic(address(_params.kernelImplementation), _params.kernelProxyDeploymentSalt));
+        roycoMarket.kernel = IRoycoKernel(
+            _deployERC1967ProxyDeterministic(address(_params.kernelImplementation), _params.kernelInitializationData, _params.kernelProxyDeploymentSalt)
+        );
 
         // Deploy the accountant with empty initialization data
-        roycoMarket.accountant =
-            IRoycoAccountant(_deployERC1967ProxyDeterministic(address(_params.accountantImplementation), _params.accountantProxyDeploymentSalt));
-
-        // Initialize the senior tranche
-        (bool success, bytes memory data) = address(roycoMarket.seniorTranche).call(_params.seniorTrancheInitializationData);
-        require(success, FAILED_TO_INITIALIZE_SENIOR_TRANCHE(data));
-
-        // Initialize the junior tranche
-        (success, data) = address(roycoMarket.juniorTranche).call(_params.juniorTrancheInitializationData);
-        require(success, FAILED_TO_INITIALIZE_JUNIOR_TRANCHE(data));
-
-        // Initialize the kernel
-        (success, data) = address(roycoMarket.kernel).call(_params.kernelInitializationData);
-        require(success, FAILED_TO_INITIALIZE_KERNEL(data));
-
-        // Initialize the accountant
-        (success, data) = address(roycoMarket.accountant).call(_params.accountantInitializationData);
-        require(success, FAILED_TO_INITIALIZE_ACCOUNTANT(data));
+        roycoMarket.accountant = IRoycoAccountant(
+            _deployERC1967ProxyDeterministic(
+                address(_params.accountantImplementation), _params.accountantInitializationData, _params.accountantProxyDeploymentSalt
+            )
+        );
     }
 
     /// @notice Validates the deployments
@@ -121,14 +110,18 @@ contract RoycoFactory is AccessManager, RolesConfiguration, IRoycoFactory {
         require(AccessManagedUpgradeable(address(_roycoMarket.seniorTranche)).authority() == address(this), INVALID_ACCESS_MANAGER());
         require(AccessManagedUpgradeable(address(_roycoMarket.juniorTranche)).authority() == address(this), INVALID_ACCESS_MANAGER());
 
-        // Check that the kernel is set on the tranches
+        // Verify the Vault's Configuration
         require(address(_roycoMarket.seniorTranche.KERNEL()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_SENIOR_TRANCHE());
         require(address(_roycoMarket.juniorTranche.KERNEL()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_JUNIOR_TRANCHE());
 
-        // Check that the accountant is set on the kernel
-        require(address(_roycoMarket.kernel.ACCOUNTANT()) == address(_roycoMarket.accountant), INVALID_ACCOUNTANT_ON_KERNEL());
+        // Verify the Kernel's Configuration
+        require(_roycoMarket.kernel.SENIOR_TRANCHE() == address(_roycoMarket.seniorTranche), INVALID_SENIOR_TRANCHE_ON_KERNEL());
+        require(_roycoMarket.kernel.JUNIOR_TRANCHE() == address(_roycoMarket.juniorTranche), INVALID_JUNIOR_TRANCHE_ON_KERNEL());
+        require(_roycoMarket.kernel.ST_ASSET() == address(_roycoMarket.seniorTranche.asset()), INVALID_ST_ASSET_ON_KERNEL());
+        require(_roycoMarket.kernel.JT_ASSET() == address(_roycoMarket.juniorTranche.asset()), INVALID_JT_ASSET_ON_KERNEL());
+        require(_roycoMarket.kernel.ACCOUNTANT() == address(_roycoMarket.accountant), INVALID_ACCOUNTANT_ON_KERNEL());
 
-        // Check that the kernel is set on the accountant
+        // Verify the Accountant's Configuration
         require(address(_roycoMarket.accountant.KERNEL()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_ACCOUNTANT());
     }
 
@@ -182,12 +175,16 @@ contract RoycoFactory is AccessManager, RolesConfiguration, IRoycoFactory {
     }
 
     /**
-     * @notice Deploys a tranche using ERC1967 proxy deterministically
+     * @notice Deploys an ERC1967 proxy deterministically using CREATE3
      * @param _implementation The implementation address
+     * @param _initData The initialization data for the proxy
      * @param _salt The salt for the deployment
      *  @return proxy The deployed proxy address
      */
-    function _deployERC1967ProxyDeterministic(address _implementation, bytes32 _salt) internal returns (address proxy) {
-        proxy = Create2.deploy(0, _salt, abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(_implementation, "")));
+    function _deployERC1967ProxyDeterministic(address _implementation, bytes memory _initData, bytes32 _salt) internal returns (address proxy) {
+        address predictedAddress = CREATE3.predictDeterministicAddress(_salt);
+        require(predictedAddress.code.length == 0, ALREADY_DEPLOYED(predictedAddress, _salt));
+
+        proxy = CREATE3.deployDeterministic(abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(_implementation, _initData)), _salt);
     }
 }
