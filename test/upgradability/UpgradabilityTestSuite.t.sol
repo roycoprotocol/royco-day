@@ -118,10 +118,14 @@ contract UpgradabilityTestSuite is BaseTest {
 
     function _fundProviders() internal {
         uint256 amount = 1_000_000e18;
-        deal(SNUSD, ALICE_ADDRESS, amount);
-        deal(SNUSD, BOB_ADDRESS, amount);
-        deal(SNUSD, CHARLIE_ADDRESS, amount);
-        deal(SNUSD, DAN_ADDRESS, amount);
+        deal(SNUSD, ST_ALICE_ADDRESS, amount);
+        deal(SNUSD, JT_ALICE_ADDRESS, amount);
+        deal(SNUSD, ST_BOB_ADDRESS, amount);
+        deal(SNUSD, JT_BOB_ADDRESS, amount);
+        deal(SNUSD, ST_CHARLIE_ADDRESS, amount);
+        deal(SNUSD, JT_CHARLIE_ADDRESS, amount);
+        deal(SNUSD, ST_DAN_ADDRESS, amount);
+        deal(SNUSD, JT_DAN_ADDRESS, amount);
     }
 
     function _deployNewImplementations() internal {
@@ -381,28 +385,28 @@ contract UpgradabilityTestSuite is BaseTest {
         uint256 stDepositAmount = 50_000e18;
 
         // Deposit to JT first (for coverage)
-        vm.startPrank(BOB_ADDRESS);
+        vm.startPrank(ALICE_ADDRESS);
         IERC20(SNUSD).approve(address(JT), jtDepositAmount);
-        JT.deposit(toTrancheUnits(jtDepositAmount), BOB_ADDRESS);
+        JT.deposit(toTrancheUnits(jtDepositAmount), ALICE_ADDRESS);
         vm.stopPrank();
 
         // Deposit to ST
-        vm.startPrank(ALICE_ADDRESS);
+        vm.startPrank(BOB_ADDRESS);
         IERC20(SNUSD).approve(address(ST), stDepositAmount);
-        uint256 shares = ST.deposit(toTrancheUnits(stDepositAmount), ALICE_ADDRESS);
+        uint256 shares = ST.deposit(toTrancheUnits(stDepositAmount), BOB_ADDRESS);
         vm.stopPrank();
 
         // Record state before upgrade
         uint256 totalSupplyBefore = ST.totalSupply();
-        uint256 aliceBalanceBefore = ST.balanceOf(ALICE_ADDRESS);
+        uint256 bobBalanceBefore = ST.balanceOf(BOB_ADDRESS);
 
         // Upgrade ST
         _executeUpgrade(address(ST), address(newSTImpl));
 
         // Verify state is preserved
         assertEq(ST.totalSupply(), totalSupplyBefore, "Total supply should be preserved");
-        assertEq(ST.balanceOf(ALICE_ADDRESS), aliceBalanceBefore, "Alice balance should be preserved");
-        assertEq(ST.balanceOf(ALICE_ADDRESS), shares, "Shares should match original deposit");
+        assertEq(ST.balanceOf(BOB_ADDRESS), bobBalanceBefore, "Bob balance should be preserved");
+        assertEq(ST.balanceOf(BOB_ADDRESS), shares, "Shares should match original deposit");
     }
 
     /// @notice Test operations still work after upgrade
@@ -419,9 +423,9 @@ contract UpgradabilityTestSuite is BaseTest {
         _executeUpgrade(address(JT), address(newJTImpl));
 
         // Deposit after upgrade should still work
-        vm.startPrank(BOB_ADDRESS);
+        vm.startPrank(JT_BOB_ADDRESS);
         IERC20(SNUSD).approve(address(JT), depositAmount);
-        uint256 sharesAfter = JT.deposit(toTrancheUnits(depositAmount), BOB_ADDRESS);
+        uint256 sharesAfter = JT.deposit(toTrancheUnits(depositAmount), JT_BOB_ADDRESS);
         vm.stopPrank();
 
         // Both deposits should have resulted in shares

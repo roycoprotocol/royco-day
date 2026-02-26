@@ -114,14 +114,14 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     }
 
     function _fundAllProviders() internal {
-        dealSTAsset(ALICE_ADDRESS, config.initialFunding);
-        dealSTAsset(BOB_ADDRESS, config.initialFunding);
-        dealSTAsset(CHARLIE_ADDRESS, config.initialFunding);
-        dealSTAsset(DAN_ADDRESS, config.initialFunding);
-        dealJTAsset(ALICE_ADDRESS, config.initialFunding);
-        dealJTAsset(BOB_ADDRESS, config.initialFunding);
-        dealJTAsset(CHARLIE_ADDRESS, config.initialFunding);
-        dealJTAsset(DAN_ADDRESS, config.initialFunding);
+        dealSTAsset(ST_ALICE_ADDRESS, config.initialFunding);
+        dealSTAsset(ST_BOB_ADDRESS, config.initialFunding);
+        dealSTAsset(ST_CHARLIE_ADDRESS, config.initialFunding);
+        dealSTAsset(ST_DAN_ADDRESS, config.initialFunding);
+        dealJTAsset(JT_ALICE_ADDRESS, config.initialFunding);
+        dealJTAsset(JT_BOB_ADDRESS, config.initialFunding);
+        dealJTAsset(JT_CHARLIE_ADDRESS, config.initialFunding);
+        dealJTAsset(JT_DAN_ADDRESS, config.initialFunding);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -593,7 +593,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         // Do another deposit to trigger fee share minting
-        _depositJT(BOB_ADDRESS, _minDepositAmount());
+        _depositJT(JT_BOB_ADDRESS, _minDepositAmount());
 
         uint256 feeRecipientSharesAfter = JT.balanceOf(PROTOCOL_FEE_RECIPIENT_ADDRESS);
 
@@ -762,10 +762,10 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
-        _depositJT(BOB_ADDRESS, _jtAmount);
+        _depositJT(JT_BOB_ADDRESS, _jtAmount);
 
         uint256 totalSupply = JT.totalSupply();
-        uint256 sumOfBalances = JT.balanceOf(ALICE_ADDRESS) + JT.balanceOf(BOB_ADDRESS);
+        uint256 sumOfBalances = JT.balanceOf(ALICE_ADDRESS) + JT.balanceOf(JT_BOB_ADDRESS);
 
         // Account for protocol fee shares
         uint256 feeShares = JT.balanceOf(PROTOCOL_FEE_RECIPIENT_ADDRESS);
@@ -1035,10 +1035,11 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Redeem protocol fee shares so all ST NAV is cleared
         if (stFeeShares > 0) {
-            // Grant LP role to protocol fee recipient so they can redeem
-            address[] memory feeRecipientArray = new address[](1);
-            feeRecipientArray[0] = PROTOCOL_FEE_RECIPIENT_ADDRESS;
-            LP_ROLES_SCRIPT.grantLPRoles(address(FACTORY), feeRecipientArray, LP_ROLE_ADMIN.privateKey);
+            // Grant LP roles to protocol fee recipient so they can redeem
+            vm.startPrank(LP_ROLE_ADMIN_ADDRESS);
+            FACTORY.grantRole(ST_LP_ROLE, PROTOCOL_FEE_RECIPIENT_ADDRESS, 0);
+            FACTORY.grantRole(JT_LP_ROLE, PROTOCOL_FEE_RECIPIENT_ADDRESS, 0);
+            vm.stopPrank();
 
             vm.prank(PROTOCOL_FEE_RECIPIENT_ADDRESS);
             ST.redeem(stFeeShares, PROTOCOL_FEE_RECIPIENT_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS);
@@ -1560,15 +1561,15 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     function testFuzz_allowance_canSpendAllowance_toRedeem(uint256 _jtAmount) external {
         _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 4);
 
-        // Deposit JT for ALICE
+        // Deposit JT for ALICE (JT_ALICE has JT_LP_ROLE)
         uint256 jtShares = _depositJT(ALICE_ADDRESS, _jtAmount);
 
-        // ALICE approves BOB to spend her shares
+        // ALICE approves JT_BOB to spend her shares
         vm.prank(ALICE_ADDRESS);
-        JT.approve(BOB_ADDRESS, jtShares);
+        JT.approve(JT_BOB_ADDRESS, jtShares);
 
         // Verify allowance
-        assertEq(JT.allowance(ALICE_ADDRESS, BOB_ADDRESS), jtShares, "Allowance should be set");
+        assertEq(JT.allowance(ALICE_ADDRESS, JT_BOB_ADDRESS), jtShares, "Allowance should be set");
 
         // Check that maxRedeem is equal to the deposited shares
         assertApproxEqAbs(
@@ -1578,35 +1579,35 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         );
         jtShares = JT.maxRedeem(ALICE_ADDRESS);
 
-        uint256 bobAssetsBefore = IERC20(config.jtAsset).balanceOf(BOB_ADDRESS);
+        uint256 bobAssetsBefore = IERC20(config.jtAsset).balanceOf(JT_BOB_ADDRESS);
 
-        // BOB (has allowance) redeems ALICE's shares - should succeed
-        vm.prank(BOB_ADDRESS);
-        AssetClaims memory claims = JT.redeem(jtShares, BOB_ADDRESS, ALICE_ADDRESS);
+        // JT_BOB (has allowance + JT_LP_ROLE) redeems ALICE's shares - should succeed
+        vm.prank(JT_BOB_ADDRESS);
+        AssetClaims memory claims = JT.redeem(jtShares, JT_BOB_ADDRESS, ALICE_ADDRESS);
 
         assertGt(toUint256(claims.jtAssets), 0, "Should receive JT assets");
-        assertGt(IERC20(config.jtAsset).balanceOf(BOB_ADDRESS), bobAssetsBefore, "BOB should receive assets");
+        assertGt(IERC20(config.jtAsset).balanceOf(JT_BOB_ADDRESS), bobAssetsBefore, "JT_BOB should receive assets");
 
         // Allowance should be spent
-        assertTrue(JT.allowance(ALICE_ADDRESS, BOB_ADDRESS) <= toUint256(ACCOUNTANT.getState().stNAVDustTolerance) + 1, "Allowance should be spent");
+        assertTrue(JT.allowance(ALICE_ADDRESS, JT_BOB_ADDRESS) <= toUint256(ACCOUNTANT.getState().stNAVDustTolerance) + 1, "Allowance should be spent");
     }
 
     /// @notice Test that allowance spending fails with insufficient allowance
     function testFuzz_allowance_insufficientAllowance_reverts(uint256 _jtAmount) external {
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 2, config.initialFunding / 4);
 
-        // Deposit JT for ALICE
+        // Deposit JT for ALICE (JT_ALICE has JT_LP_ROLE)
         uint256 jtShares = _depositJT(ALICE_ADDRESS, _jtAmount);
 
-        // ALICE approves BOB to spend half her shares
+        // ALICE approves JT_BOB to spend half her shares
         uint256 halfShares = jtShares / 2;
         vm.prank(ALICE_ADDRESS);
-        JT.approve(BOB_ADDRESS, halfShares);
+        JT.approve(JT_BOB_ADDRESS, halfShares);
 
-        // BOB tries to redeem more than his allowance - should revert
-        vm.prank(BOB_ADDRESS);
+        // JT_BOB tries to redeem more than his allowance - should revert
+        vm.prank(JT_BOB_ADDRESS);
         vm.expectRevert(); // ERC20InsufficientAllowance
-        JT.redeem(jtShares, BOB_ADDRESS, ALICE_ADDRESS);
+        JT.redeem(jtShares, JT_BOB_ADDRESS, ALICE_ADDRESS);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -2206,14 +2207,14 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Attempting to deposit ST should revert
         uint256 newStDeposit = _minDepositAmount();
-        dealSTAsset(CHARLIE_ADDRESS, newStDeposit);
+        dealSTAsset(ST_CHARLIE_ADDRESS, newStDeposit);
 
-        vm.startPrank(CHARLIE_ADDRESS);
+        vm.startPrank(ST_CHARLIE_ADDRESS);
         IERC20(config.stAsset).approve(address(ST), newStDeposit);
 
         // Should revert with ST_DEPOSIT_DISABLED_IN_LOSS
         vm.expectRevert();
-        ST.deposit(toTrancheUnits(newStDeposit), CHARLIE_ADDRESS);
+        ST.deposit(toTrancheUnits(newStDeposit), ST_CHARLIE_ADDRESS);
         vm.stopPrank();
     }
 
@@ -2283,12 +2284,13 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         assertEq(stIL, ZERO_NAV_UNITS, "ST should have no impermanent loss when JT absorbs all losses");
 
         // ST deposits should still be allowed
-        TRANCHE_UNIT maxDeposit = ST.maxDeposit(CHARLIE_ADDRESS);
+        TRANCHE_UNIT maxDeposit = ST.maxDeposit(ST_CHARLIE_ADDRESS);
         assertGt(maxDeposit, ZERO_TRANCHE_UNITS, "ST deposits should still be allowed when JT absorbs loss");
 
         // Should be able to deposit ST
         uint256 newStDeposit = _minDepositAmount();
-        _depositST(CHARLIE_ADDRESS, newStDeposit);
-        assertGt(ST.balanceOf(CHARLIE_ADDRESS), 0, "CHARLIE should have ST shares");
+        dealSTAsset(ST_CHARLIE_ADDRESS, newStDeposit);
+        _depositST(ST_CHARLIE_ADDRESS, newStDeposit);
+        assertGt(ST.balanceOf(ST_CHARLIE_ADDRESS), 0, "ST_CHARLIE should have ST shares");
     }
 }

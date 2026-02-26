@@ -100,10 +100,14 @@ contract PausabilityTestSuite is BaseTest {
 
     function _fundProviders() internal {
         uint256 amount = 1_000_000e18;
-        deal(SNUSD, ALICE_ADDRESS, amount);
-        deal(SNUSD, BOB_ADDRESS, amount);
-        deal(SNUSD, CHARLIE_ADDRESS, amount);
-        deal(SNUSD, DAN_ADDRESS, amount);
+        deal(SNUSD, ST_ALICE_ADDRESS, amount);
+        deal(SNUSD, JT_ALICE_ADDRESS, amount);
+        deal(SNUSD, ST_BOB_ADDRESS, amount);
+        deal(SNUSD, JT_BOB_ADDRESS, amount);
+        deal(SNUSD, ST_CHARLIE_ADDRESS, amount);
+        deal(SNUSD, JT_CHARLIE_ADDRESS, amount);
+        deal(SNUSD, ST_DAN_ADDRESS, amount);
+        deal(SNUSD, JT_DAN_ADDRESS, amount);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -302,9 +306,9 @@ contract PausabilityTestSuite is BaseTest {
         uint256 stAmount = 50_000e18;
 
         // First deposit JT for coverage
-        vm.startPrank(BOB_ADDRESS);
+        vm.startPrank(ALICE_ADDRESS);
         IERC20(SNUSD).approve(address(JT), jtAmount);
-        JT.deposit(toTrancheUnits(jtAmount), BOB_ADDRESS);
+        JT.deposit(toTrancheUnits(jtAmount), ALICE_ADDRESS);
         vm.stopPrank();
 
         // Pause ST
@@ -312,10 +316,10 @@ contract PausabilityTestSuite is BaseTest {
         IRoycoAuth(address(ST)).pause();
 
         // Try to deposit ST - should fail
-        vm.startPrank(ALICE_ADDRESS);
+        vm.startPrank(BOB_ADDRESS);
         IERC20(SNUSD).approve(address(ST), stAmount);
         vm.expectRevert(Pausable.EnforcedPause.selector);
-        ST.deposit(toTrancheUnits(stAmount), ALICE_ADDRESS);
+        ST.deposit(toTrancheUnits(stAmount), BOB_ADDRESS);
         vm.stopPrank();
     }
 
@@ -345,15 +349,15 @@ contract PausabilityTestSuite is BaseTest {
         uint256 stAmount = 50_000e18;
 
         // Deposit JT for coverage
-        vm.startPrank(BOB_ADDRESS);
+        vm.startPrank(ALICE_ADDRESS);
         IERC20(SNUSD).approve(address(JT), jtAmount);
-        JT.deposit(toTrancheUnits(jtAmount), BOB_ADDRESS);
+        JT.deposit(toTrancheUnits(jtAmount), ALICE_ADDRESS);
         vm.stopPrank();
 
         // Deposit ST
-        vm.startPrank(ALICE_ADDRESS);
+        vm.startPrank(BOB_ADDRESS);
         IERC20(SNUSD).approve(address(ST), stAmount);
-        uint256 shares = ST.deposit(toTrancheUnits(stAmount), ALICE_ADDRESS);
+        uint256 shares = ST.deposit(toTrancheUnits(stAmount), BOB_ADDRESS);
         vm.stopPrank();
 
         // Pause ST
@@ -361,9 +365,9 @@ contract PausabilityTestSuite is BaseTest {
         IRoycoAuth(address(ST)).pause();
 
         // Try to redeem - should fail
-        vm.prank(ALICE_ADDRESS);
+        vm.prank(BOB_ADDRESS);
         vm.expectRevert(Pausable.EnforcedPause.selector);
-        ST.redeem(shares, ALICE_ADDRESS, ALICE_ADDRESS);
+        ST.redeem(shares, BOB_ADDRESS, BOB_ADDRESS);
     }
 
     /// @notice Test that kernel sync is blocked when kernel is paused
@@ -503,9 +507,9 @@ contract PausabilityTestSuite is BaseTest {
         uint256 stAmount = 50_000e18;
 
         // First deposit JT for coverage (before pausing)
-        vm.startPrank(BOB_ADDRESS);
+        vm.startPrank(ALICE_ADDRESS);
         IERC20(SNUSD).approve(address(JT), jtAmount);
-        JT.deposit(toTrancheUnits(jtAmount), BOB_ADDRESS);
+        JT.deposit(toTrancheUnits(jtAmount), ALICE_ADDRESS);
         vm.stopPrank();
 
         // Pause JT only
@@ -513,9 +517,9 @@ contract PausabilityTestSuite is BaseTest {
         IRoycoAuth(address(JT)).pause();
 
         // ST deposit should still work
-        vm.startPrank(ALICE_ADDRESS);
+        vm.startPrank(BOB_ADDRESS);
         IERC20(SNUSD).approve(address(ST), stAmount);
-        uint256 shares = ST.deposit(toTrancheUnits(stAmount), ALICE_ADDRESS);
+        uint256 shares = ST.deposit(toTrancheUnits(stAmount), BOB_ADDRESS);
         vm.stopPrank();
 
         assertGt(shares, 0, "ST deposit should work when only JT is paused");

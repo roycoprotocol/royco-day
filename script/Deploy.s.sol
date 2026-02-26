@@ -409,9 +409,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         uint64[] memory stRoles = new uint64[](5);
 
         stSelectors[0] = IRoycoVaultTranche.deposit.selector;
-        stRoles[0] = LP_ROLE;
+        stRoles[0] = ST_LP_ROLE;
         stSelectors[1] = IRoycoVaultTranche.redeem.selector;
-        stRoles[1] = LP_ROLE;
+        stRoles[1] = ST_LP_ROLE;
         stSelectors[2] = IRoycoAuth.pause.selector;
         stRoles[2] = ADMIN_PAUSER_ROLE;
         stSelectors[3] = IRoycoAuth.unpause.selector;
@@ -422,8 +422,19 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         roles[index++] = IRoycoFactory.RolesTargetConfiguration({ target: _seniorTranche, selectors: stSelectors, roles: stRoles });
 
         // Junior Tranche roles (same as senior)
-        bytes4[] memory jtSelectors = stSelectors;
-        uint64[] memory jtRoles = stRoles;
+        bytes4[] memory jtSelectors = new bytes4[](5);
+        uint64[] memory jtRoles = new uint64[](5);
+
+        jtSelectors[0] = IRoycoVaultTranche.deposit.selector;
+        jtRoles[0] = JT_LP_ROLE;
+        jtSelectors[1] = IRoycoVaultTranche.redeem.selector;
+        jtRoles[1] = JT_LP_ROLE;
+        jtSelectors[2] = IRoycoAuth.pause.selector;
+        jtRoles[2] = ADMIN_PAUSER_ROLE;
+        jtSelectors[3] = IRoycoAuth.unpause.selector;
+        jtRoles[3] = ADMIN_PAUSER_ROLE;
+        jtSelectors[4] = UUPSUpgradeable.upgradeToAndCall.selector;
+        jtRoles[4] = ADMIN_UPGRADER_ROLE;
 
         roles[index++] = IRoycoFactory.RolesTargetConfiguration({ target: _juniorTranche, selectors: jtSelectors, roles: jtRoles });
 
@@ -479,10 +490,10 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     }
 
     /// @notice Generates role assignments from addresses
-    /// @dev LP_ROLE is included with assignee=address(0) so its admin role gets configured
+    /// @dev ST_LP_ROLE and JT_LP_ROLE are included with assignee=address(0) so their admin roles get configured
     /// @param _addresses The addresses for role assignments
     function generateRolesAssignments(RoleAssignmentAddresses memory _addresses) public pure returns (RoleAssignmentConfiguration[] memory roleAssignments) {
-        roleAssignments = new RoleAssignmentConfiguration[](12);
+        roleAssignments = new RoleAssignmentConfiguration[](13);
 
         // Get role configs from RolesConfiguration
         RoleConfig memory pauserConfig = getRoleConfig(ADMIN_PAUSER_ROLE);
@@ -493,7 +504,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         RoleConfig memory feeSetterConfig = getRoleConfig(ADMIN_PROTOCOL_FEE_SETTER_ROLE);
         RoleConfig memory oracleQuoterConfig = getRoleConfig(ADMIN_ORACLE_QUOTER_ROLE);
         RoleConfig memory lpRoleAdminConfig = getRoleConfig(LP_ROLE_ADMIN_ROLE);
-        RoleConfig memory lpRoleConfig = getRoleConfig(LP_ROLE);
+        RoleConfig memory stLpRoleConfig = getRoleConfig(ST_LP_ROLE);
+        RoleConfig memory jtLpRoleConfig = getRoleConfig(JT_LP_ROLE);
         RoleConfig memory roleGuardianConfig = getRoleConfig(GUARDIAN_ROLE);
         RoleConfig memory deployerConfig = getRoleConfig(DEPLOYER_ROLE);
         RoleConfig memory deployerAdminConfig = getRoleConfig(DEPLOYER_ROLE_ADMIN_ROLE);
@@ -545,24 +557,29 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             executionDelay: lpRoleAdminConfig.executionDelay
         });
 
-        // LP_ROLE with address(0) assignee - role admin will be set but no direct assignment
-        // LP roles are granted separately via GrantLPRolesScript
+        // ST_LP_ROLE with address(0) assignee - role admin will be set but no direct assignment
+        // LP roles are granted separately per-provider
         roleAssignments[8] = RoleAssignmentConfiguration({
-            role: LP_ROLE, roleAdminRole: lpRoleConfig.adminRole, assignee: address(0), executionDelay: lpRoleConfig.executionDelay
+            role: ST_LP_ROLE, roleAdminRole: stLpRoleConfig.adminRole, assignee: address(0), executionDelay: stLpRoleConfig.executionDelay
         });
 
+        // JT_LP_ROLE with address(0) assignee - role admin will be set but no direct assignment
         roleAssignments[9] = RoleAssignmentConfiguration({
+            role: JT_LP_ROLE, roleAdminRole: jtLpRoleConfig.adminRole, assignee: address(0), executionDelay: jtLpRoleConfig.executionDelay
+        });
+
+        roleAssignments[10] = RoleAssignmentConfiguration({
             role: GUARDIAN_ROLE,
             roleAdminRole: roleGuardianConfig.adminRole,
             assignee: _addresses.guardianAddress,
             executionDelay: roleGuardianConfig.executionDelay
         });
 
-        roleAssignments[10] = RoleAssignmentConfiguration({
+        roleAssignments[11] = RoleAssignmentConfiguration({
             role: DEPLOYER_ROLE, roleAdminRole: deployerConfig.adminRole, assignee: _addresses.deployerAddress, executionDelay: deployerConfig.executionDelay
         });
 
-        roleAssignments[11] = RoleAssignmentConfiguration({
+        roleAssignments[12] = RoleAssignmentConfiguration({
             role: DEPLOYER_ROLE_ADMIN_ROLE,
             roleAdminRole: deployerAdminConfig.adminRole,
             assignee: _addresses.deployerAdminAddress,

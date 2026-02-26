@@ -21,7 +21,8 @@ abstract contract RolesConfiguration {
     uint64 public constant ADMIN_UPGRADER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_UPGRADER_ROLE"))));
 
     /// Tranche roles
-    uint64 public constant LP_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_LP_ROLE"))));
+    uint64 public constant ST_LP_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ST_LP_ROLE"))));
+    uint64 public constant JT_LP_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_JT_LP_ROLE"))));
 
     /// Kernel roles
     uint64 public constant SYNC_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_SYNC_ROLE"))));
@@ -68,7 +69,7 @@ abstract contract RolesConfiguration {
             });
         } else if (role == ADMIN_UPGRADER_ROLE) {
             return RoleConfig({ adminRole: _ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 1 days });
-        } else if (role == LP_ROLE) {
+        } else if (role == ST_LP_ROLE || role == JT_LP_ROLE) {
             return RoleConfig({
                 adminRole: LP_ROLE_ADMIN_ROLE, // LP admin can manage LP roles
                 guardianRole: GUARDIAN_ROLE,
