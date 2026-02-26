@@ -161,10 +161,11 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     /// @inheritdoc IRoycoKernel
     function stPreviewRedeem(uint256 _shares) public view override(IRoycoKernel) returns (AssetClaims memory userClaim) {
         // Preview the total claims the senior tranche has on each tranche's assets and the total shares after minting any protocol fee shares post-sync
-        (, AssetClaims memory stNotionalClaims, uint256 totalShares) = previewSyncTrancheAccounting(TrancheType.SENIOR);
+        (SyncedAccountingState memory state, AssetClaims memory stNotionalClaims, uint256 totalShares) = previewSyncTrancheAccounting(TrancheType.SENIOR);
 
         // Calculate the user's claims based on the shares redeemed
-        // (userClaim,) = _previewRedeem(stNotionalClaims, _shares, totalShares);
+        userClaim = UtilsLib.scaleAssetClaims(stNotionalClaims, _shares, totalShares);
+        (userClaim,) = _applySeniorTrancheSelfLiquidationBonus(state, userClaim);
     }
 
     /// @inheritdoc IRoycoKernel
@@ -173,7 +174,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         (, AssetClaims memory jtNotionalClaims, uint256 totalShares) = previewSyncTrancheAccounting(TrancheType.JUNIOR);
 
         // Calculate the user's claims based on the shares redeemed
-        // (userClaim,) = _previewRedeem(jtNotionalClaims, _shares, totalShares);
+        userClaim = UtilsLib.scaleAssetClaims(jtNotionalClaims, _shares, totalShares);
     }
 
     // =============================
