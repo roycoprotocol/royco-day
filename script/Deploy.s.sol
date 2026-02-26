@@ -430,8 +430,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         roles[index++] = IRoycoFactory.RolesTargetConfiguration({ target: _juniorTranche, selectors: jtSelectors, roles: jtRoles });
 
         // Kernel roles
-        bytes4[] memory kernelSelectors = new bytes4[](7);
-        uint64[] memory kernelRoleValues = new uint64[](7);
+        bytes4[] memory kernelSelectors = new bytes4[](8);
+        uint64[] memory kernelRoleValues = new uint64[](8);
 
         kernelSelectors[0] = IRoycoKernel.setProtocolFeeRecipient.selector;
         kernelRoleValues[0] = ADMIN_KERNEL_ROLE;
@@ -447,12 +447,14 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         kernelRoleValues[5] = ADMIN_UPGRADER_ROLE;
         kernelSelectors[6] = IRoycoKernel.syncTrancheAccounting.selector;
         kernelRoleValues[6] = SYNC_ROLE;
+        kernelSelectors[7] = IRoycoKernel.setSeniorTrancheSelfLiquidationBonus.selector;
+        kernelRoleValues[7] = ADMIN_KERNEL_ROLE;
 
         roles[index++] = IRoycoFactory.RolesTargetConfiguration({ target: _kernel, selectors: kernelSelectors, roles: kernelRoleValues });
 
         // Accountant roles
-        bytes4[] memory accountantSelectors = new bytes4[](11);
-        uint64[] memory accountantRoleValues = new uint64[](11);
+        bytes4[] memory accountantSelectors = new bytes4[](14);
+        uint64[] memory accountantRoleValues = new uint64[](14);
 
         accountantSelectors[0] = IRoycoAccountant.setYDM.selector;
         accountantRoleValues[0] = ADMIN_ACCOUNTANT_ROLE;
@@ -476,6 +478,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         accountantRoleValues[9] = ADMIN_UPGRADER_ROLE;
         accountantSelectors[10] = IRoycoAccountant.setSeniorTrancheDustTolerance.selector;
         accountantRoleValues[10] = ADMIN_ACCOUNTANT_ROLE;
+        accountantSelectors[11] = IRoycoAccountant.setYieldShareProtocolFee.selector;
+        accountantRoleValues[11] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
+        accountantSelectors[12] = IRoycoAccountant.setCoverageConfiguration.selector;
+        accountantRoleValues[12] = ADMIN_ACCOUNTANT_ROLE;
+        accountantSelectors[13] = IRoycoAccountant.setJuniorTrancheDustTolerance.selector;
+        accountantRoleValues[13] = ADMIN_ACCOUNTANT_ROLE;
 
         roles[index++] = IRoycoFactory.RolesTargetConfiguration({ target: _accountant, selectors: accountantSelectors, roles: accountantRoleValues });
     }
