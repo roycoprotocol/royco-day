@@ -83,7 +83,7 @@ interface IRoycoVaultTranche is IERC20Metadata {
 
     /**
      * @notice Returns the tranche type indicating whether this is a senior or junior tranche
-     * @return trancheType An enum indicating SENIOR or JUNIOR tranche type
+     * @return trancheType An enumerator indicating SENIOR or JUNIOR tranche type
      */
     function TRANCHE_TYPE() external view returns (TrancheType trancheType);
 

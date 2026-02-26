@@ -30,21 +30,25 @@ interface IRoycoKernel {
      * @notice Initialization parameters for the Royco Kernel
      * @custom:field initialAuthority - The access manager for this kernel
      * @custom:field protocolFeeRecipient - The market's protocol fee recipient
+     * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when LLTV has been breached, scaled to WAD precision
      */
     struct RoycoKernelInitParams {
         address initialAuthority;
         address protocolFeeRecipient;
+        uint64 stSelfLiquidationBonusWAD;
     }
 
     /**
      * @notice Storage state for the Royco Kernel
      * @custom:storage-location erc7201:Royco.storage.RoycoKernelState
      * @custom:field protocolFeeRecipient - The market's configured protocol fee recipient
+     * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when LLTV has been breached, scaled to WAD precision
      * @custom:field stOwnedYieldBearingAssets - The yield bearing assets held by the ST, in ST's asset units
      * @custom:field jtOwnedYieldBearingAssets - The yield bearing assets held by the JT, in JT's asset units
      */
     struct RoycoKernelState {
         address protocolFeeRecipient;
+        uint64 stSelfLiquidationBonusWAD;
         TRANCHE_UNIT stOwnedYieldBearingAssets;
         TRANCHE_UNIT jtOwnedYieldBearingAssets;
     }
@@ -54,6 +58,12 @@ interface IRoycoKernel {
      * @param protocolFeeRecipient The new protocol fee recipient
      */
     event ProtocolFeeRecipientUpdated(address protocolFeeRecipient);
+
+    /**
+     * @notice Emitted when the ST self-liquidation bonus is updated
+     * @param stSelfLiquidationBonusWAD The new ST self-liquidation bonus remitted to redeeming ST LPs when LLTV has been breached
+     */
+    event SeniorTrancheSelfLiquidationBonusUpdated(uint64 stSelfLiquidationBonusWAD);
 
     /// @notice Thrown when any of the required initialization params are null
     error NULL_ADDRESS();
@@ -108,9 +118,17 @@ interface IRoycoKernel {
 
     /**
      * @notice Sets the new protocol fee recipient
+     * @dev Only callable by a designated admin
      * @param _protocolFeeRecipient The address of the new protocol fee recipient
      */
     function setProtocolFeeRecipient(address _protocolFeeRecipient) external;
+
+    /**
+     * @notice Sets the ST self-liquidation bonus remitted to redeeming ST LPs when LLTV has been breached
+     * @dev Only callable by a designated admin
+     * @param _stSelfLiquidationBonusWAD The ST self liquidation bonus, scaled to WAD precision
+     */
+    function setSeniorTrancheSelfLiquidationBonus(uint64 _stSelfLiquidationBonusWAD) external;
 
     /**
      * @notice Retrieves the state of the Royco kernel
@@ -156,7 +174,7 @@ interface IRoycoKernel {
     /**
      * @notice Previews a synchronization of the raw and effective NAVs of both tranches
      * @dev Does not mutate any state
-     * @param _trancheType An enum indicating which tranche to execute this preview for
+     * @param _trancheType An enumerator indicating which tranche to execute this preview for
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      * @return claims The claims on ST and JT assets that the specified tranche has denominated in tranche-native units
      * @return totalTrancheShares The total number of shares that exist in the specified tranche after minting any protocol fee shares post-sync

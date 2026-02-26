@@ -235,14 +235,14 @@ interface IRoycoAccountant {
      * @param _op The operation being executed in between the pre and post operation synchronizations
      * @param _stRawNAV The post-op senior tranche's raw NAV
      * @param _jtRawNAV The post-op junior tranche's raw NAV
-     * @param _stRedemptionBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions only
+     * @param _stSelfLiquidationBonusNAV The self-liquidation bonus remitted to an ST LP on redemption after LLTV has been breached, sourced from JT effective NAV
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function postOpSyncTrancheAccounting(
         Operation _op,
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
-        NAV_UNIT _stRedemptionBonusNAV
+        NAV_UNIT _stSelfLiquidationBonusNAV
     )
         external
         returns (SyncedAccountingState memory state);
@@ -254,14 +254,14 @@ interface IRoycoAccountant {
      * @param _op The operation being executed in between the pre and post operation synchronizations
      * @param _stRawNAV The post-op senior tranche's raw NAV
      * @param _jtRawNAV The post-op junior tranche's raw NAV
-     * @param _stRedemptionBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions only
+     * @param _stSelfLiquidationBonusNAV The self-liquidation bonus remitted to an ST LP on redemption after LLTV has been breached, sourced from JT effective NAV
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function postOpSyncTrancheAccountingAndEnforceCoverage(
         Operation _op,
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
-        NAV_UNIT _stRedemptionBonusNAV
+        NAV_UNIT _stSelfLiquidationBonusNAV
     )
         external
         returns (SyncedAccountingState memory state);

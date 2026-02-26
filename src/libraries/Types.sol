@@ -65,7 +65,9 @@ struct AssetClaims {
  * @custom:field lltvWAD - The liquidation loan to value (LLTV) for this market, scaled to WAD precision
  */
 struct SyncedAccountingState {
+    // The market's current operating state (PERPETUAL or FIXED_TERM)
     MarketState marketState;
+    // The market's marked-to-market NAVs, impermanent losses, and fees
     NAV_UNIT stRawNAV;
     NAV_UNIT jtRawNAV;
     NAV_UNIT stEffectiveNAV;
@@ -74,11 +76,11 @@ struct SyncedAccountingState {
     NAV_UNIT jtImpermanentLoss;
     NAV_UNIT stProtocolFeeAccrued;
     NAV_UNIT jtProtocolFeeAccrued;
-    // Additional data about the market's post-sync state
+    // The market's derived state metrics
     uint256 utilizationWAD;
     uint256 ltvWAD;
     uint32 fixedTermEndTimestamp;
-    // Market's coverage configuration
+    // The market's coverage configuration
     uint256 coverageWAD;
     uint256 betaWAD;
     uint256 lltvWAD;
