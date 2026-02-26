@@ -194,10 +194,10 @@ abstract contract DeploymentConfig {
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.053e18,
-                    jtYieldShareAtTargetUtilWAD: 0.053e18,
-                    jtYieldShareAtFullUtilWAD: 1e18,
-                    maxAdaptationSpeedWAD: uint64(10e18 / uint256(365 days))
+                    jtYieldShareAtZeroUtilWAD: 0.05e18,
+                    jtYieldShareAtTargetUtilWAD: 0.05e18,
+                    jtYieldShareAtFullUtilWAD: 0.4e18,
+                    maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
                 })
             )
         });
@@ -226,10 +226,10 @@ abstract contract DeploymentConfig {
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.1236e18,
-                    jtYieldShareAtTargetUtilWAD: 0.1236e18,
-                    jtYieldShareAtFullUtilWAD: 1e18,
-                    maxAdaptationSpeedWAD: uint64(10e18 / uint256(365 days))
+                    jtYieldShareAtZeroUtilWAD: 0.06e18,
+                    jtYieldShareAtTargetUtilWAD: 0.06e18,
+                    jtYieldShareAtFullUtilWAD: 0.4e18,
+                    maxAdaptationSpeedWAD: uint64(50e18 / uint256(365 days))
                 })
             )
         });
@@ -258,10 +258,10 @@ abstract contract DeploymentConfig {
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.1357e18,
-                    jtYieldShareAtTargetUtilWAD: 0.1357e18,
-                    jtYieldShareAtFullUtilWAD: 1e18,
-                    maxAdaptationSpeedWAD: uint64(10e18 / uint256(365 days))
+                    jtYieldShareAtZeroUtilWAD: 0.01e18,
+                    jtYieldShareAtTargetUtilWAD: 0.01e18,
+                    jtYieldShareAtFullUtilWAD: 0.5e18,
+                    maxAdaptationSpeedWAD: uint64(50e18 / uint256(365 days))
                 })
             )
         });
@@ -290,10 +290,10 @@ abstract contract DeploymentConfig {
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.0661e18,
-                    jtYieldShareAtTargetUtilWAD: 0.0661e18,
-                    jtYieldShareAtFullUtilWAD: 1e18,
-                    maxAdaptationSpeedWAD: uint64(10e18 / uint256(365 days))
+                    jtYieldShareAtZeroUtilWAD: 0.05e18,
+                    jtYieldShareAtTargetUtilWAD: 0.05e18,
+                    jtYieldShareAtFullUtilWAD: 0.4e18,
+                    maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
                 })
             )
         });
