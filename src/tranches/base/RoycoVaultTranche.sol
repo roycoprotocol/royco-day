@@ -30,23 +30,18 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     /// @inheritdoc IRoycoVaultTranche
     address public immutable override(IRoycoVaultTranche) KERNEL;
 
-    /// @inheritdoc IRoycoVaultTranche
-    bytes32 public immutable override(IRoycoVaultTranche) MARKET_ID;
-
     /**
      * @notice Constructs the Royco vault tranche
      * @param _asset The underlying asset for the tranche
      * @param _kernel The kernel that handles strategy logic
-     * @param _marketId The identifier of the Royco market this tranche is linked to
      */
-    constructor(address _asset, address _kernel, bytes32 _marketId) {
-        // Ensure that the asset, kernel, and market ID are not null
-        require(_asset != address(0) && _kernel != address(0) && _marketId != bytes32(0), NULL_ADDRESS());
+    constructor(address _asset, address _kernel) {
+        // Ensure that the asset and kernel are not null
+        require(_asset != address(0) && _kernel != address(0), NULL_ADDRESS());
 
         // Set the immutable addresses
         ASSET = _asset;
         KERNEL = _kernel;
-        MARKET_ID = _marketId;
     }
 
     /**

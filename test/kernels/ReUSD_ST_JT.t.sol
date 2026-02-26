@@ -240,8 +240,6 @@ contract reUSD_Test is AbstractKernelTestSuite {
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
         ProtocolConfig memory cfg = getProtocolConfig();
 
-        bytes32 marketId = keccak256(abi.encodePacked(cfg.name, "-", cfg.name, "-", vm.getBlockTimestamp()));
-
         DeployScript.ReUSDSTReUSDJTKernelParams memory kernelParams =
             DeployScript.ReUSDSTReUSDJTKernelParams({ reusd: REUSD, reusdUsdQuoteToken: USDC, insuranceCapitalLayer: ICL });
 
@@ -257,7 +255,6 @@ contract reUSD_Test is AbstractKernelTestSuite {
 
         DeployScript.DeploymentParams memory params = DeployScript.DeploymentParams({
             factoryAdmin: OWNER_ADDRESS,
-            marketId: marketId,
             seniorTrancheName: string(abi.encodePacked("Royco Senior ", cfg.name)),
             seniorTrancheSymbol: string(abi.encodePacked("RS-", cfg.name)),
             juniorTrancheName: string(abi.encodePacked("Royco Junior ", cfg.name)),

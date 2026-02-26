@@ -390,8 +390,6 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
         ProtocolConfig memory cfg = getProtocolConfig();
 
-        bytes32 marketId = keccak256(abi.encodePacked(cfg.name, "-", cfg.name, "-", vm.getBlockTimestamp()));
-
         // Get initial conversion rate (vault asset to NAV, in WAD precision)
         uint256 initialConversionRate = _getInitialConversionRate();
 
@@ -410,7 +408,6 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
 
         DeployScript.DeploymentParams memory params = DeployScript.DeploymentParams({
             factoryAdmin: OWNER_ADDRESS,
-            marketId: marketId,
             seniorTrancheName: string(abi.encodePacked("Royco Senior ", cfg.name)),
             seniorTrancheSymbol: string(abi.encodePacked("RS-", cfg.name)),
             juniorTrancheName: string(abi.encodePacked("Royco Junior ", cfg.name)),

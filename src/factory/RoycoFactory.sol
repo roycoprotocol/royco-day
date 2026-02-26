@@ -196,7 +196,6 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
         require(bytes(_params.seniorTrancheSymbol).length > 0, INVALID_SYMBOL());
         require(bytes(_params.juniorTrancheName).length > 0, INVALID_NAME());
         require(bytes(_params.juniorTrancheSymbol).length > 0, INVALID_SYMBOL());
-        require(_params.marketId != bytes32(0), INVALID_MARKET_ID());
         // Validate the implementation addresses
         require(address(_params.kernelImplementation) != address(0), INVALID_KERNEL_IMPLEMENTATION());
         require(address(_params.accountantImplementation) != address(0), INVALID_ACCOUNTANT_IMPLEMENTATION());

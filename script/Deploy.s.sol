@@ -118,7 +118,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         IRoycoVaultTranche juniorTranche;
         IRoycoAccountant accountant;
         IRoycoKernel kernel;
-        bytes32 marketId;
     }
 
     /// @notice Addresses for role assignments
@@ -141,7 +140,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         // Factory params
         address factoryAdmin;
         // Market params
-        bytes32 marketId;
         string seniorTrancheName;
         string seniorTrancheSymbol;
         string juniorTrancheName;
@@ -209,7 +207,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         // Build DeploymentParams
         DeploymentParams memory params = DeploymentParams({
             factoryAdmin: chainConfig.factoryAdmin,
-            marketId: keccak256(abi.encodePacked(marketConfig.marketName, "-", block.timestamp)),
             seniorTrancheName: marketConfig.seniorTrancheName,
             seniorTrancheSymbol: marketConfig.seniorTrancheSymbol,
             juniorTrancheName: marketConfig.juniorTrancheName,
@@ -247,8 +244,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         // Chain & Market Info
         console2.log("--- Chain & Market Info ---");
         console2.log("Chain ID:", block.chainid);
-        console2.log("Market ID:");
-        console2.logBytes32(params.marketId);
         console2.log("");
 
         // Factory Config
@@ -343,8 +338,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             seniorTranche: market.seniorTranche,
             juniorTranche: market.juniorTranche,
             accountant: market.accountant,
-            kernel: market.kernel,
-            marketId: _params.marketId
+            kernel: market.kernel
         });
 
         // Log all deployed contracts
@@ -360,7 +354,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         console2.log("Junior Tranche (Proxy):", address(result.juniorTranche));
         console2.log("Accountant (Proxy):", address(result.accountant));
         console2.log("Kernel (Proxy):", address(result.kernel));
-        console2.log("Market ID:", uint256(_params.marketId));
         console2.log("========================");
 
         vm.stopBroadcast();
@@ -610,7 +603,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         )
     {
         // Precompute expected proxy addresses using salt derived from market ID
-        bytes32 salt = keccak256(abi.encodePacked(MARKET_DEPLOYMENT_SALT, _params.marketId));
+        bytes32 salt = keccak256(abi.encodePacked(MARKET_DEPLOYMENT_SALT, _params.seniorTrancheName, _params.juniorTrancheName));
 
         // Predict the deterministic addresses of the contracts
         // The salt is unique for each contract type to prevent CREATE3 collisions
@@ -624,10 +617,10 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         address expectedKernelAddress = factory.predictDeterministicAddress(kernelSalt);
 
         // Deploy the senior tranche implementation
-        stImpl = _deploySTTrancheImpl(_params.seniorAsset, expectedKernelAddress, _params.marketId);
+        stImpl = _deploySTTrancheImpl(_params.seniorAsset, expectedKernelAddress);
 
         // Deploy the junior tranche implementation
-        jtImpl = _deployJTTrancheImpl(_params.juniorAsset, expectedKernelAddress, _params.marketId);
+        jtImpl = _deployJTTrancheImpl(_params.juniorAsset, expectedKernelAddress);
 
         // Deploy the accountant implementation
         accountantImpl = _deployAccountantImpl(expectedKernelAddress);
@@ -666,7 +659,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             seniorTrancheSymbol: _params.seniorTrancheSymbol,
             juniorTrancheName: _params.juniorTrancheName,
             juniorTrancheSymbol: _params.juniorTrancheSymbol,
-            marketId: _params.marketId,
             seniorTrancheImplementation: IRoycoVaultTranche(address(stImpl)),
             juniorTrancheImplementation: IRoycoVaultTranche(address(jtImpl)),
             kernelImplementation: IRoycoKernel(address(kernelImpl)),
@@ -709,8 +701,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
 
     /// @notice Deploys ST tranche implementation
     /// @return The deployed ST tranche implementation
-    function _deploySTTrancheImpl(address _asset, address _kernel, bytes32 _marketId) internal returns (RoycoSeniorTranche) {
-        bytes memory creationCode = abi.encodePacked(type(RoycoSeniorTranche).creationCode, abi.encode(_asset, _kernel, _marketId));
+    function _deploySTTrancheImpl(address _asset, address _kernel) internal returns (RoycoSeniorTranche) {
+        bytes memory creationCode = abi.encodePacked(type(RoycoSeniorTranche).creationCode, abi.encode(_asset, _kernel));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(ST_TRANCHE_IMPL_SALT, creationCode, false);
         if (alreadyDeployed) {
@@ -723,8 +715,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
 
     /// @notice Deploys JT tranche implementation
     /// @return The deployed JT tranche implementation
-    function _deployJTTrancheImpl(address _asset, address _kernel, bytes32 _marketId) internal returns (RoycoJuniorTranche) {
-        bytes memory creationCode = abi.encodePacked(type(RoycoJuniorTranche).creationCode, abi.encode(_asset, _kernel, _marketId));
+    function _deployJTTrancheImpl(address _asset, address _kernel) internal returns (RoycoJuniorTranche) {
+        bytes memory creationCode = abi.encodePacked(type(RoycoJuniorTranche).creationCode, abi.encode(_asset, _kernel));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(JT_TRANCHE_IMPL_SALT, creationCode, false);
         if (alreadyDeployed) {

@@ -133,7 +133,6 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
     IRoycoVaultTranche internal JT;
     IRoycoKernel internal KERNEL;
     IRoycoAccountant internal ACCOUNTANT;
-    bytes32 internal MARKET_ID;
 
     // -----------------------------------------
     // Royco Deployments Parameters
@@ -330,8 +329,6 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
 
         FACTORY = _deploymentResult.factory;
         vm.label(address(FACTORY), "Factory");
-
-        MARKET_ID = _deploymentResult.marketId;
     }
 
     function _initWallet(string memory _name, uint256 _amount) internal returns (Vm.Wallet memory) {

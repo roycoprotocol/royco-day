@@ -189,8 +189,6 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         view
         returns (DeployScript.DeploymentParams memory)
     {
-        bytes32 marketID = keccak256(abi.encodePacked(_seniorTrancheName, _juniorTrancheName, vm.getBlockTimestamp()));
-
         // Build kernel-specific params
         DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams memory kernelParams =
             DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 });
@@ -208,7 +206,6 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
 
         DeployScript.DeploymentParams memory params;
         params.factoryAdmin = OWNER_ADDRESS;
-        params.marketId = marketID;
         params.seniorTrancheName = _seniorTrancheName;
         params.seniorTrancheSymbol = _seniorTrancheSymbol;
         params.juniorTrancheName = _juniorTrancheName;
@@ -294,9 +291,6 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         assertTrue(address(result1.accountant) != address(result2.accountant), "Accountants should be different");
         assertTrue(address(result1.seniorTranche) != address(result2.seniorTranche), "Senior tranches should be different");
         assertTrue(address(result1.juniorTranche) != address(result2.juniorTranche), "Junior tranches should be different");
-
-        // Market IDs should be different
-        assertTrue(result1.marketId != result2.marketId, "Market IDs should be different");
     }
 
     /// @notice Test that the deployment script properly configures roles on both runs

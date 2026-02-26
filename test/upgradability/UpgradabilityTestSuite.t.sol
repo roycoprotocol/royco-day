@@ -92,7 +92,6 @@ contract UpgradabilityTestSuite is BaseTest {
 
         DeployScript.DeploymentParams memory params = DeployScript.DeploymentParams({
             factoryAdmin: OWNER_ADDRESS,
-            marketId: marketId,
             seniorTrancheName: "Royco Senior sNUSD",
             seniorTrancheSymbol: "RS-sNUSD",
             juniorTrancheName: "Royco Junior sNUSD",
@@ -132,10 +131,10 @@ contract UpgradabilityTestSuite is BaseTest {
     }
 
     function _deployNewImplementations() internal {
-        newSTImpl = new RoycoSeniorTranche(SNUSD, address(KERNEL), MARKET_ID);
+        newSTImpl = new RoycoSeniorTranche(SNUSD, address(KERNEL));
         vm.label(address(newSTImpl), "NewSTImpl");
 
-        newJTImpl = new RoycoJuniorTranche(SNUSD, address(KERNEL), MARKET_ID);
+        newJTImpl = new RoycoJuniorTranche(SNUSD, address(KERNEL));
         vm.label(address(newJTImpl), "NewJTImpl");
 
         newAccountantImpl = new RoycoAccountant(address(KERNEL));

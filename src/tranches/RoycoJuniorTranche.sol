@@ -11,7 +11,7 @@ import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
  * @dev Inherits from RoycoVaultTranche and specifies JUNIOR as the tranche type
  */
 contract RoycoJuniorTranche is RoycoVaultTranche {
-    constructor(address _asset, address _kernel, bytes32 _marketId) RoycoVaultTranche(_asset, _kernel, _marketId) { }
+    constructor(address _asset, address _kernel) RoycoVaultTranche(_asset, _kernel) { }
 
     /**
      * @notice Initializes the Royco junior tranche
