@@ -681,13 +681,12 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         TRANCHE_UNIT stAssetsToClaim = _claims.stAssets;
         TRANCHE_UNIT jtAssetsToClaim = _claims.jtAssets;
 
-        // Debit the yield bearing assets being withdrawn from the junior tranche
+        // Debit the ST and JT assets being withdrawn from each tranche if non-zero
         RoycoKernelState storage $ = _getRoycoKernelStorage();
-        // Account for the ST and JT assets being withdrawn from each tranche if non-zero
         if (stAssetsToClaim != ZERO_TRANCHE_UNITS) $.stOwnedYieldBearingAssets = $.stOwnedYieldBearingAssets - stAssetsToClaim;
         if (jtAssetsToClaim != ZERO_TRANCHE_UNITS) $.jtOwnedYieldBearingAssets = $.jtOwnedYieldBearingAssets - jtAssetsToClaim;
 
-        // Transfer the yield bearing assets being withdrawn to the receiver
+        // Credit the yield bearing assets being withdrawn to the receiver
         // Do one batch transfer if they are the same asset, else do two separate transfers
         if (ST_ASSET == JT_ASSET) {
             IERC20(ST_ASSET).safeTransfer(_receiver, toUint256(stAssetsToClaim + jtAssetsToClaim));
