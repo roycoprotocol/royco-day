@@ -9,7 +9,7 @@ import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/M
 import { DeployScript } from "../../../script/Deploy.s.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { IRoycoAccountant } from "../../../src/interfaces/IRoycoAccountant.sol";
-import { IRoycoVaultTranche } from "../../../src/interfaces/tranche/IRoycoVaultTranche.sol";
+import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../../src/libraries/Constants.sol";
 import { AssetClaims, MarketState, TrancheType } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";

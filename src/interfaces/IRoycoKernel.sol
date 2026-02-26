@@ -65,9 +65,6 @@ interface IRoycoKernel {
      */
     event SeniorTrancheSelfLiquidationBonusUpdated(uint64 stSelfLiquidationBonusWAD);
 
-    /// @notice Thrown when any of the required initialization params are null
-    error NULL_ADDRESS();
-
     /// @notice Thrown when the tranche and the kernel's corresponding tranche assets don't match
     error TRANCHE_AND_KERNEL_ASSETS_MISMATCH();
 

@@ -6,6 +6,7 @@ import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/E
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoAccountant } from "../../src/accountant/RoycoAccountant.sol";
 import { IRoycoAccountant, Operation } from "../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { MAX_PROTOCOL_FEE_WAD, MIN_COVERAGE_WAD, WAD, ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
 import { MarketState, SyncedAccountingState } from "../../src/libraries/Types.sol";
 import { NAV_UNIT, UnitsMathLib, toUint256 } from "../../src/libraries/Units.sol";
@@ -1500,7 +1501,7 @@ contract RoycoAccountantRevertTest is BaseTest {
         });
 
         bytes memory initData = abi.encodeCall(RoycoAccountant.initialize, (params, address(accessManager)));
-        vm.expectRevert(IRoycoAccountant.NULL_ADDRESS.selector);
+        vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
         new ERC1967Proxy(address(accountantImpl), initData);
     }
 

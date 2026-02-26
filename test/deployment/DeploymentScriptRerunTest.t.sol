@@ -10,7 +10,7 @@ import { RolesConfiguration, RoycoFactory } from "../../src/factory/RoycoFactory
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
-import { IRoycoVaultTranche } from "../../src/interfaces/tranche/IRoycoVaultTranche.sol";
+import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
 import { ERC4626Mock } from "../mock/ERC4626Mock.sol";
 

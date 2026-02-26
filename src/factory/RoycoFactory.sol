@@ -9,7 +9,7 @@ import { CREATE3 } from "../../lib/solady/src/utils/CREATE3.sol";
 import { IRoycoAccountant } from "../interfaces/IRoycoAccountant.sol";
 import { IRoycoFactory } from "../interfaces/IRoycoFactory.sol";
 import { IRoycoKernel } from "../interfaces/IRoycoKernel.sol";
-import { IRoycoVaultTranche } from "../interfaces/tranche/IRoycoVaultTranche.sol";
+import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 import { RolesConfiguration } from "./RolesConfiguration.sol";
 
 /**

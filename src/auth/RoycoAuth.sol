@@ -11,6 +11,7 @@ import { IRoycoAuth } from "../interfaces/IRoycoAuth.sol";
  */
 abstract contract RoycoAuth is AccessManagedUpgradeable, PausableUpgradeable, IRoycoAuth {
     function __RoycoAuth_init(address _initialAuthority) internal onlyInitializing {
+        require(_initialAuthority != address(0), NULL_ADDRESS());
         __AccessManaged_init(_initialAuthority);
         __Pausable_init();
     }

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { AssetClaims, TrancheType } from "../../libraries/Types.sol";
-import { NAV_UNIT, TRANCHE_UNIT } from "../../libraries/Units.sol";
+import { IERC20Metadata } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import { AssetClaims, TrancheType } from "../libraries/Types.sol";
+import { NAV_UNIT, TRANCHE_UNIT } from "../libraries/Units.sol";
 
 /**
  * @title IRoycoVaultTranche
@@ -11,6 +11,17 @@ import { NAV_UNIT, TRANCHE_UNIT } from "../../libraries/Units.sol";
  * @dev Extends ERC20 with vault-like deposit/redeem functionality and protocol fee share minting
  */
 interface IRoycoVaultTranche is IERC20Metadata {
+    /**
+     * @custom:field name - The name of the tranche share token (should be prefixed with "Royco-ST" or "Royco-JT")
+     * @custom:field symbol - The symbol of the tranche share token (should be prefixed with "ST" or "JT")
+     * @custom:field initialAuthority - The initial authority for the tranche
+     */
+    struct RoycoTrancheInitParams {
+        string name;
+        string symbol;
+        address initialAuthority;
+    }
+
     /**
      * @notice Emitted when a deposit is made into the tranche
      * @param sender The address that initiated the deposit
@@ -48,20 +59,6 @@ interface IRoycoVaultTranche is IERC20Metadata {
 
     /// @notice Thrown when the value allocated from a deposit does not match the expected value
     error INVALID_VALUE_ALLOCATED();
-
-    /// @notice Thrown when the asset, kernel, or market ID is null
-    error NULL_ADDRESS();
-
-    /**
-     * @custom:field name - The name of the tranche share token (should be prefixed with "Royco-ST" or "Royco-JT")
-     * @custom:field symbol - The symbol of the tranche share token (should be prefixed with "ST" or "JT")
-     * @custom:field initialAuthority - The initial authority for the tranche
-     */
-    struct TrancheDeploymentParams {
-        string name;
-        string symbol;
-        address initialAuthority;
-    }
 
     /**
      * @notice Returns the address of the kernel that this tranche is associated with

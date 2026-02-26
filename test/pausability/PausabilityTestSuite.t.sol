@@ -10,7 +10,7 @@ import { DeployScript } from "../../script/Deploy.s.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
-import { IRoycoVaultTranche } from "../../src/interfaces/tranche/IRoycoVaultTranche.sol";
+import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
 import { TRANCHE_UNIT, toTrancheUnits } from "../../src/libraries/Units.sol";
 

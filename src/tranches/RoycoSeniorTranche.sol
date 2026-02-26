@@ -17,7 +17,7 @@ contract RoycoSeniorTranche is RoycoVaultTranche {
      * @notice Initializes the Royco senior tranche
      * @param _stParams Deployment parameters including name, symbol, kernel, and kernel initialization data for the senior tranche
      */
-    function initialize(TrancheDeploymentParams calldata _stParams) external initializer {
+    function initialize(RoycoTrancheInitParams calldata _stParams) external initializer {
         // Initialize the Royco Senior Tranche
         __RoycoTranche_init(_stParams);
     }
