@@ -6,6 +6,7 @@ import { IERC20Metadata } from "../../lib/openzeppelin-contracts/contracts/token
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IIdleCDO } from "../../src/interfaces/external/idle-finance/IIdleCDO.sol";
 import { IdleCdoAA_ST_IdleCdoAA_JT_Kernel } from "../../src/kernels/IdleCdoAA_ST_IdleCdoAA_JT_Kernel.sol";
 import { IdenticalAssetsOracleQuoter } from "../../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
@@ -81,7 +82,7 @@ contract IdleCdoAAKernelTest is AbstractKernelTestSuite {
         });
 
         // Build role assignments using the centralized function
-        DeployScript.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
         // Build deployment params
         DeployScript.DeploymentParams memory params = DeployScript.DeploymentParams({

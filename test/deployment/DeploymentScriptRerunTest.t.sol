@@ -8,6 +8,7 @@ import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/I
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { RolesConfiguration, RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/tranche/IRoycoVaultTranche.sol";
 import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
@@ -162,7 +163,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         return wallet;
     }
 
-    function _generateRoleAssignments() internal view returns (DeployScript.RoleAssignmentConfiguration[] memory) {
+    function _generateRoleAssignments() internal view returns (IRoycoFactory.RoleAssignmentConfiguration[] memory) {
         return DEPLOY_SCRIPT.generateRolesAssignments(
             DeployScript.RoleAssignmentAddresses({
                 pauserAddress: PAUSER_ADDRESS,
@@ -206,7 +207,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         });
 
         // Build role assignments
-        DeployScript.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
         DeployScript.DeploymentParams memory params;
         params.factoryAdmin = OWNER_ADDRESS;
@@ -366,9 +367,6 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         address expectedJT = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-JT")));
         address expectedKernel = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-KERNEL")));
         address expectedAccountant = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-ACCOUNTANT")));
-
-        // Build roles configuration
-        DEPLOY_SCRIPT.buildRolesTargetConfiguration(expectedST, expectedJT, expectedKernel, expectedAccountant);
 
         // Note: For a full test, we would need to build all the initialization data
         // This test demonstrates that the DEPLOYER role is properly configured

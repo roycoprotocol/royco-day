@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20Metadata, IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
 
 import { DeployScript } from "../../../../script/Deploy.s.sol";
+import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { IdenticalERC4626SharesAdminOracleQuoter_Kernel } from "../../../../src/kernels/IdenticalERC4626SharesAdminOracleQuoter_Kernel.sol";
 import { WAD, WAD, WAD_DECIMALS } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
@@ -405,7 +406,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
         });
 
         // Build role assignments using the centralized function
-        DeployScript.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
         DeployScript.DeploymentParams memory params = DeployScript.DeploymentParams({
             factoryAdmin: OWNER_ADDRESS,

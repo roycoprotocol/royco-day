@@ -11,6 +11,9 @@ interface IRoycoFactory {
     /// @notice Thrown when an already deployed contract is predicted
     error ALREADY_DEPLOYED(address deployedAddress, bytes32 salt);
 
+    /// @notice Thrown when an invalid implementation is provided
+    error INVALID_IMPLEMENTATION();
+
     /// @notice Thrown when an invalid name is provided
     error INVALID_NAME();
 
@@ -173,6 +176,20 @@ interface IRoycoFactory {
     }
 
     /**
+     * @notice Configuration for assigning a role to an address
+     * @custom:field role - The role to assign
+     * @custom:field roleAdminRole - The admin role that can assign the role, 0 if none
+     * @custom:field assignee - The address to assign the role to
+     * @custom:field executionDelay - The delay after which the role can be assigned
+     */
+    struct RoleAssignmentConfiguration {
+        uint64 role;
+        uint64 roleAdminRole;
+        address assignee;
+        uint32 executionDelay;
+    }
+
+    /**
      * @notice Deploys a new market with senior tranche, junior tranche, and kernel
      * @param _params The parameters for deploying a new market
      * @param roycoMarket The deployed components constituting the Royco market
@@ -185,4 +202,18 @@ interface IRoycoFactory {
      * @return deployed The predicted contract address
      */
     function predictDeterministicAddress(bytes32 _salt) external view returns (address deployed);
+
+    /**
+     * @notice Returns the junior tranche for a given senior tranche
+     * @param _seniorTranche The senior tranche address
+     * @return juniorTranche The junior tranche address
+     */
+    function seniorTrancheToJuniorTranche(address _seniorTranche) external view returns (address juniorTranche);
+
+    /**
+     * @notice Returns the senior tranche for a given junior tranche
+     * @param _juniorTranche The junior tranche address
+     * @return seniorTranche The senior tranche address
+     */
+    function juniorTrancheToSeniorTranche(address _juniorTranche) external view returns (address seniorTranche);
 }

@@ -141,14 +141,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         address deployerAdminAddress;
     }
 
-    /// @notice Configuration for assigning a role to an address
-    struct RoleAssignmentConfiguration {
-        uint64 role; // The role to assign
-        uint64 roleAdminRole; // The admin role that can assign the role, 0 if none
-        address assignee; // The address to assign the role to
-        uint32 executionDelay; // The delay after which the role can be assigned
-    }
-
     /// @notice Main deployment parameters struct
     struct DeploymentParams {
         // Factory params
@@ -179,7 +171,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         YDMType ydmType;
         bytes ydmSpecificParams; // Encoded YDM-specific params
         // Roles
-        RoleAssignmentConfiguration[] roleAssignments;
+        IRoycoFactory.RoleAssignmentConfiguration[] roleAssignments;
     }
 
     function run() external virtual {
@@ -202,7 +194,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         MarketDeploymentConfig memory marketConfig = getMarketConfig(marketName);
 
         // Build role assignments from chain config
-        RoleAssignmentConfiguration[] memory roleAssignments = generateRolesAssignments(
+        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = generateRolesAssignments(
             RoleAssignmentAddresses({
                 pauserAddress: chainConfig.pauserAddress,
                 upgraderAddress: chainConfig.upgraderAddress,
@@ -331,8 +323,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         // Deploy implementations using CREATE2
         IYDM ydm = _deployYDM(_params.ydmType);
 
-        // Deploy factory with deployer as admin and deployer as deployer
-        RoycoFactory factory = _deployFactory(deployer, deployer);
+        // Deploy factory with factory admin as admin and deployer as deployer
+        RoycoFactory factory = _deployFactory(_params.factoryAdmin, deployer, _params.roleAssignments);
 
         // Deploy all implementations. Then deploy the market using the factory
         (
@@ -342,9 +334,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             address kernelImpl,
             RoycoAccountant accountantImpl
         ) = _deployMarket(factory, address(ydm), _params, deployer);
-
-        // Transfer factory ownership to factory admin
-        _transferFactoryOwnership(factory, deployer, _params.factoryAdmin);
 
         // Build deployment result
         DeploymentResult memory result = DeploymentResult({
@@ -492,8 +481,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     /// @notice Generates role assignments from addresses
     /// @dev ST_LP_ROLE and JT_LP_ROLE are included with assignee=address(0) so their admin roles get configured
     /// @param _addresses The addresses for role assignments
-    function generateRolesAssignments(RoleAssignmentAddresses memory _addresses) public pure returns (RoleAssignmentConfiguration[] memory roleAssignments) {
-        roleAssignments = new RoleAssignmentConfiguration[](13);
+    function generateRolesAssignments(RoleAssignmentAddresses memory _addresses)
+        public
+        pure
+        returns (IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments)
+    {
+        roleAssignments = new IRoycoFactory.RoleAssignmentConfiguration[](13);
 
         // Get role configs from RolesConfiguration
         RoleConfig memory pauserConfig = getRoleConfig(ADMIN_PAUSER_ROLE);
@@ -510,47 +503,47 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         RoleConfig memory deployerConfig = getRoleConfig(DEPLOYER_ROLE);
         RoleConfig memory deployerAdminConfig = getRoleConfig(DEPLOYER_ROLE_ADMIN_ROLE);
 
-        roleAssignments[0] = RoleAssignmentConfiguration({
+        roleAssignments[0] = IRoycoFactory.RoleAssignmentConfiguration({
             role: ADMIN_PAUSER_ROLE, roleAdminRole: pauserConfig.adminRole, assignee: _addresses.pauserAddress, executionDelay: pauserConfig.executionDelay
         });
 
-        roleAssignments[1] = RoleAssignmentConfiguration({
+        roleAssignments[1] = IRoycoFactory.RoleAssignmentConfiguration({
             role: ADMIN_UPGRADER_ROLE,
             roleAdminRole: upgraderConfig.adminRole,
             assignee: _addresses.upgraderAddress,
             executionDelay: upgraderConfig.executionDelay
         });
 
-        roleAssignments[2] = RoleAssignmentConfiguration({
+        roleAssignments[2] = IRoycoFactory.RoleAssignmentConfiguration({
             role: SYNC_ROLE, roleAdminRole: syncConfig.adminRole, assignee: _addresses.syncRoleAddress, executionDelay: syncConfig.executionDelay
         });
 
-        roleAssignments[3] = RoleAssignmentConfiguration({
+        roleAssignments[3] = IRoycoFactory.RoleAssignmentConfiguration({
             role: ADMIN_KERNEL_ROLE, roleAdminRole: kernelConfig.adminRole, assignee: _addresses.adminKernelAddress, executionDelay: kernelConfig.executionDelay
         });
 
-        roleAssignments[4] = RoleAssignmentConfiguration({
+        roleAssignments[4] = IRoycoFactory.RoleAssignmentConfiguration({
             role: ADMIN_ACCOUNTANT_ROLE,
             roleAdminRole: accountantConfig.adminRole,
             assignee: _addresses.adminAccountantAddress,
             executionDelay: accountantConfig.executionDelay
         });
 
-        roleAssignments[5] = RoleAssignmentConfiguration({
+        roleAssignments[5] = IRoycoFactory.RoleAssignmentConfiguration({
             role: ADMIN_PROTOCOL_FEE_SETTER_ROLE,
             roleAdminRole: feeSetterConfig.adminRole,
             assignee: _addresses.adminProtocolFeeSetterAddress,
             executionDelay: feeSetterConfig.executionDelay
         });
 
-        roleAssignments[6] = RoleAssignmentConfiguration({
+        roleAssignments[6] = IRoycoFactory.RoleAssignmentConfiguration({
             role: ADMIN_ORACLE_QUOTER_ROLE,
             roleAdminRole: oracleQuoterConfig.adminRole,
             assignee: _addresses.adminOracleQuoterAddress,
             executionDelay: oracleQuoterConfig.executionDelay
         });
 
-        roleAssignments[7] = RoleAssignmentConfiguration({
+        roleAssignments[7] = IRoycoFactory.RoleAssignmentConfiguration({
             role: LP_ROLE_ADMIN_ROLE,
             roleAdminRole: lpRoleAdminConfig.adminRole,
             assignee: _addresses.lpRoleAdminAddress,
@@ -559,79 +552,32 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
 
         // ST_LP_ROLE with address(0) assignee - role admin will be set but no direct assignment
         // LP roles are granted separately per-provider
-        roleAssignments[8] = RoleAssignmentConfiguration({
+        roleAssignments[8] = IRoycoFactory.RoleAssignmentConfiguration({
             role: ST_LP_ROLE, roleAdminRole: stLpRoleConfig.adminRole, assignee: address(0), executionDelay: stLpRoleConfig.executionDelay
         });
 
         // JT_LP_ROLE with address(0) assignee - role admin will be set but no direct assignment
-        roleAssignments[9] = RoleAssignmentConfiguration({
+        roleAssignments[9] = IRoycoFactory.RoleAssignmentConfiguration({
             role: JT_LP_ROLE, roleAdminRole: jtLpRoleConfig.adminRole, assignee: address(0), executionDelay: jtLpRoleConfig.executionDelay
         });
 
-        roleAssignments[10] = RoleAssignmentConfiguration({
+        roleAssignments[10] = IRoycoFactory.RoleAssignmentConfiguration({
             role: GUARDIAN_ROLE,
             roleAdminRole: roleGuardianConfig.adminRole,
             assignee: _addresses.guardianAddress,
             executionDelay: roleGuardianConfig.executionDelay
         });
 
-        roleAssignments[11] = RoleAssignmentConfiguration({
+        roleAssignments[11] = IRoycoFactory.RoleAssignmentConfiguration({
             role: DEPLOYER_ROLE, roleAdminRole: deployerConfig.adminRole, assignee: _addresses.deployerAddress, executionDelay: deployerConfig.executionDelay
         });
 
-        roleAssignments[12] = RoleAssignmentConfiguration({
+        roleAssignments[12] = IRoycoFactory.RoleAssignmentConfiguration({
             role: DEPLOYER_ROLE_ADMIN_ROLE,
             roleAdminRole: deployerAdminConfig.adminRole,
             assignee: _addresses.deployerAdminAddress,
             executionDelay: deployerAdminConfig.executionDelay
         });
-    }
-
-    /// @notice Grants all relevant roles to the addresses specified in the deployment parameters
-    /// @param _factory The factory contract (which acts as the AccessManager)
-    /// @param _params The deployment parameters containing role addresses
-    function grantAllRoles(RoycoFactory _factory, DeploymentParams memory _params, address _deployer) public {
-        IAccessManager accessManager = IAccessManager(address(_factory));
-
-        (bool hasRole,) = accessManager.hasRole(_ADMIN_ROLE, _deployer);
-        if (!hasRole) {
-            console2.log("This script invoker does not have ADMIN_ROLE, skipping the role assignments step");
-            return;
-        }
-
-        console2.log("Granting roles on AccessManager:", address(_factory));
-
-        for (uint256 i = 0; i < _params.roleAssignments.length; i++) {
-            RoleAssignmentConfiguration memory roleAssignment = _params.roleAssignments[i];
-
-            // Get role config to set up admin and guardian
-            RoleConfig memory roleConfig = getRoleConfig(roleAssignment.role);
-
-            // Grant the role to the assignee (skip if assignee is zero, e.g., LP_ROLE which is handled separately)
-            if (roleAssignment.assignee != address(0)) {
-                (hasRole,) = accessManager.hasRole(roleAssignment.role, roleAssignment.assignee);
-                if (!hasRole) {
-                    console2.log("  - Granting role: %s to: %s with delay: %s", roleAssignment.role, roleAssignment.assignee, roleAssignment.executionDelay);
-                    accessManager.grantRole(roleAssignment.role, roleAssignment.assignee, roleAssignment.executionDelay);
-                } else {
-                    console2.log("  - %s already granted to: %s skipping role grant", roleAssignment.role, roleAssignment.assignee);
-                }
-            } else {
-                console2.log("  - Skipping role grant for %s: assignee is zero address", roleAssignment.role);
-            }
-
-            // Set the role admin if different from default (0)
-            if (roleConfig.adminRole != _ADMIN_ROLE) {
-                console2.log("  - Setting role admin for: %s to: %s", roleAssignment.role, roleConfig.adminRole);
-                accessManager.setRoleAdmin(roleAssignment.role, roleConfig.adminRole);
-            }
-
-            // Set the role guardian
-            console2.log("  - Setting role guardian for: %s to: %s", roleAssignment.role, roleConfig.guardianRole);
-            accessManager.setRoleGuardian(roleAssignment.role, roleConfig.guardianRole);
-        }
-
-        console2.log("All roles granted successfully!");
     }
 
     /// @notice Deploys all contracts for a market
@@ -740,9 +686,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         console2.log("Junior Tranche:", address(deployedContracts.juniorTranche));
         console2.log("Kernel:", address(deployedContracts.kernel));
         console2.log("Accountant:", address(deployedContracts.accountant));
-
-        // Grant all roles to the specified addresses
-        grantAllRoles(factory, _params, _deployer);
     }
 
     /// @notice Deploys accountant implementation
@@ -819,16 +762,36 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     /// @notice Deploys factory implementation
     /// @param _factoryAdmin The address of the factory admin
     /// @return The deployed factory implementation
-    function _deployFactory(address _factoryAdmin, address _deployer) internal returns (RoycoFactory) {
-        bytes memory creationCode = abi.encodePacked(type(RoycoFactory).creationCode, abi.encode(_factoryAdmin, _deployer));
-
-        (address addr, bool alreadyDeployed) = deployWithSanityChecks(FACTORY_SALT_BASE, creationCode, false);
+    function _deployFactory(
+        address _factoryAdmin,
+        address _deployer,
+        IRoycoFactory.RoleAssignmentConfiguration[] memory _roleAssignments
+    )
+        internal
+        returns (RoycoFactory)
+    {
+        // Deploy the factory implementation
+        (address factoryImplAddr, bool alreadyDeployed) = deployWithSanityChecks(FACTORY_SALT_BASE, type(RoycoFactory).creationCode, false);
         if (alreadyDeployed) {
-            console2.log("Factory already deployed at:", addr);
+            console2.log("Factory Implementation already deployed at:", factoryImplAddr);
         } else {
-            console2.log("Factory deployed at:", addr);
+            console2.log("Factory Implementation deployed at:", factoryImplAddr);
         }
-        return RoycoFactory(addr);
+
+        // Deploy the factory proxy
+        address factoryProxyAddress;
+        (factoryProxyAddress, alreadyDeployed) = deployWithSanityChecks(
+            FACTORY_SALT_BASE,
+            getERC1967ProxyCreationCode(factoryImplAddr, abi.encodeCall(RoycoFactory.initialize, (_factoryAdmin, _deployer, _roleAssignments))),
+            false
+        );
+        if (alreadyDeployed) {
+            console2.log("Factory proxy already deployed at:", factoryProxyAddress);
+        } else {
+            console2.log("Factory proxy deployed at:", factoryProxyAddress);
+        }
+
+        return RoycoFactory(factoryProxyAddress);
     }
 
     /// @notice Deploys kernel implementation based on kernel type
@@ -1049,25 +1012,5 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         });
 
         return abi.encodeCall(RoycoJuniorTranche.initialize, (trancheParams));
-    }
-
-    function _transferFactoryOwnership(RoycoFactory _factory, address _deployer, address _newAdmin) internal {
-        // Check if new admin is already admin
-        (bool isNewAdminAdmin,) = IAccessManager(address(_factory)).hasRole(0, _newAdmin);
-        if (isNewAdminAdmin) {
-            console2.log("New admin already has ADMIN_ROLE, skipping transfer");
-            return;
-        }
-
-        console2.log("Transferring factory ownership to:", _newAdmin);
-
-        // Grant ADMIN_ROLE to new admin (execution delay = 0 for immediate effect)
-        IAccessManager(address(_factory)).grantRole(0, _newAdmin, 0);
-
-        // Revoke ADMIN_ROLE from old admin (the deploy script itself)
-        IAccessManager(address(_factory)).revokeRole(0, _deployer);
-
-        console2.log("Factory ownership transferred successfully");
-        console2.log("New factory admin:", _newAdmin);
     }
 }

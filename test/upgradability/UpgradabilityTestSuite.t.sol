@@ -8,7 +8,9 @@ import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts/contracts/prox
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { RoycoAccountant } from "../../src/accountant/RoycoAccountant.sol";
+import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/tranche/IRoycoVaultTranche.sol";
 import { IdenticalERC4626SharesAdminOracleQuoter_Kernel } from "../../src/kernels/IdenticalERC4626SharesAdminOracleQuoter_Kernel.sol";
@@ -86,7 +88,7 @@ contract UpgradabilityTestSuite is BaseTest {
         });
 
         // Build role assignments using the centralized function
-        DeployScript.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
         DeployScript.DeploymentParams memory params = DeployScript.DeploymentParams({
             factoryAdmin: OWNER_ADDRESS,
@@ -168,7 +170,8 @@ contract UpgradabilityTestSuite is BaseTest {
 
     /// @notice Test that ST implementation cannot be initialized
     function test_stImplementation_cannotBeInitialized() external {
-        IRoycoVaultTranche.TrancheDeploymentParams memory params = IRoycoVaultTranche.TrancheDeploymentParams({ name: "Test ST", symbol: "TST", initialAuthority: address(FACTORY) });
+        IRoycoVaultTranche.TrancheDeploymentParams memory params =
+            IRoycoVaultTranche.TrancheDeploymentParams({ name: "Test ST", symbol: "TST", initialAuthority: address(FACTORY) });
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         ST_IMPL.initialize(params);
@@ -176,7 +179,8 @@ contract UpgradabilityTestSuite is BaseTest {
 
     /// @notice Test that JT implementation cannot be initialized
     function test_jtImplementation_cannotBeInitialized() external {
-        IRoycoVaultTranche.TrancheDeploymentParams memory params = IRoycoVaultTranche.TrancheDeploymentParams({ name: "Test JT", symbol: "TJT", initialAuthority: address(FACTORY) });
+        IRoycoVaultTranche.TrancheDeploymentParams memory params =
+            IRoycoVaultTranche.TrancheDeploymentParams({ name: "Test JT", symbol: "TJT", initialAuthority: address(FACTORY) });
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         JT_IMPL.initialize(params);
@@ -213,7 +217,8 @@ contract UpgradabilityTestSuite is BaseTest {
 
     /// @notice Test that new ST implementation cannot be initialized
     function test_newSTImplementation_cannotBeInitialized() external {
-        IRoycoVaultTranche.TrancheDeploymentParams memory params = IRoycoVaultTranche.TrancheDeploymentParams({ name: "Test ST", symbol: "TST", initialAuthority: address(FACTORY) });
+        IRoycoVaultTranche.TrancheDeploymentParams memory params =
+            IRoycoVaultTranche.TrancheDeploymentParams({ name: "Test ST", symbol: "TST", initialAuthority: address(FACTORY) });
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         newSTImpl.initialize(params);
@@ -221,7 +226,8 @@ contract UpgradabilityTestSuite is BaseTest {
 
     /// @notice Test that new JT implementation cannot be initialized
     function test_newJTImplementation_cannotBeInitialized() external {
-        IRoycoVaultTranche.TrancheDeploymentParams memory params = IRoycoVaultTranche.TrancheDeploymentParams({ name: "Test JT", symbol: "TJT", initialAuthority: address(FACTORY) });
+        IRoycoVaultTranche.TrancheDeploymentParams memory params =
+            IRoycoVaultTranche.TrancheDeploymentParams({ name: "Test JT", symbol: "TJT", initialAuthority: address(FACTORY) });
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         newJTImpl.initialize(params);
@@ -454,5 +460,50 @@ contract UpgradabilityTestSuite is BaseTest {
         KERNEL.syncTrancheAccounting();
 
         // Should not revert - sync completed successfully
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SECTION 5: FACTORY UPGRADE RESPECTS 1-DAY DELAY
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Test that factory upgrade succeeds after the 1-day delay
+    function test_factoryProxy_canBeUpgradedAfterDelay() external {
+        // Deploy a new factory implementation
+        RoycoFactory newFactoryImpl = new RoycoFactory();
+        vm.label(address(newFactoryImpl), "NewFactoryImpl");
+
+        bytes memory upgradeData = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (address(newFactoryImpl), ""));
+
+        // Schedule the upgrade
+        vm.prank(UPGRADER_ADDRESS);
+        FACTORY.schedule(address(FACTORY), upgradeData, 0);
+
+        // Warp past the 1-day delay
+        vm.warp(block.timestamp + 1 days + 1);
+
+        // Execute the upgrade — should succeed
+        vm.prank(UPGRADER_ADDRESS);
+        FACTORY.execute(address(FACTORY), upgradeData);
+    }
+
+    /// @notice Test that factory upgrade reverts before the 1-day delay elapses
+    function test_factoryProxy_cannotBeUpgradedBeforeDelay() external {
+        // Deploy a new factory implementation
+        RoycoFactory newFactoryImpl = new RoycoFactory();
+        vm.label(address(newFactoryImpl), "NewFactoryImpl");
+
+        bytes memory upgradeData = abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (address(newFactoryImpl), ""));
+
+        // Schedule the upgrade
+        vm.prank(UPGRADER_ADDRESS);
+        FACTORY.schedule(address(FACTORY), upgradeData, 0);
+
+        // Warp to just before the delay expires
+        vm.warp(block.timestamp + 1 days - 1);
+
+        // Execute should revert — delay not yet elapsed
+        vm.prank(UPGRADER_ADDRESS);
+        vm.expectRevert();
+        FACTORY.execute(address(FACTORY), upgradeData);
     }
 }

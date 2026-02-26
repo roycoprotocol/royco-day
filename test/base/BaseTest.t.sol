@@ -9,6 +9,7 @@ import { DeployScript } from "../../script/Deploy.s.sol";
 import { RoycoAccountant } from "../../src/accountant/RoycoAccountant.sol";
 import { RolesConfiguration, RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/tranche/IRoycoVaultTranche.sol";
@@ -253,7 +254,6 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
 
         DEPLOYER_ADMIN = _initWallet("DEPLOYER_ADMIN", 1000 ether);
         DEPLOYER_ADMIN_ADDRESS = DEPLOYER_ADMIN.addr;
-
     }
 
     function _setupProviders() internal {
@@ -488,7 +488,7 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
 
     /// @notice Generates role assignments using the role-specific addresses
     /// @return roleAssignments Array of role assignment configurations
-    function _generateRoleAssignments() internal view returns (DeployScript.RoleAssignmentConfiguration[] memory roleAssignments) {
+    function _generateRoleAssignments() internal view returns (IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments) {
         return DEPLOY_SCRIPT.generateRolesAssignments(
             DeployScript.RoleAssignmentAddresses({
                 pauserAddress: PAUSER_ADDRESS,
