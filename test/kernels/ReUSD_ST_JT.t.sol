@@ -53,8 +53,6 @@ contract reUSD_Test is AbstractKernelTestSuite {
             forkRpcUrlEnvVar: "MAINNET_RPC_URL",
             stAsset: REUSD,
             jtAsset: REUSD,
-            stDecimals: 18,
-            jtDecimals: 18,
             initialFunding: 1_000_000e18 // 1M reUSD
         });
     }
@@ -251,8 +249,8 @@ contract reUSD_Test is AbstractKernelTestSuite {
         params.juniorTrancheSymbol = string(abi.encodePacked("RJ-", cfg.name));
         params.seniorAsset = cfg.stAsset;
         params.juniorAsset = cfg.jtAsset;
-        params.stNAVDustTolerance = toNAVUnits(10 ** (18 - cfg.stDecimals));
-        params.jtNAVDustTolerance = toNAVUnits(10 ** (18 - cfg.jtDecimals));
+        params.stNAVDustTolerance = toNAVUnits(uint256(1));
+        params.jtNAVDustTolerance = toNAVUnits(uint256(1));
         params.kernelType = DeployScript.KernelType.ReUSD_ST_ReUSD_JT;
         params.kernelSpecificParams =
             abi.encode(DeployScript.ReUSDSTReUSDJTKernelParams({ reusd: REUSD, reusdUsdQuoteToken: USDC, insuranceCapitalLayer: ICL }));

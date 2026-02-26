@@ -37,8 +37,6 @@ contract sNUSD_sNUSD_Test is YieldBearingERC4626_TestBase {
             forkRpcUrlEnvVar: "MAINNET_RPC_URL",
             stAsset: SNUSD,
             jtAsset: SNUSD,
-            stDecimals: 18,
-            jtDecimals: 18,
             initialFunding: 1_000_000_000e18 // 1B sNUSD
         });
     }

@@ -90,6 +90,9 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         (NAV_UNIT claimOnStNAV, NAV_UNIT claimOnJtNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalSharesAfterMintingFees) =
             (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoKernel(KERNEL).stMaxWithdrawable(_owner) : IRoycoKernel(KERNEL).jtMaxWithdrawable(_owner));
 
+        // We do not allow redemptions if the tranche has no claims on the assets
+        if (claimOnStNAV + claimOnJtNAV == ZERO_NAV_UNITS) return 0;
+
         // Calculate the maximum amount of shares that can be redeemed based on the senior and junior constraints
         // If the notional claim of the tranche on the ST or JT assets is zero, ignore the constraints since the tranche has no claims on the assets
         uint256 sharesWithdrawableBasedOnSeniorConstraints =

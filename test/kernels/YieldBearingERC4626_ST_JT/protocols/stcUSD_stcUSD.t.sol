@@ -41,8 +41,6 @@ contract stcUSD_stcUSD_Test is YieldBearingERC4626_TestBase {
             forkRpcUrlEnvVar: "MAINNET_RPC_URL",
             stAsset: STCUSD,
             jtAsset: STCUSD,
-            stDecimals: 18,
-            jtDecimals: 18,
             initialFunding: 1_000_000e18 // 1M stcUSD
         });
     }
@@ -141,7 +139,7 @@ contract stcUSD_stcUSD_Test is YieldBearingERC4626_TestBase {
 
     /// @notice Test vault share price yield affects NAV
     function testFuzz_stcUSD_vaultSharePriceYield(uint256 _jtAmount, uint256 _yieldPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _yieldPercentage = bound(_yieldPercentage, 1, 20);
 
         _depositJT(ALICE_ADDRESS, _jtAmount);

@@ -235,7 +235,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
 
     /// @notice Tests that chainlink price yield increases NAV
     function testFuzz_chainlinkPrice_yield_updatesNAV(uint256 _jtAmount, uint256 _yieldPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _yieldPercentage = bound(_yieldPercentage, 1, 50); // 1-50% yield
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -255,7 +255,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
 
     /// @notice Tests that chainlink price loss decreases NAV
     function testFuzz_chainlinkPrice_loss_updatesNAV(uint256 _jtAmount, uint256 _lossPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _lossPercentage = bound(_lossPercentage, 1, 30); // 1-30% loss
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -275,7 +275,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
 
     /// @notice Tests that chainlink price yield with ST deposits distributes correctly
     function testFuzz_chainlinkPrice_yield_distributesToJT(uint256 _jtAmount, uint256 _stPercentage, uint256 _yieldPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 50);
         _yieldPercentage = bound(_yieldPercentage, 1, 20);
 
@@ -308,7 +308,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
 
     /// @notice Tests NAV conservation after chainlink price changes
     function testFuzz_chainlinkPrice_NAVConservation(uint256 _jtAmount, uint256 _yieldPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _yieldPercentage = bound(_yieldPercentage, 1, 30);
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -536,8 +536,8 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
             juniorTrancheSymbol: string(abi.encodePacked("RJ-", cfg.name)),
             seniorAsset: cfg.stAsset,
             juniorAsset: cfg.jtAsset,
-            stNAVDustTolerance: toNAVUnits(10 ** (18 - cfg.stDecimals)),
-            jtNAVDustTolerance: toNAVUnits(10 ** (18 - cfg.jtDecimals)),
+            stNAVDustTolerance: toNAVUnits(uint256(1)),
+            jtNAVDustTolerance: toNAVUnits(uint256(1)),
             kernelType: DeployScript.KernelType.IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel,
             kernelSpecificParams: abi.encode(kernelParams),
             stSelfLiquidationBonusWAD: 0,

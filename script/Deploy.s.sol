@@ -37,6 +37,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     // Custom errors
     error UnsupportedKernelType(KernelType kernelType);
     error UnsupportedYDMType(YDMType ydmType);
+
     // Deployment salts for CREATE2
     bytes32 constant ACCOUNTANT_IMPL_SALT = keccak256("ROYCO_ACCOUNTANT_IMPLEMENTATION_V2");
     bytes32 constant KERNEL_IMPL_SALT = keccak256("ROYCO_KERNEL_IMPLEMENTATION_V2");
@@ -45,6 +46,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     bytes32 constant YDM_SALT = keccak256("ROYCO_YDM_IMPLEMENTATION_V2");
     bytes32 constant FACTORY_SALT_BASE = keccak256("ROYCO_FACTORY_IMPLEMENTATION_V2");
     bytes32 constant MARKET_DEPLOYMENT_SALT = keccak256("ROYCO_MARKET_DEPLOYMENT_V2");
+
+    // Whether to print deployment parameters
+    bool ENABLE_LOGGING = false;
 
     /// @notice Enum for kernel types
     enum KernelType {
@@ -170,6 +174,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     }
 
     function run() external virtual {
+        ENABLE_LOGGING = true;
+
         // Read deployer private key
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
@@ -233,7 +239,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         });
 
         // Print all deployment parameters before deployment
-        _printDeploymentParams(params, chainConfig);
+        if (ENABLE_LOGGING) {
+            _printDeploymentParams(params, chainConfig);
+        }
 
         return deploy(params, deployerPrivateKey);
     }
@@ -343,20 +351,22 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             kernel: market.kernel
         });
 
-        // Log all deployed contracts
-        console2.log("=== Deployment Summary ===");
-        console2.log("Factory:", address(result.factory));
-        console2.log("Factory Admin:", _params.factoryAdmin);
-        console2.log("YDM:", address(result.ydm));
-        console2.log("Accountant Implementation:", address(result.accountantImplementation));
-        console2.log("ST Tranche Implementation:", address(result.stTrancheImplementation));
-        console2.log("JT Tranche Implementation:", address(result.jtTrancheImplementation));
-        console2.log("Kernel Implementation:", result.kernelImplementation);
-        console2.log("Senior Tranche (Proxy):", address(result.seniorTranche));
-        console2.log("Junior Tranche (Proxy):", address(result.juniorTranche));
-        console2.log("Accountant (Proxy):", address(result.accountant));
-        console2.log("Kernel (Proxy):", address(result.kernel));
-        console2.log("========================");
+        if (ENABLE_LOGGING) {
+            // Log all deployed contracts
+            console2.log("=== Deployment Summary ===");
+            console2.log("Factory:", address(result.factory));
+            console2.log("Factory Admin:", _params.factoryAdmin);
+            console2.log("YDM:", address(result.ydm));
+            console2.log("Accountant Implementation:", address(result.accountantImplementation));
+            console2.log("ST Tranche Implementation:", address(result.stTrancheImplementation));
+            console2.log("JT Tranche Implementation:", address(result.jtTrancheImplementation));
+            console2.log("Kernel Implementation:", result.kernelImplementation);
+            console2.log("Senior Tranche (Proxy):", address(result.seniorTranche));
+            console2.log("Junior Tranche (Proxy):", address(result.juniorTranche));
+            console2.log("Accountant (Proxy):", address(result.accountant));
+            console2.log("Kernel (Proxy):", address(result.kernel));
+            console2.log("========================");
+        }
 
         vm.stopBroadcast();
 
@@ -624,10 +634,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             expectedAccountantAddress
         );
 
-        console2.log("Expected Senior Tranche Address:", expectedSeniorTrancheAddress);
-        console2.log("Expected Junior Tranche Address:", expectedJuniorTrancheAddress);
-        console2.log("Expected Kernel Address:", expectedKernelAddress);
-        console2.log("Expected Accountant Address:", expectedAccountantAddress);
+        if (ENABLE_LOGGING) {
+            console2.log("Expected Senior Tranche Address:", expectedSeniorTrancheAddress);
+            console2.log("Expected Junior Tranche Address:", expectedJuniorTrancheAddress);
+            console2.log("Expected Kernel Address:", expectedKernelAddress);
+            console2.log("Expected Accountant Address:", expectedAccountantAddress);
+        }
 
         // Build initialization data
         address factoryAddress = address(factory);
@@ -663,14 +675,18 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         });
 
         // Deploy market
-        console2.log("Deploying market...");
+        if (ENABLE_LOGGING) {
+            console2.log("Deploying market...");
+        }
         deployedContracts = factory.deployMarket(marketParams);
 
-        console2.log("Market deployed successfully!");
-        console2.log("Senior Tranche:", address(deployedContracts.seniorTranche));
-        console2.log("Junior Tranche:", address(deployedContracts.juniorTranche));
-        console2.log("Kernel:", address(deployedContracts.kernel));
-        console2.log("Accountant:", address(deployedContracts.accountant));
+        if (ENABLE_LOGGING) {
+            console2.log("Market deployed successfully!");
+            console2.log("Senior Tranche:", address(deployedContracts.seniorTranche));
+            console2.log("Junior Tranche:", address(deployedContracts.juniorTranche));
+            console2.log("Kernel:", address(deployedContracts.kernel));
+            console2.log("Accountant:", address(deployedContracts.accountant));
+        }
     }
 
     /// @notice Deploys accountant implementation
@@ -679,10 +695,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         bytes memory creationCode = abi.encodePacked(type(RoycoAccountant).creationCode, abi.encode(_kernel));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(ACCOUNTANT_IMPL_SALT, creationCode, false);
-        if (alreadyDeployed) {
-            console2.log("Accountant implementation already deployed at:", addr);
-        } else {
-            console2.log("Accountant implementation deployed at:", addr);
+        if (ENABLE_LOGGING) {
+            if (alreadyDeployed) {
+                console2.log("Accountant implementation already deployed at:", addr);
+            } else {
+                console2.log("Accountant implementation deployed at:", addr);
+            }
         }
         return RoycoAccountant(addr);
     }
@@ -693,10 +711,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         bytes memory creationCode = abi.encodePacked(type(RoycoSeniorTranche).creationCode, abi.encode(_asset, _kernel));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(ST_TRANCHE_IMPL_SALT, creationCode, false);
-        if (alreadyDeployed) {
-            console2.log("ST tranche implementation already deployed at:", addr);
-        } else {
-            console2.log("ST tranche implementation deployed at:", addr);
+        if (ENABLE_LOGGING) {
+            if (alreadyDeployed) {
+                console2.log("ST tranche implementation already deployed at:", addr);
+            } else {
+                console2.log("ST tranche implementation deployed at:", addr);
+            }
         }
         return RoycoSeniorTranche(addr);
     }
@@ -707,10 +727,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         bytes memory creationCode = abi.encodePacked(type(RoycoJuniorTranche).creationCode, abi.encode(_asset, _kernel));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(JT_TRANCHE_IMPL_SALT, creationCode, false);
-        if (alreadyDeployed) {
-            console2.log("JT tranche implementation already deployed at:", addr);
-        } else {
-            console2.log("JT tranche implementation deployed at:", addr);
+        if (ENABLE_LOGGING) {
+            if (alreadyDeployed) {
+                console2.log("JT tranche implementation already deployed at:", addr);
+            } else {
+                console2.log("JT tranche implementation deployed at:", addr);
+            }
         }
         return RoycoJuniorTranche(addr);
     }
@@ -736,10 +758,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         }
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(salt, creationCode, false);
-        if (alreadyDeployed) {
-            console2.log("YDM already deployed at:", addr);
-        } else {
-            console2.log("YDM deployed at:", addr);
+        if (ENABLE_LOGGING) {
+            if (alreadyDeployed) {
+                console2.log("YDM already deployed at:", addr);
+            } else {
+                console2.log("YDM deployed at:", addr);
+            }
         }
         return IYDM(addr);
     }
@@ -757,10 +781,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     {
         // Deploy the factory implementation
         (address factoryImplAddr, bool alreadyDeployed) = deployWithSanityChecks(FACTORY_SALT_BASE, type(RoycoFactory).creationCode, false);
-        if (alreadyDeployed) {
-            console2.log("Factory Implementation already deployed at:", factoryImplAddr);
-        } else {
-            console2.log("Factory Implementation deployed at:", factoryImplAddr);
+        if (ENABLE_LOGGING) {
+            if (alreadyDeployed) {
+                console2.log("Factory Implementation already deployed at:", factoryImplAddr);
+            } else {
+                console2.log("Factory Implementation deployed at:", factoryImplAddr);
+            }
         }
 
         // Deploy the factory proxy
@@ -770,10 +796,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             getERC1967ProxyCreationCode(factoryImplAddr, abi.encodeCall(RoycoFactory.initialize, (_factoryAdmin, _deployer, _roleAssignments))),
             false
         );
-        if (alreadyDeployed) {
-            console2.log("Factory proxy already deployed at:", factoryProxyAddress);
-        } else {
-            console2.log("Factory proxy deployed at:", factoryProxyAddress);
+        if (ENABLE_LOGGING) {
+            if (alreadyDeployed) {
+                console2.log("Factory proxy already deployed at:", factoryProxyAddress);
+            } else {
+                console2.log("Factory proxy deployed at:", factoryProxyAddress);
+            }
         }
 
         return RoycoFactory(factoryProxyAddress);
@@ -828,10 +856,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         );
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(KERNEL_IMPL_SALT, creationCode, false);
-        if (alreadyDeployed) {
-            console2.log("Kernel implementation already deployed at:", addr);
-        } else {
-            console2.log("Kernel implementation deployed at:", addr);
+        if (ENABLE_LOGGING) {
+            if (alreadyDeployed) {
+                console2.log("Kernel implementation already deployed at:", addr);
+            } else {
+                console2.log("Kernel implementation deployed at:", addr);
+            }
         }
         return ReUSD_ST_ReUSD_JT_Kernel(addr);
     }
@@ -843,10 +873,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         bytes memory creationCode = abi.encodePacked(type(IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel).creationCode, abi.encode(_constructionParams));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(KERNEL_IMPL_SALT, creationCode, false);
-        if (alreadyDeployed) {
-            console2.log("Kernel implementation already deployed at:", addr);
-        } else {
-            console2.log("Kernel implementation deployed at:", addr);
+        if (ENABLE_LOGGING) {
+            if (alreadyDeployed) {
+                console2.log("Kernel implementation already deployed at:", addr);
+            } else {
+                console2.log("Kernel implementation deployed at:", addr);
+            }
         }
         return IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel(addr);
     }
@@ -858,11 +890,14 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         bytes memory creationCode = abi.encodePacked(type(IdenticalERC4626SharesAdminOracleQuoter_Kernel).creationCode, abi.encode(_constructionParams));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(KERNEL_IMPL_SALT, creationCode, false);
-        if (alreadyDeployed) {
-            console2.log("Kernel implementation already deployed at:", addr);
-        } else {
-            console2.log("Kernel implementation deployed at:", addr);
+        if (ENABLE_LOGGING) {
+            if (alreadyDeployed) {
+                console2.log("Kernel implementation already deployed at:", addr);
+            } else {
+                console2.log("Kernel implementation deployed at:", addr);
+            }
         }
+
         return IdenticalERC4626SharesAdminOracleQuoter_Kernel(addr);
     }
 
@@ -878,10 +913,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         bytes memory creationCode = abi.encodePacked(type(IdleCdoAA_ST_IdleCdoAA_JT_Kernel).creationCode, abi.encode(_constructionParams, kernelParams.idleCDO));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(KERNEL_IMPL_SALT, creationCode, false);
-        if (alreadyDeployed) {
-            console2.log("Kernel implementation already deployed at:", addr);
-        } else {
-            console2.log("Kernel implementation deployed at:", addr);
+        if (ENABLE_LOGGING) {
+            if (alreadyDeployed) {
+                console2.log("Kernel implementation already deployed at:", addr);
+            } else {
+                console2.log("Kernel implementation deployed at:", addr);
+            }
         }
         return IdleCdoAA_ST_IdleCdoAA_JT_Kernel(addr);
     }

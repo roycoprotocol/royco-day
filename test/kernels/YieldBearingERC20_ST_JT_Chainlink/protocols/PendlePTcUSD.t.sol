@@ -42,8 +42,6 @@ contract PendlePTcUSD_Test is YieldBearingERC20Chainlink_TestBase {
             forkRpcUrlEnvVar: "MAINNET_RPC_URL",
             stAsset: PT_CUSD,
             jtAsset: PT_CUSD,
-            stDecimals: 18,
-            jtDecimals: 18,
             initialFunding: 1_000_000e18 // 1M PT-cUSD
         });
     }

@@ -14,8 +14,6 @@ interface IKernelTestHooks {
         string forkRpcUrlEnvVar; // RPC URL environment variable name
         address stAsset; // Senior tranche asset
         address jtAsset; // Junior tranche asset
-        uint8 stDecimals; // ST asset decimals
-        uint8 jtDecimals; // JT asset decimals
         uint256 initialFunding; // Initial funding amount per user
     }
 

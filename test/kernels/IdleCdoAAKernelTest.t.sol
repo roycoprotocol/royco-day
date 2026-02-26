@@ -125,8 +125,6 @@ contract IdleCdoAAKernelTest is AbstractKernelTestSuite {
             forkRpcUrlEnvVar: "MAINNET_RPC_URL",
             stAsset: AA_TRANCHE_TOKEN,
             jtAsset: AA_TRANCHE_TOKEN,
-            stDecimals: AA_TRANCHE_DECIMALS,
-            jtDecimals: AA_TRANCHE_DECIMALS,
             initialFunding: 800_000 * (10 ** AA_TRANCHE_DECIMALS)
         });
     }

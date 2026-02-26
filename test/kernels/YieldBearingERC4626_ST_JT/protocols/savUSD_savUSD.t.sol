@@ -37,8 +37,6 @@ contract savUSD_savUSD_Test is YieldBearingERC4626_TestBase {
             forkRpcUrlEnvVar: "AVALANCHE_RPC_URL",
             stAsset: SAVUSD,
             jtAsset: SAVUSD,
-            stDecimals: 18,
-            jtDecimals: 18,
             initialFunding: 1_000_000e18 // 1M sAVUSD
         });
     }

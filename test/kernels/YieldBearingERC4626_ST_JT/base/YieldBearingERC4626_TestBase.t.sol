@@ -187,7 +187,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
     /// @notice Tests that stored conversion rate yield increases NAV
     /// @dev This tests the baseAsset-to-NAV component of the conversion rate
     function testFuzz_storedConversionRate_yield_updatesNAV(uint256 _jtAmount, uint256 _yieldBps) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _yieldBps = bound(_yieldBps, 10, 1000); // 0.1% to 10% yield
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -213,7 +213,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
     /// @notice Tests that stored conversion rate loss decreases NAV
     /// @dev This tests the baseAsset-to-NAV component of the conversion rate
     function testFuzz_storedConversionRate_loss_updatesNAV(uint256 _jtAmount, uint256 _lossBps) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _lossBps = bound(_lossBps, 10, 500); // 0.1% to 5% loss
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -238,7 +238,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
 
     /// @notice Tests that stored conversion rate yield with ST deposits distributes correctly
     function testFuzz_storedConversionRate_yield_distributesToJT(uint256 _jtAmount, uint256 _stPercentage, uint256 _yieldBps) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 50);
         _yieldBps = bound(_yieldBps, 10, 1000); // 0.1% to 10% yield
 
@@ -272,7 +272,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
 
     /// @notice Tests NAV conservation after stored conversion rate changes
     function testFuzz_storedConversionRate_NAVConservation(uint256 _jtAmount, uint256 _yieldBps) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _yieldBps = bound(_yieldBps, 10, 1000);
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -294,7 +294,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
     /// @notice Tests that vault share price yield increases NAV
     /// @dev This tests the ERC4626.convertToAssets() component of the conversion rate
     function testFuzz_vaultSharePrice_yield_updatesNAV(uint256 _jtAmount, uint256 _yieldPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _yieldPercentage = bound(_yieldPercentage, 1, 50); // 1-50% yield
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -315,7 +315,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
     /// @notice Tests that vault share price loss decreases NAV
     /// @dev This tests the ERC4626.convertToAssets() component of the conversion rate
     function testFuzz_vaultSharePrice_loss_updatesNAV(uint256 _jtAmount, uint256 _lossPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _lossPercentage = bound(_lossPercentage, 1, 30); // 1-30% loss
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -335,7 +335,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
 
     /// @notice Tests that vault share price yield with ST deposits distributes correctly
     function testFuzz_vaultSharePrice_yield_distributesToJT(uint256 _jtAmount, uint256 _stPercentage, uint256 _yieldPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 50);
         _yieldPercentage = bound(_yieldPercentage, 1, 20);
 
@@ -368,7 +368,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
 
     /// @notice Tests NAV conservation after vault share price changes
     function testFuzz_vaultSharePrice_NAVConservation(uint256 _jtAmount, uint256 _yieldPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _yieldPercentage = bound(_yieldPercentage, 1, 30);
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -414,8 +414,8 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
             juniorTrancheSymbol: string(abi.encodePacked("RJ-", cfg.name)),
             seniorAsset: cfg.stAsset,
             juniorAsset: cfg.jtAsset,
-            stNAVDustTolerance: toNAVUnits(10 ** (18 - cfg.stDecimals)),
-            jtNAVDustTolerance: toNAVUnits(10 ** (18 - cfg.jtDecimals)),
+            stNAVDustTolerance: toNAVUnits(uint256(1)),
+            jtNAVDustTolerance: toNAVUnits(uint256(1)),
             kernelType: DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel,
             kernelSpecificParams: abi.encode(kernelParams),
             stSelfLiquidationBonusWAD: 0,

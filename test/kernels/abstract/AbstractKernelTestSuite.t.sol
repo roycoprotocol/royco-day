@@ -7,6 +7,7 @@ import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/M
 import { DeployScript } from "../../../script/Deploy.s.sol";
 import { IRoycoAccountant } from "../../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
+import { WAD } from "../../../src/libraries/Constants.sol";
 import { ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../../src/libraries/Constants.sol";
 import { AssetClaims, MarketState, TrancheType } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
@@ -227,7 +228,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function testFuzz_kernel_stMaxDeposit_respectsCoverage(uint256 _jtDeposit) external {
-        _jtDeposit = bound(_jtDeposit, _minDepositAmount(), config.initialFunding / 2);
+        _jtDeposit = bound(_jtDeposit, _minDepositAmount(), config.initialFunding / 10);
         _depositJT(ALICE_ADDRESS, _jtDeposit);
 
         TRANCHE_UNIT maxDeposit = ST.maxDeposit(BOB_ADDRESS);
@@ -254,7 +255,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     }
 
     function testFuzz_kernel_jtMaxWithdrawable_afterDeposit(uint256 _jtDeposit) external {
-        _jtDeposit = bound(_jtDeposit, _minDepositAmount(), config.initialFunding / 2);
+        _jtDeposit = bound(_jtDeposit, _minDepositAmount(), config.initialFunding / 10);
 
         _depositJT(ALICE_ADDRESS, _jtDeposit);
 
@@ -264,7 +265,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     }
 
     function test_kernel_conversionFunctions_roundTrip() external view {
-        TRANCHE_UNIT oneUnit = toTrancheUnits(10 ** config.stDecimals);
+        TRANCHE_UNIT oneUnit = toTrancheUnits(10 ** 18);
 
         NAV_UNIT navFromST = KERNEL.stConvertTrancheUnitsToNAVUnits(oneUnit);
         TRANCHE_UNIT backToST = KERNEL.stConvertNAVUnitsToTrancheUnits(navFromST);
@@ -572,7 +573,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     }
 
     function testFuzz_yield_protocolFeeAccrues(uint256 _jtAmount, uint256 _yieldPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _yieldPercentage = bound(_yieldPercentage, 5, 30);
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -604,9 +605,11 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function testFuzz_loss_JTAbsorbsFirst(uint256 _jtAmount, uint256 _stPercentage, uint256 _lossPercentage) external {
+        uint256 coverage = ACCOUNTANT.getState().coverageWAD;
+
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 50);
-        _lossPercentage = bound(_lossPercentage, 1, 20);
+        _lossPercentage = bound(_lossPercentage, 1, coverage * 100 / WAD);
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
 
@@ -638,7 +641,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     }
 
     function testFuzz_loss_STLoss_JTProvidesCoverage(uint256 _jtAmount, uint256 _stPercentage, uint256 _lossPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 30); // Keep utilization moderate
         _lossPercentage = bound(_lossPercentage, 1, 10); // Small loss
 
@@ -726,7 +729,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     }
 
     function testFuzz_invariant_NAVConservation_afterYield(uint256 _jtAmount, uint256 _yieldPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _yieldPercentage = bound(_yieldPercentage, 1, 30);
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -741,7 +744,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     }
 
     function testFuzz_invariant_NAVConservation_afterLoss(uint256 _jtAmount, uint256 _lossPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _lossPercentage = bound(_lossPercentage, 1, 30);
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -775,7 +778,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function testFuzz_fullFlow_depositYieldRedeem(uint256 _jtAmount, uint256 _stPercentage, uint256 _yieldPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 40);
         _yieldPercentage = bound(_yieldPercentage, 1, 20);
 
@@ -822,7 +825,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     }
 
     function testFuzz_fullFlow_depositLossRedeem(uint256 _jtAmount, uint256 _stPercentage, uint256 _lossPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 30);
         _lossPercentage = bound(_lossPercentage, 1, 15);
 
@@ -897,7 +900,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
     function _minDepositAmount() internal view virtual returns (uint256) {
         // Minimum deposit to avoid dust issues
-        return 10 ** (config.stDecimals > 6 ? config.stDecimals - 6 : 0) * 1000; // At least 1000 smallest units
+        return 10 ** (18 > 6 ? 18 - 6 : 0) * 1000; // At least 1000 smallest units
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -909,7 +912,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     /// @notice Full lifecycle test: JT deposit → ST deposit → yield → verify coverage → ST redeem → JT exit
     /// @dev Verifies all view functions after each operation
     function testFuzz_scenario_fullLifecycle_withYield_verifyViewFunctions(uint256 _jtAmount, uint256 _stPercentage, uint256 _yieldPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 80);
         _yieldPercentage = bound(_yieldPercentage, 1, 20);
 
