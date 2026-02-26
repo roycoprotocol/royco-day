@@ -67,12 +67,6 @@ interface IRoycoVaultTranche is IERC20Metadata {
     function KERNEL() external view returns (address kernel);
 
     /**
-     * @notice Returns the address of the market that this tranche is associated with
-     * @return marketId The bytes32 market identifier
-     */
-    function MARKET_ID() external view returns (bytes32 marketId);
-
-    /**
      * @notice Returns the raw NAV of the tranche's invested assets
      * @dev The raw NAV represents the pure value of the tranche's assets before any coverage adjustments or yield sharing
      * @return nav The raw NAV of the tranche's invested assets, denominated in the kernel's NAV units

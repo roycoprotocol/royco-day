@@ -71,7 +71,6 @@ contract PausabilityTestSuite is BaseTest {
 
         DeployScript.DeploymentParams memory params = DeployScript.DeploymentParams({
             factoryAdmin: OWNER_ADDRESS,
-            marketId: marketId,
             seniorTrancheName: "Royco Senior sNUSD",
             seniorTrancheSymbol: "RS-sNUSD",
             juniorTrancheName: "Royco Junior sNUSD",

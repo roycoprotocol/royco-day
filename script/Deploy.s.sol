@@ -118,7 +118,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         IRoycoVaultTranche juniorTranche;
         IRoycoAccountant accountant;
         IRoycoKernel kernel;
-        bytes32 marketId;
     }
 
     /// @notice Addresses for role assignments
@@ -141,7 +140,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         // Factory params
         address factoryAdmin;
         // Market params
-        bytes32 marketId;
         string seniorTrancheName;
         string seniorTrancheSymbol;
         string juniorTrancheName;
@@ -209,7 +207,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         // Build DeploymentParams
         DeploymentParams memory params = DeploymentParams({
             factoryAdmin: chainConfig.factoryAdmin,
-            marketId: keccak256(abi.encodePacked(marketConfig.marketName, "-", block.timestamp)),
             seniorTrancheName: marketConfig.seniorTrancheName,
             seniorTrancheSymbol: marketConfig.seniorTrancheSymbol,
             juniorTrancheName: marketConfig.juniorTrancheName,
@@ -247,8 +244,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         // Chain & Market Info
         console2.log("--- Chain & Market Info ---");
         console2.log("Chain ID:", block.chainid);
-        console2.log("Market ID:");
-        console2.logBytes32(params.marketId);
         console2.log("");
 
         // Factory Config
@@ -343,8 +338,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             seniorTranche: market.seniorTranche,
             juniorTranche: market.juniorTranche,
             accountant: market.accountant,
-            kernel: market.kernel,
-            marketId: _params.marketId
+            kernel: market.kernel
         });
 
         // Log all deployed contracts
@@ -360,7 +354,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         console2.log("Junior Tranche (Proxy):", address(result.juniorTranche));
         console2.log("Accountant (Proxy):", address(result.accountant));
         console2.log("Kernel (Proxy):", address(result.kernel));
-        console2.log("Market ID:", uint256(_params.marketId));
         console2.log("========================");
 
         vm.stopBroadcast();
@@ -384,103 +377,93 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         pure
         returns (IRoycoFactory.RolesTargetConfiguration[] memory roles)
     {
-        // Count how many role configurations we need
-        uint256 roleCount = 4; // ST, JT, Kernel, Accountant
+        roles = new IRoycoFactory.RolesTargetConfiguration[](4);
+        roles[0] = _buildTrancheRolesConfig(_seniorTranche, ST_LP_ROLE);
+        roles[1] = _buildTrancheRolesConfig(_juniorTranche, JT_LP_ROLE);
+        roles[2] = _buildKernelRolesConfig(_kernel);
+        roles[3] = _buildAccountantRolesConfig(_accountant);
+    }
 
-        roles = new IRoycoFactory.RolesTargetConfiguration[](roleCount);
-        uint256 index = 0;
+    function _buildTrancheRolesConfig(address _tranche, uint64 _lpRole)
+        private
+        pure
+        returns (IRoycoFactory.RolesTargetConfiguration memory)
+    {
+        bytes4[] memory selectors = new bytes4[](5);
+        uint64[] memory roleValues = new uint64[](5);
 
-        // Senior Tranche roles
-        bytes4[] memory stSelectors = new bytes4[](5);
-        uint64[] memory stRoles = new uint64[](5);
+        selectors[0] = IRoycoVaultTranche.deposit.selector;
+        roleValues[0] = _lpRole;
+        selectors[1] = IRoycoVaultTranche.redeem.selector;
+        roleValues[1] = _lpRole;
+        selectors[2] = IRoycoAuth.pause.selector;
+        roleValues[2] = ADMIN_PAUSER_ROLE;
+        selectors[3] = IRoycoAuth.unpause.selector;
+        roleValues[3] = ADMIN_PAUSER_ROLE;
+        selectors[4] = UUPSUpgradeable.upgradeToAndCall.selector;
+        roleValues[4] = ADMIN_UPGRADER_ROLE;
 
-        stSelectors[0] = IRoycoVaultTranche.deposit.selector;
-        stRoles[0] = ST_LP_ROLE;
-        stSelectors[1] = IRoycoVaultTranche.redeem.selector;
-        stRoles[1] = ST_LP_ROLE;
-        stSelectors[2] = IRoycoAuth.pause.selector;
-        stRoles[2] = ADMIN_PAUSER_ROLE;
-        stSelectors[3] = IRoycoAuth.unpause.selector;
-        stRoles[3] = ADMIN_PAUSER_ROLE;
-        stSelectors[4] = UUPSUpgradeable.upgradeToAndCall.selector;
-        stRoles[4] = ADMIN_UPGRADER_ROLE;
+        return IRoycoFactory.RolesTargetConfiguration({ target: _tranche, selectors: selectors, roles: roleValues });
+    }
 
-        roles[index++] = IRoycoFactory.RolesTargetConfiguration({ target: _seniorTranche, selectors: stSelectors, roles: stRoles });
+    function _buildKernelRolesConfig(address _kernel) private pure returns (IRoycoFactory.RolesTargetConfiguration memory) {
+        bytes4[] memory selectors = new bytes4[](8);
+        uint64[] memory roleValues = new uint64[](8);
 
-        // Junior Tranche roles (same as senior)
-        bytes4[] memory jtSelectors = new bytes4[](5);
-        uint64[] memory jtRoles = new uint64[](5);
+        selectors[0] = IRoycoKernel.setProtocolFeeRecipient.selector;
+        roleValues[0] = ADMIN_KERNEL_ROLE;
+        selectors[1] = IRoycoAuth.pause.selector;
+        roleValues[1] = ADMIN_PAUSER_ROLE;
+        selectors[2] = IRoycoAuth.unpause.selector;
+        roleValues[2] = ADMIN_PAUSER_ROLE;
+        selectors[3] = IdenticalAssetsOracleQuoter.setConversionRate.selector;
+        roleValues[3] = ADMIN_ORACLE_QUOTER_ROLE;
+        selectors[4] = IdenticalAssetsChainlinkOracleQuoter.setTrancheAssetToReferenceAssetOracle.selector;
+        roleValues[4] = ADMIN_ORACLE_QUOTER_ROLE;
+        selectors[5] = UUPSUpgradeable.upgradeToAndCall.selector;
+        roleValues[5] = ADMIN_UPGRADER_ROLE;
+        selectors[6] = IRoycoKernel.syncTrancheAccounting.selector;
+        roleValues[6] = SYNC_ROLE;
+        selectors[7] = IRoycoKernel.setSeniorTrancheSelfLiquidationBonus.selector;
+        roleValues[7] = ADMIN_KERNEL_ROLE;
 
-        jtSelectors[0] = IRoycoVaultTranche.deposit.selector;
-        jtRoles[0] = JT_LP_ROLE;
-        jtSelectors[1] = IRoycoVaultTranche.redeem.selector;
-        jtRoles[1] = JT_LP_ROLE;
-        jtSelectors[2] = IRoycoAuth.pause.selector;
-        jtRoles[2] = ADMIN_PAUSER_ROLE;
-        jtSelectors[3] = IRoycoAuth.unpause.selector;
-        jtRoles[3] = ADMIN_PAUSER_ROLE;
-        jtSelectors[4] = UUPSUpgradeable.upgradeToAndCall.selector;
-        jtRoles[4] = ADMIN_UPGRADER_ROLE;
+        return IRoycoFactory.RolesTargetConfiguration({ target: _kernel, selectors: selectors, roles: roleValues });
+    }
 
-        roles[index++] = IRoycoFactory.RolesTargetConfiguration({ target: _juniorTranche, selectors: jtSelectors, roles: jtRoles });
+    function _buildAccountantRolesConfig(address _accountant) private pure returns (IRoycoFactory.RolesTargetConfiguration memory) {
+        bytes4[] memory selectors = new bytes4[](14);
+        uint64[] memory roleValues = new uint64[](14);
 
-        // Kernel roles
-        bytes4[] memory kernelSelectors = new bytes4[](8);
-        uint64[] memory kernelRoleValues = new uint64[](8);
+        selectors[0] = IRoycoAccountant.setYDM.selector;
+        roleValues[0] = ADMIN_ACCOUNTANT_ROLE;
+        selectors[1] = IRoycoAccountant.setSeniorTrancheProtocolFee.selector;
+        roleValues[1] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
+        selectors[2] = IRoycoAccountant.setJuniorTrancheProtocolFee.selector;
+        roleValues[2] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
+        selectors[3] = IRoycoAccountant.setCoverage.selector;
+        roleValues[3] = ADMIN_ACCOUNTANT_ROLE;
+        selectors[4] = IRoycoAccountant.setBeta.selector;
+        roleValues[4] = ADMIN_ACCOUNTANT_ROLE;
+        selectors[5] = IRoycoAccountant.setLLTV.selector;
+        roleValues[5] = ADMIN_ACCOUNTANT_ROLE;
+        selectors[6] = IRoycoAccountant.setFixedTermDuration.selector;
+        roleValues[6] = ADMIN_ACCOUNTANT_ROLE;
+        selectors[7] = IRoycoAuth.pause.selector;
+        roleValues[7] = ADMIN_PAUSER_ROLE;
+        selectors[8] = IRoycoAuth.unpause.selector;
+        roleValues[8] = ADMIN_PAUSER_ROLE;
+        selectors[9] = UUPSUpgradeable.upgradeToAndCall.selector;
+        roleValues[9] = ADMIN_UPGRADER_ROLE;
+        selectors[10] = IRoycoAccountant.setSeniorTrancheDustTolerance.selector;
+        roleValues[10] = ADMIN_ACCOUNTANT_ROLE;
+        selectors[11] = IRoycoAccountant.setYieldShareProtocolFee.selector;
+        roleValues[11] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
+        selectors[12] = IRoycoAccountant.setCoverageConfiguration.selector;
+        roleValues[12] = ADMIN_ACCOUNTANT_ROLE;
+        selectors[13] = IRoycoAccountant.setJuniorTrancheDustTolerance.selector;
+        roleValues[13] = ADMIN_ACCOUNTANT_ROLE;
 
-        kernelSelectors[0] = IRoycoKernel.setProtocolFeeRecipient.selector;
-        kernelRoleValues[0] = ADMIN_KERNEL_ROLE;
-        kernelSelectors[1] = IRoycoAuth.pause.selector;
-        kernelRoleValues[1] = ADMIN_PAUSER_ROLE;
-        kernelSelectors[2] = IRoycoAuth.unpause.selector;
-        kernelRoleValues[2] = ADMIN_PAUSER_ROLE;
-        kernelSelectors[3] = IdenticalAssetsOracleQuoter.setConversionRate.selector;
-        kernelRoleValues[3] = ADMIN_ORACLE_QUOTER_ROLE;
-        kernelSelectors[4] = IdenticalAssetsChainlinkOracleQuoter.setTrancheAssetToReferenceAssetOracle.selector;
-        kernelRoleValues[4] = ADMIN_ORACLE_QUOTER_ROLE;
-        kernelSelectors[5] = UUPSUpgradeable.upgradeToAndCall.selector;
-        kernelRoleValues[5] = ADMIN_UPGRADER_ROLE;
-        kernelSelectors[6] = IRoycoKernel.syncTrancheAccounting.selector;
-        kernelRoleValues[6] = SYNC_ROLE;
-        kernelSelectors[7] = IRoycoKernel.setSeniorTrancheSelfLiquidationBonus.selector;
-        kernelRoleValues[7] = ADMIN_KERNEL_ROLE;
-
-        roles[index++] = IRoycoFactory.RolesTargetConfiguration({ target: _kernel, selectors: kernelSelectors, roles: kernelRoleValues });
-
-        // Accountant roles
-        bytes4[] memory accountantSelectors = new bytes4[](14);
-        uint64[] memory accountantRoleValues = new uint64[](14);
-
-        accountantSelectors[0] = IRoycoAccountant.setYDM.selector;
-        accountantRoleValues[0] = ADMIN_ACCOUNTANT_ROLE;
-        accountantSelectors[1] = IRoycoAccountant.setSeniorTrancheProtocolFee.selector;
-        accountantRoleValues[1] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        accountantSelectors[2] = IRoycoAccountant.setJuniorTrancheProtocolFee.selector;
-        accountantRoleValues[2] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        accountantSelectors[3] = IRoycoAccountant.setCoverage.selector;
-        accountantRoleValues[3] = ADMIN_ACCOUNTANT_ROLE;
-        accountantSelectors[4] = IRoycoAccountant.setBeta.selector;
-        accountantRoleValues[4] = ADMIN_ACCOUNTANT_ROLE;
-        accountantSelectors[5] = IRoycoAccountant.setLLTV.selector;
-        accountantRoleValues[5] = ADMIN_ACCOUNTANT_ROLE;
-        accountantSelectors[6] = IRoycoAccountant.setFixedTermDuration.selector;
-        accountantRoleValues[6] = ADMIN_ACCOUNTANT_ROLE;
-        accountantSelectors[7] = IRoycoAuth.pause.selector;
-        accountantRoleValues[7] = ADMIN_PAUSER_ROLE;
-        accountantSelectors[8] = IRoycoAuth.unpause.selector;
-        accountantRoleValues[8] = ADMIN_PAUSER_ROLE;
-        accountantSelectors[9] = UUPSUpgradeable.upgradeToAndCall.selector;
-        accountantRoleValues[9] = ADMIN_UPGRADER_ROLE;
-        accountantSelectors[10] = IRoycoAccountant.setSeniorTrancheDustTolerance.selector;
-        accountantRoleValues[10] = ADMIN_ACCOUNTANT_ROLE;
-        accountantSelectors[11] = IRoycoAccountant.setYieldShareProtocolFee.selector;
-        accountantRoleValues[11] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        accountantSelectors[12] = IRoycoAccountant.setCoverageConfiguration.selector;
-        accountantRoleValues[12] = ADMIN_ACCOUNTANT_ROLE;
-        accountantSelectors[13] = IRoycoAccountant.setJuniorTrancheDustTolerance.selector;
-        accountantRoleValues[13] = ADMIN_ACCOUNTANT_ROLE;
-
-        roles[index++] = IRoycoFactory.RolesTargetConfiguration({ target: _accountant, selectors: accountantSelectors, roles: accountantRoleValues });
+        return IRoycoFactory.RolesTargetConfiguration({ target: _accountant, selectors: selectors, roles: roleValues });
     }
 
     /// @notice Generates role assignments from addresses
@@ -610,7 +593,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         )
     {
         // Precompute expected proxy addresses using salt derived from market ID
-        bytes32 salt = keccak256(abi.encodePacked(MARKET_DEPLOYMENT_SALT, _params.marketId));
+        bytes32 salt = keccak256(abi.encodePacked(MARKET_DEPLOYMENT_SALT, _params.seniorTrancheName, _params.juniorTrancheName));
 
         // Predict the deterministic addresses of the contracts
         // The salt is unique for each contract type to prevent CREATE3 collisions
@@ -624,10 +607,10 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         address expectedKernelAddress = factory.predictDeterministicAddress(kernelSalt);
 
         // Deploy the senior tranche implementation
-        stImpl = _deploySTTrancheImpl(_params.seniorAsset, expectedKernelAddress, _params.marketId);
+        stImpl = _deploySTTrancheImpl(_params.seniorAsset, expectedKernelAddress);
 
         // Deploy the junior tranche implementation
-        jtImpl = _deployJTTrancheImpl(_params.juniorAsset, expectedKernelAddress, _params.marketId);
+        jtImpl = _deployJTTrancheImpl(_params.juniorAsset, expectedKernelAddress);
 
         // Deploy the accountant implementation
         accountantImpl = _deployAccountantImpl(expectedKernelAddress);
@@ -666,7 +649,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             seniorTrancheSymbol: _params.seniorTrancheSymbol,
             juniorTrancheName: _params.juniorTrancheName,
             juniorTrancheSymbol: _params.juniorTrancheSymbol,
-            marketId: _params.marketId,
             seniorTrancheImplementation: IRoycoVaultTranche(address(stImpl)),
             juniorTrancheImplementation: IRoycoVaultTranche(address(jtImpl)),
             kernelImplementation: IRoycoKernel(address(kernelImpl)),
@@ -709,8 +691,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
 
     /// @notice Deploys ST tranche implementation
     /// @return The deployed ST tranche implementation
-    function _deploySTTrancheImpl(address _asset, address _kernel, bytes32 _marketId) internal returns (RoycoSeniorTranche) {
-        bytes memory creationCode = abi.encodePacked(type(RoycoSeniorTranche).creationCode, abi.encode(_asset, _kernel, _marketId));
+    function _deploySTTrancheImpl(address _asset, address _kernel) internal returns (RoycoSeniorTranche) {
+        bytes memory creationCode = abi.encodePacked(type(RoycoSeniorTranche).creationCode, abi.encode(_asset, _kernel));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(ST_TRANCHE_IMPL_SALT, creationCode, false);
         if (alreadyDeployed) {
@@ -723,8 +705,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
 
     /// @notice Deploys JT tranche implementation
     /// @return The deployed JT tranche implementation
-    function _deployJTTrancheImpl(address _asset, address _kernel, bytes32 _marketId) internal returns (RoycoJuniorTranche) {
-        bytes memory creationCode = abi.encodePacked(type(RoycoJuniorTranche).creationCode, abi.encode(_asset, _kernel, _marketId));
+    function _deployJTTrancheImpl(address _asset, address _kernel) internal returns (RoycoJuniorTranche) {
+        bytes memory creationCode = abi.encodePacked(type(RoycoJuniorTranche).creationCode, abi.encode(_asset, _kernel));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(JT_TRANCHE_IMPL_SALT, creationCode, false);
         if (alreadyDeployed) {

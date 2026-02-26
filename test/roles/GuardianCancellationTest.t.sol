@@ -74,7 +74,6 @@ contract GuardianCancellationTest is BaseTest {
         // Build deployment params
         DeployScript.DeploymentParams memory params = DeployScript.DeploymentParams({
             factoryAdmin: OWNER_ADDRESS,
-            marketId: marketID,
             seniorTrancheName: SENIOR_TRANCHE_NAME,
             seniorTrancheSymbol: SENIOR_TRANCHE_SYMBOL,
             juniorTrancheName: JUNIOR_TRANCHE_NAME,

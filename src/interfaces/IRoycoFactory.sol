@@ -117,7 +117,6 @@ interface IRoycoFactory {
         string seniorTrancheSymbol;
         string juniorTrancheName;
         string juniorTrancheSymbol;
-        bytes32 marketId;
         // Implementation Addresses
         IRoycoVaultTranche seniorTrancheImplementation;
         IRoycoVaultTranche juniorTrancheImplementation;
