@@ -24,25 +24,29 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoFactoryState")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ROYCO_FACTORY_STORAGE_LOCATION = 0xd5259699f97e0f34b934576b7add74d31128c481e849a0afbdca7e6e84f8b300;
 
-    /// @dev Storage for the factory
-    /// @custom:storage-location erc7201:Royco.storage.RoycoFactoryState
-    struct RoycoFactoryStorage {
-        /// @dev Mapping from a senior tranche to its corresponding junior tranche
+    /**
+     * @dev The storage state of the Royco factory
+     * @custom:storage-location erc7201:Royco.storage.RoycoFactoryState
+     * @custom:mapping seniorTrancheToJuniorTranche - Mapping from a senior tranche to its corresponding junior tranche
+     * @custom:mapping juniorTrancheToSeniorTranche - Mapping from a junior tranche to its corresponding senior tranche
+     */
+    struct RoycoFactoryState {
         mapping(address st => address jt) seniorTrancheToJuniorTranche;
-
-        /// @dev Mapping from a junior tranche to its corresponding senior tranche
         mapping(address jt => address st) juniorTrancheToSeniorTranche;
     }
 
+    /// @notice Constructs the factory
     /// @dev Disable the initializers
     constructor() {
         _disableInitializers();
     }
 
-    /// @notice Initializes the factory
-    /// @param _admin The admin of the factory
-    /// @param _deployer The deployer address that can deploy new markets
-    /// @param _roles The roles to assign to the factory
+    /**
+     * @notice Initializes the factory
+     * @param _admin The admin of the factory
+     * @param _deployer The deployer address that can deploy new markets
+     * @param _roles The roles to assign to the factory
+     */
     function initialize(address _admin, address _deployer, RoleAssignmentConfiguration[] calldata _roles) external virtual initializer {
         // Initialize the access manager
         __AccessManager_init(_admin);
@@ -50,19 +54,21 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
         __RoycoFactory_init_unchained(_deployer, _roles);
     }
 
-    /// @notice Initializes the factory
-    /// @param _deployer The deployer address that can deploy new markets
-    /// @param _roles The roles to assign to the factory
+    /**
+     * @notice Initializes the factory
+     * @param _deployer The deployer address that can deploy new markets
+     * @param _roles The roles to assign to the factory
+     */
     function __RoycoFactory_init_unchained(address _deployer, RoleAssignmentConfiguration[] calldata _roles) internal onlyInitializing {
         // Grant the deployer the deployer role
         _grantRole(DEPLOYER_ROLE, _deployer, 0, 0);
         // Set the deployer role on the deployMarket function
         _setTargetFunctionRole(address(this), RoycoFactory.deployMarket.selector, DEPLOYER_ROLE);
 
-        // Configure the Factory Upgrade Role
+        // Configure the factory upgrader role
         _setTargetFunctionRole(address(this), UUPSUpgradeable.upgradeToAndCall.selector, ADMIN_UPGRADER_ROLE);
 
-        // Configure all market roles
+        // Configure all other market roles
         for (uint256 i = 0; i < _roles.length; i++) {
             RoleAssignmentConfiguration calldata roleAssignment = _roles[i];
 
@@ -104,7 +110,7 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
         // Update the mappings between the two deployed tranches
         address seniorTranche = address(roycoMarket.seniorTranche);
         address juniorTranche = address(roycoMarket.juniorTranche);
-        RoycoFactoryStorage storage $ = _getRoycoFactoryStorage();
+        RoycoFactoryState storage $ = _getRoycoFactoryState();
         $.seniorTrancheToJuniorTranche[seniorTranche] = juniorTranche;
         $.juniorTrancheToSeniorTranche[juniorTranche] = seniorTranche;
 
@@ -120,16 +126,14 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
     /// @param _seniorTranche The senior tranche address
     /// @return juniorTranche The junior tranche address
     function seniorTrancheToJuniorTranche(address _seniorTranche) external view override(IRoycoFactory) returns (address juniorTranche) {
-        RoycoFactoryStorage storage $ = _getRoycoFactoryStorage();
-        juniorTranche = $.seniorTrancheToJuniorTranche[_seniorTranche];
+        return _getRoycoFactoryState().seniorTrancheToJuniorTranche[_seniorTranche];
     }
 
     /// @notice Returns the senior tranche for a given junior tranche
     /// @param _juniorTranche The junior tranche address
     /// @return seniorTranche The senior tranche address
     function juniorTrancheToSeniorTranche(address _juniorTranche) external view override(IRoycoFactory) returns (address seniorTranche) {
-        RoycoFactoryStorage storage $ = _getRoycoFactoryStorage();
-        seniorTranche = $.juniorTrancheToSeniorTranche[_juniorTranche];
+        return _getRoycoFactoryState().juniorTrancheToSeniorTranche[_juniorTranche];
     }
 
     /**
@@ -243,7 +247,7 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
      * @param _implementation The implementation address
      * @param _initData The initialization data for the proxy
      * @param _salt The salt for the deployment
-     *  @return proxy The deployed proxy address
+     * @return proxy The deployed proxy address
      */
     function _deployERC1967ProxyDeterministic(address _implementation, bytes memory _initData, bytes32 _salt) internal returns (address proxy) {
         address predictedAddress = CREATE3.predictDeterministicAddress(_salt);
@@ -257,10 +261,12 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
         require(_newImplementation.code.length > 0, INVALID_IMPLEMENTATION());
     }
 
-    /// @notice Returns a storage pointer to the RoycoFactoryStorage storage
-    /// @dev Uses ERC-7201 storage slot pattern for collision-resistant storage
-    /// @return $ Storage pointer to the factory's state
-    function _getRoycoFactoryStorage() private pure returns (RoycoFactoryStorage storage $) {
+    /**
+     * @notice Returns a storage pointer to the RoycoFactoryState storage
+     * @dev Uses ERC-7201 storage slot pattern for collision-resistant storage
+     * @return $ Storage pointer to the factory's state
+     */
+    function _getRoycoFactoryState() private pure returns (RoycoFactoryState storage $) {
         assembly {
             $.slot := ROYCO_FACTORY_STORAGE_LOCATION
         }

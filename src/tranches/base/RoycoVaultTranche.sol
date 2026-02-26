@@ -25,6 +25,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     using UnitsMathLib for uint256;
     using SafeERC20 for IERC20;
 
+    /// @dev The address of the yield bearing asset of the tranche
     address private immutable ASSET;
 
     /// @inheritdoc IRoycoVaultTranche
