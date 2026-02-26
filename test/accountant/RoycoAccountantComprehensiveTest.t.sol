@@ -1019,7 +1019,7 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
             IRoycoAccountant.RoycoAccountantState memory stateBefore = accountant.getState();
             uint256 stDeposit = toUint256(maxDeposit);
             vm.prank(MOCK_KERNEL);
-            accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(stNav + toUint256(maxDeposit)), _nav(jtNav), ZERO_NAV_UNITS);
+            accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(stNav + toUint256(maxDeposit)), _nav(jtNav));
             // If we get here without revert, coverage is satisfied
             assertTrue(true);
         }
@@ -1295,7 +1295,7 @@ contract RoycoAccountantRevertTest is BaseTest {
 
         vm.prank(NON_KERNEL);
         vm.expectRevert(IRoycoAccountant.ONLY_ROYCO_KERNEL.selector);
-        accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(100e18), _nav(50e18));
     }
 
     // =========================================================================
@@ -1383,7 +1383,7 @@ contract RoycoAccountantRevertTest is BaseTest {
         // Adding more ST would violate the requirement
         vm.prank(MOCK_KERNEL);
         vm.expectRevert(IRoycoAccountant.COVERAGE_REQUIREMENT_UNSATISFIED.selector);
-        accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(600e18), _nav(100e18), ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(600e18), _nav(100e18));
     }
 
     // =========================================================================
@@ -2096,14 +2096,11 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
 
         // Execute JT withdrawal with coverage enforcement
         vm.prank(MOCK_KERNEL);
-        try accountant.postOpSyncTrancheAccountingAndEnforceCoverage(
-            Operation.JT_REDEEM, _nav(initialST), _nav(initialJT - withdrawAmount), ZERO_NAV_UNITS
-        ) returns (
+        try accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.JT_REDEEM, _nav(initialST), _nav(initialJT - withdrawAmount)) returns (
             SyncedAccountingState memory postOpState
         ) {
-            uint256 postOpLTV = _computeLTV(
-                toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.stImpermanentLoss), toUint256(postOpState.jtEffectiveNAV)
-            );
+            uint256 postOpLTV =
+                _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.stImpermanentLoss), toUint256(postOpState.jtEffectiveNAV));
 
             // INVARIANT: If coverage passed, LTV should be below LLTV
             assertLt(postOpLTV, LLTV_WAD, "LLTV breached after JT withdrawal with coverage enforcement");
@@ -2144,14 +2141,11 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
 
             // Now execute ST deposit
             vm.prank(MOCK_KERNEL);
-            try accountant.postOpSyncTrancheAccountingAndEnforceCoverage(
-                Operation.ST_DEPOSIT, _nav(newSTRaw + depositAmount), _nav(newJTRaw), ZERO_NAV_UNITS
-            ) returns (
+            try accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(newSTRaw + depositAmount), _nav(newJTRaw)) returns (
                 SyncedAccountingState memory postOpState
             ) {
-                uint256 postOpLTV = _computeLTV(
-                    toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.stImpermanentLoss), toUint256(postOpState.jtEffectiveNAV)
-                );
+                uint256 postOpLTV =
+                    _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.stImpermanentLoss), toUint256(postOpState.jtEffectiveNAV));
 
                 // INVARIANT: If both preOp and postOp succeeded without LLTV breach, LTV stays safe
                 assertLt(postOpLTV, LLTV_WAD, "LLTV breached in post-op after safe pre-op");
@@ -2174,7 +2168,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
 
         // Operation 1: ST deposit
         vm.prank(MOCK_KERNEL);
-        try accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(initialST + stDeposit), _nav(initialJT), ZERO_NAV_UNITS) {
+        try accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(initialST + stDeposit), _nav(initialJT)) {
             // Check LTV after ST deposit
             IRoycoAccountant.RoycoAccountantState memory state1 = accountant.getState();
             uint256 ltv1 = _computeLTV(toUint256(state1.lastSTEffectiveNAV), toUint256(state1.lastSTImpermanentLoss), toUint256(state1.lastJTEffectiveNAV));
@@ -3190,7 +3184,7 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
         // Try to withdraw too much JT (violating coverage)
         vm.prank(MOCK_KERNEL);
         vm.expectRevert(IRoycoAccountant.COVERAGE_REQUIREMENT_UNSATISFIED.selector);
-        accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.JT_REDEEM, _nav(100e18), _nav(10e18), ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.JT_REDEEM, _nav(100e18), _nav(10e18));
     }
 
     // =========================================================================

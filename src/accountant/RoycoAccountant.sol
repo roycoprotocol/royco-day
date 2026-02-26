@@ -262,15 +262,15 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     function postOpSyncTrancheAccountingAndEnforceCoverage(
         Operation _op,
         NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV,
-        NAV_UNIT _stSelfLiquidationBonusNAV
+        NAV_UNIT _jtRawNAV
     )
         external
         override(IRoycoAccountant)
         returns (SyncedAccountingState memory state)
     {
         // Execute a post-op NAV synchronization
-        state = postOpSyncTrancheAccounting(_op, _stRawNAV, _jtRawNAV, _stSelfLiquidationBonusNAV);
+        // This is called during a ST Deposit or JT Withdrawal, so the self-liquidation bonus is not applicable
+        state = postOpSyncTrancheAccounting(_op, _stRawNAV, _jtRawNAV, ZERO_NAV_UNITS);
         // Enforce the market's coverage requirement
         require(_isCoverageRequirementSatisfied(state.utilizationWAD), COVERAGE_REQUIREMENT_UNSATISFIED());
     }

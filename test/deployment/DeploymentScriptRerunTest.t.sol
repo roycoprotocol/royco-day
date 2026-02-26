@@ -187,24 +187,8 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
     )
         internal
         view
-        returns (DeployScript.DeploymentParams memory)
+        returns (DeployScript.DeploymentParams memory params)
     {
-        // Build kernel-specific params
-        DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams memory kernelParams =
-            DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 });
-
-        // Build YDM params (AdaptiveCurve_V2)
-        DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
-            jtYieldShareAtZeroUtilWAD: 0.225e18, // Y_0 = Y_T (same as target)
-            jtYieldShareAtTargetUtilWAD: 0.225e18,
-            jtYieldShareAtFullUtilWAD: 1e18,
-            maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
-        });
-
-        // Build role assignments
-        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
-
-        DeployScript.DeploymentParams memory params;
         params.factoryAdmin = OWNER_ADDRESS;
         params.seniorTrancheName = _seniorTrancheName;
         params.seniorTrancheSymbol = _seniorTrancheSymbol;
@@ -215,7 +199,6 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         params.stNAVDustTolerance = DUST_TOLERANCE;
         params.jtNAVDustTolerance = DUST_TOLERANCE;
         params.kernelType = DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel;
-        params.kernelSpecificParams = abi.encode(kernelParams);
         params.protocolFeeRecipient = PROTOCOL_FEE_RECIPIENT_ADDRESS;
         params.stProtocolFeeWAD = ST_PROTOCOL_FEE_WAD;
         params.jtProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
@@ -224,9 +207,22 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         params.lltvWAD = LLTV;
         params.fixedTermDurationSeconds = FIXED_TERM_DURATION_SECONDS;
         params.ydmType = DeployScript.YDMType.AdaptiveCurve_V2;
-        params.ydmSpecificParams = abi.encode(ydmParams);
-        params.roleAssignments = roleAssignments;
-        return params;
+        params.roleAssignments = _generateRoleAssignments();
+        _setEncodedParams(params);
+    }
+
+    function _setEncodedParams(DeployScript.DeploymentParams memory params) private pure {
+        params.kernelSpecificParams = abi.encode(
+            DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })
+        );
+        params.ydmSpecificParams = abi.encode(
+            DeployScript.AdaptiveCurveYDM_V2_Params({
+                jtYieldShareAtZeroUtilWAD: 0.225e18,
+                jtYieldShareAtTargetUtilWAD: 0.225e18,
+                jtYieldShareAtFullUtilWAD: 1e18,
+                maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
+            })
+        );
     }
 
     // ============================================

@@ -341,7 +341,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         $.stOwnedYieldBearingAssets = $.stOwnedYieldBearingAssets + _assets;
 
         // Execute a post-deposit sync on accounting and enforce the market's coverage requirement
-        NAV_UNIT stPostDepositNAV = (_postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, ZERO_NAV_UNITS)).stEffectiveNAV;
+        NAV_UNIT stPostDepositNAV = (_postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT)).stEffectiveNAV;
 
         // The NAV to mint tranche shares at is the pre-deposit senior tranche controlled NAV
         navToMintSharesAt = state.stEffectiveNAV;
@@ -455,7 +455,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         _withdrawAssets(userAssetClaims, _receiver);
 
         // Execute a post-redeem sync on accounting and enforce the market's coverage requirement
-        _postOpSyncTrancheAccountingAndEnforceCoverage(Operation.JT_REDEEM, ZERO_NAV_UNITS);
+        _postOpSyncTrancheAccountingAndEnforceCoverage(Operation.JT_REDEEM);
     }
 
     // =============================
@@ -557,20 +557,11 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      * @notice Invokes the accountant to do a post-operation (deposit or withdrawal) NAV sync and enforce that the market's coverage requirement is satisfied after reconciliation
      * @dev Must be executed after every NAV mutating operation that requires a coverage check (ST deposit and JT withdrawal)
      * @param _op The operation being executed in between the pre and post synchronizations
-     * @param _stSelfLiquidationBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions (only applicable if _op == ST_REDEEM)
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
-    function _postOpSyncTrancheAccountingAndEnforceCoverage(
-        Operation _op,
-        NAV_UNIT _stSelfLiquidationBonusNAV
-    )
-        internal
-        virtual
-        returns (SyncedAccountingState memory state)
-    {
+    function _postOpSyncTrancheAccountingAndEnforceCoverage(Operation _op) internal virtual returns (SyncedAccountingState memory state) {
         // Execute the post-op sync on the accountant
-        state = IRoycoAccountant(ACCOUNTANT)
-            .postOpSyncTrancheAccountingAndEnforceCoverage(_op, _getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV(), _stSelfLiquidationBonusNAV);
+        state = IRoycoAccountant(ACCOUNTANT).postOpSyncTrancheAccountingAndEnforceCoverage(_op, _getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
     }
 
     /**

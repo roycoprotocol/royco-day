@@ -874,8 +874,7 @@ contract RoycoAccountantTest is BaseTest {
         _initializeAccountantState(100e18, 50e18);
 
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state =
-            accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(105e18), _nav(50e18), ZERO_NAV_UNITS);
+        SyncedAccountingState memory state = accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(105e18), _nav(50e18));
 
         assertTrue(accountant.isCoverageRequirementSatisfied(), "coverage satisfied");
         _assertNAVConservation(state);
@@ -886,7 +885,7 @@ contract RoycoAccountantTest is BaseTest {
 
         vm.prank(MOCK_KERNEL);
         vm.expectRevert(IRoycoAccountant.COVERAGE_REQUIREMENT_UNSATISFIED.selector);
-        accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(200e18), _nav(20e18), ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(200e18), _nav(20e18));
     }
 
     function test_maxSTDepositGivenCoverage() public {
