@@ -160,6 +160,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         bytes kernelSpecificParams; // Encoded kernel-specific params
         // Kernel initialization params
         address protocolFeeRecipient;
+        uint64 stSelfLiquidationBonusWAD;
         // Accountant params
         uint64 stProtocolFeeWAD;
         uint64 jtProtocolFeeWAD;
@@ -225,6 +226,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             kernelType: marketConfig.kernelType,
             kernelSpecificParams: marketConfig.kernelSpecificParams,
             protocolFeeRecipient: chainConfig.protocolFeeRecipient,
+            stSelfLiquidationBonusWAD: marketConfig.stSelfLiquidationBonusWAD,
             stProtocolFeeWAD: marketConfig.stProtocolFeeWAD,
             jtProtocolFeeWAD: marketConfig.jtProtocolFeeWAD,
             coverageWAD: marketConfig.coverageWAD,
@@ -912,8 +914,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         pure
         returns (bytes memory)
     {
-        IRoycoKernel.RoycoKernelInitParams memory kernelParams =
-            IRoycoKernel.RoycoKernelInitParams({ initialAuthority: _factoryAddress, protocolFeeRecipient: _params.protocolFeeRecipient });
+        IRoycoKernel.RoycoKernelInitParams memory kernelParams = IRoycoKernel.RoycoKernelInitParams({
+            initialAuthority: _factoryAddress, protocolFeeRecipient: _params.protocolFeeRecipient, stSelfLiquidationBonusWAD: _params.stSelfLiquidationBonusWAD
+        });
 
         if (_kernelType == KernelType.ReUSD_ST_ReUSD_JT) {
             return abi.encodeCall(ReUSD_ST_ReUSD_JT_Kernel.initialize, (kernelParams));

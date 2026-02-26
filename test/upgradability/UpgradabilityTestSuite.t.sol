@@ -103,6 +103,7 @@ contract UpgradabilityTestSuite is BaseTest {
             jtNAVDustTolerance: DUST_TOLERANCE,
             kernelType: DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel,
             kernelSpecificParams: abi.encode(kernelParams),
+            stSelfLiquidationBonusWAD: 0,
             protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
@@ -208,8 +209,9 @@ contract UpgradabilityTestSuite is BaseTest {
 
     /// @notice Test that Kernel implementation cannot be initialized
     function test_kernelImplementation_cannotBeInitialized() external {
-        IRoycoKernel.RoycoKernelInitParams memory params =
-            IRoycoKernel.RoycoKernelInitParams({ initialAuthority: address(FACTORY), protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS });
+        IRoycoKernel.RoycoKernelInitParams memory params = IRoycoKernel.RoycoKernelInitParams({
+            initialAuthority: address(FACTORY), protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS, stSelfLiquidationBonusWAD: 0
+        });
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         IdenticalERC4626SharesAdminOracleQuoter_Kernel(KERNEL_IMPL).initialize(params, WAD);
@@ -255,8 +257,9 @@ contract UpgradabilityTestSuite is BaseTest {
 
     /// @notice Test that new Kernel implementation cannot be initialized
     function test_newKernelImplementation_cannotBeInitialized() external {
-        IRoycoKernel.RoycoKernelInitParams memory params =
-            IRoycoKernel.RoycoKernelInitParams({ initialAuthority: address(FACTORY), protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS });
+        IRoycoKernel.RoycoKernelInitParams memory params = IRoycoKernel.RoycoKernelInitParams({
+            initialAuthority: address(FACTORY), protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS, stSelfLiquidationBonusWAD: 0
+        });
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         IdenticalERC4626SharesAdminOracleQuoter_Kernel(newKernelImpl).initialize(params, WAD);

@@ -76,6 +76,7 @@ abstract contract DeploymentConfig {
         // Kernel
         DeployScript.KernelType kernelType;
         bytes kernelSpecificParams;
+        uint64 stSelfLiquidationBonusWAD;
         // Accountant
         uint64 stProtocolFeeWAD;
         uint64 jtProtocolFeeWAD;
@@ -184,6 +185,7 @@ abstract contract DeploymentConfig {
             jtDustTolerance: 3,
             kernelType: DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
+            stSelfLiquidationBonusWAD: 0, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
             coverageWAD: 0.1e18,
@@ -215,6 +217,7 @@ abstract contract DeploymentConfig {
             jtDustTolerance: 3,
             kernelType: DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
+            stSelfLiquidationBonusWAD: 0, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
             coverageWAD: 0.1e18,
@@ -246,6 +249,7 @@ abstract contract DeploymentConfig {
             jtDustTolerance: 3,
             kernelType: DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
+            stSelfLiquidationBonusWAD: 0, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
             coverageWAD: 0.2e18,
@@ -277,6 +281,7 @@ abstract contract DeploymentConfig {
             jtDustTolerance: 3,
             kernelType: DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
+            stSelfLiquidationBonusWAD: 0, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
             coverageWAD: 0.1e18,

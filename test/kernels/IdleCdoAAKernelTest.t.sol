@@ -97,6 +97,7 @@ contract IdleCdoAAKernelTest is AbstractKernelTestSuite {
             stNAVDustTolerance: toNAVUnits(SCALE_FACTOR),
             jtNAVDustTolerance: toNAVUnits(SCALE_FACTOR),
             kernelType: DeployScript.KernelType.IdleCdoAA_ST_IdleCdoAA_JT,
+            stSelfLiquidationBonusWAD: 0,
             kernelSpecificParams: abi.encode(kernelParams),
             protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,

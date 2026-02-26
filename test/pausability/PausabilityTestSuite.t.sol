@@ -84,6 +84,7 @@ contract PausabilityTestSuite is BaseTest {
             jtNAVDustTolerance: DUST_TOLERANCE,
             kernelType: DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel,
             kernelSpecificParams: abi.encode(kernelParams),
+            stSelfLiquidationBonusWAD: 0,
             protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,

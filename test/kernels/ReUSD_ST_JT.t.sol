@@ -268,6 +268,7 @@ contract reUSD_Test is AbstractKernelTestSuite {
             jtNAVDustTolerance: toNAVUnits(10 ** (18 - cfg.jtDecimals)),
             kernelType: DeployScript.KernelType.ReUSD_ST_ReUSD_JT,
             kernelSpecificParams: abi.encode(kernelParams),
+            stSelfLiquidationBonusWAD: 0,
             protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,

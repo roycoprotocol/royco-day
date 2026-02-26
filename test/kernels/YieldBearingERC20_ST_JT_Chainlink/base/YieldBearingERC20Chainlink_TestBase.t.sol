@@ -543,6 +543,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
             jtNAVDustTolerance: toNAVUnits(10 ** (18 - cfg.jtDecimals)),
             kernelType: DeployScript.KernelType.IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel,
             kernelSpecificParams: abi.encode(kernelParams),
+            stSelfLiquidationBonusWAD: 0,
             protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
