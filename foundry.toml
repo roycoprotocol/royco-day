@@ -13,11 +13,7 @@ via_ir = true
 deny = "never"
 fs_permissions = [{ access = "read", path = "./out" }]
 solc_version = "0.8.33"
-
-
-[profile.development]
-optimizer = false
-optimizer_runs = 0
+ignored_warnings_from = ["test/*"]
 
 [profile.default.optimizer_details]
 constantOptimizer = true
@@ -38,7 +34,7 @@ ignore = ["libs/*", "*.t.sol"]
 sort_imports = true
 
 [lint]
-exclude_lints = ["mixed-case-function", "mixed-case-variable"]
+exclude_lints = ["mixed-case-function", "mixed-case-variable", "unsafe-typecast", "pascal-case-struct", "unwrapped-modifier-logic"]
 
 [fuzz]
 runs = 200

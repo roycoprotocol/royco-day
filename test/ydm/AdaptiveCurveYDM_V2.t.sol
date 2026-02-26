@@ -6,7 +6,6 @@ import { FixedPointMathLib } from "../../lib/solady/src/utils/FixedPointMathLib.
 import { IYDM } from "../../src/interfaces/IYDM.sol";
 import { TARGET_UTILIZATION_WAD, TARGET_UTILIZATION_WAD_INT, WAD, WAD_INT, ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
 import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
-import { UtilsLib } from "../../src/libraries/UtilsLib.sol";
 import { AdaptiveCurveYDM_V2 } from "../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { BaseTest, MarketState } from "../base/BaseTest.t.sol";
 

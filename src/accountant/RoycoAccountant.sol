@@ -7,7 +7,7 @@ import { IRoycoKernel } from "../interfaces/IRoycoKernel.sol";
 import { IYDM } from "../interfaces/IYDM.sol";
 import { MAX_COVERAGE_WAD, MAX_PROTOCOL_FEE_WAD, MIN_COVERAGE_WAD, WAD, ZERO_NAV_UNITS } from "../libraries/Constants.sol";
 import { MarketState, NAV_UNIT, Operation, SyncedAccountingState } from "../libraries/Types.sol";
-import { UnitsMathLib, toInt256, toNAVUnits, toUint256 } from "../libraries/Units.sol";
+import { UnitsMathLib, toNAVUnits, toUint256 } from "../libraries/Units.sol";
 import { Math, UtilsLib } from "../libraries/UtilsLib.sol";
 
 /**

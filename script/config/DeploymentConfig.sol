@@ -99,7 +99,6 @@ abstract contract DeploymentConfig {
     // ERRORS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    error ChainConfigNotFound(uint256 chainId);
     error MarketConfigNotFound(string marketName);
     error MarketChainIdMismatch(string marketName, uint256 expectedChainId, uint256 actualChainId);
 

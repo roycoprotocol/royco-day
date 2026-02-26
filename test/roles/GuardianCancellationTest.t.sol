@@ -2,12 +2,9 @@
 pragma solidity ^0.8.28;
 
 import { Vm } from "../../lib/forge-std/src/Vm.sol";
-import { IAccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
-import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
-import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
 import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
 import { BaseTest } from "../base/BaseTest.t.sol";
 import { ERC4626Mock } from "../mock/ERC4626Mock.sol";
@@ -365,6 +362,190 @@ contract GuardianCancellationTest is BaseTest {
         assertEq(FACTORY.getSchedule(FACTORY.hashOperation(KERNEL_ADMIN_ADDRESS, address(KERNEL), data1)), 0);
         assertEq(FACTORY.getSchedule(FACTORY.hashOperation(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data2)), 0);
         assertEq(FACTORY.getSchedule(FACTORY.hashOperation(PROTOCOL_FEE_SETTER_ADDRESS, address(ACCOUNTANT), data3)), 0);
+    }
+
+    // ============================================
+    // ROLE ASSIGNMENT TESTS — newly added selectors
+    // ============================================
+
+    /// @notice Test that ADMIN_KERNEL_ROLE can call setSeniorTrancheSelfLiquidationBonus
+    function test_role_kernelAdmin_canSetSelfLiquidationBonus() public {
+        uint64 newBonus = 0.05e18; // 5%
+        bytes memory data = abi.encodeCall(KERNEL.setSeniorTrancheSelfLiquidationBonus, (newBonus));
+
+        // Schedule as kernel admin
+        vm.prank(KERNEL_ADMIN_ADDRESS);
+        FACTORY.schedule(address(KERNEL), data, 0);
+
+        // Advance past execution delay
+        vm.warp(block.timestamp + 1 days + 1);
+
+        // Execute
+        vm.prank(KERNEL_ADMIN_ADDRESS);
+        FACTORY.execute(address(KERNEL), data);
+    }
+
+    /// @notice Test that non-kernel-admin cannot call setSeniorTrancheSelfLiquidationBonus
+    function test_role_nonKernelAdmin_cannotSetSelfLiquidationBonus() public {
+        uint64 newBonus = 0.05e18;
+        bytes memory data = abi.encodeCall(KERNEL.setSeniorTrancheSelfLiquidationBonus, (newBonus));
+
+        // Random address tries to schedule — should fail
+        vm.prank(address(0xBAD));
+        vm.expectRevert();
+        FACTORY.schedule(address(KERNEL), data, 0);
+    }
+
+    /// @notice Test that ADMIN_PROTOCOL_FEE_SETTER_ROLE can call setYieldShareProtocolFee
+    function test_role_protocolFeeSetter_canSetYieldShareProtocolFee() public {
+        uint64 newFee = 0.1e18; // 10%
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setYieldShareProtocolFee, (newFee));
+
+        // Schedule as protocol fee setter
+        vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
+        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+
+        // Advance past execution delay
+        vm.warp(block.timestamp + 1 days + 1);
+
+        // Execute
+        vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
+        FACTORY.execute(address(ACCOUNTANT), data);
+    }
+
+    /// @notice Test that non-fee-setter cannot call setYieldShareProtocolFee
+    function test_role_nonFeeSetter_cannotSetYieldShareProtocolFee() public {
+        uint64 newFee = 0.1e18;
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setYieldShareProtocolFee, (newFee));
+
+        vm.prank(address(0xBAD));
+        vm.expectRevert();
+        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+    }
+
+    /// @notice Test that ADMIN_ACCOUNTANT_ROLE can call setCoverageConfiguration
+    function test_role_accountantAdmin_canSetCoverageConfiguration() public {
+        uint64 newCoverage = 0.3e18;
+        uint96 newBeta = 0.5e18;
+        uint64 newLLTV = 0.9e18;
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverageConfiguration, (newCoverage, newBeta, newLLTV));
+
+        // Schedule as accountant admin
+        vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
+        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+
+        // Advance past execution delay
+        vm.warp(block.timestamp + 1 days + 1);
+
+        // Execute
+        vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
+        FACTORY.execute(address(ACCOUNTANT), data);
+    }
+
+    /// @notice Test that non-accountant-admin cannot call setCoverageConfiguration
+    function test_role_nonAccountantAdmin_cannotSetCoverageConfiguration() public {
+        uint64 newCoverage = 0.3e18;
+        uint96 newBeta = 0.5e18;
+        uint64 newLLTV = 0.9e18;
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverageConfiguration, (newCoverage, newBeta, newLLTV));
+
+        vm.prank(address(0xBAD));
+        vm.expectRevert();
+        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+    }
+
+    /// @notice Test that ADMIN_ACCOUNTANT_ROLE can call setJuniorTrancheDustTolerance
+    function test_role_accountantAdmin_canSetJuniorTrancheDustTolerance() public {
+        NAV_UNIT newDustTolerance = toNAVUnits(uint256(200));
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setJuniorTrancheDustTolerance, (newDustTolerance));
+
+        // Schedule as accountant admin
+        vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
+        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+
+        // Advance past execution delay
+        vm.warp(block.timestamp + 1 days + 1);
+
+        // Execute
+        vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
+        FACTORY.execute(address(ACCOUNTANT), data);
+    }
+
+    /// @notice Test that non-accountant-admin cannot call setJuniorTrancheDustTolerance
+    function test_role_nonAccountantAdmin_cannotSetJuniorTrancheDustTolerance() public {
+        NAV_UNIT newDustTolerance = toNAVUnits(uint256(200));
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setJuniorTrancheDustTolerance, (newDustTolerance));
+
+        vm.prank(address(0xBAD));
+        vm.expectRevert();
+        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+    }
+
+    /// @notice Test that guardian can cancel setSeniorTrancheSelfLiquidationBonus
+    function test_guardian_canCancelSetSelfLiquidationBonus() public {
+        uint64 newBonus = 0.05e18;
+        bytes memory data = abi.encodeCall(KERNEL.setSeniorTrancheSelfLiquidationBonus, (newBonus));
+
+        vm.prank(KERNEL_ADMIN_ADDRESS);
+        FACTORY.schedule(address(KERNEL), data, 0);
+
+        vm.prank(ROLE_GUARDIAN_ADDRESS);
+        FACTORY.cancel(KERNEL_ADMIN_ADDRESS, address(KERNEL), data);
+
+        vm.warp(block.timestamp + 1 days + 1);
+        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.expectRevert();
+        FACTORY.execute(address(KERNEL), data);
+    }
+
+    /// @notice Test that guardian can cancel setYieldShareProtocolFee
+    function test_guardian_canCancelSetYieldShareProtocolFee() public {
+        uint64 newFee = 0.1e18;
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setYieldShareProtocolFee, (newFee));
+
+        vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
+        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+
+        vm.prank(ROLE_GUARDIAN_ADDRESS);
+        FACTORY.cancel(PROTOCOL_FEE_SETTER_ADDRESS, address(ACCOUNTANT), data);
+
+        vm.warp(block.timestamp + 1 days + 1);
+        vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
+        vm.expectRevert();
+        FACTORY.execute(address(ACCOUNTANT), data);
+    }
+
+    /// @notice Test that guardian can cancel setCoverageConfiguration
+    function test_guardian_canCancelSetCoverageConfiguration() public {
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverageConfiguration, (0.3e18, 0.5e18, 0.9e18));
+
+        vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
+        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+
+        vm.prank(ROLE_GUARDIAN_ADDRESS);
+        FACTORY.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
+
+        vm.warp(block.timestamp + 1 days + 1);
+        vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
+        vm.expectRevert();
+        FACTORY.execute(address(ACCOUNTANT), data);
+    }
+
+    /// @notice Test that guardian can cancel setJuniorTrancheDustTolerance
+    function test_guardian_canCancelSetJuniorTrancheDustTolerance() public {
+        NAV_UNIT newDustTolerance = toNAVUnits(uint256(200));
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setJuniorTrancheDustTolerance, (newDustTolerance));
+
+        vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
+        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+
+        vm.prank(ROLE_GUARDIAN_ADDRESS);
+        FACTORY.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
+
+        vm.warp(block.timestamp + 1 days + 1);
+        vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
+        vm.expectRevert();
+        FACTORY.execute(address(ACCOUNTANT), data);
     }
 
     /// @notice Test that the original caller can also cancel their own scheduled operation
