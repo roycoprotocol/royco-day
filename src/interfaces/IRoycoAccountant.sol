@@ -183,9 +183,6 @@ interface IRoycoAccountant {
     /// @notice Thrown when the caller of the function is not the accountant's configured Royco Kernel
     error ONLY_ROYCO_KERNEL();
 
-    /// @notice Thrown when an address is set to the null address
-    error NULL_ADDRESS();
-
     /// @notice Thrown when the accountant's coverage configuration is invalid (can be due to incorrect coverage, beta, or LLTV values)
     error INVALID_COVERAGE_CONFIG();
 

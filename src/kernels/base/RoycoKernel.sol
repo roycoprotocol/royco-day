@@ -8,7 +8,7 @@ import { ReentrancyGuardTransient } from "../../../lib/openzeppelin-contracts/co
 import { RoycoBase } from "../../base/RoycoBase.sol";
 import { IRoycoAccountant } from "../../interfaces/IRoycoAccountant.sol";
 import { IRoycoKernel } from "../../interfaces/IRoycoKernel.sol";
-import { IRoycoVaultTranche } from "../../interfaces/tranche/IRoycoVaultTranche.sol";
+import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { MAX_TRANCHE_UNITS, WAD, WAD_DECIMALS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../libraries/Constants.sol";
 import { AssetClaims, MarketState, Operation, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
 import { Math, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toNAVUnits, toUint256 } from "../../libraries/Units.sol";

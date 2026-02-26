@@ -9,8 +9,8 @@ import { IRoycoAccountant } from "../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoAuth } from "../src/interfaces/IRoycoAuth.sol";
 import { IRoycoFactory } from "../src/interfaces/IRoycoFactory.sol";
 import { IRoycoKernel } from "../src/interfaces/IRoycoKernel.sol";
+import { IRoycoVaultTranche } from "../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../src/interfaces/IYDM.sol";
-import { IRoycoVaultTranche } from "../src/interfaces/tranche/IRoycoVaultTranche.sol";
 import { IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel } from "../src/kernels/IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel.sol";
 import { IdenticalERC4626SharesAdminOracleQuoter_Kernel } from "../src/kernels/IdenticalERC4626SharesAdminOracleQuoter_Kernel.sol";
 import { IdleCdoAA_ST_IdleCdoAA_JT_Kernel } from "../src/kernels/IdleCdoAA_ST_IdleCdoAA_JT_Kernel.sol";
@@ -1002,7 +1002,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     }
 
     function _buildSeniorTrancheInitializationData(address _factoryAddress, DeploymentParams memory _params) internal pure returns (bytes memory) {
-        IRoycoVaultTranche.TrancheDeploymentParams memory trancheParams = IRoycoVaultTranche.TrancheDeploymentParams({
+        IRoycoVaultTranche.RoycoTrancheInitParams memory trancheParams = IRoycoVaultTranche.RoycoTrancheInitParams({
             name: _params.seniorTrancheName, symbol: _params.seniorTrancheSymbol, initialAuthority: _factoryAddress
         });
 
@@ -1010,7 +1010,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     }
 
     function _buildJuniorTrancheInitializationData(address _factoryAddress, DeploymentParams memory _params) internal pure returns (bytes memory) {
-        IRoycoVaultTranche.TrancheDeploymentParams memory trancheParams = IRoycoVaultTranche.TrancheDeploymentParams({
+        IRoycoVaultTranche.RoycoTrancheInitParams memory trancheParams = IRoycoVaultTranche.RoycoTrancheInitParams({
             name: _params.juniorTrancheName, symbol: _params.juniorTrancheSymbol, initialAuthority: _factoryAddress
         });
 

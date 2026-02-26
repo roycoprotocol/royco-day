@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IRoycoAccountant } from "./IRoycoAccountant.sol";
 import { IRoycoKernel } from "./IRoycoKernel.sol";
-import { IRoycoVaultTranche } from "./tranche/IRoycoVaultTranche.sol";
+import { IRoycoVaultTranche } from "./IRoycoVaultTranche.sol";
 
 /// @title IRoycoFactory
 /// @notice Interface for the RoycoFactory contract that deploys Royco markets

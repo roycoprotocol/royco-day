@@ -8,7 +8,7 @@ import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/E
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoBase } from "../../base/RoycoBase.sol";
 import { IRoycoKernel } from "../../interfaces/IRoycoKernel.sol";
-import { IRoycoVaultTranche } from "../../interfaces/tranche/IRoycoVaultTranche.sol";
+import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { WAD_DECIMALS, ZERO_NAV_UNITS } from "../../libraries/Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toNAVUnits, toTrancheUnits, toUint256 } from "../../libraries/Units.sol";
@@ -28,10 +28,10 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     address private immutable ASSET;
 
     /// @inheritdoc IRoycoVaultTranche
-    address public immutable override KERNEL;
+    address public immutable override(IRoycoVaultTranche) KERNEL;
 
     /// @inheritdoc IRoycoVaultTranche
-    bytes32 public immutable override MARKET_ID;
+    bytes32 public immutable override(IRoycoVaultTranche) MARKET_ID;
 
     /**
      * @notice Constructs the Royco vault tranche
@@ -52,14 +52,14 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     /**
      * @notice Initializes the Royco tranche
      * @dev This function initializes parent contracts and the tranche-specific state
-     * @param _trancheParams Deployment parameters including name, symbol, kernel, and kernel initialization data etc
+     * @param _params Deployment parameters including name, symbol, and initial authority
      */
-    function __RoycoTranche_init(TrancheDeploymentParams calldata _trancheParams) internal onlyInitializing {
+    function __RoycoTranche_init(RoycoTrancheInitParams calldata _params) internal onlyInitializing {
         // Initialize the parent contracts
-        __ERC20_init_unchained(_trancheParams.name, _trancheParams.symbol);
+        __ERC20_init_unchained(_params.name, _params.symbol);
         __ERC20Pausable_init();
-        __ERC20Permit_init(_trancheParams.name);
-        __RoycoBase_init(_trancheParams.initialAuthority);
+        __ERC20Permit_init(_params.name);
+        __RoycoBase_init(_params.initialAuthority);
     }
 
     /// @inheritdoc IRoycoVaultTranche
