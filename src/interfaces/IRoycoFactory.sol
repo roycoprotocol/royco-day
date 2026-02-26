@@ -20,9 +20,6 @@ interface IRoycoFactory {
     /// @notice Thrown when an invalid symbol is provided
     error INVALID_SYMBOL();
 
-    /// @notice Thrown when an invalid market id is provided
-    error INVALID_MARKET_ID();
-
     /// @notice Thrown when an invalid kernel implementation is provided
     error INVALID_KERNEL_IMPLEMENTATION();
 
@@ -95,9 +92,6 @@ interface IRoycoFactory {
      * @custom:field seniorTrancheSymbol - The symbol of the senior tranche
      * @custom:field juniorTrancheName - The name of the junior tranche
      * @custom:field juniorTrancheSymbol - The symbol of the junior tranche
-     * @custom:field seniorAsset - The underlying asset for the senior tranche
-     * @custom:field juniorAsset - The underlying asset for the junior tranche
-     * @custom:field marketId - The identifier of the Royco market
      * @custom:field kernelImplementation - The implementation address for the kernel
      * @custom:field accountantImplementation - The implementation address for the accountant
      * @custom:field seniorTrancheImplementation - The implementation address for the senior tranche
@@ -179,7 +173,7 @@ interface IRoycoFactory {
     /**
      * @notice Deploys a new market with senior tranche, junior tranche, and kernel
      * @param _params The parameters for deploying a new market
-     * @param roycoMarket The deployed components constituting the Royco market
+     * @return roycoMarket The deployed components constituting the Royco market
      */
     function deployMarket(MarketDeploymentParams calldata _params) external returns (RoycoMarket memory roycoMarket);
 

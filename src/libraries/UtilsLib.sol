@@ -18,7 +18,7 @@ library UtilsLib {
 
     /**
      * @notice Computes the utilization of the Royco market given the market's state
-     * @dev Informally: total covered exposure / junior loss absorbtion buffer
+     * @dev Informally: total covered exposure / junior loss absorption buffer
      * @dev Formally: Utilization = ((ST_RAW_NAV + (JT_RAW_NAV * β)) * COV) / JT_EFFECTIVE_NAV
      * @param _stRawNAV The raw net asset value of the senior tranche invested assets
      * @param _jtRawNAV The raw net asset value of the junior tranche invested assets
@@ -87,7 +87,7 @@ library UtilsLib {
     }
 
     /**
-     * @notice Scales the claims on ST and JT assets of a tranche by a given shares assuming total shares in a vault
+     * @notice Scales the claims on ST and JT assets of a tranche by a given NAV ratio
      * @param _claims The claims on ST and JT assets of the tranche
      * @param _navNumerator The NAV to use for the numerator
      * @param _navDenominator The NAV to use for the denominator

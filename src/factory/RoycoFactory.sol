@@ -22,7 +22,7 @@ import { RolesConfiguration } from "./RolesConfiguration.sol";
 contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFactory, UUPSUpgradeable {
     /// @dev Storage location for the factory
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoFactoryState")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant ROYCO_FACTORY_STORAGE_LOCATION = 0xd5259699f97e0f34b934576b7add74d31128c481e849a0afbdca7e6e84f8b300;
+    bytes32 private constant ROYCO_FACTORY_STORAGE_SLOT = 0xd5259699f97e0f34b934576b7add74d31128c481e849a0afbdca7e6e84f8b300;
 
     /**
      * @dev The storage state of the Royco factory
@@ -139,7 +139,7 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
     /**
      * @notice Deploys the contracts for a new Royco market
      * @param _params The parameters for deploying a new Royco market
-     * @param roycoMarket The deployed components constituting the Royco market
+     * @return roycoMarket The deployed components constituting the Royco market
      */
     function _deployMarket(MarketDeploymentParams calldata _params) internal virtual returns (RoycoMarket memory roycoMarket) {
         // Deploy the senior tranche
@@ -267,7 +267,7 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
      */
     function _getRoycoFactoryState() private pure returns (RoycoFactoryState storage $) {
         assembly {
-            $.slot := ROYCO_FACTORY_STORAGE_LOCATION
+            $.slot := ROYCO_FACTORY_STORAGE_SLOT
         }
     }
 }

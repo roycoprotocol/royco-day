@@ -27,7 +27,7 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
 
     /// @notice Emitted when the identical assets chainlink oracle quoter is updated
     event IdenticalAssetsChainlinkOracleUpdated(
-        address indexed _trancheAssetToReferenceAssetOracle, uint8 _trancheAssetToReferenceAssetOracleDecimalPrecision, uint48 _stalenessThresholdSeconds
+        address indexed trancheAssetToReferenceAssetOracle, uint8 trancheAssetToReferenceAssetOracleDecimalPrecision, uint48 stalenessThresholdSeconds
     );
 
     /// @notice Thrown when the tranche asset to reference asset oracle is the zero address

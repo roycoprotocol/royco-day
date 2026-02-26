@@ -68,7 +68,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                 && _params.yieldShareProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD,
             MAX_PROTOCOL_FEE_EXCEEDED()
         );
-        // Validate the market's inital coverage configuration
+        // Validate the market's initial coverage configuration
         _validateCoverageConfig(_params.coverageWAD, _params.betaWAD, _params.lltvWAD);
         // Initialize the YDM for this market
         _initializeYDM(_params.ydm, _params.ydmInitializationData);
@@ -370,9 +370,9 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     /**
      * @notice Returns whether the coverage requirement is satisfied given the utilization
      * @dev Junior capital must be sufficient to absorb losses to the senior exposure up to the coverage ratio
-     * @dev Informally: junior loss absorbtion buffer >= total covered exposure
+     * @dev Informally: junior loss absorption buffer >= total covered exposure
      * @dev Formally: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * COV
-     *      JT_EFFECTIVE_NAV is JT's current loss absorbtion buffer after applying all prior JT yield accrual and coverage adjustments
+     *      JT_EFFECTIVE_NAV is JT's current loss absorption buffer after applying all prior JT yield accrual and coverage adjustments
      *      ST_RAW_NAV and JT_RAW_NAV are the mark-to-market NAVs of the tranches
      *      β is the JT's sensitivity to the same downside stress that affects ST (eg. 0 if JT is in RFR and 1 if JT and ST are in the same opportunity)
      * @dev If we rearrange the coverage requirement, we get:
@@ -552,7 +552,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         // Determine the resulting market state:
         // 1. Forced Perpetual: The fixed-term duration is set to 0 (permanently perpetual), current fixed-term elapsed, or LLTV has been breached (undercollateralized) or ST IL exists (distressed)
         // 2. Normal Perpetual: JT coverage IL is within dust tolerance (staying perpetual) or fully recovered (exiting fixed-term for perpetual)
-        // 3. Fixed-term: The JT coverage IL is above the dust tolerance of the market, fixed-term duration hasn't elapsed, LLTV hasn't been breached, and ST IL nonexistant
+        // 3. Fixed-term: The JT coverage IL is above the dust tolerance of the market, fixed-term duration hasn't elapsed, LLTV hasn't been breached, and ST IL nonexistent
         MarketState resultingMarketState;
         uint32 fixedTermEndTimestamp = $.fixedTermEndTimestamp;
         uint24 fixedTermDurationSeconds = $.fixedTermDurationSeconds;
@@ -566,7 +566,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             // JT coverage impermanent loss has to be explicitly cleared in this branch:
             // If the fixed-term duration is 0, the market is permanently in a perpetual state and never incurs any JT coverage IL
             // If the current fixed-term has elapsed, the market needs to transition to a perpetual state since the transient JT protection period is complete
-            // If LLTV has been breached without existant ST IL, the market is approaching an uncollateralized state: ST needs to be able to withdraw to avoid losses and the YDM needs to kick in to reinstate proper collateralization
+            // If LLTV has been breached without existent ST IL, the market is approaching an uncollateralized state: ST needs to be able to withdraw to avoid losses and the YDM needs to kick in to reinstate proper collateralization
             // If ST IL exists, the market is in a distressed state: STs need to be able to book losses and any future appreciation will go to making ST whole again
             jtImpermanentLossErased = jtImpermanentLoss;
             jtImpermanentLoss = ZERO_NAV_UNITS;
@@ -575,7 +575,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             fixedTermEndTimestamp = 0;
             // If the market has less than dust coverage provided by JT
         } else if (jtImpermanentLoss <= $.stNAVDustTolerance) {
-            // JT coverage IL is either non-existant or can be attributed to dust ST losses (eg. rounding in the underlying ST NAV)
+            // JT coverage IL is either nonexistent or can be attributed to dust ST losses (eg. rounding in the underlying ST NAV)
             // If market was in a perpetual state or the coverage IL was completely wiped, transition to a perpetual state
             if (initialMarketState == MarketState.PERPETUAL || jtImpermanentLoss == ZERO_NAV_UNITS) {
                 // Transition to a perpetual state
@@ -680,7 +680,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         // Ensure that JT cannot earn more than 100% of senior appreciation
         if (jtYieldShareWAD > WAD) jtYieldShareWAD = WAD;
 
-        // Apply the accural of JT yield share to the accumulator, weighted by the time elapsed
+        // Apply the accrual of JT yield share to the accumulator, weighted by the time elapsed
         return ($.twJTYieldShareAccruedWAD + uint192(jtYieldShareWAD * elapsed));
     }
 

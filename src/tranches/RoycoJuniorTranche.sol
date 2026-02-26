@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { TrancheType } from "../interfaces/IRoycoVaultTranche.sol";
+import { TrancheType } from "../libraries/Types.sol";
 import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
 
 /**
@@ -15,7 +15,7 @@ contract RoycoJuniorTranche is RoycoVaultTranche {
 
     /**
      * @notice Initializes the Royco junior tranche
-     * @param _jtParams Deployment parameters including name, symbol, kernel, and kernel initialization data for the junior tranche
+     * @param _jtParams Deployment parameters including name, symbol, and initial authority for the junior tranche
      */
     function initialize(RoycoTrancheInitParams calldata _jtParams) external initializer {
         // Initialize the Royco Junior Tranche

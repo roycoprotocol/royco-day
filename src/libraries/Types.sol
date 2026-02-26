@@ -17,7 +17,7 @@ import { NAV_UNIT, TRANCHE_UNIT } from "./Units.sol";
  *      - Fixed term that starts when JT coverage impermanent loss is first incurred
  *      - ST redemptions blocked: protects existing JT from realizing losses by ST withdrawing coverage on arbitrary volatility
  *      - JT deposits blocked: protects existing JT from realizing losses by new JT diluting them on arbitrary volatility
- *      - Adaptive curve YDM does not adapt (prevents adaption during recovery since market forces aren't influencing utilization, underlying PNL is)
+ *      - Adaptive curve YDM does not adapt (prevents adaptation during recovery since market forces aren't influencing utilization, underlying PNL is)
  *      - Automatically transitions to PERPETUAL when term elapses, clearing JT coverage impermanent losses
  */
 enum MarketState {
@@ -52,7 +52,6 @@ struct AssetClaims {
  *                                   This represents the second claim on capital that the junior tranche has on future ST recoveries
  * @custom:field stProtocolFeeAccrued - Protocol fee taken on ST yield on this sync
  * @custom:field jtProtocolFeeAccrued - Protocol fee taken on JT yield on this sync
- * @custom:field fixedTermDurationSeconds - The duration of the fixed term in seconds
  * @custom:field utilizationWAD - The current utilization of the market, scaled to WAD precision
  * @custom:field ltvWAD - The current loan to value of the market, scaled to WAD precision
  * @custom:field fixedTermEndTimestamp - The timestamp at which the fixed term ends. Set to 0 if the market is not in a fixed term state

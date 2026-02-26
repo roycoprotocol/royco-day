@@ -39,6 +39,3 @@ uint256 constant MAX_COVERAGE_WAD = 1e18 - 1;
 
 /// @dev The max protocol fee percentage on tranche yields, scaled to WAD precision
 uint256 constant MAX_PROTOCOL_FEE_WAD = 1e18;
-
-/// @dev The sentinel value for a request ID
-uint256 constant SENTINEL_REQUEST_ID = 0;

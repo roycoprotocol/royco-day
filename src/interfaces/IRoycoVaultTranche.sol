@@ -164,7 +164,7 @@ interface IRoycoVaultTranche is IERC20Metadata {
      * @dev Does not mutate any state
      * @param _protocolFeeNAV The protocol fee amount to be minted as shares, denominated in the kernel's NAV units
      * @param _totalTrancheNAV The total effective NAV of the tranche before minting fee shares
-     * @return mintedProtocolFeeShares The number of protocol fee shares that would be minted
+     * @return protocolFeeSharesMinted The number of protocol fee shares that would be minted
      * @return totalTrancheShares The total shares in the tranche after minting the protocol fee shares
      */
     function previewMintProtocolFeeShares(
@@ -173,7 +173,7 @@ interface IRoycoVaultTranche is IERC20Metadata {
     )
         external
         view
-        returns (uint256 mintedProtocolFeeShares, uint256 totalTrancheShares);
+        returns (uint256 protocolFeeSharesMinted, uint256 totalTrancheShares);
 
     /**
      * @notice Mints protocol fee shares to the specified fee recipient
@@ -181,7 +181,7 @@ interface IRoycoVaultTranche is IERC20Metadata {
      * @param _protocolFeeNAV The protocol fee amount to be minted as shares, denominated in the kernel's NAV units
      * @param _totalTrancheNAV The total effective NAV of the tranche before minting fee shares
      * @param _protocolFeeRecipient The address that will receive the minted protocol fee shares
-     * @return mintedProtocolFeeShares The number of protocol fee shares minted
+     * @return protocolFeeSharesMinted The number of protocol fee shares minted
      * @return totalTrancheShares The total shares in the tranche after minting the protocol fee shares
      */
     function mintProtocolFeeShares(
@@ -190,5 +190,5 @@ interface IRoycoVaultTranche is IERC20Metadata {
         address _protocolFeeRecipient
     )
         external
-        returns (uint256 mintedProtocolFeeShares, uint256 totalTrancheShares);
+        returns (uint256 protocolFeeSharesMinted, uint256 totalTrancheShares);
 }

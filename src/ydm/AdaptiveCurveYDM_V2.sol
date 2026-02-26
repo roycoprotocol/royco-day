@@ -38,7 +38,7 @@ contract AdaptiveCurveYDM_V2 is IYDM {
 
     /**
      * @notice Represents the state of a market's YDM
-     * @custom:field jtYieldShareAtTargetUtilWAD - The current JT yield share at target utilization, scaled to WAD precision
+     * @custom:field jtYieldShareAtTargetWAD - The current JT yield share at target utilization, scaled to WAD precision
      * @custom:field lastAdaptationTimestamp - The last time adaptations were applied to this market's curve
      * @custom:field maxAdaptationSpeedWAD - The max adaptation speed of the curve at the boundaries of utilization (0% and 100%), scaled to WAD precision
      * @custom:field discountToTargetAtZeroUtilWAD - The fixed discount to JT yield share at target utilization given at 0% utilization, scaled to WAD precision

@@ -18,7 +18,7 @@ abstract contract IdenticalAssetsAdminOracleQuoter is IdenticalAssetsOracleQuote
     /**
      * @notice Initializes the identical assets admin oracle quoter
      * @dev The conversion rate cannot be set to the sentinel value (0)
-     * @param _initialConversionRateWAD The initial reference asset to NAV unit conversion rate, scaled to WAD precision, scaled to WAD precision
+     * @param _initialConversionRateWAD The initial reference asset to NAV unit conversion rate, scaled to WAD precision
      */
     function __IdenticalAssetsAdminOracleQuoter_init(uint256 _initialConversionRateWAD) internal onlyInitializing {
         // Validate the conversion rate

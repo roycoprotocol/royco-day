@@ -186,7 +186,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     function stMaxDeposit(address _receiver) public view virtual override(IRoycoKernel) returns (TRANCHE_UNIT) {
         // If ST IL exists, ST deposits are disabled to preclude existing ST's from getting diluted and realizing losses
         if (_previewSyncTrancheAccounting().stImpermanentLoss != ZERO_NAV_UNITS) return ZERO_TRANCHE_UNITS;
-        // ST deposits are enabled as long as ST IL is nonexistant and coverage is satisfied
+        // ST deposits are enabled as long as ST IL is nonexistent and coverage is satisfied
         // No need to include ST liquidation proceeds in the raw NAV because those assets are not exposed to any volatility
         NAV_UNIT stMaxDepositableNAV = IRoycoAccountant(ACCOUNTANT).maxSTDepositGivenCoverage(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
         return stConvertNAVUnitsToTrancheUnits(stMaxDepositableNAV);
@@ -337,7 +337,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         // If ST IL exists, ST deposits are disabled to preclude existing ST's from getting diluted and realizing losses
         require(state.stImpermanentLoss == ZERO_NAV_UNITS, ST_DEPOSIT_DISABLED_IN_LOSS());
 
-        // The tranche vault has already transfered the assets to the kernel, so simply credit those assets to the senior tranche
+        // The tranche vault has already transferred the assets to the kernel, so simply credit those assets to the senior tranche
         RoycoKernelState storage $ = _getRoycoKernelStorage();
         $.stOwnedYieldBearingAssets = $.stOwnedYieldBearingAssets + _assets;
 
@@ -414,11 +414,11 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         // Ensure that the market is in a state where JT deposits are enabled: PERPETUAL
         require(state.marketState == MarketState.PERPETUAL, JT_DEPOSIT_DISABLED_IN_FIXED_TERM_STATE());
 
-        // The tranche vault has already transfered the assets to the kernel, so simply credit those assets to the junior tranche
+        // The tranche vault has already transferred the assets to the kernel, so simply credit those assets to the junior tranche
         RoycoKernelState storage $ = _getRoycoKernelStorage();
         $.jtOwnedYieldBearingAssets = $.jtOwnedYieldBearingAssets + _assets;
 
-        // Execute a post-deposit sync on accounting and enforce the market's coverage requirement
+        // Execute a post-deposit sync on accounting
         NAV_UNIT jtPostDepositNAV = (_postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, ZERO_NAV_UNITS)).jtEffectiveNAV;
 
         // The NAV to mint tranche shares at is the pre-deposit junior tranche controlled NAV
@@ -544,7 +544,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
 
     /**
      * @notice Invokes the accountant to do a post-operation (deposit or withdrawal) NAV sync
-     * @dev Must be executed after every NAV mutating operation that doesn't require a coverage check (ST withdrawal and JT deposit)
+     * @dev Must be executed after every NAV mutating operation that doesn't require a coverage check (ST redemption and JT deposit)
      * @param _op The operation being executed in between the pre and post synchronizations
      * @param _stSelfLiquidationBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions (only applicable if _op == ST_REDEEM)
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
@@ -556,7 +556,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
 
     /**
      * @notice Invokes the accountant to do a post-operation (deposit or withdrawal) NAV sync and enforce that the market's coverage requirement is satisfied after reconciliation
-     * @dev Must be executed after every NAV mutating operation that requires a coverage check (ST deposit and JT withdrawal)
+     * @dev Must be executed after every NAV mutating operation that requires a coverage check (ST deposit and JT redemption)
      * @param _op The operation being executed in between the pre and post synchronizations
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
@@ -697,7 +697,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      * @param _state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      * @param _stUserClaims The claims of the redeeming ST user
      * @return stUserClaimsWithBonus The claims of the redeeming ST user after applying the self-liquidation bonus
-     * @return stSelfLiquidationBonusNAV Bonus sourced from JT's claim on ST assets
+     * @return stSelfLiquidationBonusNAV Bonus sourced from JT's claims on ST and JT assets
      */
     function _applySeniorTrancheSelfLiquidationBonus(
         SyncedAccountingState memory _state,

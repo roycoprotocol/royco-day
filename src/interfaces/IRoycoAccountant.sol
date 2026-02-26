@@ -21,9 +21,9 @@ interface IRoycoAccountant {
      * @custom:field ydmInitializationData - The data used to initialize the YDM for this market
      * @custom:field fixedTermDurationSeconds - The duration of a fixed term for this market in seconds
      * @custom:field lltvWAD - The liquidation loan to value (LLTV) for this market, scaled to WAD precision
-     * @custom:field stNAVDustTolerance - The dust tolerance in NAV units to account for miniscule deltas in the ST's underlying NAV calculations
+     * @custom:field stNAVDustTolerance - The dust tolerance in NAV units to account for minuscule deltas in the ST's underlying NAV calculations
      *               Primarily used for rounding in NAV calculations, and can be safely set to 0 if the underlying investments don't exhibit this behavior
-     * @custom:field jtNAVDustTolerance - The dust tolerance in NAV units to account for miniscule deltas in the JT's underlying NAV calculations
+     * @custom:field jtNAVDustTolerance - The dust tolerance in NAV units to account for minuscule deltas in the JT's underlying NAV calculations
      *               Primarily used for rounding in NAV calculations, and can be safely set to 0 if the underlying investments don't exhibit this behavior
      */
     struct RoycoAccountantInitParams {
@@ -44,8 +44,8 @@ interface IRoycoAccountant {
      * @notice Storage state for the Royco Accountant
      * @custom:storage-location erc7201:Royco.storage.RoycoAccountantState
      * @custom:field lastMarketState - The last recorded state of this market (perpetual or fixed term)
-     * @custom:field fixedTermEndTimestamp - The end timestamp of the currently ongoing fixed term (set to 0 if the market is in a perpetual state)
      * @custom:field fixedTermDurationSeconds - The duration of a fixed term for this market in seconds
+     * @custom:field fixedTermEndTimestamp - The end timestamp of the currently ongoing fixed term (set to 0 if the market is in a perpetual state)
      * @custom:field coverageWAD - The coverage percentage that the senior tranche is expected to be protected by, scaled to WAD precision
      * @custom:field betaWAD - JT's percentage sensitivity to the same downside stress that affects ST, scaled to WAD precision
      *                         For example, beta is 0 when JT is in the RFR and 1e18 (100%) when JT is in the same opportunity as senior
@@ -65,9 +65,9 @@ interface IRoycoAccountant {
      * @custom:field twJTYieldShareAccruedWAD - The time-weighted junior tranche yield share (YDM output) since the last yield distribution, scaled to WAD precision
      * @custom:field lastAccrualTimestamp - The timestamp at which the time-weighted JT yield share accumulator was last updated
      * @custom:field lastDistributionTimestamp - The timestamp at which the last ST yield distribution occurred
-     * @custom:field stNAVDustTolerance - The dust tolerance in NAV units to account for miniscule deltas in the ST's underlying NAV calculations
+     * @custom:field stNAVDustTolerance - The dust tolerance in NAV units to account for minuscule deltas in the ST's underlying NAV calculations
      *               Primarily used for rounding in NAV calculations, and can be safely set to 0 if the underlying investments don't exhibit this behavior
-     * @custom:field jtNAVDustTolerance - The dust tolerance in NAV units to account for miniscule deltas in the JT's underlying NAV calculations
+     * @custom:field jtNAVDustTolerance - The dust tolerance in NAV units to account for minuscule deltas in the JT's underlying NAV calculations
      *               Primarily used for rounding in NAV calculations, and can be safely set to 0 if the underlying investments don't exhibit this behavior
      */
     struct RoycoAccountantState {
@@ -164,13 +164,13 @@ interface IRoycoAccountant {
 
     /**
      * @notice Emitted when ST's dust tolerance is updated
-     * @param stNAVDustTolerance The dust tolerance in NAV units to account for miniscule deltas in the ST's underlying NAV calculations
+     * @param stNAVDustTolerance The dust tolerance in NAV units to account for minuscule deltas in the ST's underlying NAV calculations
      */
     event SeniorTrancheDustToleranceUpdated(NAV_UNIT stNAVDustTolerance);
 
     /**
      * @notice Emitted when JT's dust tolerance is updated
-     * @param jtNAVDustTolerance The dust tolerance in NAV units to account for miniscule deltas in the JT's underlying NAV calculations
+     * @param jtNAVDustTolerance The dust tolerance in NAV units to account for minuscule deltas in the JT's underlying NAV calculations
      */
     event JuniorTrancheDustToleranceUpdated(NAV_UNIT jtNAVDustTolerance);
 
@@ -366,7 +366,7 @@ interface IRoycoAccountant {
     function setFixedTermDuration(uint24 _fixedTermDurationSeconds) external;
 
     /**
-     * @notice Updates ST's dust tolerance in NAV units to account for miniscule deltas in the underlying protocol's NAV calculations, due to rounding
+     * @notice Updates ST's dust tolerance in NAV units to account for minuscule deltas in the underlying protocol's NAV calculations, due to rounding
      * @dev Can be safely set to 0 if the underlying investments do not exhibit rounding behavior
      * @dev Only callable by a designated admin
      * @param _stNAVDustTolerance The ST NAV tolerance for rounding discrepancies
@@ -374,7 +374,7 @@ interface IRoycoAccountant {
     function setSeniorTrancheDustTolerance(NAV_UNIT _stNAVDustTolerance) external;
 
     /**
-     * @notice Updates JT's dust tolerance in NAV units to account for miniscule deltas in the underlying protocol's NAV calculations, due to rounding
+     * @notice Updates JT's dust tolerance in NAV units to account for minuscule deltas in the underlying protocol's NAV calculations, due to rounding
      * @dev Can be safely set to 0 if the underlying investments do not exhibit rounding behavior
      * @dev Only callable by a designated admin
      * @param _jtNAVDustTolerance The JT NAV tolerance for rounding discrepancies

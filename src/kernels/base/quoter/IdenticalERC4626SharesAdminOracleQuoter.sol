@@ -13,7 +13,7 @@ import { IdenticalERC4626SharesOracleQuoter } from "./base/IdenticalERC4626Share
  */
 abstract contract IdenticalERC4626SharesAdminOracleQuoter is IdenticalERC4626SharesOracleQuoter, IdenticalAssetsAdminOracleQuoter {
     /**
-     * @notice Initializes the identical assets chainlink oracle quoter and the base identical assets oracle quoter
+     * @notice Initializes the identical ERC4626 shares admin oracle quoter and the base identical assets oracle quoter
      * @param _initialConversionRateWAD The initial conversion rate as defined by the oracle, scaled to WAD precision
      */
     function __IdenticalERC4626SharesAdminOracleQuoter_init(uint256 _initialConversionRateWAD) internal onlyInitializing {

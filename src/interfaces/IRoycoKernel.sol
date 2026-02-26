@@ -245,9 +245,9 @@ interface IRoycoKernel {
      * @param _caller The address that initiated the redemption
      * @param _owner The owner of the shares being redeemed
      * @param _receiver The address that is receiving the assets
-     * @return claims The distribution of assets that were transferred to the receiver on redemption
+     * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
      */
-    function stRedeem(uint256 _shares, address _caller, address _owner, address _receiver) external returns (AssetClaims memory claims);
+    function stRedeem(uint256 _shares, address _caller, address _owner, address _receiver) external returns (AssetClaims memory userAssetClaims);
 
     /**
      * @notice Returns the maximum amount of assets that can be deposited into the junior tranche
@@ -313,7 +313,7 @@ interface IRoycoKernel {
      * @param _caller The address that initiated the redemption
      * @param _owner The owner of the shares being redeemed
      * @param _receiver The address that is receiving the assets
-     * @return claims The distribution of assets that were transferred to the receiver on redemption
+     * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
      */
-    function jtRedeem(uint256 _shares, address _caller, address _owner, address _receiver) external returns (AssetClaims memory claims);
+    function jtRedeem(uint256 _shares, address _caller, address _owner, address _receiver) external returns (AssetClaims memory userAssetClaims);
 }

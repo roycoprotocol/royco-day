@@ -38,7 +38,7 @@ contract AdaptiveCurveYDM_V1 is IYDM {
 
     /**
      * @notice Represents the state of a market's YDM
-     * @custom:field jtYieldShareAtTargetUtilWAD - The current JT yield share at target utilization, scaled to WAD precision
+     * @custom:field jtYieldShareAtTargetWAD - The current JT yield share at target utilization, scaled to WAD precision
      * @custom:field lastAdaptationTimestamp - The last time adaptations were applied to this market's curve
      * @custom:field steepnessAfterTargetWAD - The steepness of the curve for this market post-kink: ratio of yield share at 100% utilization to yield share at target
      */
@@ -56,9 +56,9 @@ contract AdaptiveCurveYDM_V1 is IYDM {
      * @notice Emitted when the adaptive curve YDM is initialized for a market
      * @param accountant The accountant for the market that the YDM was initialized for
      * @param steepnessAfterTargetWAD The steepness of the curve for this market (ratio of yield share at 100% utilization to yield share at target), scaled to WAD precision
-     * @param initialJTYieldShareAtTargetWAD The initial JT yield share at target utilization, scaled to WAD precision
+     * @param initialJtYieldShareAtTargetWAD The initial JT yield share at target utilization, scaled to WAD precision
      */
-    event AdaptiveCurveYdmInitialized(address indexed accountant, uint256 steepnessAfterTargetWAD, uint256 initialJTYieldShareAtTargetWAD);
+    event AdaptiveCurveYdmInitialized(address indexed accountant, uint256 steepnessAfterTargetWAD, uint256 initialJtYieldShareAtTargetWAD);
 
     /**
      * @notice Emitted when the JT yield share is updated and the curve is adapted (in a PERPETUAL state)
@@ -254,9 +254,9 @@ contract AdaptiveCurveYDM_V1 is IYDM {
          * Y_T  → JT yield share at target utilization (adapts over time based on market forces)
          *
          * Key properties:
-         * - At U = 0.9 (target): R(U) = Y_T
-         * - At U = 1.0 (full):   R(U) = S * Y_T
-         * - At U = 0.0 (empty):  R(U) = Y_T / S
+         * - At U = 0.9 (target): Y(U) = Y_T
+         * - At U = 1.0 (full):   Y(U) = S * Y_T
+         * - At U = 0.0 (empty):  Y(U) = Y_T / S
          *
          * Adaptation mechanism:
          * - High utilization → Y_T adapts upward → entire curve scales up → JT receives more yield to attract deposits

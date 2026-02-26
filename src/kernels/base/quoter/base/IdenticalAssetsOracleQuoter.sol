@@ -41,8 +41,8 @@ abstract contract IdenticalAssetsOracleQuoter is RoycoKernel {
     }
 
     /// @notice Emitted when the tranche unit to NAV unit conversion rate is updated
-    /// @param _conversionRateWAD The updated conversion rate as defined by the oracle, scaled to WAD precision
-    event ConversionRateUpdated(uint256 _conversionRateWAD);
+    /// @param conversionRateWAD The updated conversion rate as defined by the oracle, scaled to WAD precision
+    event ConversionRateUpdated(uint256 conversionRateWAD);
 
     /// @notice Thrown when the senior and junior tranche assets are not identical
     error TRANCHE_ASSETS_MUST_BE_IDENTICAL();
@@ -61,7 +61,7 @@ abstract contract IdenticalAssetsOracleQuoter is RoycoKernel {
      * @param _initialConversionRateWAD The initial conversion rate as defined by the oracle, scaled to WAD precision
      */
     function __IdenticalAssetsOracleQuoter_init_unchained(uint256 _initialConversionRateWAD) internal onlyInitializing {
-        // Premptively return if this quoter is reliant on an oracle instead of an admin set conversion rate
+        // Preemptively return if this quoter is reliant on an oracle instead of an admin set conversion rate
         if (_initialConversionRateWAD == SENTINEL_CONVERSION_RATE) return;
         _getIdenticalAssetsOracleQuoterStorage().conversionRateWAD = _initialConversionRateWAD;
         emit ConversionRateUpdated(_initialConversionRateWAD);
@@ -78,13 +78,13 @@ abstract contract IdenticalAssetsOracleQuoter is RoycoKernel {
     }
 
     /// @inheritdoc RoycoKernel
-    function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _nav) public view override(RoycoKernel) returns (TRANCHE_UNIT stAssets) {
-        return _convertNAVUnitsToTrancheUnits(_nav);
+    function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view override(RoycoKernel) returns (TRANCHE_UNIT stAssets) {
+        return _convertNAVUnitsToTrancheUnits(_navAssets);
     }
 
     /// @inheritdoc RoycoKernel
-    function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _nav) public view override(RoycoKernel) returns (TRANCHE_UNIT jtAssets) {
-        return _convertNAVUnitsToTrancheUnits(_nav);
+    function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view override(RoycoKernel) returns (TRANCHE_UNIT jtAssets) {
+        return _convertNAVUnitsToTrancheUnits(_navAssets);
     }
 
     /**
