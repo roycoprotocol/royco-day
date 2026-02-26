@@ -602,7 +602,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         returns (AssetClaims memory claims)
     {
         // Decompose the NAV claims for the tranches based on the synced accounting state
-        (NAV_UNIT stClaimOnSelfRawNAV, NAV_UNIT stClaimOnJTRawNAV, NAV_UNIT jtClaimOnSelfRawNAV, NAV_UNIT jtClaimOnSTRawNAV) = _decomposeNAVClaims(_state);
+        (NAV_UNIT stClaimOnSelfRawNAV, NAV_UNIT stClaimOnJTRawNAV, NAV_UNIT jtClaimOnSTRawNAV, NAV_UNIT jtClaimOnSelfRawNAV) = _decomposeNAVClaims(_state);
 
         // Compute the cumulative asset claims for the specified tranche based on the NAV decomposition
         if (_trancheType == TrancheType.SENIOR) {
