@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
+import { DeploymentConfig } from "../../script/config/DeploymentConfig.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IIdleCDO } from "../../src/interfaces/external/idle-finance/IIdleCDO.sol";
 import { IdleCdoAA_ST_IdleCdoAA_JT_Kernel } from "../../src/kernels/IdleCdoAA_ST_IdleCdoAA_JT_Kernel.sol";
@@ -82,21 +83,21 @@ contract IdleCdoAAKernelTest is AbstractKernelTestSuite {
         // Build role assignments using the centralized function
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
-        // Build deployment params
-        DeployScript.DeploymentParams memory params = DeployScript.DeploymentParams({
-            factoryAdmin: OWNER_ADDRESS,
+        // Build deployment config
+        DeploymentConfig.MarketDeploymentConfig memory config = DeploymentConfig.MarketDeploymentConfig({
+            marketName: "IdleCdoAA",
+            chainId: block.chainid,
             seniorTrancheName: SENIOR_TRANCHE_NAME,
             seniorTrancheSymbol: SENIOR_TRANCHE_SYMBOL,
             juniorTrancheName: JUNIOR_TRANCHE_NAME,
             juniorTrancheSymbol: JUNIOR_TRANCHE_SYMBOL,
             seniorAsset: AA_TRANCHE_TOKEN,
             juniorAsset: AA_TRANCHE_TOKEN,
-            stNAVDustTolerance: toNAVUnits(SCALE_FACTOR),
-            jtNAVDustTolerance: toNAVUnits(SCALE_FACTOR),
+            stDustTolerance: SCALE_FACTOR,
+            jtDustTolerance: SCALE_FACTOR,
             kernelType: DeployScript.KernelType.IdleCdoAA_ST_IdleCdoAA_JT,
             stSelfLiquidationBonusWAD: 0,
             kernelSpecificParams: abi.encode(kernelParams),
-            protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
@@ -105,12 +106,11 @@ contract IdleCdoAAKernelTest is AbstractKernelTestSuite {
             lltvWAD: LLTV,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
-            ydmSpecificParams: abi.encode(ydmParams),
-            roleAssignments: roleAssignments
+            ydmSpecificParams: abi.encode(ydmParams)
         });
 
         // Deploy using the deployment script
-        return DEPLOY_SCRIPT.deploy(params, DEPLOYER.privateKey);
+        return DEPLOY_SCRIPT.deploy(config, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roleAssignments, DEPLOYER.privateKey);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

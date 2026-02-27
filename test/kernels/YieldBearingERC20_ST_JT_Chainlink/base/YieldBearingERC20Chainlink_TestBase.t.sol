@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { DeployScript } from "../../../../script/Deploy.s.sol";
+import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel } from "../../../../src/kernels/IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel.sol";
@@ -528,20 +529,20 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
         // Build role assignments using the centralized function
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
-        DeployScript.DeploymentParams memory params = DeployScript.DeploymentParams({
-            factoryAdmin: OWNER_ADDRESS,
+        DeploymentConfig.MarketDeploymentConfig memory config = DeploymentConfig.MarketDeploymentConfig({
+            marketName: cfg.name,
+            chainId: block.chainid,
             seniorTrancheName: string(abi.encodePacked("Royco Senior ", cfg.name)),
             seniorTrancheSymbol: string(abi.encodePacked("RS-", cfg.name)),
             juniorTrancheName: string(abi.encodePacked("Royco Junior ", cfg.name)),
             juniorTrancheSymbol: string(abi.encodePacked("RJ-", cfg.name)),
             seniorAsset: cfg.stAsset,
             juniorAsset: cfg.jtAsset,
-            stNAVDustTolerance: toNAVUnits(uint256(1)),
-            jtNAVDustTolerance: toNAVUnits(uint256(1)),
+            stDustTolerance: 1,
+            jtDustTolerance: 1,
             kernelType: DeployScript.KernelType.IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel,
             kernelSpecificParams: abi.encode(kernelParams),
             stSelfLiquidationBonusWAD: 0,
-            protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
@@ -550,11 +551,10 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
             lltvWAD: LLTV,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
-            ydmSpecificParams: abi.encode(ydmParams),
-            roleAssignments: roleAssignments
+            ydmSpecificParams: abi.encode(ydmParams)
         });
 
-        return DEPLOY_SCRIPT.deploy(params, DEPLOYER.privateKey);
+        return DEPLOY_SCRIPT.deploy(config, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roleAssignments, DEPLOYER.privateKey);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

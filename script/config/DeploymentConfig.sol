@@ -28,11 +28,11 @@ abstract contract DeploymentConfig {
     // MARKET NAMES
     // ═══════════════════════════════════════════════════════════════════════════
 
-    string internal constant STCUSD = "stcUSD";
-    string internal constant SNUSD = "sNUSD";
-    string internal constant SAVUSD = "savUSD";
-    string internal constant AUTOUSD = "autoUSD";
-    string internal constant MFONE = "mF-ONE ";
+    string public constant STCUSD = "stcUSD";
+    string public constant SNUSD = "sNUSD";
+    string public constant SAVUSD = "savUSD";
+    string public constant AUTOUSD = "autoUSD";
+    string public constant MFONE = "mF-ONE";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CHAIN-SPECIFIC CONFIG (defined once per chain)

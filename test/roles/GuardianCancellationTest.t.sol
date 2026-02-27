@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { Vm } from "../../lib/forge-std/src/Vm.sol";
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
+import { DeploymentConfig } from "../../script/config/DeploymentConfig.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
 import { BaseTest } from "../base/BaseTest.t.sol";
@@ -71,21 +72,21 @@ contract GuardianCancellationTest is BaseTest {
         // Build role assignments using the centralized function
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
-        // Build deployment params
-        DeployScript.DeploymentParams memory params = DeployScript.DeploymentParams({
-            factoryAdmin: OWNER_ADDRESS,
+        // Build deployment config
+        DeploymentConfig.MarketDeploymentConfig memory config = DeploymentConfig.MarketDeploymentConfig({
+            marketName: "test",
+            chainId: block.chainid,
             seniorTrancheName: SENIOR_TRANCHE_NAME,
             seniorTrancheSymbol: SENIOR_TRANCHE_SYMBOL,
             juniorTrancheName: JUNIOR_TRANCHE_NAME,
             juniorTrancheSymbol: JUNIOR_TRANCHE_SYMBOL,
             seniorAsset: address(MOCK_UNDERLYING_ST_VAULT),
             juniorAsset: address(MOCK_UNDERLYING_ST_VAULT),
-            stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE,
+            stDustTolerance: 1,
+            jtDustTolerance: 1,
             kernelType: DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel,
             kernelSpecificParams: abi.encode(kernelParams),
             stSelfLiquidationBonusWAD: 0,
-            protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
@@ -94,12 +95,11 @@ contract GuardianCancellationTest is BaseTest {
             lltvWAD: LLTV,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
-            ydmSpecificParams: abi.encode(ydmParams),
-            roleAssignments: roleAssignments
+            ydmSpecificParams: abi.encode(ydmParams)
         });
 
         // Deploy using the deployment script
-        return DEPLOY_SCRIPT.deploy(params, DEPLOYER.privateKey);
+        return DEPLOY_SCRIPT.deploy(config, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roleAssignments, DEPLOYER.privateKey);
     }
 
     /// @notice Returns the fork configuration

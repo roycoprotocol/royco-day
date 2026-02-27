@@ -139,40 +139,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         address deployerAdminAddress;
     }
 
-    /// @notice Main deployment parameters struct
-    struct DeploymentParams {
-        // Factory params
-        address factoryAdmin;
-        // Market params
-        string seniorTrancheName;
-        string seniorTrancheSymbol;
-        string juniorTrancheName;
-        string juniorTrancheSymbol;
-        address seniorAsset;
-        address juniorAsset;
-        NAV_UNIT stNAVDustTolerance;
-        NAV_UNIT jtNAVDustTolerance;
-        // Kernel params
-        KernelType kernelType;
-        bytes kernelSpecificParams; // Encoded kernel-specific params
-        // Kernel initialization params
-        address protocolFeeRecipient;
-        uint64 stSelfLiquidationBonusWAD;
-        // Accountant params
-        uint64 stProtocolFeeWAD;
-        uint64 jtProtocolFeeWAD;
-        uint64 jtYieldShareProtocolFeeWAD;
-        uint64 coverageWAD;
-        uint96 betaWAD;
-        uint64 lltvWAD;
-        uint24 fixedTermDurationSeconds;
-        // YDM params
-        YDMType ydmType;
-        bytes ydmSpecificParams; // Encoded YDM-specific params
-        // Roles
-        IRoycoFactory.RoleAssignmentConfiguration[] roleAssignments;
-    }
-
     function run() external virtual {
         ENABLE_LOGGING = true;
 
@@ -211,106 +177,65 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             })
         );
 
-        // Build DeploymentParams
-        DeploymentParams memory params = DeploymentParams({
-            factoryAdmin: chainConfig.factoryAdmin,
-            seniorTrancheName: marketConfig.seniorTrancheName,
-            seniorTrancheSymbol: marketConfig.seniorTrancheSymbol,
-            juniorTrancheName: marketConfig.juniorTrancheName,
-            juniorTrancheSymbol: marketConfig.juniorTrancheSymbol,
-            seniorAsset: marketConfig.seniorAsset,
-            juniorAsset: marketConfig.juniorAsset,
-            stNAVDustTolerance: toNAVUnits(marketConfig.stDustTolerance),
-            jtNAVDustTolerance: toNAVUnits(marketConfig.jtDustTolerance),
-            kernelType: marketConfig.kernelType,
-            kernelSpecificParams: marketConfig.kernelSpecificParams,
-            protocolFeeRecipient: chainConfig.protocolFeeRecipient,
-            stSelfLiquidationBonusWAD: marketConfig.stSelfLiquidationBonusWAD,
-            stProtocolFeeWAD: marketConfig.stProtocolFeeWAD,
-            jtProtocolFeeWAD: marketConfig.jtProtocolFeeWAD,
-            jtYieldShareProtocolFeeWAD: marketConfig.jtYieldShareProtocolFeeWAD,
-            coverageWAD: marketConfig.coverageWAD,
-            betaWAD: marketConfig.betaWAD,
-            lltvWAD: marketConfig.lltvWAD,
-            fixedTermDurationSeconds: marketConfig.fixedTermDurationSeconds,
-            ydmType: marketConfig.ydmType,
-            ydmSpecificParams: marketConfig.ydmSpecificParams,
-            roleAssignments: roleAssignments
-        });
-
         // Print all deployment parameters before deployment
         if (ENABLE_LOGGING) {
-            _printDeploymentParams(params, chainConfig);
+            _printDeploymentParams(marketConfig, chainConfig.factoryAdmin, chainConfig.protocolFeeRecipient);
         }
 
-        return deploy(params, deployerPrivateKey);
+        return deploy(marketConfig, chainConfig.factoryAdmin, chainConfig.protocolFeeRecipient, roleAssignments, deployerPrivateKey);
     }
 
     /// @notice Prints all deployment parameters for verification before deployment
-    function _printDeploymentParams(DeploymentParams memory params, ChainConfig memory chainConfig) internal view {
+    function _printDeploymentParams(MarketDeploymentConfig memory _config, address _factoryAdmin, address _protocolFeeRecipient) internal view {
         console2.log("=== DEPLOYMENT PARAMETERS ===");
         console2.log("");
 
         // Chain & Market Info
         console2.log("--- Chain & Market Info ---");
         console2.log("Chain ID:", block.chainid);
+        console2.log("Market Name:", _config.marketName);
         console2.log("");
 
         // Factory Config
         console2.log("--- Factory Config ---");
-        console2.log("Factory Admin:", params.factoryAdmin);
-        console2.log("Protocol Fee Recipient:", params.protocolFeeRecipient);
+        console2.log("Factory Admin:", _factoryAdmin);
+        console2.log("Protocol Fee Recipient:", _protocolFeeRecipient);
         console2.log("");
 
         // Tranche Metadata
         console2.log("--- Tranche Metadata ---");
-        console2.log("Senior Tranche Name:", params.seniorTrancheName);
-        console2.log("Senior Tranche Symbol:", params.seniorTrancheSymbol);
-        console2.log("Junior Tranche Name:", params.juniorTrancheName);
-        console2.log("Junior Tranche Symbol:", params.juniorTrancheSymbol);
+        console2.log("Senior Tranche Name:", _config.seniorTrancheName);
+        console2.log("Senior Tranche Symbol:", _config.seniorTrancheSymbol);
+        console2.log("Junior Tranche Name:", _config.juniorTrancheName);
+        console2.log("Junior Tranche Symbol:", _config.juniorTrancheSymbol);
         console2.log("");
 
         // Assets
         console2.log("--- Assets ---");
-        console2.log("Senior Asset:", params.seniorAsset);
-        console2.log("Junior Asset:", params.juniorAsset);
-        console2.log("ST Dust Tolerance (NAV):", NAV_UNIT.unwrap(params.stNAVDustTolerance));
-        console2.log("JT Dust Tolerance (NAV):", NAV_UNIT.unwrap(params.jtNAVDustTolerance));
+        console2.log("Senior Asset:", _config.seniorAsset);
+        console2.log("Junior Asset:", _config.juniorAsset);
+        console2.log("ST Dust Tolerance:", _config.stDustTolerance);
+        console2.log("JT Dust Tolerance:", _config.jtDustTolerance);
         console2.log("");
 
         // Kernel Config
         console2.log("--- Kernel Config ---");
-        console2.log("Kernel Type:", uint256(params.kernelType));
+        console2.log("Kernel Type:", uint256(_config.kernelType));
         console2.log("");
 
         // Accountant Config
         console2.log("--- Accountant Config ---");
-        console2.log("ST Protocol Fee (WAD):", uint256(params.stProtocolFeeWAD));
-        console2.log("JT Protocol Fee (WAD):", uint256(params.jtProtocolFeeWAD));
-        console2.log("Coverage (WAD):", uint256(params.coverageWAD));
-        console2.log("Beta (WAD):", uint256(params.betaWAD));
-        console2.log("LLTV (WAD):", uint256(params.lltvWAD));
-        console2.log("Fixed Term Duration (seconds):", uint256(params.fixedTermDurationSeconds));
+        console2.log("ST Protocol Fee (WAD):", uint256(_config.stProtocolFeeWAD));
+        console2.log("JT Protocol Fee (WAD):", uint256(_config.jtProtocolFeeWAD));
+        console2.log("Coverage (WAD):", uint256(_config.coverageWAD));
+        console2.log("Beta (WAD):", uint256(_config.betaWAD));
+        console2.log("LLTV (WAD):", uint256(_config.lltvWAD));
+        console2.log("Fixed Term Duration (seconds):", uint256(_config.fixedTermDurationSeconds));
         console2.log("");
 
         // YDM Config
         console2.log("--- YDM Config ---");
-        console2.log("YDM Type:", uint256(params.ydmType));
-        console2.log("");
-
-        // Role Assignments
-        console2.log("--- Role Assignments ---");
-        console2.log("Pauser:", chainConfig.pauserAddress);
-        console2.log("Upgrader:", chainConfig.upgraderAddress);
-        console2.log("Sync Role:", chainConfig.syncRoleAddress);
-        console2.log("Admin Kernel:", chainConfig.adminKernelAddress);
-        console2.log("Admin Accountant:", chainConfig.adminAccountantAddress);
-        console2.log("Admin Protocol Fee Setter:", chainConfig.adminProtocolFeeSetterAddress);
-        console2.log("Admin Oracle Quoter:", chainConfig.adminOracleQuoterAddress);
-        console2.log("LP Role Admin:", chainConfig.lpRoleAdminAddress);
-        console2.log("Guardian:", chainConfig.guardianAddress);
-        console2.log("Deployer:", chainConfig.deployerAddress);
-        console2.log("Deployer Admin:", chainConfig.deployerAdminAddress);
+        console2.log("YDM Type:", uint256(_config.ydmType));
         console2.log("");
 
         console2.log("=============================");
@@ -318,15 +243,24 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     }
 
     /// @notice Main deployment function that accepts all parameters
-    function deploy(DeploymentParams memory _params, uint256 _deployerPrivateKey) public returns (DeploymentResult memory) {
+    function deploy(
+        MarketDeploymentConfig memory _config,
+        address _factoryAdmin,
+        address _protocolFeeRecipient,
+        IRoycoFactory.RoleAssignmentConfiguration[] memory _roleAssignments,
+        uint256 _deployerPrivateKey
+    )
+        public
+        returns (DeploymentResult memory)
+    {
         vm.startBroadcast(_deployerPrivateKey);
         address deployer = vm.addr(_deployerPrivateKey);
 
         // Deploy implementations using CREATE2
-        IYDM ydm = _deployYDM(_params.ydmType);
+        IYDM ydm = _deployYDM(_config.ydmType);
 
         // Deploy factory with factory admin as admin and deployer as deployer
-        RoycoFactory factory = _deployFactory(_params.factoryAdmin, deployer, _params.roleAssignments);
+        RoycoFactory factory = _deployFactory(_factoryAdmin, deployer, _roleAssignments);
 
         // Deploy all implementations. Then deploy the market using the factory
         (
@@ -335,7 +269,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             RoycoJuniorTranche jtTrancheImpl,
             address kernelImpl,
             RoycoAccountant accountantImpl
-        ) = _deployMarket(factory, address(ydm), _params, deployer);
+        ) = _deployMarket(factory, address(ydm), _config, _protocolFeeRecipient, deployer);
 
         // Build deployment result
         DeploymentResult memory result = DeploymentResult({
@@ -355,7 +289,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             // Log all deployed contracts
             console2.log("=== Deployment Summary ===");
             console2.log("Factory:", address(result.factory));
-            console2.log("Factory Admin:", _params.factoryAdmin);
+            console2.log("Factory Admin:", _factoryAdmin);
             console2.log("YDM:", address(result.ydm));
             console2.log("Accountant Implementation:", address(result.accountantImplementation));
             console2.log("ST Tranche Implementation:", address(result.stTrancheImplementation));
@@ -579,7 +513,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     /// @notice Deploys all contracts for a market
     /// @param factory The deployed factory
     /// @param ydmAddress The address of the deployed YDM
-    /// @param _params The deployment parameters
+    /// @param _config The market deployment configuration
+    /// @param _protocolFeeRecipient The protocol fee recipient address
     /// @return deployedContracts The deployed market contracts
     /// @return stImpl The deployed senior tranche implementation address
     /// @return jtImpl The deployed junior tranche implementation address
@@ -588,7 +523,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     function _deployMarket(
         RoycoFactory factory,
         address ydmAddress,
-        DeploymentParams memory _params,
+        MarketDeploymentConfig memory _config,
+        address _protocolFeeRecipient,
         address _deployer
     )
         internal
@@ -601,7 +537,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         )
     {
         // Precompute expected proxy addresses using salt derived from market ID
-        bytes32 salt = keccak256(abi.encodePacked(MARKET_DEPLOYMENT_SALT, _params.seniorTrancheName, _params.juniorTrancheName));
+        bytes32 salt = keccak256(abi.encodePacked(MARKET_DEPLOYMENT_SALT, _config.seniorTrancheName, _config.juniorTrancheName));
 
         // Predict the deterministic addresses of the contracts
         // The salt is unique for each contract type to prevent CREATE3 collisions
@@ -615,22 +551,22 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         address expectedKernelAddress = factory.predictDeterministicAddress(kernelSalt);
 
         // Deploy the senior tranche implementation
-        stImpl = _deploySTTrancheImpl(_params.seniorAsset, expectedKernelAddress);
+        stImpl = _deploySTTrancheImpl(_config.seniorAsset, expectedKernelAddress);
 
         // Deploy the junior tranche implementation
-        jtImpl = _deployJTTrancheImpl(_params.juniorAsset, expectedKernelAddress);
+        jtImpl = _deployJTTrancheImpl(_config.juniorAsset, expectedKernelAddress);
 
         // Deploy the accountant implementation
         accountantImpl = _deployAccountantImpl(expectedKernelAddress);
 
         // Deploy the kernel implementation based on kernel type
         kernelImpl = _deployKernelImpl(
-            _params.kernelType,
-            _params.kernelSpecificParams,
+            _config.kernelType,
+            _config.kernelSpecificParams,
             expectedSeniorTrancheAddress,
             expectedJuniorTrancheAddress,
-            _params.seniorAsset,
-            _params.juniorAsset,
+            _config.seniorAsset,
+            _config.juniorAsset,
             expectedAccountantAddress
         );
 
@@ -643,11 +579,17 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
 
         // Build initialization data
         address factoryAddress = address(factory);
-        bytes memory kernelInitializationData =
-            _buildKernelInitializationData(_params.kernelType, _params.kernelSpecificParams, expectedAccountantAddress, factoryAddress, _params);
-        bytes memory accountantInitializationData = _buildAccountantInitializationData(expectedKernelAddress, ydmAddress, factoryAddress, _params);
-        bytes memory seniorTrancheInitializationData = _buildSeniorTrancheInitializationData(factoryAddress, _params);
-        bytes memory juniorTrancheInitializationData = _buildJuniorTrancheInitializationData(factoryAddress, _params);
+        bytes memory kernelInitializationData = _buildKernelInitializationData(
+            _config.kernelType,
+            _config.kernelSpecificParams,
+            expectedAccountantAddress,
+            factoryAddress,
+            _protocolFeeRecipient,
+            _config.stSelfLiquidationBonusWAD
+        );
+        bytes memory accountantInitializationData = _buildAccountantInitializationData(expectedKernelAddress, ydmAddress, factoryAddress, _config);
+        bytes memory seniorTrancheInitializationData = _buildSeniorTrancheInitializationData(factoryAddress, _config);
+        bytes memory juniorTrancheInitializationData = _buildJuniorTrancheInitializationData(factoryAddress, _config);
 
         // Build roles configuration
         IRoycoFactory.RolesTargetConfiguration[] memory roles =
@@ -655,10 +597,10 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
 
         // Build market deployment params
         IRoycoFactory.MarketDeploymentParams memory marketParams = IRoycoFactory.MarketDeploymentParams({
-            seniorTrancheName: _params.seniorTrancheName,
-            seniorTrancheSymbol: _params.seniorTrancheSymbol,
-            juniorTrancheName: _params.juniorTrancheName,
-            juniorTrancheSymbol: _params.juniorTrancheSymbol,
+            seniorTrancheName: _config.seniorTrancheName,
+            seniorTrancheSymbol: _config.seniorTrancheSymbol,
+            juniorTrancheName: _config.juniorTrancheName,
+            juniorTrancheSymbol: _config.juniorTrancheSymbol,
             seniorTrancheImplementation: IRoycoVaultTranche(address(stImpl)),
             juniorTrancheImplementation: IRoycoVaultTranche(address(jtImpl)),
             kernelImplementation: IRoycoKernel(address(kernelImpl)),
@@ -928,14 +870,15 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         bytes memory _kernelSpecificParams,
         address _expectedAccountantAddress,
         address _factoryAddress,
-        DeploymentParams memory _params
+        address _protocolFeeRecipient,
+        uint64 _stSelfLiquidationBonusWAD
     )
         internal
         pure
         returns (bytes memory)
     {
         IRoycoKernel.RoycoKernelInitParams memory kernelParams = IRoycoKernel.RoycoKernelInitParams({
-            initialAuthority: _factoryAddress, protocolFeeRecipient: _params.protocolFeeRecipient, stSelfLiquidationBonusWAD: _params.stSelfLiquidationBonusWAD
+            initialAuthority: _factoryAddress, protocolFeeRecipient: _protocolFeeRecipient, stSelfLiquidationBonusWAD: _stSelfLiquidationBonusWAD
         });
 
         if (_kernelType == KernelType.ReUSD_ST_ReUSD_JT) {
@@ -998,40 +941,40 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         address _expectedKernelAddress,
         address _ydmAddress,
         address _factoryAddress,
-        DeploymentParams memory _params
+        MarketDeploymentConfig memory _config
     )
         internal
         pure
         returns (bytes memory)
     {
         IRoycoAccountant.RoycoAccountantInitParams memory accountantParams = IRoycoAccountant.RoycoAccountantInitParams({
-            stProtocolFeeWAD: _params.stProtocolFeeWAD,
-            jtProtocolFeeWAD: _params.jtProtocolFeeWAD,
-            yieldShareProtocolFeeWAD: _params.jtYieldShareProtocolFeeWAD,
-            coverageWAD: _params.coverageWAD,
-            betaWAD: _params.betaWAD,
+            stProtocolFeeWAD: _config.stProtocolFeeWAD,
+            jtProtocolFeeWAD: _config.jtProtocolFeeWAD,
+            yieldShareProtocolFeeWAD: _config.jtYieldShareProtocolFeeWAD,
+            coverageWAD: _config.coverageWAD,
+            betaWAD: _config.betaWAD,
             ydm: _ydmAddress,
-            ydmInitializationData: _buildYDMInitializationData(_params.ydmType, _params.ydmSpecificParams),
-            fixedTermDurationSeconds: _params.fixedTermDurationSeconds,
-            lltvWAD: _params.lltvWAD,
-            stNAVDustTolerance: _params.stNAVDustTolerance,
-            jtNAVDustTolerance: _params.jtNAVDustTolerance
+            ydmInitializationData: _buildYDMInitializationData(_config.ydmType, _config.ydmSpecificParams),
+            fixedTermDurationSeconds: _config.fixedTermDurationSeconds,
+            lltvWAD: _config.lltvWAD,
+            stNAVDustTolerance: toNAVUnits(_config.stDustTolerance),
+            jtNAVDustTolerance: toNAVUnits(_config.jtDustTolerance)
         });
 
         return abi.encodeCall(RoycoAccountant.initialize, (accountantParams, _factoryAddress));
     }
 
-    function _buildSeniorTrancheInitializationData(address _factoryAddress, DeploymentParams memory _params) internal pure returns (bytes memory) {
+    function _buildSeniorTrancheInitializationData(address _factoryAddress, MarketDeploymentConfig memory _config) internal pure returns (bytes memory) {
         IRoycoVaultTranche.RoycoTrancheInitParams memory trancheParams = IRoycoVaultTranche.RoycoTrancheInitParams({
-            name: _params.seniorTrancheName, symbol: _params.seniorTrancheSymbol, initialAuthority: _factoryAddress
+            name: _config.seniorTrancheName, symbol: _config.seniorTrancheSymbol, initialAuthority: _factoryAddress
         });
 
         return abi.encodeCall(RoycoSeniorTranche.initialize, (trancheParams));
     }
 
-    function _buildJuniorTrancheInitializationData(address _factoryAddress, DeploymentParams memory _params) internal pure returns (bytes memory) {
+    function _buildJuniorTrancheInitializationData(address _factoryAddress, MarketDeploymentConfig memory _config) internal pure returns (bytes memory) {
         IRoycoVaultTranche.RoycoTrancheInitParams memory trancheParams = IRoycoVaultTranche.RoycoTrancheInitParams({
-            name: _params.juniorTrancheName, symbol: _params.juniorTrancheSymbol, initialAuthority: _factoryAddress
+            name: _config.juniorTrancheName, symbol: _config.juniorTrancheSymbol, initialAuthority: _factoryAddress
         });
 
         return abi.encodeCall(RoycoJuniorTranche.initialize, (trancheParams));

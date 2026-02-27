@@ -12,9 +12,6 @@ import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits } from "../../../../
 
 import { YieldBearingERC20Chainlink_TestBase } from "../base/YieldBearingERC20Chainlink_TestBase.t.sol";
 
-/// @dev Concrete instantiation of DeploymentConfig so it can be used via composition
-contract MfOneDeploymentConfig is DeploymentConfig { }
-
 /// @title MfOne_Test
 /// @notice Tests IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel with Midas Fasanara ONE (mF-ONE)
 /// @dev Both ST and JT use mF-ONE as the tranche asset
@@ -38,9 +35,6 @@ contract MfOne_Test is YieldBearingERC20Chainlink_TestBase {
 
     /// @notice Fork block for deterministic testing
     uint256 internal constant FORK_BLOCK = 24_543_000;
-
-    /// @notice Deployment config instance for reading market parameters
-    MfOneDeploymentConfig internal deploymentConfig;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // PROTOCOL CONFIGURATION
@@ -110,9 +104,8 @@ contract MfOne_Test is YieldBearingERC20Chainlink_TestBase {
 
     /// @notice Deploys the mF-ONE kernel and market using parameters from DeploymentConfig
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
-        // Instantiate the deployment config to access market parameters
-        deploymentConfig = new MfOneDeploymentConfig();
-        DeploymentConfig.MarketDeploymentConfig memory mfOneConfig = deploymentConfig.getMarketConfig("mF-ONE ");
+        // Read config from the deploy script (which inherits DeploymentConfig)
+        DeploymentConfig.MarketDeploymentConfig memory mfOneConfig = DEPLOY_SCRIPT.getMarketConfig("mF-ONE");
 
         // Store the chainlink oracle address for mocking
         chainlinkOracle = _getChainlinkOracle();
@@ -128,39 +121,13 @@ contract MfOne_Test is YieldBearingERC20Chainlink_TestBase {
         // Override staleness threshold for testing
         kernelParams.stalenessThresholdSeconds = _getStalenessThreshold();
 
-        // Decode YDM params from the deployment config
-        DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = abi.decode(mfOneConfig.ydmSpecificParams, (DeployScript.AdaptiveCurveYDM_V2_Params));
+        // Re-encode kernel params with overridden staleness threshold
+        mfOneConfig.kernelSpecificParams = abi.encode(kernelParams);
 
         // Build role assignments
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
-        DeployScript.DeploymentParams memory params = DeployScript.DeploymentParams({
-            factoryAdmin: OWNER_ADDRESS,
-            seniorTrancheName: mfOneConfig.seniorTrancheName,
-            seniorTrancheSymbol: mfOneConfig.seniorTrancheSymbol,
-            juniorTrancheName: mfOneConfig.juniorTrancheName,
-            juniorTrancheSymbol: mfOneConfig.juniorTrancheSymbol,
-            seniorAsset: mfOneConfig.seniorAsset,
-            juniorAsset: mfOneConfig.juniorAsset,
-            stNAVDustTolerance: toNAVUnits(mfOneConfig.stDustTolerance),
-            jtNAVDustTolerance: toNAVUnits(mfOneConfig.jtDustTolerance),
-            kernelType: mfOneConfig.kernelType,
-            kernelSpecificParams: abi.encode(kernelParams),
-            stSelfLiquidationBonusWAD: mfOneConfig.stSelfLiquidationBonusWAD,
-            protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            stProtocolFeeWAD: mfOneConfig.stProtocolFeeWAD,
-            jtProtocolFeeWAD: mfOneConfig.jtProtocolFeeWAD,
-            jtYieldShareProtocolFeeWAD: mfOneConfig.jtYieldShareProtocolFeeWAD,
-            coverageWAD: mfOneConfig.coverageWAD,
-            betaWAD: mfOneConfig.betaWAD,
-            lltvWAD: mfOneConfig.lltvWAD,
-            fixedTermDurationSeconds: mfOneConfig.fixedTermDurationSeconds,
-            ydmType: mfOneConfig.ydmType,
-            ydmSpecificParams: abi.encode(ydmParams),
-            roleAssignments: roleAssignments
-        });
-
-        return DEPLOY_SCRIPT.deploy(params, DEPLOYER.privateKey);
+        return DEPLOY_SCRIPT.deploy(mfOneConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roleAssignments, DEPLOYER.privateKey);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
