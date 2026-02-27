@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
@@ -40,10 +39,9 @@ contract MfOne_Test is YieldBearingERC20Chainlink_TestBase {
     // PROTOCOL CONFIGURATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Returns the protocol configuration for mF-ONE
-    function getProtocolConfig() public pure override returns (ProtocolConfig memory) {
-        return ProtocolConfig({
-            name: "mF-ONE",
+    /// @notice Returns the test configuration for mF-ONE
+    function getTestConfig() public pure override returns (TestConfig memory) {
+        return TestConfig({
             forkBlock: FORK_BLOCK,
             forkRpcUrlEnvVar: "MAINNET_RPC_URL",
             stAsset: MFONE_TOKEN,

@@ -46,16 +46,16 @@ contract reUSD_Test is AbstractKernelTestSuite {
     // PROTOCOL CONFIGURATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Returns the protocol configuration for reUSD
-    function getProtocolConfig() public pure override returns (ProtocolConfig memory) {
-        return ProtocolConfig({
-            name: "reUSD",
-            forkBlock: 24_187_000,
-            forkRpcUrlEnvVar: "MAINNET_RPC_URL",
-            stAsset: REUSD,
-            jtAsset: REUSD,
-            initialFunding: 1_000_000e18 // 1M reUSD
-        });
+    /// @notice Returns the test configuration for reUSD
+    function getTestConfig() public pure override returns (TestConfig memory) {
+        return
+            TestConfig({
+                forkBlock: 24_187_000,
+                forkRpcUrlEnvVar: "MAINNET_RPC_URL",
+                stAsset: REUSD,
+                jtAsset: REUSD,
+                initialFunding: 1_000_000e18 // 1M reUSD
+            });
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -235,48 +235,12 @@ contract reUSD_Test is AbstractKernelTestSuite {
     // DEPLOYMENT
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Deploys the ReUSD kernel and market
+    /// @notice Deploys the ReUSD kernel and market using parameters from DeploymentConfig
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
-        (DeploymentConfig.MarketDeploymentConfig memory config, IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments) =
-            _buildReUSDDeploymentConfig();
-        return DEPLOY_SCRIPT.deploy(config, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roleAssignments, DEPLOYER.privateKey);
-    }
+        DeploymentConfig.MarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("reUSD");
 
-    function _buildReUSDDeploymentConfig()
-        private
-        view
-        returns (DeploymentConfig.MarketDeploymentConfig memory config, IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments)
-    {
-        ProtocolConfig memory cfg = getProtocolConfig();
-        config.marketName = cfg.name;
-        config.chainId = block.chainid;
-        config.seniorTrancheName = string(abi.encodePacked("Royco Senior ", cfg.name));
-        config.seniorTrancheSymbol = string(abi.encodePacked("RS-", cfg.name));
-        config.juniorTrancheName = string(abi.encodePacked("Royco Junior ", cfg.name));
-        config.juniorTrancheSymbol = string(abi.encodePacked("RJ-", cfg.name));
-        config.seniorAsset = cfg.stAsset;
-        config.juniorAsset = cfg.jtAsset;
-        config.stDustTolerance = 1;
-        config.jtDustTolerance = 1;
-        config.kernelType = DeployScript.KernelType.ReUSD_ST_ReUSD_JT;
-        config.kernelSpecificParams =
-            abi.encode(DeployScript.ReUSDSTReUSDJTKernelParams({ reusd: REUSD, reusdUsdQuoteToken: USDC, insuranceCapitalLayer: ICL }));
-        config.stProtocolFeeWAD = ST_PROTOCOL_FEE_WAD;
-        config.jtProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
-        config.jtYieldShareProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
-        config.coverageWAD = COVERAGE_WAD;
-        config.betaWAD = 1e18;
-        config.lltvWAD = LLTV;
-        config.fixedTermDurationSeconds = FIXED_TERM_DURATION_SECONDS;
-        config.ydmType = DeployScript.YDMType.AdaptiveCurve_V2;
-        config.ydmSpecificParams = abi.encode(
-            DeployScript.AdaptiveCurveYDM_V2_Params({
-                jtYieldShareAtZeroUtilWAD: 0.3e18,
-                jtYieldShareAtTargetUtilWAD: 0.3e18,
-                jtYieldShareAtFullUtilWAD: 1e18,
-                maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
-            })
-        );
-        roleAssignments = _generateRoleAssignments();
+        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+
+        return DEPLOY_SCRIPT.deploy(marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roleAssignments, DEPLOYER.privateKey);
     }
 }

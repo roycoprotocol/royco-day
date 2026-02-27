@@ -35,10 +35,9 @@ contract PendlePTcUSD_Test is YieldBearingERC20Chainlink_TestBase {
     // PROTOCOL CONFIGURATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Returns the protocol configuration for PT-cUSD
-    function getProtocolConfig() public pure override returns (ProtocolConfig memory) {
-        return ProtocolConfig({
-            name: "PT-cUSD",
+    /// @notice Returns the test configuration for PT-cUSD
+    function getTestConfig() public pure override returns (TestConfig memory) {
+        return TestConfig({
             forkBlock: 24_344_233,
             forkRpcUrlEnvVar: "MAINNET_RPC_URL",
             stAsset: PT_CUSD,
@@ -51,56 +50,24 @@ contract PendlePTcUSD_Test is YieldBearingERC20Chainlink_TestBase {
     // DEPLOYMENT
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Deploys the YieldBearingERC20 Chainlink kernel and market
+    /// @notice Deploys the PT-cUSD kernel and market using parameters from DeploymentConfig
     function _deployKernelAndMarket() internal virtual override returns (DeployScript.DeploymentResult memory) {
-        ProtocolConfig memory cfg = getProtocolConfig();
+        DeploymentConfig.MarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("PT-cUSD");
 
-        // Get initial conversion rate (reference asset to NAV, in WAD precision)
-        uint256 initialConversionRate = _getInitialConversionRate();
-
+        // Decode kernel-specific params from the deployment config
         DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams memory kernelParams =
-            DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams({
-                trancheAssetToReferenceAssetOracle: _getChainlinkOracle(),
-                stalenessThresholdSeconds: _getStalenessThreshold(),
-                initialConversionRateWAD: initialConversionRate
-            });
+            abi.decode(marketConfig.kernelSpecificParams, (DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams));
 
-        DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
-            jtYieldShareAtZeroUtilWAD: 0.3e18, // Y_0 = Y_T (same as target)
-            jtYieldShareAtTargetUtilWAD: 0.3e18, // 30% at target utilization
-            jtYieldShareAtFullUtilWAD: 1e18, // 100% at 100% utilization
-            maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
-        });
+        // Override staleness threshold for testing
+        kernelParams.stalenessThresholdSeconds = _getStalenessThreshold();
 
-        // Build role assignments using the centralized function
+        // Re-encode kernel params with overridden staleness threshold
+        marketConfig.kernelSpecificParams = abi.encode(kernelParams);
+
+        // Build role assignments
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
-        DeploymentConfig.MarketDeploymentConfig memory config = DeploymentConfig.MarketDeploymentConfig({
-            marketName: cfg.name,
-            chainId: block.chainid,
-            seniorTrancheName: string(abi.encodePacked("Royco Senior ", cfg.name)),
-            seniorTrancheSymbol: string(abi.encodePacked("RS-", cfg.name)),
-            juniorTrancheName: string(abi.encodePacked("Royco Junior ", cfg.name)),
-            juniorTrancheSymbol: string(abi.encodePacked("RJ-", cfg.name)),
-            seniorAsset: cfg.stAsset,
-            juniorAsset: cfg.jtAsset,
-            stDustTolerance: 1,
-            jtDustTolerance: 1,
-            kernelType: DeployScript.KernelType.IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel,
-            kernelSpecificParams: abi.encode(kernelParams),
-            stSelfLiquidationBonusWAD: 0,
-            stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
-            jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            coverageWAD: COVERAGE_WAD,
-            betaWAD: 1e18, // Beta = 1 for identical assets
-            lltvWAD: LLTV,
-            fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
-            ydmSpecificParams: abi.encode(ydmParams)
-        });
-
-        return DEPLOY_SCRIPT.deploy(config, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roleAssignments, DEPLOYER.privateKey);
+        return DEPLOY_SCRIPT.deploy(marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roleAssignments, DEPLOYER.privateKey);
     }
 
     /// @notice Returns the chainlink oracle address for PT-cUSD

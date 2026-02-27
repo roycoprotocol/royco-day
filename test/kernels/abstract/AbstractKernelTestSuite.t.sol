@@ -35,7 +35,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
     TrancheState internal stState;
     TrancheState internal jtState;
-    ProtocolConfig internal config;
+    TestConfig internal config;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // ABSTRACT FUNCTIONS (Must be implemented by concrete tests)
@@ -50,7 +50,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @inheritdoc IKernelTestHooks
-    function getProtocolConfig() public view virtual returns (ProtocolConfig memory);
+    function getTestConfig() public view virtual returns (TestConfig memory);
 
     /// @notice Simulates yield generation for ST
     function simulateSTYield(uint256 _percentageWAD) public virtual;
@@ -87,7 +87,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function setUp() public virtual {
-        config = getProtocolConfig();
+        config = getTestConfig();
 
         // Setup fork if needed
         if (bytes(config.forkRpcUrlEnvVar).length > 0) {

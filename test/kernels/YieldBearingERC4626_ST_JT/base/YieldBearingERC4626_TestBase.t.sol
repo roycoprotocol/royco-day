@@ -2,14 +2,9 @@
 pragma solidity ^0.8.28;
 
 import { IERC20Metadata, IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
-
-import { DeployScript } from "../../../../script/Deploy.s.sol";
-import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
-import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { IdenticalERC4626SharesAdminOracleQuoter_Kernel } from "../../../../src/kernels/IdenticalERC4626SharesAdminOracleQuoter_Kernel.sol";
-import { WAD, WAD, WAD_DECIMALS } from "../../../../src/libraries/Constants.sol";
+import { WAD, WAD_DECIMALS } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
-
 import { AbstractKernelTestSuite } from "../../abstract/AbstractKernelTestSuite.t.sol";
 
 /// @title YieldBearingERC4626_TestBase
@@ -381,57 +376,5 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
         KERNEL.syncTrancheAccounting();
 
         _assertNAVConservation();
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // DEPLOYMENT
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @notice Deploys the YieldBearingERC4626 kernel and market
-    function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
-        ProtocolConfig memory cfg = getProtocolConfig();
-
-        // Get initial conversion rate (vault asset to NAV, in WAD precision)
-        uint256 initialConversionRate = _getInitialConversionRate();
-
-        DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams memory kernelParams =
-            DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: initialConversionRate });
-
-        DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
-            jtYieldShareAtZeroUtilWAD: 0.3e18, // Y_0 = Y_T (same as target)
-            jtYieldShareAtTargetUtilWAD: 0.3e18, // 30% at target utilization
-            jtYieldShareAtFullUtilWAD: 1e18, // 100% at 100% utilization
-            maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days)) // ~6 day doubling time
-        });
-
-        // Build role assignments using the centralized function
-        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
-
-        DeploymentConfig.MarketDeploymentConfig memory config = DeploymentConfig.MarketDeploymentConfig({
-            marketName: cfg.name,
-            chainId: block.chainid,
-            seniorTrancheName: string(abi.encodePacked("Royco Senior ", cfg.name)),
-            seniorTrancheSymbol: string(abi.encodePacked("RS-", cfg.name)),
-            juniorTrancheName: string(abi.encodePacked("Royco Junior ", cfg.name)),
-            juniorTrancheSymbol: string(abi.encodePacked("RJ-", cfg.name)),
-            seniorAsset: cfg.stAsset,
-            juniorAsset: cfg.jtAsset,
-            stDustTolerance: 1,
-            jtDustTolerance: 1,
-            kernelType: DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel,
-            kernelSpecificParams: abi.encode(kernelParams),
-            stSelfLiquidationBonusWAD: 0,
-            stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
-            jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            coverageWAD: COVERAGE_WAD,
-            betaWAD: 1e18, // Beta = 1 for identical assets
-            lltvWAD: LLTV,
-            fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
-            ydmSpecificParams: abi.encode(ydmParams)
-        });
-
-        return DEPLOY_SCRIPT.deploy(config, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roleAssignments, DEPLOYER.privateKey);
     }
 }
