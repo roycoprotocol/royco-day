@@ -123,10 +123,9 @@ contract ParetoFalconx_Test is IdleCdoAA_TestBase {
         assertEq(kernel.IDLE_CDO(), PARETO_FALCONX_CDO, "Kernel should have correct IdleCDO address");
     }
 
-    /// @notice Test that kernel has correct virtual price multiplier
+    /// @notice Test that virtual price multiplier is calculated correctly
     function test_paretoFalconx_hasCorrectVirtualPriceMultiplier() public view {
-        Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel kernel = Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel(address(KERNEL));
-        assertEq(kernel.IDLE_CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION(), SCALE_FACTOR, "Kernel should have correct virtual price multiplier");
+        assertEq(_getVirtualPriceMultiplier(), SCALE_FACTOR, "Virtual price multiplier should match expected scale factor");
     }
 
     /// @notice Test that ST and JT assets are both the AA tranche token
@@ -137,10 +136,8 @@ contract ParetoFalconx_Test is IdleCdoAA_TestBase {
 
     /// @notice Test that conversion rate matches IdleCDO virtual price
     function test_paretoFalconx_conversionRateMatchesCDOVirtualPrice() public view {
-        Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel kernel = Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel(address(KERNEL));
-
         uint256 virtualPrice = CDO.virtualPrice(AA_TRANCHE_TOKEN);
-        uint256 expectedConversionRateWAD = virtualPrice * kernel.IDLE_CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION();
+        uint256 expectedConversionRateWAD = virtualPrice * _getVirtualPriceMultiplier();
 
         TRANCHE_UNIT oneUnit = toTrancheUnits(10 ** AA_TRANCHE_DECIMALS);
         NAV_UNIT navUnits = KERNEL.stConvertTrancheUnitsToNAVUnits(oneUnit);

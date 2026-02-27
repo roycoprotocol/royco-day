@@ -46,6 +46,13 @@ abstract contract IdleCdoAA_TestBase is AbstractKernelTestSuite {
     /// @notice Returns the AA tranche token address
     function _getAATrancheToken() internal view virtual returns (address);
 
+    /// @notice Returns the virtual price multiplier for WAD precision conversion
+    /// @dev Computed as 10^(WAD_DECIMALS - tokenDecimals). Override if needed.
+    function _getVirtualPriceMultiplier() internal view virtual returns (uint256) {
+        uint8 tokenDecimals = IERC20Metadata(config.stAsset).decimals();
+        return 10 ** (WAD_DECIMALS - tokenDecimals);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // NAV MANIPULATION HOOKS IMPLEMENTATION
     // ═══════════════════════════════════════════════════════════════════════════
@@ -161,7 +168,7 @@ abstract contract IdleCdoAA_TestBase is AbstractKernelTestSuite {
     /// @notice Test that overridden conversion rate is used in conversions
     function test_setConversionRate_usedInConversions() public {
         uint8 decimals = IERC20Metadata(config.stAsset).decimals();
-        uint256 scaleFactor = Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel(address(KERNEL)).IDLE_CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION();
+        uint256 scaleFactor = _getVirtualPriceMultiplier();
 
         TRANCHE_UNIT oneToken = toTrancheUnits(10 ** decimals);
         NAV_UNIT initialNav = KERNEL.stConvertTrancheUnitsToNAVUnits(oneToken);
@@ -188,7 +195,7 @@ abstract contract IdleCdoAA_TestBase is AbstractKernelTestSuite {
     /// @notice Test setting conversion rate to sentinel value resets to oracle
     function test_setConversionRate_sentinelResetsToOracle() public {
         uint8 decimals = IERC20Metadata(config.stAsset).decimals();
-        uint256 scaleFactor = Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel(address(KERNEL)).IDLE_CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION();
+        uint256 scaleFactor = _getVirtualPriceMultiplier();
 
         // First override the rate
         uint256 overrideRate = 2e18;
@@ -218,7 +225,7 @@ abstract contract IdleCdoAA_TestBase is AbstractKernelTestSuite {
     /// @notice Test that raw NAV reflects deposits correctly
     function test_rawNAV_reflectsDeposits() public {
         uint8 decimals = IERC20Metadata(config.stAsset).decimals();
-        uint256 scaleFactor = Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel(address(KERNEL)).IDLE_CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION();
+        uint256 scaleFactor = _getVirtualPriceMultiplier();
 
         assertEq(JT.getRawNAV(), ZERO_NAV_UNITS, "Initial JT NAV should be 0");
 

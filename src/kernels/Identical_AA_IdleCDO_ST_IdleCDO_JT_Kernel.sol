@@ -20,7 +20,7 @@ contract Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel is RoycoKernel, IdenticalAsse
     address public immutable IDLE_CDO;
 
     /// @notice The virtual price multiplier for the IdleCDO's AA tranche to convert to WAD precision
-    uint256 public immutable IDLE_CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION;
+    uint256 internal immutable IDLE_CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION;
 
     /// @notice Thrown when the AA CDO tranche token is different from the market's ST and JT asset
     error AA_CDO_TRANCHE_TOKEN_MISMATCH();
