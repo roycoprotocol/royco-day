@@ -26,7 +26,7 @@ contract ReUSD_ST_ReUSD_JT_Kernel is RoycoKernel, IdenticalAssetsOracleQuoter {
     address public immutable INSURANCE_CAPITAL_LAYER;
 
     /// @notice ICL input for reUSD exchange rate in quote tokens, scaled to WAD precision
-    uint256 public immutable REUSD_AMOUNT_FOR_WAD_PRECISION_CONVERSION_RATE;
+    uint256 internal immutable REUSD_AMOUNT_FOR_WAD_PRECISION_CONVERSION_RATE;
 
     /**
      * @notice Constructs the Royco kernel
