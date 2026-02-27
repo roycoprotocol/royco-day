@@ -49,24 +49,20 @@ library UtilsLib {
 
     /**
      * @notice Computes the loan to value (LTV) of the Royco market given the market's state
-     * @dev Informally: DEBT / (DEBT + EQUITY)
-     * @dev Formally:
-     *      DEBT = (ST_EFFECTIVE_NAV + ST_IL)
-     *      EQUITY = JT_EFFECTIVE_NAV
-     *      LTV = (ST_EFFECTIVE_NAV + ST_IL) / ((ST_EFFECTIVE_NAV + ST_IL) + JT_EFFECTIVE_NAV)
+     * @dev Informally: DEBT / COLLATERAL
+     * @dev Formally: LTV = (ST_EFFECTIVE_NAV + ST_IL) / (ST_EFFECTIVE_NAV + JT_EFFECTIVE_NAV)
      * @param _stEffectiveNAV The senior tranche net asset value after receiving coverage, ST yield distribution, and ST losses
      * @param _stImpermanentLoss The impermanent loss that the senior tranche has suffered after exhausting JT's loss-absorption buffer
      * @param _jtEffectiveNAV The junior tranche net asset value after giving coverage, JT yield, ST yield distribution, and JT losses
      * @return ltvWAD The loan to value (LTV) of the Royco market, scaled to WAD precision
      */
     function computeLTV(NAV_UNIT _stEffectiveNAV, NAV_UNIT _stImpermanentLoss, NAV_UNIT _jtEffectiveNAV) internal pure returns (uint256 ltvWAD) {
-        // Compute debt and value (debt + equity)
-        NAV_UNIT debt = (_stEffectiveNAV + _stImpermanentLoss);
-        NAV_UNIT value = (debt + _jtEffectiveNAV);
-        // If total value is zero, LTV is undefined
-        if (value == ZERO_NAV_UNITS) return type(uint256).max;
+        // Compute collateral
+        NAV_UNIT collateral = (_stEffectiveNAV + _jtEffectiveNAV);
+        // If the total collateral value is zero, LTV is undefined
+        if (collateral == ZERO_NAV_UNITS) return type(uint256).max;
         // Round in favor of ensuring senior tranche protection
-        ltvWAD = WAD.mulDiv(debt, value, Math.Rounding.Ceil);
+        ltvWAD = WAD.mulDiv((_stEffectiveNAV + _stImpermanentLoss), collateral, Math.Rounding.Ceil);
     }
 
     /**
