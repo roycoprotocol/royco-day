@@ -12,7 +12,6 @@ import { IdenticalAssetsOracleQuoter } from "./base/quoter/base/IdenticalAssetsO
  * @title IdleCdoAA_ST_IdleCdoAA_JT_Kernel
  * @author Waymont
  * @notice The senior and junior tranches transfer in an IdleCDO's AA tranche
- * @notice The NAV can be expressed in any quote token supported by an IdleCDO's AA tranche
  * @dev Example: Pareto's Falconx's Prime Brokerage Vault at https://app.pareto.credit/vault#0xC26A6Fa2C37b38E549a4a1807543801Db684f99C
  * @dev https://docs.idle.finance/
  */

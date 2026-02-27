@@ -2,13 +2,13 @@
 pragma solidity ^0.8.28;
 
 import { IERC20Metadata, IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
-import { IdenticalERC4626SharesAdminOracleQuoter_Kernel } from "../../../../src/kernels/IdenticalERC4626SharesAdminOracleQuoter_Kernel.sol";
+import { Identical_ERC4626_ST_ERC4626_JT_Kernel } from "../../../../src/kernels/Identical_ERC4626_ST_ERC4626_JT_Kernel.sol";
 import { WAD, WAD_DECIMALS } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
 import { AbstractKernelTestSuite } from "../../abstract/AbstractKernelTestSuite.t.sol";
 
 /// @title YieldBearingERC4626_TestBase
-/// @notice Base test contract for IdenticalERC4626SharesAdminOracleQuoter_Kernel
+/// @notice Base test contract for Identical_ERC4626_ST_ERC4626_JT_Kernel
 /// @dev Implements the test hooks for yield-bearing ERC4626 assets where ST and JT use identical assets
 ///
 /// IMPORTANT: This kernel stores the `vaultAsset-to-NAV` conversion rate (e.g., NUSD->USD for sNUSD).
@@ -166,14 +166,14 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
 
     /// @notice Gets the current conversion rate using the kernel's getter (in WAD precision)
     function _getConversionRate() internal view returns (uint256) {
-        return IdenticalERC4626SharesAdminOracleQuoter_Kernel(address(KERNEL)).getStoredConversionRateWAD();
+        return Identical_ERC4626_ST_ERC4626_JT_Kernel(address(KERNEL)).getStoredConversionRateWAD();
     }
 
     /// @notice Sets the conversion rate using the kernel's setter (in WAD precision)
     /// @dev Requires ADMIN_ORACLE_QUOTER_ROLE, which is granted to ORACLE_QUOTER_ADMIN_ADDRESS
     function _setConversionRate(uint256 _newRateWAD) internal {
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        IdenticalERC4626SharesAdminOracleQuoter_Kernel(address(KERNEL)).setConversionRate(_newRateWAD);
+        Identical_ERC4626_ST_ERC4626_JT_Kernel(address(KERNEL)).setConversionRate(_newRateWAD);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

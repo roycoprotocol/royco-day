@@ -362,7 +362,6 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         stClaimable = totalNAVClaimable.mulDiv(kS_WAD, WAD, Math.Rounding.Floor);
         jtClaimable = totalNAVClaimable.mulDiv(kJ_WAD, WAD, Math.Rounding.Floor);
         // Account for the market's dust tolerance to preclude reverts due to rounding after JT withdrawal
-        // Apply both dust tolerances since JT withdrawals can include yield and IL repayments from ST in addition to its own NAV
         stClaimable = stClaimable.saturatingSub($.stNAVDustTolerance);
         jtClaimable = jtClaimable.saturatingSub($.jtNAVDustTolerance);
     }
@@ -474,8 +473,8 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             /// @dev STEP_APPLY_JT_COVERAGE_TO_ST: Apply any possible coverage to ST provided by JT's loss-absorption buffer
             NAV_UNIT coverageApplied = UnitsMathLib.min(stLoss, jtEffectiveNAV);
             if (coverageApplied != ZERO_NAV_UNITS) {
-                // If there was a net JT gain, reduce it by the amount of coverage applied and recalculate the protocol fee accrued on the true net gains
-                if (jtNetGain != ZERO_NAV_UNITS) {
+                // If there was a non-dust net JT gain, reduce it by the amount of coverage applied and recalculate the protocol fee accrued on the true net gains
+                if (jtNetGain > $.jtNAVDustTolerance) {
                     jtNetGain = jtNetGain.saturatingSub(coverageApplied);
                     jtProtocolFeeAccrued = jtNetGain.mulDiv($.jtProtocolFeeWAD, WAD, Math.Rounding.Floor);
                 }

@@ -36,6 +36,8 @@ abstract contract DeploymentConfig {
     string public constant PT_CUSD = "PT-cUSD";
     string public constant REUSD = "reUSD";
     string public constant AA_FALCONX_USDC = "AA-FalconXUSDC";
+    string public constant SMOKEHOUSE_USDC = "SmokehouseUSDC";
+    string public constant GAUNTLET_USDC_FRONTIER = "GauntletUSDCFrontier";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CHAIN-SPECIFIC CONFIG (defined once per chain)
@@ -183,9 +185,9 @@ abstract contract DeploymentConfig {
             juniorTrancheSymbol: _juniorTrancheSymbol(STCUSD),
             seniorAsset: 0x88887bE419578051FF9F4eb6C858A951921D8888,
             juniorAsset: 0x88887bE419578051FF9F4eb6C858A951921D8888,
-            stDustTolerance: 3,
-            jtDustTolerance: 3,
-            kernelType: DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel,
+            stDustTolerance: 5,
+            jtDustTolerance: 5,
+            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
             stSelfLiquidationBonusWAD: 0, // TODO
             stProtocolFeeWAD: 0.1e18,
@@ -215,9 +217,9 @@ abstract contract DeploymentConfig {
             juniorTrancheSymbol: _juniorTrancheSymbol(SNUSD),
             seniorAsset: 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313,
             juniorAsset: 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313,
-            stDustTolerance: 3,
-            jtDustTolerance: 3,
-            kernelType: DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel,
+            stDustTolerance: 5,
+            jtDustTolerance: 5,
+            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
             stSelfLiquidationBonusWAD: 0, // TODO
             stProtocolFeeWAD: 0.1e18,
@@ -247,9 +249,9 @@ abstract contract DeploymentConfig {
             juniorTrancheSymbol: _juniorTrancheSymbol(SAVUSD),
             seniorAsset: 0x06d47F3fb376649c3A9Dafe069B3D6E35572219E,
             juniorAsset: 0x06d47F3fb376649c3A9Dafe069B3D6E35572219E,
-            stDustTolerance: 3,
-            jtDustTolerance: 3,
-            kernelType: DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel,
+            stDustTolerance: 5,
+            jtDustTolerance: 5,
+            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
             stSelfLiquidationBonusWAD: 0, // TODO
             stProtocolFeeWAD: 0.1e18,
@@ -279,9 +281,9 @@ abstract contract DeploymentConfig {
             juniorTrancheSymbol: _juniorTrancheSymbol(AUTOUSD),
             seniorAsset: 0xa7569A44f348d3D70d8ad5889e50F78E33d80D35,
             juniorAsset: 0xa7569A44f348d3D70d8ad5889e50F78E33d80D35,
-            stDustTolerance: 3,
-            jtDustTolerance: 3,
-            kernelType: DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel,
+            stDustTolerance: 5,
+            jtDustTolerance: 5,
+            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
             stSelfLiquidationBonusWAD: 0, // TODO
             stProtocolFeeWAD: 0.1e18,
@@ -311,9 +313,9 @@ abstract contract DeploymentConfig {
             juniorTrancheSymbol: _juniorTrancheSymbol(MFONE),
             seniorAsset: 0x238a700eD6165261Cf8b2e544ba797BC11e466Ba,
             juniorAsset: 0x238a700eD6165261Cf8b2e544ba797BC11e466Ba,
-            stDustTolerance: 3,
-            jtDustTolerance: 3,
-            kernelType: DeployScript.KernelType.IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel,
+            stDustTolerance: 5,
+            jtDustTolerance: 5,
+            kernelType: DeployScript.KernelType.Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams({
                         trancheAssetToReferenceAssetOracle: 0x8D51DBC85cEef637c97D02bdaAbb5E274850e68C,
@@ -352,7 +354,7 @@ abstract contract DeploymentConfig {
             juniorAsset: 0x545A490f9ab534AdF409A2E682bc4098f49952e3,
             stDustTolerance: 1,
             jtDustTolerance: 1,
-            kernelType: DeployScript.KernelType.IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel,
+            kernelType: DeployScript.KernelType.Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams({
                         trancheAssetToReferenceAssetOracle: 0x6DA10958c691454BE7eb5f3e3B91b5713e542b17,
@@ -426,8 +428,8 @@ abstract contract DeploymentConfig {
             juniorTrancheSymbol: _juniorTrancheSymbol(AA_FALCONX_USDC),
             seniorAsset: 0xC26A6Fa2C37b38E549a4a1807543801Db684f99C,
             juniorAsset: 0xC26A6Fa2C37b38E549a4a1807543801Db684f99C,
-            stDustTolerance: 10 ** (18 - 6),
-            jtDustTolerance: 10 ** (18 - 6),
+            stDustTolerance: 5 * (10 ** (18 - 6)),
+            jtDustTolerance: 5 * (10 ** (18 - 6)),
             kernelType: DeployScript.KernelType.IdleCdoAA_ST_IdleCdoAA_JT,
             kernelSpecificParams: abi.encode(DeployScript.IdleCdoAASTIdleCdoAAJTKernelParams({ idleCDO: 0x433D5B175148dA32Ffe1e1A37a939E1b7e79be4d })),
             stSelfLiquidationBonusWAD: 0,
@@ -445,6 +447,72 @@ abstract contract DeploymentConfig {
                     jtYieldShareAtTargetUtilWAD: 0.225e18,
                     jtYieldShareAtFullUtilWAD: 1e18,
                     maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
+                })
+            )
+        });
+
+        _marketConfigs[SMOKEHOUSE_USDC] = MarketDeploymentConfig({
+            marketName: SMOKEHOUSE_USDC,
+            chainId: MAINNET,
+            seniorTrancheName: _seniorTrancheName(SMOKEHOUSE_USDC),
+            seniorTrancheSymbol: _seniorTrancheSymbol(SMOKEHOUSE_USDC),
+            juniorTrancheName: _juniorTrancheName(SMOKEHOUSE_USDC),
+            juniorTrancheSymbol: _juniorTrancheSymbol(SMOKEHOUSE_USDC),
+            seniorAsset: 0xBEeFFF209270748ddd194831b3fa287a5386f5bC,
+            juniorAsset: 0xBEeFFF209270748ddd194831b3fa287a5386f5bC,
+            stDustTolerance: 5 * (10 ** (18 - 6)),
+            jtDustTolerance: 5 * (10 ** (18 - 6)),
+            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
+            kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })), // 1:1 USDC to USD
+            stSelfLiquidationBonusWAD: 0, // TODO
+            stProtocolFeeWAD: 0.1e18,
+            jtProtocolFeeWAD: 0.2e18,
+            jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
+            coverageWAD: 0.075e18, // TODO
+            betaWAD: 1e18,
+            lltvWAD: 0.96e18, // TODO
+            fixedTermDurationSeconds: 7 days, // TODO
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
+            ydmSpecificParams: // TODO
+            abi.encode(
+                DeployScript.AdaptiveCurveYDM_V2_Params({
+                    jtYieldShareAtZeroUtilWAD: 0.052e18,
+                    jtYieldShareAtTargetUtilWAD: 0.052e18,
+                    jtYieldShareAtFullUtilWAD: 0.3e18,
+                    maxAdaptationSpeedWAD: uint64(25e18 / uint256(365 days))
+                })
+            )
+        });
+
+        _marketConfigs[GAUNTLET_USDC_FRONTIER] = MarketDeploymentConfig({
+            marketName: GAUNTLET_USDC_FRONTIER,
+            chainId: MAINNET,
+            seniorTrancheName: _seniorTrancheName(GAUNTLET_USDC_FRONTIER),
+            seniorTrancheSymbol: _seniorTrancheSymbol(GAUNTLET_USDC_FRONTIER),
+            juniorTrancheName: _juniorTrancheName(GAUNTLET_USDC_FRONTIER),
+            juniorTrancheSymbol: _juniorTrancheSymbol(GAUNTLET_USDC_FRONTIER),
+            seniorAsset: 0x9a1D6bd5b8642C41F25e0958129B85f8E1176F3e,
+            juniorAsset: 0x9a1D6bd5b8642C41F25e0958129B85f8E1176F3e,
+            stDustTolerance: 5 * (10 ** (18 - 6)),
+            jtDustTolerance: 5 * (10 ** (18 - 6)),
+            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
+            kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })), // 1:1 USDC to USD
+            stSelfLiquidationBonusWAD: 0, // TODO
+            stProtocolFeeWAD: 0.1e18,
+            jtProtocolFeeWAD: 0.2e18,
+            jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
+            coverageWAD: 0.075e18, // TODO
+            betaWAD: 1e18,
+            lltvWAD: 0.96e18, // TODO
+            fixedTermDurationSeconds: 7 days, // TODO
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
+            ydmSpecificParams: // TODO
+            abi.encode(
+                DeployScript.AdaptiveCurveYDM_V2_Params({
+                    jtYieldShareAtZeroUtilWAD: 0.052e18,
+                    jtYieldShareAtTargetUtilWAD: 0.052e18,
+                    jtYieldShareAtFullUtilWAD: 0.3e18,
+                    maxAdaptationSpeedWAD: uint64(25e18 / uint256(365 days))
                 })
             )
         });
