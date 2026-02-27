@@ -66,7 +66,7 @@ contract ReUSD_ST_ReUSD_JT_Kernel is RoycoKernel, IdenticalAssetsOracleQuoter {
     }
 
     /// @inheritdoc IdenticalAssetsOracleQuoter
-    function _getConversionRateFromOracleWAD() internal view override returns (uint256) {
+    function _getConversionRateFromOracleWAD() internal view override(IdenticalAssetsOracleQuoter) returns (uint256) {
         return IInsuranceCapitalLayer(INSURANCE_CAPITAL_LAYER).convertFromShares(REUSD_QUOTE_TOKEN, REUSD_AMOUNT_FOR_WAD_PRECISION_CONVERSION_RATE);
     }
 }

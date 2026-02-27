@@ -1198,28 +1198,36 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
             // ═══════════════════════════════════════════════════════════════════════════
             // STEP A: JT deposits
             // ═══════════════════════════════════════════════════════════════════════════
+            {
+                uint256 aliceBalance = IERC20(config.jtAsset).balanceOf(ALICE_ADDRESS);
+                uint256 jtAmountMax = aliceBalance < config.initialFunding / 20 ? aliceBalance : config.initialFunding / 20;
+                if (jtAmountMax < _minDepositAmount() * 10) continue; // Skip cycle if insufficient balance
 
-            uint256 jtAmount = bound(uint256(keccak256(abi.encodePacked(_amountSeed, cycle, "jt"))), _minDepositAmount() * 10, config.initialFunding / 20);
+                uint256 jtAmount = bound(uint256(keccak256(abi.encodePacked(_amountSeed, cycle, "jt"))), _minDepositAmount() * 10, jtAmountMax);
+                uint256 jtTotalSupplyBefore = JT.totalSupply();
+                NAV_UNIT jtNavBefore = JT.totalAssets().nav;
 
-            NAV_UNIT jtNavBefore = JT.totalAssets().nav;
-            uint256 jtTotalSupplyBefore = JT.totalSupply();
+                uint256 jtShares = _depositJT(ALICE_ADDRESS, jtAmount);
 
-            uint256 jtShares = _depositJT(ALICE_ADDRESS, jtAmount);
-
-            // Verify JT deposit
-            assertEq(JT.totalSupply(), jtTotalSupplyBefore + jtShares, "JT total supply should increase");
-            assertGt(JT.totalAssets().nav, jtNavBefore, "JT NAV should increase after deposit");
+                // Verify JT deposit
+                assertEq(JT.totalSupply(), jtTotalSupplyBefore + jtShares, "JT total supply should increase");
+                assertGt(JT.totalAssets().nav, jtNavBefore, "JT NAV should increase after deposit");
+            }
 
             // ═══════════════════════════════════════════════════════════════════════════
             // STEP B: ST deposits (if coverage allows)
             // ═══════════════════════════════════════════════════════════════════════════
-
-            TRANCHE_UNIT stMaxDeposit = ST.maxDeposit(BOB_ADDRESS);
-            uint256 stAmount = bound(uint256(keccak256(abi.encodePacked(_amountSeed, cycle, "st"))), _minDepositAmount(), toUint256(stMaxDeposit) / 2);
-
-            if (stAmount >= _minDepositAmount() && stAmount <= toUint256(stMaxDeposit)) {
-                uint256 stShares = _depositST(BOB_ADDRESS, stAmount);
-                assertGt(stShares, 0, "Should mint ST shares");
+            {
+                uint256 bobBalance = IERC20(config.stAsset).balanceOf(BOB_ADDRESS);
+                uint256 stMaxDepositVal = toUint256(ST.maxDeposit(BOB_ADDRESS));
+                uint256 stAmountMax = bobBalance < stMaxDepositVal / 2 ? bobBalance : stMaxDepositVal / 2;
+                if (stAmountMax >= _minDepositAmount()) {
+                    uint256 stAmount = bound(uint256(keccak256(abi.encodePacked(_amountSeed, cycle, "st"))), _minDepositAmount(), stAmountMax);
+                    if (stAmount <= bobBalance && stAmount <= stMaxDepositVal) {
+                        uint256 stShares = _depositST(BOB_ADDRESS, stAmount);
+                        assertGt(stShares, 0, "Should mint ST shares");
+                    }
+                }
             }
 
             // ═══════════════════════════════════════════════════════════════════════════

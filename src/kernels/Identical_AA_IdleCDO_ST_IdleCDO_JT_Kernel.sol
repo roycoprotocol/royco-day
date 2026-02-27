@@ -35,11 +35,11 @@ contract Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel is RoycoKernel, IdenticalAsse
         IDLE_CDO = _idleCDO;
 
         // Ensure that the AA tranche token is the same as the ST and JT assets for the IdleCDO
-        address aaTrancheToken = IIdleCDO(IDLE_CDO).AATranche();
+        address aaTrancheToken = IIdleCDO(_idleCDO).AATranche();
         require(aaTrancheToken == ST_ASSET && aaTrancheToken == JT_ASSET, AA_CDO_TRANCHE_TOKEN_MISMATCH());
 
         // Compute the virtual price multiplier for the IdleCDO's AA tranche to convert to WAD precision
-        uint256 quoteTokenDecimals = IERC20Metadata(IIdleCDO(IDLE_CDO).token()).decimals();
+        uint256 quoteTokenDecimals = IERC20Metadata(IIdleCDO(_idleCDO).token()).decimals();
         IDLE_CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION = 10 ** (WAD_DECIMALS - quoteTokenDecimals);
     }
 
@@ -55,9 +55,9 @@ contract Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel is RoycoKernel, IdenticalAsse
     }
 
     /// @inheritdoc IdenticalAssetsOracleQuoter
-    function _getConversionRateFromOracleWAD() internal view override returns (uint256) {
-        // Virtual Price returns IdleCDO.token() decimals
-        // We multiply the virtual price by the virtual price multiplier convert to WAD precision
+    function _getConversionRateFromOracleWAD() internal view override(IdenticalAssetsOracleQuoter) returns (uint256) {
+        // The virtual price is returned in the Idle CDO quote token's decimals
+        // We multiply the virtual price by the virtual price multiplier to convert it to WAD precision
         return IIdleCDO(IDLE_CDO).virtualPrice(ST_ASSET) * IDLE_CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION;
     }
 }
