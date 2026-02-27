@@ -47,10 +47,10 @@ abstract contract IdleCdoAA_TestBase is AbstractKernelTestSuite {
     function _getAATrancheToken() internal view virtual returns (address);
 
     /// @notice Returns the virtual price multiplier for WAD precision conversion
-    /// @dev Computed as 10^(WAD_DECIMALS - tokenDecimals). Override if needed.
+    /// @dev Computed as 10^(WAD_DECIMALS - quoteTokenDecimals) where quoteToken is the IdleCDO's underlying token
     function _getVirtualPriceMultiplier() internal view virtual returns (uint256) {
-        uint8 tokenDecimals = IERC20Metadata(config.stAsset).decimals();
-        return 10 ** (WAD_DECIMALS - tokenDecimals);
+        uint8 quoteTokenDecimals = IERC20Metadata(CDO.token()).decimals();
+        return 10 ** (WAD_DECIMALS - quoteTokenDecimals);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
