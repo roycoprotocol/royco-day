@@ -48,6 +48,24 @@ interface IRoycoVaultTranche is IERC20Metadata {
      */
     event ProtocolFeeSharesMinted(address indexed protocolFeeRecipient, uint256 mintedProtocolFeeShares, uint256 totalTrancheShares);
 
+    /**
+     * @notice Emitted when assets are seized from the tranche
+     * @param from The address that lost the seized assets
+     * @param to The address that received the seized assets
+     * @param value The amount of assets seized
+     */
+    event AssetsSeized(address indexed from, address indexed to, uint256 value);
+
+    /**
+     * @notice Emitted when assets are seized and redeemed from the tranche
+     * @param caller The address that initiated the seizure and redemption
+     * @param from The address that lost the seized assets
+     * @param to The address that received the redeemed assets
+     * @param claims The asset claims received by the receiver, including claims on ST assets, JT assets, and their total NAV value
+     * @param shares The number of shares redeemed
+     */
+    event AssetsSeizedAndRedeemed(address indexed caller, address indexed from, address indexed to, AssetClaims claims, uint256 shares);
+
     /// @notice Thrown when a deposit is requested with zero assets
     error MUST_DEPOSIT_NON_ZERO_ASSETS();
 
@@ -158,6 +176,23 @@ interface IRoycoVaultTranche is IERC20Metadata {
      * @return claims The asset claims transferred to the receiver, including claims on ST assets, JT assets, and their total NAV value
      */
     function redeem(uint256 _shares, address _receiver, address _owner) external returns (AssetClaims memory claims);
+
+    /**
+     * @notice Seizes assets from the tranche and transfers them to the receiver
+     * @dev Bypass the balance update hook
+     * @param _from The address that lost the seized assets
+     * @param _receiver The address that received the seized assets
+     * @param _shares The number of shares to seize
+     */
+    function seizeAssets(address _from, address _receiver, uint256 _shares) external;
+
+    /**
+     * @notice Seizes assets from the tranche and transfers them to the receiver
+     * @param _from The address that lost the seized assets
+     * @param _receiver The address that received the seized assets
+     * @param _shares The number of shares to seize
+     */
+    function seizeAndRedeemAssets(address _from, address _receiver, uint256 _shares) external returns (AssetClaims memory claims);
 
     /**
      * @notice Previews the protocol fee shares that would be minted for a given fee amount

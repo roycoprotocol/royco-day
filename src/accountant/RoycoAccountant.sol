@@ -212,6 +212,13 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                     stImpermanentLoss = stImpermanentLoss.mulDiv(stEffectiveNAV, $.lastSTEffectiveNAV, Math.Rounding.Ceil);
                     $.lastSTImpermanentLoss = stImpermanentLoss;
                 }
+                // During normal protocol operations, jtImpermanentLoss > 0 implies that the market is in a FIXED_TERM state, disallowing ST redemptions
+                // ST redemptions are only allowed in a FIXED_TERM state when it is legally required to do so (eg. Transfer Agent Obligations on RWA).
+                // In this situation, the withdrawing senior LP has realized its proportional share of covered losses, reducing JT's impermanent loss rounding in favor of senior
+                if (jtImpermanentLoss != ZERO_NAV_UNITS) {
+                    jtImpermanentLoss = jtImpermanentLoss.mulDiv(stEffectiveNAV, $.lastSTEffectiveNAV, Math.Rounding.Ceil);
+                    $.lastJTImpermanentLoss = jtImpermanentLoss;
+                }
             } else if (_op == Operation.JT_REDEEM) {
                 // JT cannot get a bonus from its own NAV
                 require(totalRedemptionNAV > ZERO_NAV_UNITS && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));

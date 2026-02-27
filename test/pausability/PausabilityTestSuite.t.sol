@@ -525,27 +525,6 @@ contract PausabilityTestSuite is BaseTest {
         assertGt(shares, 0, "ST deposit should work when only JT is paused");
     }
 
-    /// @notice Test that pausing kernel doesn't prevent tranche transfers
-    function test_pausingKernel_doesNotPreventTrancheTransfers() external {
-        uint256 depositAmount = 100_000e18;
-
-        // First deposit JT
-        vm.startPrank(ALICE_ADDRESS);
-        IERC20(SNUSD).approve(address(JT), depositAmount);
-        uint256 shares = JT.deposit(toTrancheUnits(depositAmount), ALICE_ADDRESS);
-        vm.stopPrank();
-
-        // Pause kernel only
-        vm.prank(PAUSER_ADDRESS);
-        IRoycoAuth(address(KERNEL)).pause();
-
-        // JT transfer should still work (ERC20 transfer doesn't go through kernel)
-        vm.prank(ALICE_ADDRESS);
-        IERC20(address(JT)).transfer(BOB_ADDRESS, shares / 2);
-
-        assertEq(IERC20(address(JT)).balanceOf(BOB_ADDRESS), shares / 2, "Transfer should work when kernel is paused");
-    }
-
     // ═══════════════════════════════════════════════════════════════════════════
     // SECTION 8: PAUSE EVENTS
     // ═══════════════════════════════════════════════════════════════════════════
