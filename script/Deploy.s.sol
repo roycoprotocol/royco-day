@@ -13,8 +13,8 @@ import { IYDM } from "../src/interfaces/IYDM.sol";
 import {
     DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel
 } from "../src/kernels/DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel.sol";
-import { IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel } from "../src/kernels/IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel.sol";
-import { IdenticalERC4626SharesAdminOracleQuoter_Kernel } from "../src/kernels/IdenticalERC4626SharesAdminOracleQuoter_Kernel.sol";
+import { Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel } from "../src/kernels/Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel.sol";
+import { Identical_ERC4626_ST_ERC4626_JT_Kernel } from "../src/kernels/Identical_ERC4626_ST_ERC4626_JT_Kernel.sol";
 import { IdleCdoAA_ST_IdleCdoAA_JT_Kernel } from "../src/kernels/IdleCdoAA_ST_IdleCdoAA_JT_Kernel.sol";
 import { ReUSD_ST_ReUSD_JT_Kernel } from "../src/kernels/ReUSD_ST_ReUSD_JT_Kernel.sol";
 import { IdenticalAssetsChainlinkOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
@@ -56,10 +56,10 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     /// @notice Enum for kernel types
     enum KernelType {
         ReUSD_ST_ReUSD_JT,
-        IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel,
-        IdenticalERC4626SharesAdminOracleQuoter_Kernel,
-        IdleCdoAA_ST_IdleCdoAA_JT,
-        DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel
+        DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel,
+        Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel,
+        Identical_ERC4626_ST_ERC4626_JT_Kernel,
+        IdleCdoAA_ST_IdleCdoAA_JT
     }
 
     /// @notice Enum for YDM types
@@ -76,14 +76,14 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         address insuranceCapitalLayer;
     }
 
-    /// @notice Deployment parameters for IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel
+    /// @notice Deployment parameters for Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel
     struct IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams {
         address trancheAssetToReferenceAssetOracle;
         uint48 stalenessThresholdSeconds;
         uint256 initialConversionRateWAD;
     }
 
-    /// @notice Deployment parameters for IdenticalERC4626SharesAdminOracleQuoter_Kernel
+    /// @notice Deployment parameters for Identical_ERC4626_ST_ERC4626_JT_Kernel
     struct IdenticalERC4626SharesAdminOracleQuoterKernelParams {
         uint256 initialConversionRateWAD;
     }
@@ -803,9 +803,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
 
         if (_kernelType == KernelType.ReUSD_ST_ReUSD_JT) {
             return address(_deployReUSDSTReUSDJTKernelImpl(constructionParams, _kernelSpecificParams));
-        } else if (_kernelType == KernelType.IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel) {
+        } else if (_kernelType == KernelType.Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel) {
             return address(_deployIdenticalAssetsChainlinkToAdminOracleQuoterKernelImpl(constructionParams));
-        } else if (_kernelType == KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel) {
+        } else if (_kernelType == KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel) {
             return address(_deployIdenticalERC4626SharesAdminOracleQuoterKernelImpl(constructionParams));
         } else if (_kernelType == KernelType.IdleCdoAA_ST_IdleCdoAA_JT) {
             return address(_deployIdleCdoAASTIdleCdoAAJTKernelImpl(constructionParams, _kernelSpecificParams));
@@ -843,9 +843,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
 
     function _deployIdenticalAssetsChainlinkToAdminOracleQuoterKernelImpl(IRoycoKernel.RoycoKernelConstructionParams memory _constructionParams)
         internal
-        returns (IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel)
+        returns (Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel)
     {
-        bytes memory creationCode = abi.encodePacked(type(IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel).creationCode, abi.encode(_constructionParams));
+        bytes memory creationCode = abi.encodePacked(type(Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel).creationCode, abi.encode(_constructionParams));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(KERNEL_IMPL_SALT, creationCode, false);
         if (ENABLE_LOGGING) {
@@ -855,14 +855,14 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
                 console2.log("Kernel implementation deployed at:", addr);
             }
         }
-        return IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel(addr);
+        return Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel(addr);
     }
 
     function _deployIdenticalERC4626SharesAdminOracleQuoterKernelImpl(IRoycoKernel.RoycoKernelConstructionParams memory _constructionParams)
         internal
-        returns (IdenticalERC4626SharesAdminOracleQuoter_Kernel)
+        returns (Identical_ERC4626_ST_ERC4626_JT_Kernel)
     {
-        bytes memory creationCode = abi.encodePacked(type(IdenticalERC4626SharesAdminOracleQuoter_Kernel).creationCode, abi.encode(_constructionParams));
+        bytes memory creationCode = abi.encodePacked(type(Identical_ERC4626_ST_ERC4626_JT_Kernel).creationCode, abi.encode(_constructionParams));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(KERNEL_IMPL_SALT, creationCode, false);
         if (ENABLE_LOGGING) {
@@ -873,7 +873,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             }
         }
 
-        return IdenticalERC4626SharesAdminOracleQuoter_Kernel(addr);
+        return Identical_ERC4626_ST_ERC4626_JT_Kernel(addr);
     }
 
     function _deployIdleCdoAASTIdleCdoAAJTKernelImpl(
@@ -937,11 +937,11 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
 
         if (_kernelType == KernelType.ReUSD_ST_ReUSD_JT) {
             return abi.encodeCall(ReUSD_ST_ReUSD_JT_Kernel.initialize, (kernelParams));
-        } else if (_kernelType == KernelType.IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel) {
+        } else if (_kernelType == KernelType.Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel) {
             IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams memory kernelParams2 =
                 abi.decode(_kernelSpecificParams, (IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams));
             return abi.encodeCall(
-                IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel.initialize,
+                Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel.initialize,
                 (
                     kernelParams,
                     kernelParams2.trancheAssetToReferenceAssetOracle,
@@ -949,10 +949,10 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
                     kernelParams2.initialConversionRateWAD
                 )
             );
-        } else if (_kernelType == KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel) {
+        } else if (_kernelType == KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel) {
             IdenticalERC4626SharesAdminOracleQuoterKernelParams memory kernelParams2 =
                 abi.decode(_kernelSpecificParams, (IdenticalERC4626SharesAdminOracleQuoterKernelParams));
-            return abi.encodeCall(IdenticalERC4626SharesAdminOracleQuoter_Kernel.initialize, (kernelParams, kernelParams2.initialConversionRateWAD));
+            return abi.encodeCall(Identical_ERC4626_ST_ERC4626_JT_Kernel.initialize, (kernelParams, kernelParams2.initialConversionRateWAD));
         } else if (_kernelType == KernelType.IdleCdoAA_ST_IdleCdoAA_JT) {
             return abi.encodeCall(IdleCdoAA_ST_IdleCdoAA_JT_Kernel.initialize, (kernelParams));
         } else if (_kernelType == KernelType.DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel) {

@@ -14,7 +14,7 @@ import {
 } from "../../../../src/kernels/DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel.sol";
 import { AssetClaims, MarketState } from "../../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
-import { YieldBearingERC20Chainlink_TestBase } from "../../YieldBearingERC20_ST_JT_Chainlink/base/YieldBearingERC20Chainlink_TestBase.t.sol";
+import { YieldBearingERC20Chainlink_TestBase } from "../../Identical_ERC20_ST_JT_Chainlink/base/YieldBearingERC20Chainlink_TestBase.t.sol";
 
 /// @title ACRED_ComplianceTest
 /// @notice Tests compliance functions (blacklist, seize, seizeAndRedeem) for the DSToken kernel with ACRED

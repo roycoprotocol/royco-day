@@ -79,7 +79,7 @@ contract PausabilityTestSuite is BaseTest {
             juniorAsset: SNUSD,
             stDustTolerance: 1,
             jtDustTolerance: 1,
-            kernelType: DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel,
+            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
             kernelSpecificParams: abi.encode(kernelParams),
             stSelfLiquidationBonusWAD: 0,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,

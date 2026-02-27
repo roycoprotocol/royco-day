@@ -6,12 +6,11 @@ import { RoycoKernel } from "./base/RoycoKernel.sol";
 import { IdenticalERC4626SharesAdminOracleQuoter } from "./base/quoter/IdenticalERC4626SharesAdminOracleQuoter.sol";
 
 /**
- * @title IdenticalERC4626SharesAdminOracleQuoter_Kernel
+ * @title Identical_ERC4626_ST_ERC4626_JT_Kernel
  * @author Waymont
- * @notice The senior and junior tranches transfer in the same yield bearing ERC4626 shares (sNUSD, sUSDe, etc.)
- * @notice The kernel uses an overridable oracle to convert tranche token units (ERC4626 shares) to NAV units, allowing NAVs to sync based on underlying PNL
+ * @notice The senior and junior tranches transfer in the same yield bearing ERC4626 shares (sUSDS, sUSDe, etc.)
  */
-contract IdenticalERC4626SharesAdminOracleQuoter_Kernel is RoycoKernel, IdenticalERC4626SharesAdminOracleQuoter {
+contract Identical_ERC4626_ST_ERC4626_JT_Kernel is RoycoKernel, IdenticalERC4626SharesAdminOracleQuoter {
     /// @notice Constructs the kernel state
     /// @param _params The standard construction parameters for the Royco kernel
     constructor(RoycoKernelConstructionParams memory _params) RoycoKernel(_params) { }

@@ -6,7 +6,7 @@ import { IDSToken } from "../../../../src/interfaces/external/ds-token/IDSToken.
 import {
     DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel
 } from "../../../../src/kernels/DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel.sol";
-import { YieldBearingERC20Chainlink_TestBase } from "../../YieldBearingERC20_ST_JT_Chainlink/base/YieldBearingERC20Chainlink_TestBase.t.sol";
+import { YieldBearingERC20Chainlink_TestBase } from "../../Identical_ERC20_ST_JT_Chainlink/base/YieldBearingERC20Chainlink_TestBase.t.sol";
 
 /// @title DSTokenChainlink_TestBase
 /// @notice Base test contract for DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel

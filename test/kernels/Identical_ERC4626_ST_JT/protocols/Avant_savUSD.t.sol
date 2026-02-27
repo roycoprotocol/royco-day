@@ -11,51 +11,51 @@ import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/librarie
 
 import { YieldBearingERC4626_TestBase } from "../base/YieldBearingERC4626_TestBase.t.sol";
 
-/// @title sNUSD_sNUSD_Test
-/// @notice Tests YieldBearingERC4626_ST_YieldBearingERC4626_JT_IdenticalERC4626SharesAdminOracleQuoter_Kernel with sNUSD
-/// @dev Both ST and JT use sNUSD as the tranche asset
+/// @title savUSD_savUSD_Test
+/// @notice Tests YieldBearingERC4626_ST_YieldBearingERC4626_JT_Identical_ERC4626_ST_ERC4626_JT_Kernel with sAVUSD
+/// @dev Both ST and JT use sAVUSD as the tranche asset on Avalanche mainnet
 ///
-/// sNUSD is an ERC4626 vault where:
-///   - Tranche Unit: sNUSD shares
-///   - Vault Asset: NUSD (the underlying)
+/// sAVUSD is an ERC4626 vault where:
+///   - Tranche Unit: sAVUSD shares
+///   - Vault Asset: AVUSD (the underlying)
 ///   - NAV Unit: USD
-/// The stored conversion rate is vaultAsset-to-NAV (NUSD->USD), which is ~1:1 for stablecoins.
-contract sNUSD_sNUSD_Test is YieldBearingERC4626_TestBase {
+/// The stored conversion rate is vaultAsset-to-NAV (AVUSD->USD), which is ~1:1 for stablecoins.
+contract savUSD_savUSD_Test is YieldBearingERC4626_TestBase {
     // ═══════════════════════════════════════════════════════════════════════════
-    // MAINNET ADDRESSES
+    // AVALANCHE MAINNET ADDRESSES
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice sNUSD on Ethereum mainnet
-    address internal constant SNUSD = 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313;
+    /// @notice sAVUSD on Avalanche mainnet
+    address internal constant SAVUSD = 0x06d47F3fb376649c3A9Dafe069B3D6E35572219E;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // PROTOCOL CONFIGURATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Returns the test configuration for sNUSD
+    /// @notice Returns the test configuration for sAVUSD
     function getTestConfig() public pure override returns (TestConfig memory) {
         return TestConfig({
-            forkBlock: 24_180_513,
-            forkRpcUrlEnvVar: "MAINNET_RPC_URL",
-            stAsset: SNUSD,
-            jtAsset: SNUSD,
-            initialFunding: 1_000_000_000e18 // 1B sNUSD
+            forkBlock: 76_172_623,
+            forkRpcUrlEnvVar: "AVALANCHE_RPC_URL",
+            stAsset: SAVUSD,
+            jtAsset: SAVUSD,
+            initialFunding: 1_000_000e18 // 1M sAVUSD
         });
     }
 
-    /// @notice Returns the initial NUSD->USD conversion rate (in WAD precision)
-    /// @dev For NUSD (a stablecoin), this is 1:1, so we return WAD (1e18)
+    /// @notice Returns the initial AVUSD->USD conversion rate (in WAD precision)
+    /// @dev For AVUSD (a stablecoin), this is 1:1, so we return WAD (1e18)
     function _getInitialConversionRate() internal pure override returns (uint256) {
-        return WAD; // 1:1 NUSD to USD
+        return WAD; // 1:1 AVUSD to USD
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // DEPLOYMENT (uses DeploymentConfig)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Deploys the sNUSD kernel and market using parameters from DeploymentConfig
+    /// @notice Deploys the savUSD kernel and market using parameters from DeploymentConfig
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
-        DeploymentConfig.MarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("sNUSD");
+        DeploymentConfig.MarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("savUSD");
 
         // Override initial conversion rate for testing
         marketConfig.kernelSpecificParams =
@@ -70,44 +70,44 @@ contract sNUSD_sNUSD_Test is YieldBearingERC4626_TestBase {
     // TOLERANCE OVERRIDES
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Returns max tranche unit delta for sNUSD (18 decimals)
+    /// @notice Returns max tranche unit delta for sAVUSD (18 decimals)
     function maxTrancheUnitDelta() public pure override returns (TRANCHE_UNIT) {
-        return toTrancheUnits(uint256(1e12)); // 0.000001 sNUSD tolerance
+        return toTrancheUnits(uint256(1e12)); // 0.000001 sAVUSD tolerance
     }
 
-    /// @notice Returns max NAV delta for sNUSD
+    /// @notice Returns max NAV delta for sAVUSD
     /// @dev Converts the tranche unit tolerance to NAV using the kernel's conversion
     function maxNAVDelta() public view override returns (NAV_UNIT) {
         return _toSTValue(maxTrancheUnitDelta());
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // sNUSD-SPECIFIC TESTS
+    // sAVUSD-SPECIFIC TESTS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Verifies that the sNUSD vault is correctly configured
-    function test_sNUSD_vaultConfiguration() external view {
+    /// @notice Verifies that the sAVUSD vault is correctly configured
+    function test_sAVUSD_vaultConfiguration() external view {
         // Verify decimals
-        uint8 decimals = IERC4626(SNUSD).decimals();
-        assertEq(decimals, 18, "sNUSD should have 18 decimals");
+        uint8 decimals = IERC4626(SAVUSD).decimals();
+        assertEq(decimals, 18, "sAVUSD should have 18 decimals");
 
         // Verify the vault has a valid share price
-        uint256 sharePrice = IERC4626(SNUSD).convertToAssets(1e18);
-        assertGe(sharePrice, 1e18, "sNUSD share price should be >= 1:1");
+        uint256 sharePrice = IERC4626(SAVUSD).convertToAssets(1e18);
+        assertGe(sharePrice, 1e18, "sAVUSD share price should be >= 1:1");
     }
 
     /// @notice Verifies initial conversion rate is set correctly
-    function test_sNUSD_initialConversionRate() external view {
+    function test_sAVUSD_initialConversionRate() external view {
         uint256 storedRate = _getConversionRate();
 
-        // The stored rate is the NUSD->USD rate in WAD precision
+        // The stored rate is the AVUSD->USD rate in WAD precision
         // For a stablecoin, this should be 1e18 (1:1)
         assertEq(storedRate, WAD, "Stored rate should be WAD (1:1 for stablecoin)");
     }
 
-    /// @notice Test that simulated yield works correctly for sNUSD
-    function testFuzz_sNUSD_simulatedYield_increasesNAV(uint256 _amount, uint256 _yieldBps) external {
-        _amount = bound(_amount, 1e18, 100_000e18); // 1 to 100k sNUSD
+    /// @notice Test that simulated yield works correctly for sAVUSD
+    function testFuzz_sAVUSD_simulatedYield_increasesNAV(uint256 _amount, uint256 _yieldBps) external {
+        _amount = bound(_amount, 1e18, 100_000e18); // 1 to 100k sAVUSD
         _yieldBps = bound(_yieldBps, 10, 1000); // 0.1% to 10% yield
 
         _depositJT(ALICE_ADDRESS, _amount);
@@ -115,7 +115,7 @@ contract sNUSD_sNUSD_Test is YieldBearingERC4626_TestBase {
         NAV_UNIT navBefore = JT.totalAssets().nav;
         uint256 rateBefore = _getConversionRate();
 
-        // Simulate yield by increasing the NUSD->USD rate
+        // Simulate yield by increasing the AVUSD->USD rate
         uint256 yieldWAD = _yieldBps * 1e14; // Convert bps to WAD
         simulateJTYield(yieldWAD);
 
@@ -130,8 +130,8 @@ contract sNUSD_sNUSD_Test is YieldBearingERC4626_TestBase {
         assertGt(navAfter, navBefore, "NAV should increase after yield");
     }
 
-    /// @notice Test loss simulation for sNUSD
-    function testFuzz_sNUSD_simulatedLoss_decreasesNAV(uint256 _amount, uint256 _lossBps) external {
+    /// @notice Test loss simulation for sAVUSD
+    function testFuzz_sAVUSD_simulatedLoss_decreasesNAV(uint256 _amount, uint256 _lossBps) external {
         _amount = bound(_amount, 1e18, 100_000e18);
         _lossBps = bound(_lossBps, 10, 500); // 0.1% to 5% loss
 
@@ -140,7 +140,7 @@ contract sNUSD_sNUSD_Test is YieldBearingERC4626_TestBase {
         NAV_UNIT navBefore = JT.totalAssets().nav;
         uint256 rateBefore = _getConversionRate();
 
-        // Simulate loss by decreasing the NUSD->USD rate
+        // Simulate loss by decreasing the AVUSD->USD rate
         uint256 lossWAD = _lossBps * 1e14;
         simulateJTLoss(lossWAD);
 

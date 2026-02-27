@@ -14,7 +14,7 @@ import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
-import { IdenticalERC4626SharesAdminOracleQuoter_Kernel } from "../../src/kernels/IdenticalERC4626SharesAdminOracleQuoter_Kernel.sol";
+import { Identical_ERC4626_ST_ERC4626_JT_Kernel } from "../../src/kernels/Identical_ERC4626_ST_ERC4626_JT_Kernel.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
 import { toTrancheUnits } from "../../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../../src/tranches/RoycoJuniorTranche.sol";
@@ -102,7 +102,7 @@ contract UpgradabilityTestSuite is BaseTest {
             juniorAsset: SNUSD,
             stDustTolerance: 1,
             jtDustTolerance: 1,
-            kernelType: DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel,
+            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
             kernelSpecificParams: abi.encode(kernelParams),
             stSelfLiquidationBonusWAD: 0,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
@@ -145,7 +145,7 @@ contract UpgradabilityTestSuite is BaseTest {
             seniorTranche: address(ST), stAsset: SNUSD, juniorTranche: address(JT), jtAsset: SNUSD, accountant: address(ACCOUNTANT)
         });
 
-        newKernelImpl = address(new IdenticalERC4626SharesAdminOracleQuoter_Kernel(constructionParams));
+        newKernelImpl = address(new Identical_ERC4626_ST_ERC4626_JT_Kernel(constructionParams));
         vm.label(newKernelImpl, "NewKernelImpl");
     }
 
@@ -214,7 +214,7 @@ contract UpgradabilityTestSuite is BaseTest {
         });
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        IdenticalERC4626SharesAdminOracleQuoter_Kernel(KERNEL_IMPL).initialize(params, WAD);
+        Identical_ERC4626_ST_ERC4626_JT_Kernel(KERNEL_IMPL).initialize(params, WAD);
     }
 
     /// @notice Test that new ST implementation cannot be initialized
@@ -262,7 +262,7 @@ contract UpgradabilityTestSuite is BaseTest {
         });
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        IdenticalERC4626SharesAdminOracleQuoter_Kernel(newKernelImpl).initialize(params, WAD);
+        Identical_ERC4626_ST_ERC4626_JT_Kernel(newKernelImpl).initialize(params, WAD);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
