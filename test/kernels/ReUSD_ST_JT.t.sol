@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
+import { DeploymentConfig } from "../../script/config/DeploymentConfig.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IInsuranceCapitalLayer } from "../../src/interfaces/external/reUSD/IInsuranceCapitalLayer.sol";
 import { ReUSD_ST_ReUSD_JT_Kernel } from "../../src/kernels/ReUSD_ST_ReUSD_JT_Kernel.sol";
@@ -45,18 +46,16 @@ contract reUSD_Test is AbstractKernelTestSuite {
     // PROTOCOL CONFIGURATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Returns the protocol configuration for reUSD
-    function getProtocolConfig() public pure override returns (ProtocolConfig memory) {
-        return ProtocolConfig({
-            name: "reUSD",
-            forkBlock: 24_187_000,
-            forkRpcUrlEnvVar: "MAINNET_RPC_URL",
-            stAsset: REUSD,
-            jtAsset: REUSD,
-            stDecimals: 18,
-            jtDecimals: 18,
-            initialFunding: 1_000_000e18 // 1M reUSD
-        });
+    /// @notice Returns the test configuration for reUSD
+    function getTestConfig() public pure override returns (TestConfig memory) {
+        return
+            TestConfig({
+                forkBlock: 24_187_000,
+                forkRpcUrlEnvVar: "MAINNET_RPC_URL",
+                stAsset: REUSD,
+                jtAsset: REUSD,
+                initialFunding: 1_000_000e18 // 1M reUSD
+            });
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -236,42 +235,12 @@ contract reUSD_Test is AbstractKernelTestSuite {
     // DEPLOYMENT
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Deploys the ReUSD kernel and market
+    /// @notice Deploys the ReUSD kernel and market using parameters from DeploymentConfig
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
-        DeployScript.DeploymentParams memory params = _buildReUSDDeploymentParams();
-        return DEPLOY_SCRIPT.deploy(params, DEPLOYER.privateKey);
-    }
+        DeploymentConfig.MarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("reUSD");
 
-    function _buildReUSDDeploymentParams() private view returns (DeployScript.DeploymentParams memory params) {
-        ProtocolConfig memory cfg = getProtocolConfig();
-        params.factoryAdmin = OWNER_ADDRESS;
-        params.seniorTrancheName = string(abi.encodePacked("Royco Senior ", cfg.name));
-        params.seniorTrancheSymbol = string(abi.encodePacked("RS-", cfg.name));
-        params.juniorTrancheName = string(abi.encodePacked("Royco Junior ", cfg.name));
-        params.juniorTrancheSymbol = string(abi.encodePacked("RJ-", cfg.name));
-        params.seniorAsset = cfg.stAsset;
-        params.juniorAsset = cfg.jtAsset;
-        params.stNAVDustTolerance = toNAVUnits(10 ** (18 - cfg.stDecimals));
-        params.jtNAVDustTolerance = toNAVUnits(10 ** (18 - cfg.jtDecimals));
-        params.kernelType = DeployScript.KernelType.ReUSD_ST_ReUSD_JT;
-        params.kernelSpecificParams =
-            abi.encode(DeployScript.ReUSDSTReUSDJTKernelParams({ reusd: REUSD, reusdUsdQuoteToken: USDC, insuranceCapitalLayer: ICL }));
-        params.protocolFeeRecipient = PROTOCOL_FEE_RECIPIENT_ADDRESS;
-        params.stProtocolFeeWAD = ST_PROTOCOL_FEE_WAD;
-        params.jtProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
-        params.coverageWAD = COVERAGE_WAD;
-        params.betaWAD = 1e18;
-        params.lltvWAD = LLTV;
-        params.fixedTermDurationSeconds = FIXED_TERM_DURATION_SECONDS;
-        params.ydmType = DeployScript.YDMType.AdaptiveCurve_V2;
-        params.ydmSpecificParams = abi.encode(
-            DeployScript.AdaptiveCurveYDM_V2_Params({
-                jtYieldShareAtZeroUtilWAD: 0.3e18,
-                jtYieldShareAtTargetUtilWAD: 0.3e18,
-                jtYieldShareAtFullUtilWAD: 1e18,
-                maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
-            })
-        );
-        params.roleAssignments = _generateRoleAssignments();
+        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+
+        return DEPLOY_SCRIPT.deploy(marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roleAssignments, DEPLOYER.privateKey);
     }
 }

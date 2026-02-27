@@ -385,5 +385,5 @@ interface IRoycoAccountant {
      * @notice Returns the state of the accountant
      * @return state The state of the accountant
      */
-    function getState() external view returns (RoycoAccountantState memory state);
+    function getState() external pure returns (RoycoAccountantState memory state);
 }

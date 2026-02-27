@@ -773,7 +773,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     // =============================
 
     /// @inheritdoc IRoycoKernel
-    function getState() external view override(IRoycoKernel) returns (RoycoKernelState memory $) {
+    function getState() external pure override(IRoycoKernel) returns (RoycoKernelState memory $) {
         return _getRoycoKernelStorage();
     }
 

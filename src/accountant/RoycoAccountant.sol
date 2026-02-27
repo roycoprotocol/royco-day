@@ -867,7 +867,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     // =============================
 
     /// @inheritdoc IRoycoAccountant
-    function getState() external view override(IRoycoAccountant) returns (RoycoAccountantState memory) {
+    function getState() external pure override(IRoycoAccountant) returns (RoycoAccountantState memory) {
         return _getRoycoAccountantStorage();
     }
 

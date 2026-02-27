@@ -131,7 +131,7 @@ interface IRoycoKernel {
      * @notice Retrieves the state of the Royco kernel
      * @return state The Royco kernel's state, including the protocol fee recipient and the kernel's controlled tranche and base assets
      */
-    function getState() external view returns (RoycoKernelState memory state);
+    function getState() external pure returns (RoycoKernelState memory state);
 
     /**
      * @notice Converts the specified ST assets denominated in its tranche units to the kernel's NAV units

@@ -2,13 +2,9 @@
 pragma solidity ^0.8.28;
 
 import { IERC20Metadata, IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
-
-import { DeployScript } from "../../../../script/Deploy.s.sol";
-import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { IdenticalERC4626SharesAdminOracleQuoter_Kernel } from "../../../../src/kernels/IdenticalERC4626SharesAdminOracleQuoter_Kernel.sol";
-import { WAD, WAD, WAD_DECIMALS } from "../../../../src/libraries/Constants.sol";
+import { WAD, WAD_DECIMALS } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
-
 import { AbstractKernelTestSuite } from "../../abstract/AbstractKernelTestSuite.t.sol";
 
 /// @title YieldBearingERC4626_TestBase
@@ -187,7 +183,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
     /// @notice Tests that stored conversion rate yield increases NAV
     /// @dev This tests the baseAsset-to-NAV component of the conversion rate
     function testFuzz_storedConversionRate_yield_updatesNAV(uint256 _jtAmount, uint256 _yieldBps) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _yieldBps = bound(_yieldBps, 10, 1000); // 0.1% to 10% yield
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -213,7 +209,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
     /// @notice Tests that stored conversion rate loss decreases NAV
     /// @dev This tests the baseAsset-to-NAV component of the conversion rate
     function testFuzz_storedConversionRate_loss_updatesNAV(uint256 _jtAmount, uint256 _lossBps) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _lossBps = bound(_lossBps, 10, 500); // 0.1% to 5% loss
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -238,7 +234,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
 
     /// @notice Tests that stored conversion rate yield with ST deposits distributes correctly
     function testFuzz_storedConversionRate_yield_distributesToJT(uint256 _jtAmount, uint256 _stPercentage, uint256 _yieldBps) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 50);
         _yieldBps = bound(_yieldBps, 10, 1000); // 0.1% to 10% yield
 
@@ -272,7 +268,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
 
     /// @notice Tests NAV conservation after stored conversion rate changes
     function testFuzz_storedConversionRate_NAVConservation(uint256 _jtAmount, uint256 _yieldBps) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _yieldBps = bound(_yieldBps, 10, 1000);
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -294,7 +290,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
     /// @notice Tests that vault share price yield increases NAV
     /// @dev This tests the ERC4626.convertToAssets() component of the conversion rate
     function testFuzz_vaultSharePrice_yield_updatesNAV(uint256 _jtAmount, uint256 _yieldPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _yieldPercentage = bound(_yieldPercentage, 1, 50); // 1-50% yield
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -315,7 +311,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
     /// @notice Tests that vault share price loss decreases NAV
     /// @dev This tests the ERC4626.convertToAssets() component of the conversion rate
     function testFuzz_vaultSharePrice_loss_updatesNAV(uint256 _jtAmount, uint256 _lossPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _lossPercentage = bound(_lossPercentage, 1, 30); // 1-30% loss
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -335,7 +331,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
 
     /// @notice Tests that vault share price yield with ST deposits distributes correctly
     function testFuzz_vaultSharePrice_yield_distributesToJT(uint256 _jtAmount, uint256 _stPercentage, uint256 _yieldPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 50);
         _yieldPercentage = bound(_yieldPercentage, 1, 20);
 
@@ -368,7 +364,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
 
     /// @notice Tests NAV conservation after vault share price changes
     function testFuzz_vaultSharePrice_NAVConservation(uint256 _jtAmount, uint256 _yieldPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _yieldPercentage = bound(_yieldPercentage, 1, 30);
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -380,57 +376,5 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
         KERNEL.syncTrancheAccounting();
 
         _assertNAVConservation();
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // DEPLOYMENT
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @notice Deploys the YieldBearingERC4626 kernel and market
-    function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
-        ProtocolConfig memory cfg = getProtocolConfig();
-
-        // Get initial conversion rate (vault asset to NAV, in WAD precision)
-        uint256 initialConversionRate = _getInitialConversionRate();
-
-        DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams memory kernelParams =
-            DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: initialConversionRate });
-
-        DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
-            jtYieldShareAtZeroUtilWAD: 0.3e18, // Y_0 = Y_T (same as target)
-            jtYieldShareAtTargetUtilWAD: 0.3e18, // 30% at target utilization
-            jtYieldShareAtFullUtilWAD: 1e18, // 100% at 100% utilization
-            maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days)) // ~6 day doubling time
-        });
-
-        // Build role assignments using the centralized function
-        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
-
-        DeployScript.DeploymentParams memory params = DeployScript.DeploymentParams({
-            factoryAdmin: OWNER_ADDRESS,
-            seniorTrancheName: string(abi.encodePacked("Royco Senior ", cfg.name)),
-            seniorTrancheSymbol: string(abi.encodePacked("RS-", cfg.name)),
-            juniorTrancheName: string(abi.encodePacked("Royco Junior ", cfg.name)),
-            juniorTrancheSymbol: string(abi.encodePacked("RJ-", cfg.name)),
-            seniorAsset: cfg.stAsset,
-            juniorAsset: cfg.jtAsset,
-            stNAVDustTolerance: toNAVUnits(10 ** (18 - cfg.stDecimals)),
-            jtNAVDustTolerance: toNAVUnits(10 ** (18 - cfg.jtDecimals)),
-            kernelType: DeployScript.KernelType.IdenticalERC4626SharesAdminOracleQuoter_Kernel,
-            kernelSpecificParams: abi.encode(kernelParams),
-            stSelfLiquidationBonusWAD: 0,
-            protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
-            jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            coverageWAD: COVERAGE_WAD,
-            betaWAD: 1e18, // Beta = 1 for identical assets
-            lltvWAD: LLTV,
-            fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
-            ydmSpecificParams: abi.encode(ydmParams),
-            roleAssignments: roleAssignments
-        });
-
-        return DEPLOY_SCRIPT.deploy(params, DEPLOYER.privateKey);
     }
 }

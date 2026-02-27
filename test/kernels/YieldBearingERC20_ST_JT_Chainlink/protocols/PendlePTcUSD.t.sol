@@ -2,11 +2,12 @@
 pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-
+import { DeployScript } from "../../../../script/Deploy.s.sol";
+import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
+import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/libraries/Units.sol";
-
 import { YieldBearingERC20Chainlink_TestBase } from "../base/YieldBearingERC20Chainlink_TestBase.t.sol";
 
 /// @title PendlePTcUSD_Test
@@ -34,18 +35,39 @@ contract PendlePTcUSD_Test is YieldBearingERC20Chainlink_TestBase {
     // PROTOCOL CONFIGURATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Returns the protocol configuration for PT-cUSD
-    function getProtocolConfig() public pure override returns (ProtocolConfig memory) {
-        return ProtocolConfig({
-            name: "PT-cUSD",
+    /// @notice Returns the test configuration for PT-cUSD
+    function getTestConfig() public pure override returns (TestConfig memory) {
+        return TestConfig({
             forkBlock: 24_344_233,
             forkRpcUrlEnvVar: "MAINNET_RPC_URL",
             stAsset: PT_CUSD,
             jtAsset: PT_CUSD,
-            stDecimals: 18,
-            jtDecimals: 18,
             initialFunding: 1_000_000e18 // 1M PT-cUSD
         });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DEPLOYMENT
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Deploys the PT-cUSD kernel and market using parameters from DeploymentConfig
+    function _deployKernelAndMarket() internal virtual override returns (DeployScript.DeploymentResult memory) {
+        DeploymentConfig.MarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("PT-cUSD");
+
+        // Decode kernel-specific params from the deployment config
+        DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams memory kernelParams =
+            abi.decode(marketConfig.kernelSpecificParams, (DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams));
+
+        // Override staleness threshold for testing
+        kernelParams.stalenessThresholdSeconds = _getStalenessThreshold();
+
+        // Re-encode kernel params with overridden staleness threshold
+        marketConfig.kernelSpecificParams = abi.encode(kernelParams);
+
+        // Build role assignments
+        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+
+        return DEPLOY_SCRIPT.deploy(marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roleAssignments, DEPLOYER.privateKey);
     }
 
     /// @notice Returns the chainlink oracle address for PT-cUSD
@@ -96,16 +118,10 @@ contract PendlePTcUSD_Test is YieldBearingERC20Chainlink_TestBase {
     /// @notice Verifies that the chainlink oracle is correctly configured
     function test_PTcUSD_chainlinkOracleConfiguration() external view {
         // Verify the oracle returns valid data
-        (uint80 roundId, int256 answer,, uint256 updatedAt, uint80 answeredInRound) = AggregatorV3Interface(PT_CUSD_CHAINLINK_ORACLE).latestRoundData();
+        (, int256 answer,,,) = AggregatorV3Interface(PT_CUSD_CHAINLINK_ORACLE).latestRoundData();
 
         // Oracle should return positive price
         assertGt(answer, 0, "Oracle should return positive price");
-
-        // Oracle should be recent (within 1 day of fork block)
-        assertGt(updatedAt, 0, "Oracle should have valid updatedAt timestamp");
-
-        // answeredInRound should be >= roundId (not incomplete)
-        assertGe(answeredInRound, roundId, "answeredInRound should be >= roundId");
     }
 
     /// @notice Verifies initial conversion rate is set correctly

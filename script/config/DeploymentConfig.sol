@@ -28,10 +28,14 @@ abstract contract DeploymentConfig {
     // MARKET NAMES
     // ═══════════════════════════════════════════════════════════════════════════
 
-    string internal constant STCUSD = "stcUSD";
-    string internal constant SNUSD = "sNUSD";
-    string internal constant SAVUSD = "savUSD";
-    string internal constant AUTOUSD = "autoUSD";
+    string public constant STCUSD = "stcUSD";
+    string public constant SNUSD = "sNUSD";
+    string public constant SAVUSD = "savUSD";
+    string public constant AUTOUSD = "autoUSD";
+    string public constant MFONE = "mF-ONE";
+    string public constant PT_CUSD = "PT-cUSD";
+    string public constant REUSD = "reUSD";
+    string public constant AA_FALCONX_USDC = "AA-FalconXUSDC";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CHAIN-SPECIFIC CONFIG (defined once per chain)
@@ -67,7 +71,6 @@ abstract contract DeploymentConfig {
         string juniorTrancheName;
         string juniorTrancheSymbol;
         // Assets
-        address baseAsset;
         address seniorAsset;
         address juniorAsset;
         // Dust tolerances
@@ -80,6 +83,7 @@ abstract contract DeploymentConfig {
         // Accountant
         uint64 stProtocolFeeWAD;
         uint64 jtProtocolFeeWAD;
+        uint64 jtYieldShareProtocolFeeWAD;
         uint64 coverageWAD;
         uint96 betaWAD;
         uint64 lltvWAD;
@@ -177,7 +181,6 @@ abstract contract DeploymentConfig {
             seniorTrancheSymbol: _seniorTrancheSymbol(STCUSD),
             juniorTrancheName: _juniorTrancheName(STCUSD),
             juniorTrancheSymbol: _juniorTrancheSymbol(STCUSD),
-            baseAsset: 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48,
             seniorAsset: 0x88887bE419578051FF9F4eb6C858A951921D8888,
             juniorAsset: 0x88887bE419578051FF9F4eb6C858A951921D8888,
             stDustTolerance: 3,
@@ -187,6 +190,7 @@ abstract contract DeploymentConfig {
             stSelfLiquidationBonusWAD: 0, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
+            jtYieldShareProtocolFeeWAD: 0.2e18,
             coverageWAD: 0.1e18,
             betaWAD: 1e18,
             lltvWAD: 0.91e18,
@@ -209,7 +213,6 @@ abstract contract DeploymentConfig {
             seniorTrancheSymbol: _seniorTrancheSymbol(SNUSD),
             juniorTrancheName: _juniorTrancheName(SNUSD),
             juniorTrancheSymbol: _juniorTrancheSymbol(SNUSD),
-            baseAsset: 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48,
             seniorAsset: 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313,
             juniorAsset: 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313,
             stDustTolerance: 3,
@@ -219,6 +222,7 @@ abstract contract DeploymentConfig {
             stSelfLiquidationBonusWAD: 0, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
+            jtYieldShareProtocolFeeWAD: 0.2e18,
             coverageWAD: 0.1e18,
             betaWAD: 1e18,
             lltvWAD: 0.91e18,
@@ -241,7 +245,6 @@ abstract contract DeploymentConfig {
             seniorTrancheSymbol: _seniorTrancheSymbol(SAVUSD),
             juniorTrancheName: _juniorTrancheName(SAVUSD),
             juniorTrancheSymbol: _juniorTrancheSymbol(SAVUSD),
-            baseAsset: 0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E,
             seniorAsset: 0x06d47F3fb376649c3A9Dafe069B3D6E35572219E,
             juniorAsset: 0x06d47F3fb376649c3A9Dafe069B3D6E35572219E,
             stDustTolerance: 3,
@@ -251,6 +254,7 @@ abstract contract DeploymentConfig {
             stSelfLiquidationBonusWAD: 0, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
+            jtYieldShareProtocolFeeWAD: 0.2e18,
             coverageWAD: 0.2e18,
             betaWAD: 1e18,
             lltvWAD: 0.82e18,
@@ -273,7 +277,6 @@ abstract contract DeploymentConfig {
             seniorTrancheSymbol: _seniorTrancheSymbol(AUTOUSD),
             juniorTrancheName: _juniorTrancheName(AUTOUSD),
             juniorTrancheSymbol: _juniorTrancheSymbol(AUTOUSD),
-            baseAsset: 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48,
             seniorAsset: 0xa7569A44f348d3D70d8ad5889e50F78E33d80D35,
             juniorAsset: 0xa7569A44f348d3D70d8ad5889e50F78E33d80D35,
             stDustTolerance: 3,
@@ -283,6 +286,7 @@ abstract contract DeploymentConfig {
             stSelfLiquidationBonusWAD: 0, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
+            jtYieldShareProtocolFeeWAD: 0.2e18,
             coverageWAD: 0.1e18,
             betaWAD: 1e18,
             lltvWAD: 0.92e18,
@@ -294,6 +298,153 @@ abstract contract DeploymentConfig {
                     jtYieldShareAtTargetUtilWAD: 0.05e18,
                     jtYieldShareAtFullUtilWAD: 0.4e18,
                     maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
+                })
+            )
+        });
+
+        _marketConfigs[MFONE] = MarketDeploymentConfig({
+            marketName: MFONE,
+            chainId: MAINNET,
+            seniorTrancheName: _seniorTrancheName(MFONE),
+            seniorTrancheSymbol: _seniorTrancheSymbol(MFONE),
+            juniorTrancheName: _juniorTrancheName(MFONE),
+            juniorTrancheSymbol: _juniorTrancheSymbol(MFONE),
+            seniorAsset: 0x238a700eD6165261Cf8b2e544ba797BC11e466Ba,
+            juniorAsset: 0x238a700eD6165261Cf8b2e544ba797BC11e466Ba,
+            stDustTolerance: 3,
+            jtDustTolerance: 3,
+            kernelType: DeployScript.KernelType.IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel,
+            kernelSpecificParams: abi.encode(
+                DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams({
+                        trancheAssetToReferenceAssetOracle: 0x8D51DBC85cEef637c97D02bdaAbb5E274850e68C,
+                        stalenessThresholdSeconds: 1800, // TODO
+                        initialConversionRateWAD: 1e18
+                    })
+            ),
+            stSelfLiquidationBonusWAD: 0, // TODO
+            stProtocolFeeWAD: 0.1e18,
+            jtProtocolFeeWAD: 0.2e18,
+            jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
+            coverageWAD: 0.1e18, // TODO
+            betaWAD: 1e18,
+            lltvWAD: 0.91e18, // TODO
+            fixedTermDurationSeconds: 2 days, // TODO
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
+            ydmSpecificParams: // TODO
+            abi.encode(
+                DeployScript.AdaptiveCurveYDM_V2_Params({
+                    jtYieldShareAtZeroUtilWAD: 0.05e18,
+                    jtYieldShareAtTargetUtilWAD: 0.05e18,
+                    jtYieldShareAtFullUtilWAD: 0.4e18,
+                    maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
+                })
+            )
+        });
+
+        _marketConfigs[PT_CUSD] = MarketDeploymentConfig({
+            marketName: PT_CUSD,
+            chainId: MAINNET,
+            seniorTrancheName: _seniorTrancheName(PT_CUSD),
+            seniorTrancheSymbol: _seniorTrancheSymbol(PT_CUSD),
+            juniorTrancheName: _juniorTrancheName(PT_CUSD),
+            juniorTrancheSymbol: _juniorTrancheSymbol(PT_CUSD),
+            seniorAsset: 0x545A490f9ab534AdF409A2E682bc4098f49952e3,
+            juniorAsset: 0x545A490f9ab534AdF409A2E682bc4098f49952e3,
+            stDustTolerance: 1,
+            jtDustTolerance: 1,
+            kernelType: DeployScript.KernelType.IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel,
+            kernelSpecificParams: abi.encode(
+                DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams({
+                        trancheAssetToReferenceAssetOracle: 0x6DA10958c691454BE7eb5f3e3B91b5713e542b17,
+                        stalenessThresholdSeconds: 1800,
+                        initialConversionRateWAD: 1e18
+                    })
+            ),
+            stSelfLiquidationBonusWAD: 0,
+            stProtocolFeeWAD: 0.1e18,
+            jtProtocolFeeWAD: 0.1e18,
+            jtYieldShareProtocolFeeWAD: 0.1e18,
+            coverageWAD: 0.2e18,
+            betaWAD: 1e18,
+            lltvWAD: 0.97e18,
+            fixedTermDurationSeconds: 2 weeks,
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
+            ydmSpecificParams: abi.encode(
+                DeployScript.AdaptiveCurveYDM_V2_Params({
+                    jtYieldShareAtZeroUtilWAD: 0.3e18,
+                    jtYieldShareAtTargetUtilWAD: 0.3e18,
+                    jtYieldShareAtFullUtilWAD: 1e18,
+                    maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
+                })
+            )
+        });
+
+        _marketConfigs[REUSD] = MarketDeploymentConfig({
+            marketName: REUSD,
+            chainId: MAINNET,
+            seniorTrancheName: _seniorTrancheName(REUSD),
+            seniorTrancheSymbol: _seniorTrancheSymbol(REUSD),
+            juniorTrancheName: _juniorTrancheName(REUSD),
+            juniorTrancheSymbol: _juniorTrancheSymbol(REUSD),
+            seniorAsset: 0x5086bf358635B81D8C47C66d1C8b9E567Db70c72,
+            juniorAsset: 0x5086bf358635B81D8C47C66d1C8b9E567Db70c72,
+            stDustTolerance: 1,
+            jtDustTolerance: 1,
+            kernelType: DeployScript.KernelType.ReUSD_ST_ReUSD_JT,
+            kernelSpecificParams: abi.encode(
+                DeployScript.ReUSDSTReUSDJTKernelParams({
+                    reusd: 0x5086bf358635B81D8C47C66d1C8b9E567Db70c72,
+                    reusdUsdQuoteToken: 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48,
+                    insuranceCapitalLayer: 0x4691C475bE804Fa85f91c2D6D0aDf03114de3093
+                })
+            ),
+            stSelfLiquidationBonusWAD: 0,
+            stProtocolFeeWAD: 0.1e18,
+            jtProtocolFeeWAD: 0.1e18,
+            jtYieldShareProtocolFeeWAD: 0.1e18,
+            coverageWAD: 0.2e18,
+            betaWAD: 1e18,
+            lltvWAD: 0.97e18,
+            fixedTermDurationSeconds: 2 weeks,
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
+            ydmSpecificParams: abi.encode(
+                DeployScript.AdaptiveCurveYDM_V2_Params({
+                    jtYieldShareAtZeroUtilWAD: 0.3e18,
+                    jtYieldShareAtTargetUtilWAD: 0.3e18,
+                    jtYieldShareAtFullUtilWAD: 1e18,
+                    maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
+                })
+            )
+        });
+
+        _marketConfigs[AA_FALCONX_USDC] = MarketDeploymentConfig({
+            marketName: AA_FALCONX_USDC,
+            chainId: MAINNET,
+            seniorTrancheName: _seniorTrancheName(AA_FALCONX_USDC),
+            seniorTrancheSymbol: _seniorTrancheSymbol(AA_FALCONX_USDC),
+            juniorTrancheName: _juniorTrancheName(AA_FALCONX_USDC),
+            juniorTrancheSymbol: _juniorTrancheSymbol(AA_FALCONX_USDC),
+            seniorAsset: 0xC26A6Fa2C37b38E549a4a1807543801Db684f99C,
+            juniorAsset: 0xC26A6Fa2C37b38E549a4a1807543801Db684f99C,
+            stDustTolerance: 10 ** (18 - 6),
+            jtDustTolerance: 10 ** (18 - 6),
+            kernelType: DeployScript.KernelType.IdleCdoAA_ST_IdleCdoAA_JT,
+            kernelSpecificParams: abi.encode(DeployScript.IdleCdoAASTIdleCdoAAJTKernelParams({ idleCDO: 0x433D5B175148dA32Ffe1e1A37a939E1b7e79be4d })),
+            stSelfLiquidationBonusWAD: 0,
+            stProtocolFeeWAD: 0.1e18,
+            jtProtocolFeeWAD: 0.1e18,
+            jtYieldShareProtocolFeeWAD: 0.1e18,
+            coverageWAD: 0.2e18,
+            betaWAD: 1e18,
+            lltvWAD: 0.97e18,
+            fixedTermDurationSeconds: 2 weeks,
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
+            ydmSpecificParams: abi.encode(
+                DeployScript.AdaptiveCurveYDM_V2_Params({
+                    jtYieldShareAtZeroUtilWAD: 0.225e18,
+                    jtYieldShareAtTargetUtilWAD: 0.225e18,
+                    jtYieldShareAtFullUtilWAD: 1e18,
+                    maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
                 })
             )
         });

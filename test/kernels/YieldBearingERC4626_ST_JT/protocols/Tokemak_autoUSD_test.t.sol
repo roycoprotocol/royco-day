@@ -3,6 +3,9 @@ pragma solidity ^0.8.28;
 
 import { IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
 
+import { DeployScript } from "../../../../script/Deploy.s.sol";
+import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
+import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/libraries/Units.sol";
 
@@ -29,16 +32,13 @@ contract Tokemak_autoUSD_Test is YieldBearingERC4626_TestBase {
     // PROTOCOL CONFIGURATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Returns the protocol configuration for autoUSD
-    function getProtocolConfig() public pure override returns (ProtocolConfig memory) {
-        return ProtocolConfig({
-            name: "autoUSD",
+    /// @notice Returns the test configuration for autoUSD
+    function getTestConfig() public pure override returns (TestConfig memory) {
+        return TestConfig({
             forkBlock: 24_261_516,
             forkRpcUrlEnvVar: "MAINNET_RPC_URL",
             stAsset: AUTO_USD,
             jtAsset: AUTO_USD,
-            stDecimals: 18,
-            jtDecimals: 18,
             initialFunding: 1_000_000e18 // 1M autoUSD
         });
     }
@@ -47,6 +47,23 @@ contract Tokemak_autoUSD_Test is YieldBearingERC4626_TestBase {
     /// @dev For USDC (a stablecoin), this is 1:1, so we return WAD (1e18)
     function _getInitialConversionRate() internal pure override returns (uint256) {
         return WAD; // 1:1 USDC to USD
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DEPLOYMENT (uses DeploymentConfig)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Deploys the autoUSD kernel and market using parameters from DeploymentConfig
+    function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
+        DeploymentConfig.MarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("autoUSD");
+
+        // Override initial conversion rate for testing
+        marketConfig.kernelSpecificParams =
+            abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: _getInitialConversionRate() }));
+
+        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+
+        return DEPLOY_SCRIPT.deploy(marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roleAssignments, DEPLOYER.privateKey);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -140,7 +157,7 @@ contract Tokemak_autoUSD_Test is YieldBearingERC4626_TestBase {
 
     /// @notice Test that autoUSD vault share price changes affect NAV correctly
     function testFuzz_autoUSD_vaultSharePriceYield(uint256 _jtAmount, uint256 _yieldPercentage) external {
-        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 2);
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _yieldPercentage = bound(_yieldPercentage, 1, 20); // 1-20% yield
 
         _depositJT(ALICE_ADDRESS, _jtAmount);

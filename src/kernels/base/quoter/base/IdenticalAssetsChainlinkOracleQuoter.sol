@@ -114,7 +114,7 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
     }
 
     /// @dev Returns the chainlink oracle configuration for this quoter
-    function getChainlinkOracleConfiguration() external view returns (IdenticalAssetsChainlinkOracleQuoterState memory) {
+    function getChainlinkOracleConfiguration() external pure returns (IdenticalAssetsChainlinkOracleQuoterState memory) {
         return _getIdenticalAssetsChainlinkOracleQuoterStorage();
     }
 
