@@ -107,13 +107,6 @@ contract MfOne_Test is YieldBearingERC20Chainlink_TestBase {
         // Read config from the deploy script (which inherits DeploymentConfig)
         DeploymentConfig.MarketDeploymentConfig memory mfOneConfig = DEPLOY_SCRIPT.getMarketConfig("mF-ONE");
 
-        // Store the chainlink oracle address for mocking
-        chainlinkOracle = _getChainlinkOracle();
-
-        // Mock the chainlink oracle before deployment for consistent pricing
-        (, int256 initialPrice,,,) = AggregatorV3Interface(chainlinkOracle).latestRoundData();
-        _mockChainlinkPrice(initialPrice);
-
         // Decode kernel-specific params from the deployment config
         DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams memory kernelParams =
             abi.decode(mfOneConfig.kernelSpecificParams, (DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams));

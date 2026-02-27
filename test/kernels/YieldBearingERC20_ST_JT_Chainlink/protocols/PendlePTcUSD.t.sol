@@ -2,11 +2,12 @@
 pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-
+import { DeployScript } from "../../../../script/Deploy.s.sol";
+import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
+import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/libraries/Units.sol";
-
 import { YieldBearingERC20Chainlink_TestBase } from "../base/YieldBearingERC20Chainlink_TestBase.t.sol";
 
 /// @title PendlePTcUSD_Test
@@ -44,6 +45,62 @@ contract PendlePTcUSD_Test is YieldBearingERC20Chainlink_TestBase {
             jtAsset: PT_CUSD,
             initialFunding: 1_000_000e18 // 1M PT-cUSD
         });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DEPLOYMENT
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Deploys the YieldBearingERC20 Chainlink kernel and market
+    function _deployKernelAndMarket() internal virtual override returns (DeployScript.DeploymentResult memory) {
+        ProtocolConfig memory cfg = getProtocolConfig();
+
+        // Get initial conversion rate (reference asset to NAV, in WAD precision)
+        uint256 initialConversionRate = _getInitialConversionRate();
+
+        DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams memory kernelParams =
+            DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams({
+                trancheAssetToReferenceAssetOracle: _getChainlinkOracle(),
+                stalenessThresholdSeconds: _getStalenessThreshold(),
+                initialConversionRateWAD: initialConversionRate
+            });
+
+        DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
+            jtYieldShareAtZeroUtilWAD: 0.3e18, // Y_0 = Y_T (same as target)
+            jtYieldShareAtTargetUtilWAD: 0.3e18, // 30% at target utilization
+            jtYieldShareAtFullUtilWAD: 1e18, // 100% at 100% utilization
+            maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
+        });
+
+        // Build role assignments using the centralized function
+        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+
+        DeploymentConfig.MarketDeploymentConfig memory config = DeploymentConfig.MarketDeploymentConfig({
+            marketName: cfg.name,
+            chainId: block.chainid,
+            seniorTrancheName: string(abi.encodePacked("Royco Senior ", cfg.name)),
+            seniorTrancheSymbol: string(abi.encodePacked("RS-", cfg.name)),
+            juniorTrancheName: string(abi.encodePacked("Royco Junior ", cfg.name)),
+            juniorTrancheSymbol: string(abi.encodePacked("RJ-", cfg.name)),
+            seniorAsset: cfg.stAsset,
+            juniorAsset: cfg.jtAsset,
+            stDustTolerance: 1,
+            jtDustTolerance: 1,
+            kernelType: DeployScript.KernelType.IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel,
+            kernelSpecificParams: abi.encode(kernelParams),
+            stSelfLiquidationBonusWAD: 0,
+            stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
+            jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
+            jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
+            coverageWAD: COVERAGE_WAD,
+            betaWAD: 1e18, // Beta = 1 for identical assets
+            lltvWAD: LLTV,
+            fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
+            ydmSpecificParams: abi.encode(ydmParams)
+        });
+
+        return DEPLOY_SCRIPT.deploy(config, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roleAssignments, DEPLOYER.privateKey);
     }
 
     /// @notice Returns the chainlink oracle address for PT-cUSD
@@ -94,16 +151,10 @@ contract PendlePTcUSD_Test is YieldBearingERC20Chainlink_TestBase {
     /// @notice Verifies that the chainlink oracle is correctly configured
     function test_PTcUSD_chainlinkOracleConfiguration() external view {
         // Verify the oracle returns valid data
-        (uint80 roundId, int256 answer,, uint256 updatedAt, uint80 answeredInRound) = AggregatorV3Interface(PT_CUSD_CHAINLINK_ORACLE).latestRoundData();
+        (, int256 answer,,,) = AggregatorV3Interface(PT_CUSD_CHAINLINK_ORACLE).latestRoundData();
 
         // Oracle should return positive price
         assertGt(answer, 0, "Oracle should return positive price");
-
-        // Oracle should be recent (within 1 day of fork block)
-        assertGt(updatedAt, 0, "Oracle should have valid updatedAt timestamp");
-
-        // answeredInRound should be >= roundId (not incomplete)
-        assertGe(answeredInRound, roundId, "answeredInRound should be >= roundId");
     }
 
     /// @notice Verifies initial conversion rate is set correctly

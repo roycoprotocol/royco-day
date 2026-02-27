@@ -6,6 +6,7 @@ import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel } from "../../../../src/kernels/IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel.sol";
+import { IdenticalAssetsChainlinkToAdminOracleQuoter } from "../../../../src/kernels/base/quoter/IdenticalAssetsChainlinkToAdminOracleQuoter.sol";
 import { IdenticalAssetsChainlinkOracleQuoter } from "../../../../src/kernels/base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
@@ -27,9 +28,6 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
     /// @notice Tracks the mocked chainlink price
     /// @dev When non-zero, this value is used to mock latestRoundData() calls
     int256 internal mockedChainlinkPrice;
-
-    /// @notice The chainlink oracle address (set by concrete implementations)
-    address internal chainlinkOracle;
 
     /// @notice The staleness threshold for the chainlink oracle
     uint48 internal constant DEFAULT_STALENESS_THRESHOLD = 1 days;
@@ -152,7 +150,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
             return mockedChainlinkPrice;
         }
         // Get the actual price from the oracle
-        (, int256 answer,,,) = AggregatorV3Interface(chainlinkOracle).latestRoundData();
+        (, int256 answer,,,) = AggregatorV3Interface(_getChainlinkOracle()).latestRoundData();
         return answer;
     }
 
@@ -164,7 +162,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
         // Mock latestRoundData() to return the new price with valid round data
         // Returns: (roundId, answer, startedAt, updatedAt, answeredInRound)
         vm.mockCall(
-            chainlinkOracle,
+            _getChainlinkOracle(),
             abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
             abi.encode(
                 uint80(1), // roundId
@@ -388,7 +386,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
         // Mock a stale price (updatedAt is old)
         vm.warp(vm.getBlockTimestamp() + _getStalenessThreshold() + 1);
         vm.mockCall(
-            chainlinkOracle,
+            _getChainlinkOracle(),
             abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
             abi.encode(
                 uint80(1), // roundId
@@ -411,7 +409,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
 
         // Mock a zero price
         vm.mockCall(
-            chainlinkOracle,
+            _getChainlinkOracle(),
             abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
             abi.encode(
                 uint80(1), // roundId
@@ -433,7 +431,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
 
         // Mock a negative price
         vm.mockCall(
-            chainlinkOracle,
+            _getChainlinkOracle(),
             abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
             abi.encode(
                 uint80(1), // roundId
@@ -455,7 +453,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
 
         // Mock an incomplete round (answeredInRound < roundId)
         vm.mockCall(
-            chainlinkOracle,
+            _getChainlinkOracle(),
             abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
             abi.encode(
                 uint80(10), // roundId
@@ -476,7 +474,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
         vm.clearMockedCalls();
 
         vm.mockCall(
-            chainlinkOracle,
+            _getChainlinkOracle(),
             abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
             abi.encode(
                 uint80(10), // roundId
@@ -490,71 +488,6 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
         // Should not revert
         uint256 rate = IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
         assertGt(rate, 0, "Conversion rate should be positive");
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // DEPLOYMENT
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @notice Deploys the YieldBearingERC20 Chainlink kernel and market
-    function _deployKernelAndMarket() internal virtual override returns (DeployScript.DeploymentResult memory) {
-        ProtocolConfig memory cfg = getProtocolConfig();
-
-        // Store the chainlink oracle address for mocking
-        chainlinkOracle = _getChainlinkOracle();
-
-        // IMPORTANT: Mock the chainlink oracle before deployment to ensure consistent pricing
-        // The Pendle TWAP oracle can return slightly different values between calls,
-        // which causes issues with maxRedeem calculations due to rounding
-        (, int256 initialPrice,,,) = AggregatorV3Interface(chainlinkOracle).latestRoundData();
-        _mockChainlinkPrice(initialPrice);
-
-        // Get initial conversion rate (reference asset to NAV, in WAD precision)
-        uint256 initialConversionRate = _getInitialConversionRate();
-
-        DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams memory kernelParams =
-            DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams({
-                trancheAssetToReferenceAssetOracle: chainlinkOracle,
-                stalenessThresholdSeconds: _getStalenessThreshold(),
-                initialConversionRateWAD: initialConversionRate
-            });
-
-        DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
-            jtYieldShareAtZeroUtilWAD: 0.3e18, // Y_0 = Y_T (same as target)
-            jtYieldShareAtTargetUtilWAD: 0.3e18, // 30% at target utilization
-            jtYieldShareAtFullUtilWAD: 1e18, // 100% at 100% utilization
-            maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
-        });
-
-        // Build role assignments using the centralized function
-        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
-
-        DeploymentConfig.MarketDeploymentConfig memory config = DeploymentConfig.MarketDeploymentConfig({
-            marketName: cfg.name,
-            chainId: block.chainid,
-            seniorTrancheName: string(abi.encodePacked("Royco Senior ", cfg.name)),
-            seniorTrancheSymbol: string(abi.encodePacked("RS-", cfg.name)),
-            juniorTrancheName: string(abi.encodePacked("Royco Junior ", cfg.name)),
-            juniorTrancheSymbol: string(abi.encodePacked("RJ-", cfg.name)),
-            seniorAsset: cfg.stAsset,
-            juniorAsset: cfg.jtAsset,
-            stDustTolerance: 1,
-            jtDustTolerance: 1,
-            kernelType: DeployScript.KernelType.IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel,
-            kernelSpecificParams: abi.encode(kernelParams),
-            stSelfLiquidationBonusWAD: 0,
-            stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
-            jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            coverageWAD: COVERAGE_WAD,
-            betaWAD: 1e18, // Beta = 1 for identical assets
-            lltvWAD: LLTV,
-            fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
-            ydmSpecificParams: abi.encode(ydmParams)
-        });
-
-        return DEPLOY_SCRIPT.deploy(config, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roleAssignments, DEPLOYER.privateKey);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
