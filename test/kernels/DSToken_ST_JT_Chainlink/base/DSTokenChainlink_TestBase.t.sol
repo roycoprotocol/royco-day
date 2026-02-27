@@ -73,7 +73,7 @@ abstract contract DSTokenChainlink_TestBase is YieldBearingERC20Chainlink_TestBa
 
         vm.prank(BOB_ADDRESS);
         vm.expectRevert(
-            abi.encodeWithSelector(Identical_DSToken_ST_DSToken_JT_Kernel.ACCOUNT_NOT_WHITELISTED_ON_DS_COMPLIANCE_SERVICE.selector, nonWhitelisted)
+            abi.encodeWithSelector(Identical_DSToken_ST_DSToken_JT_Kernel.ACCOUNT_NOT_WHITELISTED_ON_SECURITY_COMPLIANCE_SERVICE.selector, nonWhitelisted)
         );
         ST.transfer(nonWhitelisted, stShares);
     }
@@ -88,7 +88,7 @@ abstract contract DSTokenChainlink_TestBase is YieldBearingERC20Chainlink_TestBa
 
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert(
-            abi.encodeWithSelector(Identical_DSToken_ST_DSToken_JT_Kernel.ACCOUNT_NOT_WHITELISTED_ON_DS_COMPLIANCE_SERVICE.selector, nonWhitelisted)
+            abi.encodeWithSelector(Identical_DSToken_ST_DSToken_JT_Kernel.ACCOUNT_NOT_WHITELISTED_ON_SECURITY_COMPLIANCE_SERVICE.selector, nonWhitelisted)
         );
         JT.transfer(nonWhitelisted, jtShares);
     }
@@ -103,7 +103,9 @@ abstract contract DSTokenChainlink_TestBase is YieldBearingERC20Chainlink_TestBa
         _mockNotWhitelisted(BOB_ADDRESS);
 
         vm.prank(BOB_ADDRESS);
-        vm.expectRevert(abi.encodeWithSelector(Identical_DSToken_ST_DSToken_JT_Kernel.ACCOUNT_NOT_WHITELISTED_ON_DS_COMPLIANCE_SERVICE.selector, BOB_ADDRESS));
+        vm.expectRevert(
+            abi.encodeWithSelector(Identical_DSToken_ST_DSToken_JT_Kernel.ACCOUNT_NOT_WHITELISTED_ON_SECURITY_COMPLIANCE_SERVICE.selector, BOB_ADDRESS)
+        );
         ST.transfer(ALICE_ADDRESS, stShares);
     }
 
@@ -116,7 +118,9 @@ abstract contract DSTokenChainlink_TestBase is YieldBearingERC20Chainlink_TestBa
         _mockNotWhitelisted(ALICE_ADDRESS);
 
         vm.prank(ALICE_ADDRESS);
-        vm.expectRevert(abi.encodeWithSelector(Identical_DSToken_ST_DSToken_JT_Kernel.ACCOUNT_NOT_WHITELISTED_ON_DS_COMPLIANCE_SERVICE.selector, ALICE_ADDRESS));
+        vm.expectRevert(
+            abi.encodeWithSelector(Identical_DSToken_ST_DSToken_JT_Kernel.ACCOUNT_NOT_WHITELISTED_ON_SECURITY_COMPLIANCE_SERVICE.selector, ALICE_ADDRESS)
+        );
         JT.transfer(BOB_ADDRESS, jtShares);
     }
 
