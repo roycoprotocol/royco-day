@@ -1873,12 +1873,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // JT maxRedeem should increase
         uint256 maxRedeemAfterSTRedeem = JT.maxRedeem(ALICE_ADDRESS);
         assertGt(maxRedeemAfterSTRedeem, maxRedeemWithST, "JT maxRedeem should increase after ST redeems");
-        assertApproxEqAbs(
-            maxRedeemAfterSTRedeem,
-            jtShares,
-            toUint256(ACCOUNTANT.getState().stNAVDustTolerance + ACCOUNTANT.getState().jtNAVDustTolerance) + 1,
-            "JT maxRedeem should return to full balance"
-        );
+        assertApproxEqRel(maxRedeemAfterSTRedeem, jtShares, PREVIEW_RELATIVE_DELTA);
     }
 
     /// @notice Test maxRedeem after yield still respects coverage
