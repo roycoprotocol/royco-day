@@ -122,16 +122,12 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
         deployed = CREATE3.predictDeterministicAddress(_salt);
     }
 
-    /// @notice Returns the junior tranche for a given senior tranche
-    /// @param _seniorTranche The senior tranche address
-    /// @return juniorTranche The junior tranche address
+    /// @inheritdoc IRoycoFactory
     function seniorTrancheToJuniorTranche(address _seniorTranche) external view override(IRoycoFactory) returns (address juniorTranche) {
         return _getRoycoFactoryState().seniorTrancheToJuniorTranche[_seniorTranche];
     }
 
-    /// @notice Returns the senior tranche for a given junior tranche
-    /// @param _juniorTranche The junior tranche address
-    /// @return seniorTranche The senior tranche address
+    /// @inheritdoc IRoycoFactory
     function juniorTrancheToSeniorTranche(address _juniorTranche) external view override(IRoycoFactory) returns (address seniorTranche) {
         return _getRoycoFactoryState().juniorTrancheToSeniorTranche[_juniorTranche];
     }

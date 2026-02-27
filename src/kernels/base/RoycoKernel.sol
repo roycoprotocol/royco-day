@@ -337,9 +337,8 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         // If ST IL exists, ST deposits are disabled to preclude existing ST's from getting diluted and realizing losses
         require(state.stImpermanentLoss == ZERO_NAV_UNITS, ST_DEPOSIT_DISABLED_IN_LOSS());
 
-        // The tranche vault has already transferred the assets to the kernel, so simply credit those assets to the senior tranche
-        RoycoKernelState storage $ = _getRoycoKernelStorage();
-        $.stOwnedYieldBearingAssets = $.stOwnedYieldBearingAssets + _assets;
+        // Process the deposit for the senior tranche
+        _stDepositAssets(_assets);
 
         // Execute a post-deposit sync on accounting and enforce the market's coverage requirement
         NAV_UNIT stPostDepositNAV = (_postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT)).stEffectiveNAV;
@@ -414,9 +413,8 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         // Ensure that the market is in a state where JT deposits are enabled: PERPETUAL
         require(state.marketState == MarketState.PERPETUAL, JT_DEPOSIT_DISABLED_IN_FIXED_TERM_STATE());
 
-        // The tranche vault has already transferred the assets to the kernel, so simply credit those assets to the junior tranche
-        RoycoKernelState storage $ = _getRoycoKernelStorage();
-        $.jtOwnedYieldBearingAssets = $.jtOwnedYieldBearingAssets + _assets;
+        // Process the deposit for the junior tranche
+        _jtDepositAssets(_assets);
 
         // Execute a post-deposit sync on accounting
         NAV_UNIT jtPostDepositNAV = (_postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, ZERO_NAV_UNITS)).jtEffectiveNAV;
@@ -660,6 +658,28 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     function _getJuniorTrancheRawNAV() internal view virtual returns (NAV_UNIT jtRawNAV) {
         // Get the yield bearing assets owned by JT and convert them to NAV units via the configured quoter
         return jtConvertTrancheUnitsToNAVUnits(_getRoycoKernelStorage().jtOwnedYieldBearingAssets);
+    }
+
+    /**
+     * @notice Process a deposit of senior tranche assets
+     * @dev The ST vault has already transferred the assets to the kernel
+     * @param _stAssets The senior tranche assets deposited by the ST LP
+     */
+    function _stDepositAssets(TRANCHE_UNIT _stAssets) internal virtual {
+        // Credit the deposited assets to the senior tranche
+        RoycoKernelState storage $ = _getRoycoKernelStorage();
+        $.stOwnedYieldBearingAssets = $.stOwnedYieldBearingAssets + _stAssets;
+    }
+
+    /**
+     * @notice Process a deposit of junior tranche assets
+     * @dev The JT vault has already transferred the assets to the kernel
+     * @param _jtAssets The senior tranche assets deposited by the ST LP
+     */
+    function _jtDepositAssets(TRANCHE_UNIT _jtAssets) internal virtual {
+        // Credit the deposited assets to the junior tranche
+        RoycoKernelState storage $ = _getRoycoKernelStorage();
+        $.jtOwnedYieldBearingAssets = $.jtOwnedYieldBearingAssets + _jtAssets;
     }
 
     /**
