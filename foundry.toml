@@ -15,6 +15,11 @@ fs_permissions = [{ access = "read", path = "./out" }]
 solc_version = "0.8.33"
 ignored_warnings_from = ["test/*", "lib/*"]
 
+[profile.development]
+optimizer = true
+optimizer_runs = 1
+via_ir = true
+
 [profile.default.optimizer_details]
 constantOptimizer = true
 yul = true

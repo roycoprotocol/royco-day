@@ -10,6 +10,9 @@ import { IRoycoFactory } from "../src/interfaces/IRoycoFactory.sol";
 import { IRoycoKernel } from "../src/interfaces/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../src/interfaces/IYDM.sol";
+import {
+    DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel
+} from "../src/kernels/DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel.sol";
 import { IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel } from "../src/kernels/IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel.sol";
 import { IdenticalERC4626SharesAdminOracleQuoter_Kernel } from "../src/kernels/IdenticalERC4626SharesAdminOracleQuoter_Kernel.sol";
 import { IdleCdoAA_ST_IdleCdoAA_JT_Kernel } from "../src/kernels/IdleCdoAA_ST_IdleCdoAA_JT_Kernel.sol";
@@ -55,7 +58,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         ReUSD_ST_ReUSD_JT,
         IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel,
         IdenticalERC4626SharesAdminOracleQuoter_Kernel,
-        IdleCdoAA_ST_IdleCdoAA_JT
+        IdleCdoAA_ST_IdleCdoAA_JT,
+        DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel
     }
 
     /// @notice Enum for YDM types
@@ -785,6 +789,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             return address(_deployIdenticalERC4626SharesAdminOracleQuoterKernelImpl(constructionParams));
         } else if (_kernelType == KernelType.IdleCdoAA_ST_IdleCdoAA_JT) {
             return address(_deployIdleCdoAASTIdleCdoAAJTKernelImpl(constructionParams, _kernelSpecificParams));
+        } else if (_kernelType == KernelType.DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel) {
+            return address(_deployDSTokenSTDSTokenJTIdenticalAssetsChainlinkToAdminOracleQuoterKernelImpl(constructionParams));
         } else {
             revert UnsupportedKernelType(_kernelType);
         }
@@ -872,6 +878,27 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         return IdleCdoAA_ST_IdleCdoAA_JT_Kernel(addr);
     }
 
+    function _deployDSTokenSTDSTokenJTIdenticalAssetsChainlinkToAdminOracleQuoterKernelImpl(
+        IRoycoKernel.RoycoKernelConstructionParams memory _constructionParams
+    )
+        internal
+        returns (DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel)
+    {
+        bytes memory creationCode = abi.encodePacked(
+            type(DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel).creationCode, abi.encode(_constructionParams)
+        );
+
+        (address addr, bool alreadyDeployed) = deployWithSanityChecks(KERNEL_IMPL_SALT, creationCode, false);
+        if (ENABLE_LOGGING) {
+            if (alreadyDeployed) {
+                console2.log("Kernel implementation already deployed at:", addr);
+            } else {
+                console2.log("Kernel implementation deployed at:", addr);
+            }
+        }
+        return DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel(addr);
+    }
+
     function _buildKernelInitializationData(
         KernelType _kernelType,
         bytes memory _kernelSpecificParams,
@@ -908,6 +935,18 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             return abi.encodeCall(IdenticalERC4626SharesAdminOracleQuoter_Kernel.initialize, (kernelParams, kernelParams2.initialConversionRateWAD));
         } else if (_kernelType == KernelType.IdleCdoAA_ST_IdleCdoAA_JT) {
             return abi.encodeCall(IdleCdoAA_ST_IdleCdoAA_JT_Kernel.initialize, (kernelParams));
+        } else if (_kernelType == KernelType.DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel) {
+            IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams memory kernelParams2 =
+                abi.decode(_kernelSpecificParams, (IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams));
+            return abi.encodeCall(
+                DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel.initialize,
+                (
+                    kernelParams,
+                    kernelParams2.trancheAssetToReferenceAssetOracle,
+                    kernelParams2.stalenessThresholdSeconds,
+                    kernelParams2.initialConversionRateWAD
+                )
+            );
         } else {
             revert UnsupportedKernelType(_kernelType);
         }
