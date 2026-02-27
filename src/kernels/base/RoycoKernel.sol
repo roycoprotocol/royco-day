@@ -544,12 +544,14 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         require(!isDepositorBlacklisted(_from), DEPOSITOR_BLACKLISTED(_from));
         require(!isDepositorBlacklisted(_to), DEPOSITOR_BLACKLISTED(_to));
 
-        // Ensure that the "_to" address is whitelisted on the tranche
+        // If transferring shares, ensure that the "_to" address is whitelisted on the tranche
         // It is assumed that the "_from" address is already whitelisted on the tranche
-        address authority = authority();
-        // Check if the to address can call the deposit function on the tranche
-        (bool canDeposit,) = IAccessManager(authority).canCall(_to, msg.sender, IRoycoVaultTranche.deposit.selector);
-        require(_to != authority && canDeposit, TO_ADDRESS_NOT_WHITELISTED(_to));
+        if (_to != address(0)) {
+            address authority = authority();
+            // Check if the to address can call the deposit function on the tranche
+            (bool canDeposit,) = IAccessManager(authority).canCall(_to, msg.sender, IRoycoVaultTranche.deposit.selector);
+            require(_to != authority && canDeposit, TO_ADDRESS_NOT_WHITELISTED(_to));
+        }
 
         // Call the kernel specific pre-balance update hook
         _preTrancheBalanceUpdate(_from, _to, _value, msg.sender);
