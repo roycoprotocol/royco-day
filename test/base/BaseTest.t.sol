@@ -498,7 +498,8 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
                 lpRoleAdminAddress: LP_ROLE_ADMIN_ADDRESS,
                 guardianAddress: ROLE_GUARDIAN_ADDRESS,
                 deployerAddress: DEPLOYER_ADDRESS,
-                deployerAdminAddress: DEPLOYER_ADMIN_ADDRESS
+                deployerAdminAddress: DEPLOYER_ADMIN_ADDRESS,
+                protocolFeeRecipientAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS
             })
         );
     }

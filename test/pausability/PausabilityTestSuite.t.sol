@@ -475,9 +475,9 @@ contract PausabilityTestSuite is BaseTest {
 
         // Transfer should work
         vm.prank(ALICE_ADDRESS);
-        IERC20(address(JT)).transfer(BOB_ADDRESS, shares / 2);
+        IERC20(address(JT)).transfer(JT_BOB_ADDRESS, shares / 2);
 
-        assertEq(IERC20(address(JT)).balanceOf(BOB_ADDRESS), shares / 2, "BOB should have received shares");
+        assertEq(IERC20(address(JT)).balanceOf(JT_BOB_ADDRESS), shares / 2, "JT_BOB should have received shares");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

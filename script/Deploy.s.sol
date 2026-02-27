@@ -137,6 +137,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         address guardianAddress;
         address deployerAddress;
         address deployerAdminAddress;
+        address protocolFeeRecipientAddress;
     }
 
     function run() external virtual {
@@ -173,7 +174,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
                 lpRoleAdminAddress: chainConfig.lpRoleAdminAddress,
                 guardianAddress: chainConfig.guardianAddress,
                 deployerAddress: chainConfig.deployerAddress,
-                deployerAdminAddress: chainConfig.deployerAdminAddress
+                deployerAdminAddress: chainConfig.deployerAdminAddress,
+                protocolFeeRecipientAddress: chainConfig.protocolFeeRecipient
             })
         );
 
@@ -480,15 +482,20 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             executionDelay: lpRoleAdminConfig.executionDelay
         });
 
-        // ST_LP_ROLE with address(0) assignee - role admin will be set but no direct assignment
-        // LP roles are granted separately per-provider
+        // Grant the protocol fee recipient the ST_LP_ROLE
         roleAssignments[8] = IRoycoFactory.RoleAssignmentConfiguration({
-            role: ST_LP_ROLE, roleAdminRole: stLpRoleConfig.adminRole, assignee: address(0), executionDelay: stLpRoleConfig.executionDelay
+            role: ST_LP_ROLE,
+            roleAdminRole: stLpRoleConfig.adminRole,
+            assignee: _addresses.protocolFeeRecipientAddress,
+            executionDelay: stLpRoleConfig.executionDelay
         });
 
-        // JT_LP_ROLE with address(0) assignee - role admin will be set but no direct assignment
+        // Grant the protocol fee recipient the JT_LP_ROLE
         roleAssignments[9] = IRoycoFactory.RoleAssignmentConfiguration({
-            role: JT_LP_ROLE, roleAdminRole: jtLpRoleConfig.adminRole, assignee: address(0), executionDelay: jtLpRoleConfig.executionDelay
+            role: JT_LP_ROLE,
+            roleAdminRole: jtLpRoleConfig.adminRole,
+            assignee: _addresses.protocolFeeRecipientAddress,
+            executionDelay: jtLpRoleConfig.executionDelay
         });
 
         roleAssignments[10] = IRoycoFactory.RoleAssignmentConfiguration({
