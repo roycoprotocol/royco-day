@@ -36,6 +36,7 @@ abstract contract DeploymentConfig {
     string public constant PT_CUSD = "PT-cUSD";
     string public constant REUSD = "reUSD";
     string public constant AA_FALCONX_USDC = "AA-FalconXUSDC";
+    string public constant ACRED = "ACRED";
     string public constant SMOKEHOUSE_USDC = "SmokehouseUSDC";
     string public constant GAUNTLET_USDC_FRONTIER = "GauntletUSDCFrontier";
 
@@ -57,6 +58,7 @@ abstract contract DeploymentConfig {
         address guardianAddress;
         address deployerAddress;
         address deployerAdminAddress;
+        address transferAgentAddress;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -135,7 +137,8 @@ abstract contract DeploymentConfig {
                 lpRoleAdminAddress: EXECUTOR_MULTISIG,
                 guardianAddress: EXECUTOR_MULTISIG,
                 deployerAddress: DEPLOYER,
-                deployerAdminAddress: EXECUTOR_MULTISIG
+                deployerAdminAddress: EXECUTOR_MULTISIG,
+                transferAgentAddress: ROOT_MULTISIG_ETHEREUM
             });
         } else {
             return ChainConfig({
@@ -151,7 +154,8 @@ abstract contract DeploymentConfig {
                 lpRoleAdminAddress: EXECUTOR_MULTISIG,
                 guardianAddress: EXECUTOR_MULTISIG,
                 deployerAddress: DEPLOYER,
-                deployerAdminAddress: EXECUTOR_MULTISIG
+                deployerAdminAddress: EXECUTOR_MULTISIG,
+                transferAgentAddress: ROOT_MULTISIG_NON_ETHEREUM
             });
         }
     }
@@ -313,15 +317,15 @@ abstract contract DeploymentConfig {
             juniorTrancheSymbol: _juniorTrancheSymbol(MFONE),
             seniorAsset: 0x238a700eD6165261Cf8b2e544ba797BC11e466Ba,
             juniorAsset: 0x238a700eD6165261Cf8b2e544ba797BC11e466Ba,
-            stDustTolerance: 5,
-            jtDustTolerance: 5,
+            stDustTolerance: 5 * 10 ** 10, // The chainlink oracle has 8 decimals of precision
+            jtDustTolerance: 5 * 10 ** 10, // The chainlink oracle has 8 decimals of precision
             kernelType: DeployScript.KernelType.Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams({
-                        trancheAssetToReferenceAssetOracle: 0x8D51DBC85cEef637c97D02bdaAbb5E274850e68C,
-                        stalenessThresholdSeconds: 1800, // TODO
-                        initialConversionRateWAD: 1e18
-                    })
+                    trancheAssetToReferenceAssetOracle: 0x8D51DBC85cEef637c97D02bdaAbb5E274850e68C,
+                    stalenessThresholdSeconds: 1800, // TODO
+                    initialConversionRateWAD: 1e18
+                })
             ),
             stSelfLiquidationBonusWAD: 0, // TODO
             stProtocolFeeWAD: 0.1e18,
@@ -418,7 +422,6 @@ abstract contract DeploymentConfig {
                 })
             )
         });
-
         _marketConfigs[AA_FALCONX_USDC] = MarketDeploymentConfig({
             marketName: AA_FALCONX_USDC,
             chainId: MAINNET,
@@ -513,6 +516,45 @@ abstract contract DeploymentConfig {
                     jtYieldShareAtTargetUtilWAD: 0.052e18,
                     jtYieldShareAtFullUtilWAD: 0.3e18,
                     maxAdaptationSpeedWAD: uint64(25e18 / uint256(365 days))
+                })
+            )
+        });
+
+        _marketConfigs[ACRED] = MarketDeploymentConfig({
+            marketName: ACRED,
+            chainId: MAINNET,
+            seniorTrancheName: _seniorTrancheName(ACRED),
+            seniorTrancheSymbol: _seniorTrancheSymbol(ACRED),
+            juniorTrancheName: _juniorTrancheName(ACRED),
+            juniorTrancheSymbol: _juniorTrancheSymbol(ACRED),
+            seniorAsset: 0x17418038ecF73BA4026c4f428547BF099706F27B,
+            juniorAsset: 0x17418038ecF73BA4026c4f428547BF099706F27B,
+            stDustTolerance: 5 * 10 ** 10, // The chainlink oracle has 8 decimals of precision
+            jtDustTolerance: 5 * 10 ** 10, // The chainlink oracle has 8 decimals of precision
+            kernelType: DeployScript.KernelType.DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel,
+            kernelSpecificParams: abi.encode(
+                DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams({
+                    trancheAssetToReferenceAssetOracle: 0xD6BcbbC87bFb6c8964dDc73DC3EaE6d08865d51C,
+                    stalenessThresholdSeconds: 1800, // TODO
+                    initialConversionRateWAD: 1e18
+                })
+            ),
+            stSelfLiquidationBonusWAD: 0, // TODO
+            stProtocolFeeWAD: 0.1e18,
+            jtProtocolFeeWAD: 0.2e18,
+            jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
+            coverageWAD: 0.1e18, // TODO
+            betaWAD: 1e18,
+            lltvWAD: 0.91e18, // TODO
+            fixedTermDurationSeconds: 2 days, // TODO
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
+            ydmSpecificParams: // TODO
+            abi.encode(
+                DeployScript.AdaptiveCurveYDM_V2_Params({
+                    jtYieldShareAtZeroUtilWAD: 0.05e18,
+                    jtYieldShareAtTargetUtilWAD: 0.05e18,
+                    jtYieldShareAtFullUtilWAD: 0.4e18,
+                    maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
                 })
             )
         });

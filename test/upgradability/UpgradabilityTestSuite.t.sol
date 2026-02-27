@@ -70,13 +70,13 @@ contract UpgradabilityTestSuite is BaseTest {
         _deployNewImplementations();
     }
 
-    function _forkConfiguration() internal override returns (uint256 forkBlock, string memory forkRpcUrl) {
+    function _forkConfiguration() internal view override returns (uint256 forkBlock, string memory forkRpcUrl) {
         forkBlock = FORK_BLOCK;
         forkRpcUrl = vm.envString("MAINNET_RPC_URL");
     }
 
     function _deployMarket() internal returns (DeployScript.DeploymentResult memory) {
-        bytes32 marketId = keccak256(abi.encodePacked("UpgradabilityTest", vm.getBlockTimestamp()));
+        bytes32 _marketId = keccak256(abi.encodePacked("UpgradabilityTest", vm.getBlockTimestamp()));
 
         DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams memory kernelParams =
             DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: WAD });

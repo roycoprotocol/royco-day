@@ -58,49 +58,131 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         __RoycoBase_init(_params.initialAuthority);
     }
 
+    /// =============================
+    /// Tranche Deposit and Redeem Functions
+    /// =============================
+
     /// @inheritdoc IRoycoVaultTranche
-    function totalAssets() external view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
-        (, claims,) = IRoycoKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
+    function deposit(TRANCHE_UNIT _assets, address _receiver) public virtual override whenNotPaused restricted returns (uint256 shares) {
+        require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
+        require(_assets != toTrancheUnits(0), MUST_DEPOSIT_NON_ZERO_ASSETS());
+
+        // Transfer the assets to the kernel
+        IERC20(ASSET).safeTransferFrom(msg.sender, KERNEL, toUint256(_assets));
+
+        // Deposit the assets into the underlying investment opportunity and get the fraction of total assets allocated
+        (NAV_UNIT valueAllocated, NAV_UNIT effectiveNAVToMintAt) =
+            (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoKernel(KERNEL).stDeposit(_assets) : IRoycoKernel(KERNEL).jtDeposit(_assets));
+
+        // effectiveNAVToMint at can be zero initially when the tranche is deployed
+        require(valueAllocated != ZERO_NAV_UNITS, INVALID_VALUE_ALLOCATED());
+
+        // valueAllocated represents the value of the assets deposited in the asset that the tranche's NAV is denominated in
+        // shares are minted to the user at the effective NAV of the tranche
+        // effectiveNAVToMintAt is the effective NAV of the tranche before the deposit is made, ie. the NAV at which the shares will be minted
+        shares = _convertToShares(valueAllocated, totalSupply(), effectiveNAVToMintAt, Math.Rounding.Floor);
+
+        // Mint the shares to the receiver
+        _mint(_receiver, shares);
+
+        emit Deposit(msg.sender, _receiver, _assets, shares);
     }
 
     /// @inheritdoc IRoycoVaultTranche
-    function getRawNAV() external view virtual override(IRoycoVaultTranche) returns (NAV_UNIT nav) {
-        (SyncedAccountingState memory state,,) = IRoycoKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
-        nav = TRANCHE_TYPE() == TrancheType.SENIOR ? state.stRawNAV : state.jtRawNAV;
+    function redeem(uint256 _shares, address _receiver, address _owner) public virtual override whenNotPaused restricted returns (AssetClaims memory claims) {
+        require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
+        require(_shares != 0, MUST_REQUEST_NON_ZERO_SHARES());
+
+        // Spend allowance if msg.sender is not the owner
+        if (msg.sender != _owner) {
+            _spendAllowance(_owner, msg.sender, _shares);
+        }
+
+        // Process the withdrawal from the underlying investment opportunity
+        // It is expected that the kernel transfers the assets directly to the receiver
+        claims =
+        (TRANCHE_TYPE() == TrancheType.SENIOR
+                ? IRoycoKernel(KERNEL).stRedeem(_shares, _receiver, false)
+                : IRoycoKernel(KERNEL).jtRedeem(_shares, _receiver, false));
+
+        // Burn shares after kernel processes redemption (kernel depends on pre-burn total supply)
+        _burn(_owner, _shares);
+
+        emit Redeem(msg.sender, _receiver, claims, _shares);
     }
 
     /// @inheritdoc IRoycoVaultTranche
-    function maxDeposit(address _receiver) external view virtual override(IRoycoVaultTranche) returns (TRANCHE_UNIT assets) {
-        assets = (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoKernel(KERNEL).stMaxDeposit(_receiver) : IRoycoKernel(KERNEL).jtMaxDeposit(_receiver));
+    function mintProtocolFeeShares(
+        NAV_UNIT _protocolFeeNAV,
+        NAV_UNIT _totalTrancheNAV,
+        address _protocolFeeRecipient
+    )
+        external
+        virtual
+        override(IRoycoVaultTranche)
+        returns (uint256 protocolFeeSharesMinted, uint256 totalTrancheShares)
+    {
+        // Only the kernel can mint protocol fee shares based on sync
+        require(msg.sender == KERNEL, ONLY_KERNEL());
+
+        // Mint any protocol fee shares accrued to the specified recipient
+        (protocolFeeSharesMinted, totalTrancheShares) = previewMintProtocolFeeShares(_protocolFeeNAV, _totalTrancheNAV);
+        if (protocolFeeSharesMinted != 0) _mint(_protocolFeeRecipient, protocolFeeSharesMinted);
+
+        emit ProtocolFeeSharesMinted(_protocolFeeRecipient, protocolFeeSharesMinted, totalTrancheShares);
+    }
+
+    // =============================
+    // Tranche Compliance Functions
+    // =============================
+
+    /// @inheritdoc IRoycoVaultTranche
+    function seizeAssets(address _from, address _receiver, uint256 _shares) external virtual override(IRoycoVaultTranche) restricted {
+        // Ensure that the from and to addresses are not null
+        require(_from != address(0), NULL_ADDRESS());
+        require(_receiver != address(0), NULL_ADDRESS());
+        require(_shares != 0, MUST_REQUEST_NON_ZERO_SHARES());
+
+        // Transfer the shares to the receiver
+        // Bypass the balance update hook
+        super._update(_from, _receiver, _shares);
+
+        emit AssetsSeized(_from, _receiver, _shares);
     }
 
     /// @inheritdoc IRoycoVaultTranche
-    function maxRedeem(address _owner) public view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
-        //  We query the kernel for (a) N_s and N_j - the notional claim of the tranche on the ST and JT assets respectively in NAV units, and
-        //                          (b) L_s and L_j - the amount that can be withdrawn from the senior and junior tranches globally in NAV units, respectively
-        //  When shares are redeemed, assets from the senior and junior tranches are withdrawn proportionally to the notional claims of the tranche on the respective assets.
-        //  But, the global max withdrawable assets for each tranche are also considered. These are inclusive of any coverage requirements, as well as liquidity constraints.
-        //  If T respresents the total shares in the tranche, s the total shares owned by the owner, then the maximum amount of shares that can be redeemed s' is subject to:
-        //      (a) s' * N_s / T  <= min(s * N_s / T, L_s) => s' <= min(s, T * L_s / N_s)
-        //      (b) s' * N_j / T  <= min(s * N_j / T, L_j) => s' <= min(s, T * L_j / N_j)
-        //  Therefore, the maximum amount of shares that can be redeemed is:
-        //      s' = min(s, T * L_s / N_s, T * L_j / N_j)
-        uint256 sharesOwned = balanceOf(_owner);
-        // Get the notional claims and the max withdrawable assets for the tranche
-        (NAV_UNIT claimOnStNAV, NAV_UNIT claimOnJtNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalSharesAfterMintingFees) =
-            (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoKernel(KERNEL).stMaxWithdrawable(_owner) : IRoycoKernel(KERNEL).jtMaxWithdrawable(_owner));
+    function seizeAndRedeemAssets(
+        address _from,
+        address _receiver,
+        uint256 _shares
+    )
+        external
+        virtual
+        override(IRoycoVaultTranche)
+        restricted
+        returns (AssetClaims memory claims)
+    {
+        require(_from != address(0), NULL_ADDRESS());
+        require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
+        require(_shares != 0, MUST_REQUEST_NON_ZERO_SHARES());
 
-        // We do not allow redemptions if the tranche has no claims on the assets
-        if (claimOnStNAV + claimOnJtNAV == ZERO_NAV_UNITS) return 0;
+        // Process the withdrawal from the underlying investment opportunity
+        // It is expected that the kernel transfers the assets directly to the receiver
+        claims =
+        (TRANCHE_TYPE() == TrancheType.SENIOR
+                ? IRoycoKernel(KERNEL).stRedeem(_shares, _receiver, true)
+                : IRoycoKernel(KERNEL).jtRedeem(_shares, _receiver, true));
 
-        // Calculate the maximum amount of shares that can be redeemed based on the senior and junior constraints
-        // If the notional claim of the tranche on the ST or JT assets is zero, ignore the constraints since the tranche has no claims on the assets
-        uint256 sharesWithdrawableBasedOnSeniorConstraints =
-            claimOnStNAV == ZERO_NAV_UNITS ? sharesOwned : totalSharesAfterMintingFees.mulDiv(stMaxWithdrawableNAV, claimOnStNAV, Math.Rounding.Floor);
-        uint256 sharesWithdrawableBasedOnJuniorConstraints =
-            claimOnJtNAV == ZERO_NAV_UNITS ? sharesOwned : totalSharesAfterMintingFees.mulDiv(jtMaxWithdrawableNAV, claimOnJtNAV, Math.Rounding.Floor);
-        shares = Math.min(sharesOwned, Math.min(sharesWithdrawableBasedOnSeniorConstraints, sharesWithdrawableBasedOnJuniorConstraints));
+        // Burn shares after kernel processes redemption
+        // Bypass the balance update hook
+        super._update(_from, address(0), _shares);
+
+        emit AssetsSeizedAndRedeemed(msg.sender, _from, _receiver, claims, _shares);
     }
+
+    /// =============================
+    /// Tranche Preview and Conversion Functions
+    /// =============================
 
     /// @inheritdoc IRoycoVaultTranche
     function previewDeposit(TRANCHE_UNIT _assets) external view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
@@ -143,56 +225,6 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     }
 
     /// @inheritdoc IRoycoVaultTranche
-    function deposit(TRANCHE_UNIT _assets, address _receiver) public virtual override whenNotPaused restricted returns (uint256 shares) {
-        require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
-        require(_assets != toTrancheUnits(0), MUST_DEPOSIT_NON_ZERO_ASSETS());
-
-        // Transfer the assets to the kernel
-        IERC20(ASSET).safeTransferFrom(msg.sender, KERNEL, toUint256(_assets));
-
-        // Deposit the assets into the underlying investment opportunity and get the fraction of total assets allocated
-        (NAV_UNIT valueAllocated, NAV_UNIT effectiveNAVToMintAt) = (TRANCHE_TYPE() == TrancheType.SENIOR
-                ? IRoycoKernel(KERNEL).stDeposit(_assets, msg.sender, _receiver)
-                : IRoycoKernel(KERNEL).jtDeposit(_assets, msg.sender, _receiver));
-
-        // effectiveNAVToMint at can be zero initially when the tranche is deployed
-        require(valueAllocated != ZERO_NAV_UNITS, INVALID_VALUE_ALLOCATED());
-
-        // valueAllocated represents the value of the assets deposited in the asset that the tranche's NAV is denominated in
-        // shares are minted to the user at the effective NAV of the tranche
-        // effectiveNAVToMintAt is the effective NAV of the tranche before the deposit is made, ie. the NAV at which the shares will be minted
-        shares = _convertToShares(valueAllocated, totalSupply(), effectiveNAVToMintAt, Math.Rounding.Floor);
-
-        // Mint the shares to the receiver
-        _mint(_receiver, shares);
-
-        emit Deposit(msg.sender, _receiver, _assets, shares);
-    }
-
-    /// @inheritdoc IRoycoVaultTranche
-    function redeem(uint256 _shares, address _receiver, address _owner) public virtual override whenNotPaused restricted returns (AssetClaims memory claims) {
-        require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
-        require(_shares != 0, MUST_REQUEST_NON_ZERO_SHARES());
-
-        // Spend allowance if msg.sender is not the owner
-        if (msg.sender != _owner) {
-            _spendAllowance(_owner, msg.sender, _shares);
-        }
-
-        // Process the withdrawal from the underlying investment opportunity
-        // It is expected that the kernel transfers the assets directly to the receiver
-        claims =
-        (TRANCHE_TYPE() == TrancheType.SENIOR
-                ? IRoycoKernel(KERNEL).stRedeem(_shares, msg.sender, _owner, _receiver)
-                : IRoycoKernel(KERNEL).jtRedeem(_shares, msg.sender, _owner, _receiver));
-
-        // Burn shares after kernel processes redemption (kernel depends on pre-burn total supply)
-        _burn(_owner, _shares);
-
-        emit Redeem(msg.sender, _receiver, claims, _shares);
-    }
-
-    /// @inheritdoc IRoycoVaultTranche
     function previewMintProtocolFeeShares(
         NAV_UNIT _protocolFeeNAV,
         NAV_UNIT _totalTrancheNAV
@@ -213,25 +245,56 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         totalTrancheShares = _withVirtualShares(totalShares + protocolFeeSharesMinted);
     }
 
+    /// =============================
+    /// Tranche Max Deposit and Redeem Functions
+    /// =============================
+
     /// @inheritdoc IRoycoVaultTranche
-    function mintProtocolFeeShares(
-        NAV_UNIT _protocolFeeNAV,
-        NAV_UNIT _totalTrancheNAV,
-        address _protocolFeeRecipient
-    )
-        external
-        virtual
-        override(IRoycoVaultTranche)
-        returns (uint256 protocolFeeSharesMinted, uint256 totalTrancheShares)
-    {
-        // Only the kernel can mint protocol fee shares based on sync
-        require(msg.sender == KERNEL, ONLY_KERNEL());
+    function maxDeposit(address _receiver) external view virtual override(IRoycoVaultTranche) returns (TRANCHE_UNIT assets) {
+        assets = (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoKernel(KERNEL).stMaxDeposit(_receiver) : IRoycoKernel(KERNEL).jtMaxDeposit(_receiver));
+    }
 
-        // Mint any protocol fee shares accrued to the specified recipient
-        (protocolFeeSharesMinted, totalTrancheShares) = previewMintProtocolFeeShares(_protocolFeeNAV, _totalTrancheNAV);
-        if (protocolFeeSharesMinted != 0) _mint(_protocolFeeRecipient, protocolFeeSharesMinted);
+    /// @inheritdoc IRoycoVaultTranche
+    function maxRedeem(address _owner) public view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
+        //  We query the kernel for (a) N_s and N_j - the notional claim of the tranche on the ST and JT assets respectively in NAV units, and
+        //                          (b) L_s and L_j - the amount that can be withdrawn from the senior and junior tranches globally in NAV units, respectively
+        //  When shares are redeemed, assets from the senior and junior tranches are withdrawn proportionally to the notional claims of the tranche on the respective assets.
+        //  But, the global max withdrawable assets for each tranche are also considered. These are inclusive of any coverage requirements, as well as liquidity constraints.
+        //  If T respresents the total shares in the tranche, s the total shares owned by the owner, then the maximum amount of shares that can be redeemed s' is subject to:
+        //      (a) s' * N_s / T  <= min(s * N_s / T, L_s) => s' <= min(s, T * L_s / N_s)
+        //      (b) s' * N_j / T  <= min(s * N_j / T, L_j) => s' <= min(s, T * L_j / N_j)
+        //  Therefore, the maximum amount of shares that can be redeemed is:
+        //      s' = min(s, T * L_s / N_s, T * L_j / N_j)
+        uint256 sharesOwned = balanceOf(_owner);
+        // Get the notional claims and the max withdrawable assets for the tranche
+        (NAV_UNIT claimOnStNAV, NAV_UNIT claimOnJtNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalSharesAfterMintingFees) =
+            (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoKernel(KERNEL).stMaxWithdrawable(_owner) : IRoycoKernel(KERNEL).jtMaxWithdrawable(_owner));
 
-        emit ProtocolFeeSharesMinted(_protocolFeeRecipient, protocolFeeSharesMinted, totalTrancheShares);
+        // We do not allow redemptions if the tranche has no claims on the assets
+        if (claimOnStNAV + claimOnJtNAV == ZERO_NAV_UNITS) return 0;
+
+        // Calculate the maximum amount of shares that can be redeemed based on the senior and junior constraints
+        // If the notional claim of the tranche on the ST or JT assets is zero, ignore the constraints since the tranche has no claims on the assets
+        uint256 sharesWithdrawableBasedOnSeniorConstraints =
+            claimOnStNAV == ZERO_NAV_UNITS ? sharesOwned : totalSharesAfterMintingFees.mulDiv(stMaxWithdrawableNAV, claimOnStNAV, Math.Rounding.Floor);
+        uint256 sharesWithdrawableBasedOnJuniorConstraints =
+            claimOnJtNAV == ZERO_NAV_UNITS ? sharesOwned : totalSharesAfterMintingFees.mulDiv(jtMaxWithdrawableNAV, claimOnJtNAV, Math.Rounding.Floor);
+        shares = Math.min(sharesOwned, Math.min(sharesWithdrawableBasedOnSeniorConstraints, sharesWithdrawableBasedOnJuniorConstraints));
+    }
+
+    /// =============================
+    /// General Tranche View Functions
+    /// =============================
+
+    /// @inheritdoc IRoycoVaultTranche
+    function totalAssets() external view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
+        (, claims,) = IRoycoKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
+    }
+
+    /// @inheritdoc IRoycoVaultTranche
+    function getRawNAV() external view virtual override(IRoycoVaultTranche) returns (NAV_UNIT nav) {
+        (SyncedAccountingState memory state,,) = IRoycoKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
+        nav = TRANCHE_TYPE() == TrancheType.SENIOR ? state.stRawNAV : state.jtRawNAV;
     }
 
     /// @inheritdoc IERC20Metadata
@@ -245,6 +308,13 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     function asset() external view virtual override(IRoycoVaultTranche) returns (address) {
         return ASSET;
     }
+
+    /// @dev Returns the type of the tranche (Senior or Junior)
+    function TRANCHE_TYPE() public pure virtual returns (TrancheType);
+
+    // =============================
+    // Internal Utility Functions
+    // =============================
 
     /**
      * @notice Returns the total tranche assets and shares after previewing a NAV synchronization in the kernel
@@ -285,9 +355,10 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @inheritdoc ERC20PausableUpgradeable
     function _update(address _from, address _to, uint256 _value) internal override(ERC20PausableUpgradeable, ERC20Upgradeable) whenNotPaused {
+        // Call the kernel pre-balance update hook to assert that the balance update is valid
+        IRoycoKernel(KERNEL).preTrancheBalanceUpdateHook(_from, _to, _value);
+
+        // Call the parent contract update function to update the balance
         super._update(_from, _to, _value);
     }
-
-    /// @dev Returns the type of the tranche (Senior or Junior)
-    function TRANCHE_TYPE() public pure virtual returns (TrancheType);
 }

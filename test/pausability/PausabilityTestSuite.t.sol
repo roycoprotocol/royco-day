@@ -5,14 +5,12 @@ import { PausableUpgradeable } from "../../lib/openzeppelin-contracts-upgradeabl
 import { IAccessManaged } from "../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { Pausable } from "../../lib/openzeppelin-contracts/contracts/utils/Pausable.sol";
-
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { DeploymentConfig } from "../../script/config/DeploymentConfig.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
 import { toTrancheUnits } from "../../src/libraries/Units.sol";
-
 import { BaseTest } from "../base/BaseTest.t.sol";
 
 /// @title PausabilityTestSuite
@@ -49,13 +47,13 @@ contract PausabilityTestSuite is BaseTest {
         _fundProviders();
     }
 
-    function _forkConfiguration() internal override returns (uint256 forkBlock, string memory forkRpcUrl) {
+    function _forkConfiguration() internal view override returns (uint256 forkBlock, string memory forkRpcUrl) {
         forkBlock = FORK_BLOCK;
         forkRpcUrl = vm.envString("MAINNET_RPC_URL");
     }
 
     function _deployMarket() internal returns (DeployScript.DeploymentResult memory) {
-        bytes32 marketId = keccak256(abi.encodePacked("PausabilityTest", vm.getBlockTimestamp()));
+        bytes32 _marketId = keccak256(abi.encodePacked("PausabilityTest", vm.getBlockTimestamp()));
 
         DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams memory kernelParams =
             DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: WAD });
@@ -475,9 +473,9 @@ contract PausabilityTestSuite is BaseTest {
 
         // Transfer should work
         vm.prank(ALICE_ADDRESS);
-        IERC20(address(JT)).transfer(BOB_ADDRESS, shares / 2);
+        IERC20(address(JT)).transfer(JT_BOB_ADDRESS, shares / 2);
 
-        assertEq(IERC20(address(JT)).balanceOf(BOB_ADDRESS), shares / 2, "BOB should have received shares");
+        assertEq(IERC20(address(JT)).balanceOf(JT_BOB_ADDRESS), shares / 2, "JT_BOB should have received shares");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -523,27 +521,6 @@ contract PausabilityTestSuite is BaseTest {
         vm.stopPrank();
 
         assertGt(shares, 0, "ST deposit should work when only JT is paused");
-    }
-
-    /// @notice Test that pausing kernel doesn't prevent tranche transfers
-    function test_pausingKernel_doesNotPreventTrancheTransfers() external {
-        uint256 depositAmount = 100_000e18;
-
-        // First deposit JT
-        vm.startPrank(ALICE_ADDRESS);
-        IERC20(SNUSD).approve(address(JT), depositAmount);
-        uint256 shares = JT.deposit(toTrancheUnits(depositAmount), ALICE_ADDRESS);
-        vm.stopPrank();
-
-        // Pause kernel only
-        vm.prank(PAUSER_ADDRESS);
-        IRoycoAuth(address(KERNEL)).pause();
-
-        // JT transfer should still work (ERC20 transfer doesn't go through kernel)
-        vm.prank(ALICE_ADDRESS);
-        IERC20(address(JT)).transfer(BOB_ADDRESS, shares / 2);
-
-        assertEq(IERC20(address(JT)).balanceOf(BOB_ADDRESS), shares / 2, "Transfer should work when kernel is paused");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

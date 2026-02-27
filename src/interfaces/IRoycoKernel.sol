@@ -45,8 +45,21 @@ interface IRoycoKernel {
      * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when LLTV has been breached, scaled to WAD precision
      * @custom:field stOwnedYieldBearingAssets - The yield bearing assets held by the ST, in ST's asset units
      * @custom:field jtOwnedYieldBearingAssets - The yield bearing assets held by the JT, in JT's asset units
+     * @custom:field isBlacklisted - A mapping of depositors to a boolean indicating if their assets are frozen
      */
     struct RoycoKernelState {
+        address protocolFeeRecipient;
+        uint64 stSelfLiquidationBonusWAD;
+        TRANCHE_UNIT stOwnedYieldBearingAssets;
+        TRANCHE_UNIT jtOwnedYieldBearingAssets;
+        bool isBlacklistEnabled;
+        mapping(address depositor => bool isBlacklisted) isBlacklisted;
+    }
+
+    /**
+     * @notice Viewable state for the Royco Kernel
+     */
+    struct RoycoKernelStateView {
         address protocolFeeRecipient;
         uint64 stSelfLiquidationBonusWAD;
         TRANCHE_UNIT stOwnedYieldBearingAssets;
@@ -65,6 +78,24 @@ interface IRoycoKernel {
      */
     event SeniorTrancheSelfLiquidationBonusUpdated(uint64 stSelfLiquidationBonusWAD);
 
+    /**
+     * @notice Emitted when an asset is frozen for a depositor
+     * @param depositor The address of the depositor
+     */
+    event DepositorBlacklisted(address indexed depositor);
+
+    /**
+     * @notice Emitted when an asset is unfrozen for a depositor
+     * @param depositor The address of the depositor
+     */
+    event DepositorUnblacklisted(address indexed depositor);
+
+    /**
+     * @notice Emitted when the blacklist status is updated
+     * @param isBlacklistEnabled The new blacklist enabled state
+     */
+    event BlacklistStatusUpdated(bool isBlacklistEnabled);
+
     /// @notice Thrown when the tranche and the kernel's corresponding tranche assets don't match
     error TRANCHE_AND_KERNEL_ASSETS_MISMATCH();
 
@@ -82,6 +113,30 @@ interface IRoycoKernel {
 
     /// @notice Thrown when a JT LP is attempting to deposit in a fixed term market state
     error JT_DEPOSIT_DISABLED_IN_FIXED_TERM_STATE();
+
+    /// @notice Thrown when the caller of a permissioned function isn't the market's senior or junior tranche
+    error ONLY_TRANCHE();
+
+    /// @notice Thrown when the specified depositor is the null address
+    error NULL_DEPOSITOR();
+
+    /// @notice Thrown when the specified depositor is already blacklisted
+    error DEPOSITOR_ALREADY_BLACKLISTED(address depositor);
+
+    /// @notice Thrown when the specified depositor is not blacklisted
+    error DEPOSITOR_NOT_BLACKLISTED(address depositor);
+
+    /// @notice Thrown when the specified depositor is blacklisted
+    error DEPOSITOR_BLACKLISTED(address depositor);
+
+    /// @notice Thrown when the blacklist status is already set
+    error BLACKLIST_STATUS_ALREADY_SET(bool isBlacklistEnabled);
+
+    /// @notice Thrown when the to address is not whitelisted on the tranche
+    error TO_ADDRESS_NOT_WHITELISTED(address to);
+
+    /// @notice Thrown when the array of depositors is empty
+    error EMPTY_ARRAY();
 
     /**
      * @notice Retrieves the senior tranche address
@@ -128,10 +183,35 @@ interface IRoycoKernel {
     function setSeniorTrancheSelfLiquidationBonus(uint64 _stSelfLiquidationBonusWAD) external;
 
     /**
+     * @notice Blacklists the assets of the specified addresses
+     * @param _depositors The addresses of the depositors to blacklist
+     */
+    function blacklistDepositor(address[] calldata _depositors) external;
+
+    /**
+     * @notice Unblacklists the assets of the specified addresses
+     * @param _depositors The addresses of the depositors to unblacklist
+     */
+    function unblacklistDepositor(address[] calldata _depositors) external;
+
+    /**
+     * @notice Checks if the asset of the specified address is blacklisted
+     * @param _depositor The address of the depositor to check
+     * @return isBlacklisted Whether the asset is blacklisted
+     */
+    function isDepositorBlacklisted(address _depositor) external view returns (bool);
+
+    /**
+     * @notice Sets the blacklist enabled state
+     * @param _isBlacklistEnabled The new blacklist enabled state
+     */
+    function setBlacklistEnabled(bool _isBlacklistEnabled) external;
+
+    /**
      * @notice Retrieves the state of the Royco kernel
      * @return state The Royco kernel's state, including the protocol fee recipient and the kernel's controlled tranche and base assets
      */
-    function getState() external pure returns (RoycoKernelState memory state);
+    function getState() external view returns (RoycoKernelStateView memory state);
 
     /**
      * @notice Converts the specified ST assets denominated in its tranche units to the kernel's NAV units
@@ -231,23 +311,20 @@ interface IRoycoKernel {
      * @notice Processes the deposit of a specified amount of assets into the senior tranche
      * @dev Assumes that the funds are transferred to the kernel before the deposit call is made
      * @param _assets The amount of assets to deposit, denominated in the senior tranche's tranche units
-     * @param _caller The address that is depositing the assets
-     * @param _receiver The address that is receiving the shares
      * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
      * @return navToMintSharesAt The NAV at which the shares will be minted, exclusive of valueAllocated
      */
-    function stDeposit(TRANCHE_UNIT _assets, address _caller, address _receiver) external returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt);
+    function stDeposit(TRANCHE_UNIT _assets) external returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt);
 
     /**
      * @notice Processes the redemption of a specified number of shares from the senior tranche
      * @dev The function is expected to transfer the senior and junior assets directly to the receiver, based on the redemption claims
      * @param _shares The number of shares to redeem
-     * @param _caller The address that initiated the redemption
-     * @param _owner The owner of the shares being redeemed
      * @param _receiver The address that is receiving the assets
+     * @param _bypassRedemptionRestrictions Whether to bypass the redemption restrictions (eg. for Transfer Agent Obligations on RWA)
      * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
      */
-    function stRedeem(uint256 _shares, address _caller, address _owner, address _receiver) external returns (AssetClaims memory userAssetClaims);
+    function stRedeem(uint256 _shares, address _receiver, bool _bypassRedemptionRestrictions) external returns (AssetClaims memory userAssetClaims);
 
     /**
      * @notice Returns the maximum amount of assets that can be deposited into the junior tranche
@@ -299,21 +376,28 @@ interface IRoycoKernel {
      * @notice Processes the deposit of a specified amount of assets into the junior tranche
      * @dev Assumes that the funds are transferred to the kernel before the deposit call is made
      * @param _assets The amount of assets to deposit, denominated in the junior tranche's tranche units
-     * @param _caller The address that is depositing the assets
-     * @param _receiver The address that is receiving the shares
      * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
      * @return navToMintSharesAt The NAV at which the shares will be minted, exclusive of valueAllocated
      */
-    function jtDeposit(TRANCHE_UNIT _assets, address _caller, address _receiver) external returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt);
+    function jtDeposit(TRANCHE_UNIT _assets) external returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt);
 
     /**
      * @notice Processes the redemption of a specified number of shares from the junior tranche
      * @dev The function is expected to transfer the senior and junior assets directly to the receiver, based on the redemption claims
      * @param _shares The number of shares to redeem
-     * @param _caller The address that initiated the redemption
-     * @param _owner The owner of the shares being redeemed
      * @param _receiver The address that is receiving the assets
+     * @param _bypassRedemptionRestrictions Whether to bypass the redemption restrictions (eg. for Transfer Agent Obligations on RWA)
      * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
      */
-    function jtRedeem(uint256 _shares, address _caller, address _owner, address _receiver) external returns (AssetClaims memory userAssetClaims);
+    function jtRedeem(uint256 _shares, address _receiver, bool _bypassRedemptionRestrictions) external returns (AssetClaims memory userAssetClaims);
+
+    /**
+     * @notice Pre-balance update hook for the tranche
+     * @dev This function should revert if the balance update is invalid.
+     * @dev Should be called before the balance update
+     * @param _from The address from which the balance is being updated
+     * @param _to The address to which the balance is being updated
+     * @param _value The amount of the balance being updated
+     */
+    function preTrancheBalanceUpdateHook(address _from, address _to, uint256 _value) external;
 }

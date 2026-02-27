@@ -27,6 +27,7 @@ abstract contract RolesConfiguration {
     /// Kernel roles
     uint64 public constant SYNC_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_SYNC_ROLE"))));
     uint64 public constant ADMIN_KERNEL_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_KERNEL_ROLE"))));
+    uint64 public constant TRANSFER_AGENT_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_TRANSFER_AGENT_ROLE"))));
 
     /// Accountant roles
     uint64 public constant ADMIN_ACCOUNTANT_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_ACCOUNTANT_ROLE"))));
@@ -129,6 +130,12 @@ abstract contract RolesConfiguration {
                 adminRole: _ADMIN_ROLE,
                 guardianRole: GUARDIAN_ROLE,
                 executionDelay: 0 // Deployer admin operations should be immediate
+            });
+        } else if (role == TRANSFER_AGENT_ROLE) {
+            return RoleConfig({
+                adminRole: _ADMIN_ROLE,
+                guardianRole: GUARDIAN_ROLE,
+                executionDelay: 0 // Seizures and freezes must be immediate
             });
         } else {
             revert UNKNOWN_ROLE(role);
