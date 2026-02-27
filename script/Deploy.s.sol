@@ -30,12 +30,14 @@ import { Create2DeployUtils } from "./utils/Create2DeployUtils.sol";
 import { Script } from "lib/forge-std/src/Script.sol";
 import { console2 } from "lib/forge-std/src/console2.sol";
 
-/// @notice Interface for kernel oracle quoter admin functions
-interface IKernelOracleQuoterAdmin {
-    function setConversionRate(uint256 _conversionRateWAD) external;
-    function setTrancheAssetToReferenceAssetOracle(address _trancheAssetToReferenceAssetOracle, uint48 _stalenessThresholdSeconds) external;
-}
-
+/// @title DeployScript
+/// @notice Deployment script for Royco markets. Handles deterministic (CREATE2) deployment of all
+///         market components: factory, kernel, accountant, tranches, and YDM.
+/// @dev Inherits from:
+///   - Script (Foundry scripting)
+///   - Create2DeployUtils (deterministic deployments via CREATE2)
+///   - RolesConfiguration (role constants and config)
+///   - DeploymentConfig (per-chain and per-market configuration)
 contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, DeploymentConfig {
     // Custom errors
     error UnsupportedKernelType(KernelType kernelType);
@@ -145,6 +147,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         address transferAgentAddress;
     }
 
+    /// @notice Entry point for `forge script`. Reads DEPLOYER_PRIVATE_KEY and MARKET_NAME from env.
     function run() external virtual {
         ENABLE_LOGGING = true;
 
@@ -250,7 +253,13 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         console2.log("");
     }
 
-    /// @notice Main deployment function that accepts all parameters
+    /// @notice Deploys a complete Royco market: factory, implementations, and proxied market contracts.
+    /// @param _config The market deployment configuration (assets, kernel type, accountant params, YDM params)
+    /// @param _factoryAdmin The address that will admin the factory's AccessManager
+    /// @param _protocolFeeRecipient The address that receives protocol fees
+    /// @param _roleAssignments Role-to-address assignments configured on the factory
+    /// @param _deployerPrivateKey The private key used to broadcast deployment transactions
+    /// @return The deployment result containing all deployed contract addresses
     function deploy(
         MarketDeploymentConfig memory _config,
         address _factoryAdmin,
@@ -338,6 +347,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         roles[3] = _buildAccountantRolesConfig(_accountant);
     }
 
+    /// @notice Builds selector-to-role mappings for a tranche contract.
+    /// @dev Maps deposit/redeem to the LP role, pause/unpause to ADMIN_PAUSER_ROLE,
+    ///      upgradeToAndCall to ADMIN_UPGRADER_ROLE, and seize functions to TRANSFER_AGENT_ROLE.
+    /// @param _tranche The address of the tranche contract
+    /// @param _lpRole The role value for the LP role
+    /// @return The roles configuration for the tranche contract
     function _buildTrancheRolesConfig(address _tranche, uint64 _lpRole) private pure returns (IRoycoFactory.RolesTargetConfiguration memory) {
         bytes4[] memory selectors = new bytes4[](7);
         uint64[] memory roleValues = new uint64[](7);
@@ -360,6 +375,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         return IRoycoFactory.RolesTargetConfiguration({ target: _tranche, selectors: selectors, roles: roleValues });
     }
 
+    /// @notice Builds selector-to-role mappings for the kernel contract.
+    /// @dev Maps admin functions to ADMIN_KERNEL_ROLE, oracle quoter functions to ADMIN_ORACLE_QUOTER_ROLE,
+    ///      sync to SYNC_ROLE, pause/unpause to ADMIN_PAUSER_ROLE, upgrade to ADMIN_UPGRADER_ROLE,
+    ///      and blacklist functions to TRANSFER_AGENT_ROLE.
+    /// @param _kernel The address of the kernel contract
+    /// @return The roles configuration for the kernel contract
     function _buildKernelRolesConfig(address _kernel) private pure returns (IRoycoFactory.RolesTargetConfiguration memory) {
         bytes4[] memory selectors = new bytes4[](11);
         uint64[] memory roleValues = new uint64[](11);
@@ -390,6 +411,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         return IRoycoFactory.RolesTargetConfiguration({ target: _kernel, selectors: selectors, roles: roleValues });
     }
 
+    /// @notice Builds selector-to-role mappings for the accountant contract.
+    /// @dev Maps setYDM/setCoverage/setBeta/setLLTV/setFixedTermDuration/dust tolerances/coverage config
+    ///      to ADMIN_ACCOUNTANT_ROLE, fee setters to ADMIN_PROTOCOL_FEE_SETTER_ROLE, and shared
+    ///      pause/unpause/upgrade to their respective roles.
+    /// @param _accountant The address of the accountant contract
+    /// @return The roles configuration for the accountant contract
     function _buildAccountantRolesConfig(address _accountant) private pure returns (IRoycoFactory.RolesTargetConfiguration memory) {
         bytes4[] memory selectors = new bytes4[](14);
         uint64[] memory roleValues = new uint64[](14);
@@ -429,6 +456,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     /// @notice Generates role assignments from addresses
     /// @dev ST_LP_ROLE and JT_LP_ROLE are included with assignee=address(0) so their admin roles get configured
     /// @param _addresses The addresses for role assignments
+    /// @return roleAssignments The role assignments for the factory
     function generateRolesAssignments(RoleAssignmentAddresses memory _addresses)
         public
         pure
@@ -541,12 +569,14 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         });
     }
 
-    /// @notice Deploys all contracts for a market
-    /// @param factory The deployed factory
-    /// @param ydmAddress The address of the deployed YDM
+    /// @notice Deploys all implementation contracts and calls `factory.deployMarket()` to create proxied market.
+    /// @dev Precomputes deterministic proxy addresses via CREATE3 salts so implementations can reference
+    ///      each other at construction time (e.g. tranches reference the kernel, accountant references the kernel).
+    /// @param factory The deployed factory (acts as deployer and AccessManager)
+    /// @param ydmAddress The address of the deployed YDM singleton
     /// @param _config The market deployment configuration
     /// @param _protocolFeeRecipient The protocol fee recipient address
-    /// @return deployedContracts The deployed market contracts
+    /// @return deployedContracts The deployed market proxy contracts (ST, JT, kernel, accountant)
     /// @return stImpl The deployed senior tranche implementation address
     /// @return jtImpl The deployed junior tranche implementation address
     /// @return kernelImpl The deployed kernel implementation address
@@ -656,7 +686,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         }
     }
 
-    /// @notice Deploys accountant implementation
+    /// @notice Deploys the accountant implementation via CREATE2.
+    /// @param _kernel The (precomputed) kernel proxy address baked into the implementation as an immutable
     /// @return The deployed accountant implementation
     function _deployAccountantImpl(address _kernel) internal returns (RoycoAccountant) {
         bytes memory creationCode = abi.encodePacked(type(RoycoAccountant).creationCode, abi.encode(_kernel));
@@ -672,8 +703,10 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         return RoycoAccountant(addr);
     }
 
-    /// @notice Deploys ST tranche implementation
-    /// @return The deployed ST tranche implementation
+    /// @notice Deploys the senior tranche implementation via CREATE2.
+    /// @param _asset The senior tranche's underlying asset (ERC20)
+    /// @param _kernel The (precomputed) kernel proxy address baked into the implementation as an immutable
+    /// @return The deployed senior tranche implementation
     function _deploySTTrancheImpl(address _asset, address _kernel) internal returns (RoycoSeniorTranche) {
         bytes memory creationCode = abi.encodePacked(type(RoycoSeniorTranche).creationCode, abi.encode(_asset, _kernel));
 
@@ -688,8 +721,10 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         return RoycoSeniorTranche(addr);
     }
 
-    /// @notice Deploys JT tranche implementation
-    /// @return The deployed JT tranche implementation
+    /// @notice Deploys the junior tranche implementation via CREATE2.
+    /// @param _asset The junior tranche's underlying asset (ERC20)
+    /// @param _kernel The (precomputed) kernel proxy address baked into the implementation as an immutable
+    /// @return The deployed junior tranche implementation
     function _deployJTTrancheImpl(address _asset, address _kernel) internal returns (RoycoJuniorTranche) {
         bytes memory creationCode = abi.encodePacked(type(RoycoJuniorTranche).creationCode, abi.encode(_asset, _kernel));
 
@@ -735,9 +770,10 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         return IYDM(addr);
     }
 
-    /// @notice Deploys factory implementation
-    /// @param _factoryAdmin The address of the factory admin
-    /// @return The deployed factory implementation
+    /// @notice Deploys the factory implementation and its UUPS proxy via CREATE2.
+    /// @param _factoryAdmin The address that receives the admin role on the factory's AccessManager
+    /// @param _deployer The address that receives the DEPLOYER_ROLE for market deployments
+    /// @param _roleAssignments Initial role assignments configured during factory initialization
     function _deployFactory(
         address _factoryAdmin,
         address _deployer,
@@ -774,7 +810,18 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         return RoycoFactory(factoryProxyAddress);
     }
 
-    /// @notice Deploys kernel implementation based on kernel type
+    /// @notice Deploys the kernel implementation via CREATE2. Generates creation code based on kernel type,
+    ///         then deploys using the shared KERNEL_IMPL_SALT.
+    /// @param _kernelType The kernel type to deploy
+    /// @param _kernelSpecificParams ABI-encoded kernel-specific constructor parameters
+    /// @param _expectedSeniorTrancheAddress Precomputed senior tranche proxy address
+    /// @param _expectedJuniorTrancheAddress Precomputed junior tranche proxy address
+    /// @param _seniorAsset The senior tranche's underlying asset
+    /// @param _juniorAsset The junior tranche's underlying asset
+    /// @param _expectedAccountantAddress Precomputed accountant proxy address
+    /// @return The deployed kernel implementation address
+    /// @dev Precomputes deterministic proxy addresses via CREATE3 salts so implementations can reference
+    ///      each other at construction time (e.g. tranches reference the kernel, accountant references the kernel).
     function _deployKernelImpl(
         KernelType _kernelType,
         bytes memory _kernelSpecificParams,
@@ -787,7 +834,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         internal
         returns (address)
     {
-        IRoycoKernel.RoycoKernelConstructionParams memory constructionParams = IRoycoKernel.RoycoKernelConstructionParams({
+        IRoycoKernel.RoycoKernelConstructionParams memory cp = IRoycoKernel.RoycoKernelConstructionParams({
             seniorTranche: _expectedSeniorTrancheAddress,
             stAsset: _seniorAsset,
             juniorTranche: _expectedJuniorTrancheAddress,
@@ -795,124 +842,59 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             accountant: _expectedAccountantAddress
         });
 
+        bytes memory creationCode = _buildKernelCreationCode(_kernelType, _kernelSpecificParams, cp);
+
+        (address addr, bool alreadyDeployed) = deployWithSanityChecks(KERNEL_IMPL_SALT, creationCode, false);
+        if (ENABLE_LOGGING) {
+            if (alreadyDeployed) {
+                console2.log("Kernel implementation already deployed at:", addr);
+            } else {
+                console2.log("Kernel implementation deployed at:", addr);
+            }
+        }
+        return addr;
+    }
+
+    /// @notice Builds the full creation code (bytecode + constructor args) for the given kernel type.
+    /// @param _kernelType The kernel type to build creation code for
+    /// @param _kernelSpecificParams ABI-encoded kernel-specific constructor parameters
+    /// @param _cp The construction parameters for the kernel
+    /// @return The creation code for the kernel implementation
+    function _buildKernelCreationCode(
+        KernelType _kernelType,
+        bytes memory _kernelSpecificParams,
+        IRoycoKernel.RoycoKernelConstructionParams memory _cp
+    )
+        private
+        pure
+        returns (bytes memory)
+    {
         if (_kernelType == KernelType.ReUSD_ST_ReUSD_JT) {
-            return address(_deployReUSDSTReUSDJTKernelImpl(constructionParams, _kernelSpecificParams));
+            ReUSDSTReUSDJTKernelParams memory kp = abi.decode(_kernelSpecificParams, (ReUSDSTReUSDJTKernelParams));
+            return abi.encodePacked(type(ReUSD_ST_ReUSD_JT_Kernel).creationCode, abi.encode(_cp, kp.reusd, kp.reusdUsdQuoteToken, kp.insuranceCapitalLayer));
         } else if (_kernelType == KernelType.Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel) {
-            return address(_deployIdenticalAssetsChainlinkToAdminOracleQuoterKernelImpl(constructionParams));
+            return abi.encodePacked(type(Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel).creationCode, abi.encode(_cp));
         } else if (_kernelType == KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel) {
-            return address(_deployIdenticalERC4626SharesAdminOracleQuoterKernelImpl(constructionParams));
+            return abi.encodePacked(type(Identical_ERC4626_ST_ERC4626_JT_Kernel).creationCode, abi.encode(_cp));
         } else if (_kernelType == KernelType.IdleCdoAA_ST_IdleCdoAA_JT) {
-            return address(_deployIdleCdoAASTIdleCdoAAJTKernelImpl(constructionParams, _kernelSpecificParams));
+            IdleCdoAASTIdleCdoAAJTKernelParams memory kp = abi.decode(_kernelSpecificParams, (IdleCdoAASTIdleCdoAAJTKernelParams));
+            return abi.encodePacked(type(IdleCdoAA_ST_IdleCdoAA_JT_Kernel).creationCode, abi.encode(_cp, kp.idleCDO));
         } else if (_kernelType == KernelType.DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel) {
-            return address(_deployDSTokenSTDSTokenJTIdenticalAssetsChainlinkToAdminOracleQuoterKernelImpl(constructionParams));
+            return abi.encodePacked(type(DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel).creationCode, abi.encode(_cp));
         } else {
             revert UnsupportedKernelType(_kernelType);
         }
     }
 
-    function _deployReUSDSTReUSDJTKernelImpl(
-        IRoycoKernel.RoycoKernelConstructionParams memory _constructionParams,
-        bytes memory _params
-    )
-        internal
-        returns (ReUSD_ST_ReUSD_JT_Kernel)
-    {
-        ReUSDSTReUSDJTKernelParams memory kernelParams = abi.decode(_params, (ReUSDSTReUSDJTKernelParams));
-
-        bytes memory creationCode = abi.encodePacked(
-            type(ReUSD_ST_ReUSD_JT_Kernel).creationCode,
-            abi.encode(_constructionParams, kernelParams.reusd, kernelParams.reusdUsdQuoteToken, kernelParams.insuranceCapitalLayer)
-        );
-
-        (address addr, bool alreadyDeployed) = deployWithSanityChecks(KERNEL_IMPL_SALT, creationCode, false);
-        if (ENABLE_LOGGING) {
-            if (alreadyDeployed) {
-                console2.log("Kernel implementation already deployed at:", addr);
-            } else {
-                console2.log("Kernel implementation deployed at:", addr);
-            }
-        }
-        return ReUSD_ST_ReUSD_JT_Kernel(addr);
-    }
-
-    function _deployIdenticalAssetsChainlinkToAdminOracleQuoterKernelImpl(IRoycoKernel.RoycoKernelConstructionParams memory _constructionParams)
-        internal
-        returns (Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel)
-    {
-        bytes memory creationCode = abi.encodePacked(type(Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel).creationCode, abi.encode(_constructionParams));
-
-        (address addr, bool alreadyDeployed) = deployWithSanityChecks(KERNEL_IMPL_SALT, creationCode, false);
-        if (ENABLE_LOGGING) {
-            if (alreadyDeployed) {
-                console2.log("Kernel implementation already deployed at:", addr);
-            } else {
-                console2.log("Kernel implementation deployed at:", addr);
-            }
-        }
-        return Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel(addr);
-    }
-
-    function _deployIdenticalERC4626SharesAdminOracleQuoterKernelImpl(IRoycoKernel.RoycoKernelConstructionParams memory _constructionParams)
-        internal
-        returns (Identical_ERC4626_ST_ERC4626_JT_Kernel)
-    {
-        bytes memory creationCode = abi.encodePacked(type(Identical_ERC4626_ST_ERC4626_JT_Kernel).creationCode, abi.encode(_constructionParams));
-
-        (address addr, bool alreadyDeployed) = deployWithSanityChecks(KERNEL_IMPL_SALT, creationCode, false);
-        if (ENABLE_LOGGING) {
-            if (alreadyDeployed) {
-                console2.log("Kernel implementation already deployed at:", addr);
-            } else {
-                console2.log("Kernel implementation deployed at:", addr);
-            }
-        }
-
-        return Identical_ERC4626_ST_ERC4626_JT_Kernel(addr);
-    }
-
-    function _deployIdleCdoAASTIdleCdoAAJTKernelImpl(
-        IRoycoKernel.RoycoKernelConstructionParams memory _constructionParams,
-        bytes memory _params
-    )
-        internal
-        returns (IdleCdoAA_ST_IdleCdoAA_JT_Kernel)
-    {
-        IdleCdoAASTIdleCdoAAJTKernelParams memory kernelParams = abi.decode(_params, (IdleCdoAASTIdleCdoAAJTKernelParams));
-
-        bytes memory creationCode = abi.encodePacked(type(IdleCdoAA_ST_IdleCdoAA_JT_Kernel).creationCode, abi.encode(_constructionParams, kernelParams.idleCDO));
-
-        (address addr, bool alreadyDeployed) = deployWithSanityChecks(KERNEL_IMPL_SALT, creationCode, false);
-        if (ENABLE_LOGGING) {
-            if (alreadyDeployed) {
-                console2.log("Kernel implementation already deployed at:", addr);
-            } else {
-                console2.log("Kernel implementation deployed at:", addr);
-            }
-        }
-        return IdleCdoAA_ST_IdleCdoAA_JT_Kernel(addr);
-    }
-
-    function _deployDSTokenSTDSTokenJTIdenticalAssetsChainlinkToAdminOracleQuoterKernelImpl(
-        IRoycoKernel.RoycoKernelConstructionParams memory _constructionParams
-    )
-        internal
-        returns (DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel)
-    {
-        bytes memory creationCode = abi.encodePacked(
-            type(DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel).creationCode, abi.encode(_constructionParams)
-        );
-
-        (address addr, bool alreadyDeployed) = deployWithSanityChecks(KERNEL_IMPL_SALT, creationCode, false);
-        if (ENABLE_LOGGING) {
-            if (alreadyDeployed) {
-                console2.log("Kernel implementation already deployed at:", addr);
-            } else {
-                console2.log("Kernel implementation deployed at:", addr);
-            }
-        }
-        return DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel(addr);
-    }
-
+    /// @notice Builds ABI-encoded initialization calldata for the kernel proxy.
+    /// @dev Each kernel type has its own `initialize()` signature. This function routes to the correct one
+    ///      and encodes the calldata that the factory will use when initializing the kernel proxy.
+    /// @param _kernelType The kernel type to build initialization data for
+    /// @param _kernelSpecificParams ABI-encoded kernel-specific constructor parameters
+    /// @param _factoryAddress The address of the factory
+    /// @param _protocolFeeRecipient The address that receives protocol fees
+    /// @param _stSelfLiquidationBonusWAD The self-liquidation bonus for the senior tranche
+    /// @return The initialization data for the kernel proxy
     function _buildKernelInitializationData(
         KernelType _kernelType,
         bytes memory _kernelSpecificParams,
@@ -969,6 +951,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     /// @param _ydmType The YDM type
     /// @param _ydmSpecificParams Encoded YDM-specific parameters
     /// @return ydmInitializationData The encoded YDM initialization data
+    /// @dev Routes to the correct YDM implementation initializer based on YDM type
     function _buildYDMInitializationData(YDMType _ydmType, bytes memory _ydmSpecificParams) internal pure returns (bytes memory ydmInitializationData) {
         if (_ydmType == YDMType.StaticCurve) {
             StaticCurveYDMParams memory ydmParams = abi.decode(_ydmSpecificParams, (StaticCurveYDMParams));
@@ -996,6 +979,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         }
     }
 
+    /// @notice Builds ABI-encoded initialization calldata for the accountant proxy.
+    /// @dev Constructs `RoycoAccountantInitParams` from the market config and encodes `RoycoAccountant.initialize()`.
+    /// @param _ydmAddress The address of the deployed YDM singleton
+    /// @param _factoryAddress The address of the factory
+    /// @param _config The market deployment configuration
+    /// @return The initialization data for the accountant proxy
     function _buildAccountantInitializationData(
         address _ydmAddress,
         address _factoryAddress,
@@ -1022,6 +1011,10 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         return abi.encodeCall(RoycoAccountant.initialize, (accountantParams, _factoryAddress));
     }
 
+    /// @notice Builds ABI-encoded initialization calldata for the senior tranche proxy.
+    /// @param _factoryAddress The address of the factory
+    /// @param _config The market deployment configuration
+    /// @return The initialization data for the senior tranche proxy
     function _buildSeniorTrancheInitializationData(address _factoryAddress, MarketDeploymentConfig memory _config) internal pure returns (bytes memory) {
         IRoycoVaultTranche.RoycoTrancheInitParams memory trancheParams = IRoycoVaultTranche.RoycoTrancheInitParams({
             name: _config.seniorTrancheName, symbol: _config.seniorTrancheSymbol, initialAuthority: _factoryAddress
@@ -1030,6 +1023,10 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         return abi.encodeCall(RoycoSeniorTranche.initialize, (trancheParams));
     }
 
+    /// @notice Builds ABI-encoded initialization calldata for the junior tranche proxy.
+    /// @param _factoryAddress The address of the factory
+    /// @param _config The market deployment configuration
+    /// @return The initialization data for the junior tranche proxy
     function _buildJuniorTrancheInitializationData(address _factoryAddress, MarketDeploymentConfig memory _config) internal pure returns (bytes memory) {
         IRoycoVaultTranche.RoycoTrancheInitParams memory trancheParams = IRoycoVaultTranche.RoycoTrancheInitParams({
             name: _config.juniorTrancheName, symbol: _config.juniorTrancheSymbol, initialAuthority: _factoryAddress
