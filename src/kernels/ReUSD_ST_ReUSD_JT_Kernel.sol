@@ -22,11 +22,11 @@ contract ReUSD_ST_ReUSD_JT_Kernel is RoycoKernel, IdenticalAssetsOracleQuoter {
     /// @notice The address of the token in which the NAV is expressed (typically USDC)
     address public immutable REUSD_QUOTE_TOKEN;
 
-    /// @notice ICL input for reUSD exchange rate in quote tokens, scaled to WAD precision
-    uint256 public immutable REUSD_AMOUNT_FOR_WAD_PRECISION_CONVERSION_RATE;
-
     /// @notice The address of the reUSD insurance capital layer
     address public immutable INSURANCE_CAPITAL_LAYER;
+
+    /// @notice ICL input for reUSD exchange rate in quote tokens, scaled to WAD precision
+    uint256 public immutable REUSD_AMOUNT_FOR_WAD_PRECISION_CONVERSION_RATE;
 
     /**
      * @notice Constructs the Royco kernel
@@ -47,10 +47,11 @@ contract ReUSD_ST_ReUSD_JT_Kernel is RoycoKernel, IdenticalAssetsOracleQuoter {
         require(_reusd != address(0) && _reusdUsdQuoteToken != address(0) && _insuranceCapitalLayer != address(0), NULL_ADDRESS());
         REUSD = _reusd;
         REUSD_QUOTE_TOKEN = _reusdUsdQuoteToken;
-        // ICL output = input * rate * 10^(QUOTE_DECIMALS - REUSD_DECIMALS), so input = 10^(WAD_DECIMALS + REUSD_DECIMALS - QUOTE_DECIMALS) yields rate * WAD
+        INSURANCE_CAPITAL_LAYER = _insuranceCapitalLayer;
+        // ICL output = input * rate * 10^(QUOTE_DECIMALS - REUSD_DECIMALS)
+        // With input = 10^(WAD_DECIMALS + REUSD_DECIMALS - QUOTE_DECIMALS), output = rate * WAD
         REUSD_AMOUNT_FOR_WAD_PRECISION_CONVERSION_RATE =
             10 ** (WAD_DECIMALS + IERC20Metadata(_reusd).decimals() - IERC20Metadata(_reusdUsdQuoteToken).decimals());
-        INSURANCE_CAPITAL_LAYER = _insuranceCapitalLayer;
     }
 
     /**
@@ -66,8 +67,6 @@ contract ReUSD_ST_ReUSD_JT_Kernel is RoycoKernel, IdenticalAssetsOracleQuoter {
 
     /// @inheritdoc IdenticalAssetsOracleQuoter
     function _getConversionRateFromOracleWAD() internal view override returns (uint256) {
-        // ICL output = input * rate * 10^(QUOTE_DECIMALS - REUSD_DECIMALS)
-        // With input = 10^(WAD_DECIMALS + REUSD_DECIMALS - QUOTE_DECIMALS), output = rate * WAD
         return IInsuranceCapitalLayer(INSURANCE_CAPITAL_LAYER).convertFromShares(REUSD_QUOTE_TOKEN, REUSD_AMOUNT_FOR_WAD_PRECISION_CONVERSION_RATE);
     }
 }
