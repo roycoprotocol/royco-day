@@ -9,9 +9,7 @@ import { IRoycoKernel } from "../../../../src/interfaces/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../../../../src/interfaces/IRoycoVaultTranche.sol";
 import { IComplianceServiceWhitelisted } from "../../../../src/interfaces/external/ds-token/IComplianceServiceWhitelisted.sol";
 import { IDSToken } from "../../../../src/interfaces/external/ds-token/IDSToken.sol";
-import {
-    DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel
-} from "../../../../src/kernels/DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel.sol";
+import { Identical_DSToken_ST_DSToken_JT_Kernel } from "../../../../src/kernels/Identical_DSToken_ST_DSToken_JT_Kernel.sol";
 import { AssetClaims, MarketState } from "../../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
 import { YieldBearingERC20Chainlink_TestBase } from "../../Identical_ERC20_ST_JT_Chainlink/base/YieldBearingERC20Chainlink_TestBase.t.sol";
@@ -99,7 +97,7 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _complianceService() internal view returns (address) {
-        return DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel(address(KERNEL)).COMPLIANCE_SERVICE();
+        return Identical_DSToken_ST_DSToken_JT_Kernel(address(KERNEL)).COMPLIANCE_SERVICE();
     }
 
     function _mockNotWhitelisted(address _who) internal {
@@ -117,14 +115,14 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
         address[] memory depositors = new address[](1);
         depositors[0] = _who;
         vm.prank(TRANSFER_AGENT_ADDRESS);
-        KERNEL.blacklistDepositor(depositors);
+        KERNEL.blacklistAccounts(depositors);
     }
 
     function _unblacklist(address _who) internal {
         address[] memory depositors = new address[](1);
         depositors[0] = _who;
         vm.prank(TRANSFER_AGENT_ADDRESS);
-        KERNEL.unblacklistDepositor(depositors);
+        KERNEL.unblacklistAccounts(depositors);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -142,7 +140,7 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
         uint256 amount = 10e6;
         vm.startPrank(BOB_ADDRESS);
         IERC20(config.stAsset).approve(address(ST), amount);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoKernel.DEPOSITOR_BLACKLISTED.selector, BOB_ADDRESS));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoKernel.ACCOUNT_BLACKLISTED.selector, BOB_ADDRESS));
         ST.deposit(toTrancheUnits(amount), BOB_ADDRESS);
         vm.stopPrank();
     }
@@ -157,7 +155,7 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
 
         // BOB tries to redeem ST — should revert
         vm.startPrank(BOB_ADDRESS);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoKernel.DEPOSITOR_BLACKLISTED.selector, BOB_ADDRESS));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoKernel.ACCOUNT_BLACKLISTED.selector, BOB_ADDRESS));
         ST.redeem(stShares, BOB_ADDRESS, BOB_ADDRESS);
         vm.stopPrank();
     }
@@ -173,7 +171,7 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
 
         // BOB tries to transfer ST shares to ALICE — should revert (from is blacklisted)
         vm.startPrank(BOB_ADDRESS);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoKernel.DEPOSITOR_BLACKLISTED.selector, BOB_ADDRESS));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoKernel.ACCOUNT_BLACKLISTED.selector, BOB_ADDRESS));
         IERC20(address(ST)).transfer(ST_ALICE_ADDRESS, stShares);
         vm.stopPrank();
     }
@@ -190,7 +188,7 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
 
         // BOB tries to transfer ST shares to blacklisted receiver — should revert
         vm.startPrank(BOB_ADDRESS);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoKernel.DEPOSITOR_BLACKLISTED.selector, receiver));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoKernel.ACCOUNT_BLACKLISTED.selector, receiver));
         IERC20(address(ST)).transfer(receiver, stShares);
         vm.stopPrank();
     }
@@ -468,13 +466,13 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
         // ALICE tries to blacklist — should revert
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert();
-        KERNEL.blacklistDepositor(depositors);
+        KERNEL.blacklistAccounts(depositors);
     }
 
-    function test_setBlacklistEnabled_revertsForNonTransferAgent() external {
+    function test_setBlacklistStatus_revertsForNonTransferAgent() external {
         // ALICE tries to enable blacklist — should revert
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert();
-        KERNEL.setBlacklistEnabled(true);
+        KERNEL.setBlacklistStatus(true);
     }
 }

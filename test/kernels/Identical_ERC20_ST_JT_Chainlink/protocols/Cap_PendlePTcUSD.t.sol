@@ -11,7 +11,7 @@ import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/librarie
 import { YieldBearingERC20Chainlink_TestBase } from "../base/YieldBearingERC20Chainlink_TestBase.t.sol";
 
 /// @title PendlePTcUSD_Test
-/// @notice Tests YieldBearingERC20_ST_YieldBearingERC20_JT_Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel with Pendle PT-cUSD
+/// @notice Tests YieldBearingERC20_ST_YieldBearingERC20_JT_Identical_ERC20_ST_ERC20_JT_Kernel with Pendle PT-cUSD
 /// @dev Both ST and JT use PT-cUSD as the tranche asset
 ///
 /// PT-cUSD (Pendle Principal Token for cUSD) is a yield-bearing ERC20 where:

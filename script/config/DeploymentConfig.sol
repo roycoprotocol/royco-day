@@ -193,7 +193,7 @@ abstract contract DeploymentConfig {
             jtDustTolerance: 5,
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
-            stSelfLiquidationBonusWAD: 0, // TODO
+            stSelfLiquidationBonusWAD: 0.05e18, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
             jtYieldShareProtocolFeeWAD: 0.2e18,
@@ -225,7 +225,7 @@ abstract contract DeploymentConfig {
             jtDustTolerance: 5,
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
-            stSelfLiquidationBonusWAD: 0, // TODO
+            stSelfLiquidationBonusWAD: 0.05e18, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
             jtYieldShareProtocolFeeWAD: 0.2e18,
@@ -257,7 +257,7 @@ abstract contract DeploymentConfig {
             jtDustTolerance: 5,
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
-            stSelfLiquidationBonusWAD: 0, // TODO
+            stSelfLiquidationBonusWAD: 0.05e18, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
             jtYieldShareProtocolFeeWAD: 0.2e18,
@@ -289,7 +289,7 @@ abstract contract DeploymentConfig {
             jtDustTolerance: 5,
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
-            stSelfLiquidationBonusWAD: 0, // TODO
+            stSelfLiquidationBonusWAD: 0.05e18, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
             jtYieldShareProtocolFeeWAD: 0.2e18,
@@ -319,7 +319,7 @@ abstract contract DeploymentConfig {
             juniorAsset: 0x238a700eD6165261Cf8b2e544ba797BC11e466Ba,
             stDustTolerance: 5 * 10 ** 10, // The chainlink oracle has 8 decimals of precision
             jtDustTolerance: 5 * 10 ** 10, // The chainlink oracle has 8 decimals of precision
-            kernelType: DeployScript.KernelType.Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel,
+            kernelType: DeployScript.KernelType.Identical_ERC20_ST_ERC20_JT_Kernel,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams({
                     trancheAssetToReferenceAssetOracle: 0x8D51DBC85cEef637c97D02bdaAbb5E274850e68C,
@@ -327,7 +327,7 @@ abstract contract DeploymentConfig {
                     initialConversionRateWAD: 1e18
                 })
             ),
-            stSelfLiquidationBonusWAD: 0, // TODO
+            stSelfLiquidationBonusWAD: 0.05e18, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
             jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
@@ -358,15 +358,15 @@ abstract contract DeploymentConfig {
             juniorAsset: 0x545A490f9ab534AdF409A2E682bc4098f49952e3,
             stDustTolerance: 1,
             jtDustTolerance: 1,
-            kernelType: DeployScript.KernelType.Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel,
+            kernelType: DeployScript.KernelType.Identical_ERC20_ST_ERC20_JT_Kernel,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams({
-                        trancheAssetToReferenceAssetOracle: 0x6DA10958c691454BE7eb5f3e3B91b5713e542b17,
-                        stalenessThresholdSeconds: 1800,
-                        initialConversionRateWAD: 1e18
-                    })
+                    trancheAssetToReferenceAssetOracle: 0x6DA10958c691454BE7eb5f3e3B91b5713e542b17,
+                    stalenessThresholdSeconds: 1800,
+                    initialConversionRateWAD: 1e18
+                })
             ),
-            stSelfLiquidationBonusWAD: 0,
+            stSelfLiquidationBonusWAD: 0.05e18,
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.1e18,
             jtYieldShareProtocolFeeWAD: 0.1e18,
@@ -404,7 +404,7 @@ abstract contract DeploymentConfig {
                     insuranceCapitalLayer: 0x4691C475bE804Fa85f91c2D6D0aDf03114de3093
                 })
             ),
-            stSelfLiquidationBonusWAD: 0,
+            stSelfLiquidationBonusWAD: 0.05e18,
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.1e18,
             jtYieldShareProtocolFeeWAD: 0.1e18,
@@ -435,7 +435,7 @@ abstract contract DeploymentConfig {
             jtDustTolerance: 5 * (10 ** (18 - 6)),
             kernelType: DeployScript.KernelType.IdleCdoAA_ST_IdleCdoAA_JT,
             kernelSpecificParams: abi.encode(DeployScript.IdleCdoAASTIdleCdoAAJTKernelParams({ idleCDO: 0x433D5B175148dA32Ffe1e1A37a939E1b7e79be4d })),
-            stSelfLiquidationBonusWAD: 0,
+            stSelfLiquidationBonusWAD: 0.05e18,
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.1e18,
             jtYieldShareProtocolFeeWAD: 0.1e18,
@@ -463,11 +463,11 @@ abstract contract DeploymentConfig {
             juniorTrancheSymbol: _juniorTrancheSymbol(SMOKEHOUSE_USDC),
             seniorAsset: 0xBEeFFF209270748ddd194831b3fa287a5386f5bC,
             juniorAsset: 0xBEeFFF209270748ddd194831b3fa287a5386f5bC,
-            stDustTolerance: 5 * (10 ** (18 - 6)),
-            jtDustTolerance: 5 * (10 ** (18 - 6)),
+            stDustTolerance: 2 * (10 ** (18 - 6)),
+            jtDustTolerance: 2 * (10 ** (18 - 6)),
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })), // 1:1 USDC to USD
-            stSelfLiquidationBonusWAD: 0, // TODO
+            stSelfLiquidationBonusWAD: 0.05e18, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
             jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
@@ -496,11 +496,11 @@ abstract contract DeploymentConfig {
             juniorTrancheSymbol: _juniorTrancheSymbol(GAUNTLET_USDC_FRONTIER),
             seniorAsset: 0x9a1D6bd5b8642C41F25e0958129B85f8E1176F3e,
             juniorAsset: 0x9a1D6bd5b8642C41F25e0958129B85f8E1176F3e,
-            stDustTolerance: 5 * (10 ** (18 - 6)),
-            jtDustTolerance: 5 * (10 ** (18 - 6)),
+            stDustTolerance: 2 * (10 ** (18 - 6)),
+            jtDustTolerance: 2 * (10 ** (18 - 6)),
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })), // 1:1 USDC to USD
-            stSelfLiquidationBonusWAD: 0, // TODO
+            stSelfLiquidationBonusWAD: 0.05e18, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
             jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
@@ -531,7 +531,7 @@ abstract contract DeploymentConfig {
             juniorAsset: 0x17418038ecF73BA4026c4f428547BF099706F27B,
             stDustTolerance: 5 * 10 ** 10, // The chainlink oracle has 8 decimals of precision
             jtDustTolerance: 5 * 10 ** 10, // The chainlink oracle has 8 decimals of precision
-            kernelType: DeployScript.KernelType.DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel,
+            kernelType: DeployScript.KernelType.Identical_DSToken_ST_DSToken_JT_Kernel,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams({
                     trancheAssetToReferenceAssetOracle: 0xD6BcbbC87bFb6c8964dDc73DC3EaE6d08865d51C,
@@ -539,7 +539,7 @@ abstract contract DeploymentConfig {
                     initialConversionRateWAD: 1e18
                 })
             ),
-            stSelfLiquidationBonusWAD: 0, // TODO
+            stSelfLiquidationBonusWAD: 0.05e18, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
             jtYieldShareProtocolFeeWAD: 0.2e18, // TODO

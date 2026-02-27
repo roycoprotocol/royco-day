@@ -70,7 +70,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // Transfer the assets to the kernel
         IERC20(ASSET).safeTransferFrom(msg.sender, KERNEL, toUint256(_assets));
 
-        // Deposit the assets into the underlying investment opportunity and get the fraction of total assets allocated
+        // Deposit the assets into the Royco market and get the fraction of total assets allocated
         (NAV_UNIT valueAllocated, NAV_UNIT effectiveNAVToMintAt) =
             (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoKernel(KERNEL).stDeposit(_assets) : IRoycoKernel(KERNEL).jtDeposit(_assets));
 
@@ -98,7 +98,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
             _spendAllowance(_owner, msg.sender, _shares);
         }
 
-        // Process the withdrawal from the underlying investment opportunity
+        // Process the withdrawal from the Royco market
         // It is expected that the kernel transfers the assets directly to the receiver
         claims =
         (TRANCHE_TYPE() == TrancheType.SENIOR
@@ -138,9 +138,9 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @inheritdoc IRoycoVaultTranche
     function seizeAssets(address _from, address _receiver, uint256 _shares) external virtual override(IRoycoVaultTranche) restricted {
-        // Ensure that the from and to addresses are not null
+        // Basic sanity checks on the seizure
         require(_from != address(0), NULL_ADDRESS());
-        require(_receiver != address(0), NULL_ADDRESS());
+        require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
         require(_shares != 0, MUST_REQUEST_NON_ZERO_SHARES());
 
         // Transfer the shares to the receiver
@@ -162,11 +162,12 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         restricted
         returns (AssetClaims memory claims)
     {
+        // Basic sanity checks on the seizure
         require(_from != address(0), NULL_ADDRESS());
         require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
         require(_shares != 0, MUST_REQUEST_NON_ZERO_SHARES());
 
-        // Process the withdrawal from the underlying investment opportunity
+        // Force process the withdrawal from the Royco market
         // It is expected that the kernel transfers the assets directly to the receiver
         claims =
         (TRANCHE_TYPE() == TrancheType.SENIOR

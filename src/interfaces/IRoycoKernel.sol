@@ -45,7 +45,8 @@ interface IRoycoKernel {
      * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when LLTV has been breached, scaled to WAD precision
      * @custom:field stOwnedYieldBearingAssets - The yield bearing assets held by the ST, in ST's asset units
      * @custom:field jtOwnedYieldBearingAssets - The yield bearing assets held by the JT, in JT's asset units
-     * @custom:field isBlacklisted - A mapping of depositors to a boolean indicating if their assets are frozen
+     * @custom:field isBlacklistEnabled - A boolean indicating whether the blacklist is enforced for this market
+     * @custom:field isBlacklisted - A mapping of accounts to a boolean indicating if they are blacklisted
      */
     struct RoycoKernelState {
         address protocolFeeRecipient;
@@ -53,13 +54,12 @@ interface IRoycoKernel {
         TRANCHE_UNIT stOwnedYieldBearingAssets;
         TRANCHE_UNIT jtOwnedYieldBearingAssets;
         bool isBlacklistEnabled;
-        mapping(address depositor => bool isBlacklisted) isBlacklisted;
+        mapping(address account => bool isBlacklisted) isBlacklisted;
     }
 
-    /**
-     * @notice Viewable state for the Royco Kernel
-     */
+    /// @notice Viewable state for the Royco Kernel
     struct RoycoKernelStateView {
+        bool isBlacklistEnabled;
         address protocolFeeRecipient;
         uint64 stSelfLiquidationBonusWAD;
         TRANCHE_UNIT stOwnedYieldBearingAssets;
@@ -79,16 +79,16 @@ interface IRoycoKernel {
     event SeniorTrancheSelfLiquidationBonusUpdated(uint64 stSelfLiquidationBonusWAD);
 
     /**
-     * @notice Emitted when an asset is frozen for a depositor
-     * @param depositor The address of the depositor
+     * @notice Emitted when an account is blacklisted
+     * @param account The address of the account
      */
-    event DepositorBlacklisted(address indexed depositor);
+    event AccountBlacklisted(address indexed account);
 
     /**
-     * @notice Emitted when an asset is unfrozen for a depositor
-     * @param depositor The address of the depositor
+     * @notice Emitted when an account is unblacklisted
+     * @param account The address of the account
      */
-    event DepositorUnblacklisted(address indexed depositor);
+    event AccountUnblacklisted(address indexed account);
 
     /**
      * @notice Emitted when the blacklist status is updated
@@ -117,25 +117,25 @@ interface IRoycoKernel {
     /// @notice Thrown when the caller of a permissioned function isn't the market's senior or junior tranche
     error ONLY_TRANCHE();
 
-    /// @notice Thrown when the specified depositor is the null address
+    /// @notice Thrown when the specified account is the null address
     error NULL_DEPOSITOR();
 
-    /// @notice Thrown when the specified depositor is already blacklisted
-    error DEPOSITOR_ALREADY_BLACKLISTED(address depositor);
+    /// @notice Thrown when the specified account is already blacklisted
+    error ACCOUNT_ALREADY_BLACKLISTED(address account);
 
-    /// @notice Thrown when the specified depositor is not blacklisted
-    error DEPOSITOR_NOT_BLACKLISTED(address depositor);
+    /// @notice Thrown when the specified account is not blacklisted
+    error ACCOUNT_NOT_BLACKLISTED(address account);
 
-    /// @notice Thrown when the specified depositor is blacklisted
-    error DEPOSITOR_BLACKLISTED(address depositor);
+    /// @notice Thrown when the specified account is blacklisted
+    error ACCOUNT_BLACKLISTED(address account);
 
     /// @notice Thrown when the blacklist status is already set
     error BLACKLIST_STATUS_ALREADY_SET(bool isBlacklistEnabled);
 
     /// @notice Thrown when the to address is not whitelisted on the tranche
-    error TO_ADDRESS_NOT_WHITELISTED(address to);
+    error ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(address to);
 
-    /// @notice Thrown when the array of depositors is empty
+    /// @notice Thrown when the array of accounts is empty
     error EMPTY_ARRAY();
 
     /**
@@ -184,28 +184,28 @@ interface IRoycoKernel {
 
     /**
      * @notice Blacklists the assets of the specified addresses
-     * @param _depositors The addresses of the depositors to blacklist
+     * @param _accounts The addresses of the accounts to blacklist
      */
-    function blacklistDepositor(address[] calldata _depositors) external;
+    function blacklistAccounts(address[] calldata _accounts) external;
 
     /**
      * @notice Unblacklists the assets of the specified addresses
-     * @param _depositors The addresses of the depositors to unblacklist
+     * @param _accounts The addresses of the accounts to unblacklist
      */
-    function unblacklistDepositor(address[] calldata _depositors) external;
+    function unblacklistAccounts(address[] calldata _accounts) external;
 
     /**
-     * @notice Checks if the asset of the specified address is blacklisted
-     * @param _depositor The address of the depositor to check
-     * @return isBlacklisted Whether the asset is blacklisted
+     * @notice Checks if the specified account is blacklisted
+     * @param _account The address of the account to check
+     * @return isBlacklisted Whether the account is blacklisted
      */
-    function isDepositorBlacklisted(address _depositor) external view returns (bool);
+    function isBlacklisted(address _account) external view returns (bool);
 
     /**
      * @notice Sets the blacklist enabled state
-     * @param _isBlacklistEnabled The new blacklist enabled state
+     * @param _blacklistEnabled The new blacklist enabled state
      */
-    function setBlacklistEnabled(bool _isBlacklistEnabled) external;
+    function setBlacklistStatus(bool _blacklistEnabled) external;
 
     /**
      * @notice Retrieves the state of the Royco kernel
@@ -394,7 +394,7 @@ interface IRoycoKernel {
     /**
      * @notice Pre-balance update hook for the tranche
      * @dev This function should revert if the balance update is invalid.
-     * @dev Should be called before the balance update
+     * @dev Should be called before every tranche share balance update
      * @param _from The address from which the balance is being updated
      * @param _to The address to which the balance is being updated
      * @param _value The amount of the balance being updated

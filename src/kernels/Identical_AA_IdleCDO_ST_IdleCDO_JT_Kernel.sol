@@ -9,24 +9,21 @@ import { RoycoKernel } from "./base/RoycoKernel.sol";
 import { IdenticalAssetsOracleQuoter } from "./base/quoter/base/IdenticalAssetsOracleQuoter.sol";
 
 /**
- * @title IdleCdoAA_ST_IdleCdoAA_JT_Kernel
+ * @title Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel
  * @author Waymont
  * @notice The senior and junior tranches transfer in an IdleCDO's AA tranche
  * @dev Example: Pareto's Falconx's Prime Brokerage Vault at https://app.pareto.credit/vault#0xC26A6Fa2C37b38E549a4a1807543801Db684f99C
  * @dev https://docs.idle.finance/
  */
-contract IdleCdoAA_ST_IdleCdoAA_JT_Kernel is RoycoKernel, IdenticalAssetsOracleQuoter {
+contract Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel is RoycoKernel, IdenticalAssetsOracleQuoter {
     /// @notice The address of the IdleCDO
     address public immutable IDLE_CDO;
 
     /// @notice The virtual price multiplier for the IdleCDO's AA tranche to convert to WAD precision
     uint256 public immutable IDLE_CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION;
 
-    /// @notice Thrown when the AA tranche token is different from the ST and JT asset
-    error CDO_AA_TRANCHE_TOKEN_MISMATCH();
-
-    /// @notice Thrown when the IdleCDO address is null
-    error NULL_IDLE_CDO_ADDRESS();
+    /// @notice Thrown when the AA CDO tranche token is different from the market's ST and JT asset
+    error AA_CDO_TRANCHE_TOKEN_MISMATCH();
 
     /**
      * @notice Constructs the Royco kernel
@@ -34,12 +31,12 @@ contract IdleCdoAA_ST_IdleCdoAA_JT_Kernel is RoycoKernel, IdenticalAssetsOracleQ
      * @param _idleCDO The address of the IdleCDO
      */
     constructor(RoycoKernelConstructionParams memory _params, address _idleCDO) RoycoKernel(_params) {
-        require(_idleCDO != address(0), NULL_IDLE_CDO_ADDRESS());
+        require(_idleCDO != address(0), NULL_ADDRESS());
         IDLE_CDO = _idleCDO;
 
         // Ensure that the AA tranche token is the same as the ST and JT assets for the IdleCDO
         address aaTrancheToken = IIdleCDO(IDLE_CDO).AATranche();
-        require(aaTrancheToken == ST_ASSET && aaTrancheToken == JT_ASSET, CDO_AA_TRANCHE_TOKEN_MISMATCH());
+        require(aaTrancheToken == ST_ASSET && aaTrancheToken == JT_ASSET, AA_CDO_TRANCHE_TOKEN_MISMATCH());
 
         // Compute the virtual price multiplier for the IdleCDO's AA tranche to convert to WAD precision
         uint256 quoteTokenDecimals = IERC20Metadata(IIdleCDO(IDLE_CDO).token()).decimals();

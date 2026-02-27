@@ -12,7 +12,7 @@ import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits } from "../../../../
 import { YieldBearingERC20Chainlink_TestBase } from "../base/YieldBearingERC20Chainlink_TestBase.t.sol";
 
 /// @title MfOne_Test
-/// @notice Tests Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel with Midas Fasanara ONE (mF-ONE)
+/// @notice Tests Identical_ERC20_ST_ERC20_JT_Kernel with Midas Fasanara ONE (mF-ONE)
 /// @dev Both ST and JT use mF-ONE as the tranche asset
 ///
 /// mF-ONE is a yield-bearing ERC20 token where:

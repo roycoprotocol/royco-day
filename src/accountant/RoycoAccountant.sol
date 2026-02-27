@@ -279,7 +279,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     // Coverage Checking Functions
     // =============================
 
-    ///@inheritdoc IRoycoAccountant
+    /// @inheritdoc IRoycoAccountant
     function isCoverageRequirementSatisfied() public view override(IRoycoAccountant) returns (bool) {
         // Get the storage pointer to the accountant state
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();

@@ -10,12 +10,10 @@ import { IRoycoFactory } from "../src/interfaces/IRoycoFactory.sol";
 import { IRoycoKernel } from "../src/interfaces/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../src/interfaces/IYDM.sol";
-import {
-    DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel
-} from "../src/kernels/DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel.sol";
-import { Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel } from "../src/kernels/Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel.sol";
+import { Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel } from "../src/kernels/Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel.sol";
+import { Identical_DSToken_ST_DSToken_JT_Kernel } from "../src/kernels/Identical_DSToken_ST_DSToken_JT_Kernel.sol";
+import { Identical_ERC20_ST_ERC20_JT_Kernel } from "../src/kernels/Identical_ERC20_ST_ERC20_JT_Kernel.sol";
 import { Identical_ERC4626_ST_ERC4626_JT_Kernel } from "../src/kernels/Identical_ERC4626_ST_ERC4626_JT_Kernel.sol";
-import { IdleCdoAA_ST_IdleCdoAA_JT_Kernel } from "../src/kernels/IdleCdoAA_ST_IdleCdoAA_JT_Kernel.sol";
 import { ReUSD_ST_ReUSD_JT_Kernel } from "../src/kernels/ReUSD_ST_ReUSD_JT_Kernel.sol";
 import { IdenticalAssetsChainlinkOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
 import { IdenticalAssetsOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
@@ -58,8 +56,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     /// @notice Enum for kernel types
     enum KernelType {
         ReUSD_ST_ReUSD_JT,
-        DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel,
-        Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel,
+        Identical_DSToken_ST_DSToken_JT_Kernel,
+        Identical_ERC20_ST_ERC20_JT_Kernel,
         Identical_ERC4626_ST_ERC4626_JT_Kernel,
         IdleCdoAA_ST_IdleCdoAA_JT
     }
@@ -78,7 +76,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         address insuranceCapitalLayer;
     }
 
-    /// @notice Deployment parameters for Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel
+    /// @notice Deployment parameters for Identical_ERC20_ST_ERC20_JT_Kernel
     struct IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams {
         address trancheAssetToReferenceAssetOracle;
         uint48 stalenessThresholdSeconds;
@@ -90,7 +88,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         uint256 initialConversionRateWAD;
     }
 
-    /// @notice Deployment parameters for IdleCdoAA_ST_IdleCdoAA_JT_Kernel
+    /// @notice Deployment parameters for Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel
     struct IdleCdoAASTIdleCdoAAJTKernelParams {
         address idleCDO;
     }
@@ -401,11 +399,11 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         roleValues[6] = SYNC_ROLE;
         selectors[7] = IRoycoKernel.setSeniorTrancheSelfLiquidationBonus.selector;
         roleValues[7] = ADMIN_KERNEL_ROLE;
-        selectors[8] = IRoycoKernel.blacklistDepositor.selector;
+        selectors[8] = IRoycoKernel.blacklistAccounts.selector;
         roleValues[8] = TRANSFER_AGENT_ROLE;
-        selectors[9] = IRoycoKernel.unblacklistDepositor.selector;
+        selectors[9] = IRoycoKernel.unblacklistAccounts.selector;
         roleValues[9] = TRANSFER_AGENT_ROLE;
-        selectors[10] = IRoycoKernel.setBlacklistEnabled.selector;
+        selectors[10] = IRoycoKernel.setBlacklistStatus.selector;
         roleValues[10] = TRANSFER_AGENT_ROLE;
 
         return IRoycoFactory.RolesTargetConfiguration({ target: _kernel, selectors: selectors, roles: roleValues });
@@ -872,15 +870,15 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         if (_kernelType == KernelType.ReUSD_ST_ReUSD_JT) {
             ReUSDSTReUSDJTKernelParams memory kp = abi.decode(_kernelSpecificParams, (ReUSDSTReUSDJTKernelParams));
             return abi.encodePacked(type(ReUSD_ST_ReUSD_JT_Kernel).creationCode, abi.encode(_cp, kp.reusd, kp.reusdUsdQuoteToken, kp.insuranceCapitalLayer));
-        } else if (_kernelType == KernelType.Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel) {
-            return abi.encodePacked(type(Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel).creationCode, abi.encode(_cp));
+        } else if (_kernelType == KernelType.Identical_ERC20_ST_ERC20_JT_Kernel) {
+            return abi.encodePacked(type(Identical_ERC20_ST_ERC20_JT_Kernel).creationCode, abi.encode(_cp));
         } else if (_kernelType == KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel) {
             return abi.encodePacked(type(Identical_ERC4626_ST_ERC4626_JT_Kernel).creationCode, abi.encode(_cp));
         } else if (_kernelType == KernelType.IdleCdoAA_ST_IdleCdoAA_JT) {
             IdleCdoAASTIdleCdoAAJTKernelParams memory kp = abi.decode(_kernelSpecificParams, (IdleCdoAASTIdleCdoAAJTKernelParams));
-            return abi.encodePacked(type(IdleCdoAA_ST_IdleCdoAA_JT_Kernel).creationCode, abi.encode(_cp, kp.idleCDO));
-        } else if (_kernelType == KernelType.DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel) {
-            return abi.encodePacked(type(DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel).creationCode, abi.encode(_cp));
+            return abi.encodePacked(type(Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel).creationCode, abi.encode(_cp, kp.idleCDO));
+        } else if (_kernelType == KernelType.Identical_DSToken_ST_DSToken_JT_Kernel) {
+            return abi.encodePacked(type(Identical_DSToken_ST_DSToken_JT_Kernel).creationCode, abi.encode(_cp));
         } else {
             revert UnsupportedKernelType(_kernelType);
         }
@@ -912,11 +910,11 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
 
         if (_kernelType == KernelType.ReUSD_ST_ReUSD_JT) {
             return abi.encodeCall(ReUSD_ST_ReUSD_JT_Kernel.initialize, (kernelParams));
-        } else if (_kernelType == KernelType.Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel) {
+        } else if (_kernelType == KernelType.Identical_ERC20_ST_ERC20_JT_Kernel) {
             IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams memory kernelParams2 =
                 abi.decode(_kernelSpecificParams, (IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams));
             return abi.encodeCall(
-                Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel.initialize,
+                Identical_ERC20_ST_ERC20_JT_Kernel.initialize,
                 (
                     kernelParams,
                     kernelParams2.trancheAssetToReferenceAssetOracle,
@@ -929,12 +927,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
                 abi.decode(_kernelSpecificParams, (IdenticalERC4626SharesAdminOracleQuoterKernelParams));
             return abi.encodeCall(Identical_ERC4626_ST_ERC4626_JT_Kernel.initialize, (kernelParams, kernelParams2.initialConversionRateWAD));
         } else if (_kernelType == KernelType.IdleCdoAA_ST_IdleCdoAA_JT) {
-            return abi.encodeCall(IdleCdoAA_ST_IdleCdoAA_JT_Kernel.initialize, (kernelParams));
-        } else if (_kernelType == KernelType.DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel) {
+            return abi.encodeCall(Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel.initialize, (kernelParams));
+        } else if (_kernelType == KernelType.Identical_DSToken_ST_DSToken_JT_Kernel) {
             IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams memory kernelParams2 =
                 abi.decode(_kernelSpecificParams, (IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams));
             return abi.encodeCall(
-                DSToken_ST_DSToken_JT_IdenticalAssetsChainlinkToAdminOracleQuoter_Kernel.initialize,
+                Identical_ERC20_ST_ERC20_JT_Kernel.initialize,
                 (
                     kernelParams,
                     kernelParams2.trancheAssetToReferenceAssetOracle,

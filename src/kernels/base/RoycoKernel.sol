@@ -60,7 +60,6 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     }
 
     /// @dev Permissions the function to only be callable by the market's senior or junior tranche
-    /// @dev Should be placed on all tranche balance update functions
     modifier onlyTranche() {
         require(msg.sender == SENIOR_TRANCHE || msg.sender == JUNIOR_TRANCHE, ONLY_TRANCHE());
         _;
@@ -116,9 +115,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         RoycoKernelState storage $ = _getRoycoKernelStorage();
         $.protocolFeeRecipient = _params.protocolFeeRecipient;
         $.stSelfLiquidationBonusWAD = _params.stSelfLiquidationBonusWAD;
-
-        // Enable the blacklist by default
-        $.isBlacklistEnabled = true;
+        $.isBlacklistEnabled = true; // Enable the blacklist by default
 
         emit ProtocolFeeRecipientUpdated(_params.protocolFeeRecipient);
     }
@@ -196,7 +193,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     /// @dev ST deposits are allowed if the market is in a PERPETUAL or FIXED_TERM state, granted that the market's coverage requirement is satisfied post-deposit
     function stMaxDeposit(address _receiver) public view virtual override(IRoycoKernel) returns (TRANCHE_UNIT) {
         // If the receiver is blacklisted, return zero tranche units
-        if (isDepositorBlacklisted(_receiver)) return ZERO_TRANCHE_UNITS;
+        if (isBlacklisted(_receiver)) return ZERO_TRANCHE_UNITS;
         // If ST IL exists, ST deposits are disabled to preclude existing ST's from getting diluted and realizing losses
         if (_previewSyncTrancheAccounting().stImpermanentLoss != ZERO_NAV_UNITS) return ZERO_TRANCHE_UNITS;
         // ST deposits are enabled as long as ST IL is nonexistent and coverage is satisfied
@@ -221,7 +218,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         )
     {
         // If the owner is blacklisted, return zero claims
-        if (isDepositorBlacklisted(_owner)) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+        if (isBlacklisted(_owner)) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
         SyncedAccountingState memory state;
         AssetClaims memory stNotionalClaims;
@@ -245,7 +242,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     /// @dev JT deposits are allowed if the market is in a PERPETUAL state
     function jtMaxDeposit(address _receiver) public view virtual override(IRoycoKernel) returns (TRANCHE_UNIT) {
         // If the receiver is blacklisted, return zero tranche units
-        if (isDepositorBlacklisted(_receiver)) return ZERO_TRANCHE_UNITS;
+        if (isBlacklisted(_receiver)) return ZERO_TRANCHE_UNITS;
         // If the market is in a state where JT deposits are not allowed, return zero tranche units
         if ((_previewSyncTrancheAccounting()).marketState != MarketState.PERPETUAL) return ZERO_TRANCHE_UNITS;
         return MAX_TRANCHE_UNITS;
@@ -267,7 +264,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         )
     {
         // If the owner is blacklisted, return zero claims
-        if (isDepositorBlacklisted(_owner)) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+        if (isBlacklisted(_owner)) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
         // Get the total claims the junior tranche has on each tranche's assets
         SyncedAccountingState memory state;
@@ -490,80 +487,77 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         emit SeniorTrancheSelfLiquidationBonusUpdated(_stSelfLiquidationBonusWAD);
     }
 
-    // =============================
-    // Tranche Balance Update Hook Functions and Compliance Methods
-    // =============================
+    /// @inheritdoc IRoycoKernel
+    function setBlacklistStatus(bool _blacklistEnabled) external override(IRoycoKernel) restricted {
+        RoycoKernelState storage $ = _getRoycoKernelStorage();
+        require($.isBlacklistEnabled != _blacklistEnabled, BLACKLIST_STATUS_ALREADY_SET(_blacklistEnabled));
+        $.isBlacklistEnabled = _blacklistEnabled;
+        emit BlacklistStatusUpdated(_blacklistEnabled);
+    }
 
     /// @inheritdoc IRoycoKernel
-    function blacklistDepositor(address[] calldata _depositors) external override(IRoycoKernel) restricted {
-        require(_depositors.length != 0, EMPTY_ARRAY());
+    function blacklistAccounts(address[] calldata _accounts) external override(IRoycoKernel) restricted {
+        require(_accounts.length != 0, EMPTY_ARRAY());
         RoycoKernelState storage $ = _getRoycoKernelStorage();
-        for (uint256 i = 0; i < _depositors.length; i++) {
-            address depositor = _depositors[i];
-            require(depositor != address(0), NULL_ADDRESS());
-            require(!$.isBlacklisted[depositor], DEPOSITOR_ALREADY_BLACKLISTED(depositor));
-            $.isBlacklisted[depositor] = true;
-            emit DepositorBlacklisted(depositor);
+        for (uint256 i = 0; i < _accounts.length; i++) {
+            address account = _accounts[i];
+            require(account != address(0), NULL_ADDRESS());
+            require(!$.isBlacklisted[account], ACCOUNT_ALREADY_BLACKLISTED(account));
+            $.isBlacklisted[account] = true;
+            emit AccountBlacklisted(account);
         }
     }
 
     /// @inheritdoc IRoycoKernel
-    function unblacklistDepositor(address[] calldata _depositors) external override(IRoycoKernel) restricted {
-        require(_depositors.length != 0, EMPTY_ARRAY());
+    function unblacklistAccounts(address[] calldata _accounts) external override(IRoycoKernel) restricted {
+        require(_accounts.length != 0, EMPTY_ARRAY());
         RoycoKernelState storage $ = _getRoycoKernelStorage();
-        for (uint256 i = 0; i < _depositors.length; i++) {
-            address depositor = _depositors[i];
-            require(depositor != address(0), NULL_ADDRESS());
-            require($.isBlacklisted[depositor], DEPOSITOR_NOT_BLACKLISTED(depositor));
-            $.isBlacklisted[depositor] = false;
-            emit DepositorUnblacklisted(depositor);
+        for (uint256 i = 0; i < _accounts.length; i++) {
+            address account = _accounts[i];
+            require(account != address(0), NULL_ADDRESS());
+            require($.isBlacklisted[account], ACCOUNT_NOT_BLACKLISTED(account));
+            $.isBlacklisted[account] = false;
+            emit AccountUnblacklisted(account);
         }
     }
 
+    // =============================
+    // Tranche Compliance Methods
+    // =============================
+
     /// @inheritdoc IRoycoKernel
-    function isDepositorBlacklisted(address _depositor) public view override(IRoycoKernel) returns (bool) {
+    function isBlacklisted(address _account) public view override(IRoycoKernel) returns (bool) {
         RoycoKernelState storage $ = _getRoycoKernelStorage();
-        return $.isBlacklistEnabled && $.isBlacklisted[_depositor];
+        return $.isBlacklistEnabled && $.isBlacklisted[_account];
     }
 
     /// @inheritdoc IRoycoKernel
     function preTrancheBalanceUpdateHook(address _from, address _to, uint256 _value) external override(IRoycoKernel) onlyTranche whenNotPaused {
-        // Check if the depositor is blacklisted
-        require(!isDepositorBlacklisted(_from), DEPOSITOR_BLACKLISTED(_from));
-        require(!isDepositorBlacklisted(_to), DEPOSITOR_BLACKLISTED(_to));
+        // Check if the sender or recipient are blacklisted
+        require(!isBlacklisted(_from), ACCOUNT_BLACKLISTED(_from));
+        require(!isBlacklisted(_to), ACCOUNT_BLACKLISTED(_to));
 
-        // If transferring shares, ensure that the "_to" address is whitelisted on the tranche
-        // It is assumed that the "_from" address is already whitelisted on the tranche
+        // If transferring shares, ensure that the recipient is a whitelisted LP for the tranche
+        // It is assumed that the sender is already a whitelisted LP
         if (_to != address(0)) {
             address authority = authority();
             // Check if the to address can call the deposit function on the tranche
-            (bool canDeposit,) = IAccessManager(authority).canCall(_to, msg.sender, IRoycoVaultTranche.deposit.selector);
-            require(_to != authority && canDeposit, TO_ADDRESS_NOT_WHITELISTED(_to));
+            (bool isWhitelistedTrancheLP,) = IAccessManager(authority).canCall(_to, msg.sender, IRoycoVaultTranche.deposit.selector);
+            require(_to != authority && isWhitelistedTrancheLP, ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(_to));
         }
 
-        // Call the kernel specific pre-balance update hook
-        _preTrancheBalanceUpdate(_from, _to, _value, msg.sender);
-    }
-
-    /// @inheritdoc IRoycoKernel
-    function setBlacklistEnabled(bool _isBlacklistEnabled) external override(IRoycoKernel) restricted {
-        RoycoKernelState storage $ = _getRoycoKernelStorage();
-        require($.isBlacklistEnabled != _isBlacklistEnabled, BLACKLIST_STATUS_ALREADY_SET(_isBlacklistEnabled));
-
-        _getRoycoKernelStorage().isBlacklistEnabled = _isBlacklistEnabled;
-
-        emit BlacklistStatusUpdated(_isBlacklistEnabled);
+        // Call the market specific pre-balance update hook
+        _preTrancheBalanceUpdate(_from, _to, _value);
     }
 
     /**
-     * @notice Pre-balance update hook for the tranche
-     * @dev Should be overridden by the tranche to perform any additional checks or actions.
+     * @notice Pre-balance update hook for the kernel
+     * @dev Should be overridden by concrete kernel implementations to perform any additional checks or actions
      * @param _from The address from which the balance is being updated
      * @param _to The address to which the balance is being updated
      * @param _value The amount of the balance being updated
-     * @param _tranche The address of the tranche
      */
-    function _preTrancheBalanceUpdate(address _from, address _to, uint256 _value, address _tranche) internal virtual { }
+    function _preTrancheBalanceUpdate(address _from, address _to, uint256 _value) internal virtual { }
 
     // =============================
     // Internal Tranche Accounting Synchronization Functions
@@ -765,7 +759,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     /**
      * @notice Process a deposit of junior tranche assets
      * @dev The JT vault has already transferred the assets to the kernel
-     * @param _jtAssets The senior tranche assets deposited by the ST LP
+     * @param _jtAssets The junior tranche assets deposited by the JT LP
      */
     function _jtDepositAssets(TRANCHE_UNIT _jtAssets) internal virtual {
         // Credit the deposited assets to the junior tranche
@@ -826,14 +820,15 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         NAV_UNIT desiredBonusNAV = _stUserClaims.nav.mulDiv(_getRoycoKernelStorage().stSelfLiquidationBonusWAD, WAD, Math.Rounding.Floor);
         // Clamp the actual bonus by the remaining JT controlled NAV
         stSelfLiquidationBonusNAV = UnitsMathLib.min(desiredBonusNAV, _state.jtEffectiveNAV);
-        // Preemptively return if there is no bonus to remit
+        // Preemptively return if there is no remaining bonus capital to remit
         if (stSelfLiquidationBonusNAV == ZERO_NAV_UNITS) return (_stUserClaims, ZERO_NAV_UNITS);
 
         // Decompose the NAV claims for the Junior Tranche to get the NAV claims for sourcing the bonus
         (,, NAV_UNIT jtClaimOnSTRawNAV, NAV_UNIT jtClaimOnSelfRawNAV) = _decomposeNAVClaims(_state);
-        // Compute the bonus NAV sourced from JT's claims on each tranche's NAV: prioritize ST assets and then JT assets
+        // Compute the bonus NAV sourced from JT's claims on each tranche's NAV: prioritize ST assets over JT assets for sourcing
+        // stSelfLiquidationBonusNAV <= (jtClaimOnSTRawNAV + jtClaimOnSelfRawNAV) since it was bounded by JT effective NAV already
         NAV_UNIT bonusFromJTClaimOnSTRawNAV = UnitsMathLib.min(stSelfLiquidationBonusNAV, jtClaimOnSTRawNAV);
-        NAV_UNIT bonusFromJTClaimOnSelfRawNAV = UnitsMathLib.min((stSelfLiquidationBonusNAV - bonusFromJTClaimOnSTRawNAV), jtClaimOnSelfRawNAV);
+        NAV_UNIT bonusFromJTClaimOnSelfRawNAV = (stSelfLiquidationBonusNAV - bonusFromJTClaimOnSTRawNAV);
 
         // Apply the derived bonus to the user's asset claims
         stUserClaimsWithBonus.stAssets = _stUserClaims.stAssets + stConvertNAVUnitsToTrancheUnits(bonusFromJTClaimOnSTRawNAV);
@@ -867,6 +862,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     function getState() external view override(IRoycoKernel) returns (RoycoKernelStateView memory) {
         RoycoKernelState storage $ = _getRoycoKernelStorage();
         return RoycoKernelStateView({
+            isBlacklistEnabled: $.isBlacklistEnabled,
             protocolFeeRecipient: $.protocolFeeRecipient,
             stSelfLiquidationBonusWAD: $.stSelfLiquidationBonusWAD,
             stOwnedYieldBearingAssets: $.stOwnedYieldBearingAssets,

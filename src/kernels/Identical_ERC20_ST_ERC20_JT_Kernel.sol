@@ -6,11 +6,11 @@ import { RoycoKernel } from "./base/RoycoKernel.sol";
 import { IdenticalAssetsChainlinkToAdminOracleQuoter } from "./base/quoter/IdenticalAssetsChainlinkToAdminOracleQuoter.sol";
 
 /**
- * @title Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel
+ * @title Identical_ERC20_ST_ERC20_JT_Kernel
  * @author Waymont
- * @notice The senior and junior tranches transfer in the same yield bearing ERC20 asset (ACRED, mF-ONE, etc.)
+ * @notice The senior and junior tranches transfer in the same yield bearing ERC20 asset (PT-cUSD, mF-ONE, etc.)
  */
-contract Identical_ERC20_ST_ERC20_JT_Chainlink_Kernel is RoycoKernel, IdenticalAssetsChainlinkToAdminOracleQuoter {
+contract Identical_ERC20_ST_ERC20_JT_Kernel is RoycoKernel, IdenticalAssetsChainlinkToAdminOracleQuoter {
     /// @notice Constructs the kernel state
     /// @param _params The standard construction parameters for the Royco kernel
     constructor(RoycoKernelConstructionParams memory _params) RoycoKernel(_params) { }

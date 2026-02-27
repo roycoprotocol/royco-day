@@ -22,7 +22,7 @@ contract RoycoJuniorTranche is RoycoVaultTranche {
         __RoycoTranche_init(_jtParams);
     }
 
-    ///@inheritdoc RoycoVaultTranche
+    /// @inheritdoc RoycoVaultTranche
     function TRANCHE_TYPE() public pure virtual override(RoycoVaultTranche) returns (TrancheType) {
         return TrancheType.JUNIOR;
     }

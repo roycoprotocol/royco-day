@@ -1178,6 +1178,8 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
             // ST should still have value (coverage protected them)
             assertGt(toUint256(stPreviewClaims.nav), 0, "ST should have redemption value");
 
+            // If the claims are greater, the liquidation bonus is being applied
+            if (stPreviewClaims.nav >= stNavBeforeLoss) return;
             // The NAV should be approximately what was deposited (coverage protected)
             assertApproxEqRel(
                 toUint256(stPreviewClaims.nav), toUint256(stNavBeforeLoss), MAX_RELATIVE_DELTA, "ST preview NAV should be approximately original deposit"

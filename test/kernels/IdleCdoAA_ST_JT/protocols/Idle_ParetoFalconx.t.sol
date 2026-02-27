@@ -6,13 +6,13 @@ import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { IIdleCDO } from "../../../../src/interfaces/external/idle-finance/IIdleCDO.sol";
-import { IdleCdoAA_ST_IdleCdoAA_JT_Kernel } from "../../../../src/kernels/IdleCdoAA_ST_IdleCdoAA_JT_Kernel.sol";
+import { Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel } from "../../../../src/kernels/Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel.sol";
 import { WAD_DECIMALS } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
 import { IdleCdoAA_TestBase } from "../base/IdleCdoAA_TestBase.t.sol";
 
 /// @title ParetoFalconx_Test
-/// @notice Tests IdleCdoAA_ST_IdleCdoAA_JT_Kernel with Pareto's Falconx Prime Brokerage Vault
+/// @notice Tests Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel with Pareto's Falconx Prime Brokerage Vault
 /// @dev Both ST and JT use the AA tranche token as the tranche asset
 ///
 /// Pareto Falconx is an IdleCDO where:
@@ -119,13 +119,13 @@ contract ParetoFalconx_Test is IdleCdoAA_TestBase {
 
     /// @notice Test that kernel is deployed with correct CDO address
     function test_paretoFalconx_hasCorrectIdleCDOAddress() public view {
-        IdleCdoAA_ST_IdleCdoAA_JT_Kernel kernel = IdleCdoAA_ST_IdleCdoAA_JT_Kernel(address(KERNEL));
+        Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel kernel = Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel(address(KERNEL));
         assertEq(kernel.IDLE_CDO(), PARETO_FALCONX_CDO, "Kernel should have correct IdleCDO address");
     }
 
     /// @notice Test that kernel has correct virtual price multiplier
     function test_paretoFalconx_hasCorrectVirtualPriceMultiplier() public view {
-        IdleCdoAA_ST_IdleCdoAA_JT_Kernel kernel = IdleCdoAA_ST_IdleCdoAA_JT_Kernel(address(KERNEL));
+        Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel kernel = Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel(address(KERNEL));
         assertEq(kernel.IDLE_CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION(), SCALE_FACTOR, "Kernel should have correct virtual price multiplier");
     }
 
@@ -137,7 +137,7 @@ contract ParetoFalconx_Test is IdleCdoAA_TestBase {
 
     /// @notice Test that conversion rate matches IdleCDO virtual price
     function test_paretoFalconx_conversionRateMatchesCDOVirtualPrice() public view {
-        IdleCdoAA_ST_IdleCdoAA_JT_Kernel kernel = IdleCdoAA_ST_IdleCdoAA_JT_Kernel(address(KERNEL));
+        Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel kernel = Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel(address(KERNEL));
 
         uint256 virtualPrice = CDO.virtualPrice(AA_TRANCHE_TOKEN);
         uint256 expectedConversionRateWAD = virtualPrice * kernel.IDLE_CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION();

@@ -20,7 +20,7 @@ import { RolesConfiguration } from "./RolesConfiguration.sol";
  * @dev The factory deploys each market's constituent contracts using the UUPS proxy pattern
  */
 contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFactory, UUPSUpgradeable {
-    /// @dev Storage location for the factory
+    /// @dev Storage slot for RoycoFactoryState using ERC-7201 pattern
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoFactoryState")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ROYCO_FACTORY_STORAGE_SLOT = 0xd5259699f97e0f34b934576b7add74d31128c481e849a0afbdca7e6e84f8b300;
 
@@ -91,6 +91,21 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
     }
 
     /// @inheritdoc IRoycoFactory
+    function seniorTrancheToJuniorTranche(address _seniorTranche) external view override(IRoycoFactory) returns (address juniorTranche) {
+        return _getRoycoFactoryState().seniorTrancheToJuniorTranche[_seniorTranche];
+    }
+
+    /// @inheritdoc IRoycoFactory
+    function juniorTrancheToSeniorTranche(address _juniorTranche) external view override(IRoycoFactory) returns (address seniorTranche) {
+        return _getRoycoFactoryState().juniorTrancheToSeniorTranche[_juniorTranche];
+    }
+
+    /// @inheritdoc IRoycoFactory
+    function predictDeterministicAddress(bytes32 _salt) external view override(IRoycoFactory) returns (address deployed) {
+        deployed = CREATE3.predictDeterministicAddress(_salt);
+    }
+
+    /// @inheritdoc IRoycoFactory
     function deployMarket(MarketDeploymentParams calldata _params) external override(IRoycoFactory) onlyAuthorized returns (RoycoMarket memory roycoMarket) {
         // Validate the deployment parameters
         _validateDeploymentParams(_params);
@@ -115,21 +130,6 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
         $.juniorTrancheToSeniorTranche[juniorTranche] = seniorTranche;
 
         emit MarketDeployed(roycoMarket, _params);
-    }
-
-    /// @inheritdoc IRoycoFactory
-    function predictDeterministicAddress(bytes32 _salt) external view override(IRoycoFactory) returns (address deployed) {
-        deployed = CREATE3.predictDeterministicAddress(_salt);
-    }
-
-    /// @inheritdoc IRoycoFactory
-    function seniorTrancheToJuniorTranche(address _seniorTranche) external view override(IRoycoFactory) returns (address juniorTranche) {
-        return _getRoycoFactoryState().seniorTrancheToJuniorTranche[_seniorTranche];
-    }
-
-    /// @inheritdoc IRoycoFactory
-    function juniorTrancheToSeniorTranche(address _juniorTranche) external view override(IRoycoFactory) returns (address seniorTranche) {
-        return _getRoycoFactoryState().juniorTrancheToSeniorTranche[_juniorTranche];
     }
 
     /**
@@ -165,30 +165,6 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
         );
     }
 
-    /// @notice Validates the deployments
-    /// @param _roycoMarket The deployed Royco market to validate
-    function _validateDeployment(RoycoMarket memory _roycoMarket) internal view {
-        // Check that the access manager is set on the contracts
-        require(AccessManagedUpgradeable(address(_roycoMarket.accountant)).authority() == address(this), INVALID_ACCESS_MANAGER());
-        require(AccessManagedUpgradeable(address(_roycoMarket.kernel)).authority() == address(this), INVALID_ACCESS_MANAGER());
-        require(AccessManagedUpgradeable(address(_roycoMarket.seniorTranche)).authority() == address(this), INVALID_ACCESS_MANAGER());
-        require(AccessManagedUpgradeable(address(_roycoMarket.juniorTranche)).authority() == address(this), INVALID_ACCESS_MANAGER());
-
-        // Verify the Vault's Configuration
-        require(address(_roycoMarket.seniorTranche.KERNEL()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_SENIOR_TRANCHE());
-        require(address(_roycoMarket.juniorTranche.KERNEL()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_JUNIOR_TRANCHE());
-
-        // Verify the Kernel's Configuration
-        require(_roycoMarket.kernel.SENIOR_TRANCHE() == address(_roycoMarket.seniorTranche), INVALID_SENIOR_TRANCHE_ON_KERNEL());
-        require(_roycoMarket.kernel.JUNIOR_TRANCHE() == address(_roycoMarket.juniorTranche), INVALID_JUNIOR_TRANCHE_ON_KERNEL());
-        require(_roycoMarket.kernel.ST_ASSET() == address(_roycoMarket.seniorTranche.asset()), INVALID_ST_ASSET_ON_KERNEL());
-        require(_roycoMarket.kernel.JT_ASSET() == address(_roycoMarket.juniorTranche.asset()), INVALID_JT_ASSET_ON_KERNEL());
-        require(_roycoMarket.kernel.ACCOUNTANT() == address(_roycoMarket.accountant), INVALID_ACCOUNTANT_ON_KERNEL());
-
-        // Verify the Accountant's Configuration
-        require(address(_roycoMarket.accountant.KERNEL()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_ACCOUNTANT());
-    }
-
     /// @notice Validates the deployment parameters
     /// @param _params The parameters to validate
     function _validateDeploymentParams(MarketDeploymentParams calldata _params) internal pure {
@@ -209,6 +185,30 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
         require(_params.juniorTrancheProxyDeploymentSalt != bytes32(0), INVALID_JUNIOR_TRANCHE_PROXY_DEPLOYMENT_SALT());
         require(_params.kernelProxyDeploymentSalt != bytes32(0), INVALID_KERNEL_PROXY_DEPLOYMENT_SALT());
         require(_params.accountantProxyDeploymentSalt != bytes32(0), INVALID_ACCOUNTANT_PROXY_DEPLOYMENT_SALT());
+    }
+
+    /// @notice Validates the deployments
+    /// @param _roycoMarket The deployed Royco market to validate
+    function _validateDeployment(RoycoMarket memory _roycoMarket) internal view {
+        // Check that the access manager is set on the contracts
+        require(AccessManagedUpgradeable(address(_roycoMarket.accountant)).authority() == address(this), INVALID_ACCESS_MANAGER());
+        require(AccessManagedUpgradeable(address(_roycoMarket.kernel)).authority() == address(this), INVALID_ACCESS_MANAGER());
+        require(AccessManagedUpgradeable(address(_roycoMarket.seniorTranche)).authority() == address(this), INVALID_ACCESS_MANAGER());
+        require(AccessManagedUpgradeable(address(_roycoMarket.juniorTranche)).authority() == address(this), INVALID_ACCESS_MANAGER());
+
+        // Verify the Tranche Configurations
+        require(address(_roycoMarket.seniorTranche.KERNEL()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_SENIOR_TRANCHE());
+        require(address(_roycoMarket.juniorTranche.KERNEL()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_JUNIOR_TRANCHE());
+
+        // Verify the Kernel's Configuration
+        require(_roycoMarket.kernel.SENIOR_TRANCHE() == address(_roycoMarket.seniorTranche), INVALID_SENIOR_TRANCHE_ON_KERNEL());
+        require(_roycoMarket.kernel.JUNIOR_TRANCHE() == address(_roycoMarket.juniorTranche), INVALID_JUNIOR_TRANCHE_ON_KERNEL());
+        require(_roycoMarket.kernel.ST_ASSET() == address(_roycoMarket.seniorTranche.asset()), INVALID_ST_ASSET_ON_KERNEL());
+        require(_roycoMarket.kernel.JT_ASSET() == address(_roycoMarket.juniorTranche.asset()), INVALID_JT_ASSET_ON_KERNEL());
+        require(_roycoMarket.kernel.ACCOUNTANT() == address(_roycoMarket.accountant), INVALID_ACCOUNTANT_ON_KERNEL());
+
+        // Verify the Accountant's Configuration
+        require(address(_roycoMarket.accountant.KERNEL()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_ACCOUNTANT());
     }
 
     /**
@@ -251,7 +251,7 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
         proxy = CREATE3.deployDeterministic(abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(_implementation, _initData)), _salt);
     }
 
-    /// @dev Restricts the upgrade to only the authorized roles
+    /// @dev Restricts the upgrade to only authorized parties
     function _authorizeUpgrade(address _newImplementation) internal override(UUPSUpgradeable) onlyAuthorized {
         require(_newImplementation.code.length > 0, INVALID_IMPLEMENTATION());
     }
