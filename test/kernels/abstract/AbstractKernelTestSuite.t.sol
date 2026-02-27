@@ -1595,7 +1595,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 4);
 
         // Deposit JT
-        uint256 jtShares = _depositJT(ALICE_ADDRESS, _jtAmount);
+        uint256 _jtShares = _depositJT(ALICE_ADDRESS, _jtAmount);
         uint256 maxRedeemable = JT.maxRedeem(ALICE_ADDRESS);
         if (maxRedeemable == 0) return;
 
@@ -1734,7 +1734,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Test maxRedeem returns zero for zero balance
-    function test_maxRedeem_zeroForZeroBalance() external {
+    function test_maxRedeem_zeroForZeroBalance() external view {
         assertEq(JT.maxRedeem(ALICE_ADDRESS), 0, "maxRedeem should be 0 for zero balance");
         assertEq(ST.maxRedeem(ALICE_ADDRESS), 0, "maxRedeem should be 0 for zero balance");
     }
@@ -1858,7 +1858,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         uint256 stShares = _depositST(BOB_ADDRESS, stAmount);
 
         // Record maxRedeem before yield
-        uint256 jtMaxRedeemBeforeYield = JT.maxRedeem(ALICE_ADDRESS);
+        uint256 _jtMaxRedeemBeforeYield = JT.maxRedeem(ALICE_ADDRESS);
 
         // Simulate yield
         simulateJTYield(_yieldPercentage * 1e16);
@@ -1867,7 +1867,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         // maxRedeem after yield
-        uint256 jtMaxRedeemAfterYield = JT.maxRedeem(ALICE_ADDRESS);
+        uint256 _jtMaxRedeemAfterYield = JT.maxRedeem(ALICE_ADDRESS);
 
         // ST maxRedeem should still be full balance
         assertEq(ST.maxRedeem(BOB_ADDRESS), stShares, "ST maxRedeem should still be full balance");
@@ -2129,7 +2129,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         _depositST(BOB_ADDRESS, stDeposit);
 
         // Verify ST deposits are initially allowed for new depositors
-        TRANCHE_UNIT maxDepositBefore = ST.maxDeposit(CHARLIE_ADDRESS);
+        TRANCHE_UNIT _maxDepositBefore = ST.maxDeposit(CHARLIE_ADDRESS);
 
         // Simulate a massive loss that exceeds JT capacity (50% loss)
         // This will cause ST impermanent loss since JT cannot cover all losses

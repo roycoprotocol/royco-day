@@ -343,14 +343,14 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         vm.warp(block.timestamp + 1);
 
         // Build market deployment params for factory.deployMarket()
-        bytes32 marketId2 = keccak256(abi.encodePacked("Second Market", vm.getBlockTimestamp()));
+        bytes32 _marketId2 = keccak256(abi.encodePacked("Second Market", vm.getBlockTimestamp()));
 
         // Get expected addresses
         bytes32 salt2 = keccak256(abi.encodePacked("MARKET_2_SALT"));
-        address expectedST = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-ST")));
-        address expectedJT = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-JT")));
-        address expectedKernel = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-KERNEL")));
-        address expectedAccountant = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-ACCOUNTANT")));
+        address _expectedST = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-ST")));
+        address _expectedJT = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-JT")));
+        address _expectedKernel = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-KERNEL")));
+        address _expectedAccountant = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-ACCOUNTANT")));
 
         // Note: For a full test, we would need to build all the initialization data
         // This test demonstrates that the DEPLOYER role is properly configured

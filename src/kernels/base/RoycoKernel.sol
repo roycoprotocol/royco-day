@@ -339,11 +339,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     /// @inheritdoc IRoycoKernel
     /// @dev ST deposits are enabled if the market is in a PERPETUAL or FIXED_TERM state, granted that the market's coverage requirement is satisfied post-deposit
     /// @dev ST deposits are disabled if the senior tranche has incurred any impermanent loss to prevent dilution
-    function stDeposit(
-        TRANCHE_UNIT _assets,
-        address,
-        address
-    )
+    function stDeposit(TRANCHE_UNIT _assets)
         external
         virtual
         override(IRoycoKernel)
@@ -374,8 +370,6 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     /// @dev ST redemptions are enabled if the market is in a PERPETUAL state
     function stRedeem(
         uint256 _shares,
-        address,
-        address,
         address _receiver,
         bool _bypassRedemptionRestrictions
     )
@@ -416,11 +410,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
 
     /// @inheritdoc IRoycoKernel
     /// @dev JT deposits are enabled if the market is in a PERPETUAL state
-    function jtDeposit(
-        TRANCHE_UNIT _assets,
-        address,
-        address
-    )
+    function jtDeposit(TRANCHE_UNIT _assets)
         external
         virtual
         override(IRoycoKernel)
@@ -451,8 +441,6 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     /// @dev JT redemptions are enabled if the market is in a PERPETUAL or FIXED_TERM state, granted that the market's coverage requirement is satisfied post-redemption
     function jtRedeem(
         uint256 _shares,
-        address,
-        address,
         address _receiver,
         bool _bypassRedemptionRestrictions
     )

@@ -84,7 +84,7 @@ contract ACRED_Test is YieldBearingERC20Chainlink_TestBase {
         return DEPLOY_SCRIPT.deploy(cfg, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, _generateRoleAssignments(), DEPLOYER.privateKey);
     }
 
-    function _overrideStaleness(DeploymentConfig.MarketDeploymentConfig memory _cfg) private view {
+    function _overrideStaleness(DeploymentConfig.MarketDeploymentConfig memory _cfg) private pure {
         DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams memory kp =
             abi.decode(_cfg.kernelSpecificParams, (DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams));
         kp.stalenessThresholdSeconds = _getStalenessThreshold();

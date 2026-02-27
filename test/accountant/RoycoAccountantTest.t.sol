@@ -55,7 +55,8 @@ contract RoycoAccountantTest is BaseTest {
     }
 
     function _deployAccountant(
-        address kernel,
+        address,
+        /* kernel */
         uint64 stProtocolFeeWAD,
         uint64 jtProtocolFeeWAD,
         uint64 coverageWAD,
@@ -517,7 +518,7 @@ contract RoycoAccountantTest is BaseTest {
 
         uint256 jtLoss = 10e18;
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state1 = accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18 - jtLoss));
+        SyncedAccountingState memory _state1 = accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18 - jtLoss));
 
         // jtSelfImpermanentLoss removed from SyncedAccountingState
 
@@ -831,7 +832,7 @@ contract RoycoAccountantTest is BaseTest {
         uint256 stEffBefore = toUint256(stateBefore.lastSTEffectiveNAV);
         uint256 stRawBefore = toUint256(stateBefore.lastSTRawNAV);
 
-        uint256 stWithdrawal = stRawBefore - 25e18;
+        uint256 _stWithdrawal = stRawBefore - 25e18;
         vm.prank(MOCK_KERNEL);
         accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(25e18), _nav(10e18), ZERO_NAV_UNITS);
 
@@ -854,7 +855,7 @@ contract RoycoAccountantTest is BaseTest {
         uint256 jtEffBefore = toUint256(stateBefore.lastJTEffectiveNAV);
         uint256 jtRawBefore = toUint256(stateBefore.lastJTRawNAV);
 
-        uint256 jtWithdrawal = jtRawBefore - 25e18;
+        uint256 _jtWithdrawal = jtRawBefore - 25e18;
         vm.prank(MOCK_KERNEL);
         accountant.postOpSyncTrancheAccounting(Operation.JT_REDEEM, _nav(80e18), _nav(25e18), ZERO_NAV_UNITS);
 
@@ -1344,9 +1345,9 @@ contract RoycoAccountantTest is BaseTest {
         IRoycoAccountant.RoycoAccountantState memory accountantState = accountant.getState();
 
         // Verify LTV is computed correctly: LTV = stEffectiveNAV / (stEffectiveNAV + jtEffectiveNAV - stIL)
-        uint256 stEff = toUint256(state.stEffectiveNAV);
-        uint256 jtEff = toUint256(state.jtEffectiveNAV);
-        uint256 stIL = toUint256(state.stImpermanentLoss);
+        uint256 _stEff = toUint256(state.stEffectiveNAV);
+        uint256 _jtEff = toUint256(state.jtEffectiveNAV);
+        uint256 _stIL = toUint256(state.stImpermanentLoss);
         uint256 expectedLtv = UtilsLib.computeLTV(state.stEffectiveNAV, state.stImpermanentLoss, state.jtEffectiveNAV);
         assertEq(state.ltvWAD, expectedLtv, "ltvWAD mismatch");
 

@@ -351,7 +351,7 @@ contract StaticCurveYDMTest is BaseTest {
         }
     }
 
-    function test_previewJTYieldShare_continuityAtBoundary() public view {
+    function test_previewJTYieldShare_continuityAtBoundary() public pure {
         // Both legs should give the same result at U = 0.9
         // First leg: Y = 0.25 * 0.9 = 0.225
         // Second leg: Y = 7.75 * (0.9 - 0.9) + 0.225 = 0.225

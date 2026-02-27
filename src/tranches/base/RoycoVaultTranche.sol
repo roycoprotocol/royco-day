@@ -71,9 +71,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         IERC20(ASSET).safeTransferFrom(msg.sender, KERNEL, toUint256(_assets));
 
         // Deposit the assets into the underlying investment opportunity and get the fraction of total assets allocated
-        (NAV_UNIT valueAllocated, NAV_UNIT effectiveNAVToMintAt) = (TRANCHE_TYPE() == TrancheType.SENIOR
-                ? IRoycoKernel(KERNEL).stDeposit(_assets, msg.sender, _receiver)
-                : IRoycoKernel(KERNEL).jtDeposit(_assets, msg.sender, _receiver));
+        (NAV_UNIT valueAllocated, NAV_UNIT effectiveNAVToMintAt) =
+            (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoKernel(KERNEL).stDeposit(_assets) : IRoycoKernel(KERNEL).jtDeposit(_assets));
 
         // effectiveNAVToMint at can be zero initially when the tranche is deployed
         require(valueAllocated != ZERO_NAV_UNITS, INVALID_VALUE_ALLOCATED());
@@ -103,8 +102,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // It is expected that the kernel transfers the assets directly to the receiver
         claims =
         (TRANCHE_TYPE() == TrancheType.SENIOR
-                ? IRoycoKernel(KERNEL).stRedeem(_shares, msg.sender, _owner, _receiver, false)
-                : IRoycoKernel(KERNEL).jtRedeem(_shares, msg.sender, _owner, _receiver, false));
+                ? IRoycoKernel(KERNEL).stRedeem(_shares, _receiver, false)
+                : IRoycoKernel(KERNEL).jtRedeem(_shares, _receiver, false));
 
         // Burn shares after kernel processes redemption (kernel depends on pre-burn total supply)
         _burn(_owner, _shares);
@@ -171,8 +170,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // It is expected that the kernel transfers the assets directly to the receiver
         claims =
         (TRANCHE_TYPE() == TrancheType.SENIOR
-                ? IRoycoKernel(KERNEL).stRedeem(_shares, msg.sender, _from, _receiver, true)
-                : IRoycoKernel(KERNEL).jtRedeem(_shares, msg.sender, _from, _receiver, true));
+                ? IRoycoKernel(KERNEL).stRedeem(_shares, _receiver, true)
+                : IRoycoKernel(KERNEL).jtRedeem(_shares, _receiver, true));
 
         // Burn shares after kernel processes redemption
         // Bypass the balance update hook

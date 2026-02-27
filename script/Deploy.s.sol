@@ -277,7 +277,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             RoycoJuniorTranche jtTrancheImpl,
             address kernelImpl,
             RoycoAccountant accountantImpl
-        ) = _deployMarket(factory, address(ydm), _config, _protocolFeeRecipient, deployer);
+        ) = _deployMarket(factory, address(ydm), _config, _protocolFeeRecipient);
 
         // Build deployment result
         DeploymentResult memory result = DeploymentResult({
@@ -555,8 +555,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         RoycoFactory factory,
         address ydmAddress,
         MarketDeploymentConfig memory _config,
-        address _protocolFeeRecipient,
-        address _deployer
+        address _protocolFeeRecipient
     )
         internal
         returns (
@@ -611,14 +610,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         // Build initialization data
         address factoryAddress = address(factory);
         bytes memory kernelInitializationData = _buildKernelInitializationData(
-            _config.kernelType,
-            _config.kernelSpecificParams,
-            expectedAccountantAddress,
-            factoryAddress,
-            _protocolFeeRecipient,
-            _config.stSelfLiquidationBonusWAD
+            _config.kernelType, _config.kernelSpecificParams, factoryAddress, _protocolFeeRecipient, _config.stSelfLiquidationBonusWAD
         );
-        bytes memory accountantInitializationData = _buildAccountantInitializationData(expectedKernelAddress, ydmAddress, factoryAddress, _config);
+        bytes memory accountantInitializationData = _buildAccountantInitializationData(ydmAddress, factoryAddress, _config);
         bytes memory seniorTrancheInitializationData = _buildSeniorTrancheInitializationData(factoryAddress, _config);
         bytes memory juniorTrancheInitializationData = _buildJuniorTrancheInitializationData(factoryAddress, _config);
 
@@ -922,7 +916,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     function _buildKernelInitializationData(
         KernelType _kernelType,
         bytes memory _kernelSpecificParams,
-        address _expectedAccountantAddress,
         address _factoryAddress,
         address _protocolFeeRecipient,
         uint64 _stSelfLiquidationBonusWAD
@@ -1004,7 +997,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     }
 
     function _buildAccountantInitializationData(
-        address _expectedKernelAddress,
         address _ydmAddress,
         address _factoryAddress,
         MarketDeploymentConfig memory _config
