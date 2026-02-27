@@ -142,6 +142,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         address deployerAddress;
         address deployerAdminAddress;
         address protocolFeeRecipientAddress;
+        address transferAgentAddress;
     }
 
     function run() external virtual {
@@ -179,7 +180,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
                 guardianAddress: chainConfig.guardianAddress,
                 deployerAddress: chainConfig.deployerAddress,
                 deployerAdminAddress: chainConfig.deployerAdminAddress,
-                protocolFeeRecipientAddress: chainConfig.protocolFeeRecipient
+                protocolFeeRecipientAddress: chainConfig.protocolFeeRecipient,
+                transferAgentAddress: chainConfig.transferAgentAddress
             })
         );
 
@@ -337,8 +339,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     }
 
     function _buildTrancheRolesConfig(address _tranche, uint64 _lpRole) private pure returns (IRoycoFactory.RolesTargetConfiguration memory) {
-        bytes4[] memory selectors = new bytes4[](5);
-        uint64[] memory roleValues = new uint64[](5);
+        bytes4[] memory selectors = new bytes4[](7);
+        uint64[] memory roleValues = new uint64[](7);
 
         selectors[0] = IRoycoVaultTranche.deposit.selector;
         roleValues[0] = _lpRole;
@@ -350,13 +352,17 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         roleValues[3] = ADMIN_PAUSER_ROLE;
         selectors[4] = UUPSUpgradeable.upgradeToAndCall.selector;
         roleValues[4] = ADMIN_UPGRADER_ROLE;
+        selectors[5] = IRoycoVaultTranche.seizeAssets.selector;
+        roleValues[5] = TRANSFER_AGENT_ROLE;
+        selectors[6] = IRoycoVaultTranche.seizeAndRedeemAssets.selector;
+        roleValues[6] = TRANSFER_AGENT_ROLE;
 
         return IRoycoFactory.RolesTargetConfiguration({ target: _tranche, selectors: selectors, roles: roleValues });
     }
 
     function _buildKernelRolesConfig(address _kernel) private pure returns (IRoycoFactory.RolesTargetConfiguration memory) {
-        bytes4[] memory selectors = new bytes4[](8);
-        uint64[] memory roleValues = new uint64[](8);
+        bytes4[] memory selectors = new bytes4[](11);
+        uint64[] memory roleValues = new uint64[](11);
 
         selectors[0] = IRoycoKernel.setProtocolFeeRecipient.selector;
         roleValues[0] = ADMIN_KERNEL_ROLE;
@@ -374,6 +380,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         roleValues[6] = SYNC_ROLE;
         selectors[7] = IRoycoKernel.setSeniorTrancheSelfLiquidationBonus.selector;
         roleValues[7] = ADMIN_KERNEL_ROLE;
+        selectors[8] = IRoycoKernel.blacklistDepositor.selector;
+        roleValues[8] = TRANSFER_AGENT_ROLE;
+        selectors[9] = IRoycoKernel.unblacklistDepositor.selector;
+        roleValues[9] = TRANSFER_AGENT_ROLE;
+        selectors[10] = IRoycoKernel.setBlacklistEnabled.selector;
+        roleValues[10] = TRANSFER_AGENT_ROLE;
 
         return IRoycoFactory.RolesTargetConfiguration({ target: _kernel, selectors: selectors, roles: roleValues });
     }
@@ -422,7 +434,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         pure
         returns (IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments)
     {
-        roleAssignments = new IRoycoFactory.RoleAssignmentConfiguration[](13);
+        roleAssignments = new IRoycoFactory.RoleAssignmentConfiguration[](14);
 
         // Get role configs from RolesConfiguration
         RoleConfig memory pauserConfig = getRoleConfig(ADMIN_PAUSER_ROLE);
@@ -438,6 +450,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         RoleConfig memory roleGuardianConfig = getRoleConfig(GUARDIAN_ROLE);
         RoleConfig memory deployerConfig = getRoleConfig(DEPLOYER_ROLE);
         RoleConfig memory deployerAdminConfig = getRoleConfig(DEPLOYER_ROLE_ADMIN_ROLE);
+        RoleConfig memory transferAgentConfig = getRoleConfig(TRANSFER_AGENT_ROLE);
 
         roleAssignments[0] = IRoycoFactory.RoleAssignmentConfiguration({
             role: ADMIN_PAUSER_ROLE, roleAdminRole: pauserConfig.adminRole, assignee: _addresses.pauserAddress, executionDelay: pauserConfig.executionDelay
@@ -518,6 +531,13 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             roleAdminRole: deployerAdminConfig.adminRole,
             assignee: _addresses.deployerAdminAddress,
             executionDelay: deployerAdminConfig.executionDelay
+        });
+
+        roleAssignments[13] = IRoycoFactory.RoleAssignmentConfiguration({
+            role: TRANSFER_AGENT_ROLE,
+            roleAdminRole: transferAgentConfig.adminRole,
+            assignee: _addresses.transferAgentAddress,
+            executionDelay: transferAgentConfig.executionDelay
         });
     }
 

@@ -74,6 +74,9 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
     Vm.Wallet internal DEPLOYER_ADMIN;
     address internal DEPLOYER_ADMIN_ADDRESS;
 
+    Vm.Wallet internal TRANSFER_AGENT;
+    address internal TRANSFER_AGENT_ADDRESS;
+
     // ST-only providers
     Vm.Wallet internal ST_ALICE;
     Vm.Wallet internal ST_BOB;
@@ -253,6 +256,10 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
 
         DEPLOYER_ADMIN = _initWallet("DEPLOYER_ADMIN", 1000 ether);
         DEPLOYER_ADMIN_ADDRESS = DEPLOYER_ADMIN.addr;
+
+        // Transfer agent wallet (for compliance operations)
+        TRANSFER_AGENT = _initWallet("TRANSFER_AGENT", 1000 ether);
+        TRANSFER_AGENT_ADDRESS = TRANSFER_AGENT.addr;
     }
 
     function _setupProviders() internal {
@@ -499,7 +506,8 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
                 guardianAddress: ROLE_GUARDIAN_ADDRESS,
                 deployerAddress: DEPLOYER_ADDRESS,
                 deployerAdminAddress: DEPLOYER_ADMIN_ADDRESS,
-                protocolFeeRecipientAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS
+                protocolFeeRecipientAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS,
+                transferAgentAddress: TRANSFER_AGENT_ADDRESS
             })
         );
     }
@@ -530,6 +538,9 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
 
         // Grant LP_ROLE_ADMIN_ROLE
         FACTORY.grantRole(LP_ROLE_ADMIN_ROLE, LP_ROLE_ADMIN_ADDRESS, 0);
+
+        // Grant TRANSFER_AGENT_ROLE
+        FACTORY.grantRole(TRANSFER_AGENT_ROLE, TRANSFER_AGENT_ADDRESS, 0);
 
         // Set ST_LP_ROLE and JT_LP_ROLE admin to LP_ROLE_ADMIN_ROLE
         FACTORY.setRoleAdmin(ST_LP_ROLE, LP_ROLE_ADMIN_ROLE);

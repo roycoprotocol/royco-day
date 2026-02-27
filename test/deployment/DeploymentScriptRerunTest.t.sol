@@ -174,7 +174,8 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
                 guardianAddress: ROLE_GUARDIAN_ADDRESS,
                 deployerAddress: DEPLOYER_ADDRESS,
                 deployerAdminAddress: DEPLOYER_ADMIN_ADDRESS,
-                protocolFeeRecipientAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS
+                protocolFeeRecipientAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS,
+                transferAgentAddress: address(0)
             })
         );
     }
