@@ -136,4 +136,150 @@ contract Makina_DUSD_Test is YieldBearingERC4626_TestBase {
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
         Identical_Makina_ST_Makina_JT_Kernel(address(KERNEL)).setConversionRate(_newRateWAD);
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MAKINA-SPECIFIC TESTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Verifies that the Makina machine is correctly configured
+    function test_makina_machineConfiguration() external view {
+        // Verify share token is DUSD
+        address shareToken = IMachine(MAKINA_MACHINE).shareToken();
+        assertEq(shareToken, DUSD, "Makina machine share token should be DUSD");
+
+        // Verify accounting token exists
+        address accountingToken = IMachine(MAKINA_MACHINE).accountingToken();
+        assertTrue(accountingToken != address(0), "Makina machine accounting token should not be zero");
+
+        // Verify the machine has a valid share price
+        uint256 sharePrice = IMachine(MAKINA_MACHINE).convertToAssets(_getSharesToConvertToAssets());
+        assertGt(sharePrice, 0, "Makina machine share price should be > 0");
+    }
+
+    /// @notice Verifies the kernel's MAKINA_MACHINE immutable is set correctly
+    function test_makina_kernelConfiguration() external view {
+        address kernelMachine = Identical_Makina_ST_Makina_JT_Kernel(address(KERNEL)).MAKINA_MACHINE();
+        assertEq(kernelMachine, MAKINA_MACHINE, "Kernel's MAKINA_MACHINE should match expected");
+    }
+
+    /// @notice Verifies initial conversion rate is set correctly
+    function test_makina_initialConversionRate() external view {
+        uint256 storedRate = _getConversionRate();
+        assertEq(storedRate, WAD, "Stored rate should be WAD (1:1 for stablecoin)");
+    }
+
+    /// @notice Test that simulated yield works correctly for Makina DUSD
+    function testFuzz_makina_simulatedYield_increasesNAV(uint256 _amount, uint256 _yieldBps) external {
+        _amount = bound(_amount, _minDepositAmount(), config.initialFunding / 10);
+        _yieldBps = bound(_yieldBps, 10, 1000); // 0.1% to 10% yield
+
+        _depositJT(ALICE_ADDRESS, _amount);
+
+        NAV_UNIT navBefore = JT.totalAssets().nav;
+        uint256 rateBefore = _getConversionRate();
+
+        // Simulate yield by increasing the USDC->USD rate
+        uint256 yieldWAD = _yieldBps * 1e14;
+        simulateJTYield(yieldWAD);
+
+        uint256 rateAfter = _getConversionRate();
+        assertGt(rateAfter, rateBefore, "Rate should increase after yield");
+
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        NAV_UNIT navAfter = JT.totalAssets().nav;
+        assertGt(navAfter, navBefore, "NAV should increase after yield");
+    }
+
+    /// @notice Test loss simulation for Makina DUSD
+    function testFuzz_makina_simulatedLoss_decreasesNAV(uint256 _amount, uint256 _lossBps) external {
+        _amount = bound(_amount, _minDepositAmount(), config.initialFunding / 10);
+        _lossBps = bound(_lossBps, 10, 500); // 0.1% to 5% loss
+
+        _depositJT(ALICE_ADDRESS, _amount);
+
+        NAV_UNIT navBefore = JT.totalAssets().nav;
+        uint256 rateBefore = _getConversionRate();
+
+        uint256 lossWAD = _lossBps * 1e14;
+        simulateJTLoss(lossWAD);
+
+        uint256 rateAfter = _getConversionRate();
+        assertLt(rateAfter, rateBefore, "Rate should decrease after loss");
+
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        NAV_UNIT navAfter = JT.totalAssets().nav;
+        assertLt(navAfter, navBefore, "NAV should decrease after loss");
+    }
+
+    /// @notice Test Makina machine share price yield affects NAV
+    function testFuzz_makina_machineSharePriceYield(uint256 _jtAmount, uint256 _yieldPercentage) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
+        _yieldPercentage = bound(_yieldPercentage, 1, 20);
+
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        NAV_UNIT navBefore = JT.totalAssets().nav;
+
+        simulateVaultSharePriceYield(_yieldPercentage * 1e16);
+
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        NAV_UNIT navAfter = JT.totalAssets().nav;
+        assertGt(navAfter, navBefore, "NAV should increase after Makina machine share price yield");
+    }
+
+    /// @notice Test Makina machine share price loss affects NAV
+    function testFuzz_makina_machineSharePriceLoss(uint256 _jtAmount, uint256 _lossPercentage) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
+        _lossPercentage = bound(_lossPercentage, 1, 20);
+
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        NAV_UNIT navBefore = JT.totalAssets().nav;
+
+        simulateVaultSharePriceLoss(_lossPercentage * 1e16);
+
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        NAV_UNIT navAfter = JT.totalAssets().nav;
+        assertLt(navAfter, navBefore, "NAV should decrease after Makina machine share price loss");
+    }
+
+    /// @notice Test combined yield: both machine share price AND stored rate increase
+    function testFuzz_makina_combinedYield_bothComponents(uint256 _jtAmount, uint256 _sharePriceYieldBps, uint256 _rateYieldBps) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
+        _sharePriceYieldBps = bound(_sharePriceYieldBps, 10, 500); // 0.1% to 5%
+        _rateYieldBps = bound(_rateYieldBps, 10, 500); // 0.1% to 5%
+
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        NAV_UNIT navBefore = JT.totalAssets().nav;
+
+        // Apply both yields
+        simulateVaultSharePriceYield(_sharePriceYieldBps * 1e14);
+        _simulateYield(_rateYieldBps * 1e14);
+
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        NAV_UNIT navAfter = JT.totalAssets().nav;
+        assertGt(navAfter, navBefore, "NAV should increase after combined yield");
+    }
+
+    /// @notice Test that getTrancheUnitToNAVUnitConversionRateWAD returns expected value
+    function test_makina_conversionRateCalculation() external view {
+        uint256 sharePriceWAD = IMachine(MAKINA_MACHINE).convertToAssets(_getSharesToConvertToAssets());
+        uint256 storedRateWAD = _getConversionRate();
+
+        uint256 expectedConversionRate = (sharePriceWAD * storedRateWAD) / WAD;
+        uint256 actualConversionRate = Identical_Makina_ST_Makina_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+
+        assertEq(actualConversionRate, expectedConversionRate, "Conversion rate should equal sharePrice * storedRate / WAD");
+    }
 }
