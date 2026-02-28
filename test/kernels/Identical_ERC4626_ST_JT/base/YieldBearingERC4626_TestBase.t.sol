@@ -118,13 +118,13 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
 
     /// @notice Computes the share amount to pass to convertToAssets() to get WAD-scaled output
     /// @dev This matches the kernel's SHARES_TO_CONVERT_TO_ASSETS calculation
-    function _getSharesToConvertToAssets() internal view returns (uint256) {
+    function _getSharesToConvertToAssets() internal view virtual returns (uint256) {
         return 10 ** (WAD_DECIMALS + IERC4626(config.stAsset).decimals() - IERC20Metadata(IERC4626(config.stAsset).asset()).decimals());
     }
 
     /// @notice Gets the current share price (either mocked or from the actual vault)
     /// @return The share price in WAD precision
-    function _getCurrentSharePriceWAD() internal view returns (uint256) {
+    function _getCurrentSharePriceWAD() internal view virtual returns (uint256) {
         if (mockedSharePriceWAD != 0) {
             return mockedSharePriceWAD;
         }
@@ -134,7 +134,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
 
     /// @notice Mocks the convertToAssets function on the vault
     /// @param _newSharePriceWAD The new share price in WAD precision
-    function _mockConvertToAssets(uint256 _newSharePriceWAD) internal {
+    function _mockConvertToAssets(uint256 _newSharePriceWAD) internal virtual {
         mockedSharePriceWAD = _newSharePriceWAD;
 
         // Mock convertToAssets with the same input the kernel uses (SHARES_TO_CONVERT_TO_ASSETS)
@@ -165,13 +165,13 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
     }
 
     /// @notice Gets the current conversion rate using the kernel's getter (in WAD precision)
-    function _getConversionRate() internal view returns (uint256) {
+    function _getConversionRate() internal view virtual returns (uint256) {
         return Identical_ERC4626_ST_ERC4626_JT_Kernel(address(KERNEL)).getStoredConversionRateWAD();
     }
 
     /// @notice Sets the conversion rate using the kernel's setter (in WAD precision)
     /// @dev Requires ADMIN_ORACLE_QUOTER_ROLE, which is granted to ORACLE_QUOTER_ADMIN_ADDRESS
-    function _setConversionRate(uint256 _newRateWAD) internal {
+    function _setConversionRate(uint256 _newRateWAD) internal virtual {
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
         Identical_ERC4626_ST_ERC4626_JT_Kernel(address(KERNEL)).setConversionRate(_newRateWAD);
     }
