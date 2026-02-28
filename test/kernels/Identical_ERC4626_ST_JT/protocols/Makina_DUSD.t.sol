@@ -5,8 +5,8 @@ import { IERC20Metadata } from "../../../../lib/openzeppelin-contracts/contracts
 
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
-import { IMachine } from "../../../../src/interfaces/external/makina/IMachine.sol";
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
+import { IMachine } from "../../../../src/interfaces/external/makina/IMachine.sol";
 import { Identical_Makina_ST_Makina_JT_Kernel } from "../../../../src/kernels/Identical_Makina_ST_Makina_JT_Kernel.sol";
 import { WAD, WAD_DECIMALS } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/libraries/Units.sol";
@@ -76,21 +76,9 @@ contract Makina_DUSD_Test is YieldBearingERC4626_TestBase {
         return DEPLOY_SCRIPT.deploy(marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roleAssignments, DEPLOYER.privateKey);
     }
 
-    /// @notice Simulates vault share price yield by mocking convertToAssets()
-    /// @param _percentageWAD The percentage increase in WAD (e.g., 0.05e18 = 5%)
-    function simulateVaultSharePriceYield(uint256 _percentageWAD) public override {
-        uint256 currentSharePrice = _getCurrentSharePriceWAD();
-        uint256 newSharePrice = currentSharePrice * (WAD + _percentageWAD) / WAD;
-        _mockConvertToAssets(newSharePrice);
-    }
-
-    /// @notice Simulates vault share price loss by mocking convertToAssets()
-    /// @param _percentageWAD The percentage decrease in WAD (e.g., 0.05e18 = 5%)
-    function simulateVaultSharePriceLoss(uint256 _percentageWAD) public override {
-        uint256 currentSharePrice = _getCurrentSharePriceWAD();
-        uint256 newSharePrice = currentSharePrice * (WAD - _percentageWAD) / WAD;
-        _mockConvertToAssets(newSharePrice);
-    }
+    // NOTE: simulateVaultSharePriceYield() and simulateVaultSharePriceLoss() are inherited from
+    // YieldBearingERC4626_TestBase and work correctly because they call the overridden internal
+    // functions _getCurrentSharePriceWAD() and _mockConvertToAssets() below.
 
     /// @notice Computes the share amount to pass to convertToAssets() to get WAD-scaled output
     /// @dev This matches the kernel's MACHINE_SHARES_TO_CONVERT_TO_ASSETS calculation
