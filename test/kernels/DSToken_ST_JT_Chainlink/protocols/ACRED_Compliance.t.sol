@@ -263,7 +263,7 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
 
         // TRANSFER_AGENT seizes BOB's ST shares to ALICE
         vm.prank(TRANSFER_AGENT_ADDRESS);
-        ST.seizeAssets(BOB_ADDRESS, ST_ALICE_ADDRESS, stShares);
+        ST.seizeShares(BOB_ADDRESS, ST_ALICE_ADDRESS, stShares);
 
         // ALICE should have the shares, BOB should have none
         assertEq(IERC20(address(ST)).balanceOf(ST_ALICE_ADDRESS), stShares, "ALICE should have seized shares");
@@ -280,7 +280,7 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
 
         // TRANSFER_AGENT seizes ALICE's JT shares to BOB
         vm.prank(TRANSFER_AGENT_ADDRESS);
-        JT.seizeAssets(ALICE_ADDRESS, JT_BOB_ADDRESS, jtShares);
+        JT.seizeShares(ALICE_ADDRESS, JT_BOB_ADDRESS, jtShares);
 
         // BOB should have the shares, ALICE should have none
         assertEq(IERC20(address(JT)).balanceOf(JT_BOB_ADDRESS), jtShares, "BOB should have seized JT shares");
@@ -298,7 +298,7 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
 
         // TRANSFER_AGENT seizes BOB's ST shares to ALICE — should succeed despite non-whitelisted
         vm.prank(TRANSFER_AGENT_ADDRESS);
-        ST.seizeAssets(BOB_ADDRESS, ST_ALICE_ADDRESS, stShares);
+        ST.seizeShares(BOB_ADDRESS, ST_ALICE_ADDRESS, stShares);
 
         assertEq(IERC20(address(ST)).balanceOf(ST_ALICE_ADDRESS), stShares, "ALICE should have seized shares");
     }
@@ -314,22 +314,22 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
 
         // TRANSFER_AGENT seizes BOB's ST shares to non-whitelisted receiver — should succeed
         vm.prank(TRANSFER_AGENT_ADDRESS);
-        ST.seizeAssets(BOB_ADDRESS, receiver, stShares);
+        ST.seizeShares(BOB_ADDRESS, receiver, stShares);
 
         assertEq(IERC20(address(ST)).balanceOf(receiver), stShares, "Receiver should have seized shares");
     }
 
-    function test_seize_emitsAssetsSeizedEvent() external {
+    function test_seize_emitsSharesSeizedEvent() external {
         // Setup: deposit JT + ST for BOB
         _depositJT(ALICE_ADDRESS, 100e6);
         uint256 stShares = _depositST(BOB_ADDRESS, 10e6);
 
-        // Expect the AssetsSeized event
+        // Expect the SharesSeized event
         vm.expectEmit(true, true, false, true, address(ST));
-        emit IRoycoVaultTranche.AssetsSeized(BOB_ADDRESS, ST_ALICE_ADDRESS, stShares);
+        emit IRoycoVaultTranche.SharesSeized(TRANSFER_AGENT_ADDRESS, BOB_ADDRESS, ST_ALICE_ADDRESS, stShares);
 
         vm.prank(TRANSFER_AGENT_ADDRESS);
-        ST.seizeAssets(BOB_ADDRESS, ST_ALICE_ADDRESS, stShares);
+        ST.seizeShares(BOB_ADDRESS, ST_ALICE_ADDRESS, stShares);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -351,7 +351,7 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
 
         // TRANSFER_AGENT seizes and redeems BOB's ST shares
         vm.prank(TRANSFER_AGENT_ADDRESS);
-        AssetClaims memory claims = ST.seizeAndRedeemAssets(BOB_ADDRESS, TRANSFER_AGENT_ADDRESS, stShares);
+        AssetClaims memory claims = ST.seizeAndRedeemShares(BOB_ADDRESS, TRANSFER_AGENT_ADDRESS, stShares);
 
         // Verify shares burned and assets received
         assertEq(IERC20(address(ST)).balanceOf(BOB_ADDRESS), 0, "BOB should have no ST shares after seizure");
@@ -393,7 +393,7 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
 
         // TRANSFER_AGENT seizes and redeems ALL of ALICE's JT shares — bypasses coverage
         vm.prank(TRANSFER_AGENT_ADDRESS);
-        AssetClaims memory claims = JT.seizeAndRedeemAssets(ALICE_ADDRESS, TRANSFER_AGENT_ADDRESS, jtShares);
+        AssetClaims memory claims = JT.seizeAndRedeemShares(ALICE_ADDRESS, TRANSFER_AGENT_ADDRESS, jtShares);
 
         // Verify shares burned and assets received
         assertEq(IERC20(address(JT)).balanceOf(ALICE_ADDRESS), 0, "ALICE should have no JT shares");
@@ -425,19 +425,19 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
 
         // We cannot predict exact claims, so just check that the event is emitted
         vm.expectEmit(true, true, true, false, address(ST));
-        emit IRoycoVaultTranche.AssetsSeizedAndRedeemed(
+        emit IRoycoVaultTranche.SharesSeizedAndRedeemed(
             TRANSFER_AGENT_ADDRESS, BOB_ADDRESS, TRANSFER_AGENT_ADDRESS, AssetClaims(TRANCHE_UNIT.wrap(0), TRANCHE_UNIT.wrap(0), NAV_UNIT.wrap(0)), stShares
         );
 
         vm.prank(TRANSFER_AGENT_ADDRESS);
-        ST.seizeAndRedeemAssets(BOB_ADDRESS, TRANSFER_AGENT_ADDRESS, stShares);
+        ST.seizeAndRedeemShares(BOB_ADDRESS, TRANSFER_AGENT_ADDRESS, stShares);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CATEGORY 4: ACCESS CONTROL — only TRANSFER_AGENT can call
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function test_seizeAssets_revertsForNonTransferAgent() external {
+    function test_seizeShares_revertsForNonTransferAgent() external {
         // Setup: deposit JT + ST
         _depositJT(ALICE_ADDRESS, 100e6);
         uint256 stShares = _depositST(BOB_ADDRESS, 10e6);
@@ -445,7 +445,7 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
         // ALICE tries to seize — should revert
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert();
-        ST.seizeAssets(BOB_ADDRESS, ALICE_ADDRESS, stShares);
+        ST.seizeShares(BOB_ADDRESS, ALICE_ADDRESS, stShares);
     }
 
     function test_seizeAndRedeem_revertsForNonTransferAgent() external {
@@ -456,7 +456,7 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
         // ALICE tries to seizeAndRedeem — should revert
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert();
-        ST.seizeAndRedeemAssets(BOB_ADDRESS, ALICE_ADDRESS, stShares);
+        ST.seizeAndRedeemShares(BOB_ADDRESS, ALICE_ADDRESS, stShares);
     }
 
     function test_blacklist_revertsForNonTransferAgent() external {

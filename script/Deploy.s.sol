@@ -378,9 +378,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         roleValues[3] = ADMIN_PAUSER_ROLE;
         selectors[4] = UUPSUpgradeable.upgradeToAndCall.selector;
         roleValues[4] = ADMIN_UPGRADER_ROLE;
-        selectors[5] = IRoycoVaultTranche.seizeAssets.selector;
+        selectors[5] = IRoycoVaultTranche.seizeShares.selector;
         roleValues[5] = TRANSFER_AGENT_ROLE;
-        selectors[6] = IRoycoVaultTranche.seizeAndRedeemAssets.selector;
+        selectors[6] = IRoycoVaultTranche.seizeAndRedeemShares.selector;
         roleValues[6] = TRANSFER_AGENT_ROLE;
 
         return IRoycoFactory.RolesTargetConfiguration({ target: _tranche, selectors: selectors, roles: roleValues });
