@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { ReentrancyGuardTransient } from "../../../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuardTransient.sol";
@@ -536,15 +535,6 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         // Check if the sender or recipient are blacklisted
         require(!isBlacklisted(_from), ACCOUNT_BLACKLISTED(_from));
         require(!isBlacklisted(_to), ACCOUNT_BLACKLISTED(_to));
-
-        // If transferring shares, ensure that the recipient is a whitelisted LP for the tranche
-        // It is assumed that the sender is already a whitelisted LP
-        if (_to != address(0)) {
-            address authority = authority();
-            // Check if the to address can call the deposit function on the tranche
-            (bool isWhitelistedTrancheLP,) = IAccessManager(authority).canCall(_to, msg.sender, IRoycoVaultTranche.deposit.selector);
-            require(_to != authority && isWhitelistedTrancheLP, ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(_to));
-        }
 
         // Call the market specific pre-balance update hook
         _preTrancheBalanceUpdate(_from, _to, _value);
