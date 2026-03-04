@@ -13,7 +13,7 @@ import { IdenticalAssetsAdminOracleQuoter, IdenticalAssetsOracleQuoter } from ".
  * @title sUSDai_ST_sUSDai_JT_Kernel
  * @author Waymont
  * @notice The senior and junior tranches transfer in sUSDai
- * @notice The NAV computation employs the conservative valuation methodology used for valuing sUSDai redemptions in terms of USDai and converts the USDai to USD using an admin set exchange rate
+ * @notice NAV computations employ the conservative valuation methodology used for valuing sUSDai redemptions in terms of USDai and converts the USDai to USD using an admin set exchange rate
  */
 contract sUSDai_ST_sUSDai_JT_Kernel is RoycoKernel, IdenticalAssetsAdminOracleQuoter {
     using Math for uint256;

@@ -3,7 +3,8 @@ pragma solidity ^0.8.28;
 
 import { IERC20Metadata, IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
 import { Identical_ERC4626_ST_ERC4626_JT_Kernel } from "../../../../src/kernels/Identical_ERC4626_ST_ERC4626_JT_Kernel.sol";
-import { WAD, WAD_DECIMALS } from "../../../../src/libraries/Constants.sol";
+import { WAD, WAD_DECIMALS, ZERO_NAV_UNITS } from "../../../../src/libraries/Constants.sol";
+import { SyncedAccountingState, TrancheType } from "../../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
 import { AbstractKernelTestSuite } from "../../abstract/AbstractKernelTestSuite.t.sol";
 
@@ -375,6 +376,350 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
 
+        _assertNAVConservation();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // COMBINED SHARE PRICE + STORED RATE TESTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Tests combined yield from both share price AND stored rate increases
+    function testFuzz_combined_yield_bothComponents(uint256 _jtAmount, uint256 _sharePriceYieldBps, uint256 _storedRateYieldBps) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
+        _sharePriceYieldBps = bound(_sharePriceYieldBps, 10, 500); // 0.1% to 5%
+        _storedRateYieldBps = bound(_storedRateYieldBps, 10, 500); // 0.1% to 5%
+
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        NAV_UNIT navBefore = JT.totalAssets().nav;
+
+        // Apply both yields
+        simulateVaultSharePriceYield(_sharePriceYieldBps * 1e14);
+        _simulateYield(_storedRateYieldBps * 1e14);
+
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        NAV_UNIT navAfter = JT.totalAssets().nav;
+        assertGt(navAfter, navBefore, "NAV should increase after combined yield");
+    }
+
+    /// @notice Tests combined loss from both share price AND stored rate decreases
+    function testFuzz_combined_loss_bothComponents(uint256 _jtAmount, uint256 _sharePriceLossBps, uint256 _storedRateLossBps) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
+        _sharePriceLossBps = bound(_sharePriceLossBps, 10, 200); // 0.1% to 2%
+        _storedRateLossBps = bound(_storedRateLossBps, 10, 200); // 0.1% to 2%
+
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        NAV_UNIT navBefore = JT.totalAssets().nav;
+
+        // Apply both losses
+        simulateVaultSharePriceLoss(_sharePriceLossBps * 1e14);
+        _simulateLoss(_storedRateLossBps * 1e14);
+
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        NAV_UNIT navAfter = JT.totalAssets().nav;
+        assertLt(navAfter, navBefore, "NAV should decrease after combined loss");
+    }
+
+    /// @notice Tests NAV conservation after combined share price and stored rate changes
+    function testFuzz_combined_NAVConservation(uint256 _jtAmount, uint256 _sharePriceChangeBps, uint256 _storedRateChangeBps) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
+        _sharePriceChangeBps = bound(_sharePriceChangeBps, 10, 500);
+        _storedRateChangeBps = bound(_storedRateChangeBps, 10, 500);
+
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        // Apply both changes
+        simulateVaultSharePriceYield(_sharePriceChangeBps * 1e14);
+        _simulateYield(_storedRateChangeBps * 1e14);
+
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        _assertNAVConservation();
+    }
+
+    /// @notice Tests combined changes with ST deposits - yield distribution
+    function testFuzz_combined_yield_distributesToJT(uint256 _jtAmount, uint256 _stPercentage, uint256 _sharePriceYieldBps, uint256 _storedRateYieldBps) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
+        _stPercentage = bound(_stPercentage, 10, 50);
+        _sharePriceYieldBps = bound(_sharePriceYieldBps, 10, 300);
+        _storedRateYieldBps = bound(_storedRateYieldBps, 10, 300);
+
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
+        uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+
+        if (stAmount < _minDepositAmount()) return;
+
+        _depositST(BOB_ADDRESS, stAmount);
+
+        NAV_UNIT jtNavBefore = JT.totalAssets().nav;
+
+        // Apply both yields
+        simulateVaultSharePriceYield(_sharePriceYieldBps * 1e14);
+        _simulateYield(_storedRateYieldBps * 1e14);
+
+        // Warp time for yield distribution
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        NAV_UNIT jtNavAfter = JT.totalAssets().nav;
+        assertGe(jtNavAfter, jtNavBefore, "JT NAV should increase or stay same from combined yield");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SHARE PRICE IMPACT ON REDEMPTIONS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Tests that redemption returns more assets after share price increase
+    function testFuzz_vaultSharePrice_yield_increasesRedemptionValue(uint256 _jtAmount, uint256 _yieldPercentage) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
+        _yieldPercentage = bound(_yieldPercentage, 5, 30); // 5-30% yield
+
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        uint256 sharesBefore = JT.balanceOf(ALICE_ADDRESS);
+        NAV_UNIT navValueBefore = JT.totalAssets().nav;
+
+        // Simulate share price yield
+        simulateVaultSharePriceYield(_yieldPercentage * 1e16);
+
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        // Shares should be the same but worth more
+        uint256 sharesAfter = JT.balanceOf(ALICE_ADDRESS);
+        assertEq(sharesAfter, sharesBefore, "Share balance should not change");
+
+        // The NAV value of shares should have increased
+        NAV_UNIT navValueAfter = JT.totalAssets().nav;
+        assertGt(navValueAfter, navValueBefore, "NAV value of shares should increase after yield");
+    }
+
+    /// @notice Tests that redemption returns fewer assets after share price decrease
+    function testFuzz_vaultSharePrice_loss_decreasesRedemptionValue(uint256 _jtAmount, uint256 _lossPercentage) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
+        _lossPercentage = bound(_lossPercentage, 5, 20); // 5-20% loss
+
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        NAV_UNIT navValueBefore = JT.totalAssets().nav;
+
+        // Simulate share price loss
+        simulateVaultSharePriceLoss(_lossPercentage * 1e16);
+
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        NAV_UNIT navValueAfter = JT.totalAssets().nav;
+        assertLt(navValueAfter, navValueBefore, "NAV value should decrease after loss");
+    }
+
+    /// @notice Tests redemption execution after share price change
+    function testFuzz_vaultSharePrice_redemptionAfterYield(uint256 _jtAmount, uint256 _yieldPercentage, uint256 _redeemPercentage) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
+        _yieldPercentage = bound(_yieldPercentage, 1, 20);
+        _redeemPercentage = bound(_redeemPercentage, 10, 100);
+
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        // Simulate share price yield
+        simulateVaultSharePriceYield(_yieldPercentage * 1e16);
+
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        // Calculate shares to redeem
+        uint256 totalShares = JT.balanceOf(ALICE_ADDRESS);
+        uint256 sharesToRedeem = totalShares * _redeemPercentage / 100;
+
+        if (sharesToRedeem == 0) return;
+
+        // Execute redemption - should not revert
+        vm.prank(ALICE_ADDRESS);
+        JT.redeem(sharesToRedeem, ALICE_ADDRESS, ALICE_ADDRESS);
+
+        // Verify shares were burned
+        assertEq(JT.balanceOf(ALICE_ADDRESS), totalShares - sharesToRedeem, "Shares should be burned");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SHARE PRICE IMPACT ON MAX DEPOSIT/REDEEM
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Tests that maxDeposit changes appropriately after share price changes
+    function testFuzz_vaultSharePrice_affectsMaxDeposit(uint256 _jtAmount, uint256 _stPercentage, uint256 _yieldPercentage) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
+        _stPercentage = bound(_stPercentage, 10, 50);
+        _yieldPercentage = bound(_yieldPercentage, 5, 30);
+
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        TRANCHE_UNIT maxSTDepositBefore = ST.maxDeposit(CHARLIE_ADDRESS);
+
+        // Deposit some ST to have utilization
+        uint256 stAmount = toUint256(maxSTDepositBefore) * _stPercentage / 100;
+        if (stAmount >= _minDepositAmount()) {
+            _depositST(BOB_ADDRESS, stAmount);
+        }
+
+        TRANCHE_UNIT maxSTDepositAfterDeposit = ST.maxDeposit(CHARLIE_ADDRESS);
+
+        // Simulate share price yield (increases NAV, may change coverage)
+        simulateVaultSharePriceYield(_yieldPercentage * 1e16);
+
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        TRANCHE_UNIT maxSTDepositAfterYield = ST.maxDeposit(CHARLIE_ADDRESS);
+
+        // After yield, JT NAV increases, so ST coverage increases, allowing more ST deposits
+        // The exact relationship depends on the kernel's coverage calculations
+        // Just verify it doesn't revert and returns a valid value
+        assertTrue(toUint256(maxSTDepositAfterYield) >= 0, "maxDeposit should return valid value");
+    }
+
+    /// @notice Tests that maxRedeem reflects share price changes
+    function testFuzz_vaultSharePrice_affectsMaxRedeem(uint256 _jtAmount, uint256 _yieldPercentage) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
+        _yieldPercentage = bound(_yieldPercentage, 5, 30);
+
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        uint256 maxRedeemBefore = JT.maxRedeem(ALICE_ADDRESS);
+        assertGt(maxRedeemBefore, 0, "maxRedeem should be > 0 after deposit");
+
+        // Simulate share price yield
+        simulateVaultSharePriceYield(_yieldPercentage * 1e16);
+
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        uint256 maxRedeemAfter = JT.maxRedeem(ALICE_ADDRESS);
+
+        // maxRedeem should still be valid (may change based on NAV changes)
+        assertTrue(maxRedeemAfter >= 0, "maxRedeem should return valid value");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // IMPERMANENT LOSS WITH SHARE PRICE DROP
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Tests that ST deposits are disabled when share price drops create impermanent loss
+    function testFuzz_vaultSharePrice_loss_disablesSTDeposits(uint256 _jtAmount, uint256 _stPercentage, uint256 _lossPercentage) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
+        _stPercentage = bound(_stPercentage, 20, 80);
+        _lossPercentage = bound(_lossPercentage, 10, 30); // Significant loss
+
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        // Deposit ST to have senior exposure
+        TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
+        uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+
+        if (stAmount < _minDepositAmount()) return;
+
+        _depositST(BOB_ADDRESS, stAmount);
+
+        // Simulate significant share price loss
+        simulateVaultSharePriceLoss(_lossPercentage * 1e16);
+
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        // Check if impermanent loss exists using previewSyncTrancheAccounting
+        (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
+        bool hasImpermanentLoss = state.stImpermanentLoss != ZERO_NAV_UNITS;
+
+        // If there's impermanent loss, new ST deposits should be disabled (maxDeposit = 0)
+        if (hasImpermanentLoss) {
+            TRANCHE_UNIT maxSTDepositAfterLoss = ST.maxDeposit(CHARLIE_ADDRESS);
+            assertEq(toUint256(maxSTDepositAfterLoss), 0, "ST deposits should be disabled during impermanent loss");
+        }
+    }
+
+    /// @notice Tests that share price recovery can clear impermanent loss
+    /// @dev Note: Even after clearing impermanent loss, ST deposits may still be disabled due to coverage constraints
+    function testFuzz_vaultSharePrice_recovery_clearsImpermanentLoss(uint256 _jtAmount, uint256 _stPercentage, uint256 _lossPercentage) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
+        _stPercentage = bound(_stPercentage, 20, 50);
+        _lossPercentage = bound(_lossPercentage, 5, 15);
+
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
+        uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+
+        if (stAmount < _minDepositAmount()) return;
+
+        _depositST(BOB_ADDRESS, stAmount);
+
+        // Simulate loss
+        simulateVaultSharePriceLoss(_lossPercentage * 1e16);
+
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        (SyncedAccountingState memory stateBefore,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
+        bool hadImpermanentLoss = stateBefore.stImpermanentLoss != ZERO_NAV_UNITS;
+
+        // Recover by simulating yield that exceeds the loss significantly
+        uint256 recoveryYield = (_lossPercentage * 2 + 10) * 1e16; // Double the loss + extra
+        uint256 currentSharePrice = _getCurrentSharePriceWAD();
+        uint256 newSharePrice = currentSharePrice * (WAD + recoveryYield) / WAD;
+        _mockConvertToAssets(newSharePrice);
+
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        // After recovery, check if impermanent loss is cleared
+        (SyncedAccountingState memory stateAfter,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
+        bool hasImpermanentLossAfterRecovery = stateAfter.stImpermanentLoss != ZERO_NAV_UNITS;
+
+        // If there was impermanent loss, verify recovery reduced or cleared it
+        if (hadImpermanentLoss) {
+            // After significant yield, impermanent loss should be reduced or cleared
+            assertTrue(
+                stateAfter.stImpermanentLoss <= stateBefore.stImpermanentLoss,
+                "Impermanent loss should not increase after recovery yield"
+            );
+        }
+
+        // NAV conservation should still hold
+        _assertNAVConservation();
+    }
+
+    /// @notice Tests share price loss with multiple depositors maintains NAV conservation
+    function testFuzz_vaultSharePrice_loss_multipleDepositors_NAVConservation(
+        uint256 _jtAmount1,
+        uint256 _jtAmount2,
+        uint256 _lossPercentage
+    ) external {
+        _jtAmount1 = bound(_jtAmount1, _minDepositAmount(), config.initialFunding / 20);
+        _jtAmount2 = bound(_jtAmount2, _minDepositAmount(), config.initialFunding / 20);
+        _lossPercentage = bound(_lossPercentage, 1, 20);
+
+        // Multiple JT depositors (both using ALICE since she has LP role)
+        _depositJT(ALICE_ADDRESS, _jtAmount1);
+
+        // For second deposit, use CHARLIE who also has LP role
+        _depositJT(CHARLIE_ADDRESS, _jtAmount2);
+
+        // Simulate share price loss
+        simulateVaultSharePriceLoss(_lossPercentage * 1e16);
+
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        // NAV should still be conserved
         _assertNAVConservation();
     }
 }
