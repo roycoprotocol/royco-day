@@ -32,13 +32,13 @@ contract Identical_DSToken_ST_DSToken_JT_Kernel is Identical_ERC20_ST_ERC20_JT_K
 
     /// @inheritdoc RoycoKernel
     function _preTrancheBalanceUpdate(address _from, address _to, uint256) internal view override(RoycoKernel) {
-        // Only check sender on redeem and recipient on mint
+        // Only check whitelisted status for the sender on redeem and recipient on mint
         // Check if the sender is whitelisted by the compliance service
         require(
             _from == address(0) || IComplianceServiceWhitelisted(COMPLIANCE_SERVICE).checkWhitelisted(_from),
             ACCOUNT_NOT_WHITELISTED_ON_SECURITY_COMPLIANCE_SERVICE(_from)
         );
-        // Check if the recipient address is whitelisted by the compliance service
+        // Check if the recipient is whitelisted by the compliance service
         require(
             _to == address(0) || IComplianceServiceWhitelisted(COMPLIANCE_SERVICE).checkWhitelisted(_to),
             ACCOUNT_NOT_WHITELISTED_ON_SECURITY_COMPLIANCE_SERVICE(_to)

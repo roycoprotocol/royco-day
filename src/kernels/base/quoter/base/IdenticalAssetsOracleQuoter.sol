@@ -104,9 +104,11 @@ abstract contract IdenticalAssetsOracleQuoter is RoycoKernel {
         _preOpSyncTrancheAccounting();
     }
 
-    /// @notice Returns the value of 1 Tranche Unit in NAV Units, scaled to WAD precision
-    /// @dev If the override is set, it will return the override value, otherwise it will return the value queried from the oracle
-    /// @return trancheToNAVUnitConversionRateWAD The tranche unit to NAV unit conversion rate
+    /**
+     * @notice Returns the value of 1 Tranche Unit in NAV Units, scaled to WAD precision
+     * @dev If the admin oracle is set, it will return the override value, otherwise it will return the value queried from the oracle
+     * @return trancheToNAVUnitConversionRateWAD The tranche unit to NAV unit conversion rate
+     */
     function getTrancheUnitToNAVUnitConversionRateWAD() public view virtual returns (uint256 trancheToNAVUnitConversionRateWAD) {
         // If there is an admin set conversion rate, use that, else query the oracle for the rate
         trancheToNAVUnitConversionRateWAD = getStoredConversionRateWAD();
