@@ -13,7 +13,7 @@ import { IdenticalAssetsAdminOracleQuoter, IdenticalAssetsOracleQuoter } from ".
  * @title sUSDai_ST_sUSDai_JT_Kernel
  * @author Waymont
  * @notice The senior and junior tranches transfer in sUSDai
- * @notice NAV computations employ the conservative valuation methodology used for valuing sUSDai redemptions in terms of USDai and converts the USDai to USD using an admin set exchange rate
+ * @notice NAV computations employ the conservative valuation methodology used for valuing sUSDai redemptions in terms of USDai and convert the USDai to USD using an admin set exchange rate
  */
 contract sUSDai_ST_sUSDai_JT_Kernel is RoycoKernel, IdenticalAssetsAdminOracleQuoter {
     using Math for uint256;
@@ -45,13 +45,7 @@ contract sUSDai_ST_sUSDai_JT_Kernel is RoycoKernel, IdenticalAssetsAdminOracleQu
 
     /// @notice Returns the conversion rate from sUSDai (tranche units) to USD (NAV units), scaled to WAD precision
     /// @return sUSDaiToUSDConversionRateWAD The conversion rate from sUSDai (tranche units) to USD (NAV units), scaled to WAD precision
-    function getTrancheUnitToNAVUnitConversionRateWAD()
-        public
-        view
-        virtual
-        override(IdenticalAssetsOracleQuoter)
-        returns (uint256 sUSDaiToUSDConversionRateWAD)
-    {
+    function getTrancheUnitToNAVUnitConversionRateWAD() public view override(IdenticalAssetsOracleQuoter) returns (uint256 sUSDaiToUSDConversionRateWAD) {
         // Fetch the conversion rate from one sUSDai to USDai
         // NOTE: The output is already scaled to WAD precision since USDai has 18 decimals of precision
         uint256 sUSDaiToUSDaiConversionRateWAD = IStakedUSDai(ST_ASSET).redemptionSharePrice();
