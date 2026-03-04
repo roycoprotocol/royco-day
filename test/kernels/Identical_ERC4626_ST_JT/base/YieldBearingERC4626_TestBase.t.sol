@@ -444,7 +444,14 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
     }
 
     /// @notice Tests combined changes with ST deposits - yield distribution
-    function testFuzz_combined_yield_distributesToJT(uint256 _jtAmount, uint256 _stPercentage, uint256 _sharePriceYieldBps, uint256 _storedRateYieldBps) external {
+    function testFuzz_combined_yield_distributesToJT(
+        uint256 _jtAmount,
+        uint256 _stPercentage,
+        uint256 _sharePriceYieldBps,
+        uint256 _storedRateYieldBps
+    )
+        external
+    {
         _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 50);
         _sharePriceYieldBps = bound(_sharePriceYieldBps, 10, 300);
@@ -687,10 +694,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
         // If there was impermanent loss, verify recovery reduced or cleared it
         if (hadImpermanentLoss) {
             // After significant yield, impermanent loss should be reduced or cleared
-            assertTrue(
-                stateAfter.stImpermanentLoss <= stateBefore.stImpermanentLoss,
-                "Impermanent loss should not increase after recovery yield"
-            );
+            assertTrue(stateAfter.stImpermanentLoss <= stateBefore.stImpermanentLoss, "Impermanent loss should not increase after recovery yield");
         }
 
         // NAV conservation should still hold
@@ -698,11 +702,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
     }
 
     /// @notice Tests share price loss with multiple depositors maintains NAV conservation
-    function testFuzz_vaultSharePrice_loss_multipleDepositors_NAVConservation(
-        uint256 _jtAmount1,
-        uint256 _jtAmount2,
-        uint256 _lossPercentage
-    ) external {
+    function testFuzz_vaultSharePrice_loss_multipleDepositors_NAVConservation(uint256 _jtAmount1, uint256 _jtAmount2, uint256 _lossPercentage) external {
         _jtAmount1 = bound(_jtAmount1, _minDepositAmount(), config.initialFunding / 20);
         _jtAmount2 = bound(_jtAmount2, _minDepositAmount(), config.initialFunding / 20);
         _lossPercentage = bound(_lossPercentage, 1, 20);
