@@ -13,7 +13,7 @@ import { IdenticalAssetsOracleQuoter } from "./base/quoter/base/IdenticalAssetsO
  * @author Waymont
  * @notice The senior and junior tranches transfer in reUSD
  * @notice The NAV can be expressed in any quote token supported by reUSD's Insurance Capital Layer (ICL)
- * @dev https://docs.re.xyz/insurance-capital-layers/what-is-reusd
+ * @dev https://docs.re.xyz/insurance-capital-layers/what-is-reUSD
  */
 contract ReUSD_ST_ReUSD_JT_Kernel is RoycoKernel, IdenticalAssetsOracleQuoter {
     /// @notice The address of the reUSD token
@@ -31,27 +31,19 @@ contract ReUSD_ST_ReUSD_JT_Kernel is RoycoKernel, IdenticalAssetsOracleQuoter {
     /**
      * @notice Constructs the Royco kernel
      * @param _params The standard construction parameters for the Royco kernel
-     * @param _reusd The address of the reUSD token
-     * @param _reusdUsdQuoteToken The address of the token in which the NAV is expressed in
+     * @param _reUSD The address of the reUSD token
+     * @param _reUSDQuoteToken The address of the token in which the NAV is expressed in
      * @param _insuranceCapitalLayer The address of the reUSD insurance capital layer
      */
-    constructor(
-        RoycoKernelConstructionParams memory _params,
-        address _reusd,
-        address _reusdUsdQuoteToken,
-        address _insuranceCapitalLayer
-    )
-        RoycoKernel(_params)
-    {
+    constructor(RoycoKernelConstructionParams memory _params, address _reUSD, address _reUSDQuoteToken, address _insuranceCapitalLayer) RoycoKernel(_params) {
         // Set the reUSD specific state
-        require(_reusd != address(0) && _reusdUsdQuoteToken != address(0) && _insuranceCapitalLayer != address(0), NULL_ADDRESS());
-        REUSD = _reusd;
-        REUSD_QUOTE_TOKEN = _reusdUsdQuoteToken;
+        require(_reUSD != address(0) && _reUSDQuoteToken != address(0) && _insuranceCapitalLayer != address(0), NULL_ADDRESS());
+        REUSD = _reUSD;
+        REUSD_QUOTE_TOKEN = _reUSDQuoteToken;
         INSURANCE_CAPITAL_LAYER = _insuranceCapitalLayer;
         // ICL output = input * rate * 10^(QUOTE_DECIMALS - REUSD_DECIMALS)
         // With input = 10^(WAD_DECIMALS + REUSD_DECIMALS - QUOTE_DECIMALS), output = rate * WAD
-        REUSD_AMOUNT_FOR_WAD_PRECISION_CONVERSION_RATE =
-            10 ** (WAD_DECIMALS + IERC20Metadata(_reusd).decimals() - IERC20Metadata(_reusdUsdQuoteToken).decimals());
+        REUSD_AMOUNT_FOR_WAD_PRECISION_CONVERSION_RATE = 10 ** (WAD_DECIMALS + IERC20Metadata(_reUSD).decimals() - IERC20Metadata(_reUSDQuoteToken).decimals());
     }
 
     /// @notice Initializes the Royco Kernel
