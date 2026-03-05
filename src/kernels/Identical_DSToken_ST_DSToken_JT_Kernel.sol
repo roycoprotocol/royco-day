@@ -10,24 +10,20 @@ import { Identical_ERC20_ST_ERC20_JT_Kernel, RoycoKernel } from "./Identical_ERC
  * @title Identical_DSToken_ST_DSToken_JT_Kernel
  * @author Waymont
  * @notice The senior and junior tranches transfer in the same Digital Security (DS) token (ACRED, STAC, etc.)
- * @notice The tranche transfers are restricted to whitelisted addresses on the underlying DS-Token compliance service
+ * @notice Tranche share transfers are restricted to whitelisted addresses on the underlying DS-Token compliance service
  */
 contract Identical_DSToken_ST_DSToken_JT_Kernel is Identical_ERC20_ST_ERC20_JT_Kernel {
-    /// @notice Thrown when the compliance service is invalid
-    error INVALID_COMPLIANCE_SERVICE();
+    /// @notice The address of the digital security compliance service
+    address public immutable DS_COMPLIANCE_SERVICE;
 
     /// @notice Thrown when an account is not whitelisted by the digital security compliance service
     error ACCOUNT_NOT_WHITELISTED_ON_SECURITY_COMPLIANCE_SERVICE(address account);
 
-    /// @notice The address of the digital security compliance service
-    address public immutable COMPLIANCE_SERVICE;
-
     /// @notice Constructs the kernel state
     /// @param _params The standard construction parameters for the Royco kernel
     constructor(RoycoKernelConstructionParams memory _params) Identical_ERC20_ST_ERC20_JT_Kernel(_params) {
-        // The tranche asset is the DSToken. Query the compliance service from the DSToken.
-        COMPLIANCE_SERVICE = IDSToken(ST_ASSET).getDSService(IDSToken(ST_ASSET).COMPLIANCE_SERVICE());
-        require(COMPLIANCE_SERVICE != address(0), INVALID_COMPLIANCE_SERVICE());
+        // Retrieve and cache the compliance service from the DSToken
+        DS_COMPLIANCE_SERVICE = IDSToken(ST_ASSET).getDSService(IDSToken(ST_ASSET).COMPLIANCE_SERVICE());
     }
 
     /// @inheritdoc RoycoKernel
@@ -35,12 +31,12 @@ contract Identical_DSToken_ST_DSToken_JT_Kernel is Identical_ERC20_ST_ERC20_JT_K
         // Only check whitelisted status for the sender on redeem and recipient on mint
         // Check if the sender is whitelisted by the compliance service
         require(
-            _from == address(0) || IComplianceServiceWhitelisted(COMPLIANCE_SERVICE).checkWhitelisted(_from),
+            _from == address(0) || IComplianceServiceWhitelisted(DS_COMPLIANCE_SERVICE).checkWhitelisted(_from),
             ACCOUNT_NOT_WHITELISTED_ON_SECURITY_COMPLIANCE_SERVICE(_from)
         );
         // Check if the recipient is whitelisted by the compliance service
         require(
-            _to == address(0) || IComplianceServiceWhitelisted(COMPLIANCE_SERVICE).checkWhitelisted(_to),
+            _to == address(0) || IComplianceServiceWhitelisted(DS_COMPLIANCE_SERVICE).checkWhitelisted(_to),
             ACCOUNT_NOT_WHITELISTED_ON_SECURITY_COMPLIANCE_SERVICE(_to)
         );
     }
