@@ -14,9 +14,11 @@ import { Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel } from "../src/kernels/Identi
 import { Identical_DSToken_ST_DSToken_JT_Kernel } from "../src/kernels/Identical_DSToken_ST_DSToken_JT_Kernel.sol";
 import { Identical_ERC20_ST_ERC20_JT_Kernel } from "../src/kernels/Identical_ERC20_ST_ERC20_JT_Kernel.sol";
 import { Identical_ERC4626_ST_ERC4626_JT_Kernel } from "../src/kernels/Identical_ERC4626_ST_ERC4626_JT_Kernel.sol";
+import { Identical_Makina_ST_Makina_JT_Kernel } from "../src/kernels/Identical_Makina_ST_Makina_JT_Kernel.sol";
 import { ReUSD_ST_ReUSD_JT_Kernel } from "../src/kernels/ReUSD_ST_ReUSD_JT_Kernel.sol";
 import { IdenticalAssetsChainlinkOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
 import { IdenticalAssetsOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
+import { sUSDai_ST_sUSDai_JT_Kernel } from "../src/kernels/sUSDai_ST_sUSDai_JT_Kernel.sol";
 import { NAV_UNIT, toNAVUnits } from "../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoSeniorTranche } from "../src/tranches/RoycoSeniorTranche.sol";
@@ -59,7 +61,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         Identical_DSToken_ST_DSToken_JT_Kernel,
         Identical_ERC20_ST_ERC20_JT_Kernel,
         Identical_ERC4626_ST_ERC4626_JT_Kernel,
-        IdleCdoAA_ST_IdleCdoAA_JT
+        IdleCdoAA_ST_IdleCdoAA_JT,
+        Identical_Makina_ST_Makina_JT_Kernel,
+        sUSDai_ST_sUSDai_JT_Kernel
     }
 
     /// @notice Enum for YDM types
@@ -69,11 +73,22 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         AdaptiveCurve_V2
     }
 
+    /// @notice Deployment parameters for Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel
+    struct IdleAACdoSTCdoJTKernelParams {
+        address idleCDO;
+    }
+
     /// @notice Deployment parameters for ReUSD_ST_ReUSD_JT_Kernel
     struct ReUSDSTReUSDJTKernelParams {
         address reusd;
         address reusdUsdQuoteToken;
         address insuranceCapitalLayer;
+    }
+
+    /// @notice Deployment parameters for Identical_Makina_ST_Makina_JT_Kernel
+    struct IdenticalMakinaSTMakinaJTKernelParams {
+        address makinaMachine;
+        uint256 initialConversionRateWAD;
     }
 
     /// @notice Deployment parameters for Identical_ERC20_ST_ERC20_JT_Kernel
@@ -88,9 +103,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         uint256 initialConversionRateWAD;
     }
 
-    /// @notice Deployment parameters for Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel
-    struct IdleCdoAASTIdleCdoAAJTKernelParams {
-        address idleCDO;
+    /// @notice Deployment parameters for kernels that employ the IdenticalAssetsAdminOracleQuoter
+    struct IdenticalAssetsAdminOracleQuoterKernelParams {
+        uint256 initialConversionRateWAD;
     }
 
     /// @notice Deployment parameters for StaticCurveYDM
@@ -365,9 +380,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         roleValues[3] = ADMIN_PAUSER_ROLE;
         selectors[4] = UUPSUpgradeable.upgradeToAndCall.selector;
         roleValues[4] = ADMIN_UPGRADER_ROLE;
-        selectors[5] = IRoycoVaultTranche.seizeAssets.selector;
+        selectors[5] = IRoycoVaultTranche.seizeShares.selector;
         roleValues[5] = TRANSFER_AGENT_ROLE;
-        selectors[6] = IRoycoVaultTranche.seizeAndRedeemAssets.selector;
+        selectors[6] = IRoycoVaultTranche.seizeAndRedeemShares.selector;
         roleValues[6] = TRANSFER_AGENT_ROLE;
 
         return IRoycoFactory.RolesTargetConfiguration({ target: _tranche, selectors: selectors, roles: roleValues });
@@ -875,10 +890,15 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         } else if (_kernelType == KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel) {
             return abi.encodePacked(type(Identical_ERC4626_ST_ERC4626_JT_Kernel).creationCode, abi.encode(_cp));
         } else if (_kernelType == KernelType.IdleCdoAA_ST_IdleCdoAA_JT) {
-            IdleCdoAASTIdleCdoAAJTKernelParams memory kp = abi.decode(_kernelSpecificParams, (IdleCdoAASTIdleCdoAAJTKernelParams));
+            IdleAACdoSTCdoJTKernelParams memory kp = abi.decode(_kernelSpecificParams, (IdleAACdoSTCdoJTKernelParams));
             return abi.encodePacked(type(Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel).creationCode, abi.encode(_cp, kp.idleCDO));
         } else if (_kernelType == KernelType.Identical_DSToken_ST_DSToken_JT_Kernel) {
             return abi.encodePacked(type(Identical_DSToken_ST_DSToken_JT_Kernel).creationCode, abi.encode(_cp));
+        } else if (_kernelType == KernelType.Identical_Makina_ST_Makina_JT_Kernel) {
+            IdenticalMakinaSTMakinaJTKernelParams memory kp = abi.decode(_kernelSpecificParams, (IdenticalMakinaSTMakinaJTKernelParams));
+            return abi.encodePacked(type(Identical_Makina_ST_Makina_JT_Kernel).creationCode, abi.encode(_cp, kp.makinaMachine));
+        } else if (_kernelType == KernelType.sUSDai_ST_sUSDai_JT_Kernel) {
+            return abi.encodePacked(type(sUSDai_ST_sUSDai_JT_Kernel).creationCode, abi.encode(_cp));
         } else {
             revert UnsupportedKernelType(_kernelType);
         }
@@ -940,6 +960,13 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
                     kernelParams2.initialConversionRateWAD
                 )
             );
+        } else if (_kernelType == KernelType.Identical_Makina_ST_Makina_JT_Kernel) {
+            IdenticalMakinaSTMakinaJTKernelParams memory kernelParams2 = abi.decode(_kernelSpecificParams, (IdenticalMakinaSTMakinaJTKernelParams));
+            return abi.encodeCall(Identical_Makina_ST_Makina_JT_Kernel.initialize, (kernelParams, kernelParams2.initialConversionRateWAD));
+        } else if (_kernelType == KernelType.sUSDai_ST_sUSDai_JT_Kernel) {
+            IdenticalAssetsAdminOracleQuoterKernelParams memory kernelParams2 =
+                abi.decode(_kernelSpecificParams, (IdenticalAssetsAdminOracleQuoterKernelParams));
+            return abi.encodeCall(sUSDai_ST_sUSDai_JT_Kernel.initialize, (kernelParams, kernelParams2.initialConversionRateWAD));
         } else {
             revert UnsupportedKernelType(_kernelType);
         }

@@ -54,10 +54,8 @@ contract ReUSD_ST_ReUSD_JT_Kernel is RoycoKernel, IdenticalAssetsOracleQuoter {
             10 ** (WAD_DECIMALS + IERC20Metadata(_reusd).decimals() - IERC20Metadata(_reusdUsdQuoteToken).decimals());
     }
 
-    /**
-     * @notice Initializes the Royco Kernel
-     * @param _params The standard initialization parameters for the Royco Kernel
-     */
+    /// @notice Initializes the Royco Kernel
+    /// @param _params The standard initialization parameters for the Royco Kernel
     function initialize(IRoycoKernel.RoycoKernelInitParams calldata _params) external initializer {
         // Initialize the base kernel state
         __RoycoKernel_init(_params);

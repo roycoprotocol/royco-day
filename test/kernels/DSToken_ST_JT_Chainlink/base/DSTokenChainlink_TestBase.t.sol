@@ -47,7 +47,7 @@ abstract contract DSTokenChainlink_TestBase is YieldBearingERC20Chainlink_TestBa
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _complianceService() private view returns (address) {
-        return Identical_DSToken_ST_DSToken_JT_Kernel(address(KERNEL)).COMPLIANCE_SERVICE();
+        return Identical_DSToken_ST_DSToken_JT_Kernel(address(KERNEL)).DS_COMPLIANCE_SERVICE();
     }
 
     function _mockNotWhitelisted(address _who) private {
