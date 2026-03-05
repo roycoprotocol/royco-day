@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { IAccessManaged } from "../../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC20.sol";
 
 import { DeployScript } from "../../../../script/Deploy.s.sol";
@@ -8,6 +9,7 @@ import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { IStakedUSDai } from "../../../../src/interfaces/external/usdai/IStakedUSDai.sol";
 import { IUSDai } from "../../../../src/interfaces/external/usdai/IUSDai.sol";
+import { IdenticalAssetsAdminOracleQuoter } from "../../../../src/kernels/base/quoter/base/IdenticalAssetsAdminOracleQuoter.sol";
 import { sUSDai_ST_sUSDai_JT_Kernel } from "../../../../src/kernels/sUSDai_ST_sUSDai_JT_Kernel.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
@@ -289,17 +291,12 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
     // BLACKLIST TESTS (sUSDai-specific)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Test that the kernel checks blacklist status via USDai
-    /// @dev We verify the kernel's USDAI address is correctly set and the isBlacklisted function exists
+    /// @notice Test that the kernel's USDAI immutable is set from sUSDai.asset()
     function test_sUSDai_blacklistIntegration() external view {
-        // Verify kernel has correct USDai address
+        // Verify kernel has correct USDai address (set from sUSDai.asset() in constructor)
         address kernelUsdai = sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).USDAI();
-        assertEq(kernelUsdai, USDAI, "Kernel's USDAI should match expected");
-
-        // Verify USDai has isBlacklisted function (will not revert if it exists)
-        // On a real blacklisted account, this would return true
-        bool isBlacklisted = IUSDai(USDAI).isBlacklisted(address(0));
-        assertFalse(isBlacklisted, "Zero address should not be blacklisted");
+        address expectedUsdai = IStakedUSDai(SUSDAI).asset();
+        assertEq(kernelUsdai, expectedUsdai, "Kernel's USDAI should equal sUSDai.asset()");
     }
 
     /// @notice Test that non-blacklisted accounts can deposit and redeem normally
@@ -315,5 +312,215 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
         // Redeem should succeed
         vm.prank(ALICE_ADDRESS);
         JT.redeem(shares, ALICE_ADDRESS, ALICE_ADDRESS);
+    }
+
+    /// @notice Test that blacklisted sender cannot redeem (reverts from either kernel or sUSDai)
+    /// @dev Both the kernel and sUSDai enforce blacklist checks - either can reject the transaction
+    function test_sUSDai_blacklistedSender_cannotRedeem() external {
+        uint256 amount = _minDepositAmount();
+
+        // First deposit normally
+        _depositJT(ALICE_ADDRESS, amount);
+        uint256 shares = JT.balanceOf(ALICE_ADDRESS);
+
+        // Mock ALICE as blacklisted on USDai
+        vm.mockCall(USDAI, abi.encodeWithSelector(IUSDai.isBlacklisted.selector, ALICE_ADDRESS), abi.encode(true));
+
+        // Attempt to redeem should revert (either from kernel or sUSDai's own check)
+        vm.prank(ALICE_ADDRESS);
+        vm.expectRevert(); // Any revert is acceptable - blacklist is enforced
+        JT.redeem(shares, ALICE_ADDRESS, ALICE_ADDRESS);
+    }
+
+    /// @notice Test that blacklisted receiver cannot receive redemption assets
+    /// @dev Both the kernel and sUSDai enforce blacklist checks - either can reject the transaction
+    function test_sUSDai_blacklistedRedeemReceiver_cannotReceive() external {
+        uint256 amount = _minDepositAmount();
+
+        // ALICE deposits normally
+        _depositJT(ALICE_ADDRESS, amount);
+        uint256 shares = JT.balanceOf(ALICE_ADDRESS);
+
+        // Mock BOB as blacklisted on USDai
+        vm.mockCall(USDAI, abi.encodeWithSelector(IUSDai.isBlacklisted.selector, BOB_ADDRESS), abi.encode(true));
+
+        // ALICE tries to redeem to BOB (blacklisted receiver) - should revert
+        vm.prank(ALICE_ADDRESS);
+        vm.expectRevert(); // Any revert is acceptable - blacklist is enforced
+        JT.redeem(shares, BOB_ADDRESS, ALICE_ADDRESS);
+    }
+
+    /// @notice Test that blacklisted recipient cannot receive deposit shares
+    /// @dev Tests the kernel's _preTrancheBalanceUpdate check on mint
+    function test_sUSDai_blacklistedRecipient_cannotReceiveShares() external {
+        uint256 amount = _minDepositAmount();
+
+        // Mock CHARLIE as blacklisted on USDai
+        vm.mockCall(USDAI, abi.encodeWithSelector(IUSDai.isBlacklisted.selector, CHARLIE_ADDRESS), abi.encode(true));
+
+        // Try to deposit to CHARLIE (blacklisted recipient) - should revert
+        deal(config.jtAsset, ALICE_ADDRESS, amount);
+        vm.startPrank(ALICE_ADDRESS);
+        IERC20(config.jtAsset).approve(address(JT), amount);
+        vm.expectRevert(); // Kernel's _preTrancheBalanceUpdate should reject blacklisted _to
+        JT.deposit(toTrancheUnits(amount), CHARLIE_ADDRESS);
+        vm.stopPrank();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CONVERSION RATE PRECISION TESTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Test that conversion rate uses floor rounding (mulDiv with Floor)
+    function test_sUSDai_conversionRate_usesFloorRounding() external {
+        // Set up values where floor vs ceil rounding would produce different results
+        // redemptionSharePrice = 1.000000000000000001e18 (WAD + 1)
+        // storedRate = 1.000000000000000001e18 (WAD + 1)
+        // Expected with floor: (WAD+1) * (WAD+1) / WAD = WAD + 2 (floor division truncates)
+
+        uint256 sharePriceWithSmallFraction = WAD + 1;
+        uint256 storedRateWithSmallFraction = WAD + 1;
+
+        // Mock the share price
+        _mockConvertToAssets(sharePriceWithSmallFraction);
+
+        // Set the stored rate
+        _setConversionRate(storedRateWithSmallFraction);
+
+        // Calculate expected with floor: (WAD+1) * (WAD+1) / WAD
+        // = (WAD^2 + 2*WAD + 1) / WAD = WAD + 2 + 1/WAD = WAD + 2 (floor truncates the 1/WAD)
+        uint256 expectedFloor = (sharePriceWithSmallFraction * storedRateWithSmallFraction) / WAD;
+
+        uint256 actual = sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+
+        assertEq(actual, expectedFloor, "Conversion rate should use floor rounding");
+        assertEq(actual, WAD + 2, "Floor should truncate to WAD + 2");
+    }
+
+    /// @notice Test conversion rate with large values (no overflow)
+    function testFuzz_sUSDai_conversionRate_noOverflow(uint256 _sharePrice, uint256 _storedRate) external {
+        // Bound to reasonable values that won't overflow: sqrt(type(uint256).max / WAD) ≈ 1.34e29
+        _sharePrice = bound(_sharePrice, WAD / 2, 1e29);
+        _storedRate = bound(_storedRate, WAD / 2, 1e29);
+
+        _mockConvertToAssets(_sharePrice);
+        _setConversionRate(_storedRate);
+
+        // Should not revert
+        uint256 rate = sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+
+        // Verify the calculation is correct
+        uint256 expected = (_sharePrice * _storedRate) / WAD;
+        assertEq(rate, expected, "Rate should equal sharePrice * storedRate / WAD");
+    }
+
+    /// @notice Test that conversion rate components are independent (share price affects rate proportionally)
+    function testFuzz_sUSDai_conversionRate_componentsIndependent(uint256 _sharePrice1, uint256 _sharePrice2, uint256 _storedRate) external {
+        _sharePrice1 = bound(_sharePrice1, WAD / 2, WAD * 2);
+        _sharePrice2 = bound(_sharePrice2, WAD / 2, WAD * 2);
+        _storedRate = bound(_storedRate, WAD / 2, WAD * 2);
+
+        // Set stored rate (constant for this test)
+        _setConversionRate(_storedRate);
+
+        // Test with first share price
+        _mockConvertToAssets(_sharePrice1);
+        uint256 rate1 = sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+
+        // Test with second share price
+        _mockConvertToAssets(_sharePrice2);
+        uint256 rate2 = sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+
+        // Verify formula: rate = sharePrice * storedRate / WAD
+        uint256 expectedRate1 = (_sharePrice1 * _storedRate) / WAD;
+        uint256 expectedRate2 = (_sharePrice2 * _storedRate) / WAD;
+        assertEq(rate1, expectedRate1, "Rate1 should equal sharePrice1 * storedRate / WAD");
+        assertEq(rate2, expectedRate2, "Rate2 should equal sharePrice2 * storedRate / WAD");
+
+        // Rates should be monotonic with share prices (allowing for equal due to floor rounding)
+        if (_sharePrice1 > _sharePrice2) {
+            assertGe(rate1, rate2, "Higher share price should give >= rate");
+        } else if (_sharePrice1 < _sharePrice2) {
+            assertLe(rate1, rate2, "Lower share price should give <= rate");
+        } else {
+            assertEq(rate1, rate2, "Equal share prices should give equal rates");
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ACCESS CONTROL TESTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Test that only authorized role can call setConversionRate
+    function test_sUSDai_setConversionRate_onlyAuthorizedRole() external {
+        // Unauthorized user should not be able to set rate
+        vm.prank(ALICE_ADDRESS);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, ALICE_ADDRESS));
+        sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).setConversionRate(WAD * 2);
+    }
+
+    /// @notice Test that authorized role can successfully set conversion rate
+    function test_sUSDai_setConversionRate_authorizedRoleSucceeds() external {
+        uint256 newRate = WAD * 2;
+
+        // ORACLE_QUOTER_ADMIN_ADDRESS has the required role
+        vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
+        sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).setConversionRate(newRate);
+
+        // Verify rate was updated
+        assertEq(_getConversionRate(), newRate, "Rate should be updated to new value");
+    }
+
+    /// @notice Test that setConversionRate reverts when setting to zero (sentinel value)
+    function test_sUSDai_setConversionRate_revertsOnZero() external {
+        vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
+        vm.expectRevert(abi.encodeWithSelector(IdenticalAssetsAdminOracleQuoter.INVALID_CONVERSION_RATE.selector));
+        sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).setConversionRate(0);
+    }
+
+    /// @notice Test that setConversionRate updates state correctly
+    function testFuzz_sUSDai_setConversionRate_updatesState(uint256 _newRate) external {
+        // Rate must be non-zero (sentinel value)
+        _newRate = bound(_newRate, 1, type(uint128).max);
+
+        vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
+        sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).setConversionRate(_newRate);
+
+        assertEq(_getConversionRate(), _newRate, "Stored rate should match set value");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // EDGE CASE TESTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Test conversion rate with minimum non-zero values
+    function test_sUSDai_conversionRate_minimumValues() external {
+        // Set minimum valid rate (1 wei)
+        _setConversionRate(1);
+        _mockConvertToAssets(1);
+
+        // Should not revert, but rate will be very small (1 * 1 / WAD = 0 due to floor)
+        uint256 rate = sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        assertEq(rate, 0, "Very small inputs should floor to 0");
+    }
+
+    /// @notice Test conversion rate with WAD values (1:1 conversion)
+    function test_sUSDai_conversionRate_wadValues() external {
+        _setConversionRate(WAD);
+        _mockConvertToAssets(WAD);
+
+        uint256 rate = sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        assertEq(rate, WAD, "WAD * WAD / WAD should equal WAD");
+    }
+
+    /// @notice Test that getStoredConversionRateWAD returns the admin-set rate
+    function test_sUSDai_getStoredConversionRateWAD_returnsAdminSetRate() external {
+        uint256 newRate = 1.5e18; // 1.5 WAD
+
+        vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
+        sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).setConversionRate(newRate);
+
+        uint256 storedRate = sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).getStoredConversionRateWAD();
+        assertEq(storedRate, newRate, "getStoredConversionRateWAD should return admin-set rate");
     }
 }
