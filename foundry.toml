@@ -43,10 +43,11 @@ sort_imports = true
 exclude_lints = ["mixed-case-function", "mixed-case-variable", "unsafe-typecast", "pascal-case-struct", "unwrapped-modifier-logic"]
 
 [fuzz]
-runs = 200
+runs = 5000
 show_logs = true
 
 
 [etherscan]
 mainnet = { key = "${ETHERSCAN_API_KEY}" }
 avalanche = { key = "${AVALANCHE_API_KEY}" }
+arbitrum = { key = "${ARBITRUM_API_KEY}" }
