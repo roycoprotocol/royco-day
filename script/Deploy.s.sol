@@ -18,6 +18,7 @@ import { Identical_Makina_ST_Makina_JT_Kernel } from "../src/kernels/Identical_M
 import { ReUSD_ST_ReUSD_JT_Kernel } from "../src/kernels/ReUSD_ST_ReUSD_JT_Kernel.sol";
 import { IdenticalAssetsChainlinkOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
 import { IdenticalAssetsOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
+import { sUSDai_ST_sUSDai_JT_Kernel } from "../src/kernels/sUSDai_ST_sUSDai_JT_Kernel.sol";
 import { NAV_UNIT, toNAVUnits } from "../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoSeniorTranche } from "../src/tranches/RoycoSeniorTranche.sol";
@@ -61,7 +62,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         Identical_ERC20_ST_ERC20_JT_Kernel,
         Identical_ERC4626_ST_ERC4626_JT_Kernel,
         IdleCdoAA_ST_IdleCdoAA_JT,
-        Identical_Makina_ST_Makina_JT_Kernel
+        Identical_Makina_ST_Makina_JT_Kernel,
+        sUSDai_ST_sUSDai_JT_Kernel
     }
 
     /// @notice Enum for YDM types
@@ -895,6 +897,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         } else if (_kernelType == KernelType.Identical_Makina_ST_Makina_JT_Kernel) {
             IdenticalMakinaSTMakinaJTKernelParams memory kp = abi.decode(_kernelSpecificParams, (IdenticalMakinaSTMakinaJTKernelParams));
             return abi.encodePacked(type(Identical_Makina_ST_Makina_JT_Kernel).creationCode, abi.encode(_cp, kp.makinaMachine));
+        } else if (_kernelType == KernelType.sUSDai_ST_sUSDai_JT_Kernel) {
+            return abi.encodePacked(type(sUSDai_ST_sUSDai_JT_Kernel).creationCode, abi.encode(_cp));
         } else {
             revert UnsupportedKernelType(_kernelType);
         }
@@ -959,6 +963,10 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         } else if (_kernelType == KernelType.Identical_Makina_ST_Makina_JT_Kernel) {
             IdenticalMakinaSTMakinaJTKernelParams memory kernelParams2 = abi.decode(_kernelSpecificParams, (IdenticalMakinaSTMakinaJTKernelParams));
             return abi.encodeCall(Identical_Makina_ST_Makina_JT_Kernel.initialize, (kernelParams, kernelParams2.initialConversionRateWAD));
+        } else if (_kernelType == KernelType.sUSDai_ST_sUSDai_JT_Kernel) {
+            IdenticalAssetsAdminOracleQuoterKernelParams memory kernelParams2 =
+                abi.decode(_kernelSpecificParams, (IdenticalAssetsAdminOracleQuoterKernelParams));
+            return abi.encodeCall(sUSDai_ST_sUSDai_JT_Kernel.initialize, (kernelParams, kernelParams2.initialConversionRateWAD));
         } else {
             revert UnsupportedKernelType(_kernelType);
         }

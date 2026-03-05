@@ -97,7 +97,7 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _complianceService() internal view returns (address) {
-        return Identical_DSToken_ST_DSToken_JT_Kernel(address(KERNEL)).COMPLIANCE_SERVICE();
+        return Identical_DSToken_ST_DSToken_JT_Kernel(address(KERNEL)).DS_COMPLIANCE_SERVICE();
     }
 
     function _mockNotWhitelisted(address _who) internal {

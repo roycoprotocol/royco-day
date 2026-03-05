@@ -68,16 +68,13 @@ abstract contract IdenticalMakinaSharesAdminOracleQuoter is IdenticalAssetsAdmin
         returns (uint256 trancheToNAVUnitConversionRateWAD)
     {
         // Fetch the conversion rate from the tranche asset (Makina machine share) to its underlying asset, scaled to WAD precision
-        uint256 trancheUnitToBaseAssetsConversionRateWAD = IMachine(MAKINA_MACHINE).convertToAssets(MACHINE_SHARES_TO_CONVERT_TO_ASSETS);
+        uint256 trancheUnitToAccountingAssetsConversionRateWAD = IMachine(MAKINA_MACHINE).convertToAssets(MACHINE_SHARES_TO_CONVERT_TO_ASSETS);
 
-        // Resolve the machine's accounting asset to NAV unit conversion rate, scaled to WAD precision
+        // Retrieve the machine's accounting asset to NAV unit conversion rate from the admin set oracle, scaled to WAD precision
         uint256 accountingAssetToNAVUnitConversionRateWAD = getStoredConversionRateWAD();
-        // If the stored conversion rate is the sentinel value, the cache hasn't been warmed, so query the oracle for the rate
-        if (accountingAssetToNAVUnitConversionRateWAD == SENTINEL_CONVERSION_RATE) {
-            accountingAssetToNAVUnitConversionRateWAD = _getConversionRateFromOracleWAD();
-        }
 
         // Calculate the conversion rate from tranche to NAV units, scaled to WAD precision
-        trancheToNAVUnitConversionRateWAD = trancheUnitToBaseAssetsConversionRateWAD.mulDiv(accountingAssetToNAVUnitConversionRateWAD, WAD, Math.Rounding.Floor);
+        trancheToNAVUnitConversionRateWAD =
+            trancheUnitToAccountingAssetsConversionRateWAD.mulDiv(accountingAssetToNAVUnitConversionRateWAD, WAD, Math.Rounding.Floor);
     }
 }
