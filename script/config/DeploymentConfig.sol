@@ -87,6 +87,7 @@ abstract contract DeploymentConfig {
         DeployScript.KernelType kernelType;
         bytes kernelSpecificParams;
         uint64 stSelfLiquidationBonusWAD;
+        bool enforceVaultSharesTransferWhitelist;
         // Accountant
         uint64 stProtocolFeeWAD;
         uint64 jtProtocolFeeWAD;
@@ -196,6 +197,7 @@ abstract contract DeploymentConfig {
             jtDustTolerance: 5,
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
+            enforceVaultSharesTransferWhitelist: false,
             stSelfLiquidationBonusWAD: 0.05e18, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
@@ -228,6 +230,7 @@ abstract contract DeploymentConfig {
             jtDustTolerance: 5,
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
+            enforceVaultSharesTransferWhitelist: false,
             stSelfLiquidationBonusWAD: 0.05e18, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
@@ -260,6 +263,7 @@ abstract contract DeploymentConfig {
             jtDustTolerance: 5,
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
+            enforceVaultSharesTransferWhitelist: false,
             stSelfLiquidationBonusWAD: 0.05e18, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
@@ -292,6 +296,7 @@ abstract contract DeploymentConfig {
             jtDustTolerance: 5,
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
+            enforceVaultSharesTransferWhitelist: false,
             stSelfLiquidationBonusWAD: 0.05e18, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
@@ -330,6 +335,7 @@ abstract contract DeploymentConfig {
                     initialConversionRateWAD: 1e18
                 })
             ),
+            enforceVaultSharesTransferWhitelist: false,
             stSelfLiquidationBonusWAD: 0.05e18, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
@@ -369,6 +375,7 @@ abstract contract DeploymentConfig {
                     initialConversionRateWAD: 1e18
                 })
             ),
+            enforceVaultSharesTransferWhitelist: false,
             stSelfLiquidationBonusWAD: 0.05e18,
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.1e18,
@@ -400,6 +407,7 @@ abstract contract DeploymentConfig {
             stDustTolerance: 5,
             jtDustTolerance: 5,
             kernelType: DeployScript.KernelType.ReUSD_ST_ReUSD_JT,
+            enforceVaultSharesTransferWhitelist: false,
             kernelSpecificParams: abi.encode(
                 DeployScript.ReUSDSTReUSDJTKernelParams({
                     reusd: 0x5086bf358635B81D8C47C66d1C8b9E567Db70c72,
@@ -438,6 +446,7 @@ abstract contract DeploymentConfig {
             jtDustTolerance: 5 * (10 ** (18 - 6)),
             kernelType: DeployScript.KernelType.IdleCdoAA_ST_IdleCdoAA_JT,
             kernelSpecificParams: abi.encode(DeployScript.IdleAACdoSTCdoJTKernelParams({ idleCDO: 0x433D5B175148dA32Ffe1e1A37a939E1b7e79be4d })),
+            enforceVaultSharesTransferWhitelist: false,
             stSelfLiquidationBonusWAD: 0.05e18,
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.1e18,
@@ -470,6 +479,7 @@ abstract contract DeploymentConfig {
             jtDustTolerance: 2 * (10 ** (18 - 6)),
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })), // 1:1 USDC to USD
+            enforceVaultSharesTransferWhitelist: false,
             stSelfLiquidationBonusWAD: 0.05e18, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
@@ -503,6 +513,7 @@ abstract contract DeploymentConfig {
             jtDustTolerance: 2 * (10 ** (18 - 6)),
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })), // 1:1 USDC to USD
+            enforceVaultSharesTransferWhitelist: false,
             stSelfLiquidationBonusWAD: 0.05e18, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
@@ -535,6 +546,7 @@ abstract contract DeploymentConfig {
             stDustTolerance: 5 * 10 ** 10, // The chainlink oracle has 8 decimals of precision
             jtDustTolerance: 5 * 10 ** 10, // The chainlink oracle has 8 decimals of precision
             kernelType: DeployScript.KernelType.Identical_DSToken_ST_DSToken_JT_Kernel,
+            enforceVaultSharesTransferWhitelist: true,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams({
                     trancheAssetToReferenceAssetOracle: 0xD6BcbbC87bFb6c8964dDc73DC3EaE6d08865d51C,
@@ -574,6 +586,7 @@ abstract contract DeploymentConfig {
             stDustTolerance: 5 * 10 ** 12,
             jtDustTolerance: 5 * 10 ** 12,
             kernelType: DeployScript.KernelType.Identical_Makina_ST_Makina_JT_Kernel,
+            enforceVaultSharesTransferWhitelist: false,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalMakinaSTMakinaJTKernelParams({
                     makinaMachine: 0x6b006870C83b1Cd49E766Ac9209f8d68763Df721, initialConversionRateWAD: 1e18
@@ -611,6 +624,7 @@ abstract contract DeploymentConfig {
             stDustTolerance: 5,
             jtDustTolerance: 5,
             kernelType: DeployScript.KernelType.sUSDai_ST_sUSDai_JT_Kernel,
+            enforceVaultSharesTransferWhitelist: false,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalAssetsAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
             stSelfLiquidationBonusWAD: 0.03e18, // TODO
             stProtocolFeeWAD: 0.1e18,

@@ -82,6 +82,7 @@ contract PausabilityTestSuite is BaseTest {
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
             kernelSpecificParams: abi.encode(kernelParams),
             stSelfLiquidationBonusWAD: 0,
+            enforceVaultSharesTransferWhitelist: false,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,

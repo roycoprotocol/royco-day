@@ -640,6 +640,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             expectedJuniorTrancheAddress,
             _config.seniorAsset,
             _config.juniorAsset,
+            _config.enforceVaultSharesTransferWhitelist,
             expectedAccountantAddress
         );
 
@@ -832,6 +833,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     /// @param _seniorAsset The senior tranche's underlying asset
     /// @param _juniorAsset The junior tranche's underlying asset
     /// @param _expectedAccountantAddress Precomputed accountant proxy address
+    /// @param _enforceVaultSharesTransferWhitelist Whether to enforce the vault shares transfer whitelist
     /// @return The deployed kernel implementation address
     /// @dev Precomputes deterministic proxy addresses via CREATE3 salts so implementations can reference
     ///      each other at construction time (e.g. tranches reference the kernel, accountant references the kernel).
@@ -842,6 +844,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         address _expectedJuniorTrancheAddress,
         address _seniorAsset,
         address _juniorAsset,
+        bool _enforceVaultSharesTransferWhitelist,
         address _expectedAccountantAddress
     )
         internal
@@ -852,7 +855,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             stAsset: _seniorAsset,
             juniorTranche: _expectedJuniorTrancheAddress,
             jtAsset: _juniorAsset,
-            accountant: _expectedAccountantAddress
+            accountant: _expectedAccountantAddress,
+            enforceVaultSharesTransferWhitelist: _enforceVaultSharesTransferWhitelist
         });
 
         bytes memory creationCode = _buildKernelCreationCode(_kernelType, _kernelSpecificParams, cp);

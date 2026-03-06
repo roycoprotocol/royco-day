@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { ReentrancyGuardTransient } from "../../../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuardTransient.sol";
@@ -43,6 +44,9 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
 
     /// @inheritdoc IRoycoKernel
     address public immutable override(IRoycoKernel) ACCOUNTANT;
+
+    /// @notice Whether to enforce the vault shares transfer whitelist
+    bool public immutable ENFORCE_VAULT_SHARES_TRANSFER_WHITELIST;
 
     /// @dev Permissions the function to only be callable by the market's senior tranche
     /// @dev Should be placed on ST deposit and redeem functions
@@ -92,6 +96,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         JUNIOR_TRANCHE = _params.juniorTranche;
         JT_ASSET = _params.jtAsset;
         ACCOUNTANT = _params.accountant;
+        ENFORCE_VAULT_SHARES_TRANSFER_WHITELIST = _params.enforceVaultSharesTransferWhitelist;
     }
 
     /**
@@ -535,6 +540,16 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         // Check if the sender or recipient are blacklisted
         require(!isBlacklisted(_from), ACCOUNT_BLACKLISTED(_from));
         require(!isBlacklisted(_to), ACCOUNT_BLACKLISTED(_to));
+
+        // If transferring shares, ensure that the recipient is a whitelisted LP for the tranche
+        // It is assumed that the sender is already a whitelisted LP
+        if (ENFORCE_VAULT_SHARES_TRANSFER_WHITELIST && _to != address(0)) {
+            address authority = authority();
+            // Check if the to address can call the deposit function on the tranche
+            // @dev msg.sender is the tranche address
+            (bool isWhitelistedTrancheLP,) = IAccessManager(authority).canCall(_to, msg.sender, IRoycoVaultTranche.deposit.selector);
+            require(_to != authority && isWhitelistedTrancheLP, ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(_to));
+        }
 
         // Call the market specific pre-balance update hook
         _preTrancheBalanceUpdate(_from, _to, _value);
