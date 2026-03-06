@@ -21,12 +21,12 @@ contract Identical_DSToken_ST_DSToken_JT_Kernel is Identical_ERC20_ST_ERC20_JT_K
     error ACCOUNT_NOT_WHITELISTED_ON_SECURITY_COMPLIANCE_SERVICE(address account);
 
     /// @notice Thrown when the vault shares transfer whitelist is not enforced
-    error VAULT_SHARES_TRANSFER_WHITELIST_NOT_ENFORCED();
+    error TRANCHE_SHARES_TRANSFER_WHITELIST_NOT_ENFORCED();
 
     /// @notice Constructs the kernel state
     /// @param _params The standard construction parameters for the Royco kernel
     constructor(RoycoKernelConstructionParams memory _params) Identical_ERC20_ST_ERC20_JT_Kernel(_params) {
-        require(_params.enforceVaultSharesTransferWhitelist, VAULT_SHARES_TRANSFER_WHITELIST_NOT_ENFORCED());
+        require(_params.enforceVaultSharesTransferWhitelist, TRANCHE_SHARES_TRANSFER_WHITELIST_NOT_ENFORCED());
         // Retrieve and cache the compliance service from the DSToken
         DS_COMPLIANCE_SERVICE = IDSToken(ST_ASSET).getDSService(IDSToken(ST_ASSET).COMPLIANCE_SERVICE());
     }
