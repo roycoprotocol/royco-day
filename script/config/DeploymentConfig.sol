@@ -15,6 +15,7 @@ abstract contract DeploymentConfig {
     uint256 internal constant MAINNET = 1;
     uint256 internal constant AVALANCHE = 43_114;
     uint256 internal constant ARBITRUM = 42_161;
+    uint256 internal constant BASE = 8453;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CONTROLLING MULTISIG ADDRESSES
@@ -42,6 +43,7 @@ abstract contract DeploymentConfig {
     string public constant GAUNTLET_USDC_FRONTIER = "GauntletUSDCFrontier";
     string public constant MAKINA_DUSD = "MakinaDUSD";
     string public constant SUSDAI = "sUSDai";
+    string public constant YO_USD = "yoUSD";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CHAIN-SPECIFIC CONFIG (defined once per chain)
@@ -627,6 +629,40 @@ abstract contract DeploymentConfig {
             enforceVaultSharesTransferWhitelist: false,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalAssetsAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
             stSelfLiquidationBonusWAD: 0.03e18, // TODO
+            stProtocolFeeWAD: 0.1e18,
+            jtProtocolFeeWAD: 0.2e18,
+            jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
+            coverageWAD: 0.1e18, // TODO
+            betaWAD: 1e18,
+            lltvWAD: 0.91e18, // TODO
+            fixedTermDurationSeconds: 2 days, // TODO
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
+            ydmSpecificParams: // TODO
+            abi.encode(
+                DeployScript.AdaptiveCurveYDM_V2_Params({
+                    jtYieldShareAtZeroUtilWAD: 0.07e18,
+                    jtYieldShareAtTargetUtilWAD: 0.07e18,
+                    jtYieldShareAtFullUtilWAD: 0.45e18,
+                    maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
+                })
+            )
+        });
+
+        _marketConfigs[YO_USD] = MarketDeploymentConfig({
+            marketName: YO_USD,
+            chainId: BASE,
+            seniorTrancheName: _seniorTrancheName(YO_USD),
+            seniorTrancheSymbol: _seniorTrancheSymbol(YO_USD),
+            juniorTrancheName: _juniorTrancheName(YO_USD),
+            juniorTrancheSymbol: _juniorTrancheSymbol(YO_USD),
+            seniorAsset: 0x0000000f2eB9f69274678c76222B35eEc7588a65,
+            juniorAsset: 0x0000000f2eB9f69274678c76222B35eEc7588a65,
+            stDustTolerance: 5,
+            jtDustTolerance: 5,
+            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
+            kernelSpecificParams: abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
+            enforceVaultSharesTransferWhitelist: false,
+            stSelfLiquidationBonusWAD: 0.05e18, // TODO
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
             jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
