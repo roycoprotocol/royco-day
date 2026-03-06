@@ -9,14 +9,14 @@ import { IdenticalAssetsOracleQuoter } from "./IdenticalAssetsOracleQuoter.sol";
 /**
  * @title IdenticalERC4626SharesOracleQuoter
  * @notice Quoter to convert tranche units (ERC4626 vault shares) to/from NAV units by converting the shares to base assets and converting base assets to NAV units using an admin or oracle set rate
- * @dev The senior and junior tranches must have the same ERC4626 vault share as its tranche unit
+ * @dev The senior and junior tranches must have the same ERC4626 vault share as their tranche unit
  * @dev Use case: Convert sUSDE (Tranche unit) to USDE (base assets) using ERC4626's convertToAssets and convert USDE to USD (NAV unit) using an admin or oracle set rate
  */
 abstract contract IdenticalERC4626SharesOracleQuoter is IdenticalAssetsOracleQuoter {
     using Math for uint256;
 
     /// @dev The share amount to pass to convertToAssets() such that the result is scaled to WAD precision
-    uint256 internal immutable SHARES_TO_CONVERT_TO_ASSETS;
+    uint256 internal immutable ERC4626_SHARES_TO_CONVERT_TO_ASSETS;
 
     constructor() {
         // NOTE: Both tranche assets are identical ERC4626 shares
@@ -26,7 +26,7 @@ abstract contract IdenticalERC4626SharesOracleQuoter is IdenticalAssetsOracleQuo
         // INPUT_DECIMALS = WAD_DECIMALS + TRANCHE_DECIMALS - BASE_ASSET_DECIMALS
         // OUTPUT_DECIMALS = (WAD_DECIMALS + TRANCHE_DECIMALS - BASE_ASSET_DECIMALS) + BASE_ASSET_DECIMALS - TRANCHE_DECIMALS
         // OUTPUT_DECIMALS = WAD_DECIMALS
-        SHARES_TO_CONVERT_TO_ASSETS = 10 ** (WAD_DECIMALS + IERC4626(ST_ASSET).decimals() - IERC20Metadata(IERC4626(ST_ASSET).asset()).decimals());
+        ERC4626_SHARES_TO_CONVERT_TO_ASSETS = 10 ** (WAD_DECIMALS + IERC4626(ST_ASSET).decimals() - IERC20Metadata(IERC4626(ST_ASSET).asset()).decimals());
     }
 
     /**
@@ -43,7 +43,7 @@ abstract contract IdenticalERC4626SharesOracleQuoter is IdenticalAssetsOracleQuo
         returns (uint256 trancheToNAVUnitConversionRateWAD)
     {
         // Fetch the conversion rate from the tranche asset (ERC4626 share) to its underlying asset, scaled to WAD precision
-        uint256 trancheUnitToBaseAssetsConversionRateWAD = IERC4626(ST_ASSET).convertToAssets(SHARES_TO_CONVERT_TO_ASSETS);
+        uint256 trancheUnitToBaseAssetsConversionRateWAD = IERC4626(ST_ASSET).convertToAssets(ERC4626_SHARES_TO_CONVERT_TO_ASSETS);
 
         // Resolve the vault base asset to NAV unit conversion rate, scaled to WAD precision
         uint256 baseAssetToNAVUnitConversionRateWAD = getStoredConversionRateWAD();

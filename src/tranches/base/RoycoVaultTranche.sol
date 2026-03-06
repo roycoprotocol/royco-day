@@ -137,7 +137,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     // =============================
 
     /// @inheritdoc IRoycoVaultTranche
-    function seizeAssets(address _from, address _receiver, uint256 _shares) external virtual override(IRoycoVaultTranche) restricted {
+    function seizeShares(address _from, address _receiver, uint256 _shares) external virtual override(IRoycoVaultTranche) restricted {
         // Basic sanity checks on the seizure
         require(_from != address(0), NULL_ADDRESS());
         require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
@@ -147,11 +147,11 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // Bypass the balance update hook
         super._update(_from, _receiver, _shares);
 
-        emit AssetsSeized(_from, _receiver, _shares);
+        emit SharesSeized(msg.sender, _from, _receiver, _shares);
     }
 
     /// @inheritdoc IRoycoVaultTranche
-    function seizeAndRedeemAssets(
+    function seizeAndRedeemShares(
         address _from,
         address _receiver,
         uint256 _shares
@@ -178,7 +178,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // Bypass the balance update hook
         super._update(_from, address(0), _shares);
 
-        emit AssetsSeizedAndRedeemed(msg.sender, _from, _receiver, claims, _shares);
+        emit SharesSeizedAndRedeemed(msg.sender, _from, _receiver, claims, _shares);
     }
 
     /// =============================

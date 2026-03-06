@@ -49,22 +49,23 @@ interface IRoycoVaultTranche is IERC20Metadata {
     event ProtocolFeeSharesMinted(address indexed protocolFeeRecipient, uint256 mintedProtocolFeeShares, uint256 totalTrancheShares);
 
     /**
-     * @notice Emitted when assets are seized from the tranche
-     * @param from The address that lost the seized assets
-     * @param to The address that received the seized assets
-     * @param value The amount of assets seized
+     * @notice Emitted when shares are seized from the tranche
+     * @param caller The designated admin that initiated the seizure
+     * @param from The address to seize shares from
+     * @param to The address that received the seized shares
+     * @param shares The amount of shares seized
      */
-    event AssetsSeized(address indexed from, address indexed to, uint256 value);
+    event SharesSeized(address indexed caller, address indexed from, address indexed to, uint256 shares);
 
     /**
-     * @notice Emitted when assets are seized and redeemed from the tranche
-     * @param caller The address that initiated the seizure and redemption
-     * @param from The address that lost the seized assets
-     * @param to The address that received the redeemed assets
-     * @param claims The asset claims received by the receiver, including claims on ST assets, JT assets, and their total NAV value
-     * @param shares The number of shares redeemed
+     * @notice Emitted when shares are seized and redeemed from the tranche
+     * @param caller The designated admin that initiated the seizure and redemption
+     * @param from The address to seize shares from
+     * @param to The address that received the assets from redeeming the shares
+     * @param claims The asset claims remitted to the receiver, including claims on ST assets, JT assets, and their total NAV value
+     * @param shares The number of shares seized and redeemed
      */
-    event AssetsSeizedAndRedeemed(address indexed caller, address indexed from, address indexed to, AssetClaims claims, uint256 shares);
+    event SharesSeizedAndRedeemed(address indexed caller, address indexed from, address indexed to, AssetClaims claims, uint256 shares);
 
     /// @notice Thrown when a deposit is requested with zero assets
     error MUST_DEPOSIT_NON_ZERO_ASSETS();
@@ -178,21 +179,23 @@ interface IRoycoVaultTranche is IERC20Metadata {
     function redeem(uint256 _shares, address _receiver, address _owner) external returns (AssetClaims memory claims);
 
     /**
-     * @notice Seizes assets from the tranche and transfers them to the receiver
-     * @dev Bypass the balance update hook
-     * @param _from The address that lost the seized assets
-     * @param _receiver The address that received the seized assets
+     * @notice Seizes shares from a user and transfers them to the receiver
+     * @dev Only callable by a designated admin for compliance reasons
+     * @dev Bypasses the balance update hook
+     * @param _from The address to seize shares from
+     * @param _receiver The address that will receive the seized shares
      * @param _shares The number of shares to seize
      */
-    function seizeAssets(address _from, address _receiver, uint256 _shares) external;
+    function seizeShares(address _from, address _receiver, uint256 _shares) external;
 
     /**
-     * @notice Seizes assets from the tranche and transfers them to the receiver
-     * @param _from The address that lost the seized assets
-     * @param _receiver The address that received the seized assets
-     * @param _shares The number of shares to seize
+     * @notice Seizes shares from a user, redeems the shares, and transfers them to the receiver
+     * @dev Only callable by a designated admin for compliance reasons
+     * @param _from The address to seize and redeem shares from
+     * @param _receiver The address that received the assets for the redeemed shares
+     * @param _shares The number of shares to seize and redeem
      */
-    function seizeAndRedeemAssets(address _from, address _receiver, uint256 _shares) external returns (AssetClaims memory claims);
+    function seizeAndRedeemShares(address _from, address _receiver, uint256 _shares) external returns (AssetClaims memory claims);
 
     /**
      * @notice Previews the protocol fee shares that would be minted for a given fee amount

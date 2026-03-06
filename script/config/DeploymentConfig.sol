@@ -14,6 +14,7 @@ abstract contract DeploymentConfig {
 
     uint256 internal constant MAINNET = 1;
     uint256 internal constant AVALANCHE = 43_114;
+    uint256 internal constant ARBITRUM = 42_161;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CONTROLLING MULTISIG ADDRESSES
@@ -39,6 +40,8 @@ abstract contract DeploymentConfig {
     string public constant ACRED = "ACRED";
     string public constant SMOKEHOUSE_USDC = "SmokehouseUSDC";
     string public constant GAUNTLET_USDC_FRONTIER = "GauntletUSDCFrontier";
+    string public constant MAKINA_DUSD = "MakinaDUSD";
+    string public constant SUSDAI = "sUSDai";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CHAIN-SPECIFIC CONFIG (defined once per chain)
@@ -356,8 +359,8 @@ abstract contract DeploymentConfig {
             juniorTrancheSymbol: _juniorTrancheSymbol(PT_CUSD),
             seniorAsset: 0x545A490f9ab534AdF409A2E682bc4098f49952e3,
             juniorAsset: 0x545A490f9ab534AdF409A2E682bc4098f49952e3,
-            stDustTolerance: 1,
-            jtDustTolerance: 1,
+            stDustTolerance: 5,
+            jtDustTolerance: 5,
             kernelType: DeployScript.KernelType.Identical_ERC20_ST_ERC20_JT_Kernel,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams({
@@ -394,8 +397,8 @@ abstract contract DeploymentConfig {
             juniorTrancheSymbol: _juniorTrancheSymbol(REUSD),
             seniorAsset: 0x5086bf358635B81D8C47C66d1C8b9E567Db70c72,
             juniorAsset: 0x5086bf358635B81D8C47C66d1C8b9E567Db70c72,
-            stDustTolerance: 1,
-            jtDustTolerance: 1,
+            stDustTolerance: 5,
+            jtDustTolerance: 5,
             kernelType: DeployScript.KernelType.ReUSD_ST_ReUSD_JT,
             kernelSpecificParams: abi.encode(
                 DeployScript.ReUSDSTReUSDJTKernelParams({
@@ -434,7 +437,7 @@ abstract contract DeploymentConfig {
             stDustTolerance: 5 * (10 ** (18 - 6)),
             jtDustTolerance: 5 * (10 ** (18 - 6)),
             kernelType: DeployScript.KernelType.IdleCdoAA_ST_IdleCdoAA_JT,
-            kernelSpecificParams: abi.encode(DeployScript.IdleCdoAASTIdleCdoAAJTKernelParams({ idleCDO: 0x433D5B175148dA32Ffe1e1A37a939E1b7e79be4d })),
+            kernelSpecificParams: abi.encode(DeployScript.IdleAACdoSTCdoJTKernelParams({ idleCDO: 0x433D5B175148dA32Ffe1e1A37a939E1b7e79be4d })),
             stSelfLiquidationBonusWAD: 0.05e18,
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.1e18,
@@ -554,6 +557,76 @@ abstract contract DeploymentConfig {
                     jtYieldShareAtZeroUtilWAD: 0.05e18,
                     jtYieldShareAtTargetUtilWAD: 0.05e18,
                     jtYieldShareAtFullUtilWAD: 0.4e18,
+                    maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
+                })
+            )
+        });
+
+        _marketConfigs[MAKINA_DUSD] = MarketDeploymentConfig({
+            marketName: MAKINA_DUSD,
+            chainId: MAINNET,
+            seniorTrancheName: _seniorTrancheName(MAKINA_DUSD),
+            seniorTrancheSymbol: _seniorTrancheSymbol(MAKINA_DUSD),
+            juniorTrancheName: _juniorTrancheName(MAKINA_DUSD),
+            juniorTrancheSymbol: _juniorTrancheSymbol(MAKINA_DUSD),
+            seniorAsset: 0x1e33E98aF620F1D563fcD3cfd3C75acE841204ef,
+            juniorAsset: 0x1e33E98aF620F1D563fcD3cfd3C75acE841204ef,
+            stDustTolerance: 5 * 10 ** 12,
+            jtDustTolerance: 5 * 10 ** 12,
+            kernelType: DeployScript.KernelType.Identical_Makina_ST_Makina_JT_Kernel,
+            kernelSpecificParams: abi.encode(
+                DeployScript.IdenticalMakinaSTMakinaJTKernelParams({
+                    makinaMachine: 0x6b006870C83b1Cd49E766Ac9209f8d68763Df721, initialConversionRateWAD: 1e18
+                })
+            ),
+            stSelfLiquidationBonusWAD: 0.03e18, // TODO
+            stProtocolFeeWAD: 0.1e18,
+            jtProtocolFeeWAD: 0.2e18,
+            jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
+            coverageWAD: 0.1e18, // TODO
+            betaWAD: 1e18,
+            lltvWAD: 0.91e18, // TODO
+            fixedTermDurationSeconds: 2 days, // TODO
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
+            ydmSpecificParams: // TODO
+            abi.encode(
+                DeployScript.AdaptiveCurveYDM_V2_Params({
+                    jtYieldShareAtZeroUtilWAD: 0.07e18,
+                    jtYieldShareAtTargetUtilWAD: 0.07e18,
+                    jtYieldShareAtFullUtilWAD: 0.45e18,
+                    maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
+                })
+            )
+        });
+
+        _marketConfigs[SUSDAI] = MarketDeploymentConfig({
+            marketName: SUSDAI,
+            chainId: ARBITRUM,
+            seniorTrancheName: _seniorTrancheName(SUSDAI),
+            seniorTrancheSymbol: _seniorTrancheSymbol(SUSDAI),
+            juniorTrancheName: _juniorTrancheName(SUSDAI),
+            juniorTrancheSymbol: _juniorTrancheSymbol(SUSDAI),
+            seniorAsset: 0x0B2b2B2076d95dda7817e785989fE353fe955ef9,
+            juniorAsset: 0x0B2b2B2076d95dda7817e785989fE353fe955ef9,
+            stDustTolerance: 5,
+            jtDustTolerance: 5,
+            kernelType: DeployScript.KernelType.sUSDai_ST_sUSDai_JT_Kernel,
+            kernelSpecificParams: abi.encode(DeployScript.IdenticalAssetsAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
+            stSelfLiquidationBonusWAD: 0.03e18, // TODO
+            stProtocolFeeWAD: 0.1e18,
+            jtProtocolFeeWAD: 0.2e18,
+            jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
+            coverageWAD: 0.1e18, // TODO
+            betaWAD: 1e18,
+            lltvWAD: 0.91e18, // TODO
+            fixedTermDurationSeconds: 2 days, // TODO
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
+            ydmSpecificParams: // TODO
+            abi.encode(
+                DeployScript.AdaptiveCurveYDM_V2_Params({
+                    jtYieldShareAtZeroUtilWAD: 0.07e18,
+                    jtYieldShareAtTargetUtilWAD: 0.07e18,
+                    jtYieldShareAtFullUtilWAD: 0.45e18,
                     maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
                 })
             )

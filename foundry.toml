@@ -12,8 +12,9 @@ evm_version = "prague"
 via_ir = true
 deny = "never"
 fs_permissions = [{ access = "read", path = "./out" }]
-solc_version = "0.8.33"
+solc_version = "0.8.34"
 ignored_warnings_from = ["test/*", "lib/*"]
+show_progress = true
 
 [profile.development]
 optimizer = true
@@ -49,3 +50,4 @@ show_logs = true
 [etherscan]
 mainnet = { key = "${ETHERSCAN_API_KEY}" }
 avalanche = { key = "${AVALANCHE_API_KEY}" }
+arbitrum = { key = "${ARBITRUM_API_KEY}" }
