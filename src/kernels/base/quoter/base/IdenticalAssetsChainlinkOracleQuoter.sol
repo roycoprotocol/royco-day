@@ -25,8 +25,8 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
         uint48 stalenessThresholdSeconds;
     }
 
-    /// @notice Emitted when the identical assets chainlink oracle quoter is updated
-    event IdenticalAssetsChainlinkOracleUpdated(address indexed oracle, uint8 oracleDecimals, uint48 stalenessThresholdSeconds);
+    /// @notice Emitted when the identical assets chainlink oracle is updated
+    event ChainlinkOracleUpdated(address indexed oracle, uint8 oracleDecimals, uint48 stalenessThresholdSeconds);
 
     /// @notice Thrown when the staleness threshold seconds is zero
     error INVALID_STALENESS_THRESHOLD_SECONDS();
@@ -42,11 +42,11 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
 
     /**
      * @notice Initializes the identical assets chainlink oracle quoter
-     * @param _chainlinkOracle The chainlink oracle used to price an asset
+     * @param _oracle The chainlink (compatible) oracle used to price an asset
      * @param _stalenessThresholdSeconds The staleness threshold in seconds
      */
-    function __IdenticalAssetsChainlinkOracleQuoter_init_unchained(address _chainlinkOracle, uint48 _stalenessThresholdSeconds) internal onlyInitializing {
-        _setChainlinkOracle(_chainlinkOracle, _stalenessThresholdSeconds);
+    function __IdenticalAssetsChainlinkOracleQuoter_init_unchained(address _oracle, uint48 _stalenessThresholdSeconds) internal onlyInitializing {
+        _setChainlinkOracle(_oracle, _stalenessThresholdSeconds);
     }
 
     /**
@@ -76,11 +76,11 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
 
     /**
      * @notice Sets the chainlink oracle for pricing an asset
-     * @param _chainlinkOracle The new chainlink oracle for pricing an asset
+     * @param _oracle The new chainlink (compatible) oracle for pricing an asset
      * @param _stalenessThresholdSeconds The new staleness threshold seconds
      */
-    function setChainlinkOracle(address _chainlinkOracle, uint48 _stalenessThresholdSeconds) external restricted {
-        _setChainlinkOracle(_chainlinkOracle, _stalenessThresholdSeconds);
+    function setChainlinkOracle(address _oracle, uint48 _stalenessThresholdSeconds) external restricted {
+        _setChainlinkOracle(_oracle, _stalenessThresholdSeconds);
     }
 
     /// @dev Returns the chainlink oracle configuration for this quoter
@@ -123,7 +123,7 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
         $.oracleDecimals = AggregatorV3Interface(_oracle).decimals();
         $.stalenessThresholdSeconds = _stalenessThresholdSeconds;
 
-        emit IdenticalAssetsChainlinkOracleUpdated(_oracle, $.oracleDecimals, _stalenessThresholdSeconds);
+        emit ChainlinkOracleUpdated(_oracle, $.oracleDecimals, _stalenessThresholdSeconds);
     }
 
     /**
