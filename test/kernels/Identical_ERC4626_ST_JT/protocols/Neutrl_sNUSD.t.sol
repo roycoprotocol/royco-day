@@ -9,18 +9,19 @@ import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/libraries/Units.sol";
 
-import { YieldBearingERC4626_TestBase } from "../base/YieldBearingERC4626_TestBase.t.sol";
+import { YieldBearingERC4626_ChainlinkOracle_TestBase } from "../base/YieldBearingERC4626_ChainlinkOracle_TestBase.t.sol";
 
 /// @title sNUSD_sNUSD_Test
-/// @notice Tests YieldBearingERC4626_ST_YieldBearingERC4626_JT_Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel with sNUSD
-/// @dev Both ST and JT use sNUSD as the tranche asset
+/// @notice Tests Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel with sNUSD
+/// @dev Both ST and JT use sNUSD as the tranche asset on Ethereum mainnet
 ///
 /// sNUSD is an ERC4626 vault where:
 ///   - Tranche Unit: sNUSD shares
 ///   - Vault Asset: NUSD (the underlying)
 ///   - NAV Unit: USD
 /// The stored conversion rate is vaultAsset-to-NAV (NUSD->USD), which is ~1:1 for stablecoins.
-contract sNUSD_sNUSD_Test is YieldBearingERC4626_TestBase {
+/// The Chainlink oracle provides the live NUSD->USD rate.
+contract sNUSD_sNUSD_Test is YieldBearingERC4626_ChainlinkOracle_TestBase {
     // ═══════════════════════════════════════════════════════════════════════════
     // MAINNET ADDRESSES
     // ═══════════════════════════════════════════════════════════════════════════
@@ -35,7 +36,7 @@ contract sNUSD_sNUSD_Test is YieldBearingERC4626_TestBase {
     /// @notice Returns the test configuration for sNUSD
     function getTestConfig() public pure override returns (TestConfig memory) {
         return TestConfig({
-            forkBlock: 24_180_513,
+            forkBlock: 24_623_821,
             forkRpcUrlEnvVar: "MAINNET_RPC_URL",
             stAsset: SNUSD,
             jtAsset: SNUSD,
@@ -54,12 +55,9 @@ contract sNUSD_sNUSD_Test is YieldBearingERC4626_TestBase {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Deploys the sNUSD kernel and market using parameters from DeploymentConfig
+    /// @dev Uses the Chainlink oracle from the deployment config for NUSD->USD pricing
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
         DeploymentConfig.MarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("sNUSD");
-
-        // Override initial conversion rate for testing
-        marketConfig.kernelSpecificParams =
-            abi.encode(DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: _getInitialConversionRate() }));
 
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
