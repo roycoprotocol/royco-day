@@ -372,10 +372,10 @@ abstract contract DeploymentConfig {
             kernelType: DeployScript.KernelType.Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams({
-                    initialConversionRateWAD: 1e18,
-                    trancheAssetToReferenceAssetOracle: 0x6DA10958c691454BE7eb5f3e3B91b5713e542b17,
-                    stalenessThresholdSeconds: 1800
-                })
+                        initialConversionRateWAD: 1e18,
+                        trancheAssetToReferenceAssetOracle: 0x6DA10958c691454BE7eb5f3e3B91b5713e542b17,
+                        stalenessThresholdSeconds: 1800
+                    })
             ),
             enforceVaultSharesTransferWhitelist: false,
             stSelfLiquidationBonusWAD: 0.05e18,

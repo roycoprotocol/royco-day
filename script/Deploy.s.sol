@@ -966,12 +966,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
                 abi.decode(_kernelSpecificParams, (IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams));
             return abi.encodeCall(
                 Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel.initialize,
-                (
-                    kernelParams,
-                    kernelParams2.initialConversionRateWAD,
-                    kernelParams2.baseAssetToNavAssetOracle,
-                    kernelParams2.stalenessThresholdSeconds
-                )
+                (kernelParams, kernelParams2.initialConversionRateWAD, kernelParams2.baseAssetToNavAssetOracle, kernelParams2.stalenessThresholdSeconds)
             );
         } else if (_kernelType == KernelType.IdleCdoAA_ST_IdleCdoAA_JT) {
             return abi.encodeCall(Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel.initialize, (kernelParams));
