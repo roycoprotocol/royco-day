@@ -12,7 +12,7 @@ import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/librarie
 import { YieldBearingERC4626_TestBase } from "../base/YieldBearingERC4626_TestBase.t.sol";
 
 /// @title Tokemak_autoUSD_Test
-/// @notice Tests YieldBearingERC4626_ST_YieldBearingERC4626_JT_Identical_ERC4626_ST_ERC4626_JT_Kernel with Tokemak autoUSD
+/// @notice Tests YieldBearingERC4626_ST_YieldBearingERC4626_JT_Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel with Tokemak autoUSD
 /// @dev Both ST and JT use autoUSD as the tranche asset on Ethereum mainnet
 ///
 /// autoUSD is Tokemak's ERC4626 autopool vault where:

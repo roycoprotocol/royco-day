@@ -12,7 +12,7 @@ import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/librarie
 import { YieldBearingERC4626_TestBase } from "../base/YieldBearingERC4626_TestBase.t.sol";
 
 /// @title Yo_yoUSD_Test
-/// @notice Tests Identical_ERC4626_ST_ERC4626_JT_Kernel with Yo Protocol yoUSD on Base
+/// @notice Tests Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel with Yo Protocol yoUSD on Base
 /// @dev Both ST and JT use yoUSD as the tranche asset on Base
 ///
 /// yoUSD is Yo Protocol's ERC4626 vault where:

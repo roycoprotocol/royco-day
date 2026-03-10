@@ -12,7 +12,7 @@ import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/librarie
 import { YieldBearingERC4626_TestBase } from "../base/YieldBearingERC4626_TestBase.t.sol";
 
 /// @title sNUSD_sNUSD_Test
-/// @notice Tests YieldBearingERC4626_ST_YieldBearingERC4626_JT_Identical_ERC4626_ST_ERC4626_JT_Kernel with sNUSD
+/// @notice Tests YieldBearingERC4626_ST_YieldBearingERC4626_JT_Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel with sNUSD
 /// @dev Both ST and JT use sNUSD as the tranche asset
 ///
 /// sNUSD is an ERC4626 vault where:

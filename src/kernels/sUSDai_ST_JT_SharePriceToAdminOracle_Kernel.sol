@@ -10,13 +10,13 @@ import { RoycoKernel } from "./base/RoycoKernel.sol";
 import { IdenticalAssetsAdminOracleQuoter, IdenticalAssetsOracleQuoter } from "./base/quoter/base/IdenticalAssetsAdminOracleQuoter.sol";
 
 /**
- * @title sUSDai_ST_sUSDai_JT_Kernel
+ * @title sUSDai_ST_JT_SharePriceToAdminOracle_Kernel
  * @author Waymont
  * @notice The senior and junior tranches transfer in sUSDai
  * @notice Tranche share transfers are restricted to addresses not blacklisted by USDai
  * @dev NAV computations employ the conservative valuation methodology used for valuing sUSDai redemptions in terms of USDai and convert the USDai to USD using an admin set exchange rate
  */
-contract sUSDai_ST_sUSDai_JT_Kernel is RoycoKernel, IdenticalAssetsAdminOracleQuoter {
+contract sUSDai_ST_JT_SharePriceToAdminOracle_Kernel is RoycoKernel, IdenticalAssetsAdminOracleQuoter {
     using Math for uint256;
 
     /// @notice The address of the USDai token

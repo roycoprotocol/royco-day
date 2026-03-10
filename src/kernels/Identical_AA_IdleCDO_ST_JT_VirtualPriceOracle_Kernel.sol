@@ -9,13 +9,13 @@ import { RoycoKernel } from "./base/RoycoKernel.sol";
 import { IdenticalAssetsOracleQuoter } from "./base/quoter/base/IdenticalAssetsOracleQuoter.sol";
 
 /**
- * @title Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel
+ * @title Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel
  * @author Waymont
  * @notice The senior and junior tranches transfer in an IdleCDO's AA tranche
  * @dev Example: Pareto's Falconx's Prime Brokerage Vault at https://app.pareto.credit/vault#0xC26A6Fa2C37b38E549a4a1807543801Db684f99C
  * @dev https://docs.idle.finance/
  */
-contract Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel is RoycoKernel, IdenticalAssetsOracleQuoter {
+contract Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel is RoycoKernel, IdenticalAssetsOracleQuoter {
     /// @notice The address of the IdleCDO
     address public immutable IDLE_CDO;
 

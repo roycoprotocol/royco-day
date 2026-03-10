@@ -9,7 +9,7 @@ import { IRoycoKernel } from "../../../../src/interfaces/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../../../../src/interfaces/IRoycoVaultTranche.sol";
 import { IComplianceServiceWhitelisted } from "../../../../src/interfaces/external/ds-token/IComplianceServiceWhitelisted.sol";
 import { IDSToken } from "../../../../src/interfaces/external/ds-token/IDSToken.sol";
-import { Identical_DSToken_ST_DSToken_JT_Kernel } from "../../../../src/kernels/Identical_DSToken_ST_DSToken_JT_Kernel.sol";
+import { Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel } from "../../../../src/kernels/Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel.sol";
 import { AssetClaims, MarketState } from "../../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
 import { YieldBearingERC20Chainlink_TestBase } from "../../Identical_ERC20_ST_JT_Chainlink/base/YieldBearingERC20Chainlink_TestBase.t.sol";
@@ -97,7 +97,7 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _complianceService() internal view returns (address) {
-        return Identical_DSToken_ST_DSToken_JT_Kernel(address(KERNEL)).DS_COMPLIANCE_SERVICE();
+        return Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).DS_COMPLIANCE_SERVICE();
     }
 
     function _mockNotWhitelisted(address _who) internal {

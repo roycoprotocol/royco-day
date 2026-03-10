@@ -201,7 +201,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         config.juniorAsset = _stVault;
         config.stDustTolerance = DUST_TOLERANCE_RAW;
         config.jtDustTolerance = DUST_TOLERANCE_RAW;
-        config.kernelType = DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel;
+        config.kernelType = DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel;
         config.stProtocolFeeWAD = ST_PROTOCOL_FEE_WAD;
         config.jtProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
         config.jtYieldShareProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;

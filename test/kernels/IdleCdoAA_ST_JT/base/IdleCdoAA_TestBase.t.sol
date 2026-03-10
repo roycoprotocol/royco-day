@@ -6,7 +6,7 @@ import { IERC20Metadata } from "../../../../lib/openzeppelin-contracts/contracts
 import { Math } from "../../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 
 import { IIdleCDO } from "../../../../src/interfaces/external/idle-finance/IIdleCDO.sol";
-import { Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel } from "../../../../src/kernels/Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel.sol";
+import { Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel } from "../../../../src/kernels/Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel.sol";
 import { IdenticalAssetsOracleQuoter } from "../../../../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
 import { WAD, WAD_DECIMALS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../../../src/libraries/Constants.sol";
 import { AssetClaims } from "../../../../src/libraries/Types.sol";
@@ -15,7 +15,7 @@ import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toNAVUnits, toTrancheUnits, toUin
 import { AbstractKernelTestSuite } from "../../abstract/AbstractKernelTestSuite.t.sol";
 
 /// @title IdleCdoAA_TestBase
-/// @notice Base test contract for Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel
+/// @notice Base test contract for Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel
 /// @dev Implements the test hooks for IdleCdoAA assets where ST and JT use identical AA tranche tokens
 ///
 /// IMPORTANT: This kernel derives NAV from the IdleCDO virtualPrice:

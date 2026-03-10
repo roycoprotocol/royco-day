@@ -6,12 +6,12 @@ import { RoycoKernel } from "./base/RoycoKernel.sol";
 import { IdenticalAssetsChainlinkToAdminOracleQuoter } from "./base/quoter/IdenticalAssetsChainlinkToAdminOracleQuoter.sol";
 
 /**
- * @title Identical_ERC20_ST_ERC20_JT_Kernel
+ * @title Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel
  * @author Waymont
  * @notice The senior and junior tranches transfer in the same yield bearing ERC20 asset (PT-cUSD, mF-ONE, etc.)
  * @dev NAV computations use a Chainlink (compatible) oracle to convert tranche units to the oracle's quote asset and an admin oracle set rate to convert from quote assets to NAV units
  */
-contract Identical_ERC20_ST_ERC20_JT_Kernel is RoycoKernel, IdenticalAssetsChainlinkToAdminOracleQuoter {
+contract Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel is RoycoKernel, IdenticalAssetsChainlinkToAdminOracleQuoter {
     /// @notice Constructs the kernel state
     /// @param _params The standard construction parameters for the Royco kernel
     constructor(RoycoKernelConstructionParams memory _params) RoycoKernel(_params) { }

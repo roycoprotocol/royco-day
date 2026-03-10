@@ -6,7 +6,7 @@ import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol
 import { IRoycoAuth } from "../../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
-import { Identical_ERC20_ST_ERC20_JT_Kernel } from "../../../../src/kernels/Identical_ERC20_ST_ERC20_JT_Kernel.sol";
+import { Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel } from "../../../../src/kernels/Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel.sol";
 import { IdenticalAssetsChainlinkToAdminOracleQuoter } from "../../../../src/kernels/base/quoter/IdenticalAssetsChainlinkToAdminOracleQuoter.sol";
 import { IdenticalAssetsChainlinkOracleQuoter } from "../../../../src/kernels/base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
@@ -14,7 +14,7 @@ import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from ".
 import { AbstractKernelTestSuite } from "../../abstract/AbstractKernelTestSuite.t.sol";
 
 /// @title YieldBearingERC20Chainlink_TestBase
-/// @notice Base test contract for Identical_ERC20_ST_ERC20_JT_Kernel
+/// @notice Base test contract for Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel
 /// @dev Implements the test hooks for yield-bearing ERC20 assets using Chainlink oracle for pricing
 ///
 /// IMPORTANT: This kernel uses two conversion rates:
@@ -203,14 +203,14 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
 
     /// @notice Gets the stored conversion rate (reference asset to NAV) in WAD precision
     function _getStoredConversionRate() internal view returns (uint256) {
-        return Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).getStoredConversionRateWAD();
+        return Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).getStoredConversionRateWAD();
     }
 
     /// @notice Sets the stored conversion rate (reference asset to NAV) in WAD precision
     /// @dev Requires ADMIN_ORACLE_QUOTER_ROLE, which is granted to ORACLE_QUOTER_ADMIN_ADDRESS
     function _setStoredConversionRate(uint256 _newRateWAD) internal {
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).setConversionRate(_newRateWAD);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setConversionRate(_newRateWAD);
     }
 
     /// @notice Simulates yield in the stored conversion rate
@@ -337,20 +337,20 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
         vm.mockCall(newOracle, abi.encodeWithSelector(AggregatorV3Interface.decimals.selector), abi.encode(uint8(18)));
 
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).setChainlinkOracle(newOracle, newStaleness);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(newOracle, newStaleness);
 
         // Verify by checking that it doesn't revert when called again with different values
         vm.mockCall(anotherOracle, abi.encodeWithSelector(AggregatorV3Interface.decimals.selector), abi.encode(uint8(8)));
 
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).setChainlinkOracle(anotherOracle, 3 days);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(anotherOracle, 3 days);
     }
 
     /// @notice Tests that setting oracle with zero address reverts
     function test_setChainlinkOracle_revertsOnZeroAddress() external {
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
         vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
-        Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).setChainlinkOracle(address(0), 1 days);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(address(0), 1 days);
     }
 
     /// @notice Tests that setting oracle with zero staleness reverts
@@ -361,7 +361,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
 
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
         vm.expectRevert(IdenticalAssetsChainlinkOracleQuoter.INVALID_STALENESS_THRESHOLD_SECONDS.selector);
-        Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).setChainlinkOracle(newOracle, 0);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(newOracle, 0);
     }
 
     /// @notice Tests that non-admin cannot set oracle
@@ -372,7 +372,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
 
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert(); // AccessManagerUnauthorizedAccount
-        Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).setChainlinkOracle(newOracle, 1 days);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(newOracle, 1 days);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -400,7 +400,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
 
         // Try to get conversion rate - should revert with STALE_PRICE
         vm.expectRevert(IdenticalAssetsChainlinkOracleQuoter.STALE_PRICE.selector);
-        Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
     }
 
     /// @notice Tests that zero/negative price causes INVALID_PRICE revert
@@ -422,7 +422,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
         );
 
         vm.expectRevert(IdenticalAssetsChainlinkOracleQuoter.INVALID_PRICE.selector);
-        Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
     }
 
     /// @notice Tests that negative price causes INVALID_PRICE revert
@@ -444,7 +444,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
         );
 
         vm.expectRevert(IdenticalAssetsChainlinkOracleQuoter.INVALID_PRICE.selector);
-        Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
     }
 
     /// @notice Tests that incomplete round causes INCOMPLETE_PRICE revert
@@ -466,7 +466,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
         );
 
         vm.expectRevert(IdenticalAssetsChainlinkOracleQuoter.INCOMPLETE_PRICE.selector);
-        Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
     }
 
     /// @notice Tests that valid oracle data passes all checks
@@ -487,7 +487,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
         );
 
         // Should not revert
-        uint256 rate = Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        uint256 rate = Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
         assertGt(rate, 0, "Conversion rate should be positive");
     }
 

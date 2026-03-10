@@ -6,11 +6,11 @@ import { RoycoKernel } from "./base/RoycoKernel.sol";
 import { IdenticalERC4626SharesToAdminOracleQuoter } from "./base/quoter/IdenticalERC4626SharesToAdminOracleQuoter.sol";
 
 /**
- * @title Identical_ERC4626_ST_ERC4626_JT_Kernel
+ * @title Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel
  * @author Waymont
  * @notice The senior and junior tranches transfer in the same yield bearing ERC4626 shares (sUSDS, sUSDe, etc.)
  */
-contract Identical_ERC4626_ST_ERC4626_JT_Kernel is RoycoKernel, IdenticalERC4626SharesToAdminOracleQuoter {
+contract Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel is RoycoKernel, IdenticalERC4626SharesToAdminOracleQuoter {
     /// @notice Constructs the kernel state
     /// @param _params The standard construction parameters for the Royco kernel
     constructor(RoycoKernelConstructionParams memory _params) RoycoKernel(_params) { }

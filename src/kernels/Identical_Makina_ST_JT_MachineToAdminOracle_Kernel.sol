@@ -6,11 +6,11 @@ import { RoycoKernel } from "./base/RoycoKernel.sol";
 import { IdenticalMakinaSharesToAdminOracleQuoter } from "./base/quoter/IdenticalMakinaSharesToAdminOracleQuoter.sol";
 
 /**
- * @title Identical_Makina_ST_Makina_JT_Kernel
+ * @title Identical_Makina_ST_JT_MachineToAdminOracle_Kernel
  * @author Waymont
  * @notice The senior and junior tranches transfer in the same yield bearing Makina machine shares (DUSD, DBIT, etc.)
  */
-contract Identical_Makina_ST_Makina_JT_Kernel is RoycoKernel, IdenticalMakinaSharesToAdminOracleQuoter {
+contract Identical_Makina_ST_JT_MachineToAdminOracle_Kernel is RoycoKernel, IdenticalMakinaSharesToAdminOracleQuoter {
     /**
      * @notice Constructs the kernel state
      * @param _params The standard construction parameters for the Royco kernel

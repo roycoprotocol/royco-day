@@ -12,7 +12,7 @@ import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/librarie
 import { YieldBearingERC4626_TestBase } from "../base/YieldBearingERC4626_TestBase.t.sol";
 
 /// @title Morpho_GauntletUSDCFrontier_Test
-/// @notice Tests YieldBearingERC4626_ST_YieldBearingERC4626_JT_Identical_ERC4626_ST_ERC4626_JT_Kernel with Morpho's GauntletUSDCFrontier
+/// @notice Tests YieldBearingERC4626_ST_YieldBearingERC4626_JT_Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel with Morpho's GauntletUSDCFrontier
 /// @dev Both ST and JT use GauntletUSDCFrontier vault shares as the tranche asset
 ///
 /// GauntletUSDCFrontier is an ERC4626 vault where:

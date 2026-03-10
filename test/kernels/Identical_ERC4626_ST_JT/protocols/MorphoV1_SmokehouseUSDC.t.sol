@@ -12,7 +12,7 @@ import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/librarie
 import { YieldBearingERC4626_TestBase } from "../base/YieldBearingERC4626_TestBase.t.sol";
 
 /// @title Morpho_SmokehouseUSDC_Test
-/// @notice Tests YieldBearingERC4626_ST_YieldBearingERC4626_JT_Identical_ERC4626_ST_ERC4626_JT_Kernel with Morpho's SmokehouseUSDC
+/// @notice Tests YieldBearingERC4626_ST_YieldBearingERC4626_JT_Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel with Morpho's SmokehouseUSDC
 /// @dev Both ST and JT use SmokehouseUSDC vault shares as the tranche asset
 ///
 /// SmokehouseUSDC is an ERC4626 vault where:
