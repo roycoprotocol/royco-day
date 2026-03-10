@@ -58,8 +58,8 @@ contract GuardianCancellationTest is BaseTest {
         bytes32 _marketID = keccak256(abi.encodePacked(SENIOR_TRANCHE_NAME, JUNIOR_TRANCHE_NAME, vm.getBlockTimestamp()));
 
         // Build kernel-specific params
-        DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams memory kernelParams =
-            DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 });
+        DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams memory kernelParams =
+            DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 });
 
         // Build YDM params (AdaptiveCurve_V2)
         DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({

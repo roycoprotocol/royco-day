@@ -210,7 +210,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         config.lltvWAD = LLTV;
         config.fixedTermDurationSeconds = FIXED_TERM_DURATION_SECONDS;
         config.ydmType = DeployScript.YDMType.AdaptiveCurve_V2;
-        config.kernelSpecificParams = abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 }));
+        config.kernelSpecificParams = abi.encode(DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 }));
         config.ydmSpecificParams = abi.encode(
             DeployScript.AdaptiveCurveYDM_V2_Params({
                 jtYieldShareAtZeroUtilWAD: 0.225e18,

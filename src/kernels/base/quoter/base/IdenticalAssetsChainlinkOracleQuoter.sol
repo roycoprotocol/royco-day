@@ -20,62 +20,33 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
     /// @dev Storage state for the Royco identical assets chainlink oracle quoter
     /// @custom:storage-location erc7201:Royco.storage.IdenticalAssetsChainlinkOracleQuoterState
     struct IdenticalAssetsChainlinkOracleQuoterState {
-        address trancheAssetToReferenceAssetOracle;
-        uint8 trancheAssetToReferenceAssetOracleDecimalPrecision;
+        address oracle;
+        uint8 oracleDecimals;
         uint48 stalenessThresholdSeconds;
     }
 
     /// @notice Emitted when the identical assets chainlink oracle quoter is updated
-    event IdenticalAssetsChainlinkOracleUpdated(
-        address indexed trancheAssetToReferenceAssetOracle, uint8 trancheAssetToReferenceAssetOracleDecimalPrecision, uint48 stalenessThresholdSeconds
-    );
-
-    /// @notice Thrown when the tranche asset to reference asset oracle is the zero address
-    error INVALID_TRANCHE_ASSET_TO_REFERENCE_ASSET_ORACLE();
+    event IdenticalAssetsChainlinkOracleUpdated(address indexed oracle, uint8 oracleDecimals, uint48 stalenessThresholdSeconds);
 
     /// @notice Thrown when the staleness threshold seconds is zero
     error INVALID_STALENESS_THRESHOLD_SECONDS();
 
     /// @notice Thrown when the price is stale
-    error PRICE_STALE();
+    error STALE_PRICE();
 
     /// @notice Thrown when the price is invalid
-    error PRICE_INVALID();
+    error INVALID_PRICE();
 
     /// @notice Thrown when the price is incomplete
-    error PRICE_INCOMPLETE();
-
-    /**
-     * @notice Initializes the identical assets chainlink oracle quoter and the base identical assets oracle quoter
-     * @param _initialConversionRateWAD The initial conversion rate as defined by the oracle, scaled to WAD precision
-     * @param _trancheAssetToReferenceAssetOracle The tranche asset to reference asset oracle
-     * @param _stalenessThresholdSeconds The staleness threshold in seconds
-     */
-    function __IdenticalAssetsChainlinkOracleQuoter_init(
-        uint256 _initialConversionRateWAD,
-        address _trancheAssetToReferenceAssetOracle,
-        uint48 _stalenessThresholdSeconds
-    )
-        internal
-        onlyInitializing
-    {
-        __IdenticalAssetsOracleQuoter_init_unchained(_initialConversionRateWAD);
-        __IdenticalAssetsChainlinkOracleQuoter_init_unchained(_trancheAssetToReferenceAssetOracle, _stalenessThresholdSeconds);
-    }
+    error INCOMPLETE_PRICE();
 
     /**
      * @notice Initializes the identical assets chainlink oracle quoter
-     * @param _trancheAssetToReferenceAssetOracle The tranche asset to reference asset oracle
+     * @param _chainlinkOracle The chainlink oracle used to price an asset
      * @param _stalenessThresholdSeconds The staleness threshold in seconds
      */
-    function __IdenticalAssetsChainlinkOracleQuoter_init_unchained(
-        address _trancheAssetToReferenceAssetOracle,
-        uint48 _stalenessThresholdSeconds
-    )
-        internal
-        onlyInitializing
-    {
-        _setTrancheAssetToReferenceAssetOracle(_trancheAssetToReferenceAssetOracle, _stalenessThresholdSeconds);
+    function __IdenticalAssetsChainlinkOracleQuoter_init_unchained(address _chainlinkOracle, uint48 _stalenessThresholdSeconds) internal onlyInitializing {
+        _setChainlinkOracle(_chainlinkOracle, _stalenessThresholdSeconds);
     }
 
     /**
@@ -90,10 +61,8 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
         override(IdenticalAssetsOracleQuoter)
         returns (uint256 trancheToNAVUnitConversionRateWAD)
     {
-        // Fetch the Tranche Asset to the reference asset
-        IdenticalAssetsChainlinkOracleQuoterState storage $ = _getIdenticalAssetsChainlinkOracleQuoterStorage();
-        (uint256 trancheAssetPriceInReferenceAsset, uint256 precision) =
-            _queryChainlinkOracle($.trancheAssetToReferenceAssetOracle, $.stalenessThresholdSeconds, $.trancheAssetToReferenceAssetOracleDecimalPrecision);
+        // Fetch the tranche asset price in reference assets and its precision
+        (uint256 trancheAssetPriceInReferenceAsset, uint256 pricePrecision) = _queryChainlinkOracle();
 
         // Resolve the reference asset to NAV unit conversion rate, scaled to WAD precision
         uint256 referenceAssetToNAVUnitConversionRateWAD = getStoredConversionRateWAD();
@@ -101,16 +70,17 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
         if (referenceAssetToNAVUnitConversionRateWAD == SENTINEL_CONVERSION_RATE) referenceAssetToNAVUnitConversionRateWAD = _getConversionRateFromOracleWAD();
 
         // Calculate the conversion rate from tranche to NAV units, scaled to WAD precision
-        trancheToNAVUnitConversionRateWAD = trancheAssetPriceInReferenceAsset.mulDiv(referenceAssetToNAVUnitConversionRateWAD, precision, Math.Rounding.Floor);
+        trancheToNAVUnitConversionRateWAD =
+            trancheAssetPriceInReferenceAsset.mulDiv(referenceAssetToNAVUnitConversionRateWAD, pricePrecision, Math.Rounding.Floor);
     }
 
     /**
-     * @notice Sets the tranche asset to reference asset oracle
-     * @param _trancheAssetToReferenceAssetOracle The new tranche asset to reference asset oracle
+     * @notice Sets the chainlink oracle for pricing an asset
+     * @param _chainlinkOracle The new chainlink oracle for pricing an asset
      * @param _stalenessThresholdSeconds The new staleness threshold seconds
      */
-    function setTrancheAssetToReferenceAssetOracle(address _trancheAssetToReferenceAssetOracle, uint48 _stalenessThresholdSeconds) external restricted {
-        _setTrancheAssetToReferenceAssetOracle(_trancheAssetToReferenceAssetOracle, _stalenessThresholdSeconds);
+    function setChainlinkOracle(address _chainlinkOracle, uint48 _stalenessThresholdSeconds) external restricted {
+        _setChainlinkOracle(_chainlinkOracle, _stalenessThresholdSeconds);
     }
 
     /// @dev Returns the chainlink oracle configuration for this quoter
@@ -121,48 +91,39 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
     /**
      * @notice Queries the chainlink oracle for the price
      * @dev The price is returned as the answer from the latest round
-     * @param _oracle The oracle to query
-     * @param _stalenessThresholdSeconds The staleness threshold in seconds
-     * @param _decimalPrecision The decimal precision of the price, typically Oracle.decimals()
      * @return price The price from the latest round
      * @return precision The precision of the price
      */
-    function _queryChainlinkOracle(
-        address _oracle,
-        uint256 _stalenessThresholdSeconds,
-        uint256 _decimalPrecision
-    )
-        internal
-        view
-        returns (uint256 price, uint256 precision)
-    {
-        (uint80 roundId, int256 answer,, uint256 updatedAt, uint80 answeredInRound) = AggregatorV3Interface(_oracle).latestRoundData();
+    function _queryChainlinkOracle() internal view returns (uint256 price, uint256 precision) {
+        // Fetch the price of the asset
+        IdenticalAssetsChainlinkOracleQuoterState storage $ = _getIdenticalAssetsChainlinkOracleQuoterStorage();
+        (uint80 roundId, int256 answer,, uint256 updatedAt, uint80 answeredInRound) = AggregatorV3Interface($.oracle).latestRoundData();
 
-        require(updatedAt + _stalenessThresholdSeconds >= block.timestamp, PRICE_STALE());
-        require(answer > 0, PRICE_INVALID());
-        require(answeredInRound >= roundId, PRICE_INCOMPLETE());
+        // Conduct sanity checks
+        require(updatedAt + $.stalenessThresholdSeconds >= block.timestamp, STALE_PRICE());
+        require(answer > 0, INVALID_PRICE());
+        require(answeredInRound >= roundId, INCOMPLETE_PRICE());
 
+        // Return the price and the scaled precision
         price = uint256(answer);
-        precision = 10 ** uint256(_decimalPrecision);
+        precision = 10 ** uint256($.oracleDecimals);
     }
 
     /**
-     * @notice Sets the tranche asset to reference asset oracle
-     * @param _trancheAssetToReferenceAssetOracle The new tranche asset to reference asset oracle
+     * @notice Sets the new chainlink oracle
+     * @param _oracle The new tranche asset to reference asset oracle
      * @param _stalenessThresholdSeconds The new staleness threshold seconds
      */
-    function _setTrancheAssetToReferenceAssetOracle(address _trancheAssetToReferenceAssetOracle, uint48 _stalenessThresholdSeconds) internal {
-        require(_trancheAssetToReferenceAssetOracle != address(0), INVALID_TRANCHE_ASSET_TO_REFERENCE_ASSET_ORACLE());
+    function _setChainlinkOracle(address _oracle, uint48 _stalenessThresholdSeconds) internal {
+        require(_oracle != address(0), NULL_ADDRESS());
         require(_stalenessThresholdSeconds > 0, INVALID_STALENESS_THRESHOLD_SECONDS());
 
         IdenticalAssetsChainlinkOracleQuoterState storage $ = _getIdenticalAssetsChainlinkOracleQuoterStorage();
-        $.trancheAssetToReferenceAssetOracle = _trancheAssetToReferenceAssetOracle;
-        $.trancheAssetToReferenceAssetOracleDecimalPrecision = AggregatorV3Interface(_trancheAssetToReferenceAssetOracle).decimals();
+        $.oracle = _oracle;
+        $.oracleDecimals = AggregatorV3Interface(_oracle).decimals();
         $.stalenessThresholdSeconds = _stalenessThresholdSeconds;
 
-        emit IdenticalAssetsChainlinkOracleUpdated(
-            _trancheAssetToReferenceAssetOracle, $.trancheAssetToReferenceAssetOracleDecimalPrecision, _stalenessThresholdSeconds
-        );
+        emit IdenticalAssetsChainlinkOracleUpdated(_oracle, $.oracleDecimals, _stalenessThresholdSeconds);
     }
 
     /**

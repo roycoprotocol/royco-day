@@ -77,7 +77,7 @@ contract PendlePTcUSD_Test is YieldBearingERC20Chainlink_TestBase {
 
     /// @notice Returns the staleness threshold for the chainlink oracle
     /// @dev Use a very long threshold for testing since we mock the oracle
-    /// This avoids PRICE_STALE errors when tests warp time
+    /// This avoids STALE_PRICE errors when tests warp time
     function _getStalenessThreshold() internal pure override returns (uint48) {
         return type(uint48).max;
     }

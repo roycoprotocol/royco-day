@@ -99,7 +99,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     }
 
     /// @notice Deployment parameters for Identical_ERC4626_ST_ERC4626_JT_Kernel
-    struct IdenticalERC4626SharesAdminOracleQuoterKernelParams {
+    struct IdenticalERC4626SharesToAdminOracleQuoterKernelParams {
         uint256 initialConversionRateWAD;
     }
 
@@ -406,7 +406,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         roleValues[2] = ADMIN_PAUSER_ROLE;
         selectors[3] = IdenticalAssetsOracleQuoter.setConversionRate.selector;
         roleValues[3] = ADMIN_ORACLE_QUOTER_ROLE;
-        selectors[4] = IdenticalAssetsChainlinkOracleQuoter.setTrancheAssetToReferenceAssetOracle.selector;
+        selectors[4] = IdenticalAssetsChainlinkOracleQuoter.setChainlinkOracle.selector;
         roleValues[4] = ADMIN_ORACLE_QUOTER_ROLE;
         selectors[5] = UUPSUpgradeable.upgradeToAndCall.selector;
         roleValues[5] = ADMIN_UPGRADER_ROLE;
@@ -947,8 +947,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
                 )
             );
         } else if (_kernelType == KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel) {
-            IdenticalERC4626SharesAdminOracleQuoterKernelParams memory kernelParams2 =
-                abi.decode(_kernelSpecificParams, (IdenticalERC4626SharesAdminOracleQuoterKernelParams));
+            IdenticalERC4626SharesToAdminOracleQuoterKernelParams memory kernelParams2 =
+                abi.decode(_kernelSpecificParams, (IdenticalERC4626SharesToAdminOracleQuoterKernelParams));
             return abi.encodeCall(Identical_ERC4626_ST_ERC4626_JT_Kernel.initialize, (kernelParams, kernelParams2.initialConversionRateWAD));
         } else if (_kernelType == KernelType.IdleCdoAA_ST_IdleCdoAA_JT) {
             return abi.encodeCall(Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel.initialize, (kernelParams));

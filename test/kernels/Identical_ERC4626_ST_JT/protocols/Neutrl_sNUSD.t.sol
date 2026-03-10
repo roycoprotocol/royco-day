@@ -59,7 +59,7 @@ contract sNUSD_sNUSD_Test is YieldBearingERC4626_TestBase {
 
         // Override initial conversion rate for testing
         marketConfig.kernelSpecificParams =
-            abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: _getInitialConversionRate() }));
+            abi.encode(DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: _getInitialConversionRate() }));
 
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 

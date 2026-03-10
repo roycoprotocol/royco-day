@@ -171,7 +171,7 @@ abstract contract IdenticalAssetsOracleQuoter is RoycoKernel {
      * @notice Returns a conversion rate, scaled to WAD precision
      * @dev Depending on the concrete implementation, this may return the value of 1 tranche unit or an intermediate reference asset in NAV Units
      * @dev This function should be overridden if the conversion rate needs to be fetched from an oracle
-     * @return conversionRateWAD The conversion rate from tranche units to NAV units, scaled to WAD precision
+     * @return conversionRateWAD The conversion rate, scaled to WAD precision
      */
     function _getConversionRateFromOracleWAD() internal view virtual returns (uint256 conversionRateWAD);
 
