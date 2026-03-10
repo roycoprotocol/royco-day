@@ -14,6 +14,7 @@ import { Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel } from "../src/ker
 import { Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel } from "../src/kernels/Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel.sol";
 import { Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel } from "../src/kernels/Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel.sol";
 import { Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel } from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel.sol";
+import { Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel } from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel.sol";
 import { Identical_Makina_ST_JT_MachineToAdminOracle_Kernel } from "../src/kernels/Identical_Makina_ST_JT_MachineToAdminOracle_Kernel.sol";
 import { ReUSD_ST_JT_ICLOracle_Kernel } from "../src/kernels/ReUSD_ST_JT_ICLOracle_Kernel.sol";
 import { IdenticalAssetsChainlinkOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
@@ -61,6 +62,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel,
         Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel,
         Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel,
+        Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel,
         IdleCdoAA_ST_IdleCdoAA_JT,
         Identical_Makina_ST_JT_MachineToAdminOracle_Kernel,
         sUSDai_ST_JT_SharePriceToAdminOracle_Kernel
@@ -93,14 +95,21 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
 
     /// @notice Deployment parameters for Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel
     struct IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams {
+        uint256 initialConversionRateWAD;
         address trancheAssetToReferenceAssetOracle;
         uint48 stalenessThresholdSeconds;
-        uint256 initialConversionRateWAD;
     }
 
     /// @notice Deployment parameters for Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel
     struct IdenticalERC4626SharesToAdminOracleQuoterKernelParams {
         uint256 initialConversionRateWAD;
+    }
+
+    /// @notice Deployment parameters for Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel
+    struct IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams {
+        uint256 initialConversionRateWAD;
+        address baseAssetToNavAssetOracle;
+        uint48 stalenessThresholdSeconds;
     }
 
     /// @notice Deployment parameters for kernels that employ the IdenticalAssetsAdminOracleQuoter
@@ -893,6 +902,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             return abi.encodePacked(type(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel).creationCode, abi.encode(_cp));
         } else if (_kernelType == KernelType.Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel) {
             return abi.encodePacked(type(Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel).creationCode, abi.encode(_cp));
+        } else if (_kernelType == KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel) {
+            return abi.encodePacked(type(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel).creationCode, abi.encode(_cp));
         } else if (_kernelType == KernelType.IdleCdoAA_ST_IdleCdoAA_JT) {
             IdleAACdoSTCdoJTKernelParams memory kp = abi.decode(_kernelSpecificParams, (IdleAACdoSTCdoJTKernelParams));
             return abi.encodePacked(type(Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel).creationCode, abi.encode(_cp, kp.idleCDO));
@@ -941,15 +952,27 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
                 Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel.initialize,
                 (
                     kernelParams,
+                    kernelParams2.initialConversionRateWAD,
                     kernelParams2.trancheAssetToReferenceAssetOracle,
-                    kernelParams2.stalenessThresholdSeconds,
-                    kernelParams2.initialConversionRateWAD
+                    kernelParams2.stalenessThresholdSeconds
                 )
             );
         } else if (_kernelType == KernelType.Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel) {
             IdenticalERC4626SharesToAdminOracleQuoterKernelParams memory kernelParams2 =
                 abi.decode(_kernelSpecificParams, (IdenticalERC4626SharesToAdminOracleQuoterKernelParams));
             return abi.encodeCall(Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel.initialize, (kernelParams, kernelParams2.initialConversionRateWAD));
+        } else if (_kernelType == KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel) {
+            IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams memory kernelParams2 =
+                abi.decode(_kernelSpecificParams, (IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams));
+            return abi.encodeCall(
+                Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel.initialize,
+                (
+                    kernelParams,
+                    kernelParams2.initialConversionRateWAD,
+                    kernelParams2.baseAssetToNavAssetOracle,
+                    kernelParams2.stalenessThresholdSeconds
+                )
+            );
         } else if (_kernelType == KernelType.IdleCdoAA_ST_IdleCdoAA_JT) {
             return abi.encodeCall(Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel.initialize, (kernelParams));
         } else if (_kernelType == KernelType.Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel) {
@@ -959,9 +982,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
                 Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel.initialize,
                 (
                     kernelParams,
+                    kernelParams2.initialConversionRateWAD,
                     kernelParams2.trancheAssetToReferenceAssetOracle,
-                    kernelParams2.stalenessThresholdSeconds,
-                    kernelParams2.initialConversionRateWAD
+                    kernelParams2.stalenessThresholdSeconds
                 )
             );
         } else if (_kernelType == KernelType.Identical_Makina_ST_JT_MachineToAdminOracle_Kernel) {

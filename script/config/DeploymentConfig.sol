@@ -332,9 +332,9 @@ abstract contract DeploymentConfig {
             kernelType: DeployScript.KernelType.Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams({
+                    initialConversionRateWAD: 1e18,
                     trancheAssetToReferenceAssetOracle: 0x8D51DBC85cEef637c97D02bdaAbb5E274850e68C,
-                    stalenessThresholdSeconds: 1800, // TODO
-                    initialConversionRateWAD: 1e18
+                    stalenessThresholdSeconds: 1800 // TODO
                 })
             ),
             enforceVaultSharesTransferWhitelist: false,
@@ -372,10 +372,10 @@ abstract contract DeploymentConfig {
             kernelType: DeployScript.KernelType.Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams({
-                        trancheAssetToReferenceAssetOracle: 0x6DA10958c691454BE7eb5f3e3B91b5713e542b17,
-                        stalenessThresholdSeconds: 1800,
-                        initialConversionRateWAD: 1e18
-                    })
+                    initialConversionRateWAD: 1e18,
+                    trancheAssetToReferenceAssetOracle: 0x6DA10958c691454BE7eb5f3e3B91b5713e542b17,
+                    stalenessThresholdSeconds: 1800
+                })
             ),
             enforceVaultSharesTransferWhitelist: false,
             stSelfLiquidationBonusWAD: 0.05e18,
@@ -551,9 +551,9 @@ abstract contract DeploymentConfig {
             enforceVaultSharesTransferWhitelist: true,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams({
+                    initialConversionRateWAD: 1e18,
                     trancheAssetToReferenceAssetOracle: 0xD6BcbbC87bFb6c8964dDc73DC3EaE6d08865d51C,
-                    stalenessThresholdSeconds: 1800, // TODO
-                    initialConversionRateWAD: 1e18
+                    stalenessThresholdSeconds: 1800 // TODO
                 })
             ),
             stSelfLiquidationBonusWAD: 0.05e18, // TODO

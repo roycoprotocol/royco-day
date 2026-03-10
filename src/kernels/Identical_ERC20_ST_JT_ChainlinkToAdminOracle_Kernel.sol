@@ -19,15 +19,15 @@ contract Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel is RoycoKernel, Ide
     /**
      * @notice Initializes the Royco Kernel
      * @param _params The standard initialization parameters for the Royco Kernel
-     * @param _trancheAssetToReferenceAssetOracle The tranche asset to reference asset oracle
-     * @param _stalenessThresholdSeconds The staleness threshold seconds
      * @param _initialConversionRateWAD The initial reference asset to NAV unit conversion rate, scaled to WAD precision
+     * @param _trancheAssetToReferenceAssetOracle The tranche asset to reference asset oracle
+     * @param _stalenessThresholdSeconds The staleness threshold in seconds
      */
     function initialize(
         IRoycoKernel.RoycoKernelInitParams calldata _params,
+        uint256 _initialConversionRateWAD,
         address _trancheAssetToReferenceAssetOracle,
-        uint48 _stalenessThresholdSeconds,
-        uint256 _initialConversionRateWAD
+        uint48 _stalenessThresholdSeconds
     )
         external
         initializer

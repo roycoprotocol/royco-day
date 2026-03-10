@@ -19,15 +19,15 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel is RoycoKern
     /**
      * @notice Initializes the Royco Kernel
      * @param _params The standard initialization parameters for the Royco Kernel
+     * @param _initialConversionRateWAD The initial ERC4626 base asset to NAV unit conversion rate, scaled to WAD precision (should be set to 0 unless oracle rate should be overridden)
      * @param _baseAssetToNavAssetOracle The ERC4626 base asset to NAV accounting asset oracle
-     * @param _stalenessThresholdSeconds The staleness threshold seconds
-     * @param _initialConversionRateWAD The initial base asset to NAV unit conversion rate, scaled to WAD precision (should be set to 0 unless oracle rate should be overridden)
+     * @param _stalenessThresholdSeconds The staleness threshold in seconds
      */
     function initialize(
         IRoycoKernel.RoycoKernelInitParams calldata _params,
+        uint256 _initialConversionRateWAD,
         address _baseAssetToNavAssetOracle,
-        uint48 _stalenessThresholdSeconds,
-        uint256 _initialConversionRateWAD
+        uint48 _stalenessThresholdSeconds
     )
         external
         initializer
