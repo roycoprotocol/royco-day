@@ -17,6 +17,7 @@ interface IRoycoKernel {
      * @custom:field juniorTranche - The address of the Royco junior tranche associated with this kernel
      * @custom:field jtAsset - The address of the base asset of the junior tranche
      * @custom:field accountant - The address of the accountant for the Royco market
+     * @custom:field enforceVaultSharesTransferWhitelist Whether to enforce the vault shares transfer whitelist
      */
     struct RoycoKernelConstructionParams {
         address seniorTranche;
@@ -24,6 +25,7 @@ interface IRoycoKernel {
         address juniorTranche;
         address jtAsset;
         address accountant;
+        bool enforceVaultSharesTransferWhitelist;
     }
 
     /**

@@ -105,6 +105,7 @@ contract UpgradabilityTestSuite is BaseTest {
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
             kernelSpecificParams: abi.encode(kernelParams),
             stSelfLiquidationBonusWAD: 0,
+            enforceVaultSharesTransferWhitelist: false,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
@@ -142,7 +143,12 @@ contract UpgradabilityTestSuite is BaseTest {
         vm.label(address(newAccountantImpl), "NewAccountantImpl");
 
         IRoycoKernel.RoycoKernelConstructionParams memory constructionParams = IRoycoKernel.RoycoKernelConstructionParams({
-            seniorTranche: address(ST), stAsset: SNUSD, juniorTranche: address(JT), jtAsset: SNUSD, accountant: address(ACCOUNTANT)
+            seniorTranche: address(ST),
+            stAsset: SNUSD,
+            juniorTranche: address(JT),
+            jtAsset: SNUSD,
+            accountant: address(ACCOUNTANT),
+            enforceVaultSharesTransferWhitelist: false
         });
 
         newKernelImpl = address(new Identical_ERC4626_ST_ERC4626_JT_Kernel(constructionParams));

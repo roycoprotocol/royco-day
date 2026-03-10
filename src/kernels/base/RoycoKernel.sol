@@ -45,6 +45,9 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     /// @inheritdoc IRoycoKernel
     address public immutable override(IRoycoKernel) ACCOUNTANT;
 
+    /// @notice Whether to enforce the tranche shares transfer whitelist
+    bool public immutable ENFORCE_TRANCHE_SHARES_TRANSFER_WHITELIST;
+
     /// @dev Permissions the function to only be callable by the market's senior tranche
     /// @dev Should be placed on ST deposit and redeem functions
     modifier onlySeniorTranche() {
@@ -93,6 +96,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         JUNIOR_TRANCHE = _params.juniorTranche;
         JT_ASSET = _params.jtAsset;
         ACCOUNTANT = _params.accountant;
+        ENFORCE_TRANCHE_SHARES_TRANSFER_WHITELIST = _params.enforceVaultSharesTransferWhitelist;
     }
 
     /**
@@ -539,9 +543,10 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
 
         // If transferring shares, ensure that the recipient is a whitelisted LP for the tranche
         // It is assumed that the sender is already a whitelisted LP
-        if (_to != address(0)) {
+        if (ENFORCE_TRANCHE_SHARES_TRANSFER_WHITELIST && _to != address(0)) {
             address authority = authority();
             // Check if the to address can call the deposit function on the tranche
+            // @dev msg.sender is the tranche address
             (bool isWhitelistedTrancheLP,) = IAccessManager(authority).canCall(_to, msg.sender, IRoycoVaultTranche.deposit.selector);
             require(_to != authority && isWhitelistedTrancheLP, ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(_to));
         }
