@@ -159,7 +159,7 @@ abstract contract IdleCdoAA_TestBase is AbstractKernelTestSuite {
         uint256 newConversionRateWAD = 1.5e18;
 
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(newConversionRateWAD);
+        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(newConversionRateWAD, true);
 
         uint256 storedRate = IdenticalAssetsOracleQuoter(address(KERNEL)).getStoredConversionRateWAD();
         assertEq(storedRate, newConversionRateWAD, "Stored conversion rate should be updated");
@@ -178,7 +178,7 @@ abstract contract IdleCdoAA_TestBase is AbstractKernelTestSuite {
         uint256 newConversionRateWAD = virtualPrice * scaleFactor * 2;
 
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(newConversionRateWAD);
+        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(newConversionRateWAD, true);
 
         NAV_UNIT newNav = KERNEL.stConvertTrancheUnitsToNAVUnits(oneToken);
 
@@ -189,7 +189,7 @@ abstract contract IdleCdoAA_TestBase is AbstractKernelTestSuite {
     function test_setConversionRate_revertsForNonAdmin() public {
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert();
-        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(1.5e18);
+        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(1.5e18, true);
     }
 
     /// @notice Test setting conversion rate to sentinel value resets to oracle
@@ -200,14 +200,14 @@ abstract contract IdleCdoAA_TestBase is AbstractKernelTestSuite {
         // First override the rate
         uint256 overrideRate = 2e18;
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(overrideRate);
+        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(overrideRate, true);
 
         TRANCHE_UNIT oneToken = toTrancheUnits(10 ** decimals);
         NAV_UNIT overriddenNav = KERNEL.stConvertTrancheUnitsToNAVUnits(oneToken);
 
         // Reset to sentinel (0) to use oracle
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(0);
+        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(0, true);
 
         NAV_UNIT oracleNav = KERNEL.stConvertTrancheUnitsToNAVUnits(oneToken);
 

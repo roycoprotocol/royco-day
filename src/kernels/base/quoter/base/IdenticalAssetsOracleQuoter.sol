@@ -93,10 +93,11 @@ abstract contract IdenticalAssetsOracleQuoter is RoycoKernel {
      * @dev Executes an accounting sync before and after setting the new conversion rate
      * @dev Only callable by a designated admin
      * @param _conversionRateWAD The conversion rate as defined by the oracle, scaled to WAD precision
+     * @param _shouldSyncBeforeUpdate Whether to sync the tranche accounting before updating the conversion rate
      */
-    function setConversionRate(uint256 _conversionRateWAD) public virtual restricted {
+    function setConversionRate(uint256 _conversionRateWAD, bool _shouldSyncBeforeUpdate) public virtual restricted {
         // Sync the tranche accounting to reflect the PNL up to this point in time
-        _preOpSyncTrancheAccounting();
+        if (_shouldSyncBeforeUpdate) _preOpSyncTrancheAccounting();
         // Set the new conversion rate
         _getIdenticalAssetsOracleQuoterStorage().conversionRateWAD = _conversionRateWAD;
         emit ConversionRateUpdated(_conversionRateWAD);

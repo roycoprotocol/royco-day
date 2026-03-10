@@ -174,7 +174,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
     /// @dev Requires ADMIN_ORACLE_QUOTER_ROLE, which is granted to ORACLE_QUOTER_ADMIN_ADDRESS
     function _setConversionRate(uint256 _newRateWAD) internal virtual {
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(_newRateWAD);
+        Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(_newRateWAD, true);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

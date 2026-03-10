@@ -78,9 +78,15 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
      * @notice Sets the chainlink oracle for pricing an asset
      * @param _oracle The new chainlink (compatible) oracle for pricing an asset
      * @param _stalenessThresholdSeconds The new staleness threshold seconds
+     * @param _shouldSyncBeforeUpdate Whether to sync the tranche accounting before updating the chainlink oracle
      */
-    function setChainlinkOracle(address _oracle, uint48 _stalenessThresholdSeconds) external restricted {
+    function setChainlinkOracle(address _oracle, uint48 _stalenessThresholdSeconds, bool _shouldSyncBeforeUpdate) external restricted {
+        // Sync the tranche accounting before updating the chainlink oracle
+        if (_shouldSyncBeforeUpdate) _preOpSyncTrancheAccounting();
+        // Update the chainlink oracle
         _setChainlinkOracle(_oracle, _stalenessThresholdSeconds);
+        // Sync the tranche accounting after updating the chainlink oracle
+        _preOpSyncTrancheAccounting();
     }
 
     /// @dev Returns the chainlink oracle configuration for this quoter

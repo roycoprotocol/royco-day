@@ -233,7 +233,7 @@ abstract contract DeploymentConfig {
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
-                        initialConversionRateWAD: 1e18, baseAssetToNavAssetOracle: 0x5e7281f74e74D76347f0b8f4a36Fd3cb29c19d95, stalenessThresholdSeconds: 86_400
+                        initialConversionRateWAD: 0, baseAssetToNavAssetOracle: 0x5e7281f74e74D76347f0b8f4a36Fd3cb29c19d95, stalenessThresholdSeconds: 86_400
                     })
             ),
             enforceVaultSharesTransferWhitelist: false,

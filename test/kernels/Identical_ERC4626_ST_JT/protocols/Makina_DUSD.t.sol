@@ -134,7 +134,7 @@ contract Makina_DUSD_Test is YieldBearingERC4626_TestBase {
     /// @dev Requires ADMIN_ORACLE_QUOTER_ROLE, which is granted to ORACLE_QUOTER_ADMIN_ADDRESS
     function _setConversionRate(uint256 _newRateWAD) internal override {
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        Identical_Makina_ST_JT_MachineToAdminOracle_Kernel(address(KERNEL)).setConversionRate(_newRateWAD);
+        Identical_Makina_ST_JT_MachineToAdminOracle_Kernel(address(KERNEL)).setConversionRate(_newRateWAD, true);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { Vm } from "../../../../lib/forge-std/src/Vm.sol";
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
+import { IRoycoAccountant } from "../../../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoAuth } from "../../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
@@ -210,7 +212,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
     /// @dev Requires ADMIN_ORACLE_QUOTER_ROLE, which is granted to ORACLE_QUOTER_ADMIN_ADDRESS
     function _setStoredConversionRate(uint256 _newRateWAD) internal {
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setConversionRate(_newRateWAD);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setConversionRate(_newRateWAD, true);
     }
 
     /// @notice Simulates yield in the stored conversion rate
@@ -333,24 +335,34 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
         address anotherOracle = makeAddr("anotherOracle");
         uint48 newStaleness = 2 days;
 
-        // Mock the decimals call on the new oracle
+        // Mock the decimals and latestRoundData calls on the new oracle
         vm.mockCall(newOracle, abi.encodeWithSelector(AggregatorV3Interface.decimals.selector), abi.encode(uint8(18)));
+        vm.mockCall(
+            newOracle,
+            abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
+            abi.encode(uint80(1), int256(1e18), uint256(0), block.timestamp, uint80(1))
+        );
 
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(newOracle, newStaleness);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(newOracle, newStaleness, true);
 
         // Verify by checking that it doesn't revert when called again with different values
         vm.mockCall(anotherOracle, abi.encodeWithSelector(AggregatorV3Interface.decimals.selector), abi.encode(uint8(8)));
+        vm.mockCall(
+            anotherOracle,
+            abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
+            abi.encode(uint80(1), int256(1e8), uint256(0), block.timestamp, uint80(1))
+        );
 
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(anotherOracle, 3 days);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(anotherOracle, 3 days, true);
     }
 
     /// @notice Tests that setting oracle with zero address reverts
     function test_setChainlinkOracle_revertsOnZeroAddress() external {
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
         vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
-        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(address(0), 1 days);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(address(0), 1 days, true);
     }
 
     /// @notice Tests that setting oracle with zero staleness reverts
@@ -361,7 +373,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
 
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
         vm.expectRevert(IdenticalAssetsChainlinkOracleQuoter.INVALID_STALENESS_THRESHOLD_SECONDS.selector);
-        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(newOracle, 0);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(newOracle, 0, true);
     }
 
     /// @notice Tests that non-admin cannot set oracle
@@ -372,7 +384,83 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
 
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert(); // AccessManagerUnauthorizedAccount
-        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(newOracle, 1 days);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(newOracle, 1 days, true);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // _shouldSyncBeforeUpdate FLAG TESTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Counts TrancheAccountingSynced events in recorded logs
+    function _countSyncEvents(Vm.Log[] memory logs) internal pure returns (uint256 count) {
+        bytes32 syncSelector = IRoycoAccountant.TrancheAccountingSynced.selector;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics.length > 0 && logs[i].topics[0] == syncSelector) {
+                count++;
+            }
+        }
+    }
+
+    /// @notice Tests that setConversionRate with false skips the pre-update sync (1 sync total)
+    function test_setConversionRate_skipPreSync() external {
+        vm.recordLogs();
+
+        vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setConversionRate(WAD * 2, false);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(_countSyncEvents(logs), 1, "Should have exactly 1 sync (post-update only)");
+    }
+
+    /// @notice Tests that setConversionRate with true fires both pre and post sync (2 syncs total)
+    function test_setConversionRate_withPreSync() external {
+        vm.recordLogs();
+
+        vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setConversionRate(WAD * 2, true);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(_countSyncEvents(logs), 2, "Should have exactly 2 syncs (pre + post update)");
+    }
+
+    /// @notice Tests that setChainlinkOracle with false skips the pre-update sync (1 sync total)
+    function test_setChainlinkOracle_skipPreSync() external {
+        address newOracle = makeAddr("newOracleSkipSync");
+
+        vm.mockCall(newOracle, abi.encodeWithSelector(AggregatorV3Interface.decimals.selector), abi.encode(uint8(8)));
+        vm.mockCall(
+            newOracle,
+            abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
+            abi.encode(uint80(1), int256(1e8), uint256(0), block.timestamp, uint80(1))
+        );
+
+        vm.recordLogs();
+
+        vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(newOracle, 1 days, false);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(_countSyncEvents(logs), 1, "Should have exactly 1 sync (post-update only)");
+    }
+
+    /// @notice Tests that setChainlinkOracle with true fires both pre and post sync (2 syncs total)
+    function test_setChainlinkOracle_withPreSync() external {
+        address newOracle = makeAddr("newOracleWithSync");
+
+        vm.mockCall(newOracle, abi.encodeWithSelector(AggregatorV3Interface.decimals.selector), abi.encode(uint8(8)));
+        vm.mockCall(
+            newOracle,
+            abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
+            abi.encode(uint80(1), int256(1e8), uint256(0), block.timestamp, uint80(1))
+        );
+
+        vm.recordLogs();
+
+        vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(newOracle, 1 days, true);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(_countSyncEvents(logs), 2, "Should have exactly 2 syncs (pre + post update)");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

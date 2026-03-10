@@ -142,7 +142,7 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
     /// @dev Requires ADMIN_ORACLE_QUOTER_ROLE, which is granted to ORACLE_QUOTER_ADMIN_ADDRESS
     function _setConversionRate(uint256 _newRateWAD) internal override {
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(_newRateWAD);
+        sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(_newRateWAD, true);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -456,7 +456,7 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
         // Unauthorized user should not be able to set rate
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, ALICE_ADDRESS));
-        sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(WAD * 2);
+        sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(WAD * 2, true);
     }
 
     /// @notice Test that authorized role can successfully set conversion rate
@@ -465,7 +465,7 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
 
         // ORACLE_QUOTER_ADMIN_ADDRESS has the required role
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(newRate);
+        sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(newRate, true);
 
         // Verify rate was updated
         assertEq(_getConversionRate(), newRate, "Rate should be updated to new value");
@@ -475,7 +475,7 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
     function test_sUSDai_setConversionRate_revertsOnZero() external {
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(IdenticalAssetsAdminOracleQuoter.INVALID_CONVERSION_RATE.selector));
-        sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(0);
+        sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(0, true);
     }
 
     /// @notice Test that setConversionRate updates state correctly
@@ -484,7 +484,7 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
         _newRate = bound(_newRate, 1, type(uint128).max);
 
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(_newRate);
+        sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(_newRate, true);
 
         assertEq(_getConversionRate(), _newRate, "Stored rate should match set value");
     }
@@ -518,7 +518,7 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
         uint256 newRate = 1.5e18; // 1.5 WAD
 
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(newRate);
+        sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(newRate, true);
 
         uint256 storedRate = sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).getStoredConversionRateWAD();
         assertEq(storedRate, newRate, "getStoredConversionRateWAD should return admin-set rate");

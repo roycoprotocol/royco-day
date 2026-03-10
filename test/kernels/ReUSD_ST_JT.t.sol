@@ -218,7 +218,7 @@ contract reUSD_Test is AbstractKernelTestSuite {
         uint256 newRate = 1.05e18;
 
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        ReUSD_ST_JT_ICLOracle_Kernel(address(KERNEL)).setConversionRate(newRate);
+        ReUSD_ST_JT_ICLOracle_Kernel(address(KERNEL)).setConversionRate(newRate, true);
 
         uint256 storedRate = ReUSD_ST_JT_ICLOracle_Kernel(address(KERNEL)).getStoredConversionRateWAD();
         assertEq(storedRate, newRate, "Stored rate should match set rate");
@@ -228,7 +228,7 @@ contract reUSD_Test is AbstractKernelTestSuite {
     function test_setConversionRate_revertsOnUnauthorized() external {
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert();
-        ReUSD_ST_JT_ICLOracle_Kernel(address(KERNEL)).setConversionRate(1e18);
+        ReUSD_ST_JT_ICLOracle_Kernel(address(KERNEL)).setConversionRate(1e18, true);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
