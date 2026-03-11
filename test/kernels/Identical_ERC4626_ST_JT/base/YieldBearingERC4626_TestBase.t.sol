@@ -2,14 +2,14 @@
 pragma solidity ^0.8.28;
 
 import { IERC20Metadata, IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
-import { Identical_ERC4626_ST_ERC4626_JT_Kernel } from "../../../../src/kernels/Identical_ERC4626_ST_ERC4626_JT_Kernel.sol";
+import { Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel } from "../../../../src/kernels/Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel.sol";
 import { WAD, WAD_DECIMALS, ZERO_NAV_UNITS } from "../../../../src/libraries/Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
 import { AbstractKernelTestSuite } from "../../abstract/AbstractKernelTestSuite.t.sol";
 
 /// @title YieldBearingERC4626_TestBase
-/// @notice Base test contract for Identical_ERC4626_ST_ERC4626_JT_Kernel
+/// @notice Base test contract for Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel
 /// @dev Implements the test hooks for yield-bearing ERC4626 assets where ST and JT use identical assets
 ///
 /// IMPORTANT: This kernel stores the `vaultAsset-to-NAV` conversion rate (e.g., NUSD->USD for sNUSD).
@@ -167,14 +167,14 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
 
     /// @notice Gets the current conversion rate using the kernel's getter (in WAD precision)
     function _getConversionRate() internal view virtual returns (uint256) {
-        return Identical_ERC4626_ST_ERC4626_JT_Kernel(address(KERNEL)).getStoredConversionRateWAD();
+        return Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).getStoredConversionRateWAD();
     }
 
     /// @notice Sets the conversion rate using the kernel's setter (in WAD precision)
     /// @dev Requires ADMIN_ORACLE_QUOTER_ROLE, which is granted to ORACLE_QUOTER_ADMIN_ADDRESS
     function _setConversionRate(uint256 _newRateWAD) internal virtual {
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        Identical_ERC4626_ST_ERC4626_JT_Kernel(address(KERNEL)).setConversionRate(_newRateWAD);
+        Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(_newRateWAD, true);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -390,7 +390,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
 
         // Verify kernel's conversion rate formula: sharePrice * storedRate / WAD
         uint256 expectedConversionRate = expectedSharePrice * storedRate / WAD;
-        uint256 actualConversionRate = Identical_ERC4626_ST_ERC4626_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        uint256 actualConversionRate = Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
         assertEq(actualConversionRate, expectedConversionRate, "Kernel conversion rate should equal sharePrice * storedRate / WAD");
     }
 
@@ -457,7 +457,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
 
         // Verify the combined conversion rate follows the multiplicative formula
         uint256 expectedCombinedRate = expectedSharePrice * expectedStoredRate / WAD;
-        uint256 actualCombinedRate = Identical_ERC4626_ST_ERC4626_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        uint256 actualCombinedRate = Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
         assertEq(actualCombinedRate, expectedCombinedRate, "Combined rate should equal sharePrice * storedRate / WAD");
 
         vm.prank(SYNC_ROLE_ADDRESS);
@@ -489,7 +489,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
 
         // Verify the combined conversion rate follows the multiplicative formula
         uint256 expectedCombinedRate = expectedSharePrice * expectedStoredRate / WAD;
-        uint256 actualCombinedRate = Identical_ERC4626_ST_ERC4626_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        uint256 actualCombinedRate = Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
         assertEq(actualCombinedRate, expectedCombinedRate, "Combined rate should equal sharePrice * storedRate / WAD");
 
         vm.prank(SYNC_ROLE_ADDRESS);
@@ -549,7 +549,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
         KERNEL.syncTrancheAccounting();
 
         // Get the actual conversion rate from the kernel
-        uint256 actualConversionRate = Identical_ERC4626_ST_ERC4626_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        uint256 actualConversionRate = Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
 
         // Calculate expected: sharePrice * storedRate / WAD
         uint256 sharePrice = _getCurrentSharePriceWAD();

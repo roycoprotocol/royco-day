@@ -201,7 +201,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         config.juniorAsset = _stVault;
         config.stDustTolerance = DUST_TOLERANCE_RAW;
         config.jtDustTolerance = DUST_TOLERANCE_RAW;
-        config.kernelType = DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel;
+        config.kernelType = DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel;
         config.stProtocolFeeWAD = ST_PROTOCOL_FEE_WAD;
         config.jtProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
         config.jtYieldShareProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
@@ -210,7 +210,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         config.lltvWAD = LLTV;
         config.fixedTermDurationSeconds = FIXED_TERM_DURATION_SECONDS;
         config.ydmType = DeployScript.YDMType.AdaptiveCurve_V2;
-        config.kernelSpecificParams = abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 }));
+        config.kernelSpecificParams = abi.encode(DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 }));
         config.ydmSpecificParams = abi.encode(
             DeployScript.AdaptiveCurveYDM_V2_Params({
                 jtYieldShareAtZeroUtilWAD: 0.225e18,

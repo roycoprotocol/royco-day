@@ -55,8 +55,8 @@ contract PausabilityTestSuite is BaseTest {
     function _deployMarket() internal returns (DeployScript.DeploymentResult memory) {
         bytes32 _marketId = keccak256(abi.encodePacked("PausabilityTest", vm.getBlockTimestamp()));
 
-        DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams memory kernelParams =
-            DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: WAD });
+        DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams memory kernelParams =
+            DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: WAD });
 
         DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
             jtYieldShareAtZeroUtilWAD: 0.3e18, // Y_0 = Y_T (same as target)
@@ -79,7 +79,7 @@ contract PausabilityTestSuite is BaseTest {
             juniorAsset: SNUSD,
             stDustTolerance: 1,
             jtDustTolerance: 1,
-            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
+            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel,
             kernelSpecificParams: abi.encode(kernelParams),
             stSelfLiquidationBonusWAD: 0,
             enforceVaultSharesTransferWhitelist: false,

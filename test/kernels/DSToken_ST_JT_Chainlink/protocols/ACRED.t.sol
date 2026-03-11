@@ -9,12 +9,12 @@ import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { IComplianceServiceWhitelisted } from "../../../../src/interfaces/external/ds-token/IComplianceServiceWhitelisted.sol";
 import { IDSToken } from "../../../../src/interfaces/external/ds-token/IDSToken.sol";
-import { Identical_DSToken_ST_DSToken_JT_Kernel } from "../../../../src/kernels/Identical_DSToken_ST_DSToken_JT_Kernel.sol";
+import { Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel } from "../../../../src/kernels/Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/libraries/Units.sol";
 import { YieldBearingERC20Chainlink_TestBase } from "../../Identical_ERC20_ST_JT_Chainlink/base/YieldBearingERC20Chainlink_TestBase.t.sol";
 
 /// @title ACRED_Test
-/// @notice Tests Identical_DSToken_ST_DSToken_JT_Kernel with ACRED
+/// @notice Tests Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel with ACRED
 contract ACRED_Test is YieldBearingERC20Chainlink_TestBase {
     address internal constant ACRED_TOKEN = 0x17418038ecF73BA4026c4f428547BF099706F27B;
     address internal constant ACRED_CHAINLINK_ORACLE = 0xD6BcbbC87bFb6c8964dDc73DC3EaE6d08865d51C;

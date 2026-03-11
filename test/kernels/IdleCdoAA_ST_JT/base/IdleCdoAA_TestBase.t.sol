@@ -6,7 +6,7 @@ import { IERC20Metadata } from "../../../../lib/openzeppelin-contracts/contracts
 import { Math } from "../../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 
 import { IIdleCDO } from "../../../../src/interfaces/external/idle-finance/IIdleCDO.sol";
-import { Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel } from "../../../../src/kernels/Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel.sol";
+import { Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel } from "../../../../src/kernels/Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel.sol";
 import { IdenticalAssetsOracleQuoter } from "../../../../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
 import { WAD, WAD_DECIMALS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../../../src/libraries/Constants.sol";
 import { AssetClaims } from "../../../../src/libraries/Types.sol";
@@ -15,7 +15,7 @@ import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toNAVUnits, toTrancheUnits, toUin
 import { AbstractKernelTestSuite } from "../../abstract/AbstractKernelTestSuite.t.sol";
 
 /// @title IdleCdoAA_TestBase
-/// @notice Base test contract for Identical_AA_IdleCDO_ST_IdleCDO_JT_Kernel
+/// @notice Base test contract for Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel
 /// @dev Implements the test hooks for IdleCdoAA assets where ST and JT use identical AA tranche tokens
 ///
 /// IMPORTANT: This kernel derives NAV from the IdleCDO virtualPrice:
@@ -159,7 +159,7 @@ abstract contract IdleCdoAA_TestBase is AbstractKernelTestSuite {
         uint256 newConversionRateWAD = 1.5e18;
 
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(newConversionRateWAD);
+        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(newConversionRateWAD, true);
 
         uint256 storedRate = IdenticalAssetsOracleQuoter(address(KERNEL)).getStoredConversionRateWAD();
         assertEq(storedRate, newConversionRateWAD, "Stored conversion rate should be updated");
@@ -178,7 +178,7 @@ abstract contract IdleCdoAA_TestBase is AbstractKernelTestSuite {
         uint256 newConversionRateWAD = virtualPrice * scaleFactor * 2;
 
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(newConversionRateWAD);
+        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(newConversionRateWAD, true);
 
         NAV_UNIT newNav = KERNEL.stConvertTrancheUnitsToNAVUnits(oneToken);
 
@@ -189,7 +189,7 @@ abstract contract IdleCdoAA_TestBase is AbstractKernelTestSuite {
     function test_setConversionRate_revertsForNonAdmin() public {
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert();
-        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(1.5e18);
+        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(1.5e18, true);
     }
 
     /// @notice Test setting conversion rate to sentinel value resets to oracle
@@ -200,14 +200,14 @@ abstract contract IdleCdoAA_TestBase is AbstractKernelTestSuite {
         // First override the rate
         uint256 overrideRate = 2e18;
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(overrideRate);
+        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(overrideRate, true);
 
         TRANCHE_UNIT oneToken = toTrancheUnits(10 ** decimals);
         NAV_UNIT overriddenNav = KERNEL.stConvertTrancheUnitsToNAVUnits(oneToken);
 
         // Reset to sentinel (0) to use oracle
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(0);
+        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(0, true);
 
         NAV_UNIT oracleNav = KERNEL.stConvertTrancheUnitsToNAVUnits(oneToken);
 

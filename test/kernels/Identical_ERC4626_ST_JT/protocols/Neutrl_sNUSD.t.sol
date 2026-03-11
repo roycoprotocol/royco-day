@@ -6,21 +6,24 @@ import { IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/inter
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
+import {
+    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel
+} from "../../../../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/libraries/Units.sol";
 
-import { YieldBearingERC4626_TestBase } from "../base/YieldBearingERC4626_TestBase.t.sol";
+import { YieldBearingERC4626_ChainlinkOracle_TestBase } from "../base/YieldBearingERC4626_ChainlinkOracle_TestBase.t.sol";
 
 /// @title sNUSD_sNUSD_Test
-/// @notice Tests YieldBearingERC4626_ST_YieldBearingERC4626_JT_Identical_ERC4626_ST_ERC4626_JT_Kernel with sNUSD
-/// @dev Both ST and JT use sNUSD as the tranche asset
+/// @notice Tests Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel with sNUSD
+/// @dev Both ST and JT use sNUSD as the tranche asset on Ethereum mainnet
 ///
 /// sNUSD is an ERC4626 vault where:
 ///   - Tranche Unit: sNUSD shares
 ///   - Vault Asset: NUSD (the underlying)
 ///   - NAV Unit: USD
-/// The stored conversion rate is vaultAsset-to-NAV (NUSD->USD), which is ~1:1 for stablecoins.
-contract sNUSD_sNUSD_Test is YieldBearingERC4626_TestBase {
+/// The deployment uses initialConversionRateWAD: 0 (sentinel mode — live Chainlink oracle for NUSD->USD).
+contract sNUSD_sNUSD_Test is YieldBearingERC4626_ChainlinkOracle_TestBase {
     // ═══════════════════════════════════════════════════════════════════════════
     // MAINNET ADDRESSES
     // ═══════════════════════════════════════════════════════════════════════════
@@ -35,7 +38,7 @@ contract sNUSD_sNUSD_Test is YieldBearingERC4626_TestBase {
     /// @notice Returns the test configuration for sNUSD
     function getTestConfig() public pure override returns (TestConfig memory) {
         return TestConfig({
-            forkBlock: 24_180_513,
+            forkBlock: 24_623_821,
             forkRpcUrlEnvVar: "MAINNET_RPC_URL",
             stAsset: SNUSD,
             jtAsset: SNUSD,
@@ -43,10 +46,9 @@ contract sNUSD_sNUSD_Test is YieldBearingERC4626_TestBase {
         });
     }
 
-    /// @notice Returns the initial NUSD->USD conversion rate (in WAD precision)
-    /// @dev For NUSD (a stablecoin), this is 1:1, so we return WAD (1e18)
-    function _getInitialConversionRate() internal pure override returns (uint256) {
-        return WAD; // 1:1 NUSD to USD
+    /// @notice Returns the Chainlink oracle address from the deployed kernel configuration
+    function _getChainlinkOracle() internal view override returns (address) {
+        return Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel(address(KERNEL)).getChainlinkOracleConfiguration().oracle;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -54,12 +56,9 @@ contract sNUSD_sNUSD_Test is YieldBearingERC4626_TestBase {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Deploys the sNUSD kernel and market using parameters from DeploymentConfig
+    /// @dev Uses the Chainlink oracle from the deployment config for NUSD->USD pricing
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
         DeploymentConfig.MarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("sNUSD");
-
-        // Override initial conversion rate for testing
-        marketConfig.kernelSpecificParams =
-            abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: _getInitialConversionRate() }));
 
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
@@ -96,13 +95,16 @@ contract sNUSD_sNUSD_Test is YieldBearingERC4626_TestBase {
         assertGe(sharePrice, 1e18, "sNUSD share price should be >= 1:1");
     }
 
-    /// @notice Verifies initial conversion rate is set correctly
+    /// @notice Verifies initial conversion rate is sentinel (0) for live oracle mode
     function test_sNUSD_initialConversionRate() external view {
-        uint256 storedRate = _getConversionRate();
+        uint256 storedRate = _getStoredConversionRate();
 
-        // The stored rate is the NUSD->USD rate in WAD precision
-        // For a stablecoin, this should be 1e18 (1:1)
-        assertEq(storedRate, WAD, "Stored rate should be WAD (1:1 for stablecoin)");
+        // The stored rate should be 0 (sentinel) — the live Chainlink oracle provides the NUSD->USD rate
+        assertEq(storedRate, 0, "Stored rate should be 0 (sentinel mode for live Chainlink oracle)");
+
+        // The effective conversion rate should be positive (from the Chainlink oracle)
+        uint256 effectiveRate = _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
+        assertGt(effectiveRate, 0, "Effective conversion rate should be positive from Chainlink oracle");
     }
 
     /// @notice Test that simulated yield works correctly for sNUSD
@@ -113,14 +115,14 @@ contract sNUSD_sNUSD_Test is YieldBearingERC4626_TestBase {
         _depositJT(ALICE_ADDRESS, _amount);
 
         NAV_UNIT navBefore = JT.totalAssets().nav;
-        uint256 rateBefore = _getConversionRate();
+        uint256 rateBefore = _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
 
-        // Simulate yield by increasing the NUSD->USD rate
-        uint256 yieldWAD = _yieldBps * 1e14; // Convert bps to WAD
+        // Simulate yield (randomly picks Leg 1 or Leg 2)
+        uint256 yieldWAD = _yieldBps * 1e14;
         simulateJTYield(yieldWAD);
 
-        uint256 rateAfter = _getConversionRate();
-        assertGt(rateAfter, rateBefore, "Rate should increase after yield");
+        uint256 rateAfter = _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
+        assertGt(rateAfter, rateBefore, "Effective rate should increase after yield");
 
         // Sync accounting
         vm.prank(SYNC_ROLE_ADDRESS);
@@ -138,14 +140,14 @@ contract sNUSD_sNUSD_Test is YieldBearingERC4626_TestBase {
         _depositJT(ALICE_ADDRESS, _amount);
 
         NAV_UNIT navBefore = JT.totalAssets().nav;
-        uint256 rateBefore = _getConversionRate();
+        uint256 rateBefore = _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
 
-        // Simulate loss by decreasing the NUSD->USD rate
+        // Simulate loss (randomly picks Leg 1 or Leg 2)
         uint256 lossWAD = _lossBps * 1e14;
         simulateJTLoss(lossWAD);
 
-        uint256 rateAfter = _getConversionRate();
-        assertLt(rateAfter, rateBefore, "Rate should decrease after loss");
+        uint256 rateAfter = _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
+        assertLt(rateAfter, rateBefore, "Effective rate should decrease after loss");
 
         // Sync accounting
         vm.prank(SYNC_ROLE_ADDRESS);

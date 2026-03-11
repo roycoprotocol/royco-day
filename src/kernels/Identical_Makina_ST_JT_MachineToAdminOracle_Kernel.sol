@@ -3,14 +3,14 @@ pragma solidity ^0.8.28;
 
 import { IRoycoKernel } from "../interfaces/IRoycoKernel.sol";
 import { RoycoKernel } from "./base/RoycoKernel.sol";
-import { IdenticalMakinaSharesAdminOracleQuoter } from "./base/quoter/IdenticalMakinaSharesAdminOracleQuoter.sol";
+import { IdenticalMakinaSharesToAdminOracleQuoter } from "./base/quoter/IdenticalMakinaSharesToAdminOracleQuoter.sol";
 
 /**
- * @title Identical_Makina_ST_Makina_JT_Kernel
+ * @title Identical_Makina_ST_JT_MachineToAdminOracle_Kernel
  * @author Waymont
  * @notice The senior and junior tranches transfer in the same yield bearing Makina machine shares (DUSD, DBIT, etc.)
  */
-contract Identical_Makina_ST_Makina_JT_Kernel is RoycoKernel, IdenticalMakinaSharesAdminOracleQuoter {
+contract Identical_Makina_ST_JT_MachineToAdminOracle_Kernel is RoycoKernel, IdenticalMakinaSharesToAdminOracleQuoter {
     /**
      * @notice Constructs the kernel state
      * @param _params The standard construction parameters for the Royco kernel
@@ -21,7 +21,7 @@ contract Identical_Makina_ST_Makina_JT_Kernel is RoycoKernel, IdenticalMakinaSha
         address _makinaMachine
     )
         RoycoKernel(_params)
-        IdenticalMakinaSharesAdminOracleQuoter(_makinaMachine)
+        IdenticalMakinaSharesToAdminOracleQuoter(_makinaMachine)
     { }
 
     /**
@@ -33,6 +33,6 @@ contract Identical_Makina_ST_Makina_JT_Kernel is RoycoKernel, IdenticalMakinaSha
         // Initialize the base kernel state
         __RoycoKernel_init(_params);
         // Initialize the identical Makina machine shares to admin oracle quoter
-        __IdenticalMakinaSharesAdminOracleQuoter_init(_initialConversionRateWAD);
+        __IdenticalMakinaSharesToAdminOracleQuoter_init(_initialConversionRateWAD);
     }
 }

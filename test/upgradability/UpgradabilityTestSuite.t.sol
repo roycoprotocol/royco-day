@@ -14,7 +14,7 @@ import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
-import { Identical_ERC4626_ST_ERC4626_JT_Kernel } from "../../src/kernels/Identical_ERC4626_ST_ERC4626_JT_Kernel.sol";
+import { Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel } from "../../src/kernels/Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
 import { toTrancheUnits } from "../../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../../src/tranches/RoycoJuniorTranche.sol";
@@ -78,8 +78,8 @@ contract UpgradabilityTestSuite is BaseTest {
     function _deployMarket() internal returns (DeployScript.DeploymentResult memory) {
         bytes32 _marketId = keccak256(abi.encodePacked("UpgradabilityTest", vm.getBlockTimestamp()));
 
-        DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams memory kernelParams =
-            DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: WAD });
+        DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams memory kernelParams =
+            DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: WAD });
 
         DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
             jtYieldShareAtZeroUtilWAD: 0.3e18, // Y_0 = Y_T (same as target)
@@ -102,7 +102,7 @@ contract UpgradabilityTestSuite is BaseTest {
             juniorAsset: SNUSD,
             stDustTolerance: 1,
             jtDustTolerance: 1,
-            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
+            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel,
             kernelSpecificParams: abi.encode(kernelParams),
             stSelfLiquidationBonusWAD: 0,
             enforceVaultSharesTransferWhitelist: false,
@@ -151,7 +151,7 @@ contract UpgradabilityTestSuite is BaseTest {
             enforceVaultSharesTransferWhitelist: false
         });
 
-        newKernelImpl = address(new Identical_ERC4626_ST_ERC4626_JT_Kernel(constructionParams));
+        newKernelImpl = address(new Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel(constructionParams));
         vm.label(newKernelImpl, "NewKernelImpl");
     }
 
@@ -220,7 +220,7 @@ contract UpgradabilityTestSuite is BaseTest {
         });
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        Identical_ERC4626_ST_ERC4626_JT_Kernel(KERNEL_IMPL).initialize(params, WAD);
+        Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel(KERNEL_IMPL).initialize(params, WAD);
     }
 
     /// @notice Test that new ST implementation cannot be initialized
@@ -268,7 +268,7 @@ contract UpgradabilityTestSuite is BaseTest {
         });
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        Identical_ERC4626_ST_ERC4626_JT_Kernel(newKernelImpl).initialize(params, WAD);
+        Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel(newKernelImpl).initialize(params, WAD);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

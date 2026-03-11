@@ -7,14 +7,14 @@ import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { IMachine } from "../../../../src/interfaces/external/makina/IMachine.sol";
-import { Identical_Makina_ST_Makina_JT_Kernel } from "../../../../src/kernels/Identical_Makina_ST_Makina_JT_Kernel.sol";
+import { Identical_Makina_ST_JT_MachineToAdminOracle_Kernel } from "../../../../src/kernels/Identical_Makina_ST_JT_MachineToAdminOracle_Kernel.sol";
 import { WAD, WAD_DECIMALS } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/libraries/Units.sol";
 
 import { YieldBearingERC4626_TestBase } from "../base/YieldBearingERC4626_TestBase.t.sol";
 
 /// @title Makina_DUSD_Test
-/// @notice Tests Identical_Makina_ST_Makina_JT_Kernel with Makina's DUSD
+/// @notice Tests Identical_Makina_ST_JT_MachineToAdminOracle_Kernel with Makina's DUSD
 /// @dev Both ST and JT use DUSD (Makina machine shares) as the tranche asset
 ///
 /// DUSD is a Makina machine share where:
@@ -127,14 +127,14 @@ contract Makina_DUSD_Test is YieldBearingERC4626_TestBase {
 
     /// @notice Gets the current conversion rate using the Makina kernel's getter (in WAD precision)
     function _getConversionRate() internal view override returns (uint256) {
-        return Identical_Makina_ST_Makina_JT_Kernel(address(KERNEL)).getStoredConversionRateWAD();
+        return Identical_Makina_ST_JT_MachineToAdminOracle_Kernel(address(KERNEL)).getStoredConversionRateWAD();
     }
 
     /// @notice Sets the conversion rate using the Makina kernel's setter (in WAD precision)
     /// @dev Requires ADMIN_ORACLE_QUOTER_ROLE, which is granted to ORACLE_QUOTER_ADMIN_ADDRESS
     function _setConversionRate(uint256 _newRateWAD) internal override {
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        Identical_Makina_ST_Makina_JT_Kernel(address(KERNEL)).setConversionRate(_newRateWAD);
+        Identical_Makina_ST_JT_MachineToAdminOracle_Kernel(address(KERNEL)).setConversionRate(_newRateWAD, true);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -158,7 +158,7 @@ contract Makina_DUSD_Test is YieldBearingERC4626_TestBase {
 
     /// @notice Verifies the kernel's MAKINA_MACHINE immutable is set correctly
     function test_makina_kernelConfiguration() external view {
-        address kernelMachine = Identical_Makina_ST_Makina_JT_Kernel(address(KERNEL)).MAKINA_MACHINE();
+        address kernelMachine = Identical_Makina_ST_JT_MachineToAdminOracle_Kernel(address(KERNEL)).MAKINA_MACHINE();
         assertEq(kernelMachine, MAKINA_MACHINE, "Kernel's MAKINA_MACHINE should match expected");
     }
 
@@ -278,7 +278,7 @@ contract Makina_DUSD_Test is YieldBearingERC4626_TestBase {
         uint256 storedRateWAD = _getConversionRate();
 
         uint256 expectedConversionRate = (sharePriceWAD * storedRateWAD) / WAD;
-        uint256 actualConversionRate = Identical_Makina_ST_Makina_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        uint256 actualConversionRate = Identical_Makina_ST_JT_MachineToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
 
         assertEq(actualConversionRate, expectedConversionRate, "Conversion rate should equal sharePrice * storedRate / WAD");
     }

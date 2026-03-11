@@ -12,7 +12,7 @@ import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/librarie
 import { YieldBearingERC4626_TestBase } from "../base/YieldBearingERC4626_TestBase.t.sol";
 
 /// @title Morpho_GauntletUSDCFrontier_Test
-/// @notice Tests YieldBearingERC4626_ST_YieldBearingERC4626_JT_Identical_ERC4626_ST_ERC4626_JT_Kernel with Morpho's GauntletUSDCFrontier
+/// @notice Tests YieldBearingERC4626_ST_YieldBearingERC4626_JT_Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel with Morpho's GauntletUSDCFrontier
 /// @dev Both ST and JT use GauntletUSDCFrontier vault shares as the tranche asset
 ///
 /// GauntletUSDCFrontier is an ERC4626 vault where:
@@ -59,7 +59,7 @@ contract MorphoV2_GauntletUSDCFrontier is YieldBearingERC4626_TestBase {
 
         // Override initial conversion rate for testing
         marketConfig.kernelSpecificParams =
-            abi.encode(DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: _getInitialConversionRate() }));
+            abi.encode(DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: _getInitialConversionRate() }));
 
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 

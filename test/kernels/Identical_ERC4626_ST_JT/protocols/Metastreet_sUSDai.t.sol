@@ -10,14 +10,14 @@ import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { IStakedUSDai } from "../../../../src/interfaces/external/usdai/IStakedUSDai.sol";
 import { IUSDai } from "../../../../src/interfaces/external/usdai/IUSDai.sol";
 import { IdenticalAssetsAdminOracleQuoter } from "../../../../src/kernels/base/quoter/base/IdenticalAssetsAdminOracleQuoter.sol";
-import { sUSDai_ST_sUSDai_JT_Kernel } from "../../../../src/kernels/sUSDai_ST_sUSDai_JT_Kernel.sol";
+import { sUSDai_ST_JT_SharePriceToAdminOracle_Kernel } from "../../../../src/kernels/sUSDai_ST_JT_SharePriceToAdminOracle_Kernel.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
 
 import { YieldBearingERC4626_TestBase } from "../base/YieldBearingERC4626_TestBase.t.sol";
 
 /// @title Metastreet_sUSDai_Test
-/// @notice Tests sUSDai_ST_sUSDai_JT_Kernel with Metastreet's sUSDai on Arbitrum
+/// @notice Tests sUSDai_ST_JT_SharePriceToAdminOracle_Kernel with Metastreet's sUSDai on Arbitrum
 /// @dev Both ST and JT use sUSDai (Staked USDai) as the tranche asset
 ///
 /// sUSDai is a yield-bearing staked token where:
@@ -135,14 +135,14 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
 
     /// @notice Gets the current conversion rate using the sUSDai kernel's getter (in WAD precision)
     function _getConversionRate() internal view override returns (uint256) {
-        return sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).getStoredConversionRateWAD();
+        return sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).getStoredConversionRateWAD();
     }
 
     /// @notice Sets the conversion rate using the sUSDai kernel's setter (in WAD precision)
     /// @dev Requires ADMIN_ORACLE_QUOTER_ROLE, which is granted to ORACLE_QUOTER_ADMIN_ADDRESS
     function _setConversionRate(uint256 _newRateWAD) internal override {
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).setConversionRate(_newRateWAD);
+        sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(_newRateWAD, true);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -162,7 +162,7 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
 
     /// @notice Verifies the kernel's USDAI immutable is set correctly
     function test_sUSDai_kernelConfiguration() external view {
-        address kernelUsdai = sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).USDAI();
+        address kernelUsdai = sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).USDAI();
         assertEq(kernelUsdai, USDAI, "Kernel's USDAI should match expected");
     }
 
@@ -282,7 +282,7 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
         uint256 storedRateWAD = _getConversionRate();
 
         uint256 expectedConversionRate = (redemptionSharePriceWAD * storedRateWAD) / WAD;
-        uint256 actualConversionRate = sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        uint256 actualConversionRate = sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
 
         assertEq(actualConversionRate, expectedConversionRate, "Conversion rate should equal redemptionSharePrice * storedRate / WAD");
     }
@@ -294,7 +294,7 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
     /// @notice Test that the kernel's USDAI immutable is set from sUSDai.asset()
     function test_sUSDai_blacklistIntegration() external view {
         // Verify kernel has correct USDai address (set from sUSDai.asset() in constructor)
-        address kernelUsdai = sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).USDAI();
+        address kernelUsdai = sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).USDAI();
         address expectedUsdai = IStakedUSDai(SUSDAI).asset();
         assertEq(kernelUsdai, expectedUsdai, "Kernel's USDAI should equal sUSDai.asset()");
     }
@@ -391,7 +391,7 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
         // = (WAD^2 + 2*WAD + 1) / WAD = WAD + 2 + 1/WAD = WAD + 2 (floor truncates the 1/WAD)
         uint256 expectedFloor = (sharePriceWithSmallFraction * storedRateWithSmallFraction) / WAD;
 
-        uint256 actual = sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        uint256 actual = sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
 
         assertEq(actual, expectedFloor, "Conversion rate should use floor rounding");
         assertEq(actual, WAD + 2, "Floor should truncate to WAD + 2");
@@ -407,7 +407,7 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
         _setConversionRate(_storedRate);
 
         // Should not revert
-        uint256 rate = sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        uint256 rate = sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
 
         // Verify the calculation is correct
         uint256 expected = (_sharePrice * _storedRate) / WAD;
@@ -425,11 +425,11 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
 
         // Test with first share price
         _mockConvertToAssets(_sharePrice1);
-        uint256 rate1 = sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        uint256 rate1 = sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
 
         // Test with second share price
         _mockConvertToAssets(_sharePrice2);
-        uint256 rate2 = sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        uint256 rate2 = sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
 
         // Verify formula: rate = sharePrice * storedRate / WAD
         uint256 expectedRate1 = (_sharePrice1 * _storedRate) / WAD;
@@ -456,7 +456,7 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
         // Unauthorized user should not be able to set rate
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, ALICE_ADDRESS));
-        sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).setConversionRate(WAD * 2);
+        sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(WAD * 2, true);
     }
 
     /// @notice Test that authorized role can successfully set conversion rate
@@ -465,7 +465,7 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
 
         // ORACLE_QUOTER_ADMIN_ADDRESS has the required role
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).setConversionRate(newRate);
+        sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(newRate, true);
 
         // Verify rate was updated
         assertEq(_getConversionRate(), newRate, "Rate should be updated to new value");
@@ -475,7 +475,7 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
     function test_sUSDai_setConversionRate_revertsOnZero() external {
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(IdenticalAssetsAdminOracleQuoter.INVALID_CONVERSION_RATE.selector));
-        sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).setConversionRate(0);
+        sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(0, true);
     }
 
     /// @notice Test that setConversionRate updates state correctly
@@ -484,7 +484,7 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
         _newRate = bound(_newRate, 1, type(uint128).max);
 
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).setConversionRate(_newRate);
+        sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(_newRate, true);
 
         assertEq(_getConversionRate(), _newRate, "Stored rate should match set value");
     }
@@ -500,7 +500,7 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
         _mockConvertToAssets(1);
 
         // Should not revert, but rate will be very small (1 * 1 / WAD = 0 due to floor)
-        uint256 rate = sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        uint256 rate = sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
         assertEq(rate, 0, "Very small inputs should floor to 0");
     }
 
@@ -509,7 +509,7 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
         _setConversionRate(WAD);
         _mockConvertToAssets(WAD);
 
-        uint256 rate = sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        uint256 rate = sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
         assertEq(rate, WAD, "WAD * WAD / WAD should equal WAD");
     }
 
@@ -518,9 +518,9 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
         uint256 newRate = 1.5e18; // 1.5 WAD
 
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).setConversionRate(newRate);
+        sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).setConversionRate(newRate, true);
 
-        uint256 storedRate = sUSDai_ST_sUSDai_JT_Kernel(address(KERNEL)).getStoredConversionRateWAD();
+        uint256 storedRate = sUSDai_ST_JT_SharePriceToAdminOracle_Kernel(address(KERNEL)).getStoredConversionRateWAD();
         assertEq(storedRate, newRate, "getStoredConversionRateWAD should return admin-set rate");
     }
 }

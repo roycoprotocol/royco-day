@@ -6,7 +6,7 @@ import { DeployScript } from "../../script/Deploy.s.sol";
 import { DeploymentConfig } from "../../script/config/DeploymentConfig.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IInsuranceCapitalLayer } from "../../src/interfaces/external/reUSD/IInsuranceCapitalLayer.sol";
-import { ReUSD_ST_ReUSD_JT_Kernel } from "../../src/kernels/ReUSD_ST_ReUSD_JT_Kernel.sol";
+import { ReUSD_ST_JT_ICLOracle_Kernel } from "../../src/kernels/ReUSD_ST_JT_ICLOracle_Kernel.sol";
 import { IdenticalAssetsOracleQuoter } from "../../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
 import { WAD, WAD } from "../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits } from "../../src/libraries/Units.sol";
@@ -14,7 +14,7 @@ import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits } from "../../src/li
 import { AbstractKernelTestSuite } from "./abstract/AbstractKernelTestSuite.t.sol";
 
 /// @title reUSD_Test
-/// @notice Tests ReUSD_ST_ReUSD_JT_Kernel with reUSD on Ethereum mainnet
+/// @notice Tests ReUSD_ST_JT_ICLOracle_Kernel with reUSD on Ethereum mainnet
 /// @dev Both ST and JT use reUSD as the tranche asset
 ///
 /// reUSD is a yield-bearing token where:
@@ -159,11 +159,11 @@ contract reUSD_Test is AbstractKernelTestSuite {
     /// @notice Verifies initial conversion rate is set correctly (from ICL)
     function test_reUSD_initialConversionRate() external view {
         // The stored rate should be 0 (sentinel) meaning it queries ICL
-        uint256 storedRate = ReUSD_ST_ReUSD_JT_Kernel(address(KERNEL)).getStoredConversionRateWAD();
+        uint256 storedRate = ReUSD_ST_JT_ICLOracle_Kernel(address(KERNEL)).getStoredConversionRateWAD();
         assertEq(storedRate, 0, "Stored rate should be 0 (sentinel, queries ICL)");
 
         // The actual conversion rate should be fetched from ICL
-        uint256 conversionRate = ReUSD_ST_ReUSD_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        uint256 conversionRate = ReUSD_ST_JT_ICLOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
         assertGt(conversionRate, 0, "Conversion rate should be positive");
     }
 
@@ -218,9 +218,9 @@ contract reUSD_Test is AbstractKernelTestSuite {
         uint256 newRate = 1.05e18;
 
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        ReUSD_ST_ReUSD_JT_Kernel(address(KERNEL)).setConversionRate(newRate);
+        ReUSD_ST_JT_ICLOracle_Kernel(address(KERNEL)).setConversionRate(newRate, true);
 
-        uint256 storedRate = ReUSD_ST_ReUSD_JT_Kernel(address(KERNEL)).getStoredConversionRateWAD();
+        uint256 storedRate = ReUSD_ST_JT_ICLOracle_Kernel(address(KERNEL)).getStoredConversionRateWAD();
         assertEq(storedRate, newRate, "Stored rate should match set rate");
     }
 
@@ -228,7 +228,7 @@ contract reUSD_Test is AbstractKernelTestSuite {
     function test_setConversionRate_revertsOnUnauthorized() external {
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert();
-        ReUSD_ST_ReUSD_JT_Kernel(address(KERNEL)).setConversionRate(1e18);
+        ReUSD_ST_JT_ICLOracle_Kernel(address(KERNEL)).setConversionRate(1e18, true);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { Vm } from "../../../../lib/forge-std/src/Vm.sol";
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
+import { IRoycoAccountant } from "../../../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoAuth } from "../../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
-import { Identical_ERC20_ST_ERC20_JT_Kernel } from "../../../../src/kernels/Identical_ERC20_ST_ERC20_JT_Kernel.sol";
+import { Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel } from "../../../../src/kernels/Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel.sol";
 import { IdenticalAssetsChainlinkToAdminOracleQuoter } from "../../../../src/kernels/base/quoter/IdenticalAssetsChainlinkToAdminOracleQuoter.sol";
 import { IdenticalAssetsChainlinkOracleQuoter } from "../../../../src/kernels/base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
@@ -13,7 +16,7 @@ import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from ".
 import { AbstractKernelTestSuite } from "../../abstract/AbstractKernelTestSuite.t.sol";
 
 /// @title YieldBearingERC20Chainlink_TestBase
-/// @notice Base test contract for Identical_ERC20_ST_ERC20_JT_Kernel
+/// @notice Base test contract for Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel
 /// @dev Implements the test hooks for yield-bearing ERC20 assets using Chainlink oracle for pricing
 ///
 /// IMPORTANT: This kernel uses two conversion rates:
@@ -202,14 +205,14 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
 
     /// @notice Gets the stored conversion rate (reference asset to NAV) in WAD precision
     function _getStoredConversionRate() internal view returns (uint256) {
-        return Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).getStoredConversionRateWAD();
+        return Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).getStoredConversionRateWAD();
     }
 
     /// @notice Sets the stored conversion rate (reference asset to NAV) in WAD precision
     /// @dev Requires ADMIN_ORACLE_QUOTER_ROLE, which is granted to ORACLE_QUOTER_ADMIN_ADDRESS
     function _setStoredConversionRate(uint256 _newRateWAD) internal {
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).setConversionRate(_newRateWAD);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setConversionRate(_newRateWAD, true);
     }
 
     /// @notice Simulates yield in the stored conversion rate
@@ -326,59 +329,145 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Tests that setting a new oracle works with valid params
-    function test_setTrancheAssetToReferenceAssetOracle_success() external {
+    function test_setChainlinkOracle_success() external {
         // Create mock oracle addresses
         address newOracle = makeAddr("newOracle");
         address anotherOracle = makeAddr("anotherOracle");
         uint48 newStaleness = 2 days;
 
-        // Mock the decimals call on the new oracle
+        // Mock the decimals and latestRoundData calls on the new oracle
         vm.mockCall(newOracle, abi.encodeWithSelector(AggregatorV3Interface.decimals.selector), abi.encode(uint8(18)));
+        vm.mockCall(
+            newOracle,
+            abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
+            abi.encode(uint80(1), int256(1e18), uint256(0), block.timestamp, uint80(1))
+        );
 
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).setTrancheAssetToReferenceAssetOracle(newOracle, newStaleness);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(newOracle, newStaleness, true);
 
         // Verify by checking that it doesn't revert when called again with different values
         vm.mockCall(anotherOracle, abi.encodeWithSelector(AggregatorV3Interface.decimals.selector), abi.encode(uint8(8)));
+        vm.mockCall(
+            anotherOracle,
+            abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
+            abi.encode(uint80(1), int256(1e8), uint256(0), block.timestamp, uint80(1))
+        );
 
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).setTrancheAssetToReferenceAssetOracle(anotherOracle, 3 days);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(anotherOracle, 3 days, true);
     }
 
     /// @notice Tests that setting oracle with zero address reverts
-    function test_setTrancheAssetToReferenceAssetOracle_revertsOnZeroAddress() external {
+    function test_setChainlinkOracle_revertsOnZeroAddress() external {
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        vm.expectRevert(IdenticalAssetsChainlinkOracleQuoter.INVALID_TRANCHE_ASSET_TO_REFERENCE_ASSET_ORACLE.selector);
-        Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).setTrancheAssetToReferenceAssetOracle(address(0), 1 days);
+        vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(address(0), 1 days, true);
     }
 
     /// @notice Tests that setting oracle with zero staleness reverts
-    function test_setTrancheAssetToReferenceAssetOracle_revertsOnZeroStaleness() external {
+    function test_setChainlinkOracle_revertsOnZeroStaleness() external {
         address newOracle = makeAddr("newOracleForZeroStaleness");
 
         vm.mockCall(newOracle, abi.encodeWithSelector(AggregatorV3Interface.decimals.selector), abi.encode(uint8(18)));
 
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
         vm.expectRevert(IdenticalAssetsChainlinkOracleQuoter.INVALID_STALENESS_THRESHOLD_SECONDS.selector);
-        Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).setTrancheAssetToReferenceAssetOracle(newOracle, 0);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(newOracle, 0, true);
     }
 
     /// @notice Tests that non-admin cannot set oracle
-    function test_setTrancheAssetToReferenceAssetOracle_revertsOnUnauthorized() external {
+    function test_setChainlinkOracle_revertsOnUnauthorized() external {
         address newOracle = makeAddr("newOracleForUnauthorized");
 
         vm.mockCall(newOracle, abi.encodeWithSelector(AggregatorV3Interface.decimals.selector), abi.encode(uint8(18)));
 
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert(); // AccessManagerUnauthorizedAccount
-        Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).setTrancheAssetToReferenceAssetOracle(newOracle, 1 days);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(newOracle, 1 days, true);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // ORACLE VALIDATION TESTS (PRICE_STALE, PRICE_INVALID, PRICE_INCOMPLETE)
+    // _shouldSyncBeforeUpdate FLAG TESTS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Tests that stale price causes PRICE_STALE revert
+    /// @notice Counts TrancheAccountingSynced events in recorded logs
+    function _countSyncEvents(Vm.Log[] memory logs) internal pure returns (uint256 count) {
+        bytes32 syncSelector = IRoycoAccountant.TrancheAccountingSynced.selector;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics.length > 0 && logs[i].topics[0] == syncSelector) {
+                count++;
+            }
+        }
+    }
+
+    /// @notice Tests that setConversionRate with false skips the pre-update sync (1 sync total)
+    function test_setConversionRate_skipPreSync() external {
+        vm.recordLogs();
+
+        vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setConversionRate(WAD * 2, false);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(_countSyncEvents(logs), 1, "Should have exactly 1 sync (post-update only)");
+    }
+
+    /// @notice Tests that setConversionRate with true fires both pre and post sync (2 syncs total)
+    function test_setConversionRate_withPreSync() external {
+        vm.recordLogs();
+
+        vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setConversionRate(WAD * 2, true);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(_countSyncEvents(logs), 2, "Should have exactly 2 syncs (pre + post update)");
+    }
+
+    /// @notice Tests that setChainlinkOracle with false skips the pre-update sync (1 sync total)
+    function test_setChainlinkOracle_skipPreSync() external {
+        address newOracle = makeAddr("newOracleSkipSync");
+
+        vm.mockCall(newOracle, abi.encodeWithSelector(AggregatorV3Interface.decimals.selector), abi.encode(uint8(8)));
+        vm.mockCall(
+            newOracle,
+            abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
+            abi.encode(uint80(1), int256(1e8), uint256(0), block.timestamp, uint80(1))
+        );
+
+        vm.recordLogs();
+
+        vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(newOracle, 1 days, false);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(_countSyncEvents(logs), 1, "Should have exactly 1 sync (post-update only)");
+    }
+
+    /// @notice Tests that setChainlinkOracle with true fires both pre and post sync (2 syncs total)
+    function test_setChainlinkOracle_withPreSync() external {
+        address newOracle = makeAddr("newOracleWithSync");
+
+        vm.mockCall(newOracle, abi.encodeWithSelector(AggregatorV3Interface.decimals.selector), abi.encode(uint8(8)));
+        vm.mockCall(
+            newOracle,
+            abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
+            abi.encode(uint80(1), int256(1e8), uint256(0), block.timestamp, uint80(1))
+        );
+
+        vm.recordLogs();
+
+        vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).setChainlinkOracle(newOracle, 1 days, true);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(_countSyncEvents(logs), 2, "Should have exactly 2 syncs (pre + post update)");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ORACLE VALIDATION TESTS (STALE_PRICE, INVALID_PRICE, INCOMPLETE_PRICE)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Tests that stale price causes STALE_PRICE revert
     function test_oracleValidation_revertsOnStalePrice() external {
         // Clear the mock to allow real call behavior
         vm.clearMockedCalls();
@@ -397,12 +486,12 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
             )
         );
 
-        // Try to get conversion rate - should revert with PRICE_STALE
-        vm.expectRevert(IdenticalAssetsChainlinkOracleQuoter.PRICE_STALE.selector);
-        Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        // Try to get conversion rate - should revert with STALE_PRICE
+        vm.expectRevert(IdenticalAssetsChainlinkOracleQuoter.STALE_PRICE.selector);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
     }
 
-    /// @notice Tests that zero/negative price causes PRICE_INVALID revert
+    /// @notice Tests that zero/negative price causes INVALID_PRICE revert
     function test_oracleValidation_revertsOnZeroPrice() external {
         // Clear the mock
         vm.clearMockedCalls();
@@ -420,11 +509,11 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
             )
         );
 
-        vm.expectRevert(IdenticalAssetsChainlinkOracleQuoter.PRICE_INVALID.selector);
-        Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        vm.expectRevert(IdenticalAssetsChainlinkOracleQuoter.INVALID_PRICE.selector);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
     }
 
-    /// @notice Tests that negative price causes PRICE_INVALID revert
+    /// @notice Tests that negative price causes INVALID_PRICE revert
     function test_oracleValidation_revertsOnNegativePrice() external {
         // Clear the mock
         vm.clearMockedCalls();
@@ -442,11 +531,11 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
             )
         );
 
-        vm.expectRevert(IdenticalAssetsChainlinkOracleQuoter.PRICE_INVALID.selector);
-        Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        vm.expectRevert(IdenticalAssetsChainlinkOracleQuoter.INVALID_PRICE.selector);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
     }
 
-    /// @notice Tests that incomplete round causes PRICE_INCOMPLETE revert
+    /// @notice Tests that incomplete round causes INCOMPLETE_PRICE revert
     function test_oracleValidation_revertsOnIncompleteRound() external {
         // Clear the mock
         vm.clearMockedCalls();
@@ -464,8 +553,8 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
             )
         );
 
-        vm.expectRevert(IdenticalAssetsChainlinkOracleQuoter.PRICE_INCOMPLETE.selector);
-        Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        vm.expectRevert(IdenticalAssetsChainlinkOracleQuoter.INCOMPLETE_PRICE.selector);
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
     }
 
     /// @notice Tests that valid oracle data passes all checks
@@ -486,7 +575,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
         );
 
         // Should not revert
-        uint256 rate = Identical_ERC20_ST_ERC20_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        uint256 rate = Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
         assertGt(rate, 0, "Conversion rate should be positive");
     }
 
@@ -494,7 +583,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
     // ORACLE REFRESH HOOK
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Refresh chainlink oracle after vm.warp to avoid PRICE_STALE errors
+    /// @notice Refresh chainlink oracle after vm.warp to avoid STALE_PRICE errors
     /// @dev Re-mocks the chainlink price with current timestamp
     function _refreshOraclesAfterWarp() internal virtual override {
         // Re-mock with the same price but updated timestamp

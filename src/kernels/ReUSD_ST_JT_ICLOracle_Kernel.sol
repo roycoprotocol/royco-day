@@ -9,13 +9,13 @@ import { RoycoKernel } from "./base/RoycoKernel.sol";
 import { IdenticalAssetsOracleQuoter } from "./base/quoter/base/IdenticalAssetsOracleQuoter.sol";
 
 /**
- * @title ReUSD_ST_ReUSD_JT_Kernel
+ * @title ReUSD_ST_JT_ICLOracle_Kernel
  * @author Waymont
  * @notice The senior and junior tranches transfer in reUSD
  * @notice The NAV can be expressed in any quote token supported by reUSD's Insurance Capital Layer (ICL)
  * @dev https://docs.re.xyz/insurance-capital-layers/what-is-reUSD
  */
-contract ReUSD_ST_ReUSD_JT_Kernel is RoycoKernel, IdenticalAssetsOracleQuoter {
+contract ReUSD_ST_JT_ICLOracle_Kernel is RoycoKernel, IdenticalAssetsOracleQuoter {
     /// @notice The address of the reUSD token
     address public immutable REUSD;
 

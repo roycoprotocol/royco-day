@@ -8,13 +8,13 @@ import { WAD, WAD_DECIMALS } from "../../../libraries/Constants.sol";
 import { IdenticalAssetsAdminOracleQuoter, IdenticalAssetsOracleQuoter } from "./base/IdenticalAssetsAdminOracleQuoter.sol";
 
 /**
- * @title IdenticalMakinaSharesAdminOracleQuoter
+ * @title IdenticalMakinaSharesToAdminOracleQuoter
  * @notice Quoter to convert tranche units (Makina machine shares) to/from NAV units by converting the shares to accounting assets and converting accounting assets to NAV units using an admin set rate
  * @dev Mandates that the accounting asset to NAV units uses an admin controlled oracle
  * @dev The senior and junior tranches must have the same Makina machine share as their tranche unit
  * @dev Use case: Convert DUSD (Tranche unit) to USDC (accounting assets) using the machine's convertToAssets and convert USDC to USD (NAV unit) using an admin set rate
  */
-abstract contract IdenticalMakinaSharesAdminOracleQuoter is IdenticalAssetsAdminOracleQuoter {
+abstract contract IdenticalMakinaSharesToAdminOracleQuoter is IdenticalAssetsAdminOracleQuoter {
     using Math for uint256;
 
     /// @dev The address of the Makina machine for the ST and JT asset
@@ -50,7 +50,7 @@ abstract contract IdenticalMakinaSharesAdminOracleQuoter is IdenticalAssetsAdmin
      * @notice Initializes the identical Makina machine shares admin oracle quoter and the base identical assets oracle quoter
      * @param _initialConversionRateWAD The initial conversion rate as defined by the oracle, scaled to WAD precision
      */
-    function __IdenticalMakinaSharesAdminOracleQuoter_init(uint256 _initialConversionRateWAD) internal onlyInitializing {
+    function __IdenticalMakinaSharesToAdminOracleQuoter_init(uint256 _initialConversionRateWAD) internal onlyInitializing {
         __IdenticalAssetsAdminOracleQuoter_init(_initialConversionRateWAD);
     }
 

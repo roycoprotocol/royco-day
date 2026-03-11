@@ -58,8 +58,8 @@ contract GuardianCancellationTest is BaseTest {
         bytes32 _marketID = keccak256(abi.encodePacked(SENIOR_TRANCHE_NAME, JUNIOR_TRANCHE_NAME, vm.getBlockTimestamp()));
 
         // Build kernel-specific params
-        DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams memory kernelParams =
-            DeployScript.IdenticalERC4626SharesAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 });
+        DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams memory kernelParams =
+            DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 });
 
         // Build YDM params (AdaptiveCurve_V2)
         DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
@@ -84,7 +84,7 @@ contract GuardianCancellationTest is BaseTest {
             juniorAsset: address(MOCK_UNDERLYING_ST_VAULT),
             stDustTolerance: 1,
             jtDustTolerance: 1,
-            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_ERC4626_JT_Kernel,
+            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel,
             kernelSpecificParams: abi.encode(kernelParams),
             stSelfLiquidationBonusWAD: 0,
             enforceVaultSharesTransferWhitelist: false,
