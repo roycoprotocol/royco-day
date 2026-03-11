@@ -2314,19 +2314,11 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // Verify: No bonus applied - claims should equal original effective NAV (within tolerance)
         // When no bonus is applied, the NAV returned should equal the effective NAV
         assertApproxEqRel(
-            toUint256(actualClaims.nav),
-            toUint256(stEffectiveNAV),
-            MAX_RELATIVE_DELTA,
-            "No bonus should be applied: NAV should equal effective NAV"
+            toUint256(actualClaims.nav), toUint256(stEffectiveNAV), MAX_RELATIVE_DELTA, "No bonus should be applied: NAV should equal effective NAV"
         );
 
         // Preview should match actual
-        assertApproxEqRel(
-            toUint256(actualClaims.stAssets),
-            toUint256(previewClaims.stAssets),
-            PREVIEW_RELATIVE_DELTA,
-            "Preview ST assets should match actual"
-        );
+        assertApproxEqRel(toUint256(actualClaims.stAssets), toUint256(previewClaims.stAssets), PREVIEW_RELATIVE_DELTA, "Preview ST assets should match actual");
 
         // Verify NAV conservation
         _assertNAVConservation();
@@ -2384,20 +2376,10 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // Verify bonus was applied: actual NAV should exceed original ST claims by approximately the bonus
         NAV_UNIT expectedTotalNAV = stClaimsNAV + expectedActualBonus;
 
-        assertApproxEqRel(
-            toUint256(actualClaims.nav),
-            toUint256(expectedTotalNAV),
-            MAX_RELATIVE_DELTA,
-            "Total NAV should equal ST claims + bonus"
-        );
+        assertApproxEqRel(toUint256(actualClaims.nav), toUint256(expectedTotalNAV), MAX_RELATIVE_DELTA, "Total NAV should equal ST claims + bonus");
 
         // Preview should match actual
-        assertApproxEqRel(
-            toUint256(actualClaims.nav),
-            toUint256(previewClaims.nav),
-            PREVIEW_RELATIVE_DELTA,
-            "Preview NAV should match actual NAV"
-        );
+        assertApproxEqRel(toUint256(actualClaims.nav), toUint256(previewClaims.nav), PREVIEW_RELATIVE_DELTA, "Preview NAV should match actual NAV");
 
         // Verify NAV conservation
         _assertNAVConservation();
@@ -2446,20 +2428,12 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         if (desiredBonus > jtEffNAV) {
             // Actual bonus = JT effective NAV (the cap)
             NAV_UNIT expectedTotalNAV = stClaimsNAV + jtEffNAV;
-            assertApproxEqRel(
-                toUint256(actualClaims.nav),
-                toUint256(expectedTotalNAV),
-                MAX_RELATIVE_DELTA,
-                "Bonus should be capped at JT effective NAV"
-            );
+            assertApproxEqRel(toUint256(actualClaims.nav), toUint256(expectedTotalNAV), MAX_RELATIVE_DELTA, "Bonus should be capped at JT effective NAV");
         } else {
             // Actual bonus = desired bonus
             NAV_UNIT expectedTotalNAV = stClaimsNAV + desiredBonus;
             assertApproxEqRel(
-                toUint256(actualClaims.nav),
-                toUint256(expectedTotalNAV),
-                MAX_RELATIVE_DELTA,
-                "Full bonus should be applied when JT has sufficient NAV"
+                toUint256(actualClaims.nav), toUint256(expectedTotalNAV), MAX_RELATIVE_DELTA, "Full bonus should be applied when JT has sufficient NAV"
             );
         }
 
@@ -2507,25 +2481,14 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         AssetClaims memory actualClaims = ST.redeem(sharesToRedeem, BOB_ADDRESS, BOB_ADDRESS);
 
         // Verify preview matches actual for all claim components
+        assertApproxEqRel(toUint256(actualClaims.nav), toUint256(previewClaims.nav), PREVIEW_RELATIVE_DELTA, "Preview NAV should match actual NAV");
+
         assertApproxEqRel(
-            toUint256(actualClaims.nav),
-            toUint256(previewClaims.nav),
-            PREVIEW_RELATIVE_DELTA,
-            "Preview NAV should match actual NAV"
+            toUint256(actualClaims.stAssets), toUint256(previewClaims.stAssets), PREVIEW_RELATIVE_DELTA, "Preview ST assets should match actual ST assets"
         );
 
         assertApproxEqRel(
-            toUint256(actualClaims.stAssets),
-            toUint256(previewClaims.stAssets),
-            PREVIEW_RELATIVE_DELTA,
-            "Preview ST assets should match actual ST assets"
-        );
-
-        assertApproxEqRel(
-            toUint256(actualClaims.jtAssets),
-            toUint256(previewClaims.jtAssets),
-            PREVIEW_RELATIVE_DELTA,
-            "Preview JT assets should match actual JT assets"
+            toUint256(actualClaims.jtAssets), toUint256(previewClaims.jtAssets), PREVIEW_RELATIVE_DELTA, "Preview JT assets should match actual JT assets"
         );
     }
 
@@ -2572,11 +2535,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         (SyncedAccountingState memory stateAfterRedeem,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.JUNIOR);
 
         // JT effective NAV should be less than or equal to before (reduced by bonus)
-        assertLe(
-            toUint256(stateAfterRedeem.jtEffectiveNAV),
-            toUint256(state.jtEffectiveNAV),
-            "JT effective NAV should decrease after providing bonus"
-        );
+        assertLe(toUint256(stateAfterRedeem.jtEffectiveNAV), toUint256(state.jtEffectiveNAV), "JT effective NAV should decrease after providing bonus");
     }
 
     /// @notice Test multiple ST redeemers each receive proportional self-liquidation bonus
@@ -2648,18 +2607,10 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Only assert decrease if JT had effective NAV before bonus distributions
         if (toUint256(jtEffNAVBefore) > 0) {
-            assertLt(
-                toUint256(stateAfter.jtEffectiveNAV),
-                toUint256(jtEffNAVBefore),
-                "JT effective NAV should decrease after bonus distributions"
-            );
+            assertLt(toUint256(stateAfter.jtEffectiveNAV), toUint256(jtEffNAVBefore), "JT effective NAV should decrease after bonus distributions");
         } else {
             // If JT effective NAV was already 0, it should remain 0
-            assertEq(
-                toUint256(stateAfter.jtEffectiveNAV),
-                0,
-                "JT effective NAV should remain 0 when already depleted"
-            );
+            assertEq(toUint256(stateAfter.jtEffectiveNAV), 0, "JT effective NAV should remain 0 when already depleted");
         }
     }
 
@@ -2700,9 +2651,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         NAV_UNIT actualBonusNAV = state.jtEffectiveNAV < desiredBonus ? state.jtEffectiveNAV : desiredBonus;
 
         // Calculate JT's cross-tranche claim on ST raw NAV
-        NAV_UNIT jtClaimOnSTRawNAV = state.jtEffectiveNAV > state.jtRawNAV
-            ? state.jtEffectiveNAV - state.jtRawNAV
-            : ZERO_NAV_UNITS;
+        NAV_UNIT jtClaimOnSTRawNAV = state.jtEffectiveNAV > state.jtRawNAV ? state.jtEffectiveNAV - state.jtRawNAV : ZERO_NAV_UNITS;
 
         // Execute redemption
         vm.prank(BOB_ADDRESS);
@@ -2710,12 +2659,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Verify total bonus was applied (use approximate comparison for rounding tolerance)
         NAV_UNIT expectedTotalNAV = stEffectiveNAV + actualBonusNAV;
-        assertApproxEqAbs(
-            toUint256(actualClaims.nav),
-            toUint256(expectedTotalNAV),
-            toUint256(maxNAVDelta()) + 1,
-            "ST should receive expected bonus NAV"
-        );
+        assertApproxEqAbs(toUint256(actualClaims.nav), toUint256(expectedTotalNAV), toUint256(maxNAVDelta()) + 1, "ST should receive expected bonus NAV");
 
         // When JT has cross-tranche claim on ST (jtClaimOnSTRawNAV > 0), verify sourcing priority:
         // - If actualBonus <= jtClaimOnSTRawNAV, ALL bonus should come from ST assets (stAssets increases, jtAssets unchanged)
@@ -2723,16 +2667,12 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         if (toUint256(jtClaimOnSTRawNAV) > 0 && toUint256(actualBonusNAV) > 0) {
             // Calculate expected bonus distribution
             NAV_UNIT bonusFromSTAssets = actualBonusNAV <= jtClaimOnSTRawNAV ? actualBonusNAV : jtClaimOnSTRawNAV;
-            NAV_UNIT bonusFromJTAssets = actualBonusNAV > jtClaimOnSTRawNAV
-                ? actualBonusNAV - jtClaimOnSTRawNAV
-                : ZERO_NAV_UNITS;
+            NAV_UNIT bonusFromJTAssets = actualBonusNAV > jtClaimOnSTRawNAV ? actualBonusNAV - jtClaimOnSTRawNAV : ZERO_NAV_UNITS;
 
             // If bonus fully sourced from ST assets, jtAssets claim should be minimal (only original cross-claim)
             if (bonusFromJTAssets == ZERO_NAV_UNITS) {
                 // JT asset claims should only include original ST claim on JT (if any), not bonus
-                NAV_UNIT stClaimOnJTRawNAV = state.stEffectiveNAV > state.stRawNAV
-                    ? state.stEffectiveNAV - state.stRawNAV
-                    : ZERO_NAV_UNITS;
+                NAV_UNIT stClaimOnJTRawNAV = state.stEffectiveNAV > state.stRawNAV ? state.stEffectiveNAV - state.stRawNAV : ZERO_NAV_UNITS;
 
                 assertApproxEqAbs(
                     toUint256(KERNEL.jtConvertTrancheUnitsToNAVUnits(actualClaims.jtAssets)),
