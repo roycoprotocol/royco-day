@@ -96,7 +96,7 @@ abstract contract DeploymentConfig {
         uint64 jtYieldShareProtocolFeeWAD;
         uint64 coverageWAD;
         uint96 betaWAD;
-        uint64 lltvWAD;
+        uint256 liquidationUtilizationWAD;
         uint24 fixedTermDurationSeconds;
         // YDM
         DeployScript.YDMType ydmType;
@@ -206,7 +206,7 @@ abstract contract DeploymentConfig {
             jtYieldShareProtocolFeeWAD: 0.2e18,
             coverageWAD: 0.1e18,
             betaWAD: 1e18,
-            lltvWAD: 0.91e18,
+            liquidationUtilizationWAD: 1.1111e18,
             fixedTermDurationSeconds: 0, // Market is not expected to have volatility, so no fixed term
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
@@ -243,7 +243,7 @@ abstract contract DeploymentConfig {
             jtYieldShareProtocolFeeWAD: 0.2e18,
             coverageWAD: 0.1e18,
             betaWAD: 1e18,
-            lltvWAD: 0.91e18,
+            liquidationUtilizationWAD: 1.1111e18,
             fixedTermDurationSeconds: 0, // Market is not expected to have volatility, so no fixed term
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
@@ -276,7 +276,7 @@ abstract contract DeploymentConfig {
             jtYieldShareProtocolFeeWAD: 0.2e18,
             coverageWAD: 0.2e18,
             betaWAD: 1e18,
-            lltvWAD: 0.82e18,
+            liquidationUtilizationWAD: 1.1111e18,
             fixedTermDurationSeconds: 0, // Market is not expected to have volatility, so no fixed term
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
@@ -309,7 +309,7 @@ abstract contract DeploymentConfig {
             jtYieldShareProtocolFeeWAD: 0.2e18,
             coverageWAD: 0.1e18,
             betaWAD: 1e18,
-            lltvWAD: 0.92e18,
+            liquidationUtilizationWAD: 1.25e18,
             fixedTermDurationSeconds: 2 days,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
@@ -348,7 +348,7 @@ abstract contract DeploymentConfig {
             jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
             coverageWAD: 0.1e18, // TODO
             betaWAD: 1e18,
-            lltvWAD: 0.91e18, // TODO
+            liquidationUtilizationWAD: 1.1111e18, // TODO
             fixedTermDurationSeconds: 2 days, // TODO
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: // TODO
@@ -388,7 +388,7 @@ abstract contract DeploymentConfig {
             jtYieldShareProtocolFeeWAD: 0.1e18,
             coverageWAD: 0.2e18,
             betaWAD: 1e18,
-            lltvWAD: 0.97e18,
+            liquidationUtilizationWAD: 6.6667e18,
             fixedTermDurationSeconds: 2 weeks,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
@@ -427,7 +427,7 @@ abstract contract DeploymentConfig {
             jtYieldShareProtocolFeeWAD: 0.1e18,
             coverageWAD: 0.2e18,
             betaWAD: 1e18,
-            lltvWAD: 0.97e18,
+            liquidationUtilizationWAD: 6.6667e18,
             fixedTermDurationSeconds: 2 weeks,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
@@ -459,7 +459,7 @@ abstract contract DeploymentConfig {
             jtYieldShareProtocolFeeWAD: 0.1e18,
             coverageWAD: 0.2e18,
             betaWAD: 1e18,
-            lltvWAD: 0.97e18,
+            liquidationUtilizationWAD: 6.6667e18,
             fixedTermDurationSeconds: 2 weeks,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
@@ -492,7 +492,7 @@ abstract contract DeploymentConfig {
             jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
             coverageWAD: 0.075e18, // TODO
             betaWAD: 1e18,
-            lltvWAD: 0.96e18, // TODO
+            liquidationUtilizationWAD: 1.875e18, // TODO
             fixedTermDurationSeconds: 7 days, // TODO
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: // TODO
@@ -526,7 +526,7 @@ abstract contract DeploymentConfig {
             jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
             coverageWAD: 0.075e18, // TODO
             betaWAD: 1e18,
-            lltvWAD: 0.96e18, // TODO
+            liquidationUtilizationWAD: 1.875e18, // TODO
             fixedTermDurationSeconds: 7 days, // TODO
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: // TODO
@@ -566,7 +566,7 @@ abstract contract DeploymentConfig {
             jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
             coverageWAD: 0.1e18, // TODO
             betaWAD: 1e18,
-            lltvWAD: 0.91e18, // TODO
+            liquidationUtilizationWAD: 1.1111e18, // TODO
             fixedTermDurationSeconds: 2 days, // TODO
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: // TODO
@@ -604,7 +604,7 @@ abstract contract DeploymentConfig {
             jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
             coverageWAD: 0.1e18, // TODO
             betaWAD: 1e18,
-            lltvWAD: 0.91e18, // TODO
+            liquidationUtilizationWAD: 1.1111e18, // TODO
             fixedTermDurationSeconds: 2 days, // TODO
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: // TODO
@@ -638,7 +638,7 @@ abstract contract DeploymentConfig {
             jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
             coverageWAD: 0.1e18, // TODO
             betaWAD: 1e18,
-            lltvWAD: 0.91e18, // TODO
+            liquidationUtilizationWAD: 1.1111e18, // TODO
             fixedTermDurationSeconds: 2 days, // TODO
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: // TODO
@@ -672,7 +672,7 @@ abstract contract DeploymentConfig {
             jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
             coverageWAD: 0.1e18, // TODO
             betaWAD: 1e18,
-            lltvWAD: 0.91e18, // TODO
+            liquidationUtilizationWAD: 1.1111e18, // TODO
             fixedTermDurationSeconds: 2 days, // TODO
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: // TODO

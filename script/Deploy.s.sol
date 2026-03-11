@@ -262,7 +262,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         console2.log("JT Protocol Fee (WAD):", uint256(_config.jtProtocolFeeWAD));
         console2.log("Coverage (WAD):", uint256(_config.coverageWAD));
         console2.log("Beta (WAD):", uint256(_config.betaWAD));
-        console2.log("LLTV (WAD):", uint256(_config.lltvWAD));
+        console2.log("Liquidation Utilization (WAD):", uint256(_config.liquidationUtilizationWAD));
         console2.log("Fixed Term Duration (seconds):", uint256(_config.fixedTermDurationSeconds));
         console2.log("");
 
@@ -434,7 +434,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     }
 
     /// @notice Builds selector-to-role mappings for the accountant contract.
-    /// @dev Maps setYDM/setCoverage/setBeta/setLLTV/setFixedTermDuration/dust tolerances/coverage config
+    /// @dev Maps setYDM/setCoverage/setBeta/setLiquidationUtilization/setFixedTermDuration/dust tolerances/coverage config
     ///      to ADMIN_ACCOUNTANT_ROLE, fee setters to ADMIN_PROTOCOL_FEE_SETTER_ROLE, and shared
     ///      pause/unpause/upgrade to their respective roles.
     /// @param _accountant The address of the accountant contract
@@ -453,7 +453,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         roleValues[3] = ADMIN_ACCOUNTANT_ROLE;
         selectors[4] = IRoycoAccountant.setBeta.selector;
         roleValues[4] = ADMIN_ACCOUNTANT_ROLE;
-        selectors[5] = IRoycoAccountant.setLLTV.selector;
+        selectors[5] = IRoycoAccountant.setLiquidationUtilization.selector;
         roleValues[5] = ADMIN_ACCOUNTANT_ROLE;
         selectors[6] = IRoycoAccountant.setFixedTermDuration.selector;
         roleValues[6] = ADMIN_ACCOUNTANT_ROLE;
@@ -1050,7 +1050,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             ydm: _ydmAddress,
             ydmInitializationData: _buildYDMInitializationData(_config.ydmType, _config.ydmSpecificParams),
             fixedTermDurationSeconds: _config.fixedTermDurationSeconds,
-            lltvWAD: _config.lltvWAD,
+            liquidationUtilizationWAD: _config.liquidationUtilizationWAD,
             stNAVDustTolerance: toNAVUnits(_config.stDustTolerance),
             jtNAVDustTolerance: toNAVUnits(_config.jtDustTolerance)
         });

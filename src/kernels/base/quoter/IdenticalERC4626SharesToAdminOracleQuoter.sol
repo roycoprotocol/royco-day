@@ -23,13 +23,13 @@ abstract contract IdenticalERC4626SharesToAdminOracleQuoter is IdenticalERC4626S
     /// @inheritdoc IdenticalAssetsAdminOracleQuoter
     function setConversionRate(
         uint256 _conversionRateWAD,
-        bool _shouldSyncBeforeUpdate
+        bool _syncBeforeUpdate
     )
         public
         override(IdenticalAssetsOracleQuoter, IdenticalAssetsAdminOracleQuoter)
         restricted
     {
-        IdenticalAssetsAdminOracleQuoter.setConversionRate(_conversionRateWAD, _shouldSyncBeforeUpdate);
+        IdenticalAssetsAdminOracleQuoter.setConversionRate(_conversionRateWAD, _syncBeforeUpdate);
     }
 
     /// @inheritdoc IdenticalERC4626SharesOracleQuoter

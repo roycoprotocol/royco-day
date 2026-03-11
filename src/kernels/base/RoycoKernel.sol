@@ -798,7 +798,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     }
 
     /**
-     * @notice Computes and applies the self-liquidation bonus for ST redemptions when LLTV is breached, sourced from JT asset claims
+     * @notice Computes and applies the self-liquidation bonus for ST redemptions when the liquidation utilization threshold is breached, sourced from JT asset claims
      * @dev The bonus incentivizes ST to self-liquidate by redeeming to delever the market
      * @dev After exiting the market, the bonus affords ST LPs the ability to:
      *      1. Absorb discounts/losses on secondary markets when liquidating the withdrawn exposure
@@ -818,8 +818,8 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         virtual
         returns (AssetClaims memory stUserClaimsWithBonus, NAV_UNIT stSelfLiquidationBonusNAV)
     {
-        // If the LLTV has not been breached, there is no ST self-liquidation bonus remitted
-        if (_state.ltvWAD < _state.lltvWAD) return (_stUserClaims, ZERO_NAV_UNITS);
+        // If the liquidation utilization threshold has not been breached, there is no ST self-liquidation bonus remitted
+        if (_state.utilizationWAD < _state.liquidationUtilizationWAD) return (_stUserClaims, ZERO_NAV_UNITS);
 
         // Compute the desired ST redemption based on the configured ST self-liquidation bonus
         NAV_UNIT desiredBonusNAV = _stUserClaims.nav.mulDiv(_getRoycoKernelStorage().stSelfLiquidationBonusWAD, WAD, Math.Rounding.Floor);
@@ -829,7 +829,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         if (stSelfLiquidationBonusNAV == ZERO_NAV_UNITS) return (_stUserClaims, ZERO_NAV_UNITS);
 
         // Decompose the NAV claims for the Junior Tranche to get the NAV claims for sourcing the bonus
-        (,, NAV_UNIT jtClaimOnSTRawNAV, NAV_UNIT jtClaimOnSelfRawNAV) = _decomposeNAVClaims(_state);
+        (,, NAV_UNIT jtClaimOnSTRawNAV,) = _decomposeNAVClaims(_state);
         // Compute the bonus NAV sourced from JT's claims on each tranche's NAV: prioritize ST assets over JT assets for sourcing
         // stSelfLiquidationBonusNAV <= (jtClaimOnSTRawNAV + jtClaimOnSelfRawNAV) since it was bounded by JT effective NAV already
         NAV_UNIT bonusFromJTClaimOnSTRawNAV = UnitsMathLib.min(stSelfLiquidationBonusNAV, jtClaimOnSTRawNAV);

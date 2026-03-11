@@ -8,12 +8,12 @@ import { NAV_UNIT, TRANCHE_UNIT } from "./Units.sol";
  * @notice Defines the operational state of a Royco market
  * @custom:state PERPETUAL
  *      Normal operating state where market forces govern behavior
- *      - The market is healthy (no losses over dust tolerance) or it is severely undercollateralized (LLTV breach) or uncollateralized (ST IL != 0 or JT_EFFECTIVE_NAV == 0)
+ *      - The market is healthy (no losses over dust tolerance) or it is severely undercollateralized (liquidation utilization breach) or uncollateralized (ST IL != 0 or JT_EFFECTIVE_NAV == 0)
  *      - Both tranches liquid (within coverage constraints) unless ST impermanent loss exists (ST deposits are blocked)
  *      - Adaptive curve YDM adapts based on utilization
  * @custom:state FIXED_TERM
  *      Temporary recovery state triggered when JT provides coverage for ST drawdown
- *      - ST experienced a fully covered drawdown but the market is still healthy in terms of its LLTV
+ *      - ST experienced a fully covered drawdown but the market is still healthy in terms of its liquidation utilization threshold
  *      - Fixed term that starts when JT coverage impermanent loss is first incurred
  *      - ST redemptions blocked: protects existing JT from realizing losses by ST withdrawing coverage on arbitrary volatility
  *      - JT deposits blocked: protects existing JT from realizing losses by new JT diluting them on arbitrary volatility
@@ -53,12 +53,11 @@ struct AssetClaims {
  * @custom:field stProtocolFeeAccrued - Protocol fee taken on ST yield on this sync
  * @custom:field jtProtocolFeeAccrued - Protocol fee taken on JT yield on this sync
  * @custom:field utilizationWAD - The current utilization of the market, scaled to WAD precision
- * @custom:field ltvWAD - The current loan to value of the market, scaled to WAD precision
  * @custom:field fixedTermEndTimestamp - The timestamp at which the fixed term ends. Set to 0 if the market is not in a fixed term state
  * @custom:field coverageWAD - The coverage percentage that the senior tranche is expected to be protected by, scaled to WAD precision
  * @custom:field betaWAD - JT's percentage sensitivity to the same downside stress that affects ST, scaled to WAD precision
  *                         For example, beta is 0 when JT is in the RFR and 1e18 (100%) when JT is in the same opportunity as senior
- * @custom:field lltvWAD - The liquidation loan to value (LLTV) for this market, scaled to WAD precision
+ * @custom:field liquidationUtilizationWAD - The liquidation utilization threshold for this market, scaled to WAD precision
  */
 struct SyncedAccountingState {
     // The market's current operating state (PERPETUAL or FIXED_TERM)
@@ -74,12 +73,11 @@ struct SyncedAccountingState {
     NAV_UNIT jtProtocolFeeAccrued;
     // The market's derived state metrics
     uint256 utilizationWAD;
-    uint256 ltvWAD;
     uint32 fixedTermEndTimestamp;
     // The market's coverage configuration
     uint256 coverageWAD;
     uint256 betaWAD;
-    uint256 lltvWAD;
+    uint256 liquidationUtilizationWAD;
 }
 
 /**

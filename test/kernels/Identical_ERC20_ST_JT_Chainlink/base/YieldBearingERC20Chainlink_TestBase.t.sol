@@ -388,7 +388,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // _shouldSyncBeforeUpdate FLAG TESTS
+    // _syncBeforeUpdate FLAG TESTS
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Counts TrancheAccountingSynced events in recorded logs

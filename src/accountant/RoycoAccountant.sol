@@ -69,7 +69,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             MAX_PROTOCOL_FEE_EXCEEDED()
         );
         // Validate the market's initial coverage configuration
-        _validateCoverageConfig(_params.coverageWAD, _params.betaWAD, _params.lltvWAD);
+        _validateCoverageConfig(_params.coverageWAD, _params.betaWAD, _params.liquidationUtilizationWAD);
         // Initialize the YDM for this market
         _initializeYDM(_params.ydm, _params.ydmInitializationData);
 
@@ -77,8 +77,6 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
         $.fixedTermDurationSeconds = _params.fixedTermDurationSeconds;
         emit FixedTermDurationUpdated(_params.fixedTermDurationSeconds);
-        $.lltvWAD = _params.lltvWAD;
-        emit LLTVUpdated(_params.lltvWAD);
         $.stProtocolFeeWAD = _params.stProtocolFeeWAD;
         emit SeniorTrancheProtocolFeeUpdated(_params.stProtocolFeeWAD);
         $.jtProtocolFeeWAD = _params.jtProtocolFeeWAD;
@@ -89,6 +87,8 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         emit CoverageUpdated(_params.coverageWAD);
         $.betaWAD = _params.betaWAD;
         emit BetaUpdated(_params.betaWAD);
+        $.liquidationUtilizationWAD = _params.liquidationUtilizationWAD;
+        emit LiquidationUtilizationUpdated(_params.liquidationUtilizationWAD);
         $.ydm = _params.ydm;
         emit YDMUpdated(_params.ydm);
         $.stNAVDustTolerance = _params.stNAVDustTolerance;
@@ -250,11 +250,10 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             stProtocolFeeAccrued: ZERO_NAV_UNITS,
             jtProtocolFeeAccrued: ZERO_NAV_UNITS,
             utilizationWAD: UtilsLib.computeUtilization(_stRawNAV, _jtRawNAV, betaWAD, coverageWAD, jtEffectiveNAV),
-            ltvWAD: UtilsLib.computeLTV(stEffectiveNAV, stImpermanentLoss, jtEffectiveNAV),
             fixedTermEndTimestamp: $.fixedTermEndTimestamp,
             coverageWAD: coverageWAD,
             betaWAD: betaWAD,
-            lltvWAD: $.lltvWAD
+            liquidationUtilizationWAD: $.liquidationUtilizationWAD
         });
     }
 
@@ -549,23 +548,25 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         require((_stRawNAV + _jtRawNAV) == (stEffectiveNAV + jtEffectiveNAV), NAV_CONSERVATION_VIOLATION());
 
         // Determine the resulting market state:
-        // 1. Forced Perpetual: The fixed-term duration is set to 0 (permanently perpetual), current fixed-term elapsed, or LLTV has been breached (undercollateralized) or ST IL exists (distressed)
+        // 1. Forced Perpetual: The fixed-term duration is set to 0 (permanently perpetual), current fixed-term elapsed, or liquidation utilization threshold has been breached (undercollateralized) or ST IL exists (distressed)
         // 2. Normal Perpetual: JT coverage IL is within dust tolerance (staying perpetual) or fully recovered (exiting fixed-term for perpetual)
-        // 3. Fixed-term: The JT coverage IL is above the dust tolerance of the market, fixed-term duration hasn't elapsed, LLTV hasn't been breached, and ST IL nonexistent
+        // 3. Fixed-term: The JT coverage IL is above the dust tolerance of the market, fixed-term duration hasn't elapsed, liquidation utilization threshold hasn't been breached, and ST IL nonexistent
         MarketState resultingMarketState;
         uint32 fixedTermEndTimestamp = $.fixedTermEndTimestamp;
         uint24 fixedTermDurationSeconds = $.fixedTermDurationSeconds;
-        uint256 ltvWAD = UtilsLib.computeLTV(stEffectiveNAV, stImpermanentLoss, jtEffectiveNAV);
-        uint256 lltvWAD = $.lltvWAD;
+        uint96 betaWAD = $.betaWAD;
+        uint64 coverageWAD = $.coverageWAD;
+        uint256 utilizationWAD = UtilsLib.computeUtilization(_stRawNAV, _jtRawNAV, betaWAD, coverageWAD, jtEffectiveNAV);
+        uint256 liquidationUtilizationWAD = $.liquidationUtilizationWAD;
         // If the market is permanently perpetual, the fixed-term elapsed, undercollateralized, or distressed, the market must be in a a perpetual state
         if (
-            fixedTermDurationSeconds == 0 || (initialMarketState == MarketState.FIXED_TERM && fixedTermEndTimestamp <= block.timestamp) || ltvWAD >= lltvWAD
-                || stImpermanentLoss != ZERO_NAV_UNITS
+            fixedTermDurationSeconds == 0 || (initialMarketState == MarketState.FIXED_TERM && fixedTermEndTimestamp <= block.timestamp)
+                || utilizationWAD >= liquidationUtilizationWAD || stImpermanentLoss != ZERO_NAV_UNITS
         ) {
             // JT coverage impermanent loss has to be explicitly cleared in this branch:
             // If the fixed-term duration is 0, the market is permanently in a perpetual state and never incurs any JT coverage IL
             // If the current fixed-term has elapsed, the market needs to transition to a perpetual state since the transient JT protection period is complete
-            // If LLTV has been breached without existent ST IL, the market is approaching an uncollateralized state: ST needs to be able to withdraw to avoid losses and the YDM needs to kick in to reinstate proper collateralization
+            // If the liquidation utilization threshold has been breached without existent ST IL, the market is approaching an uncollateralized state: ST needs to be able to withdraw to avoid losses and the YDM needs to kick in to reinstate proper collateralization
             // If ST IL exists, the market is in a distressed state: STs need to be able to book losses and any future appreciation will go to making ST whole again
             jtImpermanentLossErased = jtImpermanentLoss;
             jtImpermanentLoss = ZERO_NAV_UNITS;
@@ -598,8 +599,6 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         }
 
         // Marshal the post-sync state and return to the caller
-        uint256 betaWAD = $.betaWAD;
-        uint256 coverageWAD = $.coverageWAD;
         state = SyncedAccountingState({
             marketState: resultingMarketState,
             stRawNAV: _stRawNAV,
@@ -610,12 +609,11 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             jtImpermanentLoss: jtImpermanentLoss,
             stProtocolFeeAccrued: stProtocolFeeAccrued,
             jtProtocolFeeAccrued: jtProtocolFeeAccrued,
-            utilizationWAD: UtilsLib.computeUtilization(_stRawNAV, _jtRawNAV, betaWAD, coverageWAD, jtEffectiveNAV),
-            ltvWAD: ltvWAD,
+            utilizationWAD: utilizationWAD,
             fixedTermEndTimestamp: fixedTermEndTimestamp,
             coverageWAD: coverageWAD,
             betaWAD: betaWAD,
-            lltvWAD: lltvWAD
+            liquidationUtilizationWAD: liquidationUtilizationWAD
         });
     }
 
@@ -723,7 +721,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     function setCoverage(uint64 _coverageWAD) external override(IRoycoAccountant) restricted withSyncedAccounting {
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
         // Validate the new coverage configuration
-        _validateCoverageConfig(_coverageWAD, $.betaWAD, $.lltvWAD);
+        _validateCoverageConfig(_coverageWAD, $.betaWAD, $.liquidationUtilizationWAD);
         $.coverageWAD = _coverageWAD;
         emit CoverageUpdated(_coverageWAD);
     }
@@ -732,25 +730,25 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     function setBeta(uint96 _betaWAD) external override(IRoycoAccountant) restricted withSyncedAccounting {
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
         // Validate the new coverage configuration
-        _validateCoverageConfig($.coverageWAD, _betaWAD, $.lltvWAD);
+        _validateCoverageConfig($.coverageWAD, _betaWAD, $.liquidationUtilizationWAD);
         $.betaWAD = _betaWAD;
         emit BetaUpdated(_betaWAD);
     }
 
     /// @inheritdoc IRoycoAccountant
-    function setLLTV(uint64 _lltvWAD) external override(IRoycoAccountant) restricted withSyncedAccounting {
+    function setLiquidationUtilization(uint256 _liquidationUtilizationWAD) external override(IRoycoAccountant) restricted withSyncedAccounting {
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
         // Validate the new coverage configuration
-        _validateCoverageConfig($.coverageWAD, $.betaWAD, _lltvWAD);
-        $.lltvWAD = _lltvWAD;
-        emit LLTVUpdated(_lltvWAD);
+        _validateCoverageConfig($.coverageWAD, $.betaWAD, _liquidationUtilizationWAD);
+        $.liquidationUtilizationWAD = _liquidationUtilizationWAD;
+        emit LiquidationUtilizationUpdated(_liquidationUtilizationWAD);
     }
 
     /// @inheritdoc IRoycoAccountant
     function setCoverageConfiguration(
         uint64 _coverageWAD,
         uint96 _betaWAD,
-        uint64 _lltvWAD
+        uint256 _liquidationUtilizationWAD
     )
         external
         override(IRoycoAccountant)
@@ -758,15 +756,15 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         withSyncedAccounting
     {
         // Validate the new coverage configuration
-        _validateCoverageConfig(_coverageWAD, _betaWAD, _lltvWAD);
+        _validateCoverageConfig(_coverageWAD, _betaWAD, _liquidationUtilizationWAD);
         // Set the new config
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
         $.coverageWAD = _coverageWAD;
         emit CoverageUpdated(_coverageWAD);
         $.betaWAD = _betaWAD;
         emit BetaUpdated(_betaWAD);
-        $.lltvWAD = _lltvWAD;
-        emit LLTVUpdated(_lltvWAD);
+        $.liquidationUtilizationWAD = _liquidationUtilizationWAD;
+        emit LiquidationUtilizationUpdated(_liquidationUtilizationWAD);
     }
 
     /// @inheritdoc IRoycoAccountant
@@ -802,48 +800,15 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
      * @notice Validates the coverage requirement parameters of the market
      * @param _coverageWAD The coverage ratio that the senior tranche is expected to be protected by, scaled to WAD precision
      * @param _betaWAD The JT's sensitivity to the same downside stress that affects ST, scaled to WAD precision
-     * @param _lltvWAD The liquidation loan to value (LLTV) for this market, scaled to WAD precision
+     * @param _liquidationUtilizationWAD The liquidation utilization threshold for this market, scaled to WAD precision
      */
-    function _validateCoverageConfig(uint64 _coverageWAD, uint96 _betaWAD, uint64 _lltvWAD) internal pure {
+    function _validateCoverageConfig(uint64 _coverageWAD, uint96 _betaWAD, uint256 _liquidationUtilizationWAD) internal pure {
         // Ensure that the coverage requirement is valid
         require((_coverageWAD >= MIN_COVERAGE_WAD) && (_coverageWAD <= MAX_COVERAGE_WAD), INVALID_COVERAGE_CONFIG());
         // Ensure that JT withdrawals are not permanently bricked
         require(uint256(_coverageWAD).mulDiv(_betaWAD, WAD, Math.Rounding.Ceil) < WAD, INVALID_COVERAGE_CONFIG());
-        /**
-         * Ensure that the LLTV is set correctly (between the max allowed initial LTV and 100%)
-         * Maximum Initial LTV Derivation:
-         * Given:
-         *   LTV = (ST_EFFECTIVE_NAV + ST_IL) / (ST_EFFECTIVE_NAV + JT_EFFECTIVE_NAV)
-         *   Initial Utilization = ((ST_EFFECTIVE_NAV + JT_RAW_NAV * β) * COV) / JT_EFFECTIVE_NAV
-         *   NOTE: Initially, JT_RAW_NAV == JT_EFFECTIVE_NAV and ST_IL == 0 since no losses have been incurred by ST
-         *   Initial LTV = ST_EFFECTIVE_NAV / (ST_EFFECTIVE_NAV + JT_EFFECTIVE_NAV)
-         *   Initial Utilization = ((ST_EFFECTIVE_NAV + JT_EFFECTIVE_NAV * β) * COV) / JT_EFFECTIVE_NAV
-         *
-         * At Utilization = 1 (boundary of proper collateralization), solving for JT_EFFECTIVE_NAV:
-         *   1 = ((ST_EFFECTIVE_NAV + JT_EFFECTIVE_NAV * β) * COV) / JT_EFFECTIVE_NAV
-         *   JT_EFFECTIVE_NAV = (ST_EFFECTIVE_NAV + JT_EFFECTIVE_NAV * β) * COV
-         *   JT_EFFECTIVE_NAV = ST_EFFECTIVE_NAV * COV + JT_EFFECTIVE_NAV * β * COV
-         *   JT_EFFECTIVE_NAV - JT_EFFECTIVE_NAV * β * COV = ST_EFFECTIVE_NAV * COV
-         *   JT_EFFECTIVE_NAV * (1 - β * COV) = ST_EFFECTIVE_NAV * COV
-         *   JT_EFFECTIVE_NAV = ST_EFFECTIVE_NAV * COV / (1 - β * COV)
-         *
-         * Substituting JT_EFFECTIVE_NAV into initial LTV:
-         *   LTV = ST_EFFECTIVE_NAV / (ST_EFFECTIVE_NAV + (ST_EFFECTIVE_NAV * COV / (1 - β * COV))
-         *       = (1 / (1 + COV / (1 - β * COV)))
-         *       = (1 - β * COV) / (1 - β * COV + COV)
-         *       = (1 - β * COV) / (1 + COV - β * COV)
-         *       = (1 - β * COV) / (1 + COV * (1 - β))
-         *
-         * This represents the maximum initial LTV when the market is exactly at Utilization = 1
-         * LLTV must be strictly greater than this value to ensure it can only be breached after JT capital has started absorbing ST losses
-         */
-        // Round in favor of keeping max initial LTV high (conservative for setting LLTV)
-        uint256 betaCov = uint256(_coverageWAD).mulDiv(_betaWAD, WAD, Math.Rounding.Floor);
-        uint256 numerator = WAD - betaCov;
-        uint256 denominator = WAD + _coverageWAD - betaCov;
-        uint256 maxLTV = numerator.mulDiv(WAD, denominator, Math.Rounding.Ceil);
-        // LLTV must be between the max allowed initial LTV and 100% LTV
-        require(maxLTV < _lltvWAD && _lltvWAD < WAD, INVALID_COVERAGE_CONFIG());
+        // Ensure that the liquidation utilization threshold can only be breached once the NAVs have experienced losses
+        require(_liquidationUtilizationWAD > WAD, INVALID_COVERAGE_CONFIG());
     }
 
     /**

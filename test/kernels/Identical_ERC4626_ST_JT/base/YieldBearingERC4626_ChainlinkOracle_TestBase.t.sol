@@ -1231,7 +1231,7 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // SECTION F2: _shouldSyncBeforeUpdate FLAG TESTS
+    // SECTION F2: _syncBeforeUpdate FLAG TESTS
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Counts TrancheAccountingSynced events in recorded logs

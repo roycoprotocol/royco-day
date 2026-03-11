@@ -32,13 +32,13 @@ abstract contract IdenticalAssetsChainlinkToAdminOracleQuoter is IdenticalAssets
     /// @inheritdoc IdenticalAssetsAdminOracleQuoter
     function setConversionRate(
         uint256 _conversionRateWAD,
-        bool _shouldSyncBeforeUpdate
+        bool _syncBeforeUpdate
     )
         public
         override(IdenticalAssetsOracleQuoter, IdenticalAssetsAdminOracleQuoter)
         restricted
     {
-        IdenticalAssetsAdminOracleQuoter.setConversionRate(_conversionRateWAD, _shouldSyncBeforeUpdate);
+        IdenticalAssetsAdminOracleQuoter.setConversionRate(_conversionRateWAD, _syncBeforeUpdate);
     }
 
     /// @inheritdoc IdenticalAssetsChainlinkOracleQuoter
