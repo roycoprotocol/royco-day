@@ -215,7 +215,14 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             _printDeploymentParams(marketConfig, chainConfig.factoryAdmin, chainConfig.protocolFeeRecipient);
         }
 
-        return deploy(marketConfig, chainConfig.factoryAdmin, chainConfig.protocolFeeRecipient, roleAssignments, deployerPrivateKey);
+        return deploy(
+            marketConfig,
+            chainConfig.factoryAdmin,
+            chainConfig.protocolFeeRecipient,
+            chainConfig.scheduledOperationsExpirySeconds,
+            roleAssignments,
+            deployerPrivateKey
+        );
     }
 
     /// @notice Prints all deployment parameters for verification before deployment
@@ -279,6 +286,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     /// @param _config The market deployment configuration (assets, kernel type, accountant params, YDM params)
     /// @param _factoryAdmin The address that will admin the factory's AccessManager
     /// @param _protocolFeeRecipient The address that receives protocol fees
+    /// @param _scheduledOperationsExpirySeconds The expiry time for scheduled operations in seconds
     /// @param _roleAssignments Role-to-address assignments configured on the factory
     /// @param _deployerPrivateKey The private key used to broadcast deployment transactions
     /// @return The deployment result containing all deployed contract addresses
@@ -286,6 +294,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         MarketDeploymentConfig memory _config,
         address _factoryAdmin,
         address _protocolFeeRecipient,
+        uint32 _scheduledOperationsExpirySeconds,
         IRoycoFactory.RoleAssignmentConfiguration[] memory _roleAssignments,
         uint256 _deployerPrivateKey
     )
@@ -299,7 +308,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         IYDM ydm = _deployYDM(_config.ydmType);
 
         // Deploy factory with factory admin as admin and deployer as deployer
-        RoycoFactory factory = _deployFactory(_factoryAdmin, deployer, _roleAssignments);
+        RoycoFactory factory = _deployFactory(_factoryAdmin, deployer, _scheduledOperationsExpirySeconds, _roleAssignments);
 
         // Deploy all implementations. Then deploy the market using the factory
         (
@@ -796,10 +805,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     /// @notice Deploys the factory implementation and its UUPS proxy via CREATE2.
     /// @param _factoryAdmin The address that receives the admin role on the factory's AccessManager
     /// @param _deployer The address that receives the DEPLOYER_ROLE for market deployments
+    /// @param _scheduledOperationsExpirySeconds The expiry time for scheduled operations in seconds
     /// @param _roleAssignments Initial role assignments configured during factory initialization
     function _deployFactory(
         address _factoryAdmin,
         address _deployer,
+        uint32 _scheduledOperationsExpirySeconds,
         IRoycoFactory.RoleAssignmentConfiguration[] memory _roleAssignments
     )
         internal
@@ -819,7 +830,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         address factoryProxyAddress;
         (factoryProxyAddress, alreadyDeployed) = deployWithSanityChecks(
             FACTORY_SALT_BASE,
-            getERC1967ProxyCreationCode(factoryImplAddr, abi.encodeCall(RoycoFactory.initialize, (_factoryAdmin, _deployer, _roleAssignments))),
+            getERC1967ProxyCreationCode(
+                factoryImplAddr, abi.encodeCall(RoycoFactory.initialize, (_factoryAdmin, _deployer, _scheduledOperationsExpirySeconds, _roleAssignments))
+            ),
             false
         );
         if (ENABLE_LOGGING) {

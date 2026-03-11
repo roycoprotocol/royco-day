@@ -64,6 +64,7 @@ abstract contract DeploymentConfig {
         address deployerAddress;
         address deployerAdminAddress;
         address transferAgentAddress;
+        uint32 scheduledOperationsExpirySeconds;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -144,7 +145,8 @@ abstract contract DeploymentConfig {
                 guardianAddress: EXECUTOR_MULTISIG,
                 deployerAddress: DEPLOYER,
                 deployerAdminAddress: EXECUTOR_MULTISIG,
-                transferAgentAddress: ROOT_MULTISIG_ETHEREUM
+                transferAgentAddress: ROOT_MULTISIG_ETHEREUM,
+                scheduledOperationsExpirySeconds: 1 weeks
             });
         } else {
             return ChainConfig({
@@ -161,7 +163,8 @@ abstract contract DeploymentConfig {
                 guardianAddress: EXECUTOR_MULTISIG,
                 deployerAddress: DEPLOYER,
                 deployerAdminAddress: EXECUTOR_MULTISIG,
-                transferAgentAddress: ROOT_MULTISIG_NON_ETHEREUM
+                transferAgentAddress: ROOT_MULTISIG_NON_ETHEREUM,
+                scheduledOperationsExpirySeconds: 1 weeks
             });
         }
     }

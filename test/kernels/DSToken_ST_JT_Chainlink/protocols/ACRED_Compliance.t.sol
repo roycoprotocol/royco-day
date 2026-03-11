@@ -82,7 +82,10 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
     function _deployACRED() private returns (DeployScript.DeploymentResult memory) {
         DeploymentConfig.MarketDeploymentConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig("ACRED");
         _overrideStaleness(cfg);
-        return DEPLOY_SCRIPT.deploy(cfg, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, _generateRoleAssignments(), DEPLOYER.privateKey);
+        uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
+        return DEPLOY_SCRIPT.deploy(
+            cfg, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, _generateRoleAssignments(), DEPLOYER.privateKey
+        );
     }
 
     function _overrideStaleness(DeploymentConfig.MarketDeploymentConfig memory _cfg) private pure {

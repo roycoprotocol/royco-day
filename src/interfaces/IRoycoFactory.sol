@@ -83,8 +83,14 @@ interface IRoycoFactory {
     /// @notice Thrown when the JT asset address configured on the kernel is invalid
     error INVALID_JT_ASSET_ON_KERNEL();
 
+    /// @notice Thrown when the scheduled operations expiry seconds is invalid
+    error INVALID_SCHEDULED_OPERATIONS_EXPIRY_SECONDS();
+
     /// @notice Emitted when a new market is deployed
     event MarketDeployed(RoycoMarket roycoMarket, MarketDeploymentParams params);
+
+    /// @notice Emitted when the scheduled operations expiry seconds is set
+    event ScheduledOperationsExpirySecondsSet(uint32 scheduledOperationsExpirySeconds);
 
     /**
      * @notice Parameters for deploying a new market
@@ -176,6 +182,12 @@ interface IRoycoFactory {
      * @return roycoMarket The deployed components constituting the Royco market
      */
     function deployMarket(MarketDeploymentParams calldata _params) external returns (RoycoMarket memory roycoMarket);
+
+    /**
+     * @notice Sets the scheduled operations expiry seconds
+     * @param _scheduledOperationsExpirySeconds The expiry time for scheduled operations in seconds
+     */
+    function setScheduledOperationsExpiry(uint32 _scheduledOperationsExpirySeconds) external;
 
     /**
      * @notice Predicts the address of a contract deployed using CREATE3
