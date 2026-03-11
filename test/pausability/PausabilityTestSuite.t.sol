@@ -91,6 +91,7 @@ contract PausabilityTestSuite is BaseTest {
             liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
+            transferAgentAddress: address(0),
             ydmSpecificParams: abi.encode(ydmParams)
         });
 

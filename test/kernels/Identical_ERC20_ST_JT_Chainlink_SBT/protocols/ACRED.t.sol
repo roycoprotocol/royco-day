@@ -9,8 +9,8 @@ import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/librarie
 import { Identical_ERC20_ST_JT_Chainlink_SBT_TestBase } from "../base/Identical_ERC20_ST_JT_Chainlink_SBT_TestBase.t.sol";
 
 interface IDSTokenLike {
-    function getDSService(bytes32) external view returns (address);
-    function COMPLIANCE_SERVICE() external view returns (bytes32);
+    function getDSService(uint256) external view returns (address);
+    function COMPLIANCE_SERVICE() external view returns (uint256);
 }
 
 /// @title ACRED_Test

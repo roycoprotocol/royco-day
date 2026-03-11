@@ -114,7 +114,8 @@ contract UpgradabilityTestSuite is BaseTest {
             liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
-            ydmSpecificParams: abi.encode(ydmParams)
+            ydmSpecificParams: abi.encode(ydmParams),
+            transferAgentAddress: address(0)
         });
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
@@ -166,7 +167,7 @@ contract UpgradabilityTestSuite is BaseTest {
         FACTORY.schedule(_proxy, upgradeData, 0);
 
         // Wait for the delay to pass
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(block.timestamp + 2 days + 1);
 
         // Execute the upgrade
         vm.prank(UPGRADER_ADDRESS);
@@ -489,15 +490,15 @@ contract UpgradabilityTestSuite is BaseTest {
         vm.prank(UPGRADER_ADDRESS);
         FACTORY.schedule(address(FACTORY), upgradeData, 0);
 
-        // Warp past the 1-day delay
-        vm.warp(block.timestamp + 1 days + 1);
+        // Warp past the 2-day delay
+        vm.warp(block.timestamp + 2 days + 1);
 
         // Execute the upgrade — should succeed
         vm.prank(UPGRADER_ADDRESS);
         FACTORY.execute(address(FACTORY), upgradeData);
     }
 
-    /// @notice Test that factory upgrade reverts before the 1-day delay elapses
+    /// @notice Test that factory upgrade reverts before the 2-day delay elapses
     function test_factoryProxy_cannotBeUpgradedBeforeDelay() external {
         // Deploy a new factory implementation
         RoycoFactory newFactoryImpl = new RoycoFactory();
@@ -510,7 +511,7 @@ contract UpgradabilityTestSuite is BaseTest {
         FACTORY.schedule(address(FACTORY), upgradeData, 0);
 
         // Warp to just before the delay expires
-        vm.warp(block.timestamp + 1 days - 1);
+        vm.warp(block.timestamp + 2 days - 1);
 
         // Execute should revert — delay not yet elapsed
         vm.prank(UPGRADER_ADDRESS);

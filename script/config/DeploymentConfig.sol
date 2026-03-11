@@ -21,10 +21,9 @@ abstract contract DeploymentConfig {
     // CONTROLLING MULTISIG ADDRESSES
     // ═══════════════════════════════════════════════════════════════════════════
 
-    address internal constant ROOT_MULTISIG_ETHEREUM = 0x85De42e5697D16b853eA24259C42290DaCe35190;
-    address internal constant ROOT_MULTISIG_NON_ETHEREUM = 0xBEe38793Eed92e6Cf9fcB56538CD981A87a8c315;
     address internal constant EXECUTOR_MULTISIG = 0x84d37A25e46029CE161111420E07cEb78880119e;
     address internal constant DEPLOYER = 0x35518D5E1fD8105FC325c5c171c329c3B10b254c;
+    address internal constant ROOT_MULTISIG = 0x7c405bbD131e42af506d14e752f2e59B19D49997;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // MARKET NAMES
@@ -63,7 +62,6 @@ abstract contract DeploymentConfig {
         address guardianAddress;
         address deployerAddress;
         address deployerAdminAddress;
-        address transferAgentAddress;
         uint32 scheduledOperationsExpirySeconds;
     }
 
@@ -102,6 +100,8 @@ abstract contract DeploymentConfig {
         // YDM
         DeployScript.YDMType ydmType;
         bytes ydmSpecificParams;
+        // Compliance
+        address transferAgentAddress;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -129,44 +129,23 @@ abstract contract DeploymentConfig {
     // CHAIN CONFIG GETTER
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function getChainConfig(uint256 chainId) public pure returns (ChainConfig memory) {
-        if (chainId == MAINNET) {
-            return ChainConfig({
-                factoryAdmin: ROOT_MULTISIG_ETHEREUM,
-                protocolFeeRecipient: ROOT_MULTISIG_ETHEREUM,
-                pauserAddress: EXECUTOR_MULTISIG,
-                upgraderAddress: ROOT_MULTISIG_ETHEREUM,
-                syncRoleAddress: EXECUTOR_MULTISIG,
-                adminKernelAddress: ROOT_MULTISIG_ETHEREUM,
-                adminAccountantAddress: ROOT_MULTISIG_ETHEREUM,
-                adminProtocolFeeSetterAddress: ROOT_MULTISIG_ETHEREUM,
-                adminOracleQuoterAddress: ROOT_MULTISIG_ETHEREUM,
-                lpRoleAdminAddress: EXECUTOR_MULTISIG,
-                guardianAddress: EXECUTOR_MULTISIG,
-                deployerAddress: DEPLOYER,
-                deployerAdminAddress: EXECUTOR_MULTISIG,
-                transferAgentAddress: ROOT_MULTISIG_ETHEREUM,
-                scheduledOperationsExpirySeconds: 1 weeks
-            });
-        } else {
-            return ChainConfig({
-                factoryAdmin: ROOT_MULTISIG_NON_ETHEREUM,
-                protocolFeeRecipient: ROOT_MULTISIG_NON_ETHEREUM,
-                pauserAddress: EXECUTOR_MULTISIG,
-                upgraderAddress: ROOT_MULTISIG_NON_ETHEREUM,
-                syncRoleAddress: EXECUTOR_MULTISIG,
-                adminKernelAddress: ROOT_MULTISIG_NON_ETHEREUM,
-                adminAccountantAddress: ROOT_MULTISIG_NON_ETHEREUM,
-                adminProtocolFeeSetterAddress: ROOT_MULTISIG_NON_ETHEREUM,
-                adminOracleQuoterAddress: ROOT_MULTISIG_NON_ETHEREUM,
-                lpRoleAdminAddress: EXECUTOR_MULTISIG,
-                guardianAddress: EXECUTOR_MULTISIG,
-                deployerAddress: DEPLOYER,
-                deployerAdminAddress: EXECUTOR_MULTISIG,
-                transferAgentAddress: ROOT_MULTISIG_NON_ETHEREUM,
-                scheduledOperationsExpirySeconds: 1 weeks
-            });
-        }
+    function getChainConfig(uint256) public pure returns (ChainConfig memory) {
+        return ChainConfig({
+            factoryAdmin: ROOT_MULTISIG,
+            protocolFeeRecipient: ROOT_MULTISIG, // TODO
+            pauserAddress: EXECUTOR_MULTISIG,
+            upgraderAddress: ROOT_MULTISIG,
+            syncRoleAddress: ROOT_MULTISIG,
+            adminKernelAddress: ROOT_MULTISIG,
+            adminAccountantAddress: ROOT_MULTISIG,
+            adminProtocolFeeSetterAddress: ROOT_MULTISIG,
+            adminOracleQuoterAddress: ROOT_MULTISIG,
+            lpRoleAdminAddress: ROOT_MULTISIG,
+            guardianAddress: EXECUTOR_MULTISIG,
+            deployerAddress: DEPLOYER,
+            deployerAdminAddress: EXECUTOR_MULTISIG,
+            scheduledOperationsExpirySeconds: 1 weeks
+        });
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -210,7 +189,7 @@ abstract contract DeploymentConfig {
                     })
             ),
             enforceVaultSharesTransferWhitelist: false,
-            stSelfLiquidationBonusWAD: 0.05e18, // TODO
+            stSelfLiquidationBonusWAD: 0.05e18,
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
             jtYieldShareProtocolFeeWAD: 0.2e18,
@@ -226,7 +205,8 @@ abstract contract DeploymentConfig {
                     jtYieldShareAtFullUtilWAD: 0.4e18,
                     maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
                 })
-            )
+            ),
+            transferAgentAddress: address(0)
         });
 
         _marketConfigs[SNUSD] = MarketDeploymentConfig({
@@ -263,7 +243,8 @@ abstract contract DeploymentConfig {
                     jtYieldShareAtFullUtilWAD: 0.4e18,
                     maxAdaptationSpeedWAD: uint64(50e18 / uint256(365 days))
                 })
-            )
+            ),
+            transferAgentAddress: address(0)
         });
 
         _marketConfigs[SAVUSD] = MarketDeploymentConfig({
@@ -303,7 +284,8 @@ abstract contract DeploymentConfig {
                     jtYieldShareAtFullUtilWAD: 0.5e18,
                     maxAdaptationSpeedWAD: uint64(50e18 / uint256(365 days))
                 })
-            )
+            ),
+            transferAgentAddress: address(0)
         });
 
         _marketConfigs[AUTOUSD] = MarketDeploymentConfig({
@@ -343,7 +325,8 @@ abstract contract DeploymentConfig {
                     jtYieldShareAtFullUtilWAD: 0.4e18,
                     maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
                 })
-            )
+            ),
+            transferAgentAddress: address(0)
         });
 
         _marketConfigs[MFONE] = MarketDeploymentConfig({
@@ -383,7 +366,8 @@ abstract contract DeploymentConfig {
                     jtYieldShareAtFullUtilWAD: 0.4e18,
                     maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
                 })
-            )
+            ),
+            transferAgentAddress: address(0)
         });
 
         _marketConfigs[PT_CUSD] = MarketDeploymentConfig({
@@ -422,7 +406,8 @@ abstract contract DeploymentConfig {
                     jtYieldShareAtFullUtilWAD: 1e18,
                     maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
                 })
-            )
+            ),
+            transferAgentAddress: address(0)
         });
 
         _marketConfigs[REUSD] = MarketDeploymentConfig({
@@ -461,7 +446,8 @@ abstract contract DeploymentConfig {
                     jtYieldShareAtFullUtilWAD: 1e18,
                     maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
                 })
-            )
+            ),
+            transferAgentAddress: address(0)
         });
         _marketConfigs[AA_FALCONX_USDC] = MarketDeploymentConfig({
             marketName: AA_FALCONX_USDC,
@@ -493,7 +479,8 @@ abstract contract DeploymentConfig {
                     jtYieldShareAtFullUtilWAD: 1e18,
                     maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
                 })
-            )
+            ),
+            transferAgentAddress: address(0)
         });
 
         _marketConfigs[SMOKEHOUSE_USDC] = MarketDeploymentConfig({
@@ -534,7 +521,8 @@ abstract contract DeploymentConfig {
                     jtYieldShareAtFullUtilWAD: 0.3e18,
                     maxAdaptationSpeedWAD: uint64(25e18 / uint256(365 days))
                 })
-            )
+            ),
+            transferAgentAddress: address(0)
         });
 
         _marketConfigs[GAUNTLET_USDC_FRONTIER] = MarketDeploymentConfig({
@@ -575,7 +563,8 @@ abstract contract DeploymentConfig {
                     jtYieldShareAtFullUtilWAD: 0.3e18,
                     maxAdaptationSpeedWAD: uint64(25e18 / uint256(365 days))
                 })
-            )
+            ),
+            transferAgentAddress: address(0)
         });
 
         _marketConfigs[ACRED] = MarketDeploymentConfig({
@@ -615,7 +604,8 @@ abstract contract DeploymentConfig {
                     jtYieldShareAtFullUtilWAD: 0.4e18,
                     maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
                 })
-            )
+            ),
+            transferAgentAddress: address(123) // TODO
         });
 
         _marketConfigs[MAKINA_DUSD] = MarketDeploymentConfig({
@@ -653,7 +643,8 @@ abstract contract DeploymentConfig {
                     jtYieldShareAtFullUtilWAD: 0.45e18,
                     maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
                 })
-            )
+            ),
+            transferAgentAddress: address(0)
         });
 
         _marketConfigs[SUSDAI] = MarketDeploymentConfig({
@@ -687,7 +678,8 @@ abstract contract DeploymentConfig {
                     jtYieldShareAtFullUtilWAD: 0.45e18,
                     maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
                 })
-            )
+            ),
+            transferAgentAddress: address(0)
         });
 
         _marketConfigs[YO_USD] = MarketDeploymentConfig({
@@ -728,7 +720,8 @@ abstract contract DeploymentConfig {
                     jtYieldShareAtFullUtilWAD: 0.45e18,
                     maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
                 })
-            )
+            ),
+            transferAgentAddress: address(0)
         });
     }
 

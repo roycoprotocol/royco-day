@@ -564,8 +564,8 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
         vm.prank(KERNEL_ADMIN_ADDRESS);
         FACTORY.schedule(_target, _data, 0);
 
-        // Warp past the delay (1 day for ADMIN_KERNEL_ROLE)
-        vm.warp(block.timestamp + 1 days + 1);
+        // Warp past the delay (2 days for ADMIN_KERNEL_ROLE)
+        vm.warp(block.timestamp + 2 days + 1);
 
         // Execute the operation
         vm.prank(KERNEL_ADMIN_ADDRESS);
@@ -580,8 +580,8 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
         FACTORY.schedule(_target, _data, 0);
 
-        // Warp past the delay (1 day for ADMIN_ACCOUNTANT_ROLE)
-        vm.warp(block.timestamp + 1 days + 1);
+        // Warp past the delay (2 days for ADMIN_ACCOUNTANT_ROLE)
+        vm.warp(block.timestamp + 2 days + 1);
 
         // Execute the operation
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
@@ -596,8 +596,8 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
         FACTORY.schedule(_target, _data, 0);
 
-        // Warp past the delay (1 day for ADMIN_PROTOCOL_FEE_SETTER_ROLE)
-        vm.warp(block.timestamp + 1 days + 1);
+        // Warp past the delay (2 days for ADMIN_PROTOCOL_FEE_SETTER_ROLE)
+        vm.warp(block.timestamp + 2 days + 1);
 
         // Execute the operation
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);

@@ -7,13 +7,16 @@ import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol
 import { IRoycoAccountant } from "../../../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoKernel } from "../../../../src/interfaces/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../../../../src/interfaces/IRoycoVaultTranche.sol";
+import {
+    Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel
+} from "../../../../src/kernels/Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.sol";
 import { AssetClaims, MarketState } from "../../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
 import { Identical_ERC20_ST_JT_Chainlink_SBT_TestBase } from "../base/Identical_ERC20_ST_JT_Chainlink_SBT_TestBase.t.sol";
 
 interface IDSTokenLike {
-    function getDSService(bytes32) external view returns (address);
-    function COMPLIANCE_SERVICE() external view returns (bytes32);
+    function getDSService(uint256) external view returns (address);
+    function COMPLIANCE_SERVICE() external view returns (uint256);
 }
 
 /// @title ACRED_ComplianceTest
@@ -399,5 +402,86 @@ contract ACRED_ComplianceTest is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert();
         KERNEL.setBlacklistStatus(true);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CATEGORY 5: SOUL-BOUND — only mints and burns allowed, no P2P transfers
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function test_soulBound_ST_mintSucceeds() external {
+        _depositJT(ALICE_ADDRESS, 100e6);
+        uint256 stShares = _depositST(BOB_ADDRESS, 10e6);
+        assertGt(stShares, 0, "ST mint (deposit) should succeed");
+        assertEq(IERC20(address(ST)).balanceOf(BOB_ADDRESS), stShares, "BOB should hold minted ST shares");
+    }
+
+    function test_soulBound_JT_mintSucceeds() external {
+        uint256 jtShares = _depositJT(ALICE_ADDRESS, 100e6);
+        assertGt(jtShares, 0, "JT mint (deposit) should succeed");
+        assertEq(IERC20(address(JT)).balanceOf(ALICE_ADDRESS), jtShares, "ALICE should hold minted JT shares");
+    }
+
+    function test_soulBound_ST_burnSucceeds() external {
+        _depositJT(ALICE_ADDRESS, 100e6);
+        uint256 stShares = _depositST(BOB_ADDRESS, 10e6);
+
+        vm.prank(BOB_ADDRESS);
+        ST.redeem(stShares, BOB_ADDRESS, BOB_ADDRESS);
+
+        assertEq(IERC20(address(ST)).balanceOf(BOB_ADDRESS), 0, "ST burn (redeem) should succeed");
+    }
+
+    function test_soulBound_JT_burnSucceeds() external {
+        uint256 jtShares = _depositJT(ALICE_ADDRESS, 100e6);
+
+        vm.prank(ALICE_ADDRESS);
+        JT.redeem(jtShares, ALICE_ADDRESS, ALICE_ADDRESS);
+
+        assertEq(IERC20(address(JT)).balanceOf(ALICE_ADDRESS), 0, "JT burn (redeem) should succeed");
+    }
+
+    function test_soulBound_ST_directTransferReverts() external {
+        _depositJT(ALICE_ADDRESS, 100e6);
+        uint256 stShares = _depositST(BOB_ADDRESS, 10e6);
+        _grantLPRoles(ALICE_ADDRESS);
+
+        vm.prank(BOB_ADDRESS);
+        vm.expectRevert(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.TRANCHE_SHARES_TRANSFER_NOT_PERMITTED.selector);
+        IERC20(address(ST)).transfer(ALICE_ADDRESS, stShares);
+    }
+
+    function test_soulBound_JT_directTransferReverts() external {
+        uint256 jtShares = _depositJT(ALICE_ADDRESS, 100e6);
+        _grantLPRoles(BOB_ADDRESS);
+
+        vm.prank(ALICE_ADDRESS);
+        vm.expectRevert(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.TRANCHE_SHARES_TRANSFER_NOT_PERMITTED.selector);
+        IERC20(address(JT)).transfer(BOB_ADDRESS, jtShares);
+    }
+
+    function test_soulBound_ST_transferFromReverts() external {
+        _depositJT(ALICE_ADDRESS, 100e6);
+        uint256 stShares = _depositST(BOB_ADDRESS, 10e6);
+        _grantLPRoles(ALICE_ADDRESS);
+
+        // BOB approves ALICE to spend his ST shares
+        vm.prank(BOB_ADDRESS);
+        IERC20(address(ST)).approve(ALICE_ADDRESS, stShares);
+
+        // ALICE tries transferFrom — should still revert (soul-bound)
+        vm.prank(ALICE_ADDRESS);
+        vm.expectRevert(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.TRANCHE_SHARES_TRANSFER_NOT_PERMITTED.selector);
+        IERC20(address(ST)).transferFrom(BOB_ADDRESS, ALICE_ADDRESS, stShares);
+    }
+
+    function test_soulBound_ST_partialTransferReverts() external {
+        _depositJT(ALICE_ADDRESS, 100e6);
+        uint256 stShares = _depositST(BOB_ADDRESS, 10e6);
+        _grantLPRoles(ALICE_ADDRESS);
+
+        // Even transferring 1 wei of shares should revert
+        vm.prank(BOB_ADDRESS);
+        vm.expectRevert(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.TRANCHE_SHARES_TRANSFER_NOT_PERMITTED.selector);
+        IERC20(address(ST)).transfer(ALICE_ADDRESS, 1);
     }
 }

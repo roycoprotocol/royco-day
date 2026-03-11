@@ -30,6 +30,9 @@ abstract contract Identical_ERC20_ST_JT_Chainlink_SBT_TestBase is YieldBearingER
         _depositJT(ALICE_ADDRESS, depositAmount);
         uint256 stShares = _depositST(BOB_ADDRESS, depositAmount / 2);
 
+        // Grant receiver ST LP role so the LP whitelist check passes and the soul-bound check is hit
+        _grantLPRoles(ALICE_ADDRESS);
+
         vm.prank(BOB_ADDRESS);
         vm.expectRevert(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.TRANCHE_SHARES_TRANSFER_NOT_PERMITTED.selector);
         IERC20(address(ST)).transfer(ALICE_ADDRESS, stShares);
@@ -38,6 +41,9 @@ abstract contract Identical_ERC20_ST_JT_Chainlink_SBT_TestBase is YieldBearingER
     function test_soulBound_JT_transferReverts() external {
         uint256 depositAmount = _minDepositAmount() * 10;
         uint256 jtShares = _depositJT(ALICE_ADDRESS, depositAmount);
+
+        // Grant receiver JT LP role so the LP whitelist check passes and the soul-bound check is hit
+        _grantLPRoles(BOB_ADDRESS);
 
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.TRANCHE_SHARES_TRANSFER_NOT_PERMITTED.selector);

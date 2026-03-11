@@ -69,7 +69,7 @@ abstract contract RolesConfiguration {
                 executionDelay: 0 // Pausing should be immediate
             });
         } else if (role == ADMIN_UPGRADER_ROLE) {
-            return RoleConfig({ adminRole: _ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 1 days });
+            return RoleConfig({ adminRole: _ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
         } else if (role == ST_LP_ROLE || role == JT_LP_ROLE) {
             return RoleConfig({
                 adminRole: LP_ROLE_ADMIN_ROLE, // LP admin can manage LP roles
@@ -92,19 +92,19 @@ abstract contract RolesConfiguration {
             return RoleConfig({
                 adminRole: _ADMIN_ROLE,
                 guardianRole: GUARDIAN_ROLE,
-                executionDelay: 1 days // Kernel admin operations require delay
+                executionDelay: 2 days // Kernel admin operations require delay
             });
         } else if (role == ADMIN_ACCOUNTANT_ROLE) {
             return RoleConfig({
                 adminRole: _ADMIN_ROLE,
                 guardianRole: GUARDIAN_ROLE,
-                executionDelay: 1 days // Accountant admin operations require delay
+                executionDelay: 2 days // Accountant admin operations require delay
             });
         } else if (role == ADMIN_PROTOCOL_FEE_SETTER_ROLE) {
             return RoleConfig({
                 adminRole: _ADMIN_ROLE,
                 guardianRole: GUARDIAN_ROLE,
-                executionDelay: 1 days // Fee changes require delay
+                executionDelay: 2 days // Fee changes require delay
             });
         } else if (role == ADMIN_ORACLE_QUOTER_ROLE) {
             return RoleConfig({
@@ -134,7 +134,7 @@ abstract contract RolesConfiguration {
         } else if (role == TRANSFER_AGENT_ROLE) {
             return RoleConfig({
                 adminRole: _ADMIN_ROLE,
-                guardianRole: GUARDIAN_ROLE,
+                guardianRole: _ADMIN_ROLE, // Only admin can cancel transfer agent operations
                 executionDelay: 0 // Seizures and freezes must be immediate
             });
         } else {

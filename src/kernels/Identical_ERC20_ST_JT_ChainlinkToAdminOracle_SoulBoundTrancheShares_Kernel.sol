@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoKernel } from "../interfaces/IRoycoKernel.sol";
-import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 import { Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel, RoycoKernel } from "./Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel.sol";
 
 /**
  * @title Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel
  * @author Waymont
- * @notice The senior and junior tranches transfer in the same Digital Security (DS) token (ACRED, STAC, etc.)
- * @notice Tranche share transfers are restricted to whitelisted addresses on the underlying DS-Token compliance service
+ * @notice Extends the identical-asset Chainlink-to-admin-oracle kernel with soul-bound tranche shares
+ * @dev Tranche shares are non-transferable: only mints (from zero address) and burns/redeems (to zero address) are
+ *      permitted. Peer-to-peer transfers revert with TRANCHE_SHARES_TRANSFER_NOT_PERMITTED.
+ *      The transfer agent can still seize shares via seizeShares() and seizeAndRedeemShares(), which bypass this hook
+ *      by calling super._update() directly on the tranche.
  */
 contract Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel is Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel {
     error TRANCHE_SHARES_TRANSFER_NOT_PERMITTED();

@@ -208,7 +208,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
                 deployerAddress: chainConfig.deployerAddress,
                 deployerAdminAddress: chainConfig.deployerAdminAddress,
                 protocolFeeRecipientAddress: chainConfig.protocolFeeRecipient,
-                transferAgentAddress: chainConfig.transferAgentAddress
+                transferAgentAddress: marketConfig.transferAgentAddress
             })
         );
 
