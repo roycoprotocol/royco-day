@@ -2274,4 +2274,476 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         _depositST(ST_CHARLIE_ADDRESS, newStDeposit);
         assertGt(ST.balanceOf(ST_CHARLIE_ADDRESS), 0, "ST_CHARLIE should have ST shares");
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SECTION: SELF-LIQUIDATION BONUS TESTS
+    // Tests the ST self-liquidation bonus mechanism when utilization exceeds
+    // the liquidation threshold. Verifies precise bonus calculation, state
+    // transitions, NAV conservation, and asset claim distribution.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Test that ST redemption does NOT receive bonus when utilization is below liquidation threshold
+    /// @dev This is the critical base case - bonus should only apply when market is stressed
+    function testFuzz_selfLiquidationBonus_notAppliedBelowThreshold(uint256 _jtAmount, uint256 _stPercentage) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 4);
+        _stPercentage = bound(_stPercentage, 10, 40); // Keep utilization low
+
+        // Setup: Deposit JT and ST
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
+        uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        if (stAmount > config.initialFunding) stAmount = config.initialFunding * _stPercentage / 100;
+        if (stAmount < _minDepositAmount()) return;
+
+        uint256 stShares = _depositST(BOB_ADDRESS, stAmount);
+
+        // Verify utilization is below liquidation threshold
+        (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
+        assertLt(state.utilizationWAD, state.liquidationUtilizationWAD, "Utilization should be below liquidation threshold");
+
+        // Get ST's claims without bonus (directly from NAV decomposition)
+        NAV_UNIT stEffectiveNAV = state.stEffectiveNAV;
+
+        // Preview and execute redemption
+        AssetClaims memory previewClaims = ST.previewRedeem(stShares);
+
+        vm.prank(BOB_ADDRESS);
+        AssetClaims memory actualClaims = ST.redeem(stShares, BOB_ADDRESS, BOB_ADDRESS);
+
+        // Verify: No bonus applied - claims should equal original effective NAV (within tolerance)
+        // When no bonus is applied, the NAV returned should equal the effective NAV
+        assertApproxEqRel(
+            toUint256(actualClaims.nav),
+            toUint256(stEffectiveNAV),
+            MAX_RELATIVE_DELTA,
+            "No bonus should be applied: NAV should equal effective NAV"
+        );
+
+        // Preview should match actual
+        assertApproxEqRel(
+            toUint256(actualClaims.stAssets),
+            toUint256(previewClaims.stAssets),
+            PREVIEW_RELATIVE_DELTA,
+            "Preview ST assets should match actual"
+        );
+
+        // Verify NAV conservation
+        _assertNAVConservation();
+    }
+
+    /// @notice Test that ST redemption receives precise bonus when utilization exceeds liquidation threshold
+    /// @dev Verifies exact bonus calculation: bonus = stUserNAV * stSelfLiquidationBonusWAD / WAD
+    function testFuzz_selfLiquidationBonus_appliedAboveThreshold_preciseCalculation(uint256 _jtAmount, uint256 _stPercentage) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 4);
+        _stPercentage = bound(_stPercentage, 20, 60);
+
+        // Setup: Deposit JT and ST
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
+        uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        if (stAmount > config.initialFunding) stAmount = config.initialFunding * _stPercentage / 100;
+        if (stAmount < _minDepositAmount()) return;
+
+        uint256 stShares = _depositST(BOB_ADDRESS, stAmount);
+
+        // Record state before loss
+        NAV_UNIT stNAVBeforeLoss = ST.totalAssets().nav;
+
+        // Simulate severe loss to push utilization above liquidation threshold
+        // We need utilization >= liquidationUtilizationWAD
+        simulateJTLoss(0.8e18); // 80% loss to drastically reduce JT effective NAV
+
+        // Sync accounting
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        // Check if utilization is above threshold
+        (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
+
+        // Skip if utilization is still below threshold (JT absorbed all losses)
+        if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
+
+        // Get the configured bonus percentage
+        uint64 bonusWAD = KERNEL.getState().stSelfLiquidationBonusWAD;
+
+        // Preview redemption (should include bonus)
+        AssetClaims memory previewClaims = ST.previewRedeem(stShares);
+
+        // Calculate expected bonus
+        NAV_UNIT stClaimsNAV = state.stEffectiveNAV; // Full ST effective NAV for all shares
+        NAV_UNIT expectedDesiredBonus = toNAVUnits(toUint256(stClaimsNAV) * bonusWAD / WAD);
+        // Bonus is capped by JT effective NAV
+        NAV_UNIT expectedActualBonus = state.jtEffectiveNAV < expectedDesiredBonus ? state.jtEffectiveNAV : expectedDesiredBonus;
+
+        // Execute redemption
+        vm.prank(BOB_ADDRESS);
+        AssetClaims memory actualClaims = ST.redeem(stShares, BOB_ADDRESS, BOB_ADDRESS);
+
+        // Verify bonus was applied: actual NAV should exceed original ST claims by approximately the bonus
+        NAV_UNIT expectedTotalNAV = stClaimsNAV + expectedActualBonus;
+
+        assertApproxEqRel(
+            toUint256(actualClaims.nav),
+            toUint256(expectedTotalNAV),
+            MAX_RELATIVE_DELTA,
+            "Total NAV should equal ST claims + bonus"
+        );
+
+        // Preview should match actual
+        assertApproxEqRel(
+            toUint256(actualClaims.nav),
+            toUint256(previewClaims.nav),
+            PREVIEW_RELATIVE_DELTA,
+            "Preview NAV should match actual NAV"
+        );
+
+        // Verify NAV conservation
+        _assertNAVConservation();
+    }
+
+    /// @notice Test that self-liquidation bonus is capped by remaining JT effective NAV
+    /// @dev When desired bonus exceeds JT effective NAV, actual bonus = JT effective NAV
+    function testFuzz_selfLiquidationBonus_cappedByJTEffectiveNAV(uint256 _jtAmount) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount() * 5, config.initialFunding / 10);
+
+        // Setup: Deposit JT with small amount
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        // Deposit maximum ST to maximize utilization
+        TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
+        uint256 stAmount = toUint256(maxSTDeposit);
+        if (stAmount > config.initialFunding) stAmount = config.initialFunding;
+        if (stAmount < _minDepositAmount()) return;
+
+        uint256 stShares = _depositST(BOB_ADDRESS, stAmount);
+
+        // Simulate extreme loss to nearly wipe out JT effective NAV
+        simulateJTLoss(0.95e18); // 95% loss
+
+        // Sync accounting
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        // Check state
+        (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
+
+        // Skip if utilization is still below threshold
+        if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
+
+        // Calculate desired bonus (may exceed JT effective NAV)
+        uint64 bonusWAD = KERNEL.getState().stSelfLiquidationBonusWAD;
+        NAV_UNIT stClaimsNAV = state.stEffectiveNAV;
+        NAV_UNIT desiredBonus = toNAVUnits(toUint256(stClaimsNAV) * bonusWAD / WAD);
+        NAV_UNIT jtEffNAV = state.jtEffectiveNAV;
+
+        // Execute redemption
+        vm.prank(BOB_ADDRESS);
+        AssetClaims memory actualClaims = ST.redeem(stShares, BOB_ADDRESS, BOB_ADDRESS);
+
+        // If desired bonus exceeds JT effective NAV, actual bonus should be capped
+        if (desiredBonus > jtEffNAV) {
+            // Actual bonus = JT effective NAV (the cap)
+            NAV_UNIT expectedTotalNAV = stClaimsNAV + jtEffNAV;
+            assertApproxEqRel(
+                toUint256(actualClaims.nav),
+                toUint256(expectedTotalNAV),
+                MAX_RELATIVE_DELTA,
+                "Bonus should be capped at JT effective NAV"
+            );
+        } else {
+            // Actual bonus = desired bonus
+            NAV_UNIT expectedTotalNAV = stClaimsNAV + desiredBonus;
+            assertApproxEqRel(
+                toUint256(actualClaims.nav),
+                toUint256(expectedTotalNAV),
+                MAX_RELATIVE_DELTA,
+                "Full bonus should be applied when JT has sufficient NAV"
+            );
+        }
+
+        // Verify NAV conservation
+        _assertNAVConservation();
+    }
+
+    /// @notice Test that stPreviewRedeem accurately reflects the self-liquidation bonus
+    /// @dev Preview function must match actual redemption including bonus for proper UX
+    function testFuzz_selfLiquidationBonus_previewMatchesActual(uint256 _jtAmount, uint256 _stPercentage, uint256 _redeemPercentage) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 4);
+        _stPercentage = bound(_stPercentage, 20, 60);
+        _redeemPercentage = bound(_redeemPercentage, 10, 100);
+
+        // Setup: Deposit JT and ST
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
+        uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        if (stAmount > config.initialFunding) stAmount = config.initialFunding * _stPercentage / 100;
+        if (stAmount < _minDepositAmount()) return;
+
+        uint256 stShares = _depositST(BOB_ADDRESS, stAmount);
+
+        // Simulate severe loss to trigger liquidation threshold
+        simulateJTLoss(0.85e18);
+
+        // Sync accounting
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        // Check if utilization is above threshold
+        (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
+        if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
+
+        // Calculate shares to redeem (partial redemption)
+        uint256 sharesToRedeem = stShares * _redeemPercentage / 100;
+        if (sharesToRedeem == 0) sharesToRedeem = 1;
+
+        // Preview redemption
+        AssetClaims memory previewClaims = ST.previewRedeem(sharesToRedeem);
+
+        // Execute redemption
+        vm.prank(BOB_ADDRESS);
+        AssetClaims memory actualClaims = ST.redeem(sharesToRedeem, BOB_ADDRESS, BOB_ADDRESS);
+
+        // Verify preview matches actual for all claim components
+        assertApproxEqRel(
+            toUint256(actualClaims.nav),
+            toUint256(previewClaims.nav),
+            PREVIEW_RELATIVE_DELTA,
+            "Preview NAV should match actual NAV"
+        );
+
+        assertApproxEqRel(
+            toUint256(actualClaims.stAssets),
+            toUint256(previewClaims.stAssets),
+            PREVIEW_RELATIVE_DELTA,
+            "Preview ST assets should match actual ST assets"
+        );
+
+        assertApproxEqRel(
+            toUint256(actualClaims.jtAssets),
+            toUint256(previewClaims.jtAssets),
+            PREVIEW_RELATIVE_DELTA,
+            "Preview JT assets should match actual JT assets"
+        );
+    }
+
+    /// @notice Test NAV conservation when self-liquidation bonus is applied
+    /// @dev Critical invariant: total raw NAV must equal total effective NAV after bonus distribution
+    function testFuzz_selfLiquidationBonus_NAVConservation(uint256 _jtAmount, uint256 _stPercentage) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 4);
+        _stPercentage = bound(_stPercentage, 20, 60);
+
+        // Setup: Deposit JT and ST
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
+        uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        if (stAmount > config.initialFunding) stAmount = config.initialFunding * _stPercentage / 100;
+        if (stAmount < _minDepositAmount()) return;
+
+        uint256 stShares = _depositST(BOB_ADDRESS, stAmount);
+
+        // Record NAV conservation before loss
+        _assertNAVConservation();
+
+        // Simulate severe loss
+        simulateJTLoss(0.8e18);
+
+        // Sync and verify NAV conservation after loss
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+        _assertNAVConservation();
+
+        // Check if we're in liquidation state
+        (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
+        if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
+
+        // Execute ST redemption with bonus
+        vm.prank(BOB_ADDRESS);
+        ST.redeem(stShares, BOB_ADDRESS, BOB_ADDRESS);
+
+        // CRITICAL: NAV conservation must hold after bonus distribution
+        // The bonus comes from JT's effective NAV, so total should still balance
+        _assertNAVConservation();
+
+        // Verify JT effective NAV was reduced by the bonus amount
+        (SyncedAccountingState memory stateAfterRedeem,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.JUNIOR);
+
+        // JT effective NAV should be less than or equal to before (reduced by bonus)
+        assertLe(
+            toUint256(stateAfterRedeem.jtEffectiveNAV),
+            toUint256(state.jtEffectiveNAV),
+            "JT effective NAV should decrease after providing bonus"
+        );
+    }
+
+    /// @notice Test multiple ST redeemers each receive proportional self-liquidation bonus
+    /// @dev Each redeemer's bonus should be proportional to their share of ST NAV
+    function testFuzz_selfLiquidationBonus_multipleRedeemers(uint256 _jtAmount) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount() * 20, config.initialFunding / 4);
+
+        // Setup: Deposit JT
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        // Multiple ST depositors
+        TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
+        uint256 stAmountBob = toUint256(maxSTDeposit) / 4;
+        uint256 stAmountCharlie = toUint256(maxSTDeposit) / 4;
+
+        if (stAmountBob < _minDepositAmount() || stAmountCharlie < _minDepositAmount()) return;
+        if (stAmountBob > config.initialFunding / 2) stAmountBob = config.initialFunding / 2;
+        if (stAmountCharlie > config.initialFunding / 2) stAmountCharlie = config.initialFunding / 2;
+
+        uint256 bobShares = _depositST(BOB_ADDRESS, stAmountBob);
+        uint256 charlieShares = _depositST(ST_CHARLIE_ADDRESS, stAmountCharlie);
+
+        // Simulate severe loss
+        simulateJTLoss(0.85e18);
+
+        // Sync accounting
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        // Check if we're in liquidation state
+        (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
+        if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
+
+        // Record JT effective NAV before redemptions
+        NAV_UNIT jtEffNAVBefore = state.jtEffectiveNAV;
+
+        // Bob redeems first
+        vm.prank(BOB_ADDRESS);
+        AssetClaims memory bobClaims = ST.redeem(bobShares, BOB_ADDRESS, BOB_ADDRESS);
+
+        // NAV conservation after first redemption
+        _assertNAVConservation();
+
+        // Charlie redeems second
+        vm.prank(ST_CHARLIE_ADDRESS);
+        AssetClaims memory charlieClaims = ST.redeem(charlieShares, ST_CHARLIE_ADDRESS, ST_CHARLIE_ADDRESS);
+
+        // NAV conservation after second redemption
+        _assertNAVConservation();
+
+        // Verify both received bonus (NAV should exceed their proportional ST effective NAV)
+        // Since they deposited equal amounts and assuming no yield changes,
+        // their claims should be approximately equal
+        uint256 bobNAV = toUint256(bobClaims.nav);
+        uint256 charlieNAV = toUint256(charlieClaims.nav);
+
+        // Both should have received bonus (claims > 0)
+        assertGt(bobNAV, 0, "Bob should have received claims");
+        assertGt(charlieNAV, 0, "Charlie should have received claims");
+
+        // If deposited equal amounts, their claims should be approximately equal
+        // (within tolerance due to any state changes between redemptions)
+        if (stAmountBob == stAmountCharlie) {
+            assertApproxEqRel(bobNAV, charlieNAV, MAX_RELATIVE_DELTA * 2, "Equal depositors should receive approximately equal claims");
+        }
+
+        // JT effective NAV should have decreased by total bonus distributed (or remain at 0 if already depleted)
+        (SyncedAccountingState memory stateAfter,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.JUNIOR);
+
+        // Only assert decrease if JT had effective NAV before bonus distributions
+        if (toUint256(jtEffNAVBefore) > 0) {
+            assertLt(
+                toUint256(stateAfter.jtEffectiveNAV),
+                toUint256(jtEffNAVBefore),
+                "JT effective NAV should decrease after bonus distributions"
+            );
+        } else {
+            // If JT effective NAV was already 0, it should remain 0
+            assertEq(
+                toUint256(stateAfter.jtEffectiveNAV),
+                0,
+                "JT effective NAV should remain 0 when already depleted"
+            );
+        }
+    }
+
+    /// @notice Test that bonus sourcing prioritizes ST assets (from JT's claim on ST) before JT assets
+    /// @dev Per implementation: bonusFromJTClaimOnSTRawNAV is sourced first, then bonusFromJTClaimOnSelfRawNAV
+    /// @dev This is critical for ensuring ST receives the most liquid/stable assets first
+    function testFuzz_selfLiquidationBonus_sourcingPriority_STAssetsFirst(uint256 _jtAmount, uint256 _stPercentage) external {
+        _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 4);
+        _stPercentage = bound(_stPercentage, 30, 70);
+
+        // Setup: Deposit JT and ST
+        _depositJT(ALICE_ADDRESS, _jtAmount);
+
+        TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
+        uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        if (stAmount > config.initialFunding) stAmount = config.initialFunding * _stPercentage / 100;
+        if (stAmount < _minDepositAmount()) return;
+
+        uint256 stShares = _depositST(BOB_ADDRESS, stAmount);
+
+        // Simulate loss to trigger liquidation threshold
+        simulateJTLoss(0.8e18);
+
+        // Sync accounting
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+
+        // Check if we're in liquidation state
+        (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
+        if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
+
+        // Get the configured bonus percentage
+        uint64 bonusWAD = KERNEL.getState().stSelfLiquidationBonusWAD;
+
+        // Calculate expected bonus NAV
+        NAV_UNIT stEffectiveNAV = state.stEffectiveNAV;
+        NAV_UNIT desiredBonus = toNAVUnits(toUint256(stEffectiveNAV) * bonusWAD / WAD);
+        NAV_UNIT actualBonusNAV = state.jtEffectiveNAV < desiredBonus ? state.jtEffectiveNAV : desiredBonus;
+
+        // Calculate JT's cross-tranche claim on ST raw NAV
+        NAV_UNIT jtClaimOnSTRawNAV = state.jtEffectiveNAV > state.jtRawNAV
+            ? state.jtEffectiveNAV - state.jtRawNAV
+            : ZERO_NAV_UNITS;
+
+        // Execute redemption
+        vm.prank(BOB_ADDRESS);
+        AssetClaims memory actualClaims = ST.redeem(stShares, BOB_ADDRESS, BOB_ADDRESS);
+
+        // Verify total bonus was applied (use approximate comparison for rounding tolerance)
+        NAV_UNIT expectedTotalNAV = stEffectiveNAV + actualBonusNAV;
+        assertApproxEqAbs(
+            toUint256(actualClaims.nav),
+            toUint256(expectedTotalNAV),
+            toUint256(maxNAVDelta()) + 1,
+            "ST should receive expected bonus NAV"
+        );
+
+        // When JT has cross-tranche claim on ST (jtClaimOnSTRawNAV > 0), verify sourcing priority:
+        // - If actualBonus <= jtClaimOnSTRawNAV, ALL bonus should come from ST assets (stAssets increases, jtAssets unchanged)
+        // - If actualBonus > jtClaimOnSTRawNAV, ST assets sourced first, remainder from JT assets
+        if (toUint256(jtClaimOnSTRawNAV) > 0 && toUint256(actualBonusNAV) > 0) {
+            // Calculate expected bonus distribution
+            NAV_UNIT bonusFromSTAssets = actualBonusNAV <= jtClaimOnSTRawNAV ? actualBonusNAV : jtClaimOnSTRawNAV;
+            NAV_UNIT bonusFromJTAssets = actualBonusNAV > jtClaimOnSTRawNAV
+                ? actualBonusNAV - jtClaimOnSTRawNAV
+                : ZERO_NAV_UNITS;
+
+            // If bonus fully sourced from ST assets, jtAssets claim should be minimal (only original cross-claim)
+            if (bonusFromJTAssets == ZERO_NAV_UNITS) {
+                // JT asset claims should only include original ST claim on JT (if any), not bonus
+                NAV_UNIT stClaimOnJTRawNAV = state.stEffectiveNAV > state.stRawNAV
+                    ? state.stEffectiveNAV - state.stRawNAV
+                    : ZERO_NAV_UNITS;
+
+                assertApproxEqAbs(
+                    toUint256(KERNEL.jtConvertTrancheUnitsToNAVUnits(actualClaims.jtAssets)),
+                    toUint256(stClaimOnJTRawNAV),
+                    toUint256(maxNAVDelta()) + 1,
+                    "When bonus fully from ST assets, JT asset claim should equal original cross-claim only"
+                );
+            }
+        }
+
+        // Verify NAV conservation
+        _assertNAVConservation();
+    }
 }
