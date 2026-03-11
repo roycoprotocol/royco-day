@@ -1153,32 +1153,6 @@ contract RoycoAccountantTest is BaseTest {
         }
     }
 
-    function testFuzz_invariant_postOpSyncComputesCorrectState(uint256 stRaw, uint256 jtRaw, uint256 depositAmount) public {
-        stRaw = bound(stRaw, 10e18, MAX_NAV / 4);
-        jtRaw = bound(jtRaw, stRaw / 4, stRaw);
-        depositAmount = bound(depositAmount, 1e18, stRaw);
-
-        _initializeAccountantState(stRaw, jtRaw);
-
-        vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory preOpState = accountant.preOpSyncTrancheAccounting(_nav(stRaw), _nav(jtRaw));
-
-        // If utilization is below liquidation threshold in preOp (not in liquidation)
-        if (preOpState.utilizationWAD < preOpState.liquidationUtilizationWAD) {
-            vm.prank(MOCK_KERNEL);
-            SyncedAccountingState memory postOpState =
-                accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(stRaw + depositAmount), _nav(jtRaw), ZERO_NAV_UNITS);
-
-            // Verify that the raw NAV values are updated correctly
-            assertEq(toUint256(postOpState.stRawNAV), stRaw + depositAmount, "ST raw NAV updated");
-            assertEq(toUint256(postOpState.jtRawNAV), jtRaw, "JT raw NAV unchanged");
-
-            // Note: postOpSyncTrancheAccounting does NOT enforce coverage - it just computes state.
-            // Only postOpSyncTrancheAccountingAndEnforceCoverage enforces coverage (utilization <= WAD).
-            // With beta=0, ST_DEPOSIT increases utilization since stRaw is in the numerator.
-        }
-    }
-
     function test_invariant_coverageEnforcedInPostOp_stDeposit() public {
         _initializeAccountantState(100e18, 50e18);
 

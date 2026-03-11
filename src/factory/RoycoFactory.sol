@@ -92,12 +92,12 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
 
     /// @inheritdoc IRoycoFactory
     function seniorTrancheToJuniorTranche(address _seniorTranche) external view override(IRoycoFactory) returns (address juniorTranche) {
-        return _getRoycoFactoryState().seniorTrancheToJuniorTranche[_seniorTranche];
+        return _getRoycoFactoryStorage().seniorTrancheToJuniorTranche[_seniorTranche];
     }
 
     /// @inheritdoc IRoycoFactory
     function juniorTrancheToSeniorTranche(address _juniorTranche) external view override(IRoycoFactory) returns (address seniorTranche) {
-        return _getRoycoFactoryState().juniorTrancheToSeniorTranche[_juniorTranche];
+        return _getRoycoFactoryStorage().juniorTrancheToSeniorTranche[_juniorTranche];
     }
 
     /// @inheritdoc IRoycoFactory
@@ -125,7 +125,7 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
         // Update the mappings between the two deployed tranches
         address seniorTranche = address(roycoMarket.seniorTranche);
         address juniorTranche = address(roycoMarket.juniorTranche);
-        RoycoFactoryState storage $ = _getRoycoFactoryState();
+        RoycoFactoryState storage $ = _getRoycoFactoryStorage();
         $.seniorTrancheToJuniorTranche[seniorTranche] = juniorTranche;
         $.juniorTrancheToSeniorTranche[juniorTranche] = seniorTranche;
 
@@ -261,7 +261,7 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
      * @dev Uses ERC-7201 storage slot pattern for collision-resistant storage
      * @return $ Storage pointer to the factory's state
      */
-    function _getRoycoFactoryState() private pure returns (RoycoFactoryState storage $) {
+    function _getRoycoFactoryStorage() private pure returns (RoycoFactoryState storage $) {
         assembly {
             $.slot := ROYCO_FACTORY_STORAGE_SLOT
         }

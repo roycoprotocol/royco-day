@@ -2280,7 +2280,6 @@ contract RoycoAccountantAdminTest is BaseTest {
     AccessManager internal accessManager;
     MockKernelForAdmin internal mockKernel;
 
-
     function setUp() public {
         _setUpRoyco();
 
@@ -3302,7 +3301,6 @@ contract RoycoAccountantAdditionalBranchTests is BaseTest {
     AdaptiveCurveYDM_V1 internal adaptiveYDM;
     AccessManager internal accessManager;
     MockKernelForBranchTests internal mockKernel;
-
 
     function setUp() public {
         _setUpRoyco();

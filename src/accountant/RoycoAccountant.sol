@@ -840,7 +840,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
      * @dev Uses ERC-7201 storage slot pattern for collision-resistant storage
      * @return $ Storage pointer to the accountant's state
      */
-    function _getRoycoAccountantStorage() internal pure returns (RoycoAccountantState storage $) {
+    function _getRoycoAccountantStorage() private pure returns (RoycoAccountantState storage $) {
         assembly ("memory-safe") {
             $.slot := ROYCO_ACCOUNTANT_STORAGE_SLOT
         }
