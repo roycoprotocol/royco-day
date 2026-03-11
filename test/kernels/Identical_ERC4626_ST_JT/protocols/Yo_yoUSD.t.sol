@@ -9,18 +9,18 @@ import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/libraries/Units.sol";
 
-import { YieldBearingERC4626_TestBase } from "../base/YieldBearingERC4626_TestBase.t.sol";
+import { DisabledChainlinkOracle_ERC4626_TestBase } from "../base/DisabledChainlinkOracle_ERC4626_TestBase.t.sol";
 
 /// @title Yo_yoUSD_Test
-/// @notice Tests Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel with Yo Protocol yoUSD on Base
+/// @notice Tests Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel with Yo Protocol yoUSD (disabled oracle)
 /// @dev Both ST and JT use yoUSD as the tranche asset on Base
 ///
 /// yoUSD is Yo Protocol's ERC4626 vault where:
 ///   - Tranche Unit: yoUSD shares
 ///   - Vault Asset: underlying stablecoin
 ///   - NAV Unit: USD
-/// The stored conversion rate is vaultAsset-to-NAV, ~1:1 for stablecoins.
-contract Yo_yoUSD_Test is YieldBearingERC4626_TestBase {
+/// The stored conversion rate is 1:1 (WAD), with the Chainlink oracle disabled (address(1)).
+contract Yo_yoUSD_Test is DisabledChainlinkOracle_ERC4626_TestBase {
     // ═══════════════════════════════════════════════════════════════════════════
     // BASE ADDRESSES
     // ═══════════════════════════════════════════════════════════════════════════
@@ -36,16 +36,14 @@ contract Yo_yoUSD_Test is YieldBearingERC4626_TestBase {
         return TestConfig({ forkBlock: 43_024_657, forkRpcUrlEnvVar: "BASE_RPC_URL", stAsset: YO_USD, jtAsset: YO_USD, initialFunding: 1_000_000e18 });
     }
 
-    function _getInitialConversionRate() internal pure override returns (uint256) {
-        return WAD; // 1:1 for stablecoin
-    }
-
     // ═══════════════════════════════════════════════════════════════════════════
     // DEPLOYMENT (uses DeploymentConfig)
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
         DeploymentConfig.MarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("yoUSD");
+
+        _mockDisabledOracleDecimals();
 
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
@@ -83,17 +81,17 @@ contract Yo_yoUSD_Test is YieldBearingERC4626_TestBase {
 
     function testFuzz_yoUSD_simulatedYield_increasesNAV(uint256 _amount, uint256 _yieldBps) external {
         _amount = bound(_amount, 1e18, 100_000e18);
-        _yieldBps = bound(_yieldBps, 10, 1000); // 0.1% to 10%
+        _yieldBps = bound(_yieldBps, 10, 1000);
 
         _depositJT(ALICE_ADDRESS, _amount);
 
         NAV_UNIT navBefore = JT.totalAssets().nav;
-        uint256 rateBefore = _getConversionRate();
+        uint256 rateBefore = _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
 
         uint256 yieldWAD = _yieldBps * 1e14;
         simulateJTYield(yieldWAD);
 
-        uint256 rateAfter = _getConversionRate();
+        uint256 rateAfter = _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
         assertGt(rateAfter, rateBefore, "Rate should increase after yield");
 
         vm.prank(SYNC_ROLE_ADDRESS);
@@ -105,17 +103,17 @@ contract Yo_yoUSD_Test is YieldBearingERC4626_TestBase {
 
     function testFuzz_yoUSD_simulatedLoss_decreasesNAV(uint256 _amount, uint256 _lossBps) external {
         _amount = bound(_amount, 1e18, 100_000e18);
-        _lossBps = bound(_lossBps, 10, 500); // 0.1% to 5%
+        _lossBps = bound(_lossBps, 10, 500);
 
         _depositJT(ALICE_ADDRESS, _amount);
 
         NAV_UNIT navBefore = JT.totalAssets().nav;
-        uint256 rateBefore = _getConversionRate();
+        uint256 rateBefore = _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
 
         uint256 lossWAD = _lossBps * 1e14;
         simulateJTLoss(lossWAD);
 
-        uint256 rateAfter = _getConversionRate();
+        uint256 rateAfter = _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
         assertLt(rateAfter, rateBefore, "Rate should decrease after loss");
 
         vm.prank(SYNC_ROLE_ADDRESS);
@@ -127,7 +125,7 @@ contract Yo_yoUSD_Test is YieldBearingERC4626_TestBase {
 
     function testFuzz_yoUSD_vaultSharePriceYield(uint256 _jtAmount, uint256 _yieldPercentage) external {
         _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
-        _yieldPercentage = bound(_yieldPercentage, 1, 20); // 1-20%
+        _yieldPercentage = bound(_yieldPercentage, 1, 20);
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
 
