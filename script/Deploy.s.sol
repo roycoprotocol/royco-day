@@ -11,8 +11,10 @@ import { IRoycoKernel } from "../src/interfaces/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../src/interfaces/IYDM.sol";
 import { Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel } from "../src/kernels/Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel.sol";
-import { Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel } from "../src/kernels/Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel.sol";
 import { Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel } from "../src/kernels/Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel.sol";
+import {
+    Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel
+} from "../src/kernels/Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.sol";
 import { Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel } from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel.sol";
 import { Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel } from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel.sol";
 import { Identical_Makina_ST_JT_MachineToAdminOracle_Kernel } from "../src/kernels/Identical_Makina_ST_JT_MachineToAdminOracle_Kernel.sol";
@@ -59,7 +61,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     /// @notice Enum for kernel types
     enum KernelType {
         ReUSD_ST_ReUSD_JT,
-        Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel,
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel,
         Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel,
         Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel,
         Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel,
@@ -920,8 +922,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         } else if (_kernelType == KernelType.IdleCdoAA_ST_IdleCdoAA_JT) {
             IdleAACdoSTCdoJTKernelParams memory kp = abi.decode(_kernelSpecificParams, (IdleAACdoSTCdoJTKernelParams));
             return abi.encodePacked(type(Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel).creationCode, abi.encode(_cp, kp.idleCDO));
-        } else if (_kernelType == KernelType.Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel) {
-            return abi.encodePacked(type(Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel).creationCode, abi.encode(_cp));
+        } else if (_kernelType == KernelType.Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel) {
+            return abi.encodePacked(type(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel).creationCode, abi.encode(_cp));
         } else if (_kernelType == KernelType.Identical_Makina_ST_JT_MachineToAdminOracle_Kernel) {
             IdenticalMakinaSTMakinaJTKernelParams memory kp = abi.decode(_kernelSpecificParams, (IdenticalMakinaSTMakinaJTKernelParams));
             return abi.encodePacked(type(Identical_Makina_ST_JT_MachineToAdminOracle_Kernel).creationCode, abi.encode(_cp, kp.makinaMachine));
@@ -983,7 +985,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             );
         } else if (_kernelType == KernelType.IdleCdoAA_ST_IdleCdoAA_JT) {
             return abi.encodeCall(Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel.initialize, (kernelParams));
-        } else if (_kernelType == KernelType.Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel) {
+        } else if (_kernelType == KernelType.Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel) {
             IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams memory kernelParams2 =
                 abi.decode(_kernelSpecificParams, (IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams));
             return abi.encodeCall(

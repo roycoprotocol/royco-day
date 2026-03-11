@@ -7,16 +7,18 @@ import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol
 import { IRoycoAccountant } from "../../../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoKernel } from "../../../../src/interfaces/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../../../../src/interfaces/IRoycoVaultTranche.sol";
-import { IComplianceServiceWhitelisted } from "../../../../src/interfaces/external/ds-token/IComplianceServiceWhitelisted.sol";
-import { IDSToken } from "../../../../src/interfaces/external/ds-token/IDSToken.sol";
-import { Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel } from "../../../../src/kernels/Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel.sol";
 import { AssetClaims, MarketState } from "../../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
-import { YieldBearingERC20Chainlink_TestBase } from "../../Identical_ERC20_ST_JT_Chainlink/base/YieldBearingERC20Chainlink_TestBase.t.sol";
+import { Identical_ERC20_ST_JT_Chainlink_SBT_TestBase } from "../base/Identical_ERC20_ST_JT_Chainlink_SBT_TestBase.t.sol";
+
+interface IDSTokenLike {
+    function getDSService(bytes32) external view returns (address);
+    function COMPLIANCE_SERVICE() external view returns (bytes32);
+}
 
 /// @title ACRED_ComplianceTest
-/// @notice Tests compliance functions (blacklist, seize, seizeAndRedeem) for the DSToken kernel with ACRED
-contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
+/// @notice Tests compliance functions (blacklist, seize, seizeAndRedeem) for the SoulBound kernel with ACRED
+contract ACRED_ComplianceTest is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
     address internal constant ACRED_TOKEN = 0x17418038ecF73BA4026c4f428547BF099706F27B;
     address internal constant ACRED_CHAINLINK_ORACLE = 0xD6BcbbC87bFb6c8964dDc73DC3EaE6d08865d51C;
     address internal constant ACRED_WHALE = 0xa0759A0DFdE5395a1892aEd90eB5665698CFaa05;
@@ -74,8 +76,8 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _mockDSTokenCompliance() private {
-        address svc = IDSToken(ACRED_TOKEN).getDSService(IDSToken(ACRED_TOKEN).COMPLIANCE_SERVICE());
-        vm.mockCall(svc, abi.encodeWithSelector(IComplianceServiceWhitelisted.checkWhitelisted.selector), abi.encode(true));
+        address svc = IDSTokenLike(ACRED_TOKEN).getDSService(IDSTokenLike(ACRED_TOKEN).COMPLIANCE_SERVICE());
+        vm.mockCall(svc, abi.encodeWithSelector(bytes4(keccak256("checkWhitelisted(address)"))), abi.encode(true));
         vm.mockCall(svc, abi.encodeWithSelector(bytes4(keccak256("validateTransfer(address,address,uint256,bool,uint256)"))), abi.encode(uint256(0)));
     }
 
@@ -99,21 +101,6 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
     // COMPLIANCE HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function _complianceService() internal view returns (address) {
-        return Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel(address(KERNEL)).DS_COMPLIANCE_SERVICE();
-    }
-
-    function _mockNotWhitelisted(address _who) internal {
-        vm.mockCall(_complianceService(), abi.encodeWithSelector(IComplianceServiceWhitelisted.checkWhitelisted.selector, _who), abi.encode(false));
-    }
-
-    function _grantLPRoles(address _who) internal {
-        vm.startPrank(LP_ROLE_ADMIN_ADDRESS);
-        FACTORY.grantRole(ST_LP_ROLE, _who, 0);
-        FACTORY.grantRole(JT_LP_ROLE, _who, 0);
-        vm.stopPrank();
-    }
-
     function _blacklist(address _who) internal {
         address[] memory depositors = new address[](1);
         depositors[0] = _who;
@@ -129,7 +116,7 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // CATEGORY 1: BLACKLIST — freezes deposits, redemptions, and transfers
+    // CATEGORY 1: BLACKLIST — freezes deposits and redemptions
     // ═══════════════════════════════════════════════════════════════════════════
 
     function test_blacklist_blocksDeposit() external {
@@ -160,39 +147,6 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
         vm.startPrank(BOB_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(IRoycoKernel.ACCOUNT_BLACKLISTED.selector, BOB_ADDRESS));
         ST.redeem(stShares, BOB_ADDRESS, BOB_ADDRESS);
-        vm.stopPrank();
-    }
-
-    function test_blacklist_blocksOutgoingTransfer() external {
-        // Setup: deposit JT + ST for BOB, grant ALICE LP roles
-        _depositJT(ALICE_ADDRESS, 100e6);
-        uint256 stShares = _depositST(BOB_ADDRESS, 10e6);
-        _grantLPRoles(ST_ALICE_ADDRESS);
-
-        // Blacklist BOB
-        _blacklist(BOB_ADDRESS);
-
-        // BOB tries to transfer ST shares to ALICE — should revert (from is blacklisted)
-        vm.startPrank(BOB_ADDRESS);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoKernel.ACCOUNT_BLACKLISTED.selector, BOB_ADDRESS));
-        IERC20(address(ST)).transfer(ST_ALICE_ADDRESS, stShares);
-        vm.stopPrank();
-    }
-
-    function test_blacklist_blocksIncomingTransfer() external {
-        // Setup: deposit JT + ST for BOB
-        _depositJT(ALICE_ADDRESS, 100e6);
-        uint256 stShares = _depositST(BOB_ADDRESS, 10e6);
-
-        // Create a new non-provider address and blacklist it
-        address receiver = makeAddr("blacklisted_receiver");
-        _grantLPRoles(receiver);
-        _blacklist(receiver);
-
-        // BOB tries to transfer ST shares to blacklisted receiver — should revert
-        vm.startPrank(BOB_ADDRESS);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoKernel.ACCOUNT_BLACKLISTED.selector, receiver));
-        IERC20(address(ST)).transfer(receiver, stShares);
         vm.stopPrank();
     }
 
@@ -233,7 +187,6 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
         // Setup: deposit JT + ST for BOB
         _depositJT(ALICE_ADDRESS, 100e6);
         uint256 stShares = _depositST(BOB_ADDRESS, 10e6);
-        _grantLPRoles(ST_ALICE_ADDRESS);
 
         // Blacklist then unblacklist BOB
         _blacklist(BOB_ADDRESS);
@@ -244,22 +197,24 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
 
         _unblacklist(BOB_ADDRESS);
 
-        // BOB should be able to transfer again
-        vm.prank(BOB_ADDRESS);
-        IERC20(address(ST)).transfer(ST_ALICE_ADDRESS, stShares / 2);
+        // BOB should be able to redeem after unblacklisting
+        uint256 maxRedeemRestored = ST.maxRedeem(BOB_ADDRESS);
+        assertGt(maxRedeemRestored, 0, "maxRedeem should be > 0 after unblacklist");
 
-        assertGt(IERC20(address(ST)).balanceOf(ST_ALICE_ADDRESS), 0, "ALICE should have received shares");
+        vm.prank(BOB_ADDRESS);
+        ST.redeem(stShares, BOB_ADDRESS, BOB_ADDRESS);
+
+        assertEq(IERC20(address(ST)).balanceOf(BOB_ADDRESS), 0, "BOB should have redeemed all ST shares");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // CATEGORY 2: SEIZE — bypasses blacklist and DSToken whitelist
+    // CATEGORY 2: SEIZE — bypasses blacklist and soul-bound restriction
     // ═══════════════════════════════════════════════════════════════════════════
 
     function test_seize_ST_fromBlacklistedAddress() external {
         // Setup: deposit JT + ST for BOB
         _depositJT(ALICE_ADDRESS, 100e6);
         uint256 stShares = _depositST(BOB_ADDRESS, 10e6);
-        _grantLPRoles(ST_ALICE_ADDRESS);
 
         // Blacklist BOB
         _blacklist(BOB_ADDRESS);
@@ -276,7 +231,6 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
     function test_seize_JT_fromBlacklistedAddress() external {
         // Setup: deposit JT for ALICE
         uint256 jtShares = _depositJT(ALICE_ADDRESS, 100e6);
-        _grantLPRoles(JT_BOB_ADDRESS);
 
         // Blacklist ALICE
         _blacklist(ALICE_ADDRESS);
@@ -288,38 +242,6 @@ contract ACRED_ComplianceTest is YieldBearingERC20Chainlink_TestBase {
         // BOB should have the shares, ALICE should have none
         assertEq(IERC20(address(JT)).balanceOf(JT_BOB_ADDRESS), jtShares, "BOB should have seized JT shares");
         assertEq(IERC20(address(JT)).balanceOf(ALICE_ADDRESS), 0, "ALICE should have no JT shares");
-    }
-
-    function test_seize_ST_fromNonWhitelistedAddress() external {
-        // Setup: deposit JT + ST for BOB
-        _depositJT(ALICE_ADDRESS, 100e6);
-        uint256 stShares = _depositST(BOB_ADDRESS, 10e6);
-        _grantLPRoles(ST_ALICE_ADDRESS);
-
-        // Mock BOB as not whitelisted on DSToken compliance
-        _mockNotWhitelisted(BOB_ADDRESS);
-
-        // TRANSFER_AGENT seizes BOB's ST shares to ALICE — should succeed despite non-whitelisted
-        vm.prank(TRANSFER_AGENT_ADDRESS);
-        ST.seizeShares(BOB_ADDRESS, ST_ALICE_ADDRESS, stShares);
-
-        assertEq(IERC20(address(ST)).balanceOf(ST_ALICE_ADDRESS), stShares, "ALICE should have seized shares");
-    }
-
-    function test_seize_ST_toNonWhitelistedReceiver() external {
-        // Setup: deposit JT + ST for BOB
-        _depositJT(ALICE_ADDRESS, 100e6);
-        uint256 stShares = _depositST(BOB_ADDRESS, 10e6);
-
-        // Create a non-whitelisted receiver
-        address receiver = makeAddr("nonWhitelistedReceiver");
-        _mockNotWhitelisted(receiver);
-
-        // TRANSFER_AGENT seizes BOB's ST shares to non-whitelisted receiver — should succeed
-        vm.prank(TRANSFER_AGENT_ADDRESS);
-        ST.seizeShares(BOB_ADDRESS, receiver, stShares);
-
-        assertEq(IERC20(address(ST)).balanceOf(receiver), stShares, "Receiver should have seized shares");
     }
 
     function test_seize_emitsSharesSeizedEvent() external {

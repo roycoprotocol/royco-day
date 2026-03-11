@@ -86,7 +86,7 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
         // Grant the deployer the deployer role
         _grantRole(DEPLOYER_ROLE, _deployer, 0, 0);
         // Set the deployer role on the deployMarket function
-        _setTargetFunctionRole(address(this), RoycoFactory.deployMarket.selector, DEPLOYER_ROLE);
+        _setTargetFunctionRole(address(this), IRoycoFactory.deployMarket.selector, DEPLOYER_ROLE);
 
         // Configure the factory upgrader role
         _setTargetFunctionRole(address(this), UUPSUpgradeable.upgradeToAndCall.selector, ADMIN_UPGRADER_ROLE);
