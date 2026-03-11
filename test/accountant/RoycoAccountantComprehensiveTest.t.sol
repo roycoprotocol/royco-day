@@ -58,7 +58,6 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
     AccessManager internal accessManager;
 
     address internal MOCK_KERNEL;
-    uint64 internal LLTV_WAD = 0.95e18;
     uint64 internal YDM_JT_YIELD_AT_TARGET = 0.3e18;
     uint64 internal YDM_JT_YIELD_AT_FULL = 0.9e18;
 
@@ -84,7 +83,7 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
             FIXED_TERM_DURATION_SECONDS,
             DUST_TOLERANCE,
             DUST_TOLERANCE,
-            LLTV_WAD,
+            LIQUIDATION_UTILIZATION_WAD,
             YDM_JT_YIELD_AT_TARGET,
             YDM_JT_YIELD_AT_FULL
         );
@@ -101,7 +100,7 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
         uint24 fixedTermDuration,
         NAV_UNIT stNAVDustTolerance,
         NAV_UNIT jtNAVDustTolerance,
-        uint64 lltvWAD,
+        uint256 liquidationUtilizationWAD,
         uint64 jtYieldAtTarget,
         uint64 jtYieldAtFull
     )
@@ -119,7 +118,7 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
             ydm: ydm,
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: fixedTermDuration,
-            lltvWAD: lltvWAD,
+            liquidationUtilizationWAD: liquidationUtilizationWAD,
             stNAVDustTolerance: stNAVDustTolerance,
             jtNAVDustTolerance: jtNAVDustTolerance
         });
@@ -511,7 +510,7 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
             0, // Zero duration
             DUST_TOLERANCE,
             DUST_TOLERANCE,
-            LLTV_WAD,
+            LIQUIDATION_UTILIZATION_WAD,
             YDM_JT_YIELD_AT_TARGET,
             YDM_JT_YIELD_AT_FULL
         );
@@ -781,7 +780,7 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
             FIXED_TERM_DURATION_SECONDS,
             DUST_TOLERANCE,
             DUST_TOLERANCE,
-            LLTV_WAD,
+            LIQUIDATION_UTILIZATION_WAD,
             YDM_JT_YIELD_AT_TARGET,
             YDM_JT_YIELD_AT_FULL
         );
@@ -796,9 +795,9 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
 
     /// @notice Test beta = 1 (JT in same opportunity as ST, full sensitivity)
     function test_beta_one() public {
-        // Need to adjust LLTV for beta=1 to be valid
-        uint256 maxLTV = _computeMaxInitialLTV(COVERAGE_WAD, uint96(WAD));
-        uint64 lltvForBeta1 = uint64(bound(maxLTV + 1, maxLTV + 1, WAD - 1));
+        // For beta=1 configuration, liquidationUtilization must be > WAD (100%)
+        // Using 2e18 (200%) as a valid threshold
+        uint256 liquidationUtilizationForBeta1 = 2e18;
 
         IRoycoAccountant oneBetaAccountant = _deployAccountant(
             MOCK_KERNEL,
@@ -810,7 +809,7 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
             FIXED_TERM_DURATION_SECONDS,
             DUST_TOLERANCE,
             DUST_TOLERANCE,
-            lltvForBeta1,
+            liquidationUtilizationForBeta1,
             YDM_JT_YIELD_AT_TARGET,
             YDM_JT_YIELD_AT_FULL
         );
@@ -1170,10 +1169,6 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
     function _assertConfigFields(SyncedAccountingState memory state) internal view {
         IRoycoAccountant.RoycoAccountantState memory accountantState = accountant.getState();
 
-        // Verify LTV is computed correctly
-        uint256 expectedLtv = UtilsLib.computeLTV(state.stEffectiveNAV, state.stImpermanentLoss, state.jtEffectiveNAV);
-        assertEq(state.ltvWAD, expectedLtv, "ltvWAD mismatch");
-
         // Verify utilization is computed correctly
         uint256 expectedUtil =
             UtilsLib.computeUtilization(state.stRawNAV, state.jtRawNAV, accountantState.betaWAD, accountantState.coverageWAD, state.jtEffectiveNAV);
@@ -1201,7 +1196,6 @@ contract RoycoAccountantRevertTest is BaseTest {
 
     address internal MOCK_KERNEL;
     address internal NON_KERNEL;
-    uint64 internal LLTV_WAD = 0.95e18;
 
     function setUp() public {
         _setUpRoyco();
@@ -1222,7 +1216,7 @@ contract RoycoAccountantRevertTest is BaseTest {
             FIXED_TERM_DURATION_SECONDS,
             DUST_TOLERANCE,
             DUST_TOLERANCE,
-            LLTV_WAD
+            LIQUIDATION_UTILIZATION_WAD
         );
     }
 
@@ -1237,7 +1231,7 @@ contract RoycoAccountantRevertTest is BaseTest {
         uint24 fixedTermDuration,
         NAV_UNIT stNAVDustTolerance,
         NAV_UNIT jtNAVDustTolerance,
-        uint64 lltvWAD
+        uint256 liquidationUtilizationWAD
     )
         internal
         returns (IRoycoAccountant)
@@ -1253,7 +1247,7 @@ contract RoycoAccountantRevertTest is BaseTest {
             ydm: ydm,
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: fixedTermDuration,
-            lltvWAD: lltvWAD,
+            liquidationUtilizationWAD: liquidationUtilizationWAD,
             stNAVDustTolerance: stNAVDustTolerance,
             jtNAVDustTolerance: jtNAVDustTolerance
         });
@@ -1405,7 +1399,7 @@ contract RoycoAccountantRevertTest is BaseTest {
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            lltvWAD: LLTV_WAD,
+            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -1428,7 +1422,7 @@ contract RoycoAccountantRevertTest is BaseTest {
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            lltvWAD: LLTV_WAD,
+            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -1451,7 +1445,7 @@ contract RoycoAccountantRevertTest is BaseTest {
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            lltvWAD: LLTV_WAD,
+            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -1474,7 +1468,7 @@ contract RoycoAccountantRevertTest is BaseTest {
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            lltvWAD: LLTV_WAD,
+            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -1497,7 +1491,7 @@ contract RoycoAccountantRevertTest is BaseTest {
             ydm: address(0), // Null YDM
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            lltvWAD: LLTV_WAD,
+            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -1526,7 +1520,7 @@ contract RoycoAccountantRevertTest is BaseTest {
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            lltvWAD: uint64(maxLTV), // LLTV <= maxLTV is invalid
+            liquidationUtilizationWAD: uint64(maxLTV), // LLTV <= maxLTV is invalid
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -1549,7 +1543,7 @@ contract RoycoAccountantRevertTest is BaseTest {
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            lltvWAD: uint64(WAD), // LLTV >= WAD is invalid
+            liquidationUtilizationWAD: uint64(WAD), // LLTV >= WAD is invalid
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -1573,7 +1567,7 @@ contract RoycoAccountantRevertTest is BaseTest {
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            lltvWAD: LLTV_WAD,
+            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -1640,7 +1634,6 @@ contract RoycoAccountantInvariantTest is BaseTest {
     AccountantHandler internal handler;
 
     address internal MOCK_KERNEL;
-    uint64 internal LLTV_WAD = 0.95e18;
 
     function setUp() public {
         _setUpRoyco();
@@ -1661,7 +1654,7 @@ contract RoycoAccountantInvariantTest is BaseTest {
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            lltvWAD: LLTV_WAD,
+            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -1753,7 +1746,7 @@ contract RoycoAccountantInvariantTest is BaseTest {
         }
 
         // If LTV >= LLTV OR ST IL > 0, market must be in PERPETUAL state
-        if (ltvWAD >= LLTV_WAD || stIL > 0) {
+        if (ltvWAD >= LIQUIDATION_UTILIZATION_WAD || stIL > 0) {
             assertEq(
                 uint8(state.lastMarketState),
                 uint8(MarketState.PERPETUAL),
@@ -1763,7 +1756,7 @@ contract RoycoAccountantInvariantTest is BaseTest {
 
         // If in FIXED_TERM, must have JT coverage IL and LTV < LLTV and no ST IL
         if (state.lastMarketState == MarketState.FIXED_TERM) {
-            assertLt(ltvWAD, LLTV_WAD, "INVARIANT VIOLATED: FIXED_TERM with LTV >= LLTV after preOpSync");
+            assertLt(ltvWAD, LIQUIDATION_UTILIZATION_WAD, "INVARIANT VIOLATED: FIXED_TERM with LTV >= LLTV after preOpSync");
             assertEq(stIL, 0, "INVARIANT VIOLATED: FIXED_TERM with ST IL > 0 after preOpSync");
             assertGt(toUint256(state.lastJTImpermanentLoss), 0, "INVARIANT VIOLATED: FIXED_TERM without JT coverage IL after preOpSync");
         }
@@ -1934,7 +1927,6 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
     AccessManager internal accessManager;
 
     address internal MOCK_KERNEL;
-    uint64 internal LLTV_WAD = 0.95e18;
     uint256 internal constant MIN_NAV = 1e6;
     uint256 internal constant MAX_NAV = 1e30;
 
@@ -1957,7 +1949,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            lltvWAD: LLTV_WAD,
+            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -2001,7 +1993,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
             _computeLTV(toUint256(preOpState.lastSTEffectiveNAV), toUint256(preOpState.lastSTImpermanentLoss), toUint256(preOpState.lastJTEffectiveNAV));
 
         // Verify preOp didn't breach LLTV
-        if (preOpLTV >= LLTV_WAD) {
+        if (preOpLTV >= LIQUIDATION_UTILIZATION_WAD) {
             // Skip test if preOp already breached (this is expected for some inputs)
             return;
         }
@@ -2017,7 +2009,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
 
             // INVARIANT: Post-op LTV should not breach LLTV
             // Note: LTV may increase but should stay below LLTV
-            assertLt(postOpLTV, LLTV_WAD, "LLTV breached after ST deposit when preOp was safe");
+            assertLt(postOpLTV, LIQUIDATION_UTILIZATION_WAD, "LLTV breached after ST deposit when preOp was safe");
         } catch {
             // Revert is acceptable - coverage check may have failed, which is correct behavior
         }
@@ -2059,7 +2051,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
         uint256 preOpLTV =
             _computeLTV(toUint256(preOpState.lastSTEffectiveNAV), toUint256(preOpState.lastSTImpermanentLoss), toUint256(preOpState.lastJTEffectiveNAV));
 
-        if (preOpLTV >= LLTV_WAD) {
+        if (preOpLTV >= LIQUIDATION_UTILIZATION_WAD) {
             return; // Skip if already breached
         }
 
@@ -2074,7 +2066,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
                 _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.stImpermanentLoss), toUint256(postOpState.jtEffectiveNAV));
 
             // INVARIANT: Post-op LTV should not breach LLTV
-            assertLt(postOpLTV, LLTV_WAD, "LLTV breached after ST withdrawal when preOp was safe");
+            assertLt(postOpLTV, LIQUIDATION_UTILIZATION_WAD, "LLTV breached after ST withdrawal when preOp was safe");
         } catch {
             // Revert is acceptable for invalid states
         }
@@ -2092,7 +2084,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
         uint256 preOpLTV =
             _computeLTV(toUint256(preOpState.lastSTEffectiveNAV), toUint256(preOpState.lastSTImpermanentLoss), toUint256(preOpState.lastJTEffectiveNAV));
 
-        if (preOpLTV >= LLTV_WAD) {
+        if (preOpLTV >= LIQUIDATION_UTILIZATION_WAD) {
             return;
         }
 
@@ -2105,7 +2097,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
                 _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.stImpermanentLoss), toUint256(postOpState.jtEffectiveNAV));
 
             // INVARIANT: If coverage passed, LTV should be below LLTV
-            assertLt(postOpLTV, LLTV_WAD, "LLTV breached after JT withdrawal with coverage enforcement");
+            assertLt(postOpLTV, LIQUIDATION_UTILIZATION_WAD, "LLTV breached after JT withdrawal with coverage enforcement");
         } catch {
             // Coverage check failed - this is correct behavior
         }
@@ -2136,7 +2128,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
             uint256 preOpLTV = _computeLTV(toUint256(preOpState.stEffectiveNAV), toUint256(preOpState.stImpermanentLoss), toUint256(preOpState.jtEffectiveNAV));
 
             // If preOp already breached LLTV, market should be PERPETUAL
-            if (preOpLTV >= LLTV_WAD) {
+            if (preOpLTV >= LIQUIDATION_UTILIZATION_WAD) {
                 assertEq(uint8(preOpState.marketState), uint8(MarketState.PERPETUAL), "Should be perpetual when LLTV breached");
                 return;
             }
@@ -2150,7 +2142,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
                     _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.stImpermanentLoss), toUint256(postOpState.jtEffectiveNAV));
 
                 // INVARIANT: If both preOp and postOp succeeded without LLTV breach, LTV stays safe
-                assertLt(postOpLTV, LLTV_WAD, "LLTV breached in post-op after safe pre-op");
+                assertLt(postOpLTV, LIQUIDATION_UTILIZATION_WAD, "LLTV breached in post-op after safe pre-op");
             } catch {
                 // Coverage check failed - acceptable
             }
@@ -2174,7 +2166,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
             // Check LTV after ST deposit
             IRoycoAccountant.RoycoAccountantState memory state1 = accountant.getState();
             uint256 ltv1 = _computeLTV(toUint256(state1.lastSTEffectiveNAV), toUint256(state1.lastSTImpermanentLoss), toUint256(state1.lastJTEffectiveNAV));
-            assertLt(ltv1, LLTV_WAD, "LLTV breached after ST deposit");
+            assertLt(ltv1, LIQUIDATION_UTILIZATION_WAD, "LLTV breached after ST deposit");
 
             // Operation 2: JT deposit (should improve LTV)
             vm.prank(MOCK_KERNEL);
@@ -2185,7 +2177,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
 
             // LTV should be same or better after JT deposit
             assertLe(ltv2, ltv1, "JT deposit worsened LTV");
-            assertLt(ltv2, LLTV_WAD, "LLTV breached after JT deposit");
+            assertLt(ltv2, LIQUIDATION_UTILIZATION_WAD, "LLTV breached after JT deposit");
         } catch {
             // Coverage check failed on initial ST deposit - acceptable
         }
@@ -2207,7 +2199,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
         uint256 initialLTV = _computeLTV(toUint256(state.lastSTEffectiveNAV), toUint256(state.lastSTImpermanentLoss), toUint256(state.lastJTEffectiveNAV));
 
         // If already at or above LLTV, this test doesn't apply
-        if (initialLTV >= LLTV_WAD) {
+        if (initialLTV >= LIQUIDATION_UTILIZATION_WAD) {
             return;
         }
 
@@ -2218,7 +2210,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
         uint256 finalLTV = _computeLTV(toUint256(postState.stEffectiveNAV), toUint256(postState.stImpermanentLoss), toUint256(postState.jtEffectiveNAV));
 
         assertLt(finalLTV, initialLTV, "JT deposit should improve LTV");
-        assertLt(finalLTV, LLTV_WAD, "LLTV should remain safe");
+        assertLt(finalLTV, LIQUIDATION_UTILIZATION_WAD, "LLTV should remain safe");
     }
 
     /// @notice Zero operations (no change) maintain LLTV
@@ -2288,7 +2280,6 @@ contract RoycoAccountantAdminTest is BaseTest {
     AccessManager internal accessManager;
     MockKernelForAdmin internal mockKernel;
 
-    uint64 internal LLTV_WAD = 0.95e18;
 
     function setUp() public {
         _setUpRoyco();
@@ -2310,7 +2301,7 @@ contract RoycoAccountantAdminTest is BaseTest {
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            lltvWAD: LLTV_WAD,
+            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -2404,24 +2395,24 @@ contract RoycoAccountantAdminTest is BaseTest {
     }
 
     // =========================================================================
-    // setLLTV Tests
+    // setLiquidationUtilization Tests
     // =========================================================================
 
-    function test_setLLTV_success() public {
-        uint64 newLLTV = 0.98e18;
+    function test_setLiquidationUtilization_success() public {
+        uint256 newLiquidationUtilization = 5e18; // 500% - must be > 100%
 
         vm.prank(OWNER_ADDRESS);
-        accountant.setLLTV(newLLTV);
+        accountant.setLiquidationUtilization(newLiquidationUtilization);
 
-        assertEq(accountant.getState().lltvWAD, newLLTV, "LLTV not updated");
+        assertEq(accountant.getState().liquidationUtilizationWAD, newLiquidationUtilization, "liquidationUtilization not updated");
     }
 
-    function testFuzz_setLLTV(uint64 newLLTV) public {
-        newLLTV = uint64(bound(newLLTV, 0.5e18, WAD - 1));
+    function testFuzz_setLiquidationUtilization(uint256 newLiquidationUtilization) public {
+        newLiquidationUtilization = bound(newLiquidationUtilization, WAD + 1, 100e18); // Must be > 100%
 
         vm.prank(OWNER_ADDRESS);
-        try accountant.setLLTV(newLLTV) {
-            assertEq(accountant.getState().lltvWAD, newLLTV);
+        try accountant.setLiquidationUtilization(newLiquidationUtilization) {
+            assertEq(accountant.getState().liquidationUtilizationWAD, newLiquidationUtilization);
         } catch {
             // Invalid config - acceptable
         }
@@ -2553,7 +2544,6 @@ contract RoycoAccountantEdgeCaseTest is BaseTest {
     AccessManager internal accessManager;
 
     address internal MOCK_KERNEL;
-    uint64 internal LLTV_WAD = 0.95e18;
 
     function setUp() public {
         _setUpRoyco();
@@ -2574,7 +2564,7 @@ contract RoycoAccountantEdgeCaseTest is BaseTest {
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            lltvWAD: LLTV_WAD,
+            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -2883,7 +2873,6 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
     MockYDMWithInit internal mockYDMWithInit;
 
     address internal MOCK_KERNEL;
-    uint64 internal LLTV_WAD = 0.95e18;
 
     function setUp() public {
         _setUpRoyco();
@@ -2905,7 +2894,7 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
             FIXED_TERM_DURATION_SECONDS,
             DUST_TOLERANCE,
             DUST_TOLERANCE,
-            LLTV_WAD,
+            LIQUIDATION_UTILIZATION_WAD,
             0.3e18,
             0.9e18
         );
@@ -2921,7 +2910,7 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
         uint24 fixedTermDuration,
         NAV_UNIT stNAVDustTolerance,
         NAV_UNIT jtNAVDustTolerance,
-        uint64 lltvWAD,
+        uint256 liquidationUtilizationWAD,
         uint64 jtYieldAtTarget,
         uint64 jtYieldAtFull
     )
@@ -2940,7 +2929,7 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
             ydm: ydm,
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: fixedTermDuration,
-            lltvWAD: lltvWAD,
+            liquidationUtilizationWAD: liquidationUtilizationWAD,
             stNAVDustTolerance: stNAVDustTolerance,
             jtNAVDustTolerance: jtNAVDustTolerance
         });
@@ -2960,7 +2949,7 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
             ydm: ydm,
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            lltvWAD: LLTV_WAD,
+            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -3148,7 +3137,7 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
             FIXED_TERM_DURATION_SECONDS,
             DUST_TOLERANCE,
             DUST_TOLERANCE,
-            LLTV_WAD,
+            LIQUIDATION_UTILIZATION_WAD,
             0.3e18,
             0.9e18
         );
@@ -3190,18 +3179,13 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
     }
 
     // =========================================================================
-    // LLTV VALIDATION EDGE CASES (Line 685)
+    // LIQUIDATION UTILIZATION VALIDATION EDGE CASES
     // =========================================================================
 
-    /// @notice Test LLTV validation - LLTV equal to maxLTV should fail
-    function test_lltvValidation_equalToMaxLTV() public {
-        // Calculate maxLTV for given coverage and beta
-        // maxLTV = (1 - β * COV) / (1 + COV * (1 - β))
-        // With COVERAGE_WAD = 0.2e18 and BETA_WAD = 0.5e18
-        // betaCov = 0.2 * 0.5 = 0.1
-        // maxLTV = (1 - 0.1) / (1 + 0.2 * 0.5) = 0.9 / 1.1 ≈ 0.818...
-
-        uint64 invalidLLTV = 0.82e18; // At or below maxLTV
+    /// @notice Test liquidationUtilization validation - value below WAD should fail
+    function test_liquidationUtilizationValidation_belowWAD() public {
+        // liquidationUtilization must be > WAD (> 100%)
+        uint256 invalidLiquidationUtilization = WAD / 2; // 50% - invalid
 
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
@@ -3213,7 +3197,7 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            lltvWAD: invalidLLTV,
+            liquidationUtilizationWAD: invalidLiquidationUtilization,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -3223,9 +3207,9 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
         new ERC1967Proxy(address(accountantImpl), initData);
     }
 
-    /// @notice Test LLTV validation - LLTV at WAD should fail
-    function test_lltvValidation_atWAD() public {
-        uint64 invalidLLTV = uint64(WAD); // 100% LTV
+    /// @notice Test liquidationUtilization validation - value exactly at WAD should fail
+    function test_liquidationUtilizationValidation_atWAD() public {
+        uint256 invalidLiquidationUtilization = WAD; // exactly 100% - invalid
 
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
@@ -3237,7 +3221,7 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            lltvWAD: invalidLLTV,
+            liquidationUtilizationWAD: invalidLiquidationUtilization,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -3319,7 +3303,6 @@ contract RoycoAccountantAdditionalBranchTests is BaseTest {
     AccessManager internal accessManager;
     MockKernelForBranchTests internal mockKernel;
 
-    uint64 internal LLTV_WAD = 0.95e18;
 
     function setUp() public {
         _setUpRoyco();
@@ -3339,7 +3322,7 @@ contract RoycoAccountantAdditionalBranchTests is BaseTest {
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            lltvWAD: LLTV_WAD,
+            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -3377,7 +3360,7 @@ contract RoycoAccountantAdditionalBranchTests is BaseTest {
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            lltvWAD: LLTV_WAD,
+            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -3401,7 +3384,7 @@ contract RoycoAccountantAdditionalBranchTests is BaseTest {
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            lltvWAD: LLTV_WAD,
+            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -3428,7 +3411,7 @@ contract RoycoAccountantAdditionalBranchTests is BaseTest {
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            lltvWAD: 0.99e18, // High LLTV to pass that check
+            liquidationUtilizationWAD: 0.99e18, // High LLTV to pass that check
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });

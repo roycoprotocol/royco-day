@@ -74,7 +74,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
     uint96 internal BETA_WAD = 0;
     uint64 internal ST_PROTOCOL_FEE_WAD = 0.1e18;
     uint64 internal JT_PROTOCOL_FEE_WAD = 0.1e18;
-    uint64 internal LLTV = 0.97e18;
+    uint256 internal LIQUIDATION_UTILIZATION_WAD = 6.4667e18;
     uint24 internal FIXED_TERM_DURATION_SECONDS = 2 weeks;
     uint256 internal DUST_TOLERANCE_RAW = 1;
     uint24 internal JT_REDEMPTION_DELAY_SECONDS = 1_000_000;
@@ -207,7 +207,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         config.jtYieldShareProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
         config.coverageWAD = COVERAGE_WAD;
         config.betaWAD = BETA_WAD;
-        config.lltvWAD = LLTV;
+        config.liquidationUtilizationWAD = LIQUIDATION_UTILIZATION_WAD;
         config.fixedTermDurationSeconds = FIXED_TERM_DURATION_SECONDS;
         config.ydmType = DeployScript.YDMType.AdaptiveCurve_V2;
         config.kernelSpecificParams = abi.encode(DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 }));

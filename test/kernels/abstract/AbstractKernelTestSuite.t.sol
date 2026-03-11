@@ -700,7 +700,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Check state - may transition to FIXED_TERM depending on configuration
         IRoycoAccountant.RoycoAccountantState memory accountantState = ACCOUNTANT.getState();
-        // State could be PERPETUAL or FIXED_TERM depending on LLTV and coverage
+        // State could be PERPETUAL or FIXED_TERM depending on utilization and liquidation threshold
         assertTrue(
             accountantState.lastMarketState == MarketState.PERPETUAL || accountantState.lastMarketState == MarketState.FIXED_TERM,
             "State should be valid after ST loss"

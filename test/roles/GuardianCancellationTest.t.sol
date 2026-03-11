@@ -93,7 +93,7 @@ contract GuardianCancellationTest is BaseTest {
             jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             coverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            lltvWAD: LLTV,
+            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(ydmParams)
@@ -188,10 +188,10 @@ contract GuardianCancellationTest is BaseTest {
         FACTORY.execute(address(ACCOUNTANT), data);
     }
 
-    /// @notice Test that guardian can cancel a scheduled accountant admin operation (setLLTV)
-    function test_guardian_canCancelAccountantAdminSetLLTV() public {
-        uint64 newLLTV = 0.95e18;
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setLLTV, (newLLTV));
+    /// @notice Test that guardian can cancel a scheduled accountant admin operation (setLiquidationUtilization)
+    function test_guardian_canCancelAccountantAdminSetLiquidationUtilization() public {
+        uint256 newLiquidationUtilization = 5e18;
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setLiquidationUtilization, (newLiquidationUtilization));
 
         // Schedule the operation as accountant admin
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
@@ -428,8 +428,8 @@ contract GuardianCancellationTest is BaseTest {
     function test_role_accountantAdmin_canSetCoverageConfiguration() public {
         uint64 newCoverage = 0.3e18;
         uint96 newBeta = 0.5e18;
-        uint64 newLLTV = 0.9e18;
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverageConfiguration, (newCoverage, newBeta, newLLTV));
+        uint256 newLiquidationUtilization = 3e18;
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverageConfiguration, (newCoverage, newBeta, newLiquidationUtilization));
 
         // Schedule as accountant admin
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
@@ -447,8 +447,8 @@ contract GuardianCancellationTest is BaseTest {
     function test_role_nonAccountantAdmin_cannotSetCoverageConfiguration() public {
         uint64 newCoverage = 0.3e18;
         uint96 newBeta = 0.5e18;
-        uint64 newLLTV = 0.9e18;
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverageConfiguration, (newCoverage, newBeta, newLLTV));
+        uint256 newLiquidationUtilization = 3e18;
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverageConfiguration, (newCoverage, newBeta, newLiquidationUtilization));
 
         vm.prank(address(0xBAD));
         vm.expectRevert();

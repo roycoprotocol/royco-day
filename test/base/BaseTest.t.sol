@@ -150,7 +150,7 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
     uint96 internal BETA_WAD = 0; // Different opportunities
     uint64 internal ST_PROTOCOL_FEE_WAD = 0.1e18; // 10% protocol fee
     uint64 internal JT_PROTOCOL_FEE_WAD = 0.1e18; // 10% protocol fee
-    uint64 internal LLTV = 0.97e18; // 95% LLTV
+    uint256 internal LIQUIDATION_UTILIZATION_WAD = 6.4667e18; // Liquidation utilization threshold
     uint24 internal FIXED_TERM_DURATION_SECONDS = 2 weeks; // 2 weeks in seconds
     NAV_UNIT internal DUST_TOLERANCE = toNAVUnits(uint256(1));
 
