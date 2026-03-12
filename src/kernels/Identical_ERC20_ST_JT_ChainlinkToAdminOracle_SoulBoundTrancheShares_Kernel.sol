@@ -6,14 +6,12 @@ import { Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel, RoycoKernel } from
 /**
  * @title Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel
  * @author Waymont
- * @notice Extends the identical-asset Chainlink-to-admin-oracle kernel with soul-bound tranche shares
- * @dev Tranche shares are non-transferable: only mints (from zero address) and burns/redeems (to zero address) are
- *      permitted. Peer-to-peer transfers revert with TRANCHE_SHARES_TRANSFER_NOT_PERMITTED.
- *      The transfer agent can still seize shares via seizeShares() and seizeAndRedeemShares(), which bypass this hook
- *      by calling super._update() directly on the tranche.
+ * @notice Extends the Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel by making tranche shares soul-bound
+ * @dev Primarily used for RWAs and digital securities with transfer agent obligations
  */
 contract Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel is Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel {
-    error TRANCHE_SHARES_TRANSFER_NOT_PERMITTED();
+    /// @dev Thrown when a senior or junior tranche LP trys to transfer tranche shares to another LP
+    error TRANCHE_SHARES_ARE_SOUL_BOUND();
 
     /// @notice Constructs the kernel state
     /// @param _params The standard construction parameters for the Royco kernel
@@ -22,11 +20,10 @@ contract Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Ker
     /// @inheritdoc RoycoKernel
     function _preTrancheBalanceUpdate(address _from, address _to, uint256) internal pure override(RoycoKernel) {
         // Only allow transfers between the zero address and a non-zero address (redeem and mint)
-        bool isMintOrRedeem = false;
+        bool isMintOrRedeem;
         assembly ("memory-safe") {
             isMintOrRedeem := xor(eq(_from, 0), eq(_to, 0))
         }
-
-        require(isMintOrRedeem, TRANCHE_SHARES_TRANSFER_NOT_PERMITTED());
+        require(isMintOrRedeem, TRANCHE_SHARES_ARE_SOUL_BOUND());
     }
 }

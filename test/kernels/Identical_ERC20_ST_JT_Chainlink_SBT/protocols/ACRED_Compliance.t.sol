@@ -446,7 +446,7 @@ contract ACRED_ComplianceTest is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
         _grantLPRoles(ALICE_ADDRESS);
 
         vm.prank(BOB_ADDRESS);
-        vm.expectRevert(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.TRANCHE_SHARES_TRANSFER_NOT_PERMITTED.selector);
+        vm.expectRevert(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.TRANCHE_SHARES_ARE_SOUL_BOUND.selector);
         IERC20(address(ST)).transfer(ALICE_ADDRESS, stShares);
     }
 
@@ -455,7 +455,7 @@ contract ACRED_ComplianceTest is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
         _grantLPRoles(BOB_ADDRESS);
 
         vm.prank(ALICE_ADDRESS);
-        vm.expectRevert(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.TRANCHE_SHARES_TRANSFER_NOT_PERMITTED.selector);
+        vm.expectRevert(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.TRANCHE_SHARES_ARE_SOUL_BOUND.selector);
         IERC20(address(JT)).transfer(BOB_ADDRESS, jtShares);
     }
 
@@ -470,7 +470,7 @@ contract ACRED_ComplianceTest is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
 
         // ALICE tries transferFrom — should still revert (soul-bound)
         vm.prank(ALICE_ADDRESS);
-        vm.expectRevert(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.TRANCHE_SHARES_TRANSFER_NOT_PERMITTED.selector);
+        vm.expectRevert(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.TRANCHE_SHARES_ARE_SOUL_BOUND.selector);
         IERC20(address(ST)).transferFrom(BOB_ADDRESS, ALICE_ADDRESS, stShares);
     }
 
@@ -481,7 +481,7 @@ contract ACRED_ComplianceTest is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
 
         // Even transferring 1 wei of shares should revert
         vm.prank(BOB_ADDRESS);
-        vm.expectRevert(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.TRANCHE_SHARES_TRANSFER_NOT_PERMITTED.selector);
+        vm.expectRevert(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.TRANCHE_SHARES_ARE_SOUL_BOUND.selector);
         IERC20(address(ST)).transfer(ALICE_ADDRESS, 1);
     }
 }

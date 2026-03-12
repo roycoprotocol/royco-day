@@ -40,7 +40,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // Ensure that the asset and kernel are not null
         require(_asset != address(0) && _kernel != address(0), NULL_ADDRESS());
 
-        // Set the immutable addresses
+        // Set the immutable state
         ASSET = _asset;
         KERNEL = _kernel;
     }

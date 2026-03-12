@@ -869,7 +869,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      *
      *      Since with β < 1 BONUS_ST_RAW_NAV is cheaper per unit, use the ST_RAW_NAV to source the bonus first:
      *      First Priority (BONUS_JT_RAW_NAV = 0):
-     *          BONUS_ST_RAW_NAV = (ST_REDEMPTION_ST_RAW_NAV + ST_REDEMPTION_JT_RAW_NAV * β) * JT_EFFECTIVE_NAV / (COVERED_EXPOSURE - JT_EFFECTIVE_NAV)
+     *          BONUS_MAX = (ST_REDEMPTION_ST_RAW_NAV + ST_REDEMPTION_JT_RAW_NAV * β) * JT_EFFECTIVE_NAV / (COVERED_EXPOSURE - JT_EFFECTIVE_NAV)
      *
      *      Second Priority (BONUS_ST_RAW_NAV = JT_CLAIM_ON_ST_RAW_NAV, maxed out):
      *          BONUS_MAX = (ST_REDEMPTION_ST_RAW_NAV + ST_REDEMPTION_JT_RAW_NAV * β + JT_CLAIM_ON_ST_RAW_NAV * (1 - β)) * JT_EFFECTIVE_NAV / (COVERED_EXPOSURE - β * JT_EFFECTIVE_NAV)
@@ -888,7 +888,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         view
         returns (NAV_UNIT maxUtilizationNeutralBonusNAV)
     {
-        // Preemptively return if there is no remaining captial to source a bonus from
+        // Preemptively return if there is no remaining capital to source a bonus from
         NAV_UNIT jtEffectiveNAV = _state.jtEffectiveNAV;
         if (jtEffectiveNAV == ZERO_NAV_UNITS) return ZERO_NAV_UNITS;
 
