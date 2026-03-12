@@ -140,6 +140,8 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         if (initialMarketState == MarketState.PERPETUAL && state.marketState == MarketState.FIXED_TERM) {
             $.fixedTermEndTimestamp = state.fixedTermEndTimestamp;
             emit FixedTermCommenced(state.fixedTermEndTimestamp);
+        } else if (initialMarketState == MarketState.FIXED_TERM && state.marketState == MarketState.PERPETUAL) {
+            emit FixedTermEnded();
         }
 
         // If the JT Coverage IL was erased, signal the resetting
