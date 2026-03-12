@@ -18,7 +18,7 @@ library UtilsLib {
 
     /**
      * @notice Computes the utilization of the Royco market given the market's state
-     * @dev Informally: total covered exposure / junior loss absorption buffer
+     * @dev Informally: (total coverage required for exposure) / (loss absorption buffer)
      * @dev Formally: Utilization = ((ST_RAW_NAV + (JT_RAW_NAV * β)) * COV) / JT_EFFECTIVE_NAV
      * @param _stRawNAV The raw net asset value of the senior tranche invested assets
      * @param _jtRawNAV The raw net asset value of the junior tranche invested assets

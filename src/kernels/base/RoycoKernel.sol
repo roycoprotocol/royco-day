@@ -804,6 +804,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      *      1. Absorb discounts/losses on secondary markets when liquidating the withdrawn exposure
      *      2. Absorb any duration risk associated with liquidating the withdrawn exposure
      * @dev The bonus is computed on the NAV being redeemed by the senior tranche
+     * @dev The bonus is capped to ensure utilization does not increase, preventing bank run dynamics where one LP's bonus eats into coverage for remaining LPs
      * @param _state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      * @param _stUserClaims The claims of the redeeming ST user
      * @return stUserClaimsWithBonus The claims of the redeeming ST user after applying the self-liquidation bonus
@@ -821,15 +822,21 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         // If the liquidation utilization threshold has not been breached, there is no ST self-liquidation bonus remitted
         if (_state.utilizationWAD < _state.liquidationUtilizationWAD) return (_stUserClaims, ZERO_NAV_UNITS);
 
-        // Compute the desired ST redemption based on the configured ST self-liquidation bonus
+        // Compute the desired ST bonus based on the configured ST self-liquidation bonus rate
         NAV_UNIT desiredBonusNAV = _stUserClaims.nav.mulDiv(_getRoycoKernelStorage().stSelfLiquidationBonusWAD, WAD, Math.Rounding.Floor);
-        // Clamp the actual bonus by the remaining JT controlled NAV
-        stSelfLiquidationBonusNAV = UnitsMathLib.min(desiredBonusNAV, _state.jtEffectiveNAV);
-        // Preemptively return if there is no remaining bonus capital to remit
-        if (stSelfLiquidationBonusNAV == ZERO_NAV_UNITS) return (_stUserClaims, ZERO_NAV_UNITS);
 
         // Decompose the NAV claims for the Junior Tranche to get the NAV claims for sourcing the bonus
         (,, NAV_UNIT jtClaimOnSTRawNAV,) = _decomposeNAVClaims(_state);
+
+        // Compute the maximum bonus that doesn't increase utilization, preventing bank run dynamics
+        NAV_UNIT maxUtilizationNeutralBonusNAV = _computeMaxUtilizationNeutralBonus(_state, _stUserClaims, jtClaimOnSTRawNAV);
+
+        // Clamp the actual bonus by the remaining JT controlled NAV and the maximum utilization-neutral (leverage retaining or delevering) NAV
+        stSelfLiquidationBonusNAV = UnitsMathLib.min(UnitsMathLib.min(desiredBonusNAV, _state.jtEffectiveNAV), maxUtilizationNeutralBonusNAV);
+
+        // Preemptively return if there is no remaining bonus capital to remit
+        if (stSelfLiquidationBonusNAV == ZERO_NAV_UNITS) return (_stUserClaims, ZERO_NAV_UNITS);
+
         // Compute the bonus NAV sourced from JT's claims on each tranche's NAV: prioritize ST assets over JT assets for sourcing
         // stSelfLiquidationBonusNAV <= (jtClaimOnSTRawNAV + jtClaimOnSelfRawNAV) since it was bounded by JT effective NAV already
         NAV_UNIT bonusFromJTClaimOnSTRawNAV = UnitsMathLib.min(stSelfLiquidationBonusNAV, jtClaimOnSTRawNAV);
@@ -839,6 +846,69 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         stUserClaimsWithBonus.stAssets = _stUserClaims.stAssets + stConvertNAVUnitsToTrancheUnits(bonusFromJTClaimOnSTRawNAV);
         stUserClaimsWithBonus.jtAssets = _stUserClaims.jtAssets + jtConvertNAVUnitsToTrancheUnits(bonusFromJTClaimOnSelfRawNAV);
         stUserClaimsWithBonus.nav = _stUserClaims.nav + stSelfLiquidationBonusNAV;
+    }
+
+    /**
+     * @notice Computes the maximum self-liquidation bonus that doesn't increase utilization (market's leverage)
+     * @dev Prevents bank run dynamics by ensuring one LP's bonus doesn't reduce coverage for remaining LPs
+     * @dev Derivation:
+     *      Post-redemption utilization must not exceed original utilization:
+     *      U = Current utilization = ((ST_RAW_NAV + (JT_RAW_NAV * β)) * COV) / JT_EFFECTIVE_NAV
+     *      U' = Post-redemption utilization (including bonus)
+     *      Post-redemption utilization:
+     *      U' = (((ST_RAW_NAV - ST_REDEMPTION_ST_RAW_NAV - BONUS_ST_RAW_NAV) + ((JT_RAW_NAV - ST_REDEMPTION_JT_RAW_NAV - BONUS_JT_RAW_NAV) * β)) * COV) / (JT_EFFECTIVE_NAV - BONUS_ST_RAW_NAV - BONUS_JT_RAW_NAV)
+     *
+     *      NOTE: INVARIANT: U' <= U
+     *      Resulting invariant after simplification:
+     *      COVERED_EXPOSURE = ST_RAW_NAV + JT_RAW_NAV * β)
+     *      BONUS_ST_RAW_NAV * (COVERED_EXPOSURE - JT_EFFECTIVE_NAV) + BONUS_JT_RAW_NAV * (COVERED_EXPOSURE - β * JT_EFFECTIVE_NAV) <= JT_EFFECTIVE_NAV * (ST_REDEMPTION_ST_RAW_NAV + ST_REDEMPTION_JT_RAW_NAV * β)
+     *
+     *      Since with β < 1 BONUS_ST_RAW_NAV is cheaper per unit, use the ST_RAW_NAV to source the bonus first:
+     *      First Priority (BONUS_JT_RAW_NAV = 0):
+     *          BONUS_MAX = (ST_REDEMPTION_ST_RAW_NAV + ST_REDEMPTION_JT_RAW_NAV * β) * JT_EFFECTIVE_NAV / (COVERED_EXPOSURE - JT_EFFECTIVE_NAV)
+     *
+     *      Second Priority (BONUS_ST_RAW_NAV = JT_CLAIM_ON_ST_RAW_NAV, maxed out):
+     *          BONUS_MAX = (ST_REDEMPTION_ST_RAW_NAV + ST_REDEMPTION_JT_RAW_NAV * β + JT_CLAIM_ON_ST_RAW_NAV * (1 - β)) * JT_EFFECTIVE_NAV / (COVERED_EXPOSURE - β * JT_EFFECTIVE_NAV)
+     *
+     * @param _state The synced accounting state
+     * @param _stUserClaims The ST user's base claims before bonus
+     * @param _jtClaimOnSTRawNAV JT's cross-tranche claim on ST assets
+     * @return The maximum bonus NAV that maintains utilization neutrality
+     */
+    function _computeMaxUtilizationNeutralBonus(
+        SyncedAccountingState memory _state,
+        AssetClaims memory _stUserClaims,
+        NAV_UNIT _jtClaimOnSTRawNAV
+    )
+        internal
+        view
+        returns (NAV_UNIT)
+    {
+        NAV_UNIT jtEffectiveNAV = _state.jtEffectiveNAV;
+        if (jtEffectiveNAV == ZERO_NAV_UNITS) return ZERO_NAV_UNITS;
+
+        // Compute the total covered exposure of the market, rounding up to be conservative
+        NAV_UNIT totalCoveredExposure = _state.stRawNAV + _state.jtRawNAV.mulDiv(_state.betaWAD, WAD, Math.Rounding.Ceil);
+
+        // Compute the ST LP's NAV claim on real exposure (beta factored in)
+        NAV_UNIT stUserWeightedClaimNAV = stConvertTrancheUnitsToNAVUnits(_stUserClaims.stAssets)
+            + jtConvertTrancheUnitsToNAVUnits(_stUserClaims.jtAssets).mulDiv(_state.betaWAD, WAD, Math.Rounding.Floor);
+        // If no claim or healthy state (exposure ≤ jtEffectiveNAV), any bonus up to jtEffectiveNAV is safe
+        if (stUserWeightedClaimNAV == ZERO_NAV_UNITS || totalCoveredExposure <= jtEffectiveNAV) return jtEffectiveNAV;
+
+        // Case 1: Bonus sourced entirely from JT's claim on ST assets
+        // maxBonus = stUserWeightedClaimNAV * jtEffectiveNAV / (totalCoveredExposure - jtEffectiveNAV)
+        NAV_UNIT stAssetSourcedMaxBonusNAV =
+            stUserWeightedClaimNAV.mulDiv(toUint256(jtEffectiveNAV), toUint256(totalCoveredExposure - jtEffectiveNAV), Math.Rounding.Floor);
+        if (stAssetSourcedMaxBonusNAV <= _jtClaimOnSTRawNAV) return stAssetSourcedMaxBonusNAV;
+
+        // Case 2: Bonus sourced from both JT's claim on ST assets and JT's claim on JT assets
+        // maxBonus = (stUserWeightedClaimNAV + jtClaimOnSTRawNAV * (1 - β)) * jtEffectiveNAV / (totalCoveredExposure - β * jtEffectiveNAV)
+        NAV_UNIT betaScaledJTEffectiveNAV = jtEffectiveNAV.mulDiv(_state.betaWAD, WAD, Math.Rounding.Floor);
+        if (totalCoveredExposure <= betaScaledJTEffectiveNAV) return jtEffectiveNAV;
+
+        NAV_UNIT mixedAssetSourcedMaxBonusNAV = stUserWeightedClaimNAV + _jtClaimOnSTRawNAV.mulDiv(WAD - _state.betaWAD, WAD, Math.Rounding.Floor);
+        return mixedAssetSourcedMaxBonusNAV.mulDiv(toUint256(jtEffectiveNAV), toUint256(totalCoveredExposure - betaScaledJTEffectiveNAV), Math.Rounding.Floor);
     }
 
     // =============================
