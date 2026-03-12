@@ -646,7 +646,6 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         if (jtYieldShareWAD > WAD) jtYieldShareWAD = WAD;
 
         // Accrue the time-weighted yield share accrued to JT since the last tranche interaction
-
         twJTYieldShareAccruedWAD = $.twJTYieldShareAccruedWAD += uint192(jtYieldShareWAD * elapsed);
         $.lastAccrualTimestamp = uint32(block.timestamp);
 

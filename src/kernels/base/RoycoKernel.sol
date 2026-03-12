@@ -537,18 +537,22 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
 
     /// @inheritdoc IRoycoKernel
     function preTrancheBalanceUpdateHook(address _from, address _to, uint256 _value) external override(IRoycoKernel) onlyTranche whenNotPaused {
-        // Check if the sender or recipient are blacklisted
-        require(!isBlacklisted(_from), ACCOUNT_BLACKLISTED(_from));
-        require(!isBlacklisted(_to), ACCOUNT_BLACKLISTED(_to));
+        // Check if the sender is blacklisted if not a mint
+        require(_from == address(0) || !isBlacklisted(_from), ACCOUNT_BLACKLISTED(_from));
 
-        // If transferring shares, ensure that the recipient is a whitelisted LP for the tranche
-        // It is assumed that the sender is already a whitelisted LP
-        if (ENFORCE_TRANCHE_SHARES_TRANSFER_WHITELIST && _to != address(0)) {
-            address authority = authority();
-            // Check if the to address can call the deposit function on the tranche
-            // @dev msg.sender is the tranche address
-            (bool isWhitelistedTrancheLP,) = IAccessManager(authority).canCall(_to, msg.sender, IRoycoVaultTranche.deposit.selector);
-            require(_to != authority && isWhitelistedTrancheLP, ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(_to));
+        // Check if the recipient is blacklisted if not a redeem
+        if (_to != address(0)) {
+            require(!isBlacklisted(_to), ACCOUNT_BLACKLISTED(_to));
+
+            // If transferring shares, ensure that the recipient is a whitelisted LP for the tranche
+            // It is assumed that the sender is already a whitelisted LP
+            if (ENFORCE_TRANCHE_SHARES_TRANSFER_WHITELIST) {
+                address authority = authority();
+                // Check if the to address can call the deposit function on the tranche
+                // @dev msg.sender is the tranche address
+                (bool isWhitelistedTrancheLP,) = IAccessManager(authority).canCall(_to, msg.sender, IRoycoVaultTranche.deposit.selector);
+                require(_to != authority && isWhitelistedTrancheLP, ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(_to));
+            }
         }
 
         // Call the market specific pre-balance update hook
