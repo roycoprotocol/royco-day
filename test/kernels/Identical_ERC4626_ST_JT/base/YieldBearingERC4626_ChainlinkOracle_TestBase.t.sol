@@ -62,7 +62,7 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
     /// @notice Ensures the Chainlink oracle is mocked with a fresh timestamp
     /// @dev Reads the real oracle price (or cached mock) and re-mocks it with block.timestamp.
     ///      This prevents oracle staleness errors after time warps.
-    function _ensureChainlinkOracleMocked() internal {
+    function _ensureChainlinkOracleMocked() internal virtual {
         int256 currentPrice = _getCurrentChainlinkPrice();
         _mockChainlinkPrice(currentPrice);
     }
@@ -263,7 +263,7 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
 
     /// @notice Sets the stored conversion rate (base asset to NAV) in WAD precision
     /// @dev Requires ADMIN_ORACLE_QUOTER_ROLE, which is granted to ORACLE_QUOTER_ADMIN_ADDRESS
-    function _setStoredConversionRate(uint256 _newRateWAD) internal {
+    function _setStoredConversionRate(uint256 _newRateWAD) internal virtual {
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
         _kernelCast().setConversionRate(_newRateWAD, true);
     }
@@ -771,7 +771,7 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
     // NOTE: These tests require sentinel mode (stored rate == 0) so the oracle is queried
 
     /// @notice Tests that chainlink price yield increases NAV
-    function testFuzz_chainlinkPrice_yield_updatesNAV(uint256 _jtAmount, uint256 _yieldPercentage) external {
+    function testFuzz_chainlinkPrice_yield_updatesNAV(uint256 _jtAmount, uint256 _yieldPercentage) public virtual {
         _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _yieldPercentage = bound(_yieldPercentage, 1, 50);
 
@@ -792,7 +792,7 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
     }
 
     /// @notice Tests that chainlink price loss decreases NAV
-    function testFuzz_chainlinkPrice_loss_updatesNAV(uint256 _jtAmount, uint256 _lossPercentage) external {
+    function testFuzz_chainlinkPrice_loss_updatesNAV(uint256 _jtAmount, uint256 _lossPercentage) public virtual {
         _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _lossPercentage = bound(_lossPercentage, 1, 30);
 
@@ -812,7 +812,7 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
     }
 
     /// @notice Tests that chainlink price yield with ST deposits distributes correctly
-    function testFuzz_chainlinkPrice_yield_distributesToJT(uint256 _jtAmount, uint256 _stPercentage, uint256 _yieldPercentage) external {
+    function testFuzz_chainlinkPrice_yield_distributesToJT(uint256 _jtAmount, uint256 _stPercentage, uint256 _yieldPercentage) public virtual {
         _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 50);
         _yieldPercentage = bound(_yieldPercentage, 1, 20);
@@ -840,7 +840,7 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
     }
 
     /// @notice Tests NAV conservation after chainlink price changes
-    function testFuzz_chainlinkPrice_NAVConservation(uint256 _jtAmount, uint256 _yieldPercentage) external {
+    function testFuzz_chainlinkPrice_NAVConservation(uint256 _jtAmount, uint256 _yieldPercentage) public virtual {
         _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _yieldPercentage = bound(_yieldPercentage, 1, 30);
 
@@ -976,7 +976,8 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
         uint256 _sharePriceYieldBps,
         uint256 _chainlinkYieldBps
     )
-        external
+        public
+        virtual
     {
         _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _sharePriceYieldBps = bound(_sharePriceYieldBps, 10, 500);
@@ -1002,7 +1003,7 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
     }
 
     /// @notice Tests mixed direction: share price UP + chainlink DOWN
-    function testFuzz_combined_sharePriceUp_chainlinkDown(uint256 _jtAmount, uint256 _sharePriceYieldBps, uint256 _chainlinkLossBps) external {
+    function testFuzz_combined_sharePriceUp_chainlinkDown(uint256 _jtAmount, uint256 _sharePriceYieldBps, uint256 _chainlinkLossBps) public virtual {
         _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _sharePriceYieldBps = bound(_sharePriceYieldBps, 200, 500); // 2% to 5%
         _chainlinkLossBps = bound(_chainlinkLossBps, 10, 50); // 0.1% to 0.5%
@@ -1028,7 +1029,7 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
     }
 
     /// @notice Tests mixed direction: share price DOWN + chainlink UP
-    function testFuzz_combined_sharePriceDown_chainlinkUp(uint256 _jtAmount, uint256 _sharePriceLossBps, uint256 _chainlinkYieldBps) external {
+    function testFuzz_combined_sharePriceDown_chainlinkUp(uint256 _jtAmount, uint256 _sharePriceLossBps, uint256 _chainlinkYieldBps) public virtual {
         _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _sharePriceLossBps = bound(_sharePriceLossBps, 10, 50); // 0.1% to 0.5%
         _chainlinkYieldBps = bound(_chainlinkYieldBps, 200, 500); // 2% to 5%
@@ -1317,7 +1318,7 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Tests that in sentinel mode (stored rate == 0), the Chainlink oracle is queried
-    function test_sentinelMode_usesChainlinkOracle() external {
+    function test_sentinelMode_usesChainlinkOracle() public virtual {
         // Ensure sentinel mode
         assertEq(_getStoredConversionRate(), 0, "Should be in sentinel mode");
 
@@ -1356,7 +1357,7 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
     }
 
     /// @notice Tests transition from sentinel to non-sentinel mode
-    function testFuzz_sentinelToNonSentinel_transition(uint256 _jtAmount) external {
+    function testFuzz_sentinelToNonSentinel_transition(uint256 _jtAmount) public virtual {
         _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
 
         _depositJT(ALICE_ADDRESS, _jtAmount);

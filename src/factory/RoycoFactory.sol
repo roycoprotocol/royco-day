@@ -29,10 +29,12 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
      * @custom:storage-location erc7201:Royco.storage.RoycoFactoryState
      * @custom:mapping seniorTrancheToJuniorTranche - Mapping from a senior tranche to its corresponding junior tranche
      * @custom:mapping juniorTrancheToSeniorTranche - Mapping from a junior tranche to its corresponding senior tranche
+     * @custom:field scheduledOperationsExpirySeconds - The expiry time for scheduled operations in seconds
      */
     struct RoycoFactoryState {
         mapping(address st => address jt) seniorTrancheToJuniorTranche;
         mapping(address jt => address st) juniorTrancheToSeniorTranche;
+        uint32 scheduledOperationsExpirySeconds;
     }
 
     /// @notice Constructs the factory
@@ -45,25 +47,46 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
      * @notice Initializes the factory
      * @param _admin The admin of the factory
      * @param _deployer The deployer address that can deploy new markets
+     * @param _scheduledOperationsExpirySeconds The expiry time for scheduled operations in seconds
      * @param _roles The roles to assign to the factory
      */
-    function initialize(address _admin, address _deployer, RoleAssignmentConfiguration[] calldata _roles) external virtual initializer {
+    function initialize(
+        address _admin,
+        address _deployer,
+        uint32 _scheduledOperationsExpirySeconds,
+        RoleAssignmentConfiguration[] calldata _roles
+    )
+        external
+        virtual
+        initializer
+    {
         // Initialize the access manager
         __AccessManager_init(_admin);
         // Initialize the factory
-        __RoycoFactory_init_unchained(_deployer, _roles);
+        __RoycoFactory_init_unchained(_deployer, _scheduledOperationsExpirySeconds, _roles);
     }
 
     /**
      * @notice Initializes the factory
      * @param _deployer The deployer address that can deploy new markets
+     * @param _scheduledOperationsExpirySeconds The expiry time for scheduled operations in seconds
      * @param _roles The roles to assign to the factory
      */
-    function __RoycoFactory_init_unchained(address _deployer, RoleAssignmentConfiguration[] calldata _roles) internal onlyInitializing {
+    function __RoycoFactory_init_unchained(
+        address _deployer,
+        uint32 _scheduledOperationsExpirySeconds,
+        RoleAssignmentConfiguration[] calldata _roles
+    )
+        internal
+        onlyInitializing
+    {
+        // Set the scheduled operations expiry seconds
+        _setScheduledOperationsExpiry(_scheduledOperationsExpirySeconds);
+
         // Grant the deployer the deployer role
         _grantRole(DEPLOYER_ROLE, _deployer, 0, 0);
         // Set the deployer role on the deployMarket function
-        _setTargetFunctionRole(address(this), RoycoFactory.deployMarket.selector, DEPLOYER_ROLE);
+        _setTargetFunctionRole(address(this), IRoycoFactory.deployMarket.selector, DEPLOYER_ROLE);
 
         // Configure the factory upgrader role
         _setTargetFunctionRole(address(this), UUPSUpgradeable.upgradeToAndCall.selector, ADMIN_UPGRADER_ROLE);
@@ -130,6 +153,27 @@ contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFac
         $.juniorTrancheToSeniorTranche[juniorTranche] = seniorTranche;
 
         emit MarketDeployed(roycoMarket, _params);
+    }
+
+    /// @inheritdoc IRoycoFactory
+    function setScheduledOperationsExpiry(uint32 _scheduledOperationsExpirySeconds) external override(IRoycoFactory) onlyAuthorized {
+        require(_scheduledOperationsExpirySeconds > 0, INVALID_SCHEDULED_OPERATIONS_EXPIRY_SECONDS());
+        _getRoycoFactoryStorage().scheduledOperationsExpirySeconds = _scheduledOperationsExpirySeconds;
+    }
+
+    /// @inheritdoc AccessManagerUpgradeable
+    function expiration() public view override(AccessManagerUpgradeable) returns (uint32) {
+        return _getRoycoFactoryStorage().scheduledOperationsExpirySeconds;
+    }
+
+    /**
+     * @notice Sets the scheduled operations expiry seconds
+     * @param _scheduledOperationsExpirySeconds The expiry time for scheduled operations in seconds
+     */
+    function _setScheduledOperationsExpiry(uint32 _scheduledOperationsExpirySeconds) internal {
+        require(_scheduledOperationsExpirySeconds != 0, INVALID_SCHEDULED_OPERATIONS_EXPIRY_SECONDS());
+        _getRoycoFactoryStorage().scheduledOperationsExpirySeconds = _scheduledOperationsExpirySeconds;
+        emit ScheduledOperationsExpirySecondsSet(_scheduledOperationsExpirySeconds);
     }
 
     /**

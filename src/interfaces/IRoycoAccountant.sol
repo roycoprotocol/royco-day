@@ -180,6 +180,11 @@ interface IRoycoAccountant {
      */
     event JTImpermanentLossReset(NAV_UNIT jtImpermanentLossErased);
 
+    /**
+     * @notice Emitted when a fixed term regime is ended by this market
+     */
+    event FixedTermEnded();
+
     /// @notice Thrown when the caller of the function is not the accountant's configured Royco Kernel
     error ONLY_ROYCO_KERNEL();
 
