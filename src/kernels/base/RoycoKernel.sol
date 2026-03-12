@@ -865,7 +865,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      *
      *      Since with β < 1 BONUS_ST_RAW_NAV is cheaper per unit, use the ST_RAW_NAV to source the bonus first:
      *      First Priority (BONUS_JT_RAW_NAV = 0):
-     *          BONUS_MAX = (ST_REDEMPTION_ST_RAW_NAV + ST_REDEMPTION_JT_RAW_NAV * β) * JT_EFFECTIVE_NAV / (COVERED_EXPOSURE - JT_EFFECTIVE_NAV)
+     *          BONUS_ST_RAW_NAV = (ST_REDEMPTION_ST_RAW_NAV + ST_REDEMPTION_JT_RAW_NAV * β) * JT_EFFECTIVE_NAV / (COVERED_EXPOSURE - JT_EFFECTIVE_NAV)
      *
      *      Second Priority (BONUS_ST_RAW_NAV = JT_CLAIM_ON_ST_RAW_NAV, maxed out):
      *          BONUS_MAX = (ST_REDEMPTION_ST_RAW_NAV + ST_REDEMPTION_JT_RAW_NAV * β + JT_CLAIM_ON_ST_RAW_NAV * (1 - β)) * JT_EFFECTIVE_NAV / (COVERED_EXPOSURE - β * JT_EFFECTIVE_NAV)
@@ -873,7 +873,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      * @param _state The synced accounting state
      * @param _stUserClaims The ST user's base claims before bonus
      * @param _jtClaimOnSTRawNAV JT's cross-tranche claim on ST assets
-     * @return The maximum bonus NAV that maintains utilization neutrality
+     * @return maxUtilizationNeutralBonusNAV The maximum bonus NAV that maintains utilization neutrality
      */
     function _computeMaxUtilizationNeutralBonus(
         SyncedAccountingState memory _state,
@@ -882,33 +882,32 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     )
         internal
         view
-        returns (NAV_UNIT)
+        returns (NAV_UNIT maxUtilizationNeutralBonusNAV)
     {
+        // Preemptively return if there is no remaining captial to source a bonus from
         NAV_UNIT jtEffectiveNAV = _state.jtEffectiveNAV;
         if (jtEffectiveNAV == ZERO_NAV_UNITS) return ZERO_NAV_UNITS;
 
         // Compute the total covered exposure of the market, rounding up to be conservative
         NAV_UNIT totalCoveredExposure = _state.stRawNAV + _state.jtRawNAV.mulDiv(_state.betaWAD, WAD, Math.Rounding.Ceil);
 
-        // Compute the ST LP's NAV claim on real exposure (beta factored in)
+        // Compute the ST LP's NAV claim on real exposure (with beta factored in)
         NAV_UNIT stUserWeightedClaimNAV = stConvertTrancheUnitsToNAVUnits(_stUserClaims.stAssets)
             + jtConvertTrancheUnitsToNAVUnits(_stUserClaims.jtAssets).mulDiv(_state.betaWAD, WAD, Math.Rounding.Floor);
-        // If no claim or healthy state (exposure ≤ jtEffectiveNAV), any bonus up to jtEffectiveNAV is safe
-        if (stUserWeightedClaimNAV == ZERO_NAV_UNITS || totalCoveredExposure <= jtEffectiveNAV) return jtEffectiveNAV;
+        // If the weighted claim is zero, there is no bonus to apply
+        if (stUserWeightedClaimNAV == ZERO_NAV_UNITS) return ZERO_NAV_UNITS;
 
         // Case 1: Bonus sourced entirely from JT's claim on ST assets
         // maxBonus = stUserWeightedClaimNAV * jtEffectiveNAV / (totalCoveredExposure - jtEffectiveNAV)
-        NAV_UNIT stAssetSourcedMaxBonusNAV =
-            stUserWeightedClaimNAV.mulDiv(toUint256(jtEffectiveNAV), toUint256(totalCoveredExposure - jtEffectiveNAV), Math.Rounding.Floor);
+        NAV_UNIT stAssetSourcedMaxBonusNAV = stUserWeightedClaimNAV.mulDiv(jtEffectiveNAV, (totalCoveredExposure - jtEffectiveNAV), Math.Rounding.Floor);
         if (stAssetSourcedMaxBonusNAV <= _jtClaimOnSTRawNAV) return stAssetSourcedMaxBonusNAV;
 
         // Case 2: Bonus sourced from both JT's claim on ST assets and JT's claim on JT assets
         // maxBonus = (stUserWeightedClaimNAV + jtClaimOnSTRawNAV * (1 - β)) * jtEffectiveNAV / (totalCoveredExposure - β * jtEffectiveNAV)
-        NAV_UNIT betaScaledJTEffectiveNAV = jtEffectiveNAV.mulDiv(_state.betaWAD, WAD, Math.Rounding.Floor);
-        if (totalCoveredExposure <= betaScaledJTEffectiveNAV) return jtEffectiveNAV;
-
-        NAV_UNIT mixedAssetSourcedMaxBonusNAV = stUserWeightedClaimNAV + _jtClaimOnSTRawNAV.mulDiv(WAD - _state.betaWAD, WAD, Math.Rounding.Floor);
-        return mixedAssetSourcedMaxBonusNAV.mulDiv(toUint256(jtEffectiveNAV), toUint256(totalCoveredExposure - betaScaledJTEffectiveNAV), Math.Rounding.Floor);
+        NAV_UNIT betaScaledTEffectiveNAV = jtEffectiveNAV.mulDiv(_state.betaWAD, WAD, Math.Rounding.Floor);
+        NAV_UNIT mixedAssetSourcedMaxBonusNAV =
+            stUserWeightedClaimNAV + _jtClaimOnSTRawNAV.mulDiv(Math.saturatingSub(WAD, _state.betaWAD), WAD, Math.Rounding.Floor);
+        return mixedAssetSourcedMaxBonusNAV.mulDiv(jtEffectiveNAV, (totalCoveredExposure - betaScaledTEffectiveNAV), Math.Rounding.Floor);
     }
 
     // =============================
