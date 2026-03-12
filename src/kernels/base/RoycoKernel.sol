@@ -864,7 +864,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
      *
      *      NOTE: INVARIANT: U' <= U
      *      Resulting invariant after simplification:
-     *      COVERED_EXPOSURE = ST_RAW_NAV + JT_RAW_NAV * β)
+     *      COVERED_EXPOSURE = ST_RAW_NAV + JT_RAW_NAV * β
      *      BONUS_ST_RAW_NAV * (COVERED_EXPOSURE - JT_EFFECTIVE_NAV) + BONUS_JT_RAW_NAV * (COVERED_EXPOSURE - β * JT_EFFECTIVE_NAV) <= JT_EFFECTIVE_NAV * (ST_REDEMPTION_ST_RAW_NAV + ST_REDEMPTION_JT_RAW_NAV * β)
      *
      *      Since with β < 1 BONUS_ST_RAW_NAV is cheaper per unit, use the ST_RAW_NAV to source the bonus first:

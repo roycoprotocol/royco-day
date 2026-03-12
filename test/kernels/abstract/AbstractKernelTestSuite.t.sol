@@ -1605,7 +1605,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 4);
 
         // Deposit JT
-        uint256 _jtShares = _depositJT(ALICE_ADDRESS, _jtAmount);
+        _depositJT(ALICE_ADDRESS, _jtAmount);
         uint256 maxRedeemable = JT.maxRedeem(ALICE_ADDRESS);
         if (maxRedeemable == 0) return;
 
@@ -1867,17 +1867,11 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         uint256 stShares = _depositST(BOB_ADDRESS, stAmount);
 
-        // Record maxRedeem before yield
-        uint256 _jtMaxRedeemBeforeYield = JT.maxRedeem(ALICE_ADDRESS);
-
         // Simulate yield
         simulateJTYield(_yieldPercentage * 1e16);
         vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
-
-        // maxRedeem after yield
-        uint256 _jtMaxRedeemAfterYield = JT.maxRedeem(ALICE_ADDRESS);
 
         // ST maxRedeem should still be full balance
         assertEq(ST.maxRedeem(BOB_ADDRESS), stShares, "ST maxRedeem should still be full balance");
@@ -2139,8 +2133,6 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         _depositST(BOB_ADDRESS, stDeposit);
 
         // Verify ST deposits are initially allowed for new depositors
-        TRANCHE_UNIT _maxDepositBefore = ST.maxDeposit(CHARLIE_ADDRESS);
-
         // Simulate a massive loss that exceeds JT capacity (50% loss)
         // This will cause ST impermanent loss since JT cannot cover all losses
         simulateJTLoss(0.5e18);
@@ -2341,8 +2333,6 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         uint256 stShares = _depositST(BOB_ADDRESS, stAmount);
 
         // Record state before loss
-        NAV_UNIT stNAVBeforeLoss = ST.totalAssets().nav;
-
         // Simulate severe loss to push utilization above liquidation threshold
         // We need utilization >= liquidationUtilizationWAD
         simulateJTLoss(0.8e18); // 80% loss to drastically reduce JT effective NAV
@@ -2778,7 +2768,6 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // - If actualBonus > jtClaimOnSTRawNAV, ST assets sourced first, remainder from JT assets
         if (toUint256(jtClaimOnSTRawNAV) > 0 && toUint256(actualBonusNAV) > 0) {
             // Calculate expected bonus distribution
-            NAV_UNIT bonusFromSTAssets = actualBonusNAV <= jtClaimOnSTRawNAV ? actualBonusNAV : jtClaimOnSTRawNAV;
             NAV_UNIT bonusFromJTAssets = actualBonusNAV > jtClaimOnSTRawNAV ? actualBonusNAV - jtClaimOnSTRawNAV : ZERO_NAV_UNITS;
 
             // If bonus fully sourced from ST assets, jtAssets claim should be minimal (only original cross-claim)
@@ -3117,8 +3106,6 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
 
         uint256 utilizationBefore = state.utilizationWAD;
-        uint256 baseClaim = toUint256(state.stEffectiveNAV);
-
         vm.prank(BOB_ADDRESS);
         AssetClaims memory claims = ST.redeem(stShares, BOB_ADDRESS, BOB_ADDRESS);
 

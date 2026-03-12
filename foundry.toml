@@ -40,7 +40,7 @@ ignore = ["libs/*", "*.t.sol"]
 sort_imports = true
 
 [lint]
-exclude_lints = ["mixed-case-function", "mixed-case-variable", "unsafe-typecast", "pascal-case-struct", "unwrapped-modifier-logic"]
+exclude_lints = ["mixed-case-function", "mixed-case-variable", "unsafe-typecast", "pascal-case-struct", "unwrapped-modifier-logic", "erc20-unchecked-transfer"]
 
 [fuzz]
 runs = 200

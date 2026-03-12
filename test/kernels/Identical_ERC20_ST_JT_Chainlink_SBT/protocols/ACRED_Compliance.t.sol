@@ -11,7 +11,7 @@ import {
     Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel
 } from "../../../../src/kernels/Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.sol";
 import { AssetClaims, MarketState } from "../../../../src/libraries/Types.sol";
-import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
+import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
 import { Identical_ERC20_ST_JT_Chainlink_SBT_TestBase } from "../base/Identical_ERC20_ST_JT_Chainlink_SBT_TestBase.t.sol";
 
 interface IDSTokenLike {
@@ -354,7 +354,11 @@ contract ACRED_ComplianceTest is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
         // We cannot predict exact claims, so just check that the event is emitted
         vm.expectEmit(true, true, true, false, address(ST));
         emit IRoycoVaultTranche.SharesSeizedAndRedeemed(
-            TRANSFER_AGENT_ADDRESS, BOB_ADDRESS, TRANSFER_AGENT_ADDRESS, AssetClaims(TRANCHE_UNIT.wrap(0), TRANCHE_UNIT.wrap(0), NAV_UNIT.wrap(0)), stShares
+            TRANSFER_AGENT_ADDRESS,
+            BOB_ADDRESS,
+            TRANSFER_AGENT_ADDRESS,
+            AssetClaims({ stAssets: TRANCHE_UNIT.wrap(0), jtAssets: TRANCHE_UNIT.wrap(0), nav: NAV_UNIT.wrap(0) }),
+            stShares
         );
 
         vm.prank(TRANSFER_AGENT_ADDRESS);
@@ -476,7 +480,7 @@ contract ACRED_ComplianceTest is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
 
     function test_soulBound_ST_partialTransferReverts() external {
         _depositJT(ALICE_ADDRESS, 100e6);
-        uint256 stShares = _depositST(BOB_ADDRESS, 10e6);
+        _depositST(BOB_ADDRESS, 10e6);
         _grantLPRoles(ALICE_ADDRESS);
 
         // Even transferring 1 wei of shares should revert

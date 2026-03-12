@@ -23,7 +23,7 @@ contract MorphoV1_SmokehouseUSDC is DisabledChainlinkOracle_ERC4626_TestBase {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice SmokehouseUSDC on Ethereum mainnet
-    address internal constant SmokehouseUSDC = 0xBEeFFF209270748ddd194831b3fa287a5386f5bC;
+    address internal constant SMOKEHOUSE_USDC_ADDRESS = 0xBEeFFF209270748ddd194831b3fa287a5386f5bC;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // PROTOCOL CONFIGURATION
@@ -34,8 +34,8 @@ contract MorphoV1_SmokehouseUSDC is DisabledChainlinkOracle_ERC4626_TestBase {
         return TestConfig({
             forkBlock: 24_532_268,
             forkRpcUrlEnvVar: "MAINNET_RPC_URL",
-            stAsset: SmokehouseUSDC,
-            jtAsset: SmokehouseUSDC,
+            stAsset: SMOKEHOUSE_USDC_ADDRESS,
+            jtAsset: SMOKEHOUSE_USDC_ADDRESS,
             initialFunding: 1_000_000_000e18 // 1B SmokehouseUSDC
         });
     }

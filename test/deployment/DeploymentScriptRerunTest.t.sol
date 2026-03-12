@@ -350,20 +350,6 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         // This simulates a scenario where the factory already exists and we just want to add a new market
         vm.warp(block.timestamp + 1);
 
-        // Build market deployment params for factory.deployMarket()
-        bytes32 _marketId2 = keccak256(abi.encodePacked("Second Market", vm.getBlockTimestamp()));
-
-        // Get expected addresses
-        bytes32 salt2 = keccak256(abi.encodePacked("MARKET_2_SALT"));
-        address _expectedST = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-ST")));
-        address _expectedJT = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-JT")));
-        address _expectedKernel = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-KERNEL")));
-        address _expectedAccountant = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-ACCOUNTANT")));
-
-        // Note: For a full test, we would need to build all the initialization data
-        // This test demonstrates that the DEPLOYER role is properly configured
-        // and could deploy additional markets
-
         // Verify the factory admin is OWNER_ADDRESS after deployment
         (bool isOwnerAdmin,) = IAccessManager(address(factory)).hasRole(0, OWNER_ADDRESS);
         assertTrue(isOwnerAdmin, "OWNER should be admin of the factory");

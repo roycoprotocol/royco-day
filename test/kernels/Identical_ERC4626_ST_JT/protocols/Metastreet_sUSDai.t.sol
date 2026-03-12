@@ -12,7 +12,7 @@ import { IUSDai } from "../../../../src/interfaces/external/usdai/IUSDai.sol";
 import { IdenticalAssetsAdminOracleQuoter } from "../../../../src/kernels/base/quoter/base/IdenticalAssetsAdminOracleQuoter.sol";
 import { sUSDai_ST_JT_SharePriceToAdminOracle_Kernel } from "../../../../src/kernels/sUSDai_ST_JT_SharePriceToAdminOracle_Kernel.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
-import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
+import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/libraries/Units.sol";
 
 import { YieldBearingERC4626_TestBase } from "../base/YieldBearingERC4626_TestBase.t.sol";
 

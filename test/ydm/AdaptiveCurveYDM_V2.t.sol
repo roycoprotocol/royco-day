@@ -5,9 +5,10 @@ import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math
 import { FixedPointMathLib } from "../../lib/solady/src/utils/FixedPointMathLib.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
 import { TARGET_UTILIZATION_WAD, TARGET_UTILIZATION_WAD_INT, WAD, WAD_INT, ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
+import { MarketState } from "../../src/libraries/Types.sol";
 import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
 import { AdaptiveCurveYDM_V2 } from "../../src/ydm/AdaptiveCurveYDM_V2.sol";
-import { BaseTest, MarketState } from "../base/BaseTest.t.sol";
+import { BaseTest } from "../base/BaseTest.t.sol";
 
 contract AdaptiveCurveYDM_V2Test is BaseTest {
     using Math for uint256;

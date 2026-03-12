@@ -55,8 +55,6 @@ contract GuardianCancellationTest is BaseTest {
     }
 
     function _deployMarketWithKernel() internal returns (DeployScript.DeploymentResult memory) {
-        bytes32 _marketID = keccak256(abi.encodePacked(SENIOR_TRANCHE_NAME, JUNIOR_TRANCHE_NAME, vm.getBlockTimestamp()));
-
         // Build kernel-specific params
         DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams memory kernelParams =
             DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 });

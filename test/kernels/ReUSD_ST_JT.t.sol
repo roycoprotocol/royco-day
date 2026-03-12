@@ -9,7 +9,7 @@ import { IInsuranceCapitalLayer } from "../../src/interfaces/external/reUSD/IIns
 import { ReUSD_ST_JT_ICLOracle_Kernel } from "../../src/kernels/ReUSD_ST_JT_ICLOracle_Kernel.sol";
 import { IdenticalAssetsOracleQuoter } from "../../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
 import { WAD, WAD } from "../../src/libraries/Constants.sol";
-import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits } from "../../src/libraries/Units.sol";
+import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../src/libraries/Units.sol";
 
 import { AbstractKernelTestSuite } from "./abstract/AbstractKernelTestSuite.t.sol";
 

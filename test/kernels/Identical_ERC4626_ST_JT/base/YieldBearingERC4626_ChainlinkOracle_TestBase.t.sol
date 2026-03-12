@@ -12,7 +12,7 @@ import {
 import { IdenticalAssetsChainlinkOracleQuoter } from "../../../../src/kernels/base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
 import { WAD, WAD_DECIMALS, ZERO_NAV_UNITS } from "../../../../src/libraries/Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../../../src/libraries/Types.sol";
-import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
+import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
 import { AbstractKernelTestSuite } from "../../abstract/AbstractKernelTestSuite.t.sol";
 
 /// @title YieldBearingERC4626_ChainlinkOracle_TestBase
@@ -1396,7 +1396,7 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
         // Mock Chainlink to a specific price
         _mockChainlinkPrice(int256(1e8));
 
-        uint256 nonSentinelRate = _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
+        _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
 
         // Now switch back to sentinel mode
         _setStoredConversionRate(0);

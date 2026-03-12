@@ -23,7 +23,7 @@ contract MorphoV2_GauntletUSDCFrontier is DisabledChainlinkOracle_ERC4626_TestBa
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice GauntletUSDCFrontier on Ethereum mainnet
-    address internal constant GauntletUSDCFrontier = 0x9a1D6bd5b8642C41F25e0958129B85f8E1176F3e;
+    address internal constant GAUNTLET_USDC_FRONTIER_ADDRESS = 0x9a1D6bd5b8642C41F25e0958129B85f8E1176F3e;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // PROTOCOL CONFIGURATION
@@ -34,8 +34,8 @@ contract MorphoV2_GauntletUSDCFrontier is DisabledChainlinkOracle_ERC4626_TestBa
         return TestConfig({
             forkBlock: 24_532_268,
             forkRpcUrlEnvVar: "MAINNET_RPC_URL",
-            stAsset: GauntletUSDCFrontier,
-            jtAsset: GauntletUSDCFrontier,
+            stAsset: GAUNTLET_USDC_FRONTIER_ADDRESS,
+            jtAsset: GAUNTLET_USDC_FRONTIER_ADDRESS,
             initialFunding: 10_000_000e18 // 10m GauntletUSDCFrontier
         });
     }
