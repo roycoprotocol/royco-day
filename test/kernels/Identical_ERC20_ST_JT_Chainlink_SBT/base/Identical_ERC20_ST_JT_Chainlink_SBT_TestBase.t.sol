@@ -5,6 +5,7 @@ import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/E
 import {
     Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel
 } from "../../../../src/kernels/Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.sol";
+import { toTrancheUnits } from "../../../../src/libraries/Units.sol";
 import { YieldBearingERC20Chainlink_TestBase } from "../../Identical_ERC20_ST_JT_Chainlink/base/YieldBearingERC20Chainlink_TestBase.t.sol";
 
 /// @title Identical_ERC20_ST_JT_Chainlink_SBT_TestBase
@@ -96,5 +97,85 @@ abstract contract Identical_ERC20_ST_JT_Chainlink_SBT_TestBase is YieldBearingER
         JT.seizeAndRedeemShares(ALICE_ADDRESS, TRANSFER_AGENT_ADDRESS, jtShares);
 
         assertEq(IERC20(address(JT)).balanceOf(ALICE_ADDRESS), 0, "Source should have no JT shares after seizure");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SOUL-BOUND: DEPOSIT-TO-SELF SUCCEEDS, DEPOSIT-ON-BEHALF BLOCKED
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function test_soulBound_depositToSelf_ST_succeeds() external {
+        uint256 depositAmount = _minDepositAmount() * 10;
+        _depositJT(ALICE_ADDRESS, depositAmount);
+
+        // BOB deposits to himself — should succeed
+        uint256 stShares = _depositST(BOB_ADDRESS, depositAmount / 2);
+        assertGt(stShares, 0, "BOB should have ST shares from self-deposit");
+    }
+
+    function test_soulBound_depositToSelf_JT_succeeds() external {
+        uint256 depositAmount = _minDepositAmount() * 10;
+
+        // ALICE deposits to herself — should succeed
+        uint256 jtShares = _depositJT(ALICE_ADDRESS, depositAmount);
+        assertGt(jtShares, 0, "ALICE should have JT shares from self-deposit");
+    }
+
+    function test_soulBound_depositOnBehalf_ST_reverts() external {
+        uint256 depositAmount = _minDepositAmount() * 10;
+        _depositJT(ALICE_ADDRESS, depositAmount);
+
+        // Grant both ALICE (caller) and BOB (receiver) LP roles so whitelist passes
+        _grantLPRoles(ALICE_ADDRESS);
+        _grantLPRoles(BOB_ADDRESS);
+
+        // ALICE tries to deposit ST on behalf of BOB — should revert
+        uint256 amount = depositAmount / 2;
+        dealSTAsset(ALICE_ADDRESS, amount);
+        vm.startPrank(ALICE_ADDRESS);
+        IERC20(config.stAsset).approve(address(ST), amount);
+        vm.expectRevert(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.TRANCHE_SHARES_ARE_SOUL_BOUND.selector);
+        ST.deposit(toTrancheUnits(amount), BOB_ADDRESS);
+        vm.stopPrank();
+    }
+
+    function test_soulBound_depositOnBehalf_JT_reverts() external {
+        uint256 depositAmount = _minDepositAmount() * 10;
+
+        // Grant both ALICE (caller) and BOB (receiver) LP roles so whitelist passes
+        _grantLPRoles(ALICE_ADDRESS);
+        _grantLPRoles(BOB_ADDRESS);
+
+        // ALICE tries to deposit JT on behalf of BOB — should revert
+        dealJTAsset(ALICE_ADDRESS, depositAmount);
+        vm.startPrank(ALICE_ADDRESS);
+        IERC20(config.jtAsset).approve(address(JT), depositAmount);
+        vm.expectRevert(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.TRANCHE_SHARES_ARE_SOUL_BOUND.selector);
+        JT.deposit(toTrancheUnits(depositAmount), BOB_ADDRESS);
+        vm.stopPrank();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SOUL-BOUND: REDEEM (BURN) SUCCEEDS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function test_soulBound_redeem_ST_succeeds() external {
+        uint256 depositAmount = _minDepositAmount() * 10;
+        _depositJT(ALICE_ADDRESS, depositAmount);
+        uint256 stShares = _depositST(BOB_ADDRESS, depositAmount / 2);
+
+        vm.prank(BOB_ADDRESS);
+        ST.redeem(stShares, BOB_ADDRESS, BOB_ADDRESS);
+
+        assertEq(IERC20(address(ST)).balanceOf(BOB_ADDRESS), 0, "BOB should have no ST shares after redeem");
+    }
+
+    function test_soulBound_redeem_JT_succeeds() external {
+        uint256 depositAmount = _minDepositAmount() * 10;
+        uint256 jtShares = _depositJT(ALICE_ADDRESS, depositAmount);
+
+        vm.prank(ALICE_ADDRESS);
+        JT.redeem(jtShares, ALICE_ADDRESS, ALICE_ADDRESS);
+
+        assertEq(IERC20(address(JT)).balanceOf(ALICE_ADDRESS), 0, "ALICE should have no JT shares after redeem");
     }
 }

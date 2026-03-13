@@ -59,7 +59,9 @@ contract sUSDai_ST_JT_SharePriceToAdminOracle_Kernel is RoycoKernel, IdenticalAs
     }
 
     /// @inheritdoc RoycoKernel
-    function _preTrancheBalanceUpdate(address _from, address _to, uint256) internal view override(RoycoKernel) {
+    function _preTrancheBalanceUpdate(address _caller, address _from, address _to, uint256) internal view override(RoycoKernel) {
+        // Check if the caller is blacklisted
+        require(!IUSDai(USDAI).isBlacklisted(_caller), ACCOUNT_ON_USDAI_BLACKLIST(_caller));
         // Only check blacklisted status for the sender on redeem and recipient on mint
         // Check that the sender is not blacklisted by USDai
         require(_from == address(0) || !IUSDai(USDAI).isBlacklisted(_from), ACCOUNT_ON_USDAI_BLACKLIST(_from));
