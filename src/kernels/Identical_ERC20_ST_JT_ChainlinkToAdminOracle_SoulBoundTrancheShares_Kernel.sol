@@ -19,13 +19,10 @@ contract Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Ker
 
     /// @inheritdoc RoycoKernel
     function _preTrancheBalanceUpdate(address _caller, address _from, address _to, uint256) internal view override(RoycoKernel) {
-        // If minting, ensure that the caller is the recipient.
+        // If minting, ensure that the caller is the recipient
         // The exception is for the kernel contract itself, which can mint protocol fee shares on behalf of the protocol fee recipient
         if (_from == address(0)) {
-            require(
-                (_to != address(0) && _caller == _to) || (_to == _getRoycoKernelStorage().protocolFeeRecipient && _caller == address(this)),
-                TRANCHE_SHARES_ARE_SOUL_BOUND()
-            );
+            require(_to == _caller || (_to == _getRoycoKernelStorage().protocolFeeRecipient && _caller == address(this)), TRANCHE_SHARES_ARE_SOUL_BOUND());
         }
         // If it's not a mint, enforce that it's a burn, otherwise the transfer is invalid
         else {
