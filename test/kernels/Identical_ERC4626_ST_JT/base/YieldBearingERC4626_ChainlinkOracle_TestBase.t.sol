@@ -579,6 +579,9 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
 
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+        uint256 bobBalance = IERC4626(config.stAsset).balanceOf(BOB_ADDRESS);
+        if (stAmount > bobBalance) stAmount = bobBalance;
         if (stAmount < _minDepositAmount()) return;
 
         _depositST(BOB_ADDRESS, stAmount);
@@ -606,6 +609,9 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
 
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+        uint256 bobBalance = IERC4626(config.stAsset).balanceOf(BOB_ADDRESS);
+        if (stAmount > bobBalance) stAmount = bobBalance;
         if (stAmount < _minDepositAmount()) return;
 
         _depositST(BOB_ADDRESS, stAmount);
@@ -639,6 +645,9 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
 
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+        uint256 bobBalance = IERC4626(config.stAsset).balanceOf(BOB_ADDRESS);
+        if (stAmount > bobBalance) stAmount = bobBalance;
         if (stAmount < _minDepositAmount()) return;
 
         _depositST(BOB_ADDRESS, stAmount);
