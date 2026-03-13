@@ -74,7 +74,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
     uint96 internal BETA_WAD = 0;
     uint64 internal ST_PROTOCOL_FEE_WAD = 0.1e18;
     uint64 internal JT_PROTOCOL_FEE_WAD = 0.1e18;
-    uint64 internal LLTV = 0.97e18;
+    uint256 internal LIQUIDATION_UTILIZATION_WAD = 6.4667e18;
     uint24 internal FIXED_TERM_DURATION_SECONDS = 2 weeks;
     uint256 internal DUST_TOLERANCE_RAW = 1;
     uint24 internal JT_REDEMPTION_DELAY_SECONDS = 1_000_000;
@@ -207,7 +207,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         config.jtYieldShareProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
         config.coverageWAD = COVERAGE_WAD;
         config.betaWAD = BETA_WAD;
-        config.lltvWAD = LLTV;
+        config.liquidationUtilizationWAD = LIQUIDATION_UTILIZATION_WAD;
         config.fixedTermDurationSeconds = FIXED_TERM_DURATION_SECONDS;
         config.ydmType = DeployScript.YDMType.AdaptiveCurve_V2;
         config.kernelSpecificParams = abi.encode(DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 }));
@@ -234,7 +234,9 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         (DeploymentConfig.MarketDeploymentConfig memory config1, IRoycoFactory.RoleAssignmentConfiguration[] memory roles1) =
             _buildDeploymentConfig("Royco Senior Tranche Alpha", "RST-A", "Royco Junior Tranche Alpha", "RJT-A", address(MOCK_UNDERLYING_ST_VAULT_1));
 
-        DeployScript.DeploymentResult memory result1 = DEPLOY_SCRIPT.deploy(config1, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roles1, DEPLOYER.privateKey);
+        uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
+        DeployScript.DeploymentResult memory result1 =
+            DEPLOY_SCRIPT.deploy(config1, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roles1, DEPLOYER.privateKey);
 
         // Verify first deployment succeeded
         assertTrue(address(result1.factory) != address(0), "First factory should be deployed");
@@ -259,7 +261,8 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
             _buildDeploymentConfig("Royco Senior Tranche Beta", "RST-B", "Royco Junior Tranche Beta", "RJT-B", address(MOCK_UNDERLYING_ST_VAULT_2));
 
         // Second deployment should succeed
-        DeployScript.DeploymentResult memory result2 = DEPLOY_SCRIPT.deploy(config2, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roles2, DEPLOYER.privateKey);
+        DeployScript.DeploymentResult memory result2 =
+            DEPLOY_SCRIPT.deploy(config2, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roles2, DEPLOYER.privateKey);
 
         // Verify second deployment succeeded
         assertTrue(address(result2.factory) != address(0), "Second factory should be deployed");
@@ -292,7 +295,9 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         (DeploymentConfig.MarketDeploymentConfig memory config1, IRoycoFactory.RoleAssignmentConfiguration[] memory roles1) =
             _buildDeploymentConfig("Royco Senior Tranche Alpha", "RST-A", "Royco Junior Tranche Alpha", "RJT-A", address(MOCK_UNDERLYING_ST_VAULT_1));
 
-        DeployScript.DeploymentResult memory result1 = DEPLOY_SCRIPT.deploy(config1, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roles1, DEPLOYER.privateKey);
+        uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
+        DeployScript.DeploymentResult memory result1 =
+            DEPLOY_SCRIPT.deploy(config1, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roles1, DEPLOYER.privateKey);
 
         // Verify roles are configured for first deployment
         IAccessManager factory1 = IAccessManager(address(result1.factory));
@@ -311,7 +316,8 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         (DeploymentConfig.MarketDeploymentConfig memory config2, IRoycoFactory.RoleAssignmentConfiguration[] memory roles2) =
             _buildDeploymentConfig("Royco Senior Tranche Beta", "RST-B", "Royco Junior Tranche Beta", "RJT-B", address(MOCK_UNDERLYING_ST_VAULT_2));
 
-        DeployScript.DeploymentResult memory result2 = DEPLOY_SCRIPT.deploy(config2, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roles2, DEPLOYER.privateKey);
+        DeployScript.DeploymentResult memory result2 =
+            DEPLOY_SCRIPT.deploy(config2, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roles2, DEPLOYER.privateKey);
 
         // Verify roles are configured for second deployment
         IAccessManager factory2 = IAccessManager(address(result2.factory));
@@ -331,7 +337,9 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         (DeploymentConfig.MarketDeploymentConfig memory config1, IRoycoFactory.RoleAssignmentConfiguration[] memory roles1) =
             _buildDeploymentConfig("Royco Senior Tranche Alpha", "RST-A", "Royco Junior Tranche Alpha", "RJT-A", address(MOCK_UNDERLYING_ST_VAULT_1));
 
-        DeployScript.DeploymentResult memory result1 = DEPLOY_SCRIPT.deploy(config1, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roles1, DEPLOYER.privateKey);
+        uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
+        DeployScript.DeploymentResult memory result1 =
+            DEPLOY_SCRIPT.deploy(config1, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roles1, DEPLOYER.privateKey);
         RoycoFactory factory = result1.factory;
 
         // Verify DEPLOYER has DEPLOYER_ROLE
@@ -341,20 +349,6 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         // Now deploy a second market directly using the factory
         // This simulates a scenario where the factory already exists and we just want to add a new market
         vm.warp(block.timestamp + 1);
-
-        // Build market deployment params for factory.deployMarket()
-        bytes32 _marketId2 = keccak256(abi.encodePacked("Second Market", vm.getBlockTimestamp()));
-
-        // Get expected addresses
-        bytes32 salt2 = keccak256(abi.encodePacked("MARKET_2_SALT"));
-        address _expectedST = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-ST")));
-        address _expectedJT = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-JT")));
-        address _expectedKernel = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-KERNEL")));
-        address _expectedAccountant = factory.predictDeterministicAddress(keccak256(abi.encodePacked(salt2, "-ACCOUNTANT")));
-
-        // Note: For a full test, we would need to build all the initialization data
-        // This test demonstrates that the DEPLOYER role is properly configured
-        // and could deploy additional markets
 
         // Verify the factory admin is OWNER_ADDRESS after deployment
         (bool isOwnerAdmin,) = IAccessManager(address(factory)).hasRole(0, OWNER_ADDRESS);
@@ -367,7 +361,9 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         (DeploymentConfig.MarketDeploymentConfig memory config1, IRoycoFactory.RoleAssignmentConfiguration[] memory roles1) =
             _buildDeploymentConfig("Royco Senior Tranche Alpha", "RST-A", "Royco Junior Tranche Alpha", "RJT-A", address(MOCK_UNDERLYING_ST_VAULT_1));
 
-        DeployScript.DeploymentResult memory result1 = DEPLOY_SCRIPT.deploy(config1, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roles1, DEPLOYER.privateKey);
+        uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
+        DeployScript.DeploymentResult memory result1 =
+            DEPLOY_SCRIPT.deploy(config1, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roles1, DEPLOYER.privateKey);
         RoycoFactory factory = result1.factory;
 
         // After deployment, OWNER_ADDRESS should be the admin (ownership transferred)

@@ -55,8 +55,6 @@ contract GuardianCancellationTest is BaseTest {
     }
 
     function _deployMarketWithKernel() internal returns (DeployScript.DeploymentResult memory) {
-        bytes32 _marketID = keccak256(abi.encodePacked(SENIOR_TRANCHE_NAME, JUNIOR_TRANCHE_NAME, vm.getBlockTimestamp()));
-
         // Build kernel-specific params
         DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams memory kernelParams =
             DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 });
@@ -93,14 +91,17 @@ contract GuardianCancellationTest is BaseTest {
             jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             coverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            lltvWAD: LLTV,
+            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
-            ydmSpecificParams: abi.encode(ydmParams)
+            ydmSpecificParams: abi.encode(ydmParams),
+            transferAgentAddress: address(0)
         });
 
         // Deploy using the deployment script
-        return DEPLOY_SCRIPT.deploy(config, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roleAssignments, DEPLOYER.privateKey);
+        uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
+        return
+            DEPLOY_SCRIPT.deploy(config, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roleAssignments, DEPLOYER.privateKey);
     }
 
     /// @notice Returns the fork configuration
@@ -139,7 +140,7 @@ contract GuardianCancellationTest is BaseTest {
         assertEq(scheduledTime, 0, "Operation should be cancelled");
 
         // Verify the operation cannot be executed even after delay
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(block.timestamp + 2 days + 1);
         vm.prank(KERNEL_ADMIN_ADDRESS);
         vm.expectRevert(); // Should revert - operation was cancelled
         FACTORY.execute(address(KERNEL), data);
@@ -182,16 +183,16 @@ contract GuardianCancellationTest is BaseTest {
         FACTORY.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
 
         // Verify the operation cannot be executed
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(block.timestamp + 2 days + 1);
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
         vm.expectRevert();
         FACTORY.execute(address(ACCOUNTANT), data);
     }
 
-    /// @notice Test that guardian can cancel a scheduled accountant admin operation (setLLTV)
-    function test_guardian_canCancelAccountantAdminSetLLTV() public {
-        uint64 newLLTV = 0.95e18;
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setLLTV, (newLLTV));
+    /// @notice Test that guardian can cancel a scheduled accountant admin operation (setLiquidationUtilization)
+    function test_guardian_canCancelAccountantAdminSetLiquidationUtilization() public {
+        uint256 newLiquidationUtilization = 5e18;
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setLiquidationUtilization, (newLiquidationUtilization));
 
         // Schedule the operation as accountant admin
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
@@ -202,7 +203,7 @@ contract GuardianCancellationTest is BaseTest {
         FACTORY.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
 
         // Verify the operation cannot be executed
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(block.timestamp + 2 days + 1);
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
         vm.expectRevert();
         FACTORY.execute(address(ACCOUNTANT), data);
@@ -222,7 +223,7 @@ contract GuardianCancellationTest is BaseTest {
         FACTORY.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
 
         // Verify the operation cannot be executed
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(block.timestamp + 2 days + 1);
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
         vm.expectRevert();
         FACTORY.execute(address(ACCOUNTANT), data);
@@ -242,7 +243,7 @@ contract GuardianCancellationTest is BaseTest {
         FACTORY.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
 
         // Verify the operation cannot be executed
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(block.timestamp + 2 days + 1);
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
         vm.expectRevert();
         FACTORY.execute(address(ACCOUNTANT), data);
@@ -285,7 +286,7 @@ contract GuardianCancellationTest is BaseTest {
         FACTORY.cancel(PROTOCOL_FEE_SETTER_ADDRESS, address(ACCOUNTANT), data);
 
         // Verify the operation cannot be executed
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(block.timestamp + 2 days + 1);
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
         vm.expectRevert();
         FACTORY.execute(address(ACCOUNTANT), data);
@@ -379,7 +380,7 @@ contract GuardianCancellationTest is BaseTest {
         FACTORY.schedule(address(KERNEL), data, 0);
 
         // Advance past execution delay
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(block.timestamp + 2 days + 1);
 
         // Execute
         vm.prank(KERNEL_ADMIN_ADDRESS);
@@ -407,7 +408,7 @@ contract GuardianCancellationTest is BaseTest {
         FACTORY.schedule(address(ACCOUNTANT), data, 0);
 
         // Advance past execution delay
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(block.timestamp + 2 days + 1);
 
         // Execute
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
@@ -428,15 +429,15 @@ contract GuardianCancellationTest is BaseTest {
     function test_role_accountantAdmin_canSetCoverageConfiguration() public {
         uint64 newCoverage = 0.3e18;
         uint96 newBeta = 0.5e18;
-        uint64 newLLTV = 0.9e18;
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverageConfiguration, (newCoverage, newBeta, newLLTV));
+        uint256 newLiquidationUtilization = 3e18;
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverageConfiguration, (newCoverage, newBeta, newLiquidationUtilization));
 
         // Schedule as accountant admin
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
         FACTORY.schedule(address(ACCOUNTANT), data, 0);
 
         // Advance past execution delay
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(block.timestamp + 2 days + 1);
 
         // Execute
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
@@ -447,8 +448,8 @@ contract GuardianCancellationTest is BaseTest {
     function test_role_nonAccountantAdmin_cannotSetCoverageConfiguration() public {
         uint64 newCoverage = 0.3e18;
         uint96 newBeta = 0.5e18;
-        uint64 newLLTV = 0.9e18;
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverageConfiguration, (newCoverage, newBeta, newLLTV));
+        uint256 newLiquidationUtilization = 3e18;
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverageConfiguration, (newCoverage, newBeta, newLiquidationUtilization));
 
         vm.prank(address(0xBAD));
         vm.expectRevert();
@@ -465,7 +466,7 @@ contract GuardianCancellationTest is BaseTest {
         FACTORY.schedule(address(ACCOUNTANT), data, 0);
 
         // Advance past execution delay
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(block.timestamp + 2 days + 1);
 
         // Execute
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
@@ -493,7 +494,7 @@ contract GuardianCancellationTest is BaseTest {
         vm.prank(ROLE_GUARDIAN_ADDRESS);
         FACTORY.cancel(KERNEL_ADMIN_ADDRESS, address(KERNEL), data);
 
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(block.timestamp + 2 days + 1);
         vm.prank(KERNEL_ADMIN_ADDRESS);
         vm.expectRevert();
         FACTORY.execute(address(KERNEL), data);
@@ -510,7 +511,7 @@ contract GuardianCancellationTest is BaseTest {
         vm.prank(ROLE_GUARDIAN_ADDRESS);
         FACTORY.cancel(PROTOCOL_FEE_SETTER_ADDRESS, address(ACCOUNTANT), data);
 
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(block.timestamp + 2 days + 1);
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
         vm.expectRevert();
         FACTORY.execute(address(ACCOUNTANT), data);
@@ -526,7 +527,7 @@ contract GuardianCancellationTest is BaseTest {
         vm.prank(ROLE_GUARDIAN_ADDRESS);
         FACTORY.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
 
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(block.timestamp + 2 days + 1);
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
         vm.expectRevert();
         FACTORY.execute(address(ACCOUNTANT), data);
@@ -543,7 +544,7 @@ contract GuardianCancellationTest is BaseTest {
         vm.prank(ROLE_GUARDIAN_ADDRESS);
         FACTORY.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
 
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(block.timestamp + 2 days + 1);
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
         vm.expectRevert();
         FACTORY.execute(address(ACCOUNTANT), data);

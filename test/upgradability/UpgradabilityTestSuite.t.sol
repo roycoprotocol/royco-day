@@ -76,8 +76,6 @@ contract UpgradabilityTestSuite is BaseTest {
     }
 
     function _deployMarket() internal returns (DeployScript.DeploymentResult memory) {
-        bytes32 _marketId = keccak256(abi.encodePacked("UpgradabilityTest", vm.getBlockTimestamp()));
-
         DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams memory kernelParams =
             DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: WAD });
 
@@ -111,13 +109,16 @@ contract UpgradabilityTestSuite is BaseTest {
             jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             coverageWAD: COVERAGE_WAD,
             betaWAD: 1e18,
-            lltvWAD: LLTV,
+            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
-            ydmSpecificParams: abi.encode(ydmParams)
+            ydmSpecificParams: abi.encode(ydmParams),
+            transferAgentAddress: address(0)
         });
 
-        return DEPLOY_SCRIPT.deploy(config, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roleAssignments, DEPLOYER.privateKey);
+        uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
+        return
+            DEPLOY_SCRIPT.deploy(config, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roleAssignments, DEPLOYER.privateKey);
     }
 
     function _fundProviders() internal {
@@ -164,7 +165,7 @@ contract UpgradabilityTestSuite is BaseTest {
         FACTORY.schedule(_proxy, upgradeData, 0);
 
         // Wait for the delay to pass
-        vm.warp(block.timestamp + 1 days + 1);
+        vm.warp(block.timestamp + 2 days + 1);
 
         // Execute the upgrade
         vm.prank(UPGRADER_ADDRESS);
@@ -201,7 +202,7 @@ contract UpgradabilityTestSuite is BaseTest {
             yieldShareProtocolFeeWAD: 0,
             coverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            lltvWAD: LLTV,
+            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             ydm: address(YDM),
             ydmInitializationData: "",
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
@@ -249,7 +250,7 @@ contract UpgradabilityTestSuite is BaseTest {
             yieldShareProtocolFeeWAD: 0,
             coverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            lltvWAD: LLTV,
+            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
             ydm: address(YDM),
             ydmInitializationData: "",
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
@@ -487,15 +488,15 @@ contract UpgradabilityTestSuite is BaseTest {
         vm.prank(UPGRADER_ADDRESS);
         FACTORY.schedule(address(FACTORY), upgradeData, 0);
 
-        // Warp past the 1-day delay
-        vm.warp(block.timestamp + 1 days + 1);
+        // Warp past the 2-day delay
+        vm.warp(block.timestamp + 2 days + 1);
 
         // Execute the upgrade — should succeed
         vm.prank(UPGRADER_ADDRESS);
         FACTORY.execute(address(FACTORY), upgradeData);
     }
 
-    /// @notice Test that factory upgrade reverts before the 1-day delay elapses
+    /// @notice Test that factory upgrade reverts before the 2-day delay elapses
     function test_factoryProxy_cannotBeUpgradedBeforeDelay() external {
         // Deploy a new factory implementation
         RoycoFactory newFactoryImpl = new RoycoFactory();
@@ -508,7 +509,7 @@ contract UpgradabilityTestSuite is BaseTest {
         FACTORY.schedule(address(FACTORY), upgradeData, 0);
 
         // Warp to just before the delay expires
-        vm.warp(block.timestamp + 1 days - 1);
+        vm.warp(block.timestamp + 2 days - 1);
 
         // Execute should revert — delay not yet elapsed
         vm.prank(UPGRADER_ADDRESS);

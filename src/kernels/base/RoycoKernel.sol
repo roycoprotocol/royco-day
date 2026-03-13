@@ -536,33 +536,47 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     }
 
     /// @inheritdoc IRoycoKernel
-    function preTrancheBalanceUpdateHook(address _from, address _to, uint256 _value) external override(IRoycoKernel) onlyTranche whenNotPaused {
-        // Check if the sender or recipient are blacklisted
-        require(!isBlacklisted(_from), ACCOUNT_BLACKLISTED(_from));
-        require(!isBlacklisted(_to), ACCOUNT_BLACKLISTED(_to));
+    function preTrancheBalanceUpdateHook(address _caller, address _from, address _to, uint256 _value)
+        external
+        override(IRoycoKernel)
+        onlyTranche
+        whenNotPaused
+    {
+        // Check if caller is blacklisted or not
+        require(!isBlacklisted(_caller), ACCOUNT_BLACKLISTED(_caller));
 
-        // If transferring shares, ensure that the recipient is a whitelisted LP for the tranche
-        // It is assumed that the sender is already a whitelisted LP
-        if (ENFORCE_TRANCHE_SHARES_TRANSFER_WHITELIST && _to != address(0)) {
-            address authority = authority();
-            // Check if the to address can call the deposit function on the tranche
-            // @dev msg.sender is the tranche address
-            (bool isWhitelistedTrancheLP,) = IAccessManager(authority).canCall(_to, msg.sender, IRoycoVaultTranche.deposit.selector);
-            require(_to != authority && isWhitelistedTrancheLP, ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(_to));
+        // Check if the sender is blacklisted if not a mint
+        require(_from == address(0) || !isBlacklisted(_from), ACCOUNT_BLACKLISTED(_from));
+
+        // Check if the recipient is blacklisted if not a redeem
+        if (_to != address(0)) {
+            require(!isBlacklisted(_to), ACCOUNT_BLACKLISTED(_to));
+
+            // If transferring shares, ensure that the recipient is a whitelisted LP for the tranche
+            // It is assumed that the sender is already a whitelisted LP
+            if (ENFORCE_TRANCHE_SHARES_TRANSFER_WHITELIST) {
+                address authority = authority();
+                // Check if the to address can call the deposit function on the tranche
+                // @dev msg.sender is the tranche address
+                (bool isWhitelistedTrancheLP,) = IAccessManager(authority).canCall(_to, msg.sender, IRoycoVaultTranche.deposit.selector);
+                require(_to != authority && isWhitelistedTrancheLP, ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(_to));
+            }
         }
 
         // Call the market specific pre-balance update hook
-        _preTrancheBalanceUpdate(_from, _to, _value);
+        _preTrancheBalanceUpdate(_caller, _from, _to, _value);
     }
 
     /**
      * @notice Pre-balance update hook for the kernel
      * @dev Should be overridden by concrete kernel implementations to perform any additional checks or actions
+     * @dev The caller is the address that initiated the balance update
+     * @param _caller The address that initiated the balance update
      * @param _from The address from which the balance is being updated
      * @param _to The address to which the balance is being updated
      * @param _value The amount of the balance being updated
      */
-    function _preTrancheBalanceUpdate(address _from, address _to, uint256 _value) internal virtual { }
+    function _preTrancheBalanceUpdate(address _caller, address _from, address _to, uint256 _value) internal virtual { }
 
     // =============================
     // Internal Tranche Accounting Synchronization Functions
@@ -798,12 +812,13 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     }
 
     /**
-     * @notice Computes and applies the self-liquidation bonus for ST redemptions when LLTV is breached, sourced from JT asset claims
+     * @notice Computes and applies the self-liquidation bonus for ST redemptions when the liquidation utilization threshold is breached, sourced from JT asset claims
      * @dev The bonus incentivizes ST to self-liquidate by redeeming to delever the market
      * @dev After exiting the market, the bonus affords ST LPs the ability to:
      *      1. Absorb discounts/losses on secondary markets when liquidating the withdrawn exposure
      *      2. Absorb any duration risk associated with liquidating the withdrawn exposure
      * @dev The bonus is computed on the NAV being redeemed by the senior tranche
+     * @dev The bonus is capped to ensure utilization does not increase, preventing bank run dynamics where one LP's bonus eats into coverage for remaining LPs
      * @param _state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      * @param _stUserClaims The claims of the redeeming ST user
      * @return stUserClaimsWithBonus The claims of the redeeming ST user after applying the self-liquidation bonus
@@ -818,18 +833,24 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         virtual
         returns (AssetClaims memory stUserClaimsWithBonus, NAV_UNIT stSelfLiquidationBonusNAV)
     {
-        // If the LLTV has not been breached, there is no ST self-liquidation bonus remitted
-        if (_state.ltvWAD < _state.lltvWAD) return (_stUserClaims, ZERO_NAV_UNITS);
+        // If the liquidation utilization threshold has not been breached, there is no ST self-liquidation bonus remitted
+        if (_state.utilizationWAD < _state.liquidationUtilizationWAD) return (_stUserClaims, ZERO_NAV_UNITS);
 
-        // Compute the desired ST redemption based on the configured ST self-liquidation bonus
+        // Compute the desired ST bonus based on the configured ST self-liquidation bonus rate
         NAV_UNIT desiredBonusNAV = _stUserClaims.nav.mulDiv(_getRoycoKernelStorage().stSelfLiquidationBonusWAD, WAD, Math.Rounding.Floor);
-        // Clamp the actual bonus by the remaining JT controlled NAV
-        stSelfLiquidationBonusNAV = UnitsMathLib.min(desiredBonusNAV, _state.jtEffectiveNAV);
+
+        // Decompose the NAV claims for the Junior Tranche to get the NAV claims for sourcing the bonus
+        (,, NAV_UNIT jtClaimOnSTRawNAV,) = _decomposeNAVClaims(_state);
+
+        // Compute the maximum bonus that doesn't increase utilization, preventing bank run dynamics
+        NAV_UNIT maxUtilizationNeutralBonusNAV = _computeMaxUtilizationNeutralBonus(_state, _stUserClaims, jtClaimOnSTRawNAV);
+
+        // Clamp the actual bonus by the remaining JT controlled NAV and the maximum utilization-neutral (leverage retaining or delevering) NAV
+        stSelfLiquidationBonusNAV = UnitsMathLib.min(UnitsMathLib.min(desiredBonusNAV, _state.jtEffectiveNAV), maxUtilizationNeutralBonusNAV);
+
         // Preemptively return if there is no remaining bonus capital to remit
         if (stSelfLiquidationBonusNAV == ZERO_NAV_UNITS) return (_stUserClaims, ZERO_NAV_UNITS);
 
-        // Decompose the NAV claims for the Junior Tranche to get the NAV claims for sourcing the bonus
-        (,, NAV_UNIT jtClaimOnSTRawNAV, NAV_UNIT jtClaimOnSelfRawNAV) = _decomposeNAVClaims(_state);
         // Compute the bonus NAV sourced from JT's claims on each tranche's NAV: prioritize ST assets over JT assets for sourcing
         // stSelfLiquidationBonusNAV <= (jtClaimOnSTRawNAV + jtClaimOnSelfRawNAV) since it was bounded by JT effective NAV already
         NAV_UNIT bonusFromJTClaimOnSTRawNAV = UnitsMathLib.min(stSelfLiquidationBonusNAV, jtClaimOnSTRawNAV);
@@ -839,6 +860,69 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         stUserClaimsWithBonus.stAssets = _stUserClaims.stAssets + stConvertNAVUnitsToTrancheUnits(bonusFromJTClaimOnSTRawNAV);
         stUserClaimsWithBonus.jtAssets = _stUserClaims.jtAssets + jtConvertNAVUnitsToTrancheUnits(bonusFromJTClaimOnSelfRawNAV);
         stUserClaimsWithBonus.nav = _stUserClaims.nav + stSelfLiquidationBonusNAV;
+    }
+
+    /**
+     * @notice Computes the maximum self-liquidation bonus that doesn't increase utilization (market's leverage)
+     * @dev Prevents bank run dynamics by ensuring one LP's bonus doesn't reduce coverage for remaining LPs
+     * @dev Derivation:
+     *      Post-redemption utilization must not exceed original utilization:
+     *      U = Current utilization = ((ST_RAW_NAV + (JT_RAW_NAV * β)) * COV) / JT_EFFECTIVE_NAV
+     *      U' = Post-redemption utilization (including bonus)
+     *      Post-redemption utilization:
+     *      U' = (((ST_RAW_NAV - ST_REDEMPTION_ST_RAW_NAV - BONUS_ST_RAW_NAV) + ((JT_RAW_NAV - ST_REDEMPTION_JT_RAW_NAV - BONUS_JT_RAW_NAV) * β)) * COV) / (JT_EFFECTIVE_NAV - BONUS_ST_RAW_NAV - BONUS_JT_RAW_NAV)
+     *
+     *      NOTE: INVARIANT: U' <= U
+     *      Resulting invariant after simplification:
+     *      COVERED_EXPOSURE = ST_RAW_NAV + JT_RAW_NAV * β
+     *      BONUS_ST_RAW_NAV * (COVERED_EXPOSURE - JT_EFFECTIVE_NAV) + BONUS_JT_RAW_NAV * (COVERED_EXPOSURE - β * JT_EFFECTIVE_NAV) <= JT_EFFECTIVE_NAV * (ST_REDEMPTION_ST_RAW_NAV + ST_REDEMPTION_JT_RAW_NAV * β)
+     *
+     *      Since with β < 1 BONUS_ST_RAW_NAV is cheaper per unit, use the ST_RAW_NAV to source the bonus first:
+     *      First Priority (BONUS_JT_RAW_NAV = 0):
+     *          BONUS_MAX = (ST_REDEMPTION_ST_RAW_NAV + ST_REDEMPTION_JT_RAW_NAV * β) * JT_EFFECTIVE_NAV / (COVERED_EXPOSURE - JT_EFFECTIVE_NAV)
+     *
+     *      Second Priority (BONUS_ST_RAW_NAV = JT_CLAIM_ON_ST_RAW_NAV, maxed out):
+     *          BONUS_MAX = (ST_REDEMPTION_ST_RAW_NAV + ST_REDEMPTION_JT_RAW_NAV * β + JT_CLAIM_ON_ST_RAW_NAV * (1 - β)) * JT_EFFECTIVE_NAV / (COVERED_EXPOSURE - β * JT_EFFECTIVE_NAV)
+     *
+     * @param _state The synced accounting state
+     * @param _stUserClaims The ST user's base claims before bonus
+     * @param _jtClaimOnSTRawNAV JT's cross-tranche claim on ST assets
+     * @return maxUtilizationNeutralBonusNAV The maximum bonus NAV that maintains utilization neutrality
+     */
+    function _computeMaxUtilizationNeutralBonus(
+        SyncedAccountingState memory _state,
+        AssetClaims memory _stUserClaims,
+        NAV_UNIT _jtClaimOnSTRawNAV
+    )
+        internal
+        view
+        returns (NAV_UNIT maxUtilizationNeutralBonusNAV)
+    {
+        // Preemptively return if there is no remaining capital to source a bonus from
+        NAV_UNIT jtEffectiveNAV = _state.jtEffectiveNAV;
+        if (jtEffectiveNAV == ZERO_NAV_UNITS) return ZERO_NAV_UNITS;
+
+        // Compute the total covered exposure of the market, rounding up to be conservative
+        NAV_UNIT totalCoveredExposure = _state.stRawNAV + _state.jtRawNAV.mulDiv(_state.betaWAD, WAD, Math.Rounding.Ceil);
+
+        // Compute the ST LP's NAV claim on real exposure (with beta factored in)
+        NAV_UNIT stUserWeightedClaimNAV = stConvertTrancheUnitsToNAVUnits(_stUserClaims.stAssets)
+            + jtConvertTrancheUnitsToNAVUnits(_stUserClaims.jtAssets).mulDiv(_state.betaWAD, WAD, Math.Rounding.Floor);
+        // If the weighted claim is zero, there is no bonus to apply
+        if (stUserWeightedClaimNAV == ZERO_NAV_UNITS) return ZERO_NAV_UNITS;
+
+        // Case 1: Bonus sourced entirely from JT's claim on ST assets
+        // maxBonus = stUserWeightedClaimNAV * jtEffectiveNAV / (totalCoveredExposure - jtEffectiveNAV)
+        NAV_UNIT stAssetSourcedMaxBonusNAV = stUserWeightedClaimNAV.mulDiv(jtEffectiveNAV, (totalCoveredExposure - jtEffectiveNAV), Math.Rounding.Floor);
+        if (stAssetSourcedMaxBonusNAV <= _jtClaimOnSTRawNAV) return stAssetSourcedMaxBonusNAV;
+
+        // Case 2: Bonus sourced from both JT's claim on ST assets and JT's claim on JT assets
+        // maxBonus = (stUserWeightedClaimNAV + jtClaimOnSTRawNAV * (1 - β)) * jtEffectiveNAV / (totalCoveredExposure - β * jtEffectiveNAV)
+        NAV_UNIT weightedClaimWithSTSourceAdjustmentNAV =
+            stUserWeightedClaimNAV + _jtClaimOnSTRawNAV.mulDiv(Math.saturatingSub(WAD, _state.betaWAD), WAD, Math.Rounding.Floor);
+        return weightedClaimWithSTSourceAdjustmentNAV.mulDiv(
+            jtEffectiveNAV, (totalCoveredExposure - jtEffectiveNAV.mulDiv(_state.betaWAD, WAD, Math.Rounding.Floor)), Math.Rounding.Floor
+        );
     }
 
     // =============================

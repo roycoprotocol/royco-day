@@ -40,7 +40,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // Ensure that the asset and kernel are not null
         require(_asset != address(0) && _kernel != address(0), NULL_ADDRESS());
 
-        // Set the immutable addresses
+        // Set the immutable state
         ASSET = _asset;
         KERNEL = _kernel;
     }
@@ -357,7 +357,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     /// @inheritdoc ERC20PausableUpgradeable
     function _update(address _from, address _to, uint256 _value) internal override(ERC20PausableUpgradeable, ERC20Upgradeable) whenNotPaused {
         // Call the kernel pre-balance update hook to assert that the balance update is valid
-        IRoycoKernel(KERNEL).preTrancheBalanceUpdateHook(_from, _to, _value);
+        IRoycoKernel(KERNEL).preTrancheBalanceUpdateHook(msg.sender, _from, _to, _value);
 
         // Call the parent contract update function to update the balance
         super._update(_from, _to, _value);

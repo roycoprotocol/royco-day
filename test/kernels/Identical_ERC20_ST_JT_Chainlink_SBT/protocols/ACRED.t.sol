@@ -2,20 +2,19 @@
 pragma solidity ^0.8.28;
 
 import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import { IERC20Metadata } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
-import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
-import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
-import { IComplianceServiceWhitelisted } from "../../../../src/interfaces/external/ds-token/IComplianceServiceWhitelisted.sol";
-import { IDSToken } from "../../../../src/interfaces/external/ds-token/IDSToken.sol";
-import { Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel } from "../../../../src/kernels/Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/libraries/Units.sol";
-import { YieldBearingERC20Chainlink_TestBase } from "../../Identical_ERC20_ST_JT_Chainlink/base/YieldBearingERC20Chainlink_TestBase.t.sol";
+import { Identical_ERC20_ST_JT_Chainlink_SBT_TestBase } from "../base/Identical_ERC20_ST_JT_Chainlink_SBT_TestBase.t.sol";
+
+interface IDSTokenLike {
+    function getDSService(uint256) external view returns (address);
+    function COMPLIANCE_SERVICE() external view returns (uint256);
+}
 
 /// @title ACRED_Test
-/// @notice Tests Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel with ACRED
-contract ACRED_Test is YieldBearingERC20Chainlink_TestBase {
+/// @notice Tests Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel with ACRED
+contract ACRED_Test is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
     address internal constant ACRED_TOKEN = 0x17418038ecF73BA4026c4f428547BF099706F27B;
     address internal constant ACRED_CHAINLINK_ORACLE = 0xD6BcbbC87bFb6c8964dDc73DC3EaE6d08865d51C;
     address internal constant ACRED_WHALE = 0xa0759A0DFdE5395a1892aEd90eB5665698CFaa05;
@@ -71,15 +70,18 @@ contract ACRED_Test is YieldBearingERC20Chainlink_TestBase {
     }
 
     function _mockDSTokenCompliance() private {
-        address svc = IDSToken(ACRED_TOKEN).getDSService(IDSToken(ACRED_TOKEN).COMPLIANCE_SERVICE());
-        vm.mockCall(svc, abi.encodeWithSelector(IComplianceServiceWhitelisted.checkWhitelisted.selector), abi.encode(true));
+        address svc = IDSTokenLike(ACRED_TOKEN).getDSService(IDSTokenLike(ACRED_TOKEN).COMPLIANCE_SERVICE());
+        vm.mockCall(svc, abi.encodeWithSelector(bytes4(keccak256("checkWhitelisted(address)"))), abi.encode(true));
         vm.mockCall(svc, abi.encodeWithSelector(bytes4(keccak256("validateTransfer(address,address,uint256,bool,uint256)"))), abi.encode(uint256(0)));
     }
 
     function _deployACRED() private returns (DeployScript.DeploymentResult memory) {
         DeploymentConfig.MarketDeploymentConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig("ACRED");
         _overrideStaleness(cfg);
-        return DEPLOY_SCRIPT.deploy(cfg, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, _generateRoleAssignments(), DEPLOYER.privateKey);
+        uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
+        return DEPLOY_SCRIPT.deploy(
+            cfg, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, _generateRoleAssignments(), DEPLOYER.privateKey
+        );
     }
 
     function _overrideStaleness(DeploymentConfig.MarketDeploymentConfig memory _cfg) private pure {

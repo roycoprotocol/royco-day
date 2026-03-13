@@ -18,7 +18,7 @@ library UtilsLib {
 
     /**
      * @notice Computes the utilization of the Royco market given the market's state
-     * @dev Informally: total covered exposure / junior loss absorption buffer
+     * @dev Informally: (total coverage required for exposure) / (loss absorption buffer)
      * @dev Formally: Utilization = ((ST_RAW_NAV + (JT_RAW_NAV * β)) * COV) / JT_EFFECTIVE_NAV
      * @param _stRawNAV The raw net asset value of the senior tranche invested assets
      * @param _jtRawNAV The raw net asset value of the junior tranche invested assets
@@ -45,24 +45,6 @@ library UtilsLib {
         if (_jtEffectiveNAV == ZERO_NAV_UNITS) return type(uint256).max;
         // Round in favor of ensuring senior tranche protection
         utilization = _coverageWAD.mulDiv((_stRawNAV + _jtRawNAV.mulDiv(_betaWAD, WAD, Math.Rounding.Ceil)), _jtEffectiveNAV, Math.Rounding.Ceil);
-    }
-
-    /**
-     * @notice Computes the loan to value (LTV) of the Royco market given the market's state
-     * @dev Informally: DEBT / COLLATERAL
-     * @dev Formally: LTV = (ST_EFFECTIVE_NAV + ST_IL) / (ST_EFFECTIVE_NAV + JT_EFFECTIVE_NAV)
-     * @param _stEffectiveNAV The senior tranche net asset value after receiving coverage, ST yield distribution, and ST losses
-     * @param _stImpermanentLoss The impermanent loss that the senior tranche has suffered after exhausting JT's loss-absorption buffer
-     * @param _jtEffectiveNAV The junior tranche net asset value after giving coverage, JT yield, ST yield distribution, and JT losses
-     * @return ltvWAD The loan to value (LTV) of the Royco market, scaled to WAD precision
-     */
-    function computeLTV(NAV_UNIT _stEffectiveNAV, NAV_UNIT _stImpermanentLoss, NAV_UNIT _jtEffectiveNAV) internal pure returns (uint256 ltvWAD) {
-        // Compute collateral
-        NAV_UNIT collateral = (_stEffectiveNAV + _jtEffectiveNAV);
-        // If the total collateral value is zero, LTV is undefined
-        if (collateral == ZERO_NAV_UNITS) return type(uint256).max;
-        // Round in favor of ensuring senior tranche protection
-        ltvWAD = WAD.mulDiv((_stEffectiveNAV + _stImpermanentLoss), collateral, Math.Rounding.Ceil);
     }
 
     /**

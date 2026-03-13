@@ -1,32 +1,29 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
-
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
-import { WAD } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/libraries/Units.sol";
 
-import { YieldBearingERC4626_TestBase } from "../base/YieldBearingERC4626_TestBase.t.sol";
+import { DisabledChainlinkOracle_ERC4626_TestBase } from "../base/DisabledChainlinkOracle_ERC4626_TestBase.t.sol";
 
 /// @title Morpho_SmokehouseUSDC_Test
-/// @notice Tests YieldBearingERC4626_ST_YieldBearingERC4626_JT_Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel with Morpho's SmokehouseUSDC
+/// @notice Tests Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel with Morpho's SmokehouseUSDC (disabled oracle)
 /// @dev Both ST and JT use SmokehouseUSDC vault shares as the tranche asset
 ///
 /// SmokehouseUSDC is an ERC4626 vault where:
 ///   - Tranche Unit: SmokehouseUSDC shares
 ///   - Vault Asset: USDC (the underlying)
 ///   - NAV Unit: USD
-/// The stored conversion rate is vaultAsset-to-NAV (USDC->USD), which is ~1:1 for stablecoins.
-contract MorphoV1_SmokehouseUSDC is YieldBearingERC4626_TestBase {
+/// The stored conversion rate is 1:1 (WAD), with the Chainlink oracle disabled (address(1)).
+contract MorphoV1_SmokehouseUSDC is DisabledChainlinkOracle_ERC4626_TestBase {
     // ═══════════════════════════════════════════════════════════════════════════
     // MAINNET ADDRESSES
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice SmokehouseUSDC on Ethereum mainnet
-    address internal constant SmokehouseUSDC = 0xBEeFFF209270748ddd194831b3fa287a5386f5bC;
+    address internal constant SMOKEHOUSE_USDC_ADDRESS = 0xBEeFFF209270748ddd194831b3fa287a5386f5bC;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // PROTOCOL CONFIGURATION
@@ -37,16 +34,10 @@ contract MorphoV1_SmokehouseUSDC is YieldBearingERC4626_TestBase {
         return TestConfig({
             forkBlock: 24_532_268,
             forkRpcUrlEnvVar: "MAINNET_RPC_URL",
-            stAsset: SmokehouseUSDC,
-            jtAsset: SmokehouseUSDC,
+            stAsset: SMOKEHOUSE_USDC_ADDRESS,
+            jtAsset: SMOKEHOUSE_USDC_ADDRESS,
             initialFunding: 1_000_000_000e18 // 1B SmokehouseUSDC
         });
-    }
-
-    /// @notice Returns the initial USDC->USD conversion rate (in WAD precision)
-    /// @dev For USDC (a stablecoin), this is 1:1, so we return WAD (1e18)
-    function _getInitialConversionRate() internal pure override returns (uint256) {
-        return WAD; // 1:1 USDC to USD
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -57,13 +48,14 @@ contract MorphoV1_SmokehouseUSDC is YieldBearingERC4626_TestBase {
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
         DeploymentConfig.MarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("SmokehouseUSDC");
 
-        // Override initial conversion rate for testing
-        marketConfig.kernelSpecificParams =
-            abi.encode(DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: _getInitialConversionRate() }));
+        _mockDisabledOracleDecimals();
 
+        uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
-        return DEPLOY_SCRIPT.deploy(marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roleAssignments, DEPLOYER.privateKey);
+        return DEPLOY_SCRIPT.deploy(
+            marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roleAssignments, DEPLOYER.privateKey
+        );
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -76,7 +68,6 @@ contract MorphoV1_SmokehouseUSDC is YieldBearingERC4626_TestBase {
     }
 
     /// @notice Returns max NAV delta for SmokehouseUSDC
-    /// @dev Converts the tranche unit tolerance to NAV using the kernel's conversion
     function maxNAVDelta() public view override returns (NAV_UNIT) {
         return _toSTValue(maxTrancheUnitDelta());
     }

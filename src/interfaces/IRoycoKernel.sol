@@ -32,7 +32,7 @@ interface IRoycoKernel {
      * @notice Initialization parameters for the Royco Kernel
      * @custom:field initialAuthority - The access manager for this kernel
      * @custom:field protocolFeeRecipient - The market's protocol fee recipient
-     * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when LLTV has been breached, scaled to WAD precision
+     * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when liquidation utilization threshold has been breached, scaled to WAD precision
      */
     struct RoycoKernelInitParams {
         address initialAuthority;
@@ -44,7 +44,7 @@ interface IRoycoKernel {
      * @notice Storage state for the Royco Kernel
      * @custom:storage-location erc7201:Royco.storage.RoycoKernelState
      * @custom:field protocolFeeRecipient - The market's configured protocol fee recipient
-     * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when LLTV has been breached, scaled to WAD precision
+     * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when liquidation utilization threshold has been breached, scaled to WAD precision
      * @custom:field stOwnedYieldBearingAssets - The yield bearing assets held by the ST, in ST's asset units
      * @custom:field jtOwnedYieldBearingAssets - The yield bearing assets held by the JT, in JT's asset units
      * @custom:field isBlacklistEnabled - A boolean indicating whether the blacklist is enforced for this market
@@ -76,7 +76,7 @@ interface IRoycoKernel {
 
     /**
      * @notice Emitted when the ST self-liquidation bonus is updated
-     * @param stSelfLiquidationBonusWAD The new ST self-liquidation bonus remitted to redeeming ST LPs when LLTV has been breached
+     * @param stSelfLiquidationBonusWAD The new ST self-liquidation bonus remitted to redeeming ST LPs when liquidation utilization threshold has been breached
      */
     event SeniorTrancheSelfLiquidationBonusUpdated(uint64 stSelfLiquidationBonusWAD);
 
@@ -178,7 +178,7 @@ interface IRoycoKernel {
     function setProtocolFeeRecipient(address _protocolFeeRecipient) external;
 
     /**
-     * @notice Sets the ST self-liquidation bonus remitted to redeeming ST LPs when LLTV has been breached
+     * @notice Sets the ST self-liquidation bonus remitted to redeeming ST LPs when liquidation utilization threshold has been breached
      * @dev Only callable by a designated admin
      * @param _stSelfLiquidationBonusWAD The ST self liquidation bonus, scaled to WAD precision
      */
@@ -397,9 +397,10 @@ interface IRoycoKernel {
      * @notice Pre-balance update hook for the tranche
      * @dev This function should revert if the balance update is invalid.
      * @dev Should be called before every tranche share balance update
+     * @param _caller The address that is calling the balance update
      * @param _from The address from which the balance is being updated
      * @param _to The address to which the balance is being updated
      * @param _value The amount of the balance being updated
      */
-    function preTrancheBalanceUpdateHook(address _from, address _to, uint256 _value) external;
+    function preTrancheBalanceUpdateHook(address _caller, address _from, address _to, uint256 _value) external;
 }

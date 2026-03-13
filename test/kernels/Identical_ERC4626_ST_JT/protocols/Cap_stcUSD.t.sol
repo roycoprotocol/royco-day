@@ -9,18 +9,18 @@ import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/libraries/Units.sol";
 
-import { YieldBearingERC4626_TestBase } from "../base/YieldBearingERC4626_TestBase.t.sol";
+import { DisabledChainlinkOracle_ERC4626_TestBase } from "../base/DisabledChainlinkOracle_ERC4626_TestBase.t.sol";
 
 /// @title stcUSD_stcUSD_Test
-/// @notice Tests YieldBearingERC4626 kernel with stcUSD vault on Ethereum mainnet
-/// @dev Both ST and JT use stcUSD as the tranche asset
+/// @notice Tests Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel with stcUSD (disabled oracle)
+/// @dev Both ST and JT use stcUSD as the tranche asset on Ethereum mainnet
 ///
 /// stcUSD is an ERC4626 vault where:
 ///   - Tranche Unit: stcUSD shares
 ///   - Vault Asset: cUSD (the underlying)
 ///   - NAV Unit: USD
-/// The stored conversion rate is vaultAsset-to-NAV (cUSD->USD), hardcoded at 1:1.
-contract stcUSD_stcUSD_Test is YieldBearingERC4626_TestBase {
+/// The stored conversion rate is 1:1 (WAD), with the Chainlink oracle disabled (address(1)).
+contract stcUSD_stcUSD_Test is DisabledChainlinkOracle_ERC4626_TestBase {
     // ═══════════════════════════════════════════════════════════════════════════
     // MAINNET ADDRESSES
     // ═══════════════════════════════════════════════════════════════════════════
@@ -48,12 +48,6 @@ contract stcUSD_stcUSD_Test is YieldBearingERC4626_TestBase {
             });
     }
 
-    /// @notice Returns the initial cUSD->USD conversion rate (in WAD precision)
-    /// @dev Hardcoded at 1:1, so we return WAD (1e18)
-    function _getInitialConversionRate() internal pure override returns (uint256) {
-        return WAD; // 1:1 cUSD to USD
-    }
-
     // ═══════════════════════════════════════════════════════════════════════════
     // DEPLOYMENT (uses DeploymentConfig)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -62,13 +56,14 @@ contract stcUSD_stcUSD_Test is YieldBearingERC4626_TestBase {
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
         DeploymentConfig.MarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("stcUSD");
 
-        // Override initial conversion rate for testing
-        marketConfig.kernelSpecificParams =
-            abi.encode(DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: _getInitialConversionRate() }));
+        _mockDisabledOracleDecimals();
 
+        uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
-        return DEPLOY_SCRIPT.deploy(marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roleAssignments, DEPLOYER.privateKey);
+        return DEPLOY_SCRIPT.deploy(
+            marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roleAssignments, DEPLOYER.privateKey
+        );
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -91,20 +86,17 @@ contract stcUSD_stcUSD_Test is YieldBearingERC4626_TestBase {
 
     /// @notice Verifies that the stcUSD vault is correctly configured
     function test_stcUSD_vaultConfiguration() external view {
-        // Verify underlying asset is cUSD
         address underlying = IERC4626(STCUSD).asset();
         assertEq(underlying, CUSD, "stcUSD underlying should be cUSD");
 
-        // Verify decimals
         uint8 decimals = IERC4626(STCUSD).decimals();
         assertEq(decimals, 18, "stcUSD should have 18 decimals");
 
-        // Verify the vault has a valid share price
         uint256 sharePrice = IERC4626(STCUSD).convertToAssets(1e18);
         assertGt(sharePrice, 0, "stcUSD share price should be > 0");
     }
 
-    /// @notice Verifies initial conversion rate is set correctly
+    /// @notice Verifies initial stored conversion rate is WAD (1:1 for stablecoin)
     function test_stcUSD_initialConversionRate() external view {
         uint256 storedRate = _getConversionRate();
         assertEq(storedRate, WAD, "Stored rate should be WAD (1:1 for stablecoin)");
@@ -113,18 +105,17 @@ contract stcUSD_stcUSD_Test is YieldBearingERC4626_TestBase {
     /// @notice Test that simulated yield works correctly for stcUSD
     function testFuzz_stcUSD_simulatedYield_increasesNAV(uint256 _amount, uint256 _yieldBps) external {
         _amount = bound(_amount, 1e18, 100_000e18);
-        _yieldBps = bound(_yieldBps, 10, 1000); // 0.1% to 10% yield
+        _yieldBps = bound(_yieldBps, 10, 1000);
 
         _depositJT(ALICE_ADDRESS, _amount);
 
         NAV_UNIT navBefore = JT.totalAssets().nav;
-        uint256 rateBefore = _getConversionRate();
+        uint256 rateBefore = _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
 
-        // Simulate yield by increasing the cUSD->USD rate
         uint256 yieldWAD = _yieldBps * 1e14;
         simulateJTYield(yieldWAD);
 
-        uint256 rateAfter = _getConversionRate();
+        uint256 rateAfter = _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
         assertGt(rateAfter, rateBefore, "Rate should increase after yield");
 
         vm.prank(SYNC_ROLE_ADDRESS);
@@ -137,17 +128,17 @@ contract stcUSD_stcUSD_Test is YieldBearingERC4626_TestBase {
     /// @notice Test loss simulation for stcUSD
     function testFuzz_stcUSD_simulatedLoss_decreasesNAV(uint256 _amount, uint256 _lossBps) external {
         _amount = bound(_amount, 1e18, 100_000e18);
-        _lossBps = bound(_lossBps, 10, 500); // 0.1% to 5% loss
+        _lossBps = bound(_lossBps, 10, 500);
 
         _depositJT(ALICE_ADDRESS, _amount);
 
         NAV_UNIT navBefore = JT.totalAssets().nav;
-        uint256 rateBefore = _getConversionRate();
+        uint256 rateBefore = _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
 
         uint256 lossWAD = _lossBps * 1e14;
         simulateJTLoss(lossWAD);
 
-        uint256 rateAfter = _getConversionRate();
+        uint256 rateAfter = _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
         assertLt(rateAfter, rateBefore, "Rate should decrease after loss");
 
         vm.prank(SYNC_ROLE_ADDRESS);

@@ -11,16 +11,18 @@ import { IRoycoKernel } from "../src/interfaces/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../src/interfaces/IYDM.sol";
 import { Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel } from "../src/kernels/Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel.sol";
-import { Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel } from "../src/kernels/Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel.sol";
 import { Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel } from "../src/kernels/Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel.sol";
+import {
+    Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel
+} from "../src/kernels/Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.sol";
 import { Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel } from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel.sol";
 import { Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel } from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel.sol";
 import { Identical_Makina_ST_JT_MachineToAdminOracle_Kernel } from "../src/kernels/Identical_Makina_ST_JT_MachineToAdminOracle_Kernel.sol";
 import { ReUSD_ST_JT_ICLOracle_Kernel } from "../src/kernels/ReUSD_ST_JT_ICLOracle_Kernel.sol";
 import { IdenticalAssetsChainlinkOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
 import { IdenticalAssetsOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
-import { sUSDai_ST_JT_SharePriceToAdminOracle_Kernel } from "../src/kernels/sUSDai_ST_JT_SharePriceToAdminOracle_Kernel.sol";
-import { NAV_UNIT, toNAVUnits } from "../src/libraries/Units.sol";
+import { sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel } from "../src/kernels/sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel.sol";
+import { toNAVUnits } from "../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoSeniorTranche } from "../src/tranches/RoycoSeniorTranche.sol";
 import { AdaptiveCurveYDM_V1 } from "../src/ydm/AdaptiveCurveYDM_V1.sol";
@@ -59,13 +61,13 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     /// @notice Enum for kernel types
     enum KernelType {
         ReUSD_ST_ReUSD_JT,
-        Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel,
+        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel,
         Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel,
         Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel,
         Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel,
         IdleCdoAA_ST_IdleCdoAA_JT,
         Identical_Makina_ST_JT_MachineToAdminOracle_Kernel,
-        sUSDai_ST_JT_SharePriceToAdminOracle_Kernel
+        sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel
     }
 
     /// @notice Enum for YDM types
@@ -206,7 +208,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
                 deployerAddress: chainConfig.deployerAddress,
                 deployerAdminAddress: chainConfig.deployerAdminAddress,
                 protocolFeeRecipientAddress: chainConfig.protocolFeeRecipient,
-                transferAgentAddress: chainConfig.transferAgentAddress
+                transferAgentAddress: marketConfig.transferAgentAddress
             })
         );
 
@@ -215,7 +217,14 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             _printDeploymentParams(marketConfig, chainConfig.factoryAdmin, chainConfig.protocolFeeRecipient);
         }
 
-        return deploy(marketConfig, chainConfig.factoryAdmin, chainConfig.protocolFeeRecipient, roleAssignments, deployerPrivateKey);
+        return deploy(
+            marketConfig,
+            chainConfig.factoryAdmin,
+            chainConfig.protocolFeeRecipient,
+            chainConfig.scheduledOperationsExpirySeconds,
+            roleAssignments,
+            deployerPrivateKey
+        );
     }
 
     /// @notice Prints all deployment parameters for verification before deployment
@@ -262,7 +271,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         console2.log("JT Protocol Fee (WAD):", uint256(_config.jtProtocolFeeWAD));
         console2.log("Coverage (WAD):", uint256(_config.coverageWAD));
         console2.log("Beta (WAD):", uint256(_config.betaWAD));
-        console2.log("LLTV (WAD):", uint256(_config.lltvWAD));
+        console2.log("Liquidation Utilization (WAD):", uint256(_config.liquidationUtilizationWAD));
         console2.log("Fixed Term Duration (seconds):", uint256(_config.fixedTermDurationSeconds));
         console2.log("");
 
@@ -279,6 +288,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     /// @param _config The market deployment configuration (assets, kernel type, accountant params, YDM params)
     /// @param _factoryAdmin The address that will admin the factory's AccessManager
     /// @param _protocolFeeRecipient The address that receives protocol fees
+    /// @param _scheduledOperationsExpirySeconds The expiry time for scheduled operations in seconds
     /// @param _roleAssignments Role-to-address assignments configured on the factory
     /// @param _deployerPrivateKey The private key used to broadcast deployment transactions
     /// @return The deployment result containing all deployed contract addresses
@@ -286,6 +296,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         MarketDeploymentConfig memory _config,
         address _factoryAdmin,
         address _protocolFeeRecipient,
+        uint32 _scheduledOperationsExpirySeconds,
         IRoycoFactory.RoleAssignmentConfiguration[] memory _roleAssignments,
         uint256 _deployerPrivateKey
     )
@@ -299,7 +310,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         IYDM ydm = _deployYDM(_config.ydmType);
 
         // Deploy factory with factory admin as admin and deployer as deployer
-        RoycoFactory factory = _deployFactory(_factoryAdmin, deployer, _roleAssignments);
+        RoycoFactory factory = _deployFactory(_factoryAdmin, deployer, _scheduledOperationsExpirySeconds, _roleAssignments);
 
         // Deploy all implementations. Then deploy the market using the factory
         (
@@ -434,7 +445,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     }
 
     /// @notice Builds selector-to-role mappings for the accountant contract.
-    /// @dev Maps setYDM/setCoverage/setBeta/setLLTV/setFixedTermDuration/dust tolerances/coverage config
+    /// @dev Maps setYDM/setCoverage/setBeta/setLiquidationUtilization/setFixedTermDuration/dust tolerances/coverage config
     ///      to ADMIN_ACCOUNTANT_ROLE, fee setters to ADMIN_PROTOCOL_FEE_SETTER_ROLE, and shared
     ///      pause/unpause/upgrade to their respective roles.
     /// @param _accountant The address of the accountant contract
@@ -453,7 +464,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         roleValues[3] = ADMIN_ACCOUNTANT_ROLE;
         selectors[4] = IRoycoAccountant.setBeta.selector;
         roleValues[4] = ADMIN_ACCOUNTANT_ROLE;
-        selectors[5] = IRoycoAccountant.setLLTV.selector;
+        selectors[5] = IRoycoAccountant.setLiquidationUtilization.selector;
         roleValues[5] = ADMIN_ACCOUNTANT_ROLE;
         selectors[6] = IRoycoAccountant.setFixedTermDuration.selector;
         roleValues[6] = ADMIN_ACCOUNTANT_ROLE;
@@ -796,10 +807,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     /// @notice Deploys the factory implementation and its UUPS proxy via CREATE2.
     /// @param _factoryAdmin The address that receives the admin role on the factory's AccessManager
     /// @param _deployer The address that receives the DEPLOYER_ROLE for market deployments
+    /// @param _scheduledOperationsExpirySeconds The expiry time for scheduled operations in seconds
     /// @param _roleAssignments Initial role assignments configured during factory initialization
     function _deployFactory(
         address _factoryAdmin,
         address _deployer,
+        uint32 _scheduledOperationsExpirySeconds,
         IRoycoFactory.RoleAssignmentConfiguration[] memory _roleAssignments
     )
         internal
@@ -819,7 +832,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         address factoryProxyAddress;
         (factoryProxyAddress, alreadyDeployed) = deployWithSanityChecks(
             FACTORY_SALT_BASE,
-            getERC1967ProxyCreationCode(factoryImplAddr, abi.encodeCall(RoycoFactory.initialize, (_factoryAdmin, _deployer, _roleAssignments))),
+            getERC1967ProxyCreationCode(
+                factoryImplAddr, abi.encodeCall(RoycoFactory.initialize, (_factoryAdmin, _deployer, _scheduledOperationsExpirySeconds, _roleAssignments))
+            ),
             false
         );
         if (ENABLE_LOGGING) {
@@ -907,13 +922,13 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         } else if (_kernelType == KernelType.IdleCdoAA_ST_IdleCdoAA_JT) {
             IdleAACdoSTCdoJTKernelParams memory kp = abi.decode(_kernelSpecificParams, (IdleAACdoSTCdoJTKernelParams));
             return abi.encodePacked(type(Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel).creationCode, abi.encode(_cp, kp.idleCDO));
-        } else if (_kernelType == KernelType.Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel) {
-            return abi.encodePacked(type(Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel).creationCode, abi.encode(_cp));
+        } else if (_kernelType == KernelType.Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel) {
+            return abi.encodePacked(type(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel).creationCode, abi.encode(_cp));
         } else if (_kernelType == KernelType.Identical_Makina_ST_JT_MachineToAdminOracle_Kernel) {
             IdenticalMakinaSTMakinaJTKernelParams memory kp = abi.decode(_kernelSpecificParams, (IdenticalMakinaSTMakinaJTKernelParams));
             return abi.encodePacked(type(Identical_Makina_ST_JT_MachineToAdminOracle_Kernel).creationCode, abi.encode(_cp, kp.makinaMachine));
-        } else if (_kernelType == KernelType.sUSDai_ST_JT_SharePriceToAdminOracle_Kernel) {
-            return abi.encodePacked(type(sUSDai_ST_JT_SharePriceToAdminOracle_Kernel).creationCode, abi.encode(_cp));
+        } else if (_kernelType == KernelType.sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel) {
+            return abi.encodePacked(type(sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel).creationCode, abi.encode(_cp));
         } else {
             revert UnsupportedKernelType(_kernelType);
         }
@@ -970,7 +985,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             );
         } else if (_kernelType == KernelType.IdleCdoAA_ST_IdleCdoAA_JT) {
             return abi.encodeCall(Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel.initialize, (kernelParams));
-        } else if (_kernelType == KernelType.Identical_DSToken_ST_JT_ChainlinkToAdminOracle_Kernel) {
+        } else if (_kernelType == KernelType.Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel) {
             IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams memory kernelParams2 =
                 abi.decode(_kernelSpecificParams, (IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams));
             return abi.encodeCall(
@@ -985,10 +1000,10 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         } else if (_kernelType == KernelType.Identical_Makina_ST_JT_MachineToAdminOracle_Kernel) {
             IdenticalMakinaSTMakinaJTKernelParams memory kernelParams2 = abi.decode(_kernelSpecificParams, (IdenticalMakinaSTMakinaJTKernelParams));
             return abi.encodeCall(Identical_Makina_ST_JT_MachineToAdminOracle_Kernel.initialize, (kernelParams, kernelParams2.initialConversionRateWAD));
-        } else if (_kernelType == KernelType.sUSDai_ST_JT_SharePriceToAdminOracle_Kernel) {
+        } else if (_kernelType == KernelType.sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel) {
             IdenticalAssetsAdminOracleQuoterKernelParams memory kernelParams2 =
                 abi.decode(_kernelSpecificParams, (IdenticalAssetsAdminOracleQuoterKernelParams));
-            return abi.encodeCall(sUSDai_ST_JT_SharePriceToAdminOracle_Kernel.initialize, (kernelParams, kernelParams2.initialConversionRateWAD));
+            return abi.encodeCall(sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel.initialize, (kernelParams, kernelParams2.initialConversionRateWAD));
         } else {
             revert UnsupportedKernelType(_kernelType);
         }
@@ -1050,7 +1065,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             ydm: _ydmAddress,
             ydmInitializationData: _buildYDMInitializationData(_config.ydmType, _config.ydmSpecificParams),
             fixedTermDurationSeconds: _config.fixedTermDurationSeconds,
-            lltvWAD: _config.lltvWAD,
+            liquidationUtilizationWAD: _config.liquidationUtilizationWAD,
             stNAVDustTolerance: toNAVUnits(_config.stDustTolerance),
             jtNAVDustTolerance: toNAVUnits(_config.jtDustTolerance)
         });

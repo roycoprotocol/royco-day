@@ -13,7 +13,7 @@ import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
-import { AssetClaims, MarketState, TrancheType } from "../../src/libraries/Types.sol";
+import { AssetClaims, TrancheType } from "../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toUint256 } from "../../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoSeniorTranche } from "../../src/tranches/RoycoSeniorTranche.sol";
@@ -150,7 +150,7 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
     uint96 internal BETA_WAD = 0; // Different opportunities
     uint64 internal ST_PROTOCOL_FEE_WAD = 0.1e18; // 10% protocol fee
     uint64 internal JT_PROTOCOL_FEE_WAD = 0.1e18; // 10% protocol fee
-    uint64 internal LLTV = 0.97e18; // 95% LLTV
+    uint256 internal LIQUIDATION_UTILIZATION_WAD = 6.4667e18; // Liquidation utilization threshold
     uint24 internal FIXED_TERM_DURATION_SECONDS = 2 weeks; // 2 weeks in seconds
     NAV_UNIT internal DUST_TOLERANCE = toNAVUnits(uint256(1));
 
@@ -564,8 +564,8 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
         vm.prank(KERNEL_ADMIN_ADDRESS);
         FACTORY.schedule(_target, _data, 0);
 
-        // Warp past the delay (1 day for ADMIN_KERNEL_ROLE)
-        vm.warp(block.timestamp + 1 days + 1);
+        // Warp past the delay (2 days for ADMIN_KERNEL_ROLE)
+        vm.warp(block.timestamp + 2 days + 1);
 
         // Execute the operation
         vm.prank(KERNEL_ADMIN_ADDRESS);
@@ -580,8 +580,8 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
         FACTORY.schedule(_target, _data, 0);
 
-        // Warp past the delay (1 day for ADMIN_ACCOUNTANT_ROLE)
-        vm.warp(block.timestamp + 1 days + 1);
+        // Warp past the delay (2 days for ADMIN_ACCOUNTANT_ROLE)
+        vm.warp(block.timestamp + 2 days + 1);
 
         // Execute the operation
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
@@ -596,8 +596,8 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
         FACTORY.schedule(_target, _data, 0);
 
-        // Warp past the delay (1 day for ADMIN_PROTOCOL_FEE_SETTER_ROLE)
-        vm.warp(block.timestamp + 1 days + 1);
+        // Warp past the delay (2 days for ADMIN_PROTOCOL_FEE_SETTER_ROLE)
+        vm.warp(block.timestamp + 2 days + 1);
 
         // Execute the operation
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);

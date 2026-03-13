@@ -9,7 +9,7 @@ import { IInsuranceCapitalLayer } from "../../src/interfaces/external/reUSD/IIns
 import { ReUSD_ST_JT_ICLOracle_Kernel } from "../../src/kernels/ReUSD_ST_JT_ICLOracle_Kernel.sol";
 import { IdenticalAssetsOracleQuoter } from "../../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
 import { WAD, WAD } from "../../src/libraries/Constants.sol";
-import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits } from "../../src/libraries/Units.sol";
+import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../src/libraries/Units.sol";
 
 import { AbstractKernelTestSuite } from "./abstract/AbstractKernelTestSuite.t.sol";
 
@@ -239,8 +239,11 @@ contract reUSD_Test is AbstractKernelTestSuite {
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
         DeploymentConfig.MarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("reUSD");
 
+        uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
-        return DEPLOY_SCRIPT.deploy(marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, roleAssignments, DEPLOYER.privateKey);
+        return DEPLOY_SCRIPT.deploy(
+            marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roleAssignments, DEPLOYER.privateKey
+        );
     }
 }
