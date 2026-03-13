@@ -775,6 +775,9 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
         // Deposit ST to create senior claims
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+        uint256 bobBalance = IERC4626(config.stAsset).balanceOf(BOB_ADDRESS);
+        if (stAmount > bobBalance) stAmount = bobBalance;
         if (stAmount < _minDepositAmount()) return;
 
         _depositST(BOB_ADDRESS, stAmount);
@@ -813,7 +816,9 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
         // Deposit ST with high utilization
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
-
+        // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+        uint256 bobBalance = IERC4626(config.stAsset).balanceOf(BOB_ADDRESS);
+        if (stAmount > bobBalance) stAmount = bobBalance;
         if (stAmount < _minDepositAmount()) return;
 
         _depositST(BOB_ADDRESS, stAmount);
@@ -854,7 +859,9 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
 
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
-
+        // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+        uint256 bobBalance = IERC4626(config.stAsset).balanceOf(BOB_ADDRESS);
+        if (stAmount > bobBalance) stAmount = bobBalance;
         if (stAmount < _minDepositAmount()) return;
 
         _depositST(BOB_ADDRESS, stAmount);

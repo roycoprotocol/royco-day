@@ -48,8 +48,6 @@ contract MorphoV1_SmokehouseUSDC is DisabledChainlinkOracle_ERC4626_TestBase {
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
         DeploymentConfig.MarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("SmokehouseUSDC");
 
-        _mockDisabledOracleDecimals();
-
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 

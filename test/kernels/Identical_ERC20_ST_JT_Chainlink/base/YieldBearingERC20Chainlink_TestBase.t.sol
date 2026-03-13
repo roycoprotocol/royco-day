@@ -464,7 +464,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Tests that stale price causes STALE_PRICE revert
-    function test_oracleValidation_revertsOnStalePrice() external {
+    function testFuzz_oracleValidation_revertsOnStalePrice(uint256 _stalenessThreshold) external virtual {
         // Clear the mock to allow real call behavior
         vm.clearMockedCalls();
 

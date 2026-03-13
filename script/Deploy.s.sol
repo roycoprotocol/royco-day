@@ -630,7 +630,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         )
     {
         // Precompute expected proxy addresses using salt derived from market ID
-        bytes32 salt = keccak256(abi.encodePacked(MARKET_DEPLOYMENT_SALT, _config.seniorTrancheName, _config.juniorTrancheName));
+        bytes32 salt = keccak256(abi.encodePacked(MARKET_DEPLOYMENT_SALT, _config.seniorTrancheName, _config.juniorTrancheName, block.timestamp));
 
         // Predict the deterministic addresses of the contracts
         // The salt is unique for each contract type to prevent CREATE3 collisions

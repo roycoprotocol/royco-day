@@ -579,6 +579,9 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
 
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+        uint256 bobBalance = IERC4626(config.stAsset).balanceOf(BOB_ADDRESS);
+        if (stAmount > bobBalance) stAmount = bobBalance;
         if (stAmount < _minDepositAmount()) return;
 
         _depositST(BOB_ADDRESS, stAmount);
@@ -606,6 +609,9 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
 
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+        uint256 bobBalance = IERC4626(config.stAsset).balanceOf(BOB_ADDRESS);
+        if (stAmount > bobBalance) stAmount = bobBalance;
         if (stAmount < _minDepositAmount()) return;
 
         _depositST(BOB_ADDRESS, stAmount);
@@ -639,6 +645,9 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
 
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+        uint256 bobBalance = IERC4626(config.stAsset).balanceOf(BOB_ADDRESS);
+        if (stAmount > bobBalance) stAmount = bobBalance;
         if (stAmount < _minDepositAmount()) return;
 
         _depositST(BOB_ADDRESS, stAmount);
@@ -1060,7 +1069,7 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
     // NOTE: Sentinel mode (stored rate == 0) is required so the oracle is actually queried
 
     /// @notice Tests that stale price causes STALE_PRICE revert
-    function test_oracleValidation_revertsOnStalePrice() external {
+    function test_oracleValidation_revertsOnStalePrice() external virtual {
         // Ensure sentinel mode so oracle is queried
         if (_getStoredConversionRate() != 0) _setStoredConversionRate(0);
 
@@ -1084,7 +1093,7 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
     }
 
     /// @notice Tests that zero price causes INVALID_PRICE revert
-    function test_oracleValidation_revertsOnZeroPrice() external {
+    function test_oracleValidation_revertsOnZeroPrice() external virtual {
         if (_getStoredConversionRate() != 0) _setStoredConversionRate(0);
 
         vm.clearMockedCalls();
@@ -1106,7 +1115,7 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
     }
 
     /// @notice Tests that negative price causes INVALID_PRICE revert
-    function test_oracleValidation_revertsOnNegativePrice() external {
+    function test_oracleValidation_revertsOnNegativePrice() external virtual {
         if (_getStoredConversionRate() != 0) _setStoredConversionRate(0);
 
         vm.clearMockedCalls();
@@ -1128,7 +1137,7 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
     }
 
     /// @notice Tests that incomplete round causes INCOMPLETE_PRICE revert
-    function test_oracleValidation_revertsOnIncompleteRound() external {
+    function test_oracleValidation_revertsOnIncompleteRound() external virtual {
         if (_getStoredConversionRate() != 0) _setStoredConversionRate(0);
 
         vm.clearMockedCalls();
@@ -1150,7 +1159,7 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
     }
 
     /// @notice Tests that valid oracle data passes all checks
-    function test_oracleValidation_passesWithValidData() external {
+    function test_oracleValidation_passesWithValidData() external virtual {
         if (_getStoredConversionRate() != 0) _setStoredConversionRate(0);
 
         vm.clearMockedCalls();
@@ -1385,7 +1394,7 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
     }
 
     /// @notice Tests transition from non-sentinel to sentinel mode
-    function testFuzz_nonSentinelToSentinel_transition(uint256 _jtAmount) external {
+    function testFuzz_nonSentinelToSentinel_transition(uint256 _jtAmount) external virtual {
         _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
