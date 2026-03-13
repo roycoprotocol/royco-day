@@ -134,7 +134,7 @@ abstract contract DeploymentConfig {
         return ChainConfig({
             factoryAdmin: ROOT_MULTISIG,
             protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT,
-            pauserAddress: EXECUTOR_MULTISIG,
+            pauserAddress: ROOT_MULTISIG,
             upgraderAddress: ROOT_MULTISIG,
             syncRoleAddress: ROOT_MULTISIG,
             adminKernelAddress: ROOT_MULTISIG,
@@ -144,7 +144,7 @@ abstract contract DeploymentConfig {
             lpRoleAdminAddress: ROOT_MULTISIG,
             guardianAddress: EXECUTOR_MULTISIG,
             deployerAddress: DEPLOYER,
-            deployerAdminAddress: EXECUTOR_MULTISIG,
+            deployerAdminAddress: ROOT_MULTISIG,
             scheduledOperationsExpirySeconds: 1 weeks
         });
     }
@@ -348,15 +348,15 @@ abstract contract DeploymentConfig {
             juniorTrancheSymbol: _juniorTrancheSymbol(MFONE),
             seniorAsset: 0x238a700eD6165261Cf8b2e544ba797BC11e466Ba,
             juniorAsset: 0x238a700eD6165261Cf8b2e544ba797BC11e466Ba,
-            stDustTolerance: 5 * 10 ** 10, // The chainlink oracle has 8 decimals of precision
-            jtDustTolerance: 5 * 10 ** 10, // The chainlink oracle has 8 decimals of precision
+            stDustTolerance: 5,
+            jtDustTolerance: 5,
             kernelType: DeployScript.KernelType.Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams({
-                    initialConversionRateWAD: 1e18,
-                    trancheAssetToReferenceAssetOracle: 0x8D51DBC85cEef637c97D02bdaAbb5E274850e68C,
-                    stalenessThresholdSeconds: 1800 // TODO
-                })
+                        initialConversionRateWAD: 1e18,
+                        trancheAssetToReferenceAssetOracle: 0x8D51DBC85cEef637c97D02bdaAbb5E274850e68C,
+                        stalenessThresholdSeconds: 1800 // TODO
+                    })
             ),
             enforceVaultSharesTransferWhitelist: false,
             stSelfLiquidationBonusWAD: 0.05e18, // TODO
@@ -459,6 +459,7 @@ abstract contract DeploymentConfig {
             ),
             transferAgentAddress: address(0)
         });
+
         _marketConfigs[AA_FALCONX_USDC] = MarketDeploymentConfig({
             marketName: AA_FALCONX_USDC,
             chainId: MAINNET,
@@ -502,8 +503,8 @@ abstract contract DeploymentConfig {
             juniorTrancheSymbol: _juniorTrancheSymbol(SMOKEHOUSE_USDC),
             seniorAsset: 0xBEeFFF209270748ddd194831b3fa287a5386f5bC,
             juniorAsset: 0xBEeFFF209270748ddd194831b3fa287a5386f5bC,
-            stDustTolerance: 2 * (10 ** (18 - 6)),
-            jtDustTolerance: 2 * (10 ** (18 - 6)),
+            stDustTolerance: 5 * (10 ** (18 - 6)),
+            jtDustTolerance: 5 * (10 ** (18 - 6)),
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
@@ -545,8 +546,8 @@ abstract contract DeploymentConfig {
             juniorTrancheSymbol: _juniorTrancheSymbol(GAUNTLET_USDC_FRONTIER),
             seniorAsset: 0x9a1D6bd5b8642C41F25e0958129B85f8E1176F3e,
             juniorAsset: 0x9a1D6bd5b8642C41F25e0958129B85f8E1176F3e,
-            stDustTolerance: 2 * (10 ** (18 - 6)),
-            jtDustTolerance: 2 * (10 ** (18 - 6)),
+            stDustTolerance: 5 * (10 ** (18 - 6)),
+            jtDustTolerance: 5 * (10 ** (18 - 6)),
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
@@ -587,8 +588,8 @@ abstract contract DeploymentConfig {
             juniorTrancheSymbol: _juniorTrancheSymbol(ACRED),
             seniorAsset: 0x17418038ecF73BA4026c4f428547BF099706F27B,
             juniorAsset: 0x17418038ecF73BA4026c4f428547BF099706F27B,
-            stDustTolerance: 5 * 10 ** 10, // The chainlink oracle has 8 decimals of precision
-            jtDustTolerance: 5 * 10 ** 10, // The chainlink oracle has 8 decimals of precision
+            stDustTolerance: 5,
+            jtDustTolerance: 5,
             kernelType: DeployScript.KernelType.Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel,
             enforceVaultSharesTransferWhitelist: true,
             kernelSpecificParams: abi.encode(
