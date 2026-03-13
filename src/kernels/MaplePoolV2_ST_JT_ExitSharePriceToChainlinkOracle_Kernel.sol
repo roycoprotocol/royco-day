@@ -13,13 +13,13 @@ import {
 import { RoycoKernel } from "./base/RoycoKernel.sol";
 
 /**
- * @title MaplePoolV2_ST_JT_ExitSharePrice_Kernel
+ * @title MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel
  * @author Waymont
  * @notice The senior and junior tranches transfer in Maple pool V2 tokens (syrupUSDC, syrupUSDT, etc.)
- * @notice Tranche share transfers are restricted to addresses whitelisted to transfer by the Maple Pool
- * @dev NAV computations employ the exit share price (including unrealized losses) to convert pool tokens to base assets (eg USDC) and then a chainlink (compatible) or admin oracle set rate to convert base assets to NAV units
+ * @notice Tranche share transfers enforce the same restrictions as Maple Pool token transfers
+ * @dev NAV computations employ the exit share price (including unrealized losses) to convert pool tokens to base assets (eg USDC) and then a chainlink (compatible) or an admin oracle set rate to convert base assets to NAV units
  */
-contract MaplePoolV2_ST_JT_ExitSharePriceToOverridableOracle_Kernel is Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel {
+contract MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel is Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel {
     using Math for uint256;
 
     /// @dev The function ID for the transfer function on the maple pool
