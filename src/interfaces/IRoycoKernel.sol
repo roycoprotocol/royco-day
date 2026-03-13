@@ -397,9 +397,10 @@ interface IRoycoKernel {
      * @notice Pre-balance update hook for the tranche
      * @dev This function should revert if the balance update is invalid.
      * @dev Should be called before every tranche share balance update
+     * @param _caller The address that is calling the balance update
      * @param _from The address from which the balance is being updated
      * @param _to The address to which the balance is being updated
      * @param _value The amount of the balance being updated
      */
-    function preTrancheBalanceUpdateHook(address _from, address _to, uint256 _value) external;
+    function preTrancheBalanceUpdateHook(address _caller, address _from, address _to, uint256 _value) external;
 }
