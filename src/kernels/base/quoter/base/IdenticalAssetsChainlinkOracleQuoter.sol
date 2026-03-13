@@ -21,12 +21,11 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
     /// @custom:storage-location erc7201:Royco.storage.IdenticalAssetsChainlinkOracleQuoterState
     struct IdenticalAssetsChainlinkOracleQuoterState {
         address oracle;
-        uint8 oracleDecimals;
         uint48 stalenessThresholdSeconds;
     }
 
     /// @notice Emitted when the identical assets chainlink oracle is updated
-    event ChainlinkOracleUpdated(address indexed oracle, uint8 oracleDecimals, uint48 stalenessThresholdSeconds);
+    event ChainlinkOracleUpdated(address indexed oracle, uint48 stalenessThresholdSeconds);
 
     /// @notice Thrown when the staleness threshold seconds is zero
     error INVALID_STALENESS_THRESHOLD_SECONDS();
@@ -103,7 +102,8 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
     function _queryChainlinkOracle() internal view returns (uint256 price, uint256 precision) {
         // Fetch the price of the asset
         IdenticalAssetsChainlinkOracleQuoterState storage $ = _getIdenticalAssetsChainlinkOracleQuoterStorage();
-        (uint80 roundId, int256 answer,, uint256 updatedAt, uint80 answeredInRound) = AggregatorV3Interface($.oracle).latestRoundData();
+        AggregatorV3Interface oracle = AggregatorV3Interface($.oracle);
+        (uint80 roundId, int256 answer,, uint256 updatedAt, uint80 answeredInRound) = oracle.latestRoundData();
 
         // Conduct sanity checks
         require(updatedAt + $.stalenessThresholdSeconds >= block.timestamp, STALE_PRICE());
@@ -112,7 +112,7 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
 
         // Return the price and the scaled precision
         price = uint256(answer);
-        precision = 10 ** uint256($.oracleDecimals);
+        precision = 10 ** uint256(oracle.decimals());
     }
 
     /**
@@ -126,10 +126,9 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
 
         IdenticalAssetsChainlinkOracleQuoterState storage $ = _getIdenticalAssetsChainlinkOracleQuoterStorage();
         $.oracle = _oracle;
-        $.oracleDecimals = AggregatorV3Interface(_oracle).decimals();
         $.stalenessThresholdSeconds = _stalenessThresholdSeconds;
 
-        emit ChainlinkOracleUpdated(_oracle, $.oracleDecimals, _stalenessThresholdSeconds);
+        emit ChainlinkOracleUpdated(_oracle, _stalenessThresholdSeconds);
     }
 
     /**

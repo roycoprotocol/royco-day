@@ -48,8 +48,6 @@ contract MorphoV2_GauntletUSDCFrontier is DisabledChainlinkOracle_ERC4626_TestBa
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
         DeploymentConfig.MarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("GauntletUSDCFrontier");
 
-        _mockDisabledOracleDecimals();
-
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 

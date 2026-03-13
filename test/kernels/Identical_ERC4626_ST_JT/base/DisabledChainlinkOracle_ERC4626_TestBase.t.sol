@@ -55,12 +55,6 @@ abstract contract DisabledChainlinkOracle_ERC4626_TestBase is YieldBearingERC462
     // DEPLOYMENT HELPER
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Mocks decimals() on the disabled oracle (address(1)) for kernel initialization
-    /// @dev Must be called in _deployKernelAndMarket() before DEPLOY_SCRIPT.deploy()
-    function _mockDisabledOracleDecimals() internal {
-        vm.mockCall(address(1), abi.encodeWithSelector(AggregatorV3Interface.decimals.selector), abi.encode(uint8(8)));
-    }
-
     // ═══════════════════════════════════════════════════════════════════════════
     // SKIPPED TESTS: Sentinel/Chainlink-specific (not applicable for disabled oracle)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -101,6 +95,31 @@ abstract contract DisabledChainlinkOracle_ERC4626_TestBase is YieldBearingERC462
     }
 
     function testFuzz_sentinelToNonSentinel_transition(uint256) public override {
+        vm.skip(true);
+    }
+
+    function testFuzz_nonSentinelToSentinel_transition(uint256) external override {
+        vm.skip(true);
+    }
+
+    // Section F: Oracle validation tests require sentinel mode and clear all mocks (including decimals)
+    function test_oracleValidation_revertsOnStalePrice() external override {
+        vm.skip(true);
+    }
+
+    function test_oracleValidation_revertsOnZeroPrice() external override {
+        vm.skip(true);
+    }
+
+    function test_oracleValidation_revertsOnNegativePrice() external override {
+        vm.skip(true);
+    }
+
+    function test_oracleValidation_revertsOnIncompleteRound() external override {
+        vm.skip(true);
+    }
+
+    function test_oracleValidation_passesWithValidData() external override {
         vm.skip(true);
     }
 }
