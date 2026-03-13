@@ -55,12 +55,6 @@ abstract contract DisabledChainlinkOracle_ERC4626_TestBase is YieldBearingERC462
     // DEPLOYMENT HELPER
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Mocks decimals() on the disabled oracle (address(1)) for kernel initialization
-    /// @dev Must be called in _deployKernelAndMarket() before DEPLOY_SCRIPT.deploy()
-    function _mockDisabledOracleDecimals() internal {
-        vm.mockCall(address(1), abi.encodeWithSelector(AggregatorV3Interface.decimals.selector), abi.encode(uint8(8)));
-    }
-
     // ═══════════════════════════════════════════════════════════════════════════
     // SKIPPED TESTS: Sentinel/Chainlink-specific (not applicable for disabled oracle)
     // ═══════════════════════════════════════════════════════════════════════════
