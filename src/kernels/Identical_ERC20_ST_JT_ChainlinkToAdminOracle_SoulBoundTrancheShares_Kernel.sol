@@ -18,12 +18,15 @@ contract Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Ker
     constructor(RoycoKernelConstructionParams memory _params) Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel(_params) { }
 
     /// @inheritdoc RoycoKernel
-    function _preTrancheBalanceUpdate(address _from, address _to, uint256) internal pure override(RoycoKernel) {
-        // Only allow transfers between the zero address and a non-zero address (redeem and mint)
-        bool isMintOrRedeem;
-        assembly ("memory-safe") {
-            isMintOrRedeem := xor(eq(_from, 0), eq(_to, 0))
+    function _preTrancheBalanceUpdate(address _caller, address _from, address _to, uint256) internal view override(RoycoKernel) {
+        // If minting, ensure that the caller is the recipient
+        // The exception is for the kernel contract itself, which can mint protocol fee shares on behalf of the protocol fee recipient
+        if (_from == address(0)) {
+            require(_to == _caller || (_to == _getRoycoKernelStorage().protocolFeeRecipient && _caller == address(this)), TRANCHE_SHARES_ARE_SOUL_BOUND());
         }
-        require(isMintOrRedeem, TRANCHE_SHARES_ARE_SOUL_BOUND());
+        // If it's not a mint, enforce that it's a burn, otherwise the transfer is invalid
+        else {
+            require(_to == address(0), TRANCHE_SHARES_ARE_SOUL_BOUND());
+        }
     }
 }

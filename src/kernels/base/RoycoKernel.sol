@@ -536,7 +536,15 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     }
 
     /// @inheritdoc IRoycoKernel
-    function preTrancheBalanceUpdateHook(address _from, address _to, uint256 _value) external override(IRoycoKernel) onlyTranche whenNotPaused {
+    function preTrancheBalanceUpdateHook(address _caller, address _from, address _to, uint256 _value)
+        external
+        override(IRoycoKernel)
+        onlyTranche
+        whenNotPaused
+    {
+        // Check if caller is blacklisted or not
+        require(!isBlacklisted(_caller), ACCOUNT_BLACKLISTED(_caller));
+
         // Check if the sender is blacklisted if not a mint
         require(_from == address(0) || !isBlacklisted(_from), ACCOUNT_BLACKLISTED(_from));
 
@@ -556,17 +564,19 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         }
 
         // Call the market specific pre-balance update hook
-        _preTrancheBalanceUpdate(_from, _to, _value);
+        _preTrancheBalanceUpdate(_caller, _from, _to, _value);
     }
 
     /**
      * @notice Pre-balance update hook for the kernel
      * @dev Should be overridden by concrete kernel implementations to perform any additional checks or actions
+     * @dev The caller is the address that initiated the balance update
+     * @param _caller The address that initiated the balance update
      * @param _from The address from which the balance is being updated
      * @param _to The address to which the balance is being updated
      * @param _value The amount of the balance being updated
      */
-    function _preTrancheBalanceUpdate(address _from, address _to, uint256 _value) internal virtual { }
+    function _preTrancheBalanceUpdate(address _caller, address _from, address _to, uint256 _value) internal virtual { }
 
     // =============================
     // Internal Tranche Accounting Synchronization Functions

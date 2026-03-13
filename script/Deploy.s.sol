@@ -21,7 +21,7 @@ import { Identical_Makina_ST_JT_MachineToAdminOracle_Kernel } from "../src/kerne
 import { ReUSD_ST_JT_ICLOracle_Kernel } from "../src/kernels/ReUSD_ST_JT_ICLOracle_Kernel.sol";
 import { IdenticalAssetsChainlinkOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
 import { IdenticalAssetsOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
-import { sUSDai_ST_JT_SharePriceToAdminOracle_Kernel } from "../src/kernels/sUSDai_ST_JT_SharePriceToAdminOracle_Kernel.sol";
+import { sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel } from "../src/kernels/sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel.sol";
 import { toNAVUnits } from "../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoSeniorTranche } from "../src/tranches/RoycoSeniorTranche.sol";
@@ -67,7 +67,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel,
         IdleCdoAA_ST_IdleCdoAA_JT,
         Identical_Makina_ST_JT_MachineToAdminOracle_Kernel,
-        sUSDai_ST_JT_SharePriceToAdminOracle_Kernel
+        sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel
     }
 
     /// @notice Enum for YDM types
@@ -927,8 +927,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         } else if (_kernelType == KernelType.Identical_Makina_ST_JT_MachineToAdminOracle_Kernel) {
             IdenticalMakinaSTMakinaJTKernelParams memory kp = abi.decode(_kernelSpecificParams, (IdenticalMakinaSTMakinaJTKernelParams));
             return abi.encodePacked(type(Identical_Makina_ST_JT_MachineToAdminOracle_Kernel).creationCode, abi.encode(_cp, kp.makinaMachine));
-        } else if (_kernelType == KernelType.sUSDai_ST_JT_SharePriceToAdminOracle_Kernel) {
-            return abi.encodePacked(type(sUSDai_ST_JT_SharePriceToAdminOracle_Kernel).creationCode, abi.encode(_cp));
+        } else if (_kernelType == KernelType.sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel) {
+            return abi.encodePacked(type(sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel).creationCode, abi.encode(_cp));
         } else {
             revert UnsupportedKernelType(_kernelType);
         }
@@ -1000,10 +1000,10 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         } else if (_kernelType == KernelType.Identical_Makina_ST_JT_MachineToAdminOracle_Kernel) {
             IdenticalMakinaSTMakinaJTKernelParams memory kernelParams2 = abi.decode(_kernelSpecificParams, (IdenticalMakinaSTMakinaJTKernelParams));
             return abi.encodeCall(Identical_Makina_ST_JT_MachineToAdminOracle_Kernel.initialize, (kernelParams, kernelParams2.initialConversionRateWAD));
-        } else if (_kernelType == KernelType.sUSDai_ST_JT_SharePriceToAdminOracle_Kernel) {
+        } else if (_kernelType == KernelType.sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel) {
             IdenticalAssetsAdminOracleQuoterKernelParams memory kernelParams2 =
                 abi.decode(_kernelSpecificParams, (IdenticalAssetsAdminOracleQuoterKernelParams));
-            return abi.encodeCall(sUSDai_ST_JT_SharePriceToAdminOracle_Kernel.initialize, (kernelParams, kernelParams2.initialConversionRateWAD));
+            return abi.encodeCall(sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel.initialize, (kernelParams, kernelParams2.initialConversionRateWAD));
         } else {
             revert UnsupportedKernelType(_kernelType);
         }

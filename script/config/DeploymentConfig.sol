@@ -673,7 +673,7 @@ abstract contract DeploymentConfig {
             juniorAsset: 0x0B2b2B2076d95dda7817e785989fE353fe955ef9,
             stDustTolerance: 5,
             jtDustTolerance: 5,
-            kernelType: DeployScript.KernelType.sUSDai_ST_JT_SharePriceToAdminOracle_Kernel,
+            kernelType: DeployScript.KernelType.sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel,
             enforceVaultSharesTransferWhitelist: false,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalAssetsAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
             stSelfLiquidationBonusWAD: 0.01e18,
