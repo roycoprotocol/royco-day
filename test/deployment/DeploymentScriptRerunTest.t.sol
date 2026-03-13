@@ -6,11 +6,9 @@ import { Vm } from "../../lib/forge-std/src/Vm.sol";
 import { IAccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
+import { DeploymentConfig } from "../../script/config/DeploymentConfig.sol";
 import { RolesConfiguration, RoycoFactory } from "../../src/factory/RoycoFactory.sol";
-import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
-import { IRoycoKernel } from "../../src/interfaces/kernel/IRoycoKernel.sol";
-import { IRoycoVaultTranche } from "../../src/interfaces/tranche/IRoycoVaultTranche.sol";
-import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
+import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { ERC4626Mock } from "../mock/ERC4626Mock.sol";
 
 /// @title DeploymentScriptRerunTest
@@ -70,16 +68,15 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
 
     // Constants
     address internal constant ETHEREUM_MAINNET_USDC_ADDRESS = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
-    address internal constant ETHEREUM_MAINNET_AAVE_V3_POOL_ADDRESS = 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2;
 
     // Deployment params
     uint64 internal COVERAGE_WAD = 0.2e18;
     uint96 internal BETA_WAD = 0;
     uint64 internal ST_PROTOCOL_FEE_WAD = 0.1e18;
     uint64 internal JT_PROTOCOL_FEE_WAD = 0.1e18;
-    uint64 internal LLTV = 0.97e18;
+    uint256 internal LIQUIDATION_UTILIZATION_WAD = 6.4667e18;
     uint24 internal FIXED_TERM_DURATION_SECONDS = 2 weeks;
-    NAV_UNIT internal DUST_TOLERANCE = toNAVUnits(uint256(1));
+    uint256 internal DUST_TOLERANCE_RAW = 1;
     uint24 internal JT_REDEMPTION_DELAY_SECONDS = 1_000_000;
 
     function setUp() public {
@@ -163,7 +160,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         return wallet;
     }
 
-    function _generateRoleAssignments() internal view returns (DeployScript.RoleAssignmentConfiguration[] memory) {
+    function _generateRoleAssignments() internal view returns (IRoycoFactory.RoleAssignmentConfiguration[] memory) {
         return DEPLOY_SCRIPT.generateRolesAssignments(
             DeployScript.RoleAssignmentAddresses({
                 pauserAddress: PAUSER_ADDRESS,
@@ -176,12 +173,14 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
                 lpRoleAdminAddress: LP_ROLE_ADMIN_ADDRESS,
                 guardianAddress: ROLE_GUARDIAN_ADDRESS,
                 deployerAddress: DEPLOYER_ADDRESS,
-                deployerAdminAddress: DEPLOYER_ADMIN_ADDRESS
+                deployerAdminAddress: DEPLOYER_ADMIN_ADDRESS,
+                protocolFeeRecipientAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS,
+                transferAgentAddress: address(0)
             })
         );
     }
 
-    function _buildDeploymentParams(
+    function _buildDeploymentConfig(
         string memory _seniorTrancheName,
         string memory _seniorTrancheSymbol,
         string memory _juniorTrancheName,
@@ -190,50 +189,37 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
     )
         internal
         view
-        returns (DeployScript.DeploymentParams memory)
+        returns (DeploymentConfig.MarketDeploymentConfig memory config, IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments)
     {
-        bytes32 marketID = keccak256(abi.encodePacked(_seniorTrancheName, _juniorTrancheName, vm.getBlockTimestamp()));
-
-        // Build kernel-specific params
-        DeployScript.ERC4626STAaveV3JTInKindAssetsKernelParams memory kernelParams =
-            DeployScript.ERC4626STAaveV3JTInKindAssetsKernelParams({ stVault: _stVault, aaveV3Pool: ETHEREUM_MAINNET_AAVE_V3_POOL_ADDRESS });
-
-        // Build YDM params (AdaptiveCurve_V2)
-        DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
-            jtYieldShareAtZeroUtilWAD: 0.225e18, // Y_0 = Y_T (same as target)
-            jtYieldShareAtTargetUtilWAD: 0.225e18,
-            jtYieldShareAtFullUtilWAD: 1e18,
-            maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
-        });
-
-        // Build role assignments
-        DeployScript.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
-
-        return DeployScript.DeploymentParams({
-            factoryAdmin: OWNER_ADDRESS,
-            marketId: marketID,
-            seniorTrancheName: _seniorTrancheName,
-            seniorTrancheSymbol: _seniorTrancheSymbol,
-            juniorTrancheName: _juniorTrancheName,
-            juniorTrancheSymbol: _juniorTrancheSymbol,
-            seniorAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
-            juniorAsset: ETHEREUM_MAINNET_USDC_ADDRESS,
-            stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE,
-            kernelType: DeployScript.KernelType.ERC4626_ST_AaveV3_JT_InKindAssets,
-            kernelSpecificParams: abi.encode(kernelParams),
-            protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            jtRedemptionDelayInSeconds: JT_REDEMPTION_DELAY_SECONDS,
-            stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
-            jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            coverageWAD: COVERAGE_WAD,
-            betaWAD: BETA_WAD,
-            lltvWAD: LLTV,
-            fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
-            ydmSpecificParams: abi.encode(ydmParams),
-            roleAssignments: roleAssignments
-        });
+        config.marketName = "test";
+        config.chainId = block.chainid;
+        config.seniorTrancheName = _seniorTrancheName;
+        config.seniorTrancheSymbol = _seniorTrancheSymbol;
+        config.juniorTrancheName = _juniorTrancheName;
+        config.juniorTrancheSymbol = _juniorTrancheSymbol;
+        config.seniorAsset = _stVault;
+        config.juniorAsset = _stVault;
+        config.stDustTolerance = DUST_TOLERANCE_RAW;
+        config.jtDustTolerance = DUST_TOLERANCE_RAW;
+        config.kernelType = DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel;
+        config.stProtocolFeeWAD = ST_PROTOCOL_FEE_WAD;
+        config.jtProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
+        config.jtYieldShareProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
+        config.coverageWAD = COVERAGE_WAD;
+        config.betaWAD = BETA_WAD;
+        config.liquidationUtilizationWAD = LIQUIDATION_UTILIZATION_WAD;
+        config.fixedTermDurationSeconds = FIXED_TERM_DURATION_SECONDS;
+        config.ydmType = DeployScript.YDMType.AdaptiveCurve_V2;
+        config.kernelSpecificParams = abi.encode(DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 }));
+        config.ydmSpecificParams = abi.encode(
+            DeployScript.AdaptiveCurveYDM_V2_Params({
+                jtYieldShareAtZeroUtilWAD: 0.225e18,
+                jtYieldShareAtTargetUtilWAD: 0.225e18,
+                jtYieldShareAtFullUtilWAD: 1e18,
+                maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
+            })
+        );
+        roleAssignments = _generateRoleAssignments();
     }
 
     // ============================================
@@ -245,10 +231,12 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         // ============================================
         // FIRST DEPLOYMENT
         // ============================================
-        DeployScript.DeploymentParams memory params1 =
-            _buildDeploymentParams("Royco Senior Tranche Alpha", "RST-A", "Royco Junior Tranche Alpha", "RJT-A", address(MOCK_UNDERLYING_ST_VAULT_1));
+        (DeploymentConfig.MarketDeploymentConfig memory config1, IRoycoFactory.RoleAssignmentConfiguration[] memory roles1) =
+            _buildDeploymentConfig("Royco Senior Tranche Alpha", "RST-A", "Royco Junior Tranche Alpha", "RJT-A", address(MOCK_UNDERLYING_ST_VAULT_1));
 
-        DeployScript.DeploymentResult memory result1 = DEPLOY_SCRIPT.deploy(params1, DEPLOYER.privateKey);
+        uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
+        DeployScript.DeploymentResult memory result1 =
+            DEPLOY_SCRIPT.deploy(config1, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roles1, DEPLOYER.privateKey);
 
         // Verify first deployment succeeded
         assertTrue(address(result1.factory) != address(0), "First factory should be deployed");
@@ -269,11 +257,12 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         // Warp time to get different market ID
         vm.warp(block.timestamp + 1);
 
-        DeployScript.DeploymentParams memory params2 =
-            _buildDeploymentParams("Royco Senior Tranche Beta", "RST-B", "Royco Junior Tranche Beta", "RJT-B", address(MOCK_UNDERLYING_ST_VAULT_2));
+        (DeploymentConfig.MarketDeploymentConfig memory config2, IRoycoFactory.RoleAssignmentConfiguration[] memory roles2) =
+            _buildDeploymentConfig("Royco Senior Tranche Beta", "RST-B", "Royco Junior Tranche Beta", "RJT-B", address(MOCK_UNDERLYING_ST_VAULT_2));
 
         // Second deployment should succeed
-        DeployScript.DeploymentResult memory result2 = DEPLOY_SCRIPT.deploy(params2, DEPLOYER.privateKey);
+        DeployScript.DeploymentResult memory result2 =
+            DEPLOY_SCRIPT.deploy(config2, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roles2, DEPLOYER.privateKey);
 
         // Verify second deployment succeeded
         assertTrue(address(result2.factory) != address(0), "Second factory should be deployed");
@@ -298,18 +287,17 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         assertTrue(address(result1.accountant) != address(result2.accountant), "Accountants should be different");
         assertTrue(address(result1.seniorTranche) != address(result2.seniorTranche), "Senior tranches should be different");
         assertTrue(address(result1.juniorTranche) != address(result2.juniorTranche), "Junior tranches should be different");
-
-        // Market IDs should be different
-        assertTrue(result1.marketId != result2.marketId, "Market IDs should be different");
     }
 
     /// @notice Test that the deployment script properly configures roles on both runs
     function test_deploymentScript_rolesConfiguredOnBothRuns() public {
         // First deployment
-        DeployScript.DeploymentParams memory params1 =
-            _buildDeploymentParams("Royco Senior Tranche Alpha", "RST-A", "Royco Junior Tranche Alpha", "RJT-A", address(MOCK_UNDERLYING_ST_VAULT_1));
+        (DeploymentConfig.MarketDeploymentConfig memory config1, IRoycoFactory.RoleAssignmentConfiguration[] memory roles1) =
+            _buildDeploymentConfig("Royco Senior Tranche Alpha", "RST-A", "Royco Junior Tranche Alpha", "RJT-A", address(MOCK_UNDERLYING_ST_VAULT_1));
 
-        DeployScript.DeploymentResult memory result1 = DEPLOY_SCRIPT.deploy(params1, DEPLOYER.privateKey);
+        uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
+        DeployScript.DeploymentResult memory result1 =
+            DEPLOY_SCRIPT.deploy(config1, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roles1, DEPLOYER.privateKey);
 
         // Verify roles are configured for first deployment
         IAccessManager factory1 = IAccessManager(address(result1.factory));
@@ -325,10 +313,11 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         // Second deployment
         vm.warp(block.timestamp + 1);
 
-        DeployScript.DeploymentParams memory params2 =
-            _buildDeploymentParams("Royco Senior Tranche Beta", "RST-B", "Royco Junior Tranche Beta", "RJT-B", address(MOCK_UNDERLYING_ST_VAULT_2));
+        (DeploymentConfig.MarketDeploymentConfig memory config2, IRoycoFactory.RoleAssignmentConfiguration[] memory roles2) =
+            _buildDeploymentConfig("Royco Senior Tranche Beta", "RST-B", "Royco Junior Tranche Beta", "RJT-B", address(MOCK_UNDERLYING_ST_VAULT_2));
 
-        DeployScript.DeploymentResult memory result2 = DEPLOY_SCRIPT.deploy(params2, DEPLOYER.privateKey);
+        DeployScript.DeploymentResult memory result2 =
+            DEPLOY_SCRIPT.deploy(config2, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roles2, DEPLOYER.privateKey);
 
         // Verify roles are configured for second deployment
         IAccessManager factory2 = IAccessManager(address(result2.factory));
@@ -345,10 +334,12 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
     /// @notice Test that deployer can deploy multiple markets using the factory's deployMarket function
     function test_deployerCanDeployMultipleMarketsViaFactory() public {
         // First deployment creates the factory
-        DeployScript.DeploymentParams memory params1 =
-            _buildDeploymentParams("Royco Senior Tranche Alpha", "RST-A", "Royco Junior Tranche Alpha", "RJT-A", address(MOCK_UNDERLYING_ST_VAULT_1));
+        (DeploymentConfig.MarketDeploymentConfig memory config1, IRoycoFactory.RoleAssignmentConfiguration[] memory roles1) =
+            _buildDeploymentConfig("Royco Senior Tranche Alpha", "RST-A", "Royco Junior Tranche Alpha", "RJT-A", address(MOCK_UNDERLYING_ST_VAULT_1));
 
-        DeployScript.DeploymentResult memory result1 = DEPLOY_SCRIPT.deploy(params1, DEPLOYER.privateKey);
+        uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
+        DeployScript.DeploymentResult memory result1 =
+            DEPLOY_SCRIPT.deploy(config1, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roles1, DEPLOYER.privateKey);
         RoycoFactory factory = result1.factory;
 
         // Verify DEPLOYER has DEPLOYER_ROLE
@@ -359,23 +350,6 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         // This simulates a scenario where the factory already exists and we just want to add a new market
         vm.warp(block.timestamp + 1);
 
-        // Build market deployment params for factory.deployMarket()
-        bytes32 marketId2 = keccak256(abi.encodePacked("Second Market", vm.getBlockTimestamp()));
-
-        // Get expected addresses
-        bytes32 salt2 = keccak256(abi.encodePacked("MARKET_2_SALT"));
-        address expectedST = factory.predictERC1967ProxyAddress(address(result1.stTrancheImplementation), salt2);
-        address expectedJT = factory.predictERC1967ProxyAddress(address(result1.jtTrancheImplementation), salt2);
-        address expectedKernel = factory.predictERC1967ProxyAddress(result1.kernelImplementation, salt2);
-        address expectedAccountant = factory.predictERC1967ProxyAddress(address(result1.accountantImplementation), salt2);
-
-        // Build roles configuration
-        DEPLOY_SCRIPT.buildRolesTargetConfiguration(expectedST, expectedJT, expectedKernel, expectedAccountant);
-
-        // Note: For a full test, we would need to build all the initialization data
-        // This test demonstrates that the DEPLOYER role is properly configured
-        // and could deploy additional markets
-
         // Verify the factory admin is OWNER_ADDRESS after deployment
         (bool isOwnerAdmin,) = IAccessManager(address(factory)).hasRole(0, OWNER_ADDRESS);
         assertTrue(isOwnerAdmin, "OWNER should be admin of the factory");
@@ -384,10 +358,12 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
     /// @notice Test that the same deployer can use the factory after ownership transfer
     function test_deployerRetainsRoleAfterOwnershipTransfer() public {
         // Deploy first market
-        DeployScript.DeploymentParams memory params1 =
-            _buildDeploymentParams("Royco Senior Tranche Alpha", "RST-A", "Royco Junior Tranche Alpha", "RJT-A", address(MOCK_UNDERLYING_ST_VAULT_1));
+        (DeploymentConfig.MarketDeploymentConfig memory config1, IRoycoFactory.RoleAssignmentConfiguration[] memory roles1) =
+            _buildDeploymentConfig("Royco Senior Tranche Alpha", "RST-A", "Royco Junior Tranche Alpha", "RJT-A", address(MOCK_UNDERLYING_ST_VAULT_1));
 
-        DeployScript.DeploymentResult memory result1 = DEPLOY_SCRIPT.deploy(params1, DEPLOYER.privateKey);
+        uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
+        DeployScript.DeploymentResult memory result1 =
+            DEPLOY_SCRIPT.deploy(config1, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roles1, DEPLOYER.privateKey);
         RoycoFactory factory = result1.factory;
 
         // After deployment, OWNER_ADDRESS should be the admin (ownership transferred)

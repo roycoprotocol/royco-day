@@ -8,7 +8,7 @@ import { MarketState, NAV_UNIT } from "../libraries/Types.sol";
  * @notice Interface for yield distribution models that determine how ST yield is distributed between tranches in Royco markets
  */
 interface IYDM {
-    /// @dev Thrown when the initilization parameters of the YDM for a market are invalid
+    /// @dev Thrown when the initialization parameters of the YDM for a market are invalid
     error INVALID_YDM_INITIALIZATION();
 
     /// @dev Thrown when an accountant attempts to query the JT yield share without initializing the YDM

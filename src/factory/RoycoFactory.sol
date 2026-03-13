@@ -2,14 +2,14 @@
 pragma solidity ^0.8.28;
 
 import { AccessManagedUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/access/manager/AccessManagedUpgradeable.sol";
-import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
+import { AccessManagerUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/access/manager/AccessManagerUpgradeable.sol";
+import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import { Create2 } from "../../lib/openzeppelin-contracts/contracts/utils/Create2.sol";
-import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
-import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
-import { IRoycoKernel } from "../../src/interfaces/kernel/IRoycoKernel.sol";
-import { IRoycoVaultTranche } from "../../src/interfaces/tranche/IRoycoVaultTranche.sol";
-import { MarketDeploymentParams, RolesTargetConfiguration, RoycoMarket } from "../../src/libraries/Types.sol";
+import { CREATE3 } from "../../lib/solady/src/utils/CREATE3.sol";
+import { IRoycoAccountant } from "../interfaces/IRoycoAccountant.sol";
+import { IRoycoFactory } from "../interfaces/IRoycoFactory.sol";
+import { IRoycoKernel } from "../interfaces/IRoycoKernel.sol";
+import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 import { RolesConfiguration } from "./RolesConfiguration.sol";
 
 /**
@@ -19,23 +19,113 @@ import { RolesConfiguration } from "./RolesConfiguration.sol";
  * @notice The factory also acts as a singleton access manager for all the Royco markets and their constituent contracts
  * @dev The factory deploys each market's constituent contracts using the UUPS proxy pattern
  */
-contract RoycoFactory is AccessManager, RolesConfiguration, IRoycoFactory {
-    /// @dev Mapping from a senior tranche to its corresponding junior tranche
-    mapping(address st => address jt) public seniorTrancheToJuniorTranche;
-
-    /// @dev Mapping from a junior tranche to its corresponding senior tranche
-    mapping(address jt => address st) public juniorTrancheToSeniorTranche;
+contract RoycoFactory is AccessManagerUpgradeable, RolesConfiguration, IRoycoFactory, UUPSUpgradeable {
+    /// @dev Storage slot for RoycoFactoryState using ERC-7201 pattern
+    // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoFactoryState")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant ROYCO_FACTORY_STORAGE_SLOT = 0xd5259699f97e0f34b934576b7add74d31128c481e849a0afbdca7e6e84f8b300;
 
     /**
-     * @notice Initializes the Royco Factory
+     * @dev The storage state of the Royco factory
+     * @custom:storage-location erc7201:Royco.storage.RoycoFactoryState
+     * @custom:mapping seniorTrancheToJuniorTranche - Mapping from a senior tranche to its corresponding junior tranche
+     * @custom:mapping juniorTrancheToSeniorTranche - Mapping from a junior tranche to its corresponding senior tranche
+     * @custom:field scheduledOperationsExpirySeconds - The expiry time for scheduled operations in seconds
+     */
+    struct RoycoFactoryState {
+        mapping(address st => address jt) seniorTrancheToJuniorTranche;
+        mapping(address jt => address st) juniorTrancheToSeniorTranche;
+        uint32 scheduledOperationsExpirySeconds;
+    }
+
+    /// @notice Constructs the factory
+    /// @dev Disable the initializers
+    constructor() {
+        _disableInitializers();
+    }
+
+    /**
+     * @notice Initializes the factory
      * @param _admin The admin of the factory
      * @param _deployer The deployer address that can deploy new markets
+     * @param _scheduledOperationsExpirySeconds The expiry time for scheduled operations in seconds
+     * @param _roles The roles to assign to the factory
      */
-    constructor(address _admin, address _deployer) AccessManager(_admin) {
+    function initialize(
+        address _admin,
+        address _deployer,
+        uint32 _scheduledOperationsExpirySeconds,
+        RoleAssignmentConfiguration[] calldata _roles
+    )
+        external
+        virtual
+        initializer
+    {
+        // Initialize the access manager
+        __AccessManager_init(_admin);
+        // Initialize the factory
+        __RoycoFactory_init_unchained(_deployer, _scheduledOperationsExpirySeconds, _roles);
+    }
+
+    /**
+     * @notice Initializes the factory
+     * @param _deployer The deployer address that can deploy new markets
+     * @param _scheduledOperationsExpirySeconds The expiry time for scheduled operations in seconds
+     * @param _roles The roles to assign to the factory
+     */
+    function __RoycoFactory_init_unchained(
+        address _deployer,
+        uint32 _scheduledOperationsExpirySeconds,
+        RoleAssignmentConfiguration[] calldata _roles
+    )
+        internal
+        onlyInitializing
+    {
+        // Set the scheduled operations expiry seconds
+        _setScheduledOperationsExpiry(_scheduledOperationsExpirySeconds);
+
         // Grant the deployer the deployer role
         _grantRole(DEPLOYER_ROLE, _deployer, 0, 0);
         // Set the deployer role on the deployMarket function
-        _setTargetFunctionRole(address(this), RoycoFactory.deployMarket.selector, DEPLOYER_ROLE);
+        _setTargetFunctionRole(address(this), IRoycoFactory.deployMarket.selector, DEPLOYER_ROLE);
+
+        // Configure the factory upgrader role
+        _setTargetFunctionRole(address(this), UUPSUpgradeable.upgradeToAndCall.selector, ADMIN_UPGRADER_ROLE);
+
+        // Configure all other market roles
+        for (uint256 i = 0; i < _roles.length; i++) {
+            RoleAssignmentConfiguration calldata roleAssignment = _roles[i];
+
+            // Get role config to set up admin and guardian
+            RoleConfig memory roleConfig = getRoleConfig(roleAssignment.role);
+
+            // Grant the role to the assignee (skip if assignee is zero, e.g., ST_LP_ROLE which is handled separately)
+            if (roleAssignment.assignee != address(0)) {
+                _grantRole(roleAssignment.role, roleAssignment.assignee, 0, roleAssignment.executionDelay);
+            }
+
+            // Set the role admin if different from default (0)
+            if (roleConfig.adminRole != _ADMIN_ROLE) {
+                _setRoleAdmin(roleAssignment.role, roleConfig.adminRole);
+            }
+
+            // Set the role guardian
+            _setRoleGuardian(roleAssignment.role, roleConfig.guardianRole);
+        }
+    }
+
+    /// @inheritdoc IRoycoFactory
+    function seniorTrancheToJuniorTranche(address _seniorTranche) external view override(IRoycoFactory) returns (address juniorTranche) {
+        return _getRoycoFactoryStorage().seniorTrancheToJuniorTranche[_seniorTranche];
+    }
+
+    /// @inheritdoc IRoycoFactory
+    function juniorTrancheToSeniorTranche(address _juniorTranche) external view override(IRoycoFactory) returns (address seniorTranche) {
+        return _getRoycoFactoryStorage().juniorTrancheToSeniorTranche[_juniorTranche];
+    }
+
+    /// @inheritdoc IRoycoFactory
+    function predictDeterministicAddress(bytes32 _salt) external view override(IRoycoFactory) returns (address deployed) {
+        deployed = CREATE3.predictDeterministicAddress(_salt);
     }
 
     /// @inheritdoc IRoycoFactory
@@ -58,79 +148,65 @@ contract RoycoFactory is AccessManager, RolesConfiguration, IRoycoFactory {
         // Update the mappings between the two deployed tranches
         address seniorTranche = address(roycoMarket.seniorTranche);
         address juniorTranche = address(roycoMarket.juniorTranche);
-        seniorTrancheToJuniorTranche[seniorTranche] = juniorTranche;
-        juniorTrancheToSeniorTranche[juniorTranche] = seniorTranche;
+        RoycoFactoryState storage $ = _getRoycoFactoryStorage();
+        $.seniorTrancheToJuniorTranche[seniorTranche] = juniorTranche;
+        $.juniorTrancheToSeniorTranche[juniorTranche] = seniorTranche;
 
         emit MarketDeployed(roycoMarket, _params);
     }
 
     /// @inheritdoc IRoycoFactory
-    function predictERC1967ProxyAddress(address _implementation, bytes32 _salt) external view override(IRoycoFactory) returns (address proxy) {
-        proxy = Create2.computeAddress(_salt, keccak256(abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(_implementation, ""))));
+    function setScheduledOperationsExpiry(uint32 _scheduledOperationsExpirySeconds) external override(IRoycoFactory) onlyAuthorized {
+        require(_scheduledOperationsExpirySeconds > 0, INVALID_SCHEDULED_OPERATIONS_EXPIRY_SECONDS());
+        _getRoycoFactoryStorage().scheduledOperationsExpirySeconds = _scheduledOperationsExpirySeconds;
+    }
+
+    /// @inheritdoc AccessManagerUpgradeable
+    function expiration() public view override(AccessManagerUpgradeable) returns (uint32) {
+        return _getRoycoFactoryStorage().scheduledOperationsExpirySeconds;
+    }
+
+    /**
+     * @notice Sets the scheduled operations expiry seconds
+     * @param _scheduledOperationsExpirySeconds The expiry time for scheduled operations in seconds
+     */
+    function _setScheduledOperationsExpiry(uint32 _scheduledOperationsExpirySeconds) internal {
+        require(_scheduledOperationsExpirySeconds != 0, INVALID_SCHEDULED_OPERATIONS_EXPIRY_SECONDS());
+        _getRoycoFactoryStorage().scheduledOperationsExpirySeconds = _scheduledOperationsExpirySeconds;
+        emit ScheduledOperationsExpirySecondsSet(_scheduledOperationsExpirySeconds);
     }
 
     /**
      * @notice Deploys the contracts for a new Royco market
      * @param _params The parameters for deploying a new Royco market
-     * @param roycoMarket The deployed components constituting the Royco market
+     * @return roycoMarket The deployed components constituting the Royco market
      */
     function _deployMarket(MarketDeploymentParams calldata _params) internal virtual returns (RoycoMarket memory roycoMarket) {
-        // Deploy the tranches, kernel, and accountant for the market with empty initialization data
-        // It is expected that the kernel initialization data contains the address of the accountant and vice versa
-        // Therefore, it is expected that the proxy address is precomputed based on an uninitialized erc1967 proxy initcode
-        // and that the proxy is initalized separately after deployment, in the same transaction
+        // Deploy the senior tranche
+        roycoMarket.seniorTranche = IRoycoVaultTranche(
+            _deployERC1967ProxyDeterministic(
+                address(_params.seniorTrancheImplementation), _params.seniorTrancheInitializationData, _params.seniorTrancheProxyDeploymentSalt
+            )
+        );
 
-        // Deploy the senior tranche with empty initialization data
-        roycoMarket.seniorTranche =
-            IRoycoVaultTranche(_deployERC1967ProxyDeterministic(address(_params.seniorTrancheImplementation), _params.seniorTrancheProxyDeploymentSalt));
+        // Deploy the junior tranche
+        roycoMarket.juniorTranche = IRoycoVaultTranche(
+            _deployERC1967ProxyDeterministic(
+                address(_params.juniorTrancheImplementation), _params.juniorTrancheInitializationData, _params.juniorTrancheProxyDeploymentSalt
+            )
+        );
 
-        // Deploy the junior tranche with empty initialization data
-        roycoMarket.juniorTranche =
-            IRoycoVaultTranche(_deployERC1967ProxyDeterministic(address(_params.juniorTrancheImplementation), _params.juniorTrancheProxyDeploymentSalt));
+        // Deploy the kernel
+        roycoMarket.kernel = IRoycoKernel(
+            _deployERC1967ProxyDeterministic(address(_params.kernelImplementation), _params.kernelInitializationData, _params.kernelProxyDeploymentSalt)
+        );
 
-        // Deploy the kernel with empty initialization data
-        roycoMarket.kernel = IRoycoKernel(_deployERC1967ProxyDeterministic(address(_params.kernelImplementation), _params.kernelProxyDeploymentSalt));
-
-        // Deploy the accountant with empty initialization data
-        roycoMarket.accountant =
-            IRoycoAccountant(_deployERC1967ProxyDeterministic(address(_params.accountantImplementation), _params.accountantProxyDeploymentSalt));
-
-        // Initialize the senior tranche
-        (bool success, bytes memory data) = address(roycoMarket.seniorTranche).call(_params.seniorTrancheInitializationData);
-        require(success, FAILED_TO_INITIALIZE_SENIOR_TRANCHE(data));
-
-        // Initialize the junior tranche
-        (success, data) = address(roycoMarket.juniorTranche).call(_params.juniorTrancheInitializationData);
-        require(success, FAILED_TO_INITIALIZE_JUNIOR_TRANCHE(data));
-
-        // Initialize the kernel
-        (success, data) = address(roycoMarket.kernel).call(_params.kernelInitializationData);
-        require(success, FAILED_TO_INITIALIZE_KERNEL(data));
-
-        // Initialize the accountant
-        (success, data) = address(roycoMarket.accountant).call(_params.accountantInitializationData);
-        require(success, FAILED_TO_INITIALIZE_ACCOUNTANT(data));
-    }
-
-    /// @notice Validates the deployments
-    /// @param _roycoMarket The deployed Royco market to validate
-    function _validateDeployment(RoycoMarket memory _roycoMarket) internal view {
-        // Check that the access manager is set on the contracts
-        require(AccessManagedUpgradeable(address(_roycoMarket.accountant)).authority() == address(this), INVALID_ACCESS_MANAGER());
-        require(AccessManagedUpgradeable(address(_roycoMarket.kernel)).authority() == address(this), INVALID_ACCESS_MANAGER());
-        require(AccessManagedUpgradeable(address(_roycoMarket.seniorTranche)).authority() == address(this), INVALID_ACCESS_MANAGER());
-        require(AccessManagedUpgradeable(address(_roycoMarket.juniorTranche)).authority() == address(this), INVALID_ACCESS_MANAGER());
-
-        // Check that the kernel is set on the tranches
-        require(address(_roycoMarket.seniorTranche.kernel()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_SENIOR_TRANCHE());
-        require(address(_roycoMarket.juniorTranche.kernel()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_JUNIOR_TRANCHE());
-
-        (,,,,, address accountant,) = _roycoMarket.kernel.getState();
-        // Check that the accountant is set on the kernel
-        require(address(accountant) == address(_roycoMarket.accountant), INVALID_ACCOUNTANT_ON_KERNEL());
-
-        // Check that the kernel is set on the accountant
-        require(address(_roycoMarket.accountant.getState().kernel) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_ACCOUNTANT());
+        // Deploy the accountant
+        roycoMarket.accountant = IRoycoAccountant(
+            _deployERC1967ProxyDeterministic(
+                address(_params.accountantImplementation), _params.accountantInitializationData, _params.accountantProxyDeploymentSalt
+            )
+        );
     }
 
     /// @notice Validates the deployment parameters
@@ -140,7 +216,6 @@ contract RoycoFactory is AccessManager, RolesConfiguration, IRoycoFactory {
         require(bytes(_params.seniorTrancheSymbol).length > 0, INVALID_SYMBOL());
         require(bytes(_params.juniorTrancheName).length > 0, INVALID_NAME());
         require(bytes(_params.juniorTrancheSymbol).length > 0, INVALID_SYMBOL());
-        require(_params.marketId != bytes32(0), INVALID_MARKET_ID());
         // Validate the implementation addresses
         require(address(_params.kernelImplementation) != address(0), INVALID_KERNEL_IMPLEMENTATION());
         require(address(_params.accountantImplementation) != address(0), INVALID_ACCOUNTANT_IMPLEMENTATION());
@@ -154,6 +229,30 @@ contract RoycoFactory is AccessManager, RolesConfiguration, IRoycoFactory {
         require(_params.juniorTrancheProxyDeploymentSalt != bytes32(0), INVALID_JUNIOR_TRANCHE_PROXY_DEPLOYMENT_SALT());
         require(_params.kernelProxyDeploymentSalt != bytes32(0), INVALID_KERNEL_PROXY_DEPLOYMENT_SALT());
         require(_params.accountantProxyDeploymentSalt != bytes32(0), INVALID_ACCOUNTANT_PROXY_DEPLOYMENT_SALT());
+    }
+
+    /// @notice Validates the deployments
+    /// @param _roycoMarket The deployed Royco market to validate
+    function _validateDeployment(RoycoMarket memory _roycoMarket) internal view {
+        // Check that the access manager is set on the contracts
+        require(AccessManagedUpgradeable(address(_roycoMarket.accountant)).authority() == address(this), INVALID_ACCESS_MANAGER());
+        require(AccessManagedUpgradeable(address(_roycoMarket.kernel)).authority() == address(this), INVALID_ACCESS_MANAGER());
+        require(AccessManagedUpgradeable(address(_roycoMarket.seniorTranche)).authority() == address(this), INVALID_ACCESS_MANAGER());
+        require(AccessManagedUpgradeable(address(_roycoMarket.juniorTranche)).authority() == address(this), INVALID_ACCESS_MANAGER());
+
+        // Verify the Tranche Configurations
+        require(address(_roycoMarket.seniorTranche.KERNEL()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_SENIOR_TRANCHE());
+        require(address(_roycoMarket.juniorTranche.KERNEL()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_JUNIOR_TRANCHE());
+
+        // Verify the Kernel's Configuration
+        require(_roycoMarket.kernel.SENIOR_TRANCHE() == address(_roycoMarket.seniorTranche), INVALID_SENIOR_TRANCHE_ON_KERNEL());
+        require(_roycoMarket.kernel.JUNIOR_TRANCHE() == address(_roycoMarket.juniorTranche), INVALID_JUNIOR_TRANCHE_ON_KERNEL());
+        require(_roycoMarket.kernel.ST_ASSET() == address(_roycoMarket.seniorTranche.asset()), INVALID_ST_ASSET_ON_KERNEL());
+        require(_roycoMarket.kernel.JT_ASSET() == address(_roycoMarket.juniorTranche.asset()), INVALID_JT_ASSET_ON_KERNEL());
+        require(_roycoMarket.kernel.ACCOUNTANT() == address(_roycoMarket.accountant), INVALID_ACCOUNTANT_ON_KERNEL());
+
+        // Verify the Accountant's Configuration
+        require(address(_roycoMarket.accountant.KERNEL()) == address(_roycoMarket.kernel), INVALID_KERNEL_ON_ACCOUNTANT());
     }
 
     /**
@@ -183,12 +282,32 @@ contract RoycoFactory is AccessManager, RolesConfiguration, IRoycoFactory {
     }
 
     /**
-     * @notice Deploys a tranche using ERC1967 proxy deterministically
+     * @notice Deploys an ERC1967 proxy deterministically using CREATE3
      * @param _implementation The implementation address
+     * @param _initData The initialization data for the proxy
      * @param _salt The salt for the deployment
-     *  @return proxy The deployed proxy address
+     * @return proxy The deployed proxy address
      */
-    function _deployERC1967ProxyDeterministic(address _implementation, bytes32 _salt) internal returns (address proxy) {
-        proxy = Create2.deploy(0, _salt, abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(_implementation, "")));
+    function _deployERC1967ProxyDeterministic(address _implementation, bytes memory _initData, bytes32 _salt) internal returns (address proxy) {
+        address predictedAddress = CREATE3.predictDeterministicAddress(_salt);
+        require(predictedAddress.code.length == 0, ALREADY_DEPLOYED(predictedAddress, _salt));
+
+        proxy = CREATE3.deployDeterministic(abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(_implementation, _initData)), _salt);
+    }
+
+    /// @dev Restricts the upgrade to only authorized parties
+    function _authorizeUpgrade(address _newImplementation) internal override(UUPSUpgradeable) onlyAuthorized {
+        require(_newImplementation.code.length > 0, INVALID_IMPLEMENTATION());
+    }
+
+    /**
+     * @notice Returns a storage pointer to the RoycoFactoryState storage
+     * @dev Uses ERC-7201 storage slot pattern for collision-resistant storage
+     * @return $ Storage pointer to the factory's state
+     */
+    function _getRoycoFactoryStorage() private pure returns (RoycoFactoryState storage $) {
+        assembly {
+            $.slot := ROYCO_FACTORY_STORAGE_SLOT
+        }
     }
 }

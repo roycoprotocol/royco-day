@@ -8,7 +8,7 @@ import { IdenticalAssetsOracleQuoter } from "./base/IdenticalAssetsOracleQuoter.
 /**
  * @title IdenticalAssetsChainlinkToAdminOracleQuoter
  * @dev Mandates that the reference asset to NAV units uses an admin controlled oracle
- * @dev Use case: Convert PT-USDe (Tranche unit) to USDe (Reference asset) using a Chainlink (compatible) and convert USDe to USD (NAV unit) using an admin set rate
+ * @dev Use case: Convert PT-USDe (Tranche unit) to USDe (Reference asset) using a Chainlink (compatible) oracle and convert USDe to USD (NAV unit) using an admin set rate
  */
 abstract contract IdenticalAssetsChainlinkToAdminOracleQuoter is IdenticalAssetsChainlinkOracleQuoter, IdenticalAssetsAdminOracleQuoter {
     /**
@@ -30,8 +30,15 @@ abstract contract IdenticalAssetsChainlinkToAdminOracleQuoter is IdenticalAssets
     }
 
     /// @inheritdoc IdenticalAssetsAdminOracleQuoter
-    function setConversionRate(uint256 _conversionRateWAD) public override(IdenticalAssetsOracleQuoter, IdenticalAssetsAdminOracleQuoter) restricted {
-        IdenticalAssetsAdminOracleQuoter.setConversionRate(_conversionRateWAD);
+    function setConversionRate(
+        uint256 _conversionRateWAD,
+        bool _syncBeforeUpdate
+    )
+        public
+        override(IdenticalAssetsOracleQuoter, IdenticalAssetsAdminOracleQuoter)
+        restricted
+    {
+        IdenticalAssetsAdminOracleQuoter.setConversionRate(_conversionRateWAD, _syncBeforeUpdate);
     }
 
     /// @inheritdoc IdenticalAssetsChainlinkOracleQuoter

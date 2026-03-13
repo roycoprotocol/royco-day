@@ -3,16 +3,18 @@ pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
+import { DeploymentConfig } from "../../script/config/DeploymentConfig.sol";
+import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IInsuranceCapitalLayer } from "../../src/interfaces/external/reUSD/IInsuranceCapitalLayer.sol";
-import { ReUSD_ST_ReUSD_JT_Kernel } from "../../src/kernels/ReUSD_ST_ReUSD_JT_Kernel.sol";
+import { ReUSD_ST_JT_ICLOracle_Kernel } from "../../src/kernels/ReUSD_ST_JT_ICLOracle_Kernel.sol";
 import { IdenticalAssetsOracleQuoter } from "../../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
 import { WAD, WAD } from "../../src/libraries/Constants.sol";
-import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../src/libraries/Units.sol";
+import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../src/libraries/Units.sol";
 
 import { AbstractKernelTestSuite } from "./abstract/AbstractKernelTestSuite.t.sol";
 
 /// @title reUSD_Test
-/// @notice Tests ReUSD_ST_ReUSD_JT_Kernel with reUSD on Ethereum mainnet
+/// @notice Tests ReUSD_ST_JT_ICLOracle_Kernel with reUSD on Ethereum mainnet
 /// @dev Both ST and JT use reUSD as the tranche asset
 ///
 /// reUSD is a yield-bearing token where:
@@ -44,18 +46,16 @@ contract reUSD_Test is AbstractKernelTestSuite {
     // PROTOCOL CONFIGURATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Returns the protocol configuration for reUSD
-    function getProtocolConfig() public pure override returns (ProtocolConfig memory) {
-        return ProtocolConfig({
-            name: "reUSD",
-            forkBlock: 24_187_000,
-            forkRpcUrlEnvVar: "MAINNET_RPC_URL",
-            stAsset: REUSD,
-            jtAsset: REUSD,
-            stDecimals: 18,
-            jtDecimals: 18,
-            initialFunding: 1_000_000e18 // 1M reUSD
-        });
+    /// @notice Returns the test configuration for reUSD
+    function getTestConfig() public pure override returns (TestConfig memory) {
+        return
+            TestConfig({
+                forkBlock: 24_187_000,
+                forkRpcUrlEnvVar: "MAINNET_RPC_URL",
+                stAsset: REUSD,
+                jtAsset: REUSD,
+                initialFunding: 1_000_000e18 // 1M reUSD
+            });
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -101,11 +101,6 @@ contract reUSD_Test is AbstractKernelTestSuite {
     /// @dev Converts the tranche unit tolerance to NAV using the kernel's conversion
     function maxNAVDelta() public view override returns (NAV_UNIT) {
         return _toSTValue(maxTrancheUnitDelta());
-    }
-
-    /// @notice Returns the JT redemption delay
-    function _getJTRedemptionDelay() internal pure virtual override returns (uint24) {
-        return 60;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -164,11 +159,11 @@ contract reUSD_Test is AbstractKernelTestSuite {
     /// @notice Verifies initial conversion rate is set correctly (from ICL)
     function test_reUSD_initialConversionRate() external view {
         // The stored rate should be 0 (sentinel) meaning it queries ICL
-        uint256 storedRate = ReUSD_ST_ReUSD_JT_Kernel(address(KERNEL)).getStoredConversionRateWAD();
+        uint256 storedRate = ReUSD_ST_JT_ICLOracle_Kernel(address(KERNEL)).getStoredConversionRateWAD();
         assertEq(storedRate, 0, "Stored rate should be 0 (sentinel, queries ICL)");
 
         // The actual conversion rate should be fetched from ICL
-        uint256 conversionRate = ReUSD_ST_ReUSD_JT_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
+        uint256 conversionRate = ReUSD_ST_JT_ICLOracle_Kernel(address(KERNEL)).getTrancheUnitToNAVUnitConversionRateWAD();
         assertGt(conversionRate, 0, "Conversion rate should be positive");
     }
 
@@ -223,9 +218,9 @@ contract reUSD_Test is AbstractKernelTestSuite {
         uint256 newRate = 1.05e18;
 
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        ReUSD_ST_ReUSD_JT_Kernel(address(KERNEL)).setConversionRate(newRate);
+        ReUSD_ST_JT_ICLOracle_Kernel(address(KERNEL)).setConversionRate(newRate, true);
 
-        uint256 storedRate = ReUSD_ST_ReUSD_JT_Kernel(address(KERNEL)).getStoredConversionRateWAD();
+        uint256 storedRate = ReUSD_ST_JT_ICLOracle_Kernel(address(KERNEL)).getStoredConversionRateWAD();
         assertEq(storedRate, newRate, "Stored rate should match set rate");
     }
 
@@ -233,58 +228,22 @@ contract reUSD_Test is AbstractKernelTestSuite {
     function test_setConversionRate_revertsOnUnauthorized() external {
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert();
-        ReUSD_ST_ReUSD_JT_Kernel(address(KERNEL)).setConversionRate(1e18);
+        ReUSD_ST_JT_ICLOracle_Kernel(address(KERNEL)).setConversionRate(1e18, true);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // DEPLOYMENT
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Deploys the ReUSD kernel and market
+    /// @notice Deploys the ReUSD kernel and market using parameters from DeploymentConfig
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
-        ProtocolConfig memory cfg = getProtocolConfig();
+        DeploymentConfig.MarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("reUSD");
 
-        bytes32 marketId = keccak256(abi.encodePacked(cfg.name, "-", cfg.name, "-", vm.getBlockTimestamp()));
+        uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
+        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
-        DeployScript.ReUSDSTReUSDJTKernelParams memory kernelParams =
-            DeployScript.ReUSDSTReUSDJTKernelParams({ reusd: REUSD, reusdUsdQuoteToken: USDC, insuranceCapitalLayer: ICL });
-
-        DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
-            jtYieldShareAtZeroUtilWAD: 0.3e18, // Y_0 = Y_T (same as target)
-            jtYieldShareAtTargetUtilWAD: 0.3e18,
-            jtYieldShareAtFullUtilWAD: 1e18,
-            maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
-        });
-
-        // Build role assignments using the centralized function
-        DeployScript.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
-
-        DeployScript.DeploymentParams memory params = DeployScript.DeploymentParams({
-            factoryAdmin: OWNER_ADDRESS,
-            marketId: marketId,
-            seniorTrancheName: string(abi.encodePacked("Royco Senior ", cfg.name)),
-            seniorTrancheSymbol: string(abi.encodePacked("RS-", cfg.name)),
-            juniorTrancheName: string(abi.encodePacked("Royco Junior ", cfg.name)),
-            juniorTrancheSymbol: string(abi.encodePacked("RJ-", cfg.name)),
-            seniorAsset: cfg.stAsset,
-            juniorAsset: cfg.jtAsset,
-            stNAVDustTolerance: toNAVUnits(10 ** (18 - cfg.stDecimals)),
-            jtNAVDustTolerance: toNAVUnits(10 ** (18 - cfg.jtDecimals)),
-            kernelType: DeployScript.KernelType.ReUSD_ST_ReUSD_JT,
-            kernelSpecificParams: abi.encode(kernelParams),
-            protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            jtRedemptionDelayInSeconds: _getJTRedemptionDelay(),
-            stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
-            jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            coverageWAD: COVERAGE_WAD,
-            betaWAD: 1e18,
-            lltvWAD: LLTV,
-            fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
-            ydmSpecificParams: abi.encode(ydmParams),
-            roleAssignments: roleAssignments
-        });
-
-        return DEPLOY_SCRIPT.deploy(params, DEPLOYER.privateKey);
+        return DEPLOY_SCRIPT.deploy(
+            marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roleAssignments, DEPLOYER.privateKey
+        );
     }
 }

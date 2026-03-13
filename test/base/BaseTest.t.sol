@@ -6,14 +6,14 @@ import { Vm } from "../../lib/forge-std/src/Vm.sol";
 import { ERC20Mock } from "../../lib/openzeppelin-contracts/contracts/mocks/token/ERC20Mock.sol";
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
-import { GrantLPRolesScript } from "../../script/GrantLPRoles.s.sol";
 import { RoycoAccountant } from "../../src/accountant/RoycoAccountant.sol";
 import { RolesConfiguration, RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
+import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
+import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
-import { IRoycoKernel } from "../../src/interfaces/kernel/IRoycoKernel.sol";
-import { IRoycoVaultTranche } from "../../src/interfaces/tranche/IRoycoVaultTranche.sol";
-import { AssetClaims, MarketState, TrancheType } from "../../src/libraries/Types.sol";
+import { AssetClaims, TrancheType } from "../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toUint256 } from "../../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoSeniorTranche } from "../../src/tranches/RoycoSeniorTranche.sol";
@@ -74,12 +74,34 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
     Vm.Wallet internal DEPLOYER_ADMIN;
     address internal DEPLOYER_ADMIN_ADDRESS;
 
-    // Provider wallets (LPs)
+    Vm.Wallet internal TRANSFER_AGENT;
+    address internal TRANSFER_AGENT_ADDRESS;
+
+    // ST-only providers
+    Vm.Wallet internal ST_ALICE;
+    Vm.Wallet internal ST_BOB;
+    Vm.Wallet internal ST_CHARLIE;
+    Vm.Wallet internal ST_DAN;
+    address internal ST_ALICE_ADDRESS;
+    address internal ST_BOB_ADDRESS;
+    address internal ST_CHARLIE_ADDRESS;
+    address internal ST_DAN_ADDRESS;
+
+    // JT-only providers
+    Vm.Wallet internal JT_ALICE;
+    Vm.Wallet internal JT_BOB;
+    Vm.Wallet internal JT_CHARLIE;
+    Vm.Wallet internal JT_DAN;
+    address internal JT_ALICE_ADDRESS;
+    address internal JT_BOB_ADDRESS;
+    address internal JT_CHARLIE_ADDRESS;
+    address internal JT_DAN_ADDRESS;
+
+    // Backward-compat aliases (ALICE=JT, BOB=ST)
     Vm.Wallet internal ALICE;
     Vm.Wallet internal BOB;
     Vm.Wallet internal CHARLIE;
     Vm.Wallet internal DAN;
-
     address internal ALICE_ADDRESS;
     address internal BOB_ADDRESS;
     address internal CHARLIE_ADDRESS;
@@ -103,9 +125,6 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
     // Deploy Script
     DeployScript internal DEPLOY_SCRIPT;
 
-    // LP Roles Script
-    GrantLPRolesScript internal LP_ROLES_SCRIPT;
-
     // Deployments
     RoycoFactory internal FACTORY;
     IYDM internal YDM;
@@ -117,7 +136,6 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
     IRoycoVaultTranche internal JT;
     IRoycoKernel internal KERNEL;
     IRoycoAccountant internal ACCOUNTANT;
-    bytes32 internal MARKET_ID;
 
     // -----------------------------------------
     // Royco Deployments Parameters
@@ -132,7 +150,7 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
     uint96 internal BETA_WAD = 0; // Different opportunities
     uint64 internal ST_PROTOCOL_FEE_WAD = 0.1e18; // 10% protocol fee
     uint64 internal JT_PROTOCOL_FEE_WAD = 0.1e18; // 10% protocol fee
-    uint64 internal LLTV = 0.97e18; // 95% LLTV
+    uint256 internal LIQUIDATION_UTILIZATION_WAD = 6.4667e18; // Liquidation utilization threshold
     uint24 internal FIXED_TERM_DURATION_SECONDS = 2 weeks; // 2 weeks in seconds
     NAV_UNIT internal DUST_TOLERANCE = toNAVUnits(uint256(1));
 
@@ -173,20 +191,26 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
     function _setupAssets(uint256 _seedAmount) internal {
         MOCK_USDC = new ERC20Mock();
         MOCK_USDC.mint(OWNER_ADDRESS, _seedAmount * (10 ** 18));
-        MOCK_USDC.mint(ALICE_ADDRESS, _seedAmount * (10 ** 18));
-        MOCK_USDC.mint(BOB_ADDRESS, _seedAmount * (10 ** 18));
+        MOCK_USDC.mint(ST_ALICE_ADDRESS, _seedAmount * (10 ** 18));
+        MOCK_USDC.mint(JT_ALICE_ADDRESS, _seedAmount * (10 ** 18));
+        MOCK_USDC.mint(ST_BOB_ADDRESS, _seedAmount * (10 ** 18));
+        MOCK_USDC.mint(JT_BOB_ADDRESS, _seedAmount * (10 ** 18));
         ASSETS.push(address(MOCK_USDC));
 
         MOCK_USDT = new ERC20Mock();
         MOCK_USDT.mint(OWNER_ADDRESS, _seedAmount * (10 ** 18));
-        MOCK_USDT.mint(ALICE_ADDRESS, _seedAmount * (10 ** 18));
-        MOCK_USDT.mint(BOB_ADDRESS, _seedAmount * (10 ** 18));
+        MOCK_USDT.mint(ST_ALICE_ADDRESS, _seedAmount * (10 ** 18));
+        MOCK_USDT.mint(JT_ALICE_ADDRESS, _seedAmount * (10 ** 18));
+        MOCK_USDT.mint(ST_BOB_ADDRESS, _seedAmount * (10 ** 18));
+        MOCK_USDT.mint(JT_BOB_ADDRESS, _seedAmount * (10 ** 18));
         ASSETS.push(address(MOCK_USDT));
 
         MOCK_DAI = new ERC20Mock();
         MOCK_DAI.mint(OWNER_ADDRESS, _seedAmount * (10 ** 18));
-        MOCK_DAI.mint(ALICE_ADDRESS, _seedAmount * (10 ** 18));
-        MOCK_DAI.mint(BOB_ADDRESS, _seedAmount * (10 ** 18));
+        MOCK_DAI.mint(ST_ALICE_ADDRESS, _seedAmount * (10 ** 18));
+        MOCK_DAI.mint(JT_ALICE_ADDRESS, _seedAmount * (10 ** 18));
+        MOCK_DAI.mint(ST_BOB_ADDRESS, _seedAmount * (10 ** 18));
+        MOCK_DAI.mint(JT_BOB_ADDRESS, _seedAmount * (10 ** 18));
         ASSETS.push(address(MOCK_DAI));
     }
 
@@ -233,27 +257,53 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
         DEPLOYER_ADMIN = _initWallet("DEPLOYER_ADMIN", 1000 ether);
         DEPLOYER_ADMIN_ADDRESS = DEPLOYER_ADMIN.addr;
 
-        // Deploy LP roles script
-        LP_ROLES_SCRIPT = new GrantLPRolesScript();
+        // Transfer agent wallet (for compliance operations)
+        TRANSFER_AGENT = _initWallet("TRANSFER_AGENT", 1000 ether);
+        TRANSFER_AGENT_ADDRESS = TRANSFER_AGENT.addr;
     }
 
     function _setupProviders() internal {
-        // Init wallets with 1000 ETH each
-        ALICE = _generateProvider("ALICE");
-        BOB = _generateProvider("BOB");
-        CHARLIE = _generateProvider("CHARLIE");
-        DAN = _generateProvider("DAN");
+        // ST-only providers
+        ST_ALICE = _generateProvider("ST_ALICE", ST_LP_ROLE);
+        ST_BOB = _generateProvider("ST_BOB", ST_LP_ROLE);
+        ST_CHARLIE = _generateProvider("ST_CHARLIE", ST_LP_ROLE);
+        ST_DAN = _generateProvider("ST_DAN", ST_LP_ROLE);
 
-        // Set addresses
-        ALICE_ADDRESS = ALICE.addr;
-        BOB_ADDRESS = BOB.addr;
-        CHARLIE_ADDRESS = CHARLIE.addr;
-        DAN_ADDRESS = DAN.addr;
+        ST_ALICE_ADDRESS = ST_ALICE.addr;
+        ST_BOB_ADDRESS = ST_BOB.addr;
+        ST_CHARLIE_ADDRESS = ST_CHARLIE.addr;
+        ST_DAN_ADDRESS = ST_DAN.addr;
 
-        providers.push(ALICE_ADDRESS);
-        providers.push(BOB_ADDRESS);
-        providers.push(CHARLIE_ADDRESS);
-        providers.push(DAN_ADDRESS);
+        // JT-only providers
+        JT_ALICE = _generateProvider("JT_ALICE", JT_LP_ROLE);
+        JT_BOB = _generateProvider("JT_BOB", JT_LP_ROLE);
+        JT_CHARLIE = _generateProvider("JT_CHARLIE", JT_LP_ROLE);
+        JT_DAN = _generateProvider("JT_DAN", JT_LP_ROLE);
+
+        JT_ALICE_ADDRESS = JT_ALICE.addr;
+        JT_BOB_ADDRESS = JT_BOB.addr;
+        JT_CHARLIE_ADDRESS = JT_CHARLIE.addr;
+        JT_DAN_ADDRESS = JT_DAN.addr;
+
+        // Backward-compat aliases (ALICE=JT, BOB=ST)
+        ALICE = JT_ALICE;
+        ALICE_ADDRESS = JT_ALICE_ADDRESS;
+        BOB = ST_BOB;
+        BOB_ADDRESS = ST_BOB_ADDRESS;
+        CHARLIE = JT_CHARLIE;
+        CHARLIE_ADDRESS = JT_CHARLIE_ADDRESS;
+        DAN = JT_DAN;
+        DAN_ADDRESS = JT_DAN_ADDRESS;
+
+        // All unique provider addresses
+        providers.push(ST_ALICE_ADDRESS);
+        providers.push(JT_ALICE_ADDRESS);
+        providers.push(ST_BOB_ADDRESS);
+        providers.push(JT_BOB_ADDRESS);
+        providers.push(ST_CHARLIE_ADDRESS);
+        providers.push(JT_CHARLIE_ADDRESS);
+        providers.push(ST_DAN_ADDRESS);
+        providers.push(JT_DAN_ADDRESS);
     }
 
     function _setDeployedMarket(DeployScript.DeploymentResult memory _deploymentResult) internal {
@@ -286,8 +336,6 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
 
         FACTORY = _deploymentResult.factory;
         vm.label(address(FACTORY), "Factory");
-
-        MARKET_ID = _deploymentResult.marketId;
     }
 
     function _initWallet(string memory _name, uint256 _amount) internal returns (Vm.Wallet memory) {
@@ -300,30 +348,26 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
     /// @notice Generates a provider address
     /// @param _name The name of the provider
     /// @return provider The provider address
-    function _generateProvider(string memory _name) internal virtual returns (Vm.Wallet memory provider) {
-        // Generate a unique wallet
+    function _generateProvider(string memory _name, uint64 _role) internal virtual returns (Vm.Wallet memory provider) {
         provider = _initWallet(_name, 10_000_000e6);
-        address[] memory addresses = new address[](1);
-        addresses[0] = provider.addr;
 
-        // Grant LP role using the LP roles script (uses broadcast with private key)
-        LP_ROLES_SCRIPT.grantLPRoles(address(FACTORY), addresses, LP_ROLE_ADMIN.privateKey);
+        vm.prank(LP_ROLE_ADMIN_ADDRESS);
+        FACTORY.grantRole(_role, provider.addr, 0);
 
         return provider;
     }
 
-    /// @notice Generates a provider address
+    /// @notice Generates a provider address with both ST and JT LP roles
     /// @param index The index of the provider
     /// @return provider The provider address
     function _generateProvider(uint256 index) internal virtual returns (Vm.Wallet memory provider) {
-        // Generate a unique wallet
         string memory providerName = string(abi.encodePacked("PROVIDER", vm.toString(index)));
         provider = _initWallet(providerName, 10_000_000e6);
-        address[] memory addresses = new address[](1);
-        addresses[0] = provider.addr;
 
-        // Grant LP role using the LP roles script (uses broadcast with private key)
-        LP_ROLES_SCRIPT.grantLPRoles(address(FACTORY), addresses, LP_ROLE_ADMIN.privateKey);
+        vm.startPrank(LP_ROLE_ADMIN_ADDRESS);
+        FACTORY.grantRole(ST_LP_ROLE, provider.addr, 0);
+        FACTORY.grantRole(JT_LP_ROLE, provider.addr, 0);
+        vm.stopPrank();
 
         return provider;
     }
@@ -448,7 +492,7 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
 
     /// @notice Generates role assignments using the role-specific addresses
     /// @return roleAssignments Array of role assignment configurations
-    function _generateRoleAssignments() internal view returns (DeployScript.RoleAssignmentConfiguration[] memory roleAssignments) {
+    function _generateRoleAssignments() internal view returns (IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments) {
         return DEPLOY_SCRIPT.generateRolesAssignments(
             DeployScript.RoleAssignmentAddresses({
                 pauserAddress: PAUSER_ADDRESS,
@@ -461,7 +505,9 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
                 lpRoleAdminAddress: LP_ROLE_ADMIN_ADDRESS,
                 guardianAddress: ROLE_GUARDIAN_ADDRESS,
                 deployerAddress: DEPLOYER_ADDRESS,
-                deployerAdminAddress: DEPLOYER_ADMIN_ADDRESS
+                deployerAdminAddress: DEPLOYER_ADMIN_ADDRESS,
+                protocolFeeRecipientAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS,
+                transferAgentAddress: TRANSFER_AGENT_ADDRESS
             })
         );
     }
@@ -493,8 +539,12 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
         // Grant LP_ROLE_ADMIN_ROLE
         FACTORY.grantRole(LP_ROLE_ADMIN_ROLE, LP_ROLE_ADMIN_ADDRESS, 0);
 
-        // Set LP_ROLE admin to LP_ROLE_ADMIN_ROLE
-        FACTORY.setRoleAdmin(LP_ROLE, LP_ROLE_ADMIN_ROLE);
+        // Grant TRANSFER_AGENT_ROLE
+        FACTORY.grantRole(TRANSFER_AGENT_ROLE, TRANSFER_AGENT_ADDRESS, 0);
+
+        // Set ST_LP_ROLE and JT_LP_ROLE admin to LP_ROLE_ADMIN_ROLE
+        FACTORY.setRoleAdmin(ST_LP_ROLE, LP_ROLE_ADMIN_ROLE);
+        FACTORY.setRoleAdmin(JT_LP_ROLE, LP_ROLE_ADMIN_ROLE);
     }
 
     // -----------------------------------------
@@ -514,8 +564,8 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
         vm.prank(KERNEL_ADMIN_ADDRESS);
         FACTORY.schedule(_target, _data, 0);
 
-        // Warp past the delay (1 day for ADMIN_KERNEL_ROLE)
-        vm.warp(block.timestamp + 1 days + 1);
+        // Warp past the delay (2 days for ADMIN_KERNEL_ROLE)
+        vm.warp(block.timestamp + 2 days + 1);
 
         // Execute the operation
         vm.prank(KERNEL_ADMIN_ADDRESS);
@@ -530,8 +580,8 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
         FACTORY.schedule(_target, _data, 0);
 
-        // Warp past the delay (1 day for ADMIN_ACCOUNTANT_ROLE)
-        vm.warp(block.timestamp + 1 days + 1);
+        // Warp past the delay (2 days for ADMIN_ACCOUNTANT_ROLE)
+        vm.warp(block.timestamp + 2 days + 1);
 
         // Execute the operation
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
@@ -546,8 +596,8 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
         FACTORY.schedule(_target, _data, 0);
 
-        // Warp past the delay (1 day for ADMIN_PROTOCOL_FEE_SETTER_ROLE)
-        vm.warp(block.timestamp + 1 days + 1);
+        // Warp past the delay (2 days for ADMIN_PROTOCOL_FEE_SETTER_ROLE)
+        vm.warp(block.timestamp + 2 days + 1);
 
         // Execute the operation
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
@@ -558,13 +608,6 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
     /// @param _newRecipient The new protocol fee recipient address
     function _setProtocolFeeRecipient(address _newRecipient) internal {
         bytes memory data = abi.encodeCall(KERNEL.setProtocolFeeRecipient, (_newRecipient));
-        _executeKernelAdminOperation(address(KERNEL), data);
-    }
-
-    /// @notice Sets the junior tranche redemption delay via kernel admin (with scheduling)
-    /// @param _newDelay The new redemption delay in seconds
-    function _setJuniorTrancheRedemptionDelay(uint24 _newDelay) internal {
-        bytes memory data = abi.encodeCall(KERNEL.setJuniorTrancheRedemptionDelay, (_newDelay));
         _executeKernelAdminOperation(address(KERNEL), data);
     }
 

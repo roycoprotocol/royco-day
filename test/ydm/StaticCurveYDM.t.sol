@@ -4,10 +4,11 @@ pragma solidity ^0.8.28;
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
 import { TARGET_UTILIZATION_WAD, WAD, ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
+import { MarketState } from "../../src/libraries/Types.sol";
 import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
 import { UtilsLib } from "../../src/libraries/UtilsLib.sol";
 import { StaticCurveYDM } from "../../src/ydm/StaticCurveYDM.sol";
-import { BaseTest, MarketState } from "../base/BaseTest.t.sol";
+import { BaseTest } from "../base/BaseTest.t.sol";
 
 contract StaticCurveYDMTest is BaseTest {
     using Math for uint256;
@@ -159,7 +160,7 @@ contract StaticCurveYDMTest is BaseTest {
 
     function testFuzz_initializeYDMForMarket_validParams(uint64 _y0, uint64 _yT, uint64 _yFull) public {
         // Bound to valid ordering
-        _y0 = uint64(bound(_y0, 0, WAD));
+        _y0 = uint64(bound(_y0, 1, WAD));
         _yT = uint64(bound(_yT, _y0, WAD));
         _yFull = uint64(bound(_yFull, _yT, WAD));
 
@@ -351,7 +352,7 @@ contract StaticCurveYDMTest is BaseTest {
         }
     }
 
-    function test_previewJTYieldShare_continuityAtBoundary() public view {
+    function test_previewJTYieldShare_continuityAtBoundary() public pure {
         // Both legs should give the same result at U = 0.9
         // First leg: Y = 0.25 * 0.9 = 0.225
         // Second leg: Y = 7.75 * (0.9 - 0.9) + 0.225 = 0.225

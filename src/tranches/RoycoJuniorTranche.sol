@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { TrancheDeploymentParams, TrancheType } from "../libraries/Types.sol";
+import { TrancheType } from "../libraries/Types.sol";
 import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
 
 /**
@@ -11,19 +11,18 @@ import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
  * @dev Inherits from RoycoVaultTranche and specifies JUNIOR as the tranche type
  */
 contract RoycoJuniorTranche is RoycoVaultTranche {
+    constructor(address _asset, address _kernel) RoycoVaultTranche(_asset, _kernel) { }
+
     /**
      * @notice Initializes the Royco junior tranche
-     * @param _jtParams Deployment parameters including name, symbol, kernel, and kernel initialization data for the junior tranche
-     * @param _asset The underlying asset for the tranche
-     * @param _initialAuthority The initial authority for the tranche
-     * @param _marketId The identifier of the Royco market this tranche is linked to
+     * @param _jtParams Deployment parameters including name, symbol, and initial authority for the junior tranche
      */
-    function initialize(TrancheDeploymentParams calldata _jtParams, address _asset, address _initialAuthority, bytes32 _marketId) external initializer {
+    function initialize(RoycoTrancheInitParams calldata _jtParams) external initializer {
         // Initialize the Royco Junior Tranche
-        __RoycoTranche_init(_jtParams, _asset, _initialAuthority, _marketId);
+        __RoycoTranche_init(_jtParams);
     }
 
-    ///@inheritdoc RoycoVaultTranche
+    /// @inheritdoc RoycoVaultTranche
     function TRANCHE_TYPE() public pure virtual override(RoycoVaultTranche) returns (TrancheType) {
         return TrancheType.JUNIOR;
     }

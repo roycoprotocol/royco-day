@@ -21,11 +21,13 @@ abstract contract RolesConfiguration {
     uint64 public constant ADMIN_UPGRADER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_UPGRADER_ROLE"))));
 
     /// Tranche roles
-    uint64 public constant LP_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_LP_ROLE"))));
+    uint64 public constant ST_LP_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ST_LP_ROLE"))));
+    uint64 public constant JT_LP_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_JT_LP_ROLE"))));
 
     /// Kernel roles
     uint64 public constant SYNC_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_SYNC_ROLE"))));
     uint64 public constant ADMIN_KERNEL_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_KERNEL_ROLE"))));
+    uint64 public constant TRANSFER_AGENT_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_TRANSFER_AGENT_ROLE"))));
 
     /// Accountant roles
     uint64 public constant ADMIN_ACCOUNTANT_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_ACCOUNTANT_ROLE"))));
@@ -67,8 +69,8 @@ abstract contract RolesConfiguration {
                 executionDelay: 0 // Pausing should be immediate
             });
         } else if (role == ADMIN_UPGRADER_ROLE) {
-            return RoleConfig({ adminRole: _ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 1 days });
-        } else if (role == LP_ROLE) {
+            return RoleConfig({ adminRole: _ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
+        } else if (role == ST_LP_ROLE || role == JT_LP_ROLE) {
             return RoleConfig({
                 adminRole: LP_ROLE_ADMIN_ROLE, // LP admin can manage LP roles
                 guardianRole: GUARDIAN_ROLE,
@@ -90,19 +92,19 @@ abstract contract RolesConfiguration {
             return RoleConfig({
                 adminRole: _ADMIN_ROLE,
                 guardianRole: GUARDIAN_ROLE,
-                executionDelay: 1 days // Kernel admin operations require delay
+                executionDelay: 2 days // Kernel admin operations require delay
             });
         } else if (role == ADMIN_ACCOUNTANT_ROLE) {
             return RoleConfig({
                 adminRole: _ADMIN_ROLE,
                 guardianRole: GUARDIAN_ROLE,
-                executionDelay: 1 days // Accountant admin operations require delay
+                executionDelay: 2 days // Accountant admin operations require delay
             });
         } else if (role == ADMIN_PROTOCOL_FEE_SETTER_ROLE) {
             return RoleConfig({
                 adminRole: _ADMIN_ROLE,
                 guardianRole: GUARDIAN_ROLE,
-                executionDelay: 1 days // Fee changes require delay
+                executionDelay: 2 days // Fee changes require delay
             });
         } else if (role == ADMIN_ORACLE_QUOTER_ROLE) {
             return RoleConfig({
@@ -128,6 +130,12 @@ abstract contract RolesConfiguration {
                 adminRole: _ADMIN_ROLE,
                 guardianRole: GUARDIAN_ROLE,
                 executionDelay: 0 // Deployer admin operations should be immediate
+            });
+        } else if (role == TRANSFER_AGENT_ROLE) {
+            return RoleConfig({
+                adminRole: _ADMIN_ROLE,
+                guardianRole: _ADMIN_ROLE, // Only admin can cancel transfer agent operations
+                executionDelay: 0 // Seizures and freezes must be immediate
             });
         } else {
             revert UNKNOWN_ROLE(role);

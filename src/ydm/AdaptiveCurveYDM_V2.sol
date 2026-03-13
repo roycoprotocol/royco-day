@@ -38,7 +38,7 @@ contract AdaptiveCurveYDM_V2 is IYDM {
 
     /**
      * @notice Represents the state of a market's YDM
-     * @custom:field jtYieldShareAtTargetUtilWAD - The current JT yield share at target utilization, scaled to WAD precision
+     * @custom:field jtYieldShareAtTargetWAD - The current JT yield share at target utilization, scaled to WAD precision
      * @custom:field lastAdaptationTimestamp - The last time adaptations were applied to this market's curve
      * @custom:field maxAdaptationSpeedWAD - The max adaptation speed of the curve at the boundaries of utilization (0% and 100%), scaled to WAD precision
      * @custom:field discountToTargetAtZeroUtilWAD - The fixed discount to JT yield share at target utilization given at 0% utilization, scaled to WAD precision
@@ -255,11 +255,11 @@ contract AdaptiveCurveYDM_V2 is IYDM {
         int256 adjustmentToJTYieldShareAtTargetWAD = ((normalizedDeltaFromTargetWAD * int256(maxAdjustment)) / WAD_INT);
 
         // Apply the adjustment and bound the JT yield share between 0% and 100%
-        int256 signedResultWAD = int256(avgJtYieldShareAtTargetWAD) + adjustmentToJTYieldShareAtTargetWAD;
-        if (signedResultWAD < 0) {
+        int256 signedJTYieldShareWAD = int256(avgJtYieldShareAtTargetWAD) + adjustmentToJTYieldShareAtTargetWAD;
+        if (signedJTYieldShareWAD <= 0) {
             jtYieldShareWAD = 0;
         } else {
-            jtYieldShareWAD = uint256(signedResultWAD);
+            jtYieldShareWAD = uint256(signedJTYieldShareWAD);
             if (jtYieldShareWAD > WAD) jtYieldShareWAD = WAD;
         }
     }
