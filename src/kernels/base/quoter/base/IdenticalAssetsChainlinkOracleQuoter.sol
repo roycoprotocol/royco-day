@@ -66,7 +66,7 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
 
         // Resolve the reference asset to NAV unit conversion rate, scaled to WAD precision
         uint256 referenceAssetToNAVUnitConversionRateWAD = getStoredConversionRateWAD();
-        // If the stored conversion rate is the sentinel value, the cache hasn't been warmed, so query the oracle for the rate
+        // If the stored conversion rate is the sentinel value, query the oracle for the rate
         if (referenceAssetToNAVUnitConversionRateWAD == SENTINEL_CONVERSION_RATE) referenceAssetToNAVUnitConversionRateWAD = _getConversionRateFromOracleWAD();
 
         // Calculate the conversion rate from tranche to NAV units, scaled to WAD precision
