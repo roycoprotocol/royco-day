@@ -102,7 +102,8 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
     function _queryChainlinkOracle() internal view returns (uint256 price, uint256 precision) {
         // Fetch the price of the asset
         IdenticalAssetsChainlinkOracleQuoterState storage $ = _getIdenticalAssetsChainlinkOracleQuoterStorage();
-        (uint80 roundId, int256 answer,, uint256 updatedAt, uint80 answeredInRound) = AggregatorV3Interface($.oracle).latestRoundData();
+        AggregatorV3Interface oracle = AggregatorV3Interface($.oracle);
+        (uint80 roundId, int256 answer,, uint256 updatedAt, uint80 answeredInRound) = oracle.latestRoundData();
 
         // Conduct sanity checks
         require(updatedAt + $.stalenessThresholdSeconds >= block.timestamp, STALE_PRICE());
@@ -111,7 +112,7 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
 
         // Return the price and the scaled precision
         price = uint256(answer);
-        precision = 10 ** uint256(AggregatorV3Interface($.oracle).decimals());
+        precision = 10 ** uint256(oracle.decimals());
     }
 
     /**
