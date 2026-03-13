@@ -21,12 +21,11 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
     /// @custom:storage-location erc7201:Royco.storage.IdenticalAssetsChainlinkOracleQuoterState
     struct IdenticalAssetsChainlinkOracleQuoterState {
         address oracle;
-        uint8 oracleDecimals;
         uint48 stalenessThresholdSeconds;
     }
 
     /// @notice Emitted when the identical assets chainlink oracle is updated
-    event ChainlinkOracleUpdated(address indexed oracle, uint8 oracleDecimals, uint48 stalenessThresholdSeconds);
+    event ChainlinkOracleUpdated(address indexed oracle, uint48 stalenessThresholdSeconds);
 
     /// @notice Thrown when the staleness threshold seconds is zero
     error INVALID_STALENESS_THRESHOLD_SECONDS();
@@ -112,7 +111,7 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
 
         // Return the price and the scaled precision
         price = uint256(answer);
-        precision = 10 ** uint256($.oracleDecimals);
+        precision = 10 ** uint256(AggregatorV3Interface($.oracle).decimals());
     }
 
     /**
@@ -126,10 +125,9 @@ abstract contract IdenticalAssetsChainlinkOracleQuoter is IdenticalAssetsOracleQ
 
         IdenticalAssetsChainlinkOracleQuoterState storage $ = _getIdenticalAssetsChainlinkOracleQuoterStorage();
         $.oracle = _oracle;
-        $.oracleDecimals = AggregatorV3Interface(_oracle).decimals();
         $.stalenessThresholdSeconds = _stalenessThresholdSeconds;
 
-        emit ChainlinkOracleUpdated(_oracle, $.oracleDecimals, _stalenessThresholdSeconds);
+        emit ChainlinkOracleUpdated(_oracle, _stalenessThresholdSeconds);
     }
 
     /**
