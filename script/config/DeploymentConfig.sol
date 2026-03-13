@@ -228,8 +228,8 @@ abstract contract DeploymentConfig {
                         initialConversionRateWAD: 0,
                         // https://app.redstone.finance/app/feeds/ethereum-mainnet/nusd_fundamental/
                         baseAssetToNavAssetOracle: 0x5e7281f74e74D76347f0b8f4a36Fd3cb29c19d95,
-                        // Updates to this oracle are pushed every 12 hours, so we set the staleness threshold to 24 hours
-                        stalenessThresholdSeconds: 24 hours
+                        // Updates to this oracle are pushed every 12 hours, so we set the staleness threshold to 48 hours for safety
+                        stalenessThresholdSeconds: 48 hours
                     })
             ),
             enforceVaultSharesTransferWhitelist: false,
