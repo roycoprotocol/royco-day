@@ -233,13 +233,13 @@ abstract contract DeploymentConfig {
                     })
             ),
             enforceVaultSharesTransferWhitelist: false,
-            stSelfLiquidationBonusWAD: 0,
+            stSelfLiquidationBonusWAD: 0.005e18,
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0.45e18,
             coverageWAD: 0.1e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.1111e18, // TODO
+            liquidationUtilizationWAD: 1.0009009e18,
             fixedTermDurationSeconds: 0, // Market is not expected to have volatility, so no fixed term
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
@@ -276,13 +276,13 @@ abstract contract DeploymentConfig {
                     })
             ),
             enforceVaultSharesTransferWhitelist: false,
-            stSelfLiquidationBonusWAD: 0,
+            stSelfLiquidationBonusWAD: 0.005e18,
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0.45e18,
             coverageWAD: 0.1e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.1111e18, // TODO
+            liquidationUtilizationWAD: 1.0009009e18,
             fixedTermDurationSeconds: 0, // Market is not expected to have volatility, so no fixed term
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
@@ -325,7 +325,7 @@ abstract contract DeploymentConfig {
             jtYieldShareProtocolFeeWAD: 0.45e18,
             coverageWAD: 0.1e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.25e18, // TODO
+            liquidationUtilizationWAD: 1.225e18,
             fixedTermDurationSeconds: 2 days,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
@@ -522,7 +522,7 @@ abstract contract DeploymentConfig {
             jtYieldShareProtocolFeeWAD: 0.45e18,
             coverageWAD: 0.07e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.875e18, // TODO
+            liquidationUtilizationWAD: 1.0013305e18,
             fixedTermDurationSeconds: 0,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
@@ -608,7 +608,7 @@ abstract contract DeploymentConfig {
             jtYieldShareProtocolFeeWAD: 0,
             coverageWAD: 0.18e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.1111e18, // TODO
+            liquidationUtilizationWAD: 1.1025e18,
             fixedTermDurationSeconds: 7 days,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
@@ -619,7 +619,8 @@ abstract contract DeploymentConfig {
                     maxAdaptationSpeedWAD: uint64(50e18 / uint256(365 days))
                 })
             ),
-            transferAgentAddress: address(123) // TODO
+            // Setting the transfer agent address to the zero address since we don't have a transfer agent yet
+            transferAgentAddress: address(0)
         });
 
         _marketConfigs[MAKINA_DUSD] = MarketDeploymentConfig({
@@ -675,13 +676,13 @@ abstract contract DeploymentConfig {
             kernelType: DeployScript.KernelType.sUSDai_ST_JT_SharePriceToAdminOracle_Kernel,
             enforceVaultSharesTransferWhitelist: false,
             kernelSpecificParams: abi.encode(DeployScript.IdenticalAssetsAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 })),
-            stSelfLiquidationBonusWAD: 0,
+            stSelfLiquidationBonusWAD: 0.01e18,
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0.45e18,
             coverageWAD: 0.1e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.1111e18, // TODO
+            liquidationUtilizationWAD: 1.1e18,
             fixedTermDurationSeconds: 7 days,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
