@@ -18,6 +18,7 @@ import {
 import { Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel } from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel.sol";
 import { Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel } from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel.sol";
 import { Identical_Makina_ST_JT_MachineToAdminOracle_Kernel } from "../src/kernels/Identical_Makina_ST_JT_MachineToAdminOracle_Kernel.sol";
+import { MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel } from "../src/kernels/MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.sol";
 import { ReUSD_ST_JT_ICLOracle_Kernel } from "../src/kernels/ReUSD_ST_JT_ICLOracle_Kernel.sol";
 import { IdenticalAssetsChainlinkOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
 import { IdenticalAssetsOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
@@ -67,7 +68,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
         Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel,
         IdleCdoAA_ST_IdleCdoAA_JT,
         Identical_Makina_ST_JT_MachineToAdminOracle_Kernel,
-        sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel
+        sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel,
+        MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel
     }
 
     /// @notice Enum for YDM types
@@ -929,6 +931,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             return abi.encodePacked(type(Identical_Makina_ST_JT_MachineToAdminOracle_Kernel).creationCode, abi.encode(_cp, kp.makinaMachine));
         } else if (_kernelType == KernelType.sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel) {
             return abi.encodePacked(type(sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel).creationCode, abi.encode(_cp));
+        } else if (_kernelType == KernelType.MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel) {
+            return abi.encodePacked(type(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel).creationCode, abi.encode(_cp));
         } else {
             revert UnsupportedKernelType(_kernelType);
         }
@@ -1004,6 +1008,13 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
             IdenticalAssetsAdminOracleQuoterKernelParams memory kernelParams2 =
                 abi.decode(_kernelSpecificParams, (IdenticalAssetsAdminOracleQuoterKernelParams));
             return abi.encodeCall(sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel.initialize, (kernelParams, kernelParams2.initialConversionRateWAD));
+        } else if (_kernelType == KernelType.MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel) {
+            IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams memory kernelParams2 =
+                abi.decode(_kernelSpecificParams, (IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams));
+            return abi.encodeCall(
+                Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel.initialize,
+                (kernelParams, kernelParams2.initialConversionRateWAD, kernelParams2.baseAssetToNavAssetOracle, kernelParams2.stalenessThresholdSeconds)
+            );
         } else {
             revert UnsupportedKernelType(_kernelType);
         }

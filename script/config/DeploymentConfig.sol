@@ -44,6 +44,7 @@ abstract contract DeploymentConfig {
     string public constant MAKINA_DUSD = "MakinaDUSD";
     string public constant SUSDAI = "sUSDai";
     string public constant YO_USD = "yoUSD";
+    string public constant SYRUP_USDC = "syrupUSDC";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CHAIN-SPECIFIC CONFIG (defined once per chain)
@@ -734,6 +735,47 @@ abstract contract DeploymentConfig {
                     jtYieldShareAtTargetUtilWAD: 0.07e18,
                     jtYieldShareAtFullUtilWAD: 0.45e18,
                     maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
+                })
+            ),
+            transferAgentAddress: address(0)
+        });
+
+        _marketConfigs[SYRUP_USDC] = MarketDeploymentConfig({
+            marketName: SYRUP_USDC,
+            chainId: MAINNET,
+            seniorTrancheName: _seniorTrancheName(SYRUP_USDC),
+            seniorTrancheSymbol: _seniorTrancheSymbol(SYRUP_USDC),
+            juniorTrancheName: _juniorTrancheName(SYRUP_USDC),
+            juniorTrancheSymbol: _juniorTrancheSymbol(SYRUP_USDC),
+            seniorAsset: 0x80ac24aA929eaF5013f6436cdA2a7ba190f5Cc0b,
+            juniorAsset: 0x80ac24aA929eaF5013f6436cdA2a7ba190f5Cc0b,
+            stDustTolerance: 5 * (10 ** 12),
+            jtDustTolerance: 5 * (10 ** 12),
+            kernelType: DeployScript.KernelType.MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel,
+            kernelSpecificParams: abi.encode(
+                DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
+                        // Disable the Oracle Leg by setting the initial conversion rate to 1e18
+                        initialConversionRateWAD: 1e18,
+                        baseAssetToNavAssetOracle: address(1),
+                        stalenessThresholdSeconds: 86_400
+                    })
+            ),
+            enforceVaultSharesTransferWhitelist: false,
+            stSelfLiquidationBonusWAD: 0,
+            stProtocolFeeWAD: 0.1e18,
+            jtProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0.45e18,
+            coverageWAD: 0.03e18,
+            betaWAD: 1e18,
+            liquidationUtilizationWAD: 1.194e18,
+            fixedTermDurationSeconds: 7 days,
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
+            ydmSpecificParams: abi.encode(
+                DeployScript.AdaptiveCurveYDM_V2_Params({
+                    jtYieldShareAtZeroUtilWAD: 0.03e18,
+                    jtYieldShareAtTargetUtilWAD: 0.03e18,
+                    jtYieldShareAtFullUtilWAD: 0.1e18,
+                    maxAdaptationSpeedWAD: uint64(75e18 / uint256(365 days))
                 })
             ),
             transferAgentAddress: address(0)
