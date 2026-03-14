@@ -5,12 +5,12 @@ import { IRoycoKernel } from "../interfaces/IRoycoKernel.sol";
 import { IMaplePool } from "../interfaces/external/maple/IMaplePool.sol";
 import { IMaplePoolManager } from "../interfaces/external/maple/IMaplePoolManager.sol";
 import { WAD } from "../libraries/Constants.sol";
-import { Math } from "../libraries/Units.sol";
+import { TRANCHE_UNIT } from "../libraries/Units.sol";
 import {
     IdenticalERC4626SharesToChainlinkOracleQuoter,
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel
 } from "./Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel.sol";
-import { RoycoKernel } from "./base/RoycoKernel.sol";
+import { AssetClaims, IRoycoVaultTranche, Math, RoycoKernel } from "./base/RoycoKernel.sol";
 
 /**
  * @title MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel
@@ -55,7 +55,7 @@ contract MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel is Identical_E
         // Fetch the conversion rate (using the exit share price) from the Maple pool token to its underlying asset, scaled to WAD precision
         uint256 maplePoolTokenToBaseAssetsConversionRateWAD = IMaplePool(ST_ASSET).convertToExitAssets(ERC4626_SHARES_TO_CONVERT_TO_ASSETS);
 
-        // Resolve the vault base asset to NAV unit conversion rate, scaled to WAD precision
+        // Resolve the Maple pool token's base asset to NAV unit conversion rate, scaled to WAD precision
         uint256 baseAssetToNAVUnitConversionRateWAD = getStoredConversionRateWAD();
         // If the stored conversion rate is the sentinel value, query the oracle for the rate
         if (baseAssetToNAVUnitConversionRateWAD == SENTINEL_CONVERSION_RATE) baseAssetToNAVUnitConversionRateWAD = _getConversionRateFromOracleWAD();
@@ -66,21 +66,27 @@ contract MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel is Identical_E
     }
 
     /// @inheritdoc RoycoKernel
+    /// @dev Simulates Maple pool token transfer permissions as a compliance proxy
     function _preTrancheBalanceUpdate(address _caller, address _from, address _to, uint256 _amount) internal view override(RoycoKernel) {
         // Preemptively return if this is a mint or redeem since the Maple pool checks permissions on minting/redeeming the underlying
         if (_from == address(0) || _to == address(0)) return;
+
+        // Get value of the tranche shares being transferred in Pool tokens
+        AssetClaims memory claims = IRoycoVaultTranche(msg.sender).convertToAssets(_amount);
+        TRANCHE_UNIT trancheSharesValueInPoolTokens = claims.stAssets + claims.jtAssets;
 
         // Check the validity of the tranche shares transfer
         bool validTransfer;
         string memory errorMessage;
         // If this is a standard transfer, check the validity of the exact transfer call on the underlying Maple Pool
         if (_caller == _from) {
-            (validTransfer, errorMessage) = IMaplePoolManager(MAPLE_POOL_MANAGER).canCall(MAPLE_POOL_TRANSFER_FUNCTION_ID, _caller, abi.encode(_to, _amount));
+            (validTransfer, errorMessage) =
+                IMaplePoolManager(MAPLE_POOL_MANAGER).canCall(MAPLE_POOL_TRANSFER_FUNCTION_ID, _caller, abi.encode(_to, trancheSharesValueInPoolTokens));
         }
         // If this is a transferFrom, check the validity of the exact transferFrom call on the underlying Maple Pool
         else {
-            (validTransfer, errorMessage) =
-                IMaplePoolManager(MAPLE_POOL_MANAGER).canCall(MAPLE_POOL_TRANSFER_FROM_FUNCTION_ID, _caller, abi.encode(_from, _to, _amount));
+            (validTransfer, errorMessage) = IMaplePoolManager(MAPLE_POOL_MANAGER)
+                .canCall(MAPLE_POOL_TRANSFER_FROM_FUNCTION_ID, _caller, abi.encode(_from, _to, trancheSharesValueInPoolTokens));
         }
         // Assert that the manager approves of this transfer
         require(validTransfer, TRANSFER_REJECTED_BY_MAPLE_POOL_MANAGER(errorMessage));
