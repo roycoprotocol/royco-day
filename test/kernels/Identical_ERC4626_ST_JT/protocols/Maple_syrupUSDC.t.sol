@@ -181,6 +181,35 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         ST.transfer(CHARLIE_ADDRESS, transferAmount);
     }
 
+    /// @notice Verifies ST.transferFrom calls canCall with "P:transferFrom" and correct arguments
+    function test_preTrancheBalanceUpdate_ST_transferFrom_callsCanCallCorrectly() external {
+        _depositJT(ALICE_ADDRESS, 100_000e6);
+        _depositST(BOB_ADDRESS, 10_000e6);
+
+        uint256 shares = ST.balanceOf(BOB_ADDRESS);
+        uint256 transferAmount = shares / 2;
+
+        vm.prank(BOB_ADDRESS);
+        ST.approve(CHARLIE_ADDRESS, shares);
+
+        AssetClaims memory claims = ST.convertToAssets(transferAmount);
+        uint256 expectedPoolTokenAmount = toUint256(claims.stAssets) + toUint256(claims.jtAssets);
+
+        // _caller is CHARLIE (msg.sender who calls transferFrom), data encodes (from, to, amount)
+        vm.expectCall(
+            _mapleKernel().MAPLE_POOL_MANAGER(),
+            abi.encodeWithSelector(
+                IMaplePoolManager.canCall.selector,
+                bytes32("P:transferFrom"),
+                CHARLIE_ADDRESS,
+                abi.encode(BOB_ADDRESS, CHARLIE_ADDRESS, expectedPoolTokenAmount)
+            )
+        );
+
+        vm.prank(CHARLIE_ADDRESS);
+        ST.transferFrom(BOB_ADDRESS, CHARLIE_ADDRESS, transferAmount);
+    }
+
     /// @notice Verifies deposit does NOT call canCall (mint bypasses restriction)
     function test_preTrancheBalanceUpdate_deposit_doesNotCallCanCall() external {
         // Record all calls - if canCall is invoked, test will detect it
@@ -204,16 +233,40 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         assertTrue(toUint256(claims.stAssets) + toUint256(claims.jtAssets) > 0, "Redeem should succeed without canCall");
     }
 
-    /// @notice Verifies transfer reverts when canCall returns false
+    /// @notice Verifies transfer reverts when canCall returns false with correct error
     function test_preTrancheBalanceUpdate_revertsWhenCanCallReturnsFalse() external {
         _depositJT(ALICE_ADDRESS, 10_000e6);
         uint256 shares = JT.balanceOf(ALICE_ADDRESS);
 
-        // Mock canCall to return false
+        // Mock canCall to return false with an error message
         vm.mockCall(_mapleKernel().MAPLE_POOL_MANAGER(), abi.encodeWithSelector(IMaplePoolManager.canCall.selector), abi.encode(false, "P:NOT_ALLOWED"));
 
         vm.prank(ALICE_ADDRESS);
-        vm.expectRevert();
+        vm.expectRevert(
+            abi.encodeWithSelector(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.TRANSFER_REJECTED_BY_MAPLE_POOL_MANAGER.selector, "P:NOT_ALLOWED")
+        );
         JT.transfer(BOB_ADDRESS, shares / 2);
+    }
+
+    /// @notice Verifies transferFrom reverts when canCall returns false with correct error
+    function test_preTrancheBalanceUpdate_transferFrom_revertsWhenCanCallReturnsFalse() external {
+        _depositJT(ALICE_ADDRESS, 10_000e6);
+        uint256 shares = JT.balanceOf(ALICE_ADDRESS);
+
+        vm.prank(ALICE_ADDRESS);
+        JT.approve(BOB_ADDRESS, shares);
+
+        // Mock canCall to return false with an error message
+        vm.mockCall(
+            _mapleKernel().MAPLE_POOL_MANAGER(), abi.encodeWithSelector(IMaplePoolManager.canCall.selector), abi.encode(false, "P:TRANSFER_FROM_BLOCKED")
+        );
+
+        vm.prank(BOB_ADDRESS);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.TRANSFER_REJECTED_BY_MAPLE_POOL_MANAGER.selector, "P:TRANSFER_FROM_BLOCKED"
+            )
+        );
+        JT.transferFrom(ALICE_ADDRESS, BOB_ADDRESS, shares / 2);
     }
 }
