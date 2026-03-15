@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Vm } from "../../../lib/forge-std/src/Vm.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
 import { IRoycoAccountant } from "../../../src/interfaces/IRoycoAccountant.sol";
@@ -183,6 +184,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+        uint256 bobBalance = IERC20(config.stAsset).balanceOf(BOB_ADDRESS);
+        if (stAmount > bobBalance) stAmount = bobBalance;
         if (stAmount == 0) return;
 
         TRANCHE_UNIT depositAmount = toTrancheUnits(stAmount);
@@ -214,6 +218,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+        uint256 bobBalance = IERC20(config.stAsset).balanceOf(BOB_ADDRESS);
+        if (stAmount > bobBalance) stAmount = bobBalance;
         if (stAmount == 0) return;
 
         uint256 stShares = _depositST(BOB_ADDRESS, stAmount);
@@ -245,6 +252,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stDeposit = toUint256(maxSTDeposit) * _stPercentage / 100;
+        // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+        uint256 bobBalance = IERC20(config.stAsset).balanceOf(BOB_ADDRESS);
+        if (stDeposit > bobBalance) stDeposit = bobBalance;
         if (stDeposit == 0) return;
 
         _depositST(BOB_ADDRESS, stDeposit);
@@ -406,6 +416,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+        uint256 bobBalance = IERC20(config.stAsset).balanceOf(BOB_ADDRESS);
+        if (stAmount > bobBalance) stAmount = bobBalance;
 
         if (stAmount < _minDepositAmount()) return;
 
@@ -431,6 +444,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+        uint256 bobBalance = IERC20(config.stAsset).balanceOf(BOB_ADDRESS);
+        if (stAmount > bobBalance) stAmount = bobBalance;
 
         if (stAmount < _minDepositAmount()) return;
 
@@ -549,6 +565,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+        uint256 bobBalance = IERC20(config.stAsset).balanceOf(BOB_ADDRESS);
+        if (stAmount > bobBalance) stAmount = bobBalance;
 
         if (stAmount < _minDepositAmount()) return;
 
@@ -615,6 +634,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+        uint256 bobBalance = IERC20(config.stAsset).balanceOf(BOB_ADDRESS);
+        if (stAmount > bobBalance) stAmount = bobBalance;
 
         if (stAmount < _minDepositAmount()) return;
 
@@ -649,6 +671,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+        uint256 bobBalance = IERC20(config.stAsset).balanceOf(BOB_ADDRESS);
+        if (stAmount > bobBalance) stAmount = bobBalance;
 
         if (stAmount < _minDepositAmount()) return;
 
@@ -686,6 +711,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+        uint256 bobBalance = IERC20(config.stAsset).balanceOf(BOB_ADDRESS);
+        if (stAmount > bobBalance) stAmount = bobBalance;
 
         if (stAmount < _minDepositAmount()) return;
 
@@ -720,6 +748,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         if (_stPercentage > 0) {
             TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
             uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+            // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+            uint256 bobBalance = IERC20(config.stAsset).balanceOf(BOB_ADDRESS);
+            if (stAmount > bobBalance) stAmount = bobBalance;
             if (stAmount >= _minDepositAmount()) {
                 _depositST(BOB_ADDRESS, stAmount);
             }
@@ -788,6 +819,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // Step 2: ST deposits
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+        uint256 bobBalance = IERC20(config.stAsset).balanceOf(BOB_ADDRESS);
+        if (stAmount > bobBalance) stAmount = bobBalance;
         if (stAmount < _minDepositAmount()) return;
 
         _depositST(BOB_ADDRESS, stAmount);
@@ -825,9 +859,12 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     }
 
     function testFuzz_fullFlow_depositLossRedeem(uint256 _jtAmount, uint256 _stPercentage, uint256 _lossPercentage) external {
+        uint256 coverage = ACCOUNTANT.getState().coverageWAD;
+
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 30);
-        _lossPercentage = bound(_lossPercentage, 1, 15);
+        // Bound loss to coverage so JT can fully absorb it and ST remains protected
+        _lossPercentage = bound(_lossPercentage, 1, coverage * 100 / WAD);
 
         // Step 1: JT deposits
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -835,6 +872,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // Step 2: ST deposits
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
+        // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)
+        uint256 bobBalance = IERC20(config.stAsset).balanceOf(BOB_ADDRESS);
+        if (stAmount > bobBalance) stAmount = bobBalance;
         if (stAmount < _minDepositAmount()) return;
 
         _depositST(BOB_ADDRESS, stAmount);
@@ -899,8 +939,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     }
 
     function _minDepositAmount() internal view virtual returns (uint256) {
-        // Minimum deposit to avoid dust issues
-        return 10 ** (18 > 6 ? 18 - 6 : 0) * 1000; // At least 1000 smallest units
+        // Minimum deposit of 100 tokens to avoid dust issues
+        uint8 decimals = IERC20Metadata(config.stAsset).decimals();
+        return 100 * 10 ** decimals;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
