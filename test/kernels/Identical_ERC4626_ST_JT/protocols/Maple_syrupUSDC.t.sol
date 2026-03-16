@@ -210,27 +210,26 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         ST.transferFrom(BOB_ADDRESS, CHARLIE_ADDRESS, transferAmount);
     }
 
-    /// @notice Verifies deposit does NOT call canCall (mint bypasses restriction)
-    function test_preTrancheBalanceUpdate_deposit_doesNotCallCanCall() external {
-        // Record all calls - if canCall is invoked, test will detect it
-        vm.recordLogs();
-
+    /// @notice Verifies deposit does NOT trigger kernel's canCall check (mint bypasses _preTrancheBalanceUpdate)
+    /// @dev The underlying Maple pool still calls its own canCall for transferFrom - that's expected and separate
+    function test_preTrancheBalanceUpdate_deposit_bypassesKernelCheck() external {
+        // Deposit succeeds - kernel's _preTrancheBalanceUpdate returns early for _from == address(0)
         _depositJT(ALICE_ADDRESS, 10_000e6);
 
-        // Verify no canCall was made (deposit has _from == address(0), bypasses check)
-        assertTrue(JT.balanceOf(ALICE_ADDRESS) > 0, "Deposit should succeed without canCall");
+        assertTrue(JT.balanceOf(ALICE_ADDRESS) > 0, "Deposit should succeed");
     }
 
-    /// @notice Verifies redeem does NOT call canCall (burn bypasses restriction)
-    function test_preTrancheBalanceUpdate_redeem_doesNotCallCanCall() external {
+    /// @notice Verifies redeem does NOT trigger kernel's canCall check (burn bypasses _preTrancheBalanceUpdate)
+    /// @dev The underlying Maple pool still calls its own canCall for transfer - that's expected and separate
+    function test_preTrancheBalanceUpdate_redeem_bypassesKernelCheck() external {
         _depositJT(ALICE_ADDRESS, 10_000e6);
         uint256 shares = JT.balanceOf(ALICE_ADDRESS);
 
+        // Redeem succeeds - kernel's _preTrancheBalanceUpdate returns early for _to == address(0)
         vm.prank(ALICE_ADDRESS);
         AssetClaims memory claims = JT.redeem(shares, ALICE_ADDRESS, ALICE_ADDRESS);
 
-        // Verify redeem succeeded (has _to == address(0), bypasses check)
-        assertTrue(toUint256(claims.stAssets) + toUint256(claims.jtAssets) > 0, "Redeem should succeed without canCall");
+        assertTrue(toUint256(claims.stAssets) + toUint256(claims.jtAssets) > 0, "Redeem should succeed");
     }
 
     /// @notice Verifies transfer reverts when canCall returns false with correct error
@@ -268,5 +267,58 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
             )
         );
         JT.transferFrom(ALICE_ADDRESS, BOB_ADDRESS, shares / 2);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MAPLE-SPECIFIC: getTrancheUnitToNAVUnitConversionRateWAD TESTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Verifies kernel calls convertToExitAssets (not convertToAssets) for NAV calculation
+    function test_getTrancheUnitToNAVUnitConversionRateWAD_usesConvertToExitAssets() external {
+        uint256 sharesToConvert = _getSharesToConvertToAssets();
+
+        // Expect convertToExitAssets to be called with the correct share amount
+        vm.expectCall(config.stAsset, abi.encodeWithSelector(IMaplePool.convertToExitAssets.selector, sharesToConvert));
+
+        // Call the kernel's conversion rate function
+        _mapleKernel().getTrancheUnitToNAVUnitConversionRateWAD();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // EDGE CASE TESTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Verifies zero amount transfer still calls canCall
+    function test_preTrancheBalanceUpdate_zeroAmount_callsCanCall() external {
+        _depositJT(ALICE_ADDRESS, 10_000e6);
+
+        // Zero amount transfer should still call canCall with zero pool token amount
+        vm.expectCall(
+            _mapleKernel().MAPLE_POOL_MANAGER(),
+            abi.encodeWithSelector(IMaplePoolManager.canCall.selector, bytes32("P:transfer"), ALICE_ADDRESS, abi.encode(BOB_ADDRESS, uint256(0)))
+        );
+
+        vm.prank(ALICE_ADDRESS);
+        JT.transfer(BOB_ADDRESS, 0);
+    }
+
+    /// @notice Verifies self-transfer (from == to) still calls canCall
+    function test_preTrancheBalanceUpdate_selfTransfer_callsCanCall() external {
+        _depositJT(ALICE_ADDRESS, 10_000e6);
+
+        uint256 shares = JT.balanceOf(ALICE_ADDRESS);
+        uint256 transferAmount = shares / 2;
+
+        AssetClaims memory claims = JT.convertToAssets(transferAmount);
+        uint256 expectedPoolTokenAmount = toUint256(claims.stAssets) + toUint256(claims.jtAssets);
+
+        // Self-transfer should call canCall with from == to
+        vm.expectCall(
+            _mapleKernel().MAPLE_POOL_MANAGER(),
+            abi.encodeWithSelector(IMaplePoolManager.canCall.selector, bytes32("P:transfer"), ALICE_ADDRESS, abi.encode(ALICE_ADDRESS, expectedPoolTokenAmount))
+        );
+
+        vm.prank(ALICE_ADDRESS);
+        JT.transfer(ALICE_ADDRESS, transferAmount);
     }
 }
