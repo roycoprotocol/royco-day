@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { IAccessManaged } from "../../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
+import { IAccessManager } from "../../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { IERC20Metadata } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
 import { IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
 import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
@@ -10,6 +12,7 @@ import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { IMaplePool } from "../../../../src/interfaces/external/maple/IMaplePool.sol";
 import { IMaplePoolManager } from "../../../../src/interfaces/external/maple/IMaplePoolManager.sol";
+import { IMaplePoolPermissionManager } from "../../../../src/interfaces/external/maple/IMaplePoolPermissionManager.sol";
 import { MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel } from "../../../../src/kernels/MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.sol";
 import { WAD_DECIMALS } from "../../../../src/libraries/Constants.sol";
 import { AssetClaims } from "../../../../src/libraries/Types.sol";
@@ -109,34 +112,42 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
     // MAPLE-SPECIFIC: _preTrancheBalanceUpdate TESTS
     // ═══════════════════════════════════════════════════════════════════════════
 
+    /// @dev Selector for hasPermission(address,address[],bytes32) - the array overload
+    bytes4 internal constant HAS_PERMISSION_ARRAY_SELECTOR = bytes4(keccak256("hasPermission(address,address[],bytes32)"));
+
     /// @notice Helper to get the Maple kernel cast
     function _mapleKernel() internal view returns (MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel) {
         return MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel(address(KERNEL));
     }
 
-    /// @notice Verifies JT.transfer calls canCall with "P:transfer" and correct arguments
-    function test_preTrancheBalanceUpdate_JT_transfer_callsCanCallCorrectly() external {
+    /// @notice Helper to get the Maple pool permission manager
+    function _permissionManager() internal view returns (address) {
+        return IMaplePoolManager(_mapleKernel().MAPLE_POOL_MANAGER()).poolPermissionManager();
+    }
+
+    /// @notice Verifies JT.transfer calls hasPermission with correct lenders [sender, recipient]
+    function test_preTrancheBalanceUpdate_JT_transfer_callsHasPermissionCorrectly() external {
         _depositJT(ALICE_ADDRESS, 10_000e6);
 
         uint256 shares = JT.balanceOf(ALICE_ADDRESS);
         uint256 transferAmount = shares / 2;
 
-        // Calculate expected pool token value (kernel converts shares to underlying value)
-        AssetClaims memory claims = JT.convertToAssets(transferAmount);
-        uint256 expectedPoolTokenAmount = toUint256(claims.stAssets) + toUint256(claims.jtAssets);
+        // Build expected lenders array: [sender, recipient]
+        address[] memory expectedLenders = new address[](2);
+        expectedLenders[0] = ALICE_ADDRESS;
+        expectedLenders[1] = BOB_ADDRESS;
 
-        // _caller is ALICE (msg.sender who calls transfer), data encodes (to, amount)
         vm.expectCall(
-            _mapleKernel().MAPLE_POOL_MANAGER(),
-            abi.encodeWithSelector(IMaplePoolManager.canCall.selector, bytes32("P:transfer"), ALICE_ADDRESS, abi.encode(BOB_ADDRESS, expectedPoolTokenAmount))
+            _permissionManager(),
+            abi.encodeWithSelector(HAS_PERMISSION_ARRAY_SELECTOR, _mapleKernel().MAPLE_POOL_MANAGER(), expectedLenders, bytes32("P:transfer"))
         );
 
         vm.prank(ALICE_ADDRESS);
         JT.transfer(BOB_ADDRESS, transferAmount);
     }
 
-    /// @notice Verifies JT.transferFrom calls canCall with "P:transferFrom" and correct arguments
-    function test_preTrancheBalanceUpdate_JT_transferFrom_callsCanCallCorrectly() external {
+    /// @notice Verifies JT.transferFrom calls hasPermission with correct lenders [from, to]
+    function test_preTrancheBalanceUpdate_JT_transferFrom_callsHasPermissionCorrectly() external {
         _depositJT(ALICE_ADDRESS, 10_000e6);
 
         uint256 shares = JT.balanceOf(ALICE_ADDRESS);
@@ -145,44 +156,44 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         vm.prank(ALICE_ADDRESS);
         JT.approve(BOB_ADDRESS, shares);
 
-        AssetClaims memory claims = JT.convertToAssets(transferAmount);
-        uint256 expectedPoolTokenAmount = toUint256(claims.stAssets) + toUint256(claims.jtAssets);
+        // Build expected lenders array: [from, to]
+        address[] memory expectedLenders = new address[](2);
+        expectedLenders[0] = ALICE_ADDRESS;
+        expectedLenders[1] = BOB_ADDRESS;
 
-        // _caller is BOB (msg.sender who calls transferFrom), data encodes (from, to, amount)
         vm.expectCall(
-            _mapleKernel().MAPLE_POOL_MANAGER(),
-            abi.encodeWithSelector(
-                IMaplePoolManager.canCall.selector, bytes32("P:transferFrom"), BOB_ADDRESS, abi.encode(ALICE_ADDRESS, BOB_ADDRESS, expectedPoolTokenAmount)
-            )
+            _permissionManager(),
+            abi.encodeWithSelector(HAS_PERMISSION_ARRAY_SELECTOR, _mapleKernel().MAPLE_POOL_MANAGER(), expectedLenders, bytes32("P:transferFrom"))
         );
 
         vm.prank(BOB_ADDRESS);
         JT.transferFrom(ALICE_ADDRESS, BOB_ADDRESS, transferAmount);
     }
 
-    /// @notice Verifies ST.transfer calls canCall with "P:transfer" and correct arguments
-    function test_preTrancheBalanceUpdate_ST_transfer_callsCanCallCorrectly() external {
+    /// @notice Verifies ST.transfer calls hasPermission with correct lenders [sender, recipient]
+    function test_preTrancheBalanceUpdate_ST_transfer_callsHasPermissionCorrectly() external {
         _depositJT(ALICE_ADDRESS, 100_000e6);
         _depositST(BOB_ADDRESS, 10_000e6);
 
         uint256 shares = ST.balanceOf(BOB_ADDRESS);
         uint256 transferAmount = shares / 2;
 
-        AssetClaims memory claims = ST.convertToAssets(transferAmount);
-        uint256 expectedPoolTokenAmount = toUint256(claims.stAssets) + toUint256(claims.jtAssets);
+        // Build expected lenders array: [sender, recipient]
+        address[] memory expectedLenders = new address[](2);
+        expectedLenders[0] = BOB_ADDRESS;
+        expectedLenders[1] = CHARLIE_ADDRESS;
 
-        // _caller is BOB (msg.sender who calls transfer), data encodes (to, amount)
         vm.expectCall(
-            _mapleKernel().MAPLE_POOL_MANAGER(),
-            abi.encodeWithSelector(IMaplePoolManager.canCall.selector, bytes32("P:transfer"), BOB_ADDRESS, abi.encode(CHARLIE_ADDRESS, expectedPoolTokenAmount))
+            _permissionManager(),
+            abi.encodeWithSelector(HAS_PERMISSION_ARRAY_SELECTOR, _mapleKernel().MAPLE_POOL_MANAGER(), expectedLenders, bytes32("P:transfer"))
         );
 
         vm.prank(BOB_ADDRESS);
         ST.transfer(CHARLIE_ADDRESS, transferAmount);
     }
 
-    /// @notice Verifies ST.transferFrom calls canCall with "P:transferFrom" and correct arguments
-    function test_preTrancheBalanceUpdate_ST_transferFrom_callsCanCallCorrectly() external {
+    /// @notice Verifies ST.transferFrom calls hasPermission with correct lenders [from, to]
+    function test_preTrancheBalanceUpdate_ST_transferFrom_callsHasPermissionCorrectly() external {
         _depositJT(ALICE_ADDRESS, 100_000e6);
         _depositST(BOB_ADDRESS, 10_000e6);
 
@@ -192,28 +203,24 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         vm.prank(BOB_ADDRESS);
         ST.approve(CHARLIE_ADDRESS, shares);
 
-        AssetClaims memory claims = ST.convertToAssets(transferAmount);
-        uint256 expectedPoolTokenAmount = toUint256(claims.stAssets) + toUint256(claims.jtAssets);
+        // Build expected lenders array: [from, to]
+        address[] memory expectedLenders = new address[](2);
+        expectedLenders[0] = BOB_ADDRESS;
+        expectedLenders[1] = CHARLIE_ADDRESS;
 
-        // _caller is CHARLIE (msg.sender who calls transferFrom), data encodes (from, to, amount)
         vm.expectCall(
-            _mapleKernel().MAPLE_POOL_MANAGER(),
-            abi.encodeWithSelector(
-                IMaplePoolManager.canCall.selector,
-                bytes32("P:transferFrom"),
-                CHARLIE_ADDRESS,
-                abi.encode(BOB_ADDRESS, CHARLIE_ADDRESS, expectedPoolTokenAmount)
-            )
+            _permissionManager(),
+            abi.encodeWithSelector(HAS_PERMISSION_ARRAY_SELECTOR, _mapleKernel().MAPLE_POOL_MANAGER(), expectedLenders, bytes32("P:transferFrom"))
         );
 
         vm.prank(CHARLIE_ADDRESS);
         ST.transferFrom(BOB_ADDRESS, CHARLIE_ADDRESS, transferAmount);
     }
 
-    /// @notice Verifies deposit to SELF skips kernel's canCall (depositor already validated by underlying pool)
+    /// @notice Verifies deposit to SELF skips kernel's permission check (depositor already validated by underlying pool)
     /// @dev Gas optimization: when _caller == _to, the depositor is validated by Maple's transferFrom
     function test_preTrancheBalanceUpdate_deposit_toSelf_bypassesKernelCheck() external {
-        // Deposit to self bypasses kernel's canCall check since:
+        // Deposit to self bypasses kernel's permission check since:
         // 1. Depositor is validated by Maple when pool tokens are transferred to kernel
         // 2. Receiver == depositor, so no additional validation needed
         _depositJT(ALICE_ADDRESS, 10_000e6);
@@ -221,17 +228,22 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         assertTrue(JT.balanceOf(ALICE_ADDRESS) > 0, "Deposit to self should succeed");
     }
 
-    /// @notice Verifies deposit to different receiver validates that receiver
+    /// @notice Verifies deposit to different receiver validates both sender and receiver
     function test_preTrancheBalanceUpdate_deposit_toDifferentReceiver_validatesReceiver() external {
-        // Give Alice some syrupUSDC
         deal(config.jtAsset, ALICE_ADDRESS, 10_000e6);
 
         vm.startPrank(ALICE_ADDRESS);
         IERC20(config.jtAsset).approve(address(JT), 10_000e6);
 
-        // Kernel should call canCall to verify BOB can receive
-        // Note: We can't predict exact amount due to share calculation, so we just verify the call pattern
-        vm.expectCall(_mapleKernel().MAPLE_POOL_MANAGER(), abi.encodeWithSelector(IMaplePoolManager.canCall.selector, bytes32("P:transfer"), ALICE_ADDRESS));
+        // Kernel should call hasPermission to verify [ALICE, BOB] have permission
+        address[] memory expectedLenders = new address[](2);
+        expectedLenders[0] = ALICE_ADDRESS;
+        expectedLenders[1] = BOB_ADDRESS;
+
+        vm.expectCall(
+            _permissionManager(),
+            abi.encodeWithSelector(HAS_PERMISSION_ARRAY_SELECTOR, _mapleKernel().MAPLE_POOL_MANAGER(), expectedLenders, bytes32("P:transfer"))
+        );
 
         JT.deposit(toTrancheUnits(10_000e6), BOB_ADDRESS);
         vm.stopPrank();
@@ -239,76 +251,171 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         assertTrue(JT.balanceOf(BOB_ADDRESS) > 0, "Deposit to Bob should succeed");
     }
 
-    /// @notice Verifies deposit reverts if receiver is blocked by Maple
+    /// @notice Verifies deposit reverts if sender/receiver pair is blocked by Maple
+    /// @dev Note: Mock affects both Maple's underlying check and kernel's check; Maple's error surfaces first
     function test_preTrancheBalanceUpdate_deposit_revertsIfReceiverBlocked() external {
         deal(config.jtAsset, ALICE_ADDRESS, 10_000e6);
 
-        // Mock canCall to return false for BOB as receiver
-        vm.mockCall(
-            _mapleKernel().MAPLE_POOL_MANAGER(),
-            abi.encodeWithSelector(IMaplePoolManager.canCall.selector, bytes32("P:transfer"), ALICE_ADDRESS),
-            abi.encode(false, "P:RECEIVER_NOT_ALLOWED")
-        );
+        // Mock hasPermission to return false - this affects both Maple's pool check and kernel's check
+        // Maple's pool check happens first during the transferFrom, so we see Maple's error
+        vm.mockCall(_permissionManager(), abi.encodeWithSelector(HAS_PERMISSION_ARRAY_SELECTOR), abi.encode(false));
 
         vm.startPrank(ALICE_ADDRESS);
         IERC20(config.jtAsset).approve(address(JT), 10_000e6);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.TRANSFER_REJECTED_BY_MAPLE_POOL_MANAGER.selector, "P:RECEIVER_NOT_ALLOWED"
-            )
-        );
+        // The revert comes from Maple's pool during the transferFrom (before kernel's check)
+        vm.expectRevert("PM:CC:NOT_ALLOWED");
         JT.deposit(toTrancheUnits(10_000e6), BOB_ADDRESS);
         vm.stopPrank();
     }
 
-    /// @notice Verifies redeem does NOT trigger kernel's canCall check (burn bypasses _preTrancheBalanceUpdate)
-    /// @dev The kernel's transfer of pool tokens to receiver is validated by Maple directly
-    function test_preTrancheBalanceUpdate_redeem_bypassesKernelCheck() external {
+    /// @notice Verifies owner redeem validates owner is on Maple's allowlist
+    /// @dev Calls hasPermission with [owner] (single element) using P:transfer
+    function test_preTrancheBalanceUpdate_redeem_ownerRedeem_callsHasPermissionCorrectly() external {
         _depositJT(ALICE_ADDRESS, 10_000e6);
         uint256 shares = JT.balanceOf(ALICE_ADDRESS);
 
-        // Redeem succeeds - kernel's _preTrancheBalanceUpdate returns early for _to == address(0)
+        // Kernel should call hasPermission with [owner] for owner redeems (optimized to single element)
+        address[] memory expectedLenders = new address[](1);
+        expectedLenders[0] = ALICE_ADDRESS; // owner
+
+        vm.expectCall(
+            _permissionManager(),
+            abi.encodeWithSelector(HAS_PERMISSION_ARRAY_SELECTOR, _mapleKernel().MAPLE_POOL_MANAGER(), expectedLenders, bytes32("P:transfer"))
+        );
+
         vm.prank(ALICE_ADDRESS);
         AssetClaims memory claims = JT.redeem(shares, ALICE_ADDRESS, ALICE_ADDRESS);
 
-        assertTrue(toUint256(claims.stAssets) + toUint256(claims.jtAssets) > 0, "Redeem should succeed");
+        assertTrue(toUint256(claims.stAssets) + toUint256(claims.jtAssets) > 0, "Redeem should succeed for allowed owner");
     }
 
-    /// @notice Verifies transfer reverts when canCall returns false with correct error
-    function test_preTrancheBalanceUpdate_revertsWhenCanCallReturnsFalse() external {
+    /// @notice Verifies operator redeem validates owner and operator are on Maple's allowlist
+    /// @dev Calls hasPermission with [owner, operator] using P:transferFrom
+    function test_preTrancheBalanceUpdate_redeem_operatorRedeem_callsHasPermissionCorrectly() external {
         _depositJT(ALICE_ADDRESS, 10_000e6);
         uint256 shares = JT.balanceOf(ALICE_ADDRESS);
 
-        // Mock canCall to return false with an error message
-        vm.mockCall(_mapleKernel().MAPLE_POOL_MANAGER(), abi.encodeWithSelector(IMaplePoolManager.canCall.selector), abi.encode(false, "P:NOT_ALLOWED"));
+        // Approve BOB as operator
+        vm.prank(ALICE_ADDRESS);
+        JT.approve(BOB_ADDRESS, shares);
+
+        // Mock factory's canCall to allow BOB to call redeem on JT
+        // The factory is JT's authority for access control
+        address factory = IAccessManaged(address(JT)).authority();
+        vm.mockCall(factory, abi.encodeWithSelector(IAccessManager.canCall.selector, BOB_ADDRESS, address(JT)), abi.encode(true, uint32(0)));
+
+        // Kernel should call hasPermission with [owner, operator] for operator redeems
+        address[] memory expectedLenders = new address[](2);
+        expectedLenders[0] = ALICE_ADDRESS; // owner (_from)
+        expectedLenders[1] = BOB_ADDRESS; // operator (_caller, since isTransfer=false)
+
+        vm.expectCall(
+            _permissionManager(),
+            abi.encodeWithSelector(HAS_PERMISSION_ARRAY_SELECTOR, _mapleKernel().MAPLE_POOL_MANAGER(), expectedLenders, bytes32("P:transferFrom"))
+        );
+
+        // BOB (operator) redeems ALICE's shares to CHARLIE
+        vm.prank(BOB_ADDRESS);
+        AssetClaims memory claims = JT.redeem(shares, CHARLIE_ADDRESS, ALICE_ADDRESS);
+
+        assertTrue(toUint256(claims.stAssets) + toUint256(claims.jtAssets) > 0, "Operator redeem should succeed");
+    }
+
+    /// @notice Verifies blacklisted operator cannot redeem on behalf of owner
+    /// @dev This prevents blacklisted operators from participating in redemptions
+    function test_preTrancheBalanceUpdate_redeem_revertsIfOperatorBlacklisted() external {
+        _depositJT(ALICE_ADDRESS, 10_000e6);
+        uint256 shares = JT.balanceOf(ALICE_ADDRESS);
+
+        // Approve BOB as operator
+        vm.prank(ALICE_ADDRESS);
+        JT.approve(BOB_ADDRESS, shares);
+
+        // Mock factory's canCall to allow BOB to call redeem on JT (access control passes)
+        address factory = IAccessManaged(address(JT)).authority();
+        vm.mockCall(factory, abi.encodeWithSelector(IAccessManager.canCall.selector, BOB_ADDRESS, address(JT)), abi.encode(true, uint32(0)));
+
+        // Build the specific lenders array that kernel will check for operator redeem: [owner, operator]
+        address[] memory redeemLenders = new address[](2);
+        redeemLenders[0] = ALICE_ADDRESS;
+        redeemLenders[1] = BOB_ADDRESS;
+
+        // Mock hasPermission for the specific operator redeem check to return false (Maple blacklist)
+        vm.mockCall(
+            _permissionManager(),
+            abi.encodeWithSelector(HAS_PERMISSION_ARRAY_SELECTOR, _mapleKernel().MAPLE_POOL_MANAGER(), redeemLenders, bytes32("P:transferFrom")),
+            abi.encode(false)
+        );
+
+        // BOB (blacklisted by Maple) tries to redeem ALICE's shares - should fail
+        vm.prank(BOB_ADDRESS);
+        vm.expectRevert(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.TRANSFER_REJECTED_BY_MAPLE_PERMISSION_MANAGER.selector);
+        JT.redeem(shares, CHARLIE_ADDRESS, ALICE_ADDRESS);
+    }
+
+    /// @notice Verifies blacklisted owner cannot redeem even to a fresh address
+    /// @dev This prevents circumventing Maple's blacklist via redemption to a new address
+    function test_preTrancheBalanceUpdate_redeem_revertsIfOwnerBlacklisted() external {
+        _depositJT(ALICE_ADDRESS, 10_000e6);
+        uint256 shares = JT.balanceOf(ALICE_ADDRESS);
+
+        // Build the specific lenders array that kernel will check for owner redeem: [owner] (single element)
+        address[] memory redeemLenders = new address[](1);
+        redeemLenders[0] = ALICE_ADDRESS;
+
+        // Mock hasPermission for the specific redeem check to return false
+        vm.mockCall(
+            _permissionManager(),
+            abi.encodeWithSelector(HAS_PERMISSION_ARRAY_SELECTOR, _mapleKernel().MAPLE_POOL_MANAGER(), redeemLenders, bytes32("P:transfer")),
+            abi.encode(false)
+        );
+
+        // ALICE tries to redeem to BOB (fresh address) - should fail because ALICE is blacklisted
+        vm.prank(ALICE_ADDRESS);
+        vm.expectRevert(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.TRANSFER_REJECTED_BY_MAPLE_PERMISSION_MANAGER.selector);
+        JT.redeem(shares, BOB_ADDRESS, ALICE_ADDRESS);
+    }
+
+    /// @notice Verifies allowed owner can redeem to any receiver
+    /// @dev Receiver is validated by Maple during kernel→receiver pool token transfer
+    function test_preTrancheBalanceUpdate_redeem_allowedOwnerCanRedeemToOther() external {
+        _depositJT(ALICE_ADDRESS, 10_000e6);
+        uint256 shares = JT.balanceOf(ALICE_ADDRESS);
+
+        // ALICE (allowed) redeems to BOB - owner check passes, receiver validated by Maple directly
+        vm.prank(ALICE_ADDRESS);
+        AssetClaims memory claims = JT.redeem(shares, BOB_ADDRESS, ALICE_ADDRESS);
+
+        assertTrue(toUint256(claims.stAssets) + toUint256(claims.jtAssets) > 0, "Allowed owner can redeem to other");
+    }
+
+    /// @notice Verifies transfer reverts when hasPermission returns false
+    function test_preTrancheBalanceUpdate_revertsWhenHasPermissionReturnsFalse() external {
+        _depositJT(ALICE_ADDRESS, 10_000e6);
+        uint256 shares = JT.balanceOf(ALICE_ADDRESS);
+
+        // Mock hasPermission to return false
+        vm.mockCall(_permissionManager(), abi.encodeWithSelector(HAS_PERMISSION_ARRAY_SELECTOR), abi.encode(false));
 
         vm.prank(ALICE_ADDRESS);
-        vm.expectRevert(
-            abi.encodeWithSelector(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.TRANSFER_REJECTED_BY_MAPLE_POOL_MANAGER.selector, "P:NOT_ALLOWED")
-        );
+        vm.expectRevert(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.TRANSFER_REJECTED_BY_MAPLE_PERMISSION_MANAGER.selector);
         JT.transfer(BOB_ADDRESS, shares / 2);
     }
 
-    /// @notice Verifies transferFrom reverts when canCall returns false with correct error
-    function test_preTrancheBalanceUpdate_transferFrom_revertsWhenCanCallReturnsFalse() external {
+    /// @notice Verifies transferFrom reverts when hasPermission returns false
+    function test_preTrancheBalanceUpdate_transferFrom_revertsWhenHasPermissionReturnsFalse() external {
         _depositJT(ALICE_ADDRESS, 10_000e6);
         uint256 shares = JT.balanceOf(ALICE_ADDRESS);
 
         vm.prank(ALICE_ADDRESS);
         JT.approve(BOB_ADDRESS, shares);
 
-        // Mock canCall to return false with an error message
-        vm.mockCall(
-            _mapleKernel().MAPLE_POOL_MANAGER(), abi.encodeWithSelector(IMaplePoolManager.canCall.selector), abi.encode(false, "P:TRANSFER_FROM_BLOCKED")
-        );
+        // Mock hasPermission to return false
+        vm.mockCall(_permissionManager(), abi.encodeWithSelector(HAS_PERMISSION_ARRAY_SELECTOR), abi.encode(false));
 
         vm.prank(BOB_ADDRESS);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.TRANSFER_REJECTED_BY_MAPLE_POOL_MANAGER.selector, "P:TRANSFER_FROM_BLOCKED"
-            )
-        );
+        vm.expectRevert(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.TRANSFER_REJECTED_BY_MAPLE_PERMISSION_MANAGER.selector);
         JT.transferFrom(ALICE_ADDRESS, BOB_ADDRESS, shares / 2);
     }
 
@@ -331,34 +438,41 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
     // EDGE CASE TESTS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Verifies zero amount transfer still calls canCall
-    function test_preTrancheBalanceUpdate_zeroAmount_callsCanCall() external {
+    /// @notice Verifies zero amount transfer still calls hasPermission
+    function test_preTrancheBalanceUpdate_zeroAmount_callsHasPermission() external {
         _depositJT(ALICE_ADDRESS, 10_000e6);
 
-        // Zero amount transfer should still call canCall with zero pool token amount
+        // Build expected lenders array: [sender, recipient]
+        address[] memory expectedLenders = new address[](2);
+        expectedLenders[0] = ALICE_ADDRESS;
+        expectedLenders[1] = BOB_ADDRESS;
+
+        // Zero amount transfer should still call hasPermission
         vm.expectCall(
-            _mapleKernel().MAPLE_POOL_MANAGER(),
-            abi.encodeWithSelector(IMaplePoolManager.canCall.selector, bytes32("P:transfer"), ALICE_ADDRESS, abi.encode(BOB_ADDRESS, uint256(0)))
+            _permissionManager(),
+            abi.encodeWithSelector(HAS_PERMISSION_ARRAY_SELECTOR, _mapleKernel().MAPLE_POOL_MANAGER(), expectedLenders, bytes32("P:transfer"))
         );
 
         vm.prank(ALICE_ADDRESS);
         JT.transfer(BOB_ADDRESS, 0);
     }
 
-    /// @notice Verifies self-transfer (from == to) still calls canCall
-    function test_preTrancheBalanceUpdate_selfTransfer_callsCanCall() external {
+    /// @notice Verifies self-transfer (from == to) still calls hasPermission
+    function test_preTrancheBalanceUpdate_selfTransfer_callsHasPermission() external {
         _depositJT(ALICE_ADDRESS, 10_000e6);
 
         uint256 shares = JT.balanceOf(ALICE_ADDRESS);
         uint256 transferAmount = shares / 2;
 
-        AssetClaims memory claims = JT.convertToAssets(transferAmount);
-        uint256 expectedPoolTokenAmount = toUint256(claims.stAssets) + toUint256(claims.jtAssets);
+        // Build expected lenders array: [sender, recipient] where both are ALICE
+        address[] memory expectedLenders = new address[](2);
+        expectedLenders[0] = ALICE_ADDRESS;
+        expectedLenders[1] = ALICE_ADDRESS;
 
-        // Self-transfer should call canCall with from == to
+        // Self-transfer should call hasPermission with [ALICE, ALICE]
         vm.expectCall(
-            _mapleKernel().MAPLE_POOL_MANAGER(),
-            abi.encodeWithSelector(IMaplePoolManager.canCall.selector, bytes32("P:transfer"), ALICE_ADDRESS, abi.encode(ALICE_ADDRESS, expectedPoolTokenAmount))
+            _permissionManager(),
+            abi.encodeWithSelector(HAS_PERMISSION_ARRAY_SELECTOR, _mapleKernel().MAPLE_POOL_MANAGER(), expectedLenders, bytes32("P:transfer"))
         );
 
         vm.prank(ALICE_ADDRESS);

@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { IRoycoKernel } from "../interfaces/IRoycoKernel.sol";
 import { IMaplePool } from "../interfaces/external/maple/IMaplePool.sol";
 import { IMaplePoolManager } from "../interfaces/external/maple/IMaplePoolManager.sol";
+import { IMaplePoolPermissionManager } from "../interfaces/external/maple/IMaplePoolPermissionManager.sol";
 import { WAD } from "../libraries/Constants.sol";
 import { TRANCHE_UNIT } from "../libraries/Units.sol";
 import {
@@ -31,8 +32,8 @@ contract MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel is Identical_E
     /// @notice The address of the Maple pool's manager
     address public immutable MAPLE_POOL_MANAGER;
 
-    /// @dev Thrown when the Maple pool manager rejects a transfer of shares
-    error TRANSFER_REJECTED_BY_MAPLE_POOL_MANAGER(string errorMessage);
+    /// @dev Thrown when the Maple pool's permission manager rejects a transfer of shares
+    error TRANSFER_REJECTED_BY_MAPLE_PERMISSION_MANAGER();
 
     /// @notice Constructs the kernel state
     /// @param _params The standard construction parameters for the Royco kernel
@@ -67,29 +68,43 @@ contract MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel is Identical_E
 
     /// @inheritdoc RoycoKernel
     /// @dev Simulates Maple pool token transfer permissions as a compliance proxy
-    function _preTrancheBalanceUpdate(address _caller, address _from, address _to, uint256 _amount) internal view override(RoycoKernel) {
-        // Skip validation when minting shares to the caller or redeeming shares: the transfer of Pool tokens is validated directly by Maple
-        if ((_from == address(0) && _caller == _to) || _to == address(0)) return;
+    function _preTrancheBalanceUpdate(address _caller, address _from, address _to, uint256) internal view override(RoycoKernel) {
+        // Preemptively return when minting shares to the caller (deposit to self), since the caller and kernel addresses are validated on the pool token transfer on deposit
+        if (_from == address(0) && _caller == _to) return;
 
-        // Get value of the tranche shares being transferred in Pool tokens
-        AssetClaims memory claims = IRoycoVaultTranche(msg.sender).convertToAssets(_amount);
-        TRANCHE_UNIT trancheSharesValueInPoolTokens = claims.stAssets + claims.jtAssets;
+        // Retrieve the Maple pool's permission manager
+        // NOTE: This address must be queried at runtime since it is mutable
+        IMaplePoolPermissionManager permissionManager = IMaplePoolPermissionManager(IMaplePoolManager(MAPLE_POOL_MANAGER).poolPermissionManager());
 
-        // Check the validity of the tranche shares transfer
-        bool validTransfer;
-        string memory errorMessage;
+        // Determine whether the caller is the owner of the tranche shares (mints are treated as owner operations)
+        bool callerIsOwner = _from == address(0) || _caller == _from;
 
-        // For minting shares to another party or standard transfers, check the "P:transfer" permission
-        if (_from == address(0) || _caller == _from) {
-            (validTransfer, errorMessage) =
-                IMaplePoolManager(MAPLE_POOL_MANAGER).canCall(MAPLE_POOL_TRANSFER_FUNCTION_ID, _caller, abi.encode(_to, trancheSharesValueInPoolTokens));
+        // Build the users array based on the operation type
+        address[] memory users = new address[](2);
+        if (_to == address(0)) {
+            // Redemptions: validate the owner (and the approved party if this is a delegated redemption)
+            // NOTE: The actual receiver of the Maple pool tokens is validated on the kernel to receiver transfer
+            users[0] = _from;
+            if (callerIsOwner) {
+                // If the caller is the owner, we only need to check the from address so set the users array length to 1
+                assembly ("memory-safe") {
+                    mstore(users, 1)
+                }
+            } else {
+                users[1] = _caller;
+            }
+        } else {
+            // Mints/transfers/transferFroms: validate sender and recipient
+            users[0] = callerIsOwner ? _caller : _from;
+            users[1] = _to;
         }
-        // For transferFrom calls, check the "P:transferFrom" permission
-        else {
-            (validTransfer, errorMessage) = IMaplePoolManager(MAPLE_POOL_MANAGER)
-                .canCall(MAPLE_POOL_TRANSFER_FROM_FUNCTION_ID, _caller, abi.encode(_from, _to, trancheSharesValueInPoolTokens));
-        }
-        // Assert that the manager approves of this transfer
-        require(validTransfer, TRANSFER_REJECTED_BY_MAPLE_POOL_MANAGER(errorMessage));
+
+        // Assert that the parties have the permissions to execute this transfer
+        require(
+            permissionManager.hasPermission(
+                MAPLE_POOL_MANAGER, users, (callerIsOwner ? MAPLE_POOL_TRANSFER_FUNCTION_ID : MAPLE_POOL_TRANSFER_FROM_FUNCTION_ID)
+            ),
+            TRANSFER_REJECTED_BY_MAPLE_PERMISSION_MANAGER()
+        );
     }
 }
