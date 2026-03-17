@@ -210,17 +210,60 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         ST.transferFrom(BOB_ADDRESS, CHARLIE_ADDRESS, transferAmount);
     }
 
-    /// @notice Verifies deposit does NOT trigger kernel's canCall check (mint bypasses _preTrancheBalanceUpdate)
-    /// @dev The underlying Maple pool still calls its own canCall for transferFrom - that's expected and separate
-    function test_preTrancheBalanceUpdate_deposit_bypassesKernelCheck() external {
-        // Deposit succeeds - kernel's _preTrancheBalanceUpdate returns early for _from == address(0)
+    /// @notice Verifies deposit to SELF skips kernel's canCall (depositor already validated by underlying pool)
+    /// @dev Gas optimization: when _caller == _to, the depositor is validated by Maple's transferFrom
+    function test_preTrancheBalanceUpdate_deposit_toSelf_bypassesKernelCheck() external {
+        // Deposit to self bypasses kernel's canCall check since:
+        // 1. Depositor is validated by Maple when pool tokens are transferred to kernel
+        // 2. Receiver == depositor, so no additional validation needed
         _depositJT(ALICE_ADDRESS, 10_000e6);
 
-        assertTrue(JT.balanceOf(ALICE_ADDRESS) > 0, "Deposit should succeed");
+        assertTrue(JT.balanceOf(ALICE_ADDRESS) > 0, "Deposit to self should succeed");
+    }
+
+    /// @notice Verifies deposit to different receiver validates that receiver
+    function test_preTrancheBalanceUpdate_deposit_toDifferentReceiver_validatesReceiver() external {
+        // Give Alice some syrupUSDC
+        deal(config.jtAsset, ALICE_ADDRESS, 10_000e6);
+
+        vm.startPrank(ALICE_ADDRESS);
+        IERC20(config.jtAsset).approve(address(JT), 10_000e6);
+
+        // Kernel should call canCall to verify BOB can receive
+        // Note: We can't predict exact amount due to share calculation, so we just verify the call pattern
+        vm.expectCall(_mapleKernel().MAPLE_POOL_MANAGER(), abi.encodeWithSelector(IMaplePoolManager.canCall.selector, bytes32("P:transfer"), ALICE_ADDRESS));
+
+        JT.deposit(toTrancheUnits(10_000e6), BOB_ADDRESS);
+        vm.stopPrank();
+
+        assertTrue(JT.balanceOf(BOB_ADDRESS) > 0, "Deposit to Bob should succeed");
+    }
+
+    /// @notice Verifies deposit reverts if receiver is blocked by Maple
+    function test_preTrancheBalanceUpdate_deposit_revertsIfReceiverBlocked() external {
+        deal(config.jtAsset, ALICE_ADDRESS, 10_000e6);
+
+        // Mock canCall to return false for BOB as receiver
+        vm.mockCall(
+            _mapleKernel().MAPLE_POOL_MANAGER(),
+            abi.encodeWithSelector(IMaplePoolManager.canCall.selector, bytes32("P:transfer"), ALICE_ADDRESS),
+            abi.encode(false, "P:RECEIVER_NOT_ALLOWED")
+        );
+
+        vm.startPrank(ALICE_ADDRESS);
+        IERC20(config.jtAsset).approve(address(JT), 10_000e6);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.TRANSFER_REJECTED_BY_MAPLE_POOL_MANAGER.selector, "P:RECEIVER_NOT_ALLOWED"
+            )
+        );
+        JT.deposit(toTrancheUnits(10_000e6), BOB_ADDRESS);
+        vm.stopPrank();
     }
 
     /// @notice Verifies redeem does NOT trigger kernel's canCall check (burn bypasses _preTrancheBalanceUpdate)
-    /// @dev The underlying Maple pool still calls its own canCall for transfer - that's expected and separate
+    /// @dev The kernel's transfer of pool tokens to receiver is validated by Maple directly
     function test_preTrancheBalanceUpdate_redeem_bypassesKernelCheck() external {
         _depositJT(ALICE_ADDRESS, 10_000e6);
         uint256 shares = JT.balanceOf(ALICE_ADDRESS);

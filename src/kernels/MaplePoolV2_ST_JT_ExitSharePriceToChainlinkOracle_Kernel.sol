@@ -68,8 +68,8 @@ contract MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel is Identical_E
     /// @inheritdoc RoycoKernel
     /// @dev Simulates Maple pool token transfer permissions as a compliance proxy
     function _preTrancheBalanceUpdate(address _caller, address _from, address _to, uint256 _amount) internal view override(RoycoKernel) {
-        // Preemptively return if this is a mint or redeem since the Maple pool checks permissions on minting/redeeming the underlying
-        if (_from == address(0) || _to == address(0)) return;
+        // Skip validation when minting shares to the caller or redeeming shares: the transfer of Pool tokens is validated directly by Maple
+        if ((_from == address(0) && _caller == _to) || _to == address(0)) return;
 
         // Get value of the tranche shares being transferred in Pool tokens
         AssetClaims memory claims = IRoycoVaultTranche(msg.sender).convertToAssets(_amount);
@@ -78,12 +78,13 @@ contract MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel is Identical_E
         // Check the validity of the tranche shares transfer
         bool validTransfer;
         string memory errorMessage;
-        // If this is a standard transfer, check the validity of the exact transfer call on the underlying Maple Pool
-        if (_caller == _from) {
+
+        // For minting shares to another party or standard transfers, check the "P:transfer" permission
+        if (_from == address(0) || _caller == _from) {
             (validTransfer, errorMessage) =
                 IMaplePoolManager(MAPLE_POOL_MANAGER).canCall(MAPLE_POOL_TRANSFER_FUNCTION_ID, _caller, abi.encode(_to, trancheSharesValueInPoolTokens));
         }
-        // If this is a transferFrom, check the validity of the exact transferFrom call on the underlying Maple Pool
+        // For transferFrom calls, check the "P:transferFrom" permission
         else {
             (validTransfer, errorMessage) = IMaplePoolManager(MAPLE_POOL_MANAGER)
                 .canCall(MAPLE_POOL_TRANSFER_FROM_FUNCTION_ID, _caller, abi.encode(_from, _to, trancheSharesValueInPoolTokens));
