@@ -42,7 +42,7 @@ contract MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel is Identical_E
     /// @notice Constructs the kernel state
     /// @param _params The standard construction parameters for the Royco kernel
     constructor(RoycoKernelConstructionParams memory _params) Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel(_params) {
-        // Set the address of the Maple pool's manager and its globals contract
+        // Set the address of the Maple pool's manager
         MAPLE_POOL_MANAGER = IMaplePool(ST_ASSET).manager();
     }
 
@@ -84,7 +84,7 @@ contract MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel is Identical_E
             MAPLE_POOL_TOKEN_TRANSFERS_PAUSED()
         );
 
-        // Assemble the user addresses that need to validation against the ID of the target function
+        // Assemble the user addresses that need to be validated against permissions set for target function
         address[] memory users;
         bytes32 functionIdToCheck;
         // Redemptions: owner's pool tokens are being transferred out
@@ -109,7 +109,7 @@ contract MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel is Identical_E
             functionIdToCheck = MAPLE_POOL_TRANSFER_FROM_FUNCTION_ID;
         }
 
-        // Assert that the parties have the permissions to execute this transfer
+        // Assert that the users have the proper permissions to execute this transfer
         // NOTE: The Maple pool's permission manager must be queried at runtime since it is mutable
         require(
             IMaplePoolPermissionManager(IMaplePoolManager(MAPLE_POOL_MANAGER).poolPermissionManager())
