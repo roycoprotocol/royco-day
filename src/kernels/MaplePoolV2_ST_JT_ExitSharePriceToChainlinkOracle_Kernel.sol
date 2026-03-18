@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IRoycoKernel } from "../interfaces/IRoycoKernel.sol";
+import { IMapleGlobals } from "../interfaces/external/maple/IMapleGlobals.sol";
 import { IMaplePool } from "../interfaces/external/maple/IMaplePool.sol";
 import { IMaplePoolManager } from "../interfaces/external/maple/IMaplePoolManager.sol";
 import { IMaplePoolPermissionManager } from "../interfaces/external/maple/IMaplePoolPermissionManager.sol";
@@ -32,13 +33,16 @@ contract MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel is Identical_E
     /// @notice The address of the Maple pool's manager
     address public immutable MAPLE_POOL_MANAGER;
 
+    /// @dev Thrown when the Maple pool manager's permissioning function is paused (effectively pausing all pool token transfers)
+    error MAPLE_POOL_TOKEN_TRANSFERS_PAUSED();
+
     /// @dev Thrown when the Maple pool's permission manager rejects a transfer of shares
-    error TRANSFER_REJECTED_BY_MAPLE_PERMISSION_MANAGER();
+    error OPERATION_REJECTED_BY_MAPLE_PERMISSION_MANAGER();
 
     /// @notice Constructs the kernel state
     /// @param _params The standard construction parameters for the Royco kernel
     constructor(RoycoKernelConstructionParams memory _params) Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel(_params) {
-        // Set the address of the Maple pool's manager
+        // Set the address of the Maple pool's manager and its globals contract
         MAPLE_POOL_MANAGER = IMaplePool(ST_ASSET).manager();
     }
 
@@ -69,42 +73,48 @@ contract MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel is Identical_E
     /// @inheritdoc RoycoKernel
     /// @dev Simulates Maple pool token transfer permissions as a compliance proxy
     function _preTrancheBalanceUpdate(address _caller, address _from, address _to, uint256) internal view override(RoycoKernel) {
-        // Preemptively return when minting shares to the caller (deposit to self), since the caller and kernel addresses are validated on the pool token transfer on deposit
+        // Deposit to self: caller and kernel are validated by Maple on the pool token transfer
         if (_from == address(0) && _caller == _to) return;
 
-        // Retrieve the Maple pool's permission manager
-        // NOTE: This address must be queried at runtime since it is mutable
-        IMaplePoolPermissionManager permissionManager = IMaplePoolPermissionManager(IMaplePoolManager(MAPLE_POOL_MANAGER).poolPermissionManager());
+        // Check the pause status of the permission checking function
+        // NOTE: This is only needed for tranche share transfers since mints/redemptions involve pool token transfers that Maple validates
+        require(
+            (_from == address(0) || _to == address(0))
+                || !IMapleGlobals(IMaplePoolManager(MAPLE_POOL_MANAGER).globals()).isFunctionPaused(IMaplePoolManager.canCall.selector),
+            MAPLE_POOL_TOKEN_TRANSFERS_PAUSED()
+        );
 
-        // Determine whether the caller is the owner of the tranche shares (mints are treated as owner operations)
-        bool callerIsOwner = _from == address(0) || _caller == _from;
-
-        // Build the users array based on the operation type
-        address[] memory users = new address[](2);
+        // Assemble the user addresses that need to validation against the ID of the target function
+        address[] memory users;
+        bytes32 functionIdToCheck;
+        // Redemptions: owner's pool tokens are being transferred out
         if (_to == address(0)) {
-            // Redemptions: validate the owner (and the approved party if this is a delegated redemption)
-            // NOTE: The actual receiver of the Maple pool tokens is validated on the kernel to receiver transfer
+            // NOTE: The receiver of the withdrawn pool tokens is validated by Maple on the actual withdrawal transfer
+            users = new address[](1);
             users[0] = _from;
-            if (callerIsOwner) {
-                // If the caller is the owner, we only need to check the from address so set the users array length to 1
-                assembly ("memory-safe") {
-                    mstore(users, 1)
-                }
-            } else {
-                users[1] = _caller;
-            }
-        } else {
-            // Mints/transfers/transferFroms: validate sender and recipient
-            users[0] = callerIsOwner ? _caller : _from;
+            functionIdToCheck = MAPLE_POOL_TRANSFER_FUNCTION_ID;
+        }
+        // Mints to other LPs and Transfers: caller is transferring tranche shares (and their pool token claims) to recipient
+        else if (_from == address(0) || _caller == _from) {
+            users = new address[](2);
+            users[0] = _caller;
             users[1] = _to;
+            functionIdToCheck = MAPLE_POOL_TRANSFER_FUNCTION_ID;
+        }
+        // TransferFroms: from's tranche shares (and their pool token claims) are being transferred to the recipient
+        else {
+            users = new address[](2);
+            users[0] = _from;
+            users[1] = _to;
+            functionIdToCheck = MAPLE_POOL_TRANSFER_FROM_FUNCTION_ID;
         }
 
         // Assert that the parties have the permissions to execute this transfer
+        // NOTE: The Maple pool's permission manager must be queried at runtime since it is mutable
         require(
-            permissionManager.hasPermission(
-                MAPLE_POOL_MANAGER, users, (callerIsOwner ? MAPLE_POOL_TRANSFER_FUNCTION_ID : MAPLE_POOL_TRANSFER_FROM_FUNCTION_ID)
-            ),
-            TRANSFER_REJECTED_BY_MAPLE_PERMISSION_MANAGER()
+            IMaplePoolPermissionManager(IMaplePoolManager(MAPLE_POOL_MANAGER).poolPermissionManager())
+                .hasPermission(MAPLE_POOL_MANAGER, users, functionIdToCheck),
+            OPERATION_REJECTED_BY_MAPLE_PERMISSION_MANAGER()
         );
     }
 }

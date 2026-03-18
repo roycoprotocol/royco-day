@@ -10,6 +10,7 @@ import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/E
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
+import { IMapleGlobals } from "../../../../src/interfaces/external/maple/IMapleGlobals.sol";
 import { IMaplePool } from "../../../../src/interfaces/external/maple/IMaplePool.sol";
 import { IMaplePoolManager } from "../../../../src/interfaces/external/maple/IMaplePoolManager.sol";
 import { IMaplePoolPermissionManager } from "../../../../src/interfaces/external/maple/IMaplePoolPermissionManager.sol";
@@ -123,6 +124,11 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
     /// @notice Helper to get the Maple pool permission manager
     function _permissionManager() internal view returns (address) {
         return IMaplePoolManager(_mapleKernel().MAPLE_POOL_MANAGER()).poolPermissionManager();
+    }
+
+    /// @notice Helper to get the Maple globals address
+    function _globals() internal view returns (address) {
+        return IMaplePoolManager(_mapleKernel().MAPLE_POOL_MANAGER()).globals();
     }
 
     /// @notice Verifies JT.transfer calls hasPermission with correct lenders [sender, recipient]
@@ -290,8 +296,9 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         assertTrue(toUint256(claims.stAssets) + toUint256(claims.jtAssets) > 0, "Redeem should succeed for allowed owner");
     }
 
-    /// @notice Verifies operator redeem validates owner and operator are on Maple's allowlist
-    /// @dev Calls hasPermission with [owner, operator] using P:transferFrom
+    /// @notice Verifies operator redeem validates owner (not operator) on Maple's allowlist
+    /// @dev Calls hasPermission with [owner] using P:transfer (same as owner redemption)
+    /// @dev Receiver of pool tokens is validated by Maple on the actual transfer
     function test_preTrancheBalanceUpdate_redeem_operatorRedeem_callsHasPermissionCorrectly() external {
         _depositJT(ALICE_ADDRESS, 10_000e6);
         uint256 shares = JT.balanceOf(ALICE_ADDRESS);
@@ -301,18 +308,16 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         JT.approve(BOB_ADDRESS, shares);
 
         // Mock factory's canCall to allow BOB to call redeem on JT
-        // The factory is JT's authority for access control
         address factory = IAccessManaged(address(JT)).authority();
         vm.mockCall(factory, abi.encodeWithSelector(IAccessManager.canCall.selector, BOB_ADDRESS, address(JT)), abi.encode(true, uint32(0)));
 
-        // Kernel should call hasPermission with [owner, operator] for operator redeems
-        address[] memory expectedLenders = new address[](2);
-        expectedLenders[0] = ALICE_ADDRESS; // owner (_from)
-        expectedLenders[1] = BOB_ADDRESS; // operator (_caller, since isTransfer=false)
+        // Kernel should call hasPermission with [owner] for ALL redeems (owner's shares being transferred out)
+        address[] memory expectedLenders = new address[](1);
+        expectedLenders[0] = ALICE_ADDRESS; // owner
 
         vm.expectCall(
             _permissionManager(),
-            abi.encodeWithSelector(HAS_PERMISSION_ARRAY_SELECTOR, _mapleKernel().MAPLE_POOL_MANAGER(), expectedLenders, bytes32("P:transferFrom"))
+            abi.encodeWithSelector(HAS_PERMISSION_ARRAY_SELECTOR, _mapleKernel().MAPLE_POOL_MANAGER(), expectedLenders, bytes32("P:transfer"))
         );
 
         // BOB (operator) redeems ALICE's shares to CHARLIE
@@ -322,9 +327,9 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         assertTrue(toUint256(claims.stAssets) + toUint256(claims.jtAssets) > 0, "Operator redeem should succeed");
     }
 
-    /// @notice Verifies blacklisted operator cannot redeem on behalf of owner
-    /// @dev This prevents blacklisted operators from participating in redemptions
-    function test_preTrancheBalanceUpdate_redeem_revertsIfOperatorBlacklisted() external {
+    /// @notice Verifies operator can redeem on behalf of owner even if operator is blacklisted
+    /// @dev Only the owner is checked for redemptions; receiver is validated by Maple on pool token transfer
+    function test_preTrancheBalanceUpdate_redeem_operatorBlacklistedStillWorks() external {
         _depositJT(ALICE_ADDRESS, 10_000e6);
         uint256 shares = JT.balanceOf(ALICE_ADDRESS);
 
@@ -332,26 +337,15 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         vm.prank(ALICE_ADDRESS);
         JT.approve(BOB_ADDRESS, shares);
 
-        // Mock factory's canCall to allow BOB to call redeem on JT (access control passes)
+        // Mock factory's canCall to allow BOB to call redeem on JT
         address factory = IAccessManaged(address(JT)).authority();
         vm.mockCall(factory, abi.encodeWithSelector(IAccessManager.canCall.selector, BOB_ADDRESS, address(JT)), abi.encode(true, uint32(0)));
 
-        // Build the specific lenders array that kernel will check for operator redeem: [owner, operator]
-        address[] memory redeemLenders = new address[](2);
-        redeemLenders[0] = ALICE_ADDRESS;
-        redeemLenders[1] = BOB_ADDRESS;
-
-        // Mock hasPermission for the specific operator redeem check to return false (Maple blacklist)
-        vm.mockCall(
-            _permissionManager(),
-            abi.encodeWithSelector(HAS_PERMISSION_ARRAY_SELECTOR, _mapleKernel().MAPLE_POOL_MANAGER(), redeemLenders, bytes32("P:transferFrom")),
-            abi.encode(false)
-        );
-
-        // BOB (blacklisted by Maple) tries to redeem ALICE's shares - should fail
+        // BOB (operator) redeems ALICE's shares - succeeds because only owner is checked
         vm.prank(BOB_ADDRESS);
-        vm.expectRevert(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.TRANSFER_REJECTED_BY_MAPLE_PERMISSION_MANAGER.selector);
-        JT.redeem(shares, CHARLIE_ADDRESS, ALICE_ADDRESS);
+        AssetClaims memory claims = JT.redeem(shares, CHARLIE_ADDRESS, ALICE_ADDRESS);
+
+        assertTrue(toUint256(claims.stAssets) + toUint256(claims.jtAssets) > 0, "Operator redeem should succeed even if operator would be blacklisted");
     }
 
     /// @notice Verifies blacklisted owner cannot redeem even to a fresh address
@@ -373,7 +367,7 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
 
         // ALICE tries to redeem to BOB (fresh address) - should fail because ALICE is blacklisted
         vm.prank(ALICE_ADDRESS);
-        vm.expectRevert(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.TRANSFER_REJECTED_BY_MAPLE_PERMISSION_MANAGER.selector);
+        vm.expectRevert(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.OPERATION_REJECTED_BY_MAPLE_PERMISSION_MANAGER.selector);
         JT.redeem(shares, BOB_ADDRESS, ALICE_ADDRESS);
     }
 
@@ -399,7 +393,7 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         vm.mockCall(_permissionManager(), abi.encodeWithSelector(HAS_PERMISSION_ARRAY_SELECTOR), abi.encode(false));
 
         vm.prank(ALICE_ADDRESS);
-        vm.expectRevert(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.TRANSFER_REJECTED_BY_MAPLE_PERMISSION_MANAGER.selector);
+        vm.expectRevert(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.OPERATION_REJECTED_BY_MAPLE_PERMISSION_MANAGER.selector);
         JT.transfer(BOB_ADDRESS, shares / 2);
     }
 
@@ -415,8 +409,91 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         vm.mockCall(_permissionManager(), abi.encodeWithSelector(HAS_PERMISSION_ARRAY_SELECTOR), abi.encode(false));
 
         vm.prank(BOB_ADDRESS);
-        vm.expectRevert(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.TRANSFER_REJECTED_BY_MAPLE_PERMISSION_MANAGER.selector);
+        vm.expectRevert(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.OPERATION_REJECTED_BY_MAPLE_PERMISSION_MANAGER.selector);
         JT.transferFrom(ALICE_ADDRESS, BOB_ADDRESS, shares / 2);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MAPLE-SPECIFIC: PAUSE CHECK TESTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Verifies transfer reverts when Maple's canCall function is paused
+    function test_preTrancheBalanceUpdate_transfer_revertsWhenCanCallPaused() external {
+        _depositJT(ALICE_ADDRESS, 10_000e6);
+        uint256 shares = JT.balanceOf(ALICE_ADDRESS);
+
+        // Mock globals to return true for isFunctionPaused(canCall.selector)
+        vm.mockCall(_globals(), abi.encodeWithSelector(IMapleGlobals.isFunctionPaused.selector, IMaplePoolManager.canCall.selector), abi.encode(true));
+
+        vm.prank(ALICE_ADDRESS);
+        vm.expectRevert(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.MAPLE_POOL_TOKEN_TRANSFERS_PAUSED.selector);
+        JT.transfer(BOB_ADDRESS, shares / 2);
+    }
+
+    /// @notice Verifies transferFrom reverts when Maple's canCall function is paused
+    function test_preTrancheBalanceUpdate_transferFrom_revertsWhenCanCallPaused() external {
+        _depositJT(ALICE_ADDRESS, 10_000e6);
+        uint256 shares = JT.balanceOf(ALICE_ADDRESS);
+
+        vm.prank(ALICE_ADDRESS);
+        JT.approve(BOB_ADDRESS, shares);
+
+        // Mock globals to return true for isFunctionPaused(canCall.selector)
+        vm.mockCall(_globals(), abi.encodeWithSelector(IMapleGlobals.isFunctionPaused.selector, IMaplePoolManager.canCall.selector), abi.encode(true));
+
+        vm.prank(BOB_ADDRESS);
+        vm.expectRevert(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.MAPLE_POOL_TOKEN_TRANSFERS_PAUSED.selector);
+        JT.transferFrom(ALICE_ADDRESS, BOB_ADDRESS, shares / 2);
+    }
+
+    /// @notice Verifies deposit to different receiver reverts when Maple's canCall is paused
+    /// @dev Maple's underlying pool transfer check catches the pause before our kernel check
+    function test_preTrancheBalanceUpdate_deposit_toDifferentReceiver_revertsWhenCanCallPaused() external {
+        deal(config.jtAsset, ALICE_ADDRESS, 10_000e6);
+
+        vm.startPrank(ALICE_ADDRESS);
+        IERC20(config.jtAsset).approve(address(JT), 10_000e6);
+
+        // Mock globals to return true for isFunctionPaused(canCall.selector)
+        vm.mockCall(_globals(), abi.encodeWithSelector(IMapleGlobals.isFunctionPaused.selector, IMaplePoolManager.canCall.selector), abi.encode(true));
+
+        // Maple's pool check happens first during transferFrom (user → kernel), so we see Maple's error
+        vm.expectRevert("PM:CC:PAUSED");
+        JT.deposit(toTrancheUnits(10_000e6), BOB_ADDRESS);
+        vm.stopPrank();
+    }
+
+    /// @notice Verifies redeem reverts when Maple's canCall function is paused
+    /// @dev Kernel transfers pool tokens before burning tranche shares, so Maple's check catches pause first
+    function test_preTrancheBalanceUpdate_redeem_revertsWhenCanCallPaused() external {
+        _depositJT(ALICE_ADDRESS, 10_000e6);
+        uint256 shares = JT.balanceOf(ALICE_ADDRESS);
+
+        // Mock globals to return true for isFunctionPaused(canCall.selector)
+        vm.mockCall(_globals(), abi.encodeWithSelector(IMapleGlobals.isFunctionPaused.selector, IMaplePoolManager.canCall.selector), abi.encode(true));
+
+        // Maple's pool check happens first during pool token transfer (kernel → receiver)
+        vm.prank(ALICE_ADDRESS);
+        vm.expectRevert("PM:CC:PAUSED");
+        JT.redeem(shares, ALICE_ADDRESS, ALICE_ADDRESS);
+    }
+
+    /// @notice Verifies deposit to self still hits Maple's pause check on pool token transfer
+    /// @dev Our kernel early-returns for deposit to self, but Maple's pool check catches pause first anyway
+    function test_preTrancheBalanceUpdate_deposit_toSelf_stillHitsMaplePauseCheck() external {
+        deal(config.jtAsset, ALICE_ADDRESS, 10_000e6);
+
+        vm.startPrank(ALICE_ADDRESS);
+        IERC20(config.jtAsset).approve(address(JT), 10_000e6);
+
+        // Mock globals to return true for isFunctionPaused
+        vm.mockCall(_globals(), abi.encodeWithSelector(IMapleGlobals.isFunctionPaused.selector, IMaplePoolManager.canCall.selector), abi.encode(true));
+
+        // Even deposit to self fails because Maple's pool token transfer check runs first
+        // (before our kernel's early return can be reached)
+        vm.expectRevert("PM:CC:PAUSED");
+        JT.deposit(toTrancheUnits(10_000e6), ALICE_ADDRESS);
+        vm.stopPrank();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
