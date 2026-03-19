@@ -46,15 +46,15 @@ contract RoycoMarketSyncer is RoycoBase {
 
     /// @notice Thrown when attempting to add a kernel that was not deployed by the canonical RoycoFactory
     /// @param kernel The address of the invalid kernel
-    error INVALID_ROYCO_KERNEL(address kernel);
+    error INVALID_KERNEL(address kernel);
 
     /// @notice Thrown when attempting to add a kernel that is already registered with this syncer
     /// @param kernel The address of the kernel that already exists
-    error ROYCO_KERNEL_ALREADY_EXISTS(address kernel);
+    error KERNEL_ALREADY_EXISTS(address kernel);
 
     /// @notice Thrown when attempting to remove a kernel that is not registered with this syncer
     /// @param kernel The address of the kernel that does not exist
-    error ROYCO_KERNEL_DOES_NOT_EXISTS(address kernel);
+    error KERNEL_DOES_NOT_EXISTS(address kernel);
 
     /**
      * @notice Initializes the market syncer state
@@ -125,12 +125,12 @@ contract RoycoMarketSyncer is RoycoBase {
             // If this is an addition, validate that the kernel was deployed by the Royco factory and add it if it doesn't exist
             if (_isAddition) {
                 _validateMarketKernel(marketKernel);
-                require($.marketKernels.add(marketKernel), ROYCO_KERNEL_ALREADY_EXISTS(marketKernel));
+                require($.marketKernels.add(marketKernel), KERNEL_ALREADY_EXISTS(marketKernel));
                 emit MarketKernelAdded(marketKernel);
             }
             // If this is a removal, remove the kernel if it exists
             else {
-                require($.marketKernels.remove(marketKernel), ROYCO_KERNEL_DOES_NOT_EXISTS(marketKernel));
+                require($.marketKernels.remove(marketKernel), KERNEL_DOES_NOT_EXISTS(marketKernel));
                 emit MarketKernelRemoved(marketKernel);
             }
         }
@@ -150,9 +150,7 @@ contract RoycoMarketSyncer is RoycoBase {
         address juniorTranche = IRoycoFactory(authority()).seniorTrancheToJuniorTranche(seniorTranche);
 
         // Ensure that the kernel was deployed by the Royco factory
-        require(
-            juniorTranche != address(0) && _ostensibleMarketKernel == IRoycoVaultTranche(seniorTranche).KERNEL(), INVALID_ROYCO_KERNEL(_ostensibleMarketKernel)
-        );
+        require(juniorTranche != address(0) && _ostensibleMarketKernel == IRoycoVaultTranche(seniorTranche).KERNEL(), INVALID_KERNEL(_ostensibleMarketKernel));
     }
 
     /**
