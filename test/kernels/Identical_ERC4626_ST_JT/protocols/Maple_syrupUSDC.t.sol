@@ -426,7 +426,11 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         uint256 shares = JT.balanceOf(ALICE_ADDRESS);
 
         // Mock globals to return true for isFunctionPaused(poolManager, canCall.selector)
-        vm.mockCall(_globals(), abi.encodeWithSelector(IMapleGlobals.isFunctionPaused.selector, _mapleKernel().MAPLE_POOL_MANAGER(), IMaplePoolManager.canCall.selector), abi.encode(true));
+        vm.mockCall(
+            _globals(),
+            abi.encodeWithSelector(IMapleGlobals.isFunctionPaused.selector, _mapleKernel().MAPLE_POOL_MANAGER(), IMaplePoolManager.canCall.selector),
+            abi.encode(true)
+        );
 
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.MAPLE_POOL_TOKEN_TRANSFERS_PAUSED.selector);
@@ -442,7 +446,11 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         JT.approve(BOB_ADDRESS, shares);
 
         // Mock globals to return true for isFunctionPaused(poolManager, canCall.selector)
-        vm.mockCall(_globals(), abi.encodeWithSelector(IMapleGlobals.isFunctionPaused.selector, _mapleKernel().MAPLE_POOL_MANAGER(), IMaplePoolManager.canCall.selector), abi.encode(true));
+        vm.mockCall(
+            _globals(),
+            abi.encodeWithSelector(IMapleGlobals.isFunctionPaused.selector, _mapleKernel().MAPLE_POOL_MANAGER(), IMaplePoolManager.canCall.selector),
+            abi.encode(true)
+        );
 
         vm.prank(BOB_ADDRESS);
         vm.expectRevert(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.MAPLE_POOL_TOKEN_TRANSFERS_PAUSED.selector);
