@@ -116,6 +116,9 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
     /// @dev Selector for hasPermission(address,address[],bytes32) - the array overload
     bytes4 internal constant HAS_PERMISSION_ARRAY_SELECTOR = bytes4(keccak256("hasPermission(address,address[],bytes32)"));
 
+    /// @dev Selector for isFunctionPaused(bytes4) - Maple's internal 1-param version used by pool manager
+    bytes4 internal constant MAPLE_IS_FUNCTION_PAUSED_BYTES4_SELECTOR = bytes4(keccak256("isFunctionPaused(bytes4)"));
+
     /// @notice Helper to get the Maple kernel cast
     function _mapleKernel() internal view returns (MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel) {
         return MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel(address(KERNEL));
@@ -422,8 +425,8 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         _depositJT(ALICE_ADDRESS, 10_000e6);
         uint256 shares = JT.balanceOf(ALICE_ADDRESS);
 
-        // Mock globals to return true for isFunctionPaused(canCall.selector)
-        vm.mockCall(_globals(), abi.encodeWithSelector(IMapleGlobals.isFunctionPaused.selector, IMaplePoolManager.canCall.selector), abi.encode(true));
+        // Mock globals to return true for isFunctionPaused(poolManager, canCall.selector)
+        vm.mockCall(_globals(), abi.encodeWithSelector(IMapleGlobals.isFunctionPaused.selector, _mapleKernel().MAPLE_POOL_MANAGER(), IMaplePoolManager.canCall.selector), abi.encode(true));
 
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.MAPLE_POOL_TOKEN_TRANSFERS_PAUSED.selector);
@@ -438,8 +441,8 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         vm.prank(ALICE_ADDRESS);
         JT.approve(BOB_ADDRESS, shares);
 
-        // Mock globals to return true for isFunctionPaused(canCall.selector)
-        vm.mockCall(_globals(), abi.encodeWithSelector(IMapleGlobals.isFunctionPaused.selector, IMaplePoolManager.canCall.selector), abi.encode(true));
+        // Mock globals to return true for isFunctionPaused(poolManager, canCall.selector)
+        vm.mockCall(_globals(), abi.encodeWithSelector(IMapleGlobals.isFunctionPaused.selector, _mapleKernel().MAPLE_POOL_MANAGER(), IMaplePoolManager.canCall.selector), abi.encode(true));
 
         vm.prank(BOB_ADDRESS);
         vm.expectRevert(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.MAPLE_POOL_TOKEN_TRANSFERS_PAUSED.selector);
@@ -454,8 +457,8 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         vm.startPrank(ALICE_ADDRESS);
         IERC20(config.jtAsset).approve(address(JT), 10_000e6);
 
-        // Mock globals to return true for isFunctionPaused(canCall.selector)
-        vm.mockCall(_globals(), abi.encodeWithSelector(IMapleGlobals.isFunctionPaused.selector, IMaplePoolManager.canCall.selector), abi.encode(true));
+        // Mock Maple's internal isFunctionPaused(bytes4) call - pool manager uses this 1-param version
+        vm.mockCall(_globals(), abi.encodeWithSelector(MAPLE_IS_FUNCTION_PAUSED_BYTES4_SELECTOR, IMaplePoolManager.canCall.selector), abi.encode(true));
 
         // Maple's pool check happens first during transferFrom (user → kernel), so we see Maple's error
         vm.expectRevert("PM:CC:PAUSED");
@@ -469,8 +472,8 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         _depositJT(ALICE_ADDRESS, 10_000e6);
         uint256 shares = JT.balanceOf(ALICE_ADDRESS);
 
-        // Mock globals to return true for isFunctionPaused(canCall.selector)
-        vm.mockCall(_globals(), abi.encodeWithSelector(IMapleGlobals.isFunctionPaused.selector, IMaplePoolManager.canCall.selector), abi.encode(true));
+        // Mock Maple's internal isFunctionPaused(bytes4) call - pool manager uses this 1-param version
+        vm.mockCall(_globals(), abi.encodeWithSelector(MAPLE_IS_FUNCTION_PAUSED_BYTES4_SELECTOR, IMaplePoolManager.canCall.selector), abi.encode(true));
 
         // Maple's pool check happens first during pool token transfer (kernel → receiver)
         vm.prank(ALICE_ADDRESS);
@@ -486,8 +489,8 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         vm.startPrank(ALICE_ADDRESS);
         IERC20(config.jtAsset).approve(address(JT), 10_000e6);
 
-        // Mock globals to return true for isFunctionPaused
-        vm.mockCall(_globals(), abi.encodeWithSelector(IMapleGlobals.isFunctionPaused.selector, IMaplePoolManager.canCall.selector), abi.encode(true));
+        // Mock Maple's internal isFunctionPaused(bytes4) call - pool manager uses this 1-param version
+        vm.mockCall(_globals(), abi.encodeWithSelector(MAPLE_IS_FUNCTION_PAUSED_BYTES4_SELECTOR, IMaplePoolManager.canCall.selector), abi.encode(true));
 
         // Even deposit to self fails because Maple's pool token transfer check runs first
         // (before our kernel's early return can be reached)

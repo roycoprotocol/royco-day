@@ -76,11 +76,11 @@ contract MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel is Identical_E
         // Deposit to self: caller and kernel are validated by Maple on the pool token transfer
         if (_from == address(0) && _caller == _to) return;
 
-        // Check the pause status of the permission checking function
+        // Check the pause status of the permission checking function on the Maple pool manager
         // NOTE: This is only needed for tranche share transfers since mints/redemptions involve pool token transfers that Maple validates
         require(
             (_from == address(0) || _to == address(0))
-                || !IMapleGlobals(IMaplePoolManager(MAPLE_POOL_MANAGER).globals()).isFunctionPaused(IMaplePoolManager.canCall.selector),
+                || !IMapleGlobals(IMaplePoolManager(MAPLE_POOL_MANAGER).globals()).isFunctionPaused(MAPLE_POOL_MANAGER, IMaplePoolManager.canCall.selector),
             MAPLE_POOL_TOKEN_TRANSFERS_PAUSED()
         );
 
