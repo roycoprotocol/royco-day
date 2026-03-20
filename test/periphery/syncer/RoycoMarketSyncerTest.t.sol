@@ -6,12 +6,12 @@ import { Vm } from "../../../lib/forge-std/src/Vm.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
-import { RoycoMarketSyncer } from "../../../src/periphery/RoycoMarketSyncer.sol";
-import { RoycoBase } from "../../../src/base/RoycoBase.sol";
-import { IRoycoFactory } from "../../../src/interfaces/IRoycoFactory.sol";
-import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
-import { RolesConfiguration } from "../../../src/factory/RolesConfiguration.sol";
 import { DeploySyncerScript } from "../../../script/independent/DeploySyncer.s.sol";
+import { RoycoBase } from "../../../src/base/RoycoBase.sol";
+import { RolesConfiguration } from "../../../src/factory/RolesConfiguration.sol";
+import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
+import { IRoycoFactory } from "../../../src/interfaces/IRoycoFactory.sol";
+import { RoycoMarketSyncer } from "../../../src/periphery/RoycoMarketSyncer.sol";
 
 /// @dev Mock kernel contract for testing
 contract MockKernel {
@@ -152,7 +152,8 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
     function _deployCreate2Factory() internal {
         // Deploy the deterministic CREATE2 factory
         // This is the standard CREATE2 deployer bytecode
-        bytes memory create2FactoryBytecode = hex"7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe03601600081602082378035828234f58015156039578182fd5b8082525050506014600cf3";
+        bytes memory create2FactoryBytecode =
+            hex"7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe03601600081602082378035828234f58015156039578182fd5b8082525050506014600cf3";
         vm.etch(CREATE2_FACTORY, create2FactoryBytecode);
     }
 
@@ -190,10 +191,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         vm.mockCall(
             mockFactory,
             abi.encodeWithSelector(
-                IAccessManager.canCall.selector,
-                SYNC_OPERATOR_ADDRESS,
-                address(syncer),
-                RoycoMarketSyncer.executeBatchAccountingSync.selector
+                IAccessManager.canCall.selector, SYNC_OPERATOR_ADDRESS, address(syncer), RoycoMarketSyncer.executeBatchAccountingSync.selector
             ),
             abi.encode(true, uint32(0))
         );
@@ -201,75 +199,46 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         // Allow KERNEL_ADMIN to call addMarketKernels (immediate for testing)
         vm.mockCall(
             mockFactory,
-            abi.encodeWithSelector(
-                IAccessManager.canCall.selector,
-                KERNEL_ADMIN_ADDRESS,
-                address(syncer),
-                RoycoMarketSyncer.addMarketKernels.selector
-            ),
+            abi.encodeWithSelector(IAccessManager.canCall.selector, KERNEL_ADMIN_ADDRESS, address(syncer), RoycoMarketSyncer.addMarketKernels.selector),
             abi.encode(true, uint32(0))
         );
 
         // Allow KERNEL_ADMIN to call removeMarketKernels (immediate for testing)
         vm.mockCall(
             mockFactory,
-            abi.encodeWithSelector(
-                IAccessManager.canCall.selector,
-                KERNEL_ADMIN_ADDRESS,
-                address(syncer),
-                RoycoMarketSyncer.removeMarketKernels.selector
-            ),
+            abi.encodeWithSelector(IAccessManager.canCall.selector, KERNEL_ADMIN_ADDRESS, address(syncer), RoycoMarketSyncer.removeMarketKernels.selector),
             abi.encode(true, uint32(0))
         );
 
         // Allow PAUSER to call pause/unpause (immediate)
         vm.mockCall(
             mockFactory,
-            abi.encodeWithSelector(
-                IAccessManager.canCall.selector,
-                PAUSER_ADDRESS,
-                address(syncer),
-                IRoycoAuth.pause.selector
-            ),
+            abi.encodeWithSelector(IAccessManager.canCall.selector, PAUSER_ADDRESS, address(syncer), IRoycoAuth.pause.selector),
             abi.encode(true, uint32(0))
         );
 
         vm.mockCall(
             mockFactory,
-            abi.encodeWithSelector(
-                IAccessManager.canCall.selector,
-                PAUSER_ADDRESS,
-                address(syncer),
-                IRoycoAuth.unpause.selector
-            ),
+            abi.encodeWithSelector(IAccessManager.canCall.selector, PAUSER_ADDRESS, address(syncer), IRoycoAuth.unpause.selector),
             abi.encode(true, uint32(0))
         );
 
         // Mock factory's seniorTrancheToJuniorTranche to return valid junior tranche for valid kernels
         vm.mockCall(
             mockFactory,
-            abi.encodeWithSelector(
-                IRoycoFactory.seniorTrancheToJuniorTranche.selector,
-                mockKernel1.SENIOR_TRANCHE()
-            ),
+            abi.encodeWithSelector(IRoycoFactory.seniorTrancheToJuniorTranche.selector, mockKernel1.SENIOR_TRANCHE()),
             abi.encode(makeAddr("JuniorTranche1"))
         );
 
         vm.mockCall(
             mockFactory,
-            abi.encodeWithSelector(
-                IRoycoFactory.seniorTrancheToJuniorTranche.selector,
-                mockKernel2.SENIOR_TRANCHE()
-            ),
+            abi.encodeWithSelector(IRoycoFactory.seniorTrancheToJuniorTranche.selector, mockKernel2.SENIOR_TRANCHE()),
             abi.encode(makeAddr("JuniorTranche2"))
         );
 
         vm.mockCall(
             mockFactory,
-            abi.encodeWithSelector(
-                IRoycoFactory.seniorTrancheToJuniorTranche.selector,
-                mockKernel3.SENIOR_TRANCHE()
-            ),
+            abi.encodeWithSelector(IRoycoFactory.seniorTrancheToJuniorTranche.selector, mockKernel3.SENIOR_TRANCHE()),
             abi.encode(makeAddr("JuniorTranche3"))
         );
     }
@@ -384,12 +353,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
 
         // Mock factory to return address(0) for this tranche (indicating not from factory)
         vm.mockCall(
-            mockFactory,
-            abi.encodeWithSelector(
-                IRoycoFactory.seniorTrancheToJuniorTranche.selector,
-                fakeKernel.SENIOR_TRANCHE()
-            ),
-            abi.encode(address(0))
+            mockFactory, abi.encodeWithSelector(IRoycoFactory.seniorTrancheToJuniorTranche.selector, fakeKernel.SENIOR_TRANCHE()), abi.encode(address(0))
         );
 
         address[] memory kernels = _singleKernelArray(address(fakeKernel));
@@ -413,12 +377,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
 
         // Mock factory to return a valid junior tranche (non-zero)
         vm.mockCall(
-            mockFactory,
-            abi.encodeWithSelector(
-                IRoycoFactory.seniorTrancheToJuniorTranche.selector,
-                fakeTranche
-            ),
-            abi.encode(makeAddr("SomeJuniorTranche"))
+            mockFactory, abi.encodeWithSelector(IRoycoFactory.seniorTrancheToJuniorTranche.selector, fakeTranche), abi.encode(makeAddr("SomeJuniorTranche"))
         );
 
         address[] memory kernels = _singleKernelArray(address(fakeKernel));
@@ -898,12 +857,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         // Mock permission for upgrade
         vm.mockCall(
             mockFactory,
-            abi.encodeWithSelector(
-                IAccessManager.canCall.selector,
-                DEPLOYER_ADDRESS,
-                address(syncer),
-                syncer.upgradeToAndCall.selector
-            ),
+            abi.encodeWithSelector(IAccessManager.canCall.selector, DEPLOYER_ADDRESS, address(syncer), syncer.upgradeToAndCall.selector),
             abi.encode(true, uint32(0))
         );
 
@@ -922,12 +876,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         // Mock permission for upgrade
         vm.mockCall(
             mockFactory,
-            abi.encodeWithSelector(
-                IAccessManager.canCall.selector,
-                DEPLOYER_ADDRESS,
-                address(syncer),
-                syncer.upgradeToAndCall.selector
-            ),
+            abi.encodeWithSelector(IAccessManager.canCall.selector, DEPLOYER_ADDRESS, address(syncer), syncer.upgradeToAndCall.selector),
             abi.encode(true, uint32(0))
         );
 
