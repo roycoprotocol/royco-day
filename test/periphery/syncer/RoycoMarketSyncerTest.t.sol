@@ -9,8 +9,8 @@ import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/ac
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { DeploySyncerScript } from "../../../script/independent/DeploySyncer.s.sol";
 import { RoycoBase } from "../../../src/base/RoycoBase.sol";
-import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RolesConfiguration } from "../../../src/factory/RolesConfiguration.sol";
+import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoFactory } from "../../../src/interfaces/IRoycoFactory.sol";
 import { RoycoMarketSyncer } from "../../../src/periphery/RoycoMarketSyncer.sol";
@@ -176,10 +176,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
 
         // Deploy factory proxy with initialization
         // _admin, _deployer, _scheduledOperationsExpirySeconds, _roles
-        bytes memory initData = abi.encodeCall(
-            RoycoFactory.initialize,
-            (FACTORY_ADMIN_ADDRESS, DEPLOYER_ADDRESS, 7 days, emptyRoles)
-        );
+        bytes memory initData = abi.encodeCall(RoycoFactory.initialize, (FACTORY_ADMIN_ADDRESS, DEPLOYER_ADDRESS, 7 days, emptyRoles));
         ERC1967Proxy factoryProxy = new ERC1967Proxy(address(factoryImpl), initData);
         factory = RoycoFactory(address(factoryProxy));
     }
@@ -218,11 +215,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
 
         // Get production role configuration transactions from the deployment script
         // This includes both setTargetFunctionRole AND grantRole for sync operators
-        DeploySyncerScript.SafeTransaction[] memory transactions = deployScript.buildSyncerConfigTransactions(
-            address(factory),
-            address(syncer),
-            syncOperators
-        );
+        DeploySyncerScript.SafeTransaction[] memory transactions = deployScript.buildSyncerConfigTransactions(address(factory), address(syncer), syncOperators);
 
         // Execute each transaction as the factory admin to configure roles
         vm.startPrank(FACTORY_ADMIN_ADDRESS);
@@ -397,7 +390,9 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
 
         // Mock factory to return a valid junior tranche (non-zero)
         vm.mockCall(
-            address(factory), abi.encodeWithSelector(IRoycoFactory.seniorTrancheToJuniorTranche.selector, fakeTranche), abi.encode(makeAddr("SomeJuniorTranche"))
+            address(factory),
+            abi.encodeWithSelector(IRoycoFactory.seniorTrancheToJuniorTranche.selector, fakeTranche),
+            abi.encode(makeAddr("SomeJuniorTranche"))
         );
 
         address[] memory kernels = _singleKernelArray(address(fakeKernel));
@@ -1347,10 +1342,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
 
     /// @notice Verify ADMIN_PAUSER_ROLE is assigned to pause/unpause
     function test_productionConfig_pauserRoleFunctions() external view {
-        bytes4[2] memory pauserSelectors = [
-            IRoycoAuth.pause.selector,
-            IRoycoAuth.unpause.selector
-        ];
+        bytes4[2] memory pauserSelectors = [IRoycoAuth.pause.selector, IRoycoAuth.unpause.selector];
 
         for (uint256 i = 0; i < pauserSelectors.length; i++) {
             (bool canCall, uint32 delay) = factory.canCall(PAUSER_ADDRESS, address(syncer), pauserSelectors[i]);
