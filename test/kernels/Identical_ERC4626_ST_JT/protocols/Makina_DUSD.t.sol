@@ -62,7 +62,7 @@ contract Makina_DUSD_Test is YieldBearingERC4626_TestBase {
 
     /// @notice Deploys the DUSD kernel and market using parameters from MarketDeploymentConfig
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
-        MarketDeploymentConfig.MarketMarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("MakinaDUSD");
+        MarketDeploymentConfig.MarketConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("MakinaDUSD");
 
         // Override initial conversion rate for testing
         marketConfig.kernelSpecificParams = abi.encode(

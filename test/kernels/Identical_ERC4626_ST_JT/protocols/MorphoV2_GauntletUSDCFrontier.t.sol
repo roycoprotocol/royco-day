@@ -46,7 +46,7 @@ contract MorphoV2_GauntletUSDCFrontier is DisabledChainlinkOracle_ERC4626_TestBa
 
     /// @notice Deploys the GauntletUSDCFrontier kernel and market using parameters from MarketDeploymentConfig
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
-        MarketDeploymentConfig.MarketMarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("GauntletUSDCFrontier");
+        MarketDeploymentConfig.MarketConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("GauntletUSDCFrontier");
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();

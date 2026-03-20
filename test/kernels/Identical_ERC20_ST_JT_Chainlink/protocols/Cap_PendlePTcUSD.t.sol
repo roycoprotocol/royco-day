@@ -52,7 +52,7 @@ contract PendlePTcUSD_Test is YieldBearingERC20Chainlink_TestBase {
 
     /// @notice Deploys the PT-cUSD kernel and market using parameters from MarketDeploymentConfig
     function _deployKernelAndMarket() internal virtual override returns (DeployScript.DeploymentResult memory) {
-        MarketDeploymentConfig.MarketMarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("PT-cUSD");
+        MarketDeploymentConfig.MarketConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("PT-cUSD");
 
         // Decode kernel-specific params from the deployment config
         DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams memory kernelParams =

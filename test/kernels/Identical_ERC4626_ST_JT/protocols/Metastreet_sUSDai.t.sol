@@ -70,7 +70,7 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
 
     /// @notice Deploys the sUSDai kernel and market using parameters from MarketDeploymentConfig
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
-        MarketDeploymentConfig.MarketMarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("sUSDai");
+        MarketDeploymentConfig.MarketConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("sUSDai");
 
         // Override initial conversion rate for testing
         marketConfig.kernelSpecificParams =

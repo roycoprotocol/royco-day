@@ -89,7 +89,7 @@ contract UpgradabilityTestSuite is BaseTest {
         // Build role assignments using the centralized function
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
-        MarketDeploymentConfig.MarketMarketDeploymentConfig memory config = MarketDeploymentConfig.MarketMarketDeploymentConfig({
+        MarketDeploymentConfig.MarketConfig memory config = MarketDeploymentConfig.MarketConfig({
             marketName: "sNUSD",
             chainId: block.chainid,
             seniorTrancheName: "Royco Senior sNUSD",

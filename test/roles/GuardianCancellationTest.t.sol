@@ -71,7 +71,7 @@ contract GuardianCancellationTest is BaseTest {
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
         // Build deployment config
-        MarketDeploymentConfig.MarketMarketDeploymentConfig memory config = MarketDeploymentConfig.MarketMarketDeploymentConfig({
+        MarketDeploymentConfig.MarketConfig memory config = MarketDeploymentConfig.MarketConfig({
             marketName: "test",
             chainId: block.chainid,
             seniorTrancheName: SENIOR_TRANCHE_NAME,

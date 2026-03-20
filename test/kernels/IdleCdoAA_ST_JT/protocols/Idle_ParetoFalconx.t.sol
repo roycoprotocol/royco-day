@@ -76,7 +76,7 @@ contract ParetoFalconx_Test is IdleCdoAA_TestBase {
         AA_TRANCHE = IERC20(AA_TRANCHE_TOKEN);
         CDO = IIdleCDO(PARETO_FALCONX_CDO);
 
-        MarketDeploymentConfig.MarketMarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("AA-FalconXUSDC");
+        MarketDeploymentConfig.MarketConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("AA-FalconXUSDC");
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();

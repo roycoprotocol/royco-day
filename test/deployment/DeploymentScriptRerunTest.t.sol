@@ -189,7 +189,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
     )
         internal
         view
-        returns (MarketDeploymentConfig.MarketMarketDeploymentConfig memory config, IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments)
+        returns (MarketDeploymentConfig.MarketConfig memory config, IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments)
     {
         config.marketName = "test";
         config.chainId = block.chainid;
@@ -231,7 +231,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         // ============================================
         // FIRST DEPLOYMENT
         // ============================================
-        (MarketDeploymentConfig.MarketMarketDeploymentConfig memory config1, IRoycoFactory.RoleAssignmentConfiguration[] memory roles1) =
+        (MarketDeploymentConfig.MarketConfig memory config1, IRoycoFactory.RoleAssignmentConfiguration[] memory roles1) =
             _buildMarketDeploymentConfig("Royco Senior Tranche Alpha", "RST-A", "Royco Junior Tranche Alpha", "RJT-A", address(MOCK_UNDERLYING_ST_VAULT_1));
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
@@ -257,7 +257,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         // Warp time to get different market ID
         vm.warp(block.timestamp + 1);
 
-        (MarketDeploymentConfig.MarketMarketDeploymentConfig memory config2, IRoycoFactory.RoleAssignmentConfiguration[] memory roles2) =
+        (MarketDeploymentConfig.MarketConfig memory config2, IRoycoFactory.RoleAssignmentConfiguration[] memory roles2) =
             _buildMarketDeploymentConfig("Royco Senior Tranche Beta", "RST-B", "Royco Junior Tranche Beta", "RJT-B", address(MOCK_UNDERLYING_ST_VAULT_2));
 
         // Second deployment should succeed
@@ -292,7 +292,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
     /// @notice Test that the deployment script properly configures roles on both runs
     function test_deploymentScript_rolesConfiguredOnBothRuns() public {
         // First deployment
-        (MarketDeploymentConfig.MarketMarketDeploymentConfig memory config1, IRoycoFactory.RoleAssignmentConfiguration[] memory roles1) =
+        (MarketDeploymentConfig.MarketConfig memory config1, IRoycoFactory.RoleAssignmentConfiguration[] memory roles1) =
             _buildMarketDeploymentConfig("Royco Senior Tranche Alpha", "RST-A", "Royco Junior Tranche Alpha", "RJT-A", address(MOCK_UNDERLYING_ST_VAULT_1));
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
@@ -313,7 +313,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
         // Second deployment
         vm.warp(block.timestamp + 1);
 
-        (MarketDeploymentConfig.MarketMarketDeploymentConfig memory config2, IRoycoFactory.RoleAssignmentConfiguration[] memory roles2) =
+        (MarketDeploymentConfig.MarketConfig memory config2, IRoycoFactory.RoleAssignmentConfiguration[] memory roles2) =
             _buildMarketDeploymentConfig("Royco Senior Tranche Beta", "RST-B", "Royco Junior Tranche Beta", "RJT-B", address(MOCK_UNDERLYING_ST_VAULT_2));
 
         DeployScript.DeploymentResult memory result2 =
@@ -334,7 +334,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
     /// @notice Test that deployer can deploy multiple markets using the factory's deployMarket function
     function test_deployerCanDeployMultipleMarketsViaFactory() public {
         // First deployment creates the factory
-        (MarketDeploymentConfig.MarketMarketDeploymentConfig memory config1, IRoycoFactory.RoleAssignmentConfiguration[] memory roles1) =
+        (MarketDeploymentConfig.MarketConfig memory config1, IRoycoFactory.RoleAssignmentConfiguration[] memory roles1) =
             _buildMarketDeploymentConfig("Royco Senior Tranche Alpha", "RST-A", "Royco Junior Tranche Alpha", "RJT-A", address(MOCK_UNDERLYING_ST_VAULT_1));
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
@@ -358,7 +358,7 @@ contract DeploymentScriptRerunTest is Test, RolesConfiguration {
     /// @notice Test that the same deployer can use the factory after ownership transfer
     function test_deployerRetainsRoleAfterOwnershipTransfer() public {
         // Deploy first market
-        (MarketDeploymentConfig.MarketMarketDeploymentConfig memory config1, IRoycoFactory.RoleAssignmentConfiguration[] memory roles1) =
+        (MarketDeploymentConfig.MarketConfig memory config1, IRoycoFactory.RoleAssignmentConfiguration[] memory roles1) =
             _buildMarketDeploymentConfig("Royco Senior Tranche Alpha", "RST-A", "Royco Junior Tranche Alpha", "RJT-A", address(MOCK_UNDERLYING_ST_VAULT_1));
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;

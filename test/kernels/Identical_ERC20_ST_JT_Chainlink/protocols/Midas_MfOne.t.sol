@@ -102,7 +102,7 @@ contract MfOne_Test is YieldBearingERC20Chainlink_TestBase {
     /// @notice Deploys the mF-ONE kernel and market using parameters from MarketDeploymentConfig
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
         // Read config from the deploy script (which inherits MarketDeploymentConfig)
-        MarketDeploymentConfig.MarketMarketDeploymentConfig memory mfOneConfig = DEPLOY_SCRIPT.getMarketConfig("mF-ONE");
+        MarketDeploymentConfig.MarketConfig memory mfOneConfig = DEPLOY_SCRIPT.getMarketConfig("mF-ONE");
 
         // Decode kernel-specific params from the deployment config
         DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams memory kernelParams =

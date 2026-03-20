@@ -193,7 +193,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
     /// @return result The deployment result containing all deployed contract addresses
     function deployFromConfig(string memory marketName, uint256 deployerPrivateKey) public returns (DeploymentResult memory) {
         ChainConfig memory chainConfig = getChainConfig(block.chainid);
-        MarketMarketDeploymentConfig memory marketConfig = getMarketConfig(marketName);
+        MarketConfig memory marketConfig = getMarketConfig(marketName);
 
         // Build role assignments from chain config
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = generateRolesAssignments(
@@ -230,7 +230,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
     }
 
     /// @notice Prints all deployment parameters for verification before deployment
-    function _printDeploymentParams(MarketMarketDeploymentConfig memory _config, address _factoryAdmin, address _protocolFeeRecipient) internal view {
+    function _printDeploymentParams(MarketConfig memory _config, address _factoryAdmin, address _protocolFeeRecipient) internal view {
         console2.log("=== DEPLOYMENT PARAMETERS ===");
         console2.log("");
 
@@ -295,7 +295,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
     /// @param _deployerPrivateKey The private key used to broadcast deployment transactions
     /// @return The deployment result containing all deployed contract addresses
     function deploy(
-        MarketMarketDeploymentConfig memory _config,
+        MarketConfig memory _config,
         address _factoryAdmin,
         address _protocolFeeRecipient,
         uint32 _scheduledOperationsExpirySeconds,
@@ -619,7 +619,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
     function _deployMarket(
         RoycoFactory factory,
         address ydmAddress,
-        MarketMarketDeploymentConfig memory _config,
+        MarketConfig memory _config,
         address _protocolFeeRecipient
     )
         internal
@@ -1058,11 +1058,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
     /// @param _factoryAddress The address of the factory
     /// @param _config The market deployment configuration
     /// @return The initialization data for the accountant proxy
-    function _buildAccountantInitializationData(
-        address _ydmAddress,
-        address _factoryAddress,
-        MarketMarketDeploymentConfig memory _config
-    )
+    function _buildAccountantInitializationData(address _ydmAddress, address _factoryAddress, MarketConfig memory _config)
         internal
         pure
         returns (bytes memory)
@@ -1088,7 +1084,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
     /// @param _factoryAddress The address of the factory
     /// @param _config The market deployment configuration
     /// @return The initialization data for the senior tranche proxy
-    function _buildSeniorTrancheInitializationData(address _factoryAddress, MarketMarketDeploymentConfig memory _config) internal pure returns (bytes memory) {
+    function _buildSeniorTrancheInitializationData(address _factoryAddress, MarketConfig memory _config) internal pure returns (bytes memory) {
         IRoycoVaultTranche.RoycoTrancheInitParams memory trancheParams = IRoycoVaultTranche.RoycoTrancheInitParams({
             name: _config.seniorTrancheName, symbol: _config.seniorTrancheSymbol, initialAuthority: _factoryAddress
         });
@@ -1100,7 +1096,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
     /// @param _factoryAddress The address of the factory
     /// @param _config The market deployment configuration
     /// @return The initialization data for the junior tranche proxy
-    function _buildJuniorTrancheInitializationData(address _factoryAddress, MarketMarketDeploymentConfig memory _config) internal pure returns (bytes memory) {
+    function _buildJuniorTrancheInitializationData(address _factoryAddress, MarketConfig memory _config) internal pure returns (bytes memory) {
         IRoycoVaultTranche.RoycoTrancheInitParams memory trancheParams = IRoycoVaultTranche.RoycoTrancheInitParams({
             name: _config.juniorTrancheName, symbol: _config.juniorTrancheSymbol, initialAuthority: _factoryAddress
         });

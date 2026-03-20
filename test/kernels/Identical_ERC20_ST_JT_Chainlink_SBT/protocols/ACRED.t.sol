@@ -76,7 +76,7 @@ contract ACRED_Test is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
     }
 
     function _deployACRED() private returns (DeployScript.DeploymentResult memory) {
-        MarketDeploymentConfig.MarketMarketDeploymentConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig("ACRED");
+        MarketDeploymentConfig.MarketConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig("ACRED");
         _overrideStaleness(cfg);
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
         return DEPLOY_SCRIPT.deploy(
@@ -84,7 +84,7 @@ contract ACRED_Test is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
         );
     }
 
-    function _overrideStaleness(MarketDeploymentConfig.MarketMarketDeploymentConfig memory _cfg) private pure {
+    function _overrideStaleness(MarketDeploymentConfig.MarketConfig memory _cfg) private pure {
         DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams memory kp =
             abi.decode(_cfg.kernelSpecificParams, (DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams));
         kp.stalenessThresholdSeconds = _getStalenessThreshold();
