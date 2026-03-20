@@ -7,7 +7,7 @@ import { IERC4626 } from "../../lib/openzeppelin-contracts/contracts/interfaces/
 import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
-import { DeploymentConfig } from "../../script/config/DeploymentConfig.sol";
+import { MarketDeploymentConfig } from "../../script/config/MarketDeploymentConfig.sol";
 import { RoycoAccountant } from "../../src/accountant/RoycoAccountant.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
@@ -89,7 +89,7 @@ contract UpgradabilityTestSuite is BaseTest {
         // Build role assignments using the centralized function
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
-        DeploymentConfig.MarketDeploymentConfig memory config = DeploymentConfig.MarketDeploymentConfig({
+        MarketDeploymentConfig.MarketMarketDeploymentConfig memory config = MarketDeploymentConfig.MarketMarketDeploymentConfig({
             marketName: "sNUSD",
             chainId: block.chainid,
             seniorTrancheName: "Royco Senior sNUSD",

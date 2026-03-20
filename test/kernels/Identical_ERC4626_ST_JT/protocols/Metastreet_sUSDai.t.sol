@@ -5,7 +5,7 @@ import { IAccessManaged } from "../../../../lib/openzeppelin-contracts/contracts
 import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC20.sol";
 
 import { DeployScript } from "../../../../script/Deploy.s.sol";
-import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
+import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { IStakedUSDai } from "../../../../src/interfaces/external/usdai/IStakedUSDai.sol";
 import { IUSDai } from "../../../../src/interfaces/external/usdai/IUSDai.sol";
@@ -65,12 +65,12 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // DEPLOYMENT (uses DeploymentConfig)
+    // DEPLOYMENT (uses MarketDeploymentConfig)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Deploys the sUSDai kernel and market using parameters from DeploymentConfig
+    /// @notice Deploys the sUSDai kernel and market using parameters from MarketDeploymentConfig
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
-        DeploymentConfig.MarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("sUSDai");
+        MarketDeploymentConfig.MarketMarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("sUSDai");
 
         // Override initial conversion rate for testing
         marketConfig.kernelSpecificParams =

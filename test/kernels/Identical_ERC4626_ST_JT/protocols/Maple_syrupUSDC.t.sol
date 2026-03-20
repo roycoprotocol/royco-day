@@ -8,7 +8,7 @@ import { IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/inter
 import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 
 import { DeployScript } from "../../../../script/Deploy.s.sol";
-import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
+import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { IMapleGlobals } from "../../../../src/interfaces/external/maple/IMapleGlobals.sol";
 import { IMaplePool } from "../../../../src/interfaces/external/maple/IMaplePool.sol";
@@ -56,12 +56,12 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // DEPLOYMENT (uses DeploymentConfig)
+    // DEPLOYMENT (uses MarketDeploymentConfig)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Deploys the syrupUSDC kernel and market using parameters from DeploymentConfig
+    /// @notice Deploys the syrupUSDC kernel and market using parameters from MarketDeploymentConfig
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
-        DeploymentConfig.MarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("syrupUSDC");
+        MarketDeploymentConfig.MarketMarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("syrupUSDC");
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();

@@ -1,33 +1,68 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
+import { RolesConfiguration } from "../../src/factory/RolesConfiguration.sol";
+import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { RoycoMarketSyncer } from "../../src/periphery/RoycoMarketSyncer.sol";
+import { SyncerDeploymentConfig } from "../config/SyncerDeploymentConfig.sol";
+import { AccessManagerConfigUtils } from "../utils/AccessManagerConfigUtils.sol";
 import { Create2DeployUtils } from "../utils/Create2DeployUtils.sol";
-import { Script } from "lib/forge-std/src/Script.sol";
 import { console2 } from "lib/forge-std/src/console2.sol";
 
 /**
  * @title DeploySyncerScript
  * @notice Deployment script for the RoycoMarketSyncer contract
- * @dev Deploys both the implementation and ERC1967 proxy using deterministic CREATE2 deployment
+ * @dev Deploys both the implementation and ERC1967 proxy using deterministic CREATE2 deployment.
+ *      Also generates a Safe-compatible JSON file containing the factory configuration transactions
+ *      needed to make the syncer operational.
  */
-contract DeploySyncerScript is Script, Create2DeployUtils {
+contract DeploySyncerScript is SyncerDeploymentConfig, AccessManagerConfigUtils, Create2DeployUtils, RolesConfiguration {
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DEPLOYMENT CONSTANTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
     /// @dev Deployment salt for Royco syncers
     bytes32 constant SYNCER_SALT_BASE = keccak256("ROYCO_SYNCER");
 
-    /// @dev Address of the Royco factory deployed using CREATE2
-    address constant ROYCO_FACTORY = 0x7cC6fB28eC7b5e7afC3cB3986141797ffc27253C;
-    /// @dev Addresses of the market kernels to initially add the syncer
-    address[] MARKET_KERNELS;
+    /// @dev Output path for the Safe transaction JSON
+    string constant SAFE_TX_OUTPUT_PATH = "output/syncer_role_config.json";
 
-    // Whether to print deployment parameters
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DEPLOYMENT FLAGS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev Whether to print deployment parameters
     bool ENABLE_LOGGING = false;
 
+    /// @dev Whether to generate Safe transaction JSON for factory configuration
+    bool GENERATE_SAFE_TX_JSON = true;
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ENTRY POINT
+    // ═══════════════════════════════════════════════════════════════════════════
+
     function run() external {
-        // Deploy the syncer
+        ENABLE_LOGGING = true;
+
+        // Read config from environment variables
+        string memory syncerName = vm.envOr("SYNCER_NAME", MAINNET_SYNCER);
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
-        deploySyncer(ROYCO_FACTORY, MARKET_KERNELS, deployerPrivateKey);
+
+        SyncerConfig memory config = getSyncerConfig(syncerName);
+
+        // Deploy the syncer
+        address syncer = deploySyncer(config.roycoFactory, config.marketKernels, deployerPrivateKey);
+
+        // Generate Safe transaction JSON for factory configuration
+        if (GENERATE_SAFE_TX_JSON) {
+            generateFactoryConfigSafeJson(config.roycoFactory, syncer, config.syncOperators);
+        }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DEPLOYMENT FUNCTIONS
+    // ═══════════════════════════════════════════════════════════════════════════
 
     /**
      * @notice Deploys a RoycoMarketSyncer implementation and proxy
@@ -61,5 +96,84 @@ contract DeploySyncerScript is Script, Create2DeployUtils {
             }
         }
         vm.stopBroadcast();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SAFE TRANSACTION GENERATION
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Generates a Safe-compatible JSON file containing the factory configuration transactions
+     * @dev The transactions configure the syncer's function-to-role mappings on the factory.
+     *      This function is public to allow testing against production roles and deployment config.
+     * @param _factory The Royco factory (access manager) address
+     * @param _syncer The deployed syncer proxy address
+     * @param _syncOperators Addresses to grant SYNC_ROLE (keeper bots, operators)
+     */
+    function generateFactoryConfigSafeJson(address _factory, address _syncer, address[] memory _syncOperators) public {
+        // Build the list of transactions needed to configure the syncer
+        SafeTransaction[] memory transactions = buildSyncerConfigTransactions(_factory, _syncer, _syncOperators);
+
+        // Write the Safe-compatible JSON using inherited utility
+        writeSafeTransactionJson(transactions, SAFE_TX_OUTPUT_PATH, "RoycoMarketSyncer Factory Configuration");
+
+        if (ENABLE_LOGGING) {
+            console2.log("");
+            console2.log("========================================");
+            console2.log("Safe Transaction JSON Generated:");
+            console2.log("  Path:", SAFE_TX_OUTPUT_PATH);
+            console2.log("  Transactions:", transactions.length);
+            console2.log("========================================");
+            console2.log("");
+            console2.log("Import this JSON into Safe Transaction Builder to configure the syncer.");
+        }
+    }
+
+    /**
+     * @notice Builds the transactions needed to configure the syncer on the factory, including role grants
+     * @dev Configures function-to-role mappings and grants SYNC_ROLE to specified operators.
+     *      This function is public to allow testing against production roles and deployment config.
+     * @param _factory The Royco factory (access manager) address
+     * @param _syncer The deployed syncer proxy address
+     * @param _syncOperators Addresses to grant SYNC_ROLE (e.g., keeper bots, operators)
+     * @return transactions Array of transactions to execute via Safe
+     */
+    function buildSyncerConfigTransactions(
+        address _factory,
+        address _syncer,
+        address[] memory _syncOperators
+    )
+        public
+        pure
+        returns (SafeTransaction[] memory transactions)
+    {
+        // Base transactions: 3 for setTargetFunctionRole (one per role)
+        // Plus 1 grantRole per sync operator
+        uint256 numTransactions = 3 + _syncOperators.length;
+        transactions = new SafeTransaction[](numTransactions);
+
+        // Transaction 1: SYNC_ROLE functions
+        bytes4[] memory syncSelectors = new bytes4[](4);
+        syncSelectors[0] = RoycoMarketSyncer.executeBatchAccountingSync.selector;
+        syncSelectors[1] = RoycoMarketSyncer.executeBatchAccountingSyncFor.selector;
+        syncSelectors[2] = RoycoMarketSyncer.addMarketKernels.selector;
+        syncSelectors[3] = RoycoMarketSyncer.removeMarketKernels.selector;
+        transactions[0] = buildSetTargetFunctionRole(_factory, _syncer, syncSelectors, SYNC_ROLE);
+
+        // Transaction 2: ADMIN_PAUSER_ROLE functions
+        bytes4[] memory pauserSelectors = new bytes4[](2);
+        pauserSelectors[0] = IRoycoAuth.pause.selector;
+        pauserSelectors[1] = IRoycoAuth.unpause.selector;
+        transactions[1] = buildSetTargetFunctionRole(_factory, _syncer, pauserSelectors, ADMIN_PAUSER_ROLE);
+
+        // Transaction 3: ADMIN_UPGRADER_ROLE functions
+        bytes4[] memory upgraderSelectors = new bytes4[](1);
+        upgraderSelectors[0] = UUPSUpgradeable.upgradeToAndCall.selector;
+        transactions[2] = buildSetTargetFunctionRole(_factory, _syncer, upgraderSelectors, ADMIN_UPGRADER_ROLE);
+
+        // Transactions 4+: Grant SYNC_ROLE to each operator
+        for (uint256 i = 0; i < _syncOperators.length; i++) {
+            transactions[3 + i] = buildGrantRole(_factory, SYNC_ROLE, _syncOperators[i], 0);
+        }
     }
 }

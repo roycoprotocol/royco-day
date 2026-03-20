@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
 
 import { DeployScript } from "../../../../script/Deploy.s.sol";
-import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
+import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import {
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel
@@ -51,13 +51,13 @@ contract sNUSD_sNUSD_Test is YieldBearingERC4626_ChainlinkOracle_TestBase {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // DEPLOYMENT (uses DeploymentConfig)
+    // DEPLOYMENT (uses MarketDeploymentConfig)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Deploys the sNUSD kernel and market using parameters from DeploymentConfig
+    /// @notice Deploys the sNUSD kernel and market using parameters from MarketDeploymentConfig
     /// @dev Uses the Chainlink oracle from the deployment config for NUSD->USD pricing
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
-        DeploymentConfig.MarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("sNUSD");
+        MarketDeploymentConfig.MarketMarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("sNUSD");
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();

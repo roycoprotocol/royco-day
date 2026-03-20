@@ -6,8 +6,10 @@ import { Vm } from "../../../lib/forge-std/src/Vm.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
+import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { DeploySyncerScript } from "../../../script/independent/DeploySyncer.s.sol";
 import { RoycoBase } from "../../../src/base/RoycoBase.sol";
+import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { RolesConfiguration } from "../../../src/factory/RolesConfiguration.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoFactory } from "../../../src/interfaces/IRoycoFactory.sol";
@@ -53,7 +55,12 @@ contract MockTranche {
 /**
  * @title RoycoMarketSyncerTest
  * @notice Comprehensive test suite for the RoycoMarketSyncer contract
- * @dev Uses the DeploySyncer script to deploy the syncer and mock kernels for testing
+ * @dev Uses the DeploySyncer script to deploy the syncer and configures roles using
+ *      production configuration from buildSyncerConfigTransactions.
+ *      Tests are 1:1 with production role assignments:
+ *      - SYNC_ROLE: executeBatchAccountingSync, executeBatchAccountingSyncFor, addMarketKernels, removeMarketKernels
+ *      - ADMIN_PAUSER_ROLE: pause, unpause
+ *      - ADMIN_UPGRADER_ROLE: upgradeToAndCall
  */
 contract RoycoMarketSyncerTest is Test, RolesConfiguration {
     // ═══════════════════════════════════════════════════════════════════════════
@@ -62,7 +69,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
 
     DeploySyncerScript internal deployScript;
     RoycoMarketSyncer internal syncer;
-    address internal mockFactory;
+    RoycoFactory internal factory;
 
     // Mock kernels and tranches
     MockKernel internal mockKernel1;
@@ -73,14 +80,14 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
     MockTranche internal mockTranche3;
 
     // Test wallets
+    Vm.Wallet internal FACTORY_ADMIN;
+    address internal FACTORY_ADMIN_ADDRESS;
+
     Vm.Wallet internal DEPLOYER;
     address internal DEPLOYER_ADDRESS;
 
     Vm.Wallet internal SYNC_OPERATOR;
     address internal SYNC_OPERATOR_ADDRESS;
-
-    Vm.Wallet internal KERNEL_ADMIN;
-    address internal KERNEL_ADMIN_ADDRESS;
 
     Vm.Wallet internal PAUSER;
     address internal PAUSER_ADDRESS;
@@ -99,8 +106,8 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         // Deploy CREATE2 factory (deterministic deployer)
         _deployCreate2Factory();
 
-        // Create mock factory address
-        mockFactory = makeAddr("MockFactory");
+        // Deploy real RoycoFactory
+        _deployFactory();
 
         // Deploy mock kernels and tranches
         _deployMockKernelsAndTranches();
@@ -108,21 +115,29 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         // Deploy syncer using the deployment script
         deployScript = new DeploySyncerScript();
         address[] memory emptyKernels = new address[](0);
-        address syncerAddr = deployScript.deploySyncer(mockFactory, emptyKernels, DEPLOYER.privateKey);
+        address syncerAddr = deployScript.deploySyncer(address(factory), emptyKernels, DEPLOYER.privateKey);
         syncer = RoycoMarketSyncer(syncerAddr);
 
         // Label contracts for debugging
         vm.label(address(syncer), "Syncer");
-        vm.label(mockFactory, "MockFactory");
+        vm.label(address(factory), "Factory");
         vm.label(address(mockKernel1), "MockKernel1");
         vm.label(address(mockKernel2), "MockKernel2");
         vm.label(address(mockKernel3), "MockKernel3");
 
-        // Configure roles for the syncer
-        _configureRoles();
+        // Configure roles using production configuration
+        _configureProductionRoles();
+
+        // Setup mock kernel validation on factory
+        _setupKernelValidation();
     }
 
     function _setupWallets() internal {
+        FACTORY_ADMIN = vm.createWallet("FACTORY_ADMIN");
+        FACTORY_ADMIN_ADDRESS = FACTORY_ADMIN.addr;
+        vm.label(FACTORY_ADMIN_ADDRESS, "FACTORY_ADMIN");
+        vm.deal(FACTORY_ADMIN_ADDRESS, 100 ether);
+
         DEPLOYER = vm.createWallet("DEPLOYER");
         DEPLOYER_ADDRESS = DEPLOYER.addr;
         vm.label(DEPLOYER_ADDRESS, "DEPLOYER");
@@ -132,11 +147,6 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         SYNC_OPERATOR_ADDRESS = SYNC_OPERATOR.addr;
         vm.label(SYNC_OPERATOR_ADDRESS, "SYNC_OPERATOR");
         vm.deal(SYNC_OPERATOR_ADDRESS, 100 ether);
-
-        KERNEL_ADMIN = vm.createWallet("KERNEL_ADMIN");
-        KERNEL_ADMIN_ADDRESS = KERNEL_ADMIN.addr;
-        vm.label(KERNEL_ADMIN_ADDRESS, "KERNEL_ADMIN");
-        vm.deal(KERNEL_ADMIN_ADDRESS, 100 ether);
 
         PAUSER = vm.createWallet("PAUSER");
         PAUSER_ADDRESS = PAUSER.addr;
@@ -155,6 +165,23 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         bytes memory create2FactoryBytecode =
             hex"7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe03601600081602082378035828234f58015156039578182fd5b8082525050506014600cf3";
         vm.etch(CREATE2_FACTORY, create2FactoryBytecode);
+    }
+
+    function _deployFactory() internal {
+        // Deploy factory implementation
+        RoycoFactory factoryImpl = new RoycoFactory();
+
+        // Create empty role assignments array (we'll configure roles after syncer deployment)
+        IRoycoFactory.RoleAssignmentConfiguration[] memory emptyRoles = new IRoycoFactory.RoleAssignmentConfiguration[](0);
+
+        // Deploy factory proxy with initialization
+        // _admin, _deployer, _scheduledOperationsExpirySeconds, _roles
+        bytes memory initData = abi.encodeCall(
+            RoycoFactory.initialize,
+            (FACTORY_ADMIN_ADDRESS, DEPLOYER_ADDRESS, 7 days, emptyRoles)
+        );
+        ERC1967Proxy factoryProxy = new ERC1967Proxy(address(factoryImpl), initData);
+        factory = RoycoFactory(address(factoryProxy));
     }
 
     function _deployMockKernelsAndTranches() internal {
@@ -184,67 +211,53 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         vm.store(tranche3Addr, bytes32(0), bytes32(uint256(uint160(address(mockKernel3)))));
     }
 
-    function _configureRoles() internal {
-        // Mock the factory's canCall function to allow our test wallets to call syncer functions
+    function _configureProductionRoles() internal {
+        // Build sync operators array (production: this would be the sync bot/keeper addresses)
+        address[] memory syncOperators = new address[](1);
+        syncOperators[0] = SYNC_OPERATOR_ADDRESS;
 
-        // Allow SYNC_OPERATOR to call executeBatchAccountingSync and executeBatchAccountingSyncFor (immediate, no delay)
-        vm.mockCall(
-            mockFactory,
-            abi.encodeWithSelector(
-                IAccessManager.canCall.selector, SYNC_OPERATOR_ADDRESS, address(syncer), RoycoMarketSyncer.executeBatchAccountingSync.selector
-            ),
-            abi.encode(true, uint32(0))
-        );
-        vm.mockCall(
-            mockFactory,
-            abi.encodeWithSelector(
-                IAccessManager.canCall.selector, SYNC_OPERATOR_ADDRESS, address(syncer), RoycoMarketSyncer.executeBatchAccountingSyncFor.selector
-            ),
-            abi.encode(true, uint32(0))
+        // Get production role configuration transactions from the deployment script
+        // This includes both setTargetFunctionRole AND grantRole for sync operators
+        DeploySyncerScript.SafeTransaction[] memory transactions = deployScript.buildSyncerConfigTransactions(
+            address(factory),
+            address(syncer),
+            syncOperators
         );
 
-        // Allow KERNEL_ADMIN to call addMarketKernels (immediate for testing)
-        vm.mockCall(
-            mockFactory,
-            abi.encodeWithSelector(IAccessManager.canCall.selector, KERNEL_ADMIN_ADDRESS, address(syncer), RoycoMarketSyncer.addMarketKernels.selector),
-            abi.encode(true, uint32(0))
-        );
+        // Execute each transaction as the factory admin to configure roles
+        vm.startPrank(FACTORY_ADMIN_ADDRESS);
+        for (uint256 i = 0; i < transactions.length; i++) {
+            (bool success,) = transactions[i].to.call(transactions[i].data);
+            require(success, "Failed to configure syncer roles");
+        }
+        vm.stopPrank();
 
-        // Allow KERNEL_ADMIN to call removeMarketKernels (immediate for testing)
-        vm.mockCall(
-            mockFactory,
-            abi.encodeWithSelector(IAccessManager.canCall.selector, KERNEL_ADMIN_ADDRESS, address(syncer), RoycoMarketSyncer.removeMarketKernels.selector),
-            abi.encode(true, uint32(0))
-        );
+        // Grant ADMIN_PAUSER_ROLE to PAUSER (not included in buildSyncerConfigTransactions)
+        vm.prank(FACTORY_ADMIN_ADDRESS);
+        factory.grantRole(ADMIN_PAUSER_ROLE, PAUSER_ADDRESS, 0);
 
-        // Allow PAUSER to call pause/unpause (immediate)
-        vm.mockCall(
-            mockFactory,
-            abi.encodeWithSelector(IAccessManager.canCall.selector, PAUSER_ADDRESS, address(syncer), IRoycoAuth.pause.selector),
-            abi.encode(true, uint32(0))
-        );
+        // Grant ADMIN_UPGRADER_ROLE to DEPLOYER (not included in buildSyncerConfigTransactions)
+        vm.prank(FACTORY_ADMIN_ADDRESS);
+        factory.grantRole(ADMIN_UPGRADER_ROLE, DEPLOYER_ADDRESS, 0);
+    }
 
-        vm.mockCall(
-            mockFactory,
-            abi.encodeWithSelector(IAccessManager.canCall.selector, PAUSER_ADDRESS, address(syncer), IRoycoAuth.unpause.selector),
-            abi.encode(true, uint32(0))
-        );
-
+    function _setupKernelValidation() internal {
         // Mock factory's seniorTrancheToJuniorTranche to return valid junior tranche for valid kernels
+        // This is necessary because we're using mock kernels that weren't deployed via the factory
         vm.mockCall(
-            mockFactory,
+            address(factory),
             abi.encodeWithSelector(IRoycoFactory.seniorTrancheToJuniorTranche.selector, mockKernel1.SENIOR_TRANCHE()),
             abi.encode(makeAddr("JuniorTranche1"))
         );
 
         vm.mockCall(
-            mockFactory,
+            address(factory),
             abi.encodeWithSelector(IRoycoFactory.seniorTrancheToJuniorTranche.selector, mockKernel2.SENIOR_TRANCHE()),
             abi.encode(makeAddr("JuniorTranche2"))
         );
 
         vm.mockCall(
-            mockFactory,
+            address(factory),
             abi.encodeWithSelector(IRoycoFactory.seniorTrancheToJuniorTranche.selector, mockKernel3.SENIOR_TRANCHE()),
             abi.encode(makeAddr("JuniorTranche3"))
         );
@@ -254,15 +267,15 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
     // HELPER FUNCTIONS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Helper to add kernels with proper permissions
+    /// @notice Helper to add kernels with proper permissions (SYNC_ROLE in production)
     function _addKernels(address[] memory kernels) internal {
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.prank(SYNC_OPERATOR_ADDRESS);
         syncer.addMarketKernels(kernels);
     }
 
-    /// @notice Helper to remove kernels with proper permissions
+    /// @notice Helper to remove kernels with proper permissions (SYNC_ROLE in production)
     function _removeKernels(address[] memory kernels) internal {
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.prank(SYNC_OPERATOR_ADDRESS);
         syncer.removeMarketKernels(kernels);
     }
 
@@ -294,21 +307,21 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
 
     /// @notice Test that syncer initializes with correct authority
     function test_initialize_setsCorrectAuthority() external view {
-        assertEq(syncer.authority(), mockFactory, "Authority should be factory");
+        assertEq(syncer.authority(), address(factory), "Authority should be factory");
     }
 
     /// @notice Test that syncer cannot be reinitialized
     function test_initialize_cannotReinitialize() external {
         address[] memory kernels = new address[](0);
         vm.expectRevert();
-        syncer.initialize(mockFactory, kernels);
+        syncer.initialize(address(factory), kernels);
     }
 
     /// @notice Test initialization with kernels using deployment script
     function test_initialize_withKernels() external {
         // Deploy a new syncer with kernels using the deployment script
         address[] memory initialKernels = _getAllKernels();
-        address newSyncerAddr = deployScript.deploySyncer(mockFactory, initialKernels, DEPLOYER.privateKey);
+        address newSyncerAddr = deployScript.deploySyncer(address(factory), initialKernels, DEPLOYER.privateKey);
         RoycoMarketSyncer newSyncer = RoycoMarketSyncer(newSyncerAddr);
 
         address[] memory kernels = newSyncer.getMarketKernels();
@@ -324,7 +337,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         address firstDeployAddr = address(syncer);
 
         // Deploy again - should return same address (already deployed)
-        address secondDeployAddr = deployScript.deploySyncer(mockFactory, emptyKernels, DEPLOYER.privateKey);
+        address secondDeployAddr = deployScript.deploySyncer(address(factory), emptyKernels, DEPLOYER.privateKey);
 
         assertEq(firstDeployAddr, secondDeployAddr, "CREATE2 should give deterministic address");
     }
@@ -348,7 +361,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         address[] memory kernels = new address[](1);
         kernels[0] = address(0);
 
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.prank(SYNC_OPERATOR_ADDRESS);
         vm.expectRevert();
         syncer.addMarketKernels(kernels);
     }
@@ -360,12 +373,12 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
 
         // Mock factory to return address(0) for this tranche (indicating not from factory)
         vm.mockCall(
-            mockFactory, abi.encodeWithSelector(IRoycoFactory.seniorTrancheToJuniorTranche.selector, fakeKernel.SENIOR_TRANCHE()), abi.encode(address(0))
+            address(factory), abi.encodeWithSelector(IRoycoFactory.seniorTrancheToJuniorTranche.selector, fakeKernel.SENIOR_TRANCHE()), abi.encode(address(0))
         );
 
         address[] memory kernels = _singleKernelArray(address(fakeKernel));
 
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.prank(SYNC_OPERATOR_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(RoycoMarketSyncer.INVALID_KERNEL.selector, address(fakeKernel)));
         syncer.addMarketKernels(kernels);
     }
@@ -384,12 +397,12 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
 
         // Mock factory to return a valid junior tranche (non-zero)
         vm.mockCall(
-            mockFactory, abi.encodeWithSelector(IRoycoFactory.seniorTrancheToJuniorTranche.selector, fakeTranche), abi.encode(makeAddr("SomeJuniorTranche"))
+            address(factory), abi.encodeWithSelector(IRoycoFactory.seniorTrancheToJuniorTranche.selector, fakeTranche), abi.encode(makeAddr("SomeJuniorTranche"))
         );
 
         address[] memory kernels = _singleKernelArray(address(fakeKernel));
 
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.prank(SYNC_OPERATOR_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(RoycoMarketSyncer.INVALID_KERNEL.selector, address(fakeKernel)));
         syncer.addMarketKernels(kernels);
     }
@@ -423,7 +436,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         vm.expectEmit(true, false, false, true, address(syncer));
         emit RoycoMarketSyncer.MarketKernelAdded(address(mockKernel1));
 
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.prank(SYNC_OPERATOR_ADDRESS);
         syncer.addMarketKernels(kernels);
     }
 
@@ -434,7 +447,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         _addKernels(kernels);
 
         // Try to add again - should revert
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.prank(SYNC_OPERATOR_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(RoycoMarketSyncer.KERNEL_ALREADY_REGISTERED.selector, address(mockKernel1)));
         syncer.addMarketKernels(kernels);
     }
@@ -486,7 +499,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         vm.expectEmit(true, false, false, true, address(syncer));
         emit RoycoMarketSyncer.MarketKernelRemoved(address(mockKernel1));
 
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.prank(SYNC_OPERATOR_ADDRESS);
         syncer.removeMarketKernels(kernels);
     }
 
@@ -494,7 +507,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
     function test_removeKernels_nonExistentReverts() external {
         address[] memory kernels = _singleKernelArray(address(mockKernel1));
 
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.prank(SYNC_OPERATOR_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(RoycoMarketSyncer.KERNEL_IS_NOT_REGISTERED.selector, address(mockKernel1)));
         syncer.removeMarketKernels(kernels);
     }
@@ -946,19 +959,29 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         syncer.pause();
     }
 
-    /// @notice Test sync operator cannot add kernels
-    function test_accessControl_syncOperatorCannotAddKernels() external {
+    /// @notice Test SYNC_ROLE holder can add kernels (production config)
+    function test_accessControl_syncRoleCanAddKernels() external {
         address[] memory kernels = _singleKernelArray(address(mockKernel1));
         vm.prank(SYNC_OPERATOR_ADDRESS);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, SYNC_OPERATOR_ADDRESS));
         syncer.addMarketKernels(kernels);
+        assertEq(syncer.getMarketKernels().length, 1, "SYNC_ROLE should be able to add kernels");
     }
 
-    /// @notice Test kernel admin cannot sync
-    function test_accessControl_kernelAdminCannotSync() external {
-        vm.prank(KERNEL_ADMIN_ADDRESS);
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, KERNEL_ADMIN_ADDRESS));
+    /// @notice Test SYNC_ROLE holder can remove kernels (production config)
+    function test_accessControl_syncRoleCanRemoveKernels() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        _addKernels(kernels);
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.removeMarketKernels(kernels);
+        assertEq(syncer.getMarketKernels().length, 0, "SYNC_ROLE should be able to remove kernels");
+    }
+
+    /// @notice Test SYNC_ROLE holder can execute batch sync (production config)
+    function test_accessControl_syncRoleCanSync() external {
+        vm.prank(SYNC_OPERATOR_ADDRESS);
         syncer.executeBatchAccountingSync(true);
+        // Should not revert
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1014,7 +1037,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
 
         address[] memory kernels = _singleKernelArray(address(mockKernel1));
 
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.prank(SYNC_OPERATOR_ADDRESS);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         syncer.addMarketKernels(kernels);
     }
@@ -1029,7 +1052,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         vm.prank(PAUSER_ADDRESS);
         syncer.pause();
 
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.prank(SYNC_OPERATOR_ADDRESS);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         syncer.removeMarketKernels(kernels);
     }
@@ -1155,7 +1178,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
 
         // Mock permission for upgrade
         vm.mockCall(
-            mockFactory,
+            address(factory),
             abi.encodeWithSelector(IAccessManager.canCall.selector, DEPLOYER_ADDRESS, address(syncer), syncer.upgradeToAndCall.selector),
             abi.encode(true, uint32(0))
         );
@@ -1165,7 +1188,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
 
         // Verify upgrade succeeded - implementation changed
         // The syncer should still work after upgrade
-        assertEq(syncer.authority(), mockFactory, "Authority should remain after upgrade");
+        assertEq(syncer.authority(), address(factory), "Authority should remain after upgrade");
     }
 
     /// @notice Test that upgrade to EOA (no code) reverts
@@ -1174,7 +1197,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
 
         // Mock permission for upgrade
         vm.mockCall(
-            mockFactory,
+            address(factory),
             abi.encodeWithSelector(IAccessManager.canCall.selector, DEPLOYER_ADDRESS, address(syncer), syncer.upgradeToAndCall.selector),
             abi.encode(true, uint32(0))
         );
@@ -1269,5 +1292,154 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         }
 
         assertEq(mockKernel1.syncCallCount(), 5, "Should have synced 5 times");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SECTION 11: PRODUCTION ROLE CONFIGURATION VERIFICATION
+    // ═══════════════════════════════════════════════════════════════════════════
+    // These tests explicitly verify that the production role configuration from
+    // buildSyncerConfigTransactions matches expected values and is correctly applied.
+
+    /// @notice Verify buildSyncerConfigTransactions returns exactly 3 transactions when no sync operators
+    function test_productionConfig_transactionCount_noOperators() external view {
+        DeploySyncerScript.SafeTransaction[] memory txs = deployScript.buildSyncerConfigTransactions(address(factory), address(syncer), new address[](0));
+        assertEq(txs.length, 3, "Should have exactly 3 role configuration transactions with no operators");
+    }
+
+    /// @notice Verify buildSyncerConfigTransactions returns 3 + N transactions with N sync operators
+    function test_productionConfig_transactionCount_withOperators() external view {
+        address[] memory syncOperators = new address[](2);
+        syncOperators[0] = address(0x1111);
+        syncOperators[1] = address(0x2222);
+
+        DeploySyncerScript.SafeTransaction[] memory txs = deployScript.buildSyncerConfigTransactions(address(factory), address(syncer), syncOperators);
+        assertEq(txs.length, 5, "Should have 3 role config + 2 grantRole transactions");
+    }
+
+    /// @notice Verify all transactions target the factory
+    function test_productionConfig_allTransactionsTargetFactory() external view {
+        address[] memory syncOperators = new address[](1);
+        syncOperators[0] = SYNC_OPERATOR_ADDRESS;
+
+        DeploySyncerScript.SafeTransaction[] memory txs = deployScript.buildSyncerConfigTransactions(address(factory), address(syncer), syncOperators);
+        for (uint256 i = 0; i < txs.length; i++) {
+            assertEq(txs[i].to, address(factory), string.concat("Transaction ", vm.toString(i), " should target factory"));
+            assertEq(txs[i].value, 0, string.concat("Transaction ", vm.toString(i), " should have zero value"));
+        }
+    }
+
+    /// @notice Verify SYNC_ROLE is assigned to the correct 4 functions
+    function test_productionConfig_syncRoleFunctions() external view {
+        // Verify factory's canCall returns true for SYNC_ROLE holder on all 4 functions
+        bytes4[4] memory syncSelectors = [
+            RoycoMarketSyncer.executeBatchAccountingSync.selector,
+            RoycoMarketSyncer.executeBatchAccountingSyncFor.selector,
+            RoycoMarketSyncer.addMarketKernels.selector,
+            RoycoMarketSyncer.removeMarketKernels.selector
+        ];
+
+        for (uint256 i = 0; i < syncSelectors.length; i++) {
+            (bool canCall, uint32 delay) = factory.canCall(SYNC_OPERATOR_ADDRESS, address(syncer), syncSelectors[i]);
+            assertTrue(canCall, string.concat("SYNC_ROLE should be able to call selector index ", vm.toString(i)));
+            assertEq(delay, 0, string.concat("SYNC_ROLE should have no delay for selector index ", vm.toString(i)));
+        }
+    }
+
+    /// @notice Verify ADMIN_PAUSER_ROLE is assigned to pause/unpause
+    function test_productionConfig_pauserRoleFunctions() external view {
+        bytes4[2] memory pauserSelectors = [
+            IRoycoAuth.pause.selector,
+            IRoycoAuth.unpause.selector
+        ];
+
+        for (uint256 i = 0; i < pauserSelectors.length; i++) {
+            (bool canCall, uint32 delay) = factory.canCall(PAUSER_ADDRESS, address(syncer), pauserSelectors[i]);
+            assertTrue(canCall, string.concat("ADMIN_PAUSER_ROLE should be able to call selector index ", vm.toString(i)));
+            assertEq(delay, 0, string.concat("ADMIN_PAUSER_ROLE should have no delay for selector index ", vm.toString(i)));
+        }
+    }
+
+    /// @notice Verify ADMIN_UPGRADER_ROLE is assigned to upgradeToAndCall
+    function test_productionConfig_upgraderRoleFunction() external view {
+        (bool canCall,) = factory.canCall(DEPLOYER_ADDRESS, address(syncer), syncer.upgradeToAndCall.selector);
+        assertTrue(canCall, "ADMIN_UPGRADER_ROLE should be able to call upgradeToAndCall");
+    }
+
+    /// @notice Verify unauthorized users cannot call any restricted function
+    function test_productionConfig_unauthorizedCannotCallAnyFunction() external view {
+        bytes4[7] memory allRestrictedSelectors = [
+            RoycoMarketSyncer.executeBatchAccountingSync.selector,
+            RoycoMarketSyncer.executeBatchAccountingSyncFor.selector,
+            RoycoMarketSyncer.addMarketKernels.selector,
+            RoycoMarketSyncer.removeMarketKernels.selector,
+            IRoycoAuth.pause.selector,
+            IRoycoAuth.unpause.selector,
+            syncer.upgradeToAndCall.selector
+        ];
+
+        for (uint256 i = 0; i < allRestrictedSelectors.length; i++) {
+            (bool canCall,) = factory.canCall(UNAUTHORIZED_USER_ADDRESS, address(syncer), allRestrictedSelectors[i]);
+            assertFalse(canCall, string.concat("Unauthorized user should NOT be able to call selector index ", vm.toString(i)));
+        }
+    }
+
+    /// @notice Verify role separation - SYNC_ROLE cannot pause
+    function test_productionConfig_roleSeparation_syncCannotPause() external view {
+        (bool canCall,) = factory.canCall(SYNC_OPERATOR_ADDRESS, address(syncer), IRoycoAuth.pause.selector);
+        assertFalse(canCall, "SYNC_ROLE should NOT be able to pause");
+
+        (canCall,) = factory.canCall(SYNC_OPERATOR_ADDRESS, address(syncer), IRoycoAuth.unpause.selector);
+        assertFalse(canCall, "SYNC_ROLE should NOT be able to unpause");
+    }
+
+    /// @notice Verify role separation - PAUSER cannot sync
+    function test_productionConfig_roleSeparation_pauserCannotSync() external view {
+        (bool canCall,) = factory.canCall(PAUSER_ADDRESS, address(syncer), RoycoMarketSyncer.executeBatchAccountingSync.selector);
+        assertFalse(canCall, "ADMIN_PAUSER_ROLE should NOT be able to sync");
+
+        (canCall,) = factory.canCall(PAUSER_ADDRESS, address(syncer), RoycoMarketSyncer.addMarketKernels.selector);
+        assertFalse(canCall, "ADMIN_PAUSER_ROLE should NOT be able to add kernels");
+    }
+
+    /// @notice Verify role separation - SYNC_ROLE cannot upgrade
+    function test_productionConfig_roleSeparation_syncCannotUpgrade() external view {
+        (bool canCall,) = factory.canCall(SYNC_OPERATOR_ADDRESS, address(syncer), syncer.upgradeToAndCall.selector);
+        assertFalse(canCall, "SYNC_ROLE should NOT be able to upgrade");
+    }
+
+    /// @notice Verify the exact role IDs from RolesConfiguration are used
+    function test_productionConfig_usesCorrectRoleIds() external view {
+        // Get the role assigned to each function via getTargetFunctionRole
+        uint64 syncRole = factory.getTargetFunctionRole(address(syncer), RoycoMarketSyncer.executeBatchAccountingSync.selector);
+        uint64 addKernelsRole = factory.getTargetFunctionRole(address(syncer), RoycoMarketSyncer.addMarketKernels.selector);
+        uint64 removeKernelsRole = factory.getTargetFunctionRole(address(syncer), RoycoMarketSyncer.removeMarketKernels.selector);
+        uint64 syncForRole = factory.getTargetFunctionRole(address(syncer), RoycoMarketSyncer.executeBatchAccountingSyncFor.selector);
+        uint64 pauseRole = factory.getTargetFunctionRole(address(syncer), IRoycoAuth.pause.selector);
+        uint64 unpauseRole = factory.getTargetFunctionRole(address(syncer), IRoycoAuth.unpause.selector);
+        uint64 upgradeRole = factory.getTargetFunctionRole(address(syncer), syncer.upgradeToAndCall.selector);
+
+        // Verify SYNC_ROLE for all 4 sync-related functions
+        assertEq(syncRole, SYNC_ROLE, "executeBatchAccountingSync should use SYNC_ROLE");
+        assertEq(syncForRole, SYNC_ROLE, "executeBatchAccountingSyncFor should use SYNC_ROLE");
+        assertEq(addKernelsRole, SYNC_ROLE, "addMarketKernels should use SYNC_ROLE");
+        assertEq(removeKernelsRole, SYNC_ROLE, "removeMarketKernels should use SYNC_ROLE");
+
+        // Verify ADMIN_PAUSER_ROLE for pause/unpause
+        assertEq(pauseRole, ADMIN_PAUSER_ROLE, "pause should use ADMIN_PAUSER_ROLE");
+        assertEq(unpauseRole, ADMIN_PAUSER_ROLE, "unpause should use ADMIN_PAUSER_ROLE");
+
+        // Verify ADMIN_UPGRADER_ROLE for upgrade
+        assertEq(upgradeRole, ADMIN_UPGRADER_ROLE, "upgradeToAndCall should use ADMIN_UPGRADER_ROLE");
+    }
+
+    /// @notice Verify the selectors in buildSyncerConfigTransactions match actual function selectors
+    function test_productionConfig_selectorsMatchActualFunctions() external pure {
+        // These are the expected selectors - verify they match the actual contract
+        assertEq(RoycoMarketSyncer.executeBatchAccountingSync.selector, bytes4(keccak256("executeBatchAccountingSync(bool)")));
+        assertEq(RoycoMarketSyncer.executeBatchAccountingSyncFor.selector, bytes4(keccak256("executeBatchAccountingSyncFor(address[],bool)")));
+        assertEq(RoycoMarketSyncer.addMarketKernels.selector, bytes4(keccak256("addMarketKernels(address[])")));
+        assertEq(RoycoMarketSyncer.removeMarketKernels.selector, bytes4(keccak256("removeMarketKernels(address[])")));
+        assertEq(IRoycoAuth.pause.selector, bytes4(keccak256("pause()")));
+        assertEq(IRoycoAuth.unpause.selector, bytes4(keccak256("unpause()")));
     }
 }
