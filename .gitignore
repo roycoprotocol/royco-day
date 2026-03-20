@@ -17,3 +17,6 @@ docs/
 # Foundry deployment files
 broadcast
 *.env.*
+
+# Deployment script output
+output/
