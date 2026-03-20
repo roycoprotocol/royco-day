@@ -141,7 +141,7 @@ contract RoycoMarketSyncer is RoycoBase {
             // Fetch the return data if the sync failed
             bytes memory returnData;
             assembly ("memory-safe") {
-                // Retrieve the free memory pointer and its size
+                // Retrieve the free memory pointer and the return data size
                 returnData := mload(0x40)
                 let size := returndatasize()
                 // Update the free memory pointer to be after the memory allocated for the return data (ensure 32 byte alignment)
