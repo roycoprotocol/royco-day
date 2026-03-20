@@ -21,7 +21,7 @@ contract RoycoMarketSyncer is RoycoBase {
     bytes32 private constant ROYCO_MARKET_SYNCER_STORAGE_SLOT = 0x65f8145c32d6f7d600ded0f23ff9c2c2e262c975a2f7552b5c41fcd203e2aa00;
 
     /// @dev The calldata for synchronizing NAV accounting for Royco markets
-    bytes private constant ACCOUNTING_SYNC_CALLDATA = abi.encodeCall(IRoycoKernel.syncTrancheAccounting, ());
+    bytes private constant SYNC_ACCOUNTING_CALLDATA = abi.encodeCall(IRoycoKernel.syncTrancheAccounting, ());
 
     /// @notice Storage state for the Royco market syncer
     /// @custom:field marketKernels An enumerable set of the configured market kernels
@@ -135,7 +135,7 @@ contract RoycoMarketSyncer is RoycoBase {
      */
     function _executeAccountingSync(address _marketKernel, bool _tolerateReversion) internal {
         // Execute the accounting sync on the specified kernel
-        (bool syncSucceeded,) = _marketKernel.call(ACCOUNTING_SYNC_CALLDATA);
+        (bool syncSucceeded,) = _marketKernel.call(SYNC_ACCOUNTING_CALLDATA);
         // If the sync reverted, handle it according to the tolerance specified
         if (!syncSucceeded) {
             // Fetch the return data if the sync failed
