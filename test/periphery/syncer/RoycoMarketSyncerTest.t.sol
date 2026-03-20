@@ -187,11 +187,18 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
     function _configureRoles() internal {
         // Mock the factory's canCall function to allow our test wallets to call syncer functions
 
-        // Allow SYNC_OPERATOR to call executeBatchAccountingSync (immediate, no delay)
+        // Allow SYNC_OPERATOR to call executeBatchAccountingSync and executeBatchAccountingSyncFor (immediate, no delay)
         vm.mockCall(
             mockFactory,
             abi.encodeWithSelector(
                 IAccessManager.canCall.selector, SYNC_OPERATOR_ADDRESS, address(syncer), RoycoMarketSyncer.executeBatchAccountingSync.selector
+            ),
+            abi.encode(true, uint32(0))
+        );
+        vm.mockCall(
+            mockFactory,
+            abi.encodeWithSelector(
+                IAccessManager.canCall.selector, SYNC_OPERATOR_ADDRESS, address(syncer), RoycoMarketSyncer.executeBatchAccountingSyncFor.selector
             ),
             abi.encode(true, uint32(0))
         );
@@ -682,6 +689,222 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // SECTION 5B: EXECUTE BATCH ACCOUNTING SYNC FOR (SPECIFIC KERNELS) TESTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Test batch sync for specific kernels with single kernel succeeds
+    function test_executeBatchSyncFor_singleKernel() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSyncFor(kernels, true);
+
+        assertEq(mockKernel1.syncCallCount(), 1, "Sync should have been called once");
+    }
+
+    /// @notice Test batch sync for specific kernels with multiple kernels succeeds
+    function test_executeBatchSyncFor_multipleKernels() external {
+        address[] memory kernels = _getAllKernels();
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSyncFor(kernels, true);
+
+        assertEq(mockKernel1.syncCallCount(), 1, "Kernel1 sync should have been called");
+        assertEq(mockKernel2.syncCallCount(), 1, "Kernel2 sync should have been called");
+        assertEq(mockKernel3.syncCallCount(), 1, "Kernel3 sync should have been called");
+    }
+
+    /// @notice Test batch sync for specific kernels with zero kernels succeeds (no-op)
+    function test_executeBatchSyncFor_zeroKernels() external {
+        address[] memory kernels = new address[](0);
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSyncFor(kernels, true);
+        // Should succeed without reverting
+    }
+
+    /// @notice Test batch sync for specific kernels tolerates individual kernel failures when flag is true
+    function test_executeBatchSyncFor_toleratesFailures() external {
+        address[] memory kernels = _getAllKernels();
+
+        // Set first kernel to fail
+        mockKernel1.setShouldRevert(true);
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSyncFor(kernels, true);
+
+        // Verify other kernels were still synced
+        assertEq(mockKernel2.syncCallCount(), 1, "Kernel2 sync should have been called");
+        assertEq(mockKernel3.syncCallCount(), 1, "Kernel3 sync should have been called");
+    }
+
+    /// @notice Test batch sync for specific kernels emits failure event when kernel fails
+    function test_executeBatchSyncFor_emitsFailureEvent() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+
+        mockKernel1.setShouldRevert(true);
+
+        vm.expectEmit(true, false, false, false, address(syncer));
+        emit RoycoMarketSyncer.AccountingSyncFailed(address(mockKernel1), "");
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSyncFor(kernels, true);
+    }
+
+    /// @notice Test batch sync for specific kernels reverts on failure when tolerance is false
+    function test_executeBatchSyncFor_revertsOnFailureWhenNotTolerant() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+
+        mockKernel1.setShouldRevert(true);
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        vm.expectRevert("MockKernel: sync failed");
+        syncer.executeBatchAccountingSyncFor(kernels, false);
+    }
+
+    /// @notice Test batch sync for specific kernels propagates the exact error from failing kernel
+    function test_executeBatchSyncFor_propagatesExactError() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+
+        mockKernel1.setShouldRevert(true);
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        vm.expectRevert("MockKernel: sync failed");
+        syncer.executeBatchAccountingSyncFor(kernels, false);
+    }
+
+    /// @notice Test batch sync for specific kernels propagates custom errors correctly
+    function test_executeBatchSyncFor_propagatesCustomError() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+
+        mockKernel1.setShouldRevertWithCustomError(true);
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        vm.expectRevert(abi.encodeWithSelector(MockKernel.CustomSyncError.selector, 42, "custom error"));
+        syncer.executeBatchAccountingSyncFor(kernels, false);
+    }
+
+    /// @notice Test that error bytes are propagated exactly for specific kernels (byte-by-byte verification)
+    function test_executeBatchSyncFor_errorBytesMatchExactly() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+
+        mockKernel1.setShouldRevert(true);
+
+        // Get expected error bytes by calling kernel directly
+        bytes memory expectedErrorBytes;
+        try mockKernel1.syncTrancheAccounting() {
+            revert("Should have reverted");
+        } catch (bytes memory errorBytes) {
+            expectedErrorBytes = errorBytes;
+        }
+
+        // Now call through syncer and capture the propagated error
+        bytes memory actualErrorBytes;
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        try syncer.executeBatchAccountingSyncFor(kernels, false) {
+            revert("Should have reverted");
+        } catch (bytes memory errorBytes) {
+            actualErrorBytes = errorBytes;
+        }
+
+        assertEq(actualErrorBytes, expectedErrorBytes, "Error bytes should be propagated exactly");
+    }
+
+    /// @notice Test batch sync for specific kernels success path does not emit failure event
+    function test_executeBatchSyncFor_successDoesNotEmitFailureEvent() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+
+        vm.recordLogs();
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSyncFor(kernels, true);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        bytes32 failureEventSig = keccak256("AccountingSyncFailed(address,bytes)");
+        for (uint256 i = 0; i < logs.length; i++) {
+            assertTrue(logs[i].topics[0] != failureEventSig, "Should not emit AccountingSyncFailed on success");
+        }
+
+        assertEq(mockKernel1.syncCallCount(), 1, "Sync should have been called");
+    }
+
+    /// @notice Test batch sync for specific kernels continues after failure when tolerant
+    function test_executeBatchSyncFor_continuesAfterFailure() external {
+        address[] memory kernels = _getAllKernels();
+
+        mockKernel1.setShouldRevert(true);
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSyncFor(kernels, true);
+
+        assertEq(mockKernel2.syncCallCount(), 1, "Kernel2 should have been synced");
+        assertEq(mockKernel3.syncCallCount(), 1, "Kernel3 should have been synced");
+    }
+
+    /// @notice Test batch sync for specific kernels works with unregistered kernels
+    function test_executeBatchSyncFor_worksWithUnregisteredKernels() external {
+        // Don't register kernels, just sync them directly
+        address[] memory kernels = _getAllKernels();
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSyncFor(kernels, true);
+
+        // Verify all kernels were synced even though they weren't registered
+        assertEq(mockKernel1.syncCallCount(), 1, "Kernel1 sync should have been called");
+        assertEq(mockKernel2.syncCallCount(), 1, "Kernel2 sync should have been called");
+        assertEq(mockKernel3.syncCallCount(), 1, "Kernel3 sync should have been called");
+
+        // Verify they are not in the registered list
+        address[] memory registeredKernels = syncer.getMarketKernels();
+        assertEq(registeredKernels.length, 0, "No kernels should be registered");
+    }
+
+    /// @notice Test batch sync for specific kernels can sync same kernel multiple times
+    function test_executeBatchSyncFor_canSyncSameKernelMultipleTimes() external {
+        address[] memory kernels = new address[](3);
+        kernels[0] = address(mockKernel1);
+        kernels[1] = address(mockKernel1);
+        kernels[2] = address(mockKernel1);
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSyncFor(kernels, true);
+
+        assertEq(mockKernel1.syncCallCount(), 3, "Kernel1 should have been synced 3 times");
+    }
+
+    /// @notice Test batch sync for specific kernels with middle kernel failing
+    function test_executeBatchSyncFor_middleKernelFails() external {
+        address[] memory kernels = _getAllKernels();
+
+        // Set middle kernel to fail
+        mockKernel2.setShouldRevert(true);
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSyncFor(kernels, true);
+
+        // Verify kernel1 and kernel3 were synced, kernel2 was attempted
+        assertEq(mockKernel1.syncCallCount(), 1, "Kernel1 should have been synced");
+        assertEq(mockKernel3.syncCallCount(), 1, "Kernel3 should have been synced");
+    }
+
+    /// @notice Test batch sync for specific kernels stops at first failure when not tolerant
+    function test_executeBatchSyncFor_stopsAtFirstFailureWhenNotTolerant() external {
+        address[] memory kernels = _getAllKernels();
+
+        // Set first kernel to fail
+        mockKernel1.setShouldRevert(true);
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        vm.expectRevert("MockKernel: sync failed");
+        syncer.executeBatchAccountingSyncFor(kernels, false);
+
+        // Verify subsequent kernels were NOT called
+        assertEq(mockKernel2.syncCallCount(), 0, "Kernel2 should NOT have been synced");
+        assertEq(mockKernel3.syncCallCount(), 0, "Kernel3 should NOT have been synced");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // SECTION 6: ACCESS CONTROL TESTS
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -690,6 +913,14 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         vm.prank(UNAUTHORIZED_USER_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, UNAUTHORIZED_USER_ADDRESS));
         syncer.executeBatchAccountingSync(true);
+    }
+
+    /// @notice Test unauthorized user cannot execute batch sync for specific kernels
+    function test_accessControl_unauthorizedCannotSyncFor() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        vm.prank(UNAUTHORIZED_USER_ADDRESS);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, UNAUTHORIZED_USER_ADDRESS));
+        syncer.executeBatchAccountingSyncFor(kernels, true);
     }
 
     /// @notice Test unauthorized user cannot add kernels
@@ -763,6 +994,17 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         vm.prank(SYNC_OPERATOR_ADDRESS);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         syncer.executeBatchAccountingSync(true);
+    }
+
+    /// @notice Test pause blocks executeBatchAccountingSyncFor
+    function test_pause_blocksBatchSyncFor() external {
+        vm.prank(PAUSER_ADDRESS);
+        syncer.pause();
+
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        syncer.executeBatchAccountingSyncFor(kernels, true);
     }
 
     /// @notice Test add kernels fails when paused
@@ -843,6 +1085,63 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
     function test_getMarketKernels_returnsEmptyWhenNone() external view {
         address[] memory result = syncer.getMarketKernels();
         assertEq(result.length, 0, "Should have 0 kernels");
+    }
+
+    /// @notice Test isMarketKernelRegistered returns true for registered kernel
+    function test_isMarketKernelRegistered_returnsTrueForRegistered() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        _addKernels(kernels);
+
+        assertTrue(syncer.isMarketKernelRegistered(address(mockKernel1)), "Kernel1 should be registered");
+    }
+
+    /// @notice Test isMarketKernelRegistered returns false for unregistered kernel
+    function test_isMarketKernelRegistered_returnsFalseForUnregistered() external view {
+        assertFalse(syncer.isMarketKernelRegistered(address(mockKernel1)), "Kernel1 should not be registered");
+    }
+
+    /// @notice Test isMarketKernelRegistered returns false after kernel is removed
+    function test_isMarketKernelRegistered_returnsFalseAfterRemoval() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        _addKernels(kernels);
+
+        assertTrue(syncer.isMarketKernelRegistered(address(mockKernel1)), "Kernel1 should be registered");
+
+        _removeKernels(kernels);
+
+        assertFalse(syncer.isMarketKernelRegistered(address(mockKernel1)), "Kernel1 should not be registered after removal");
+    }
+
+    /// @notice Test isMarketKernelRegistered returns false for zero address
+    function test_isMarketKernelRegistered_returnsFalseForZeroAddress() external view {
+        assertFalse(syncer.isMarketKernelRegistered(address(0)), "Zero address should not be registered");
+    }
+
+    /// @notice Test isMarketKernelRegistered with multiple kernels registered
+    function test_isMarketKernelRegistered_multipleKernels() external {
+        address[] memory kernels = _getAllKernels();
+        _addKernels(kernels);
+
+        assertTrue(syncer.isMarketKernelRegistered(address(mockKernel1)), "Kernel1 should be registered");
+        assertTrue(syncer.isMarketKernelRegistered(address(mockKernel2)), "Kernel2 should be registered");
+        assertTrue(syncer.isMarketKernelRegistered(address(mockKernel3)), "Kernel3 should be registered");
+
+        // Random address should not be registered
+        assertFalse(syncer.isMarketKernelRegistered(address(0x1234)), "Random address should not be registered");
+    }
+
+    /// @notice Test isMarketKernelRegistered correctly tracks partial removals
+    function test_isMarketKernelRegistered_partialRemoval() external {
+        address[] memory kernels = _getAllKernels();
+        _addKernels(kernels);
+
+        // Remove only kernel2
+        address[] memory toRemove = _singleKernelArray(address(mockKernel2));
+        _removeKernels(toRemove);
+
+        assertTrue(syncer.isMarketKernelRegistered(address(mockKernel1)), "Kernel1 should still be registered");
+        assertFalse(syncer.isMarketKernelRegistered(address(mockKernel2)), "Kernel2 should not be registered");
+        assertTrue(syncer.isMarketKernelRegistered(address(mockKernel3)), "Kernel3 should still be registered");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

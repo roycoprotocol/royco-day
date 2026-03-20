@@ -44,7 +44,7 @@ contract RoycoMarketSyncer is RoycoBase {
      */
     event AccountingSyncFailed(address indexed kernel, bytes errorData);
 
-    /// @notice Thrown when attempting to add a kernel that was not deployed by the canonical RoycoFactory
+    /// @notice Thrown when attempting to add a kernel that was not deployed by the canonical Royco Factory
     /// @param kernel The address of the invalid kernel
     error INVALID_KERNEL(address kernel);
 
@@ -70,38 +70,32 @@ contract RoycoMarketSyncer is RoycoBase {
 
     /**
      * @notice Executes a batch NAV accounting synchronization across all registered market kernels
-     * @dev Iterates through all registered kernels and calls syncTrancheAccounting on each
-     * @dev Uses low-level calls to gracefully handle reversions
-     * @param _tolerateReversions A boolean indicating whether to tolerate downstream reversions or propograte them upstream
+     * @param _tolerateReversions A boolean indicating whether to tolerate downstream reversions or propagate them upstream
      */
     function executeBatchAccountingSync(bool _tolerateReversions) external whenNotPaused restricted {
         // Execute the NAV synchronization for each registered kernel
         RoycoMarketSyncerState storage $ = _getRoycoMarketSyncerStorage();
         uint256 numKernels = $.marketKernels.length();
-        for (uint256 i = 0; i < numKernels; ++i) {
-            address marketKernel = $.marketKernels.at(i);
-            (bool syncSucceeded,) = marketKernel.call(ACCOUNTING_SYNC_CALLDATA);
-            // If the sync reverted, handle it according to the tolerance specified
-            if (!syncSucceeded) {
-                // Fetch the return data if the sync failed
-                bytes memory returnData;
-                assembly ("memory-safe") {
-                    // Retrieve the free memory pointer and its size
-                    returnData := mload(0x40)
-                    let size := returndatasize()
-                    // Update the free memory pointer to be after the memory allocated for the return data (ensure 32 byte alignment)
-                    mstore(0x40, add(returnData, and(add(size, 0x3f), not(0x1f))))
-                    // Store the return data length in the first 32 bytes and the actual data in the rest of the allocated memory
-                    mstore(returnData, size)
-                    returndatacopy(add(returnData, 0x20), 0x00, size)
-                }
-                // Emit the log and propogate the error up if specified
-                emit AccountingSyncFailed(marketKernel, returnData);
-                if (!_tolerateReversions) {
-                    assembly ("memory-safe") {
-                        revert(add(returnData, 0x20), mload(returnData))
-                    }
-                }
+        for (uint256 i = 0; i < numKernels;) {
+            _executeAccountingSync($.marketKernels.at(i), _tolerateReversions);
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    /**
+     * @notice Executes a batch NAV accounting synchronization across all specified market kernels
+     * @param _marketKernels The market kernels to execute the NAV synchronizations for
+     * @param _tolerateReversions A boolean indicating whether to tolerate downstream reversions or propagate them upstream
+     */
+    function executeBatchAccountingSyncFor(address[] calldata _marketKernels, bool _tolerateReversions) external whenNotPaused restricted {
+        // Execute the NAV synchronization for each specified kernel
+        uint256 numKernels = _marketKernels.length;
+        for (uint256 i = 0; i < numKernels;) {
+            _executeAccountingSync(_marketKernels[i], _tolerateReversions);
+            unchecked {
+                ++i;
             }
         }
     }
@@ -128,6 +122,42 @@ contract RoycoMarketSyncer is RoycoBase {
         return _getRoycoMarketSyncerStorage().marketKernels.values();
     }
 
+    /// @notice Returns if the specified kernel is currently registered with this syncer
+    function isMarketKernelRegistered(address _marketKernel) public view returns (bool) {
+        return _getRoycoMarketSyncerStorage().marketKernels.contains(_marketKernel);
+    }
+
+    /**
+     * @notice Executes a NAV accounting synchronization for the specified market kernel
+     * @dev Uses low-level calls to gracefully handle reversions
+     * @param _marketKernel The market kernel to execute the NAV synchronizations for
+     * @param _tolerateReversion A boolean indicating whether to tolerate downstream reversions or propagate them upstream
+     */
+    function _executeAccountingSync(address _marketKernel, bool _tolerateReversion) internal {
+        // Execute the accounting sync on the specified kernel
+        (bool syncSucceeded,) = _marketKernel.call(ACCOUNTING_SYNC_CALLDATA);
+        // If the sync reverted, handle it according to the tolerance specified
+        if (!syncSucceeded) {
+            // Fetch the return data if the sync failed
+            bytes memory returnData;
+            assembly ("memory-safe") {
+                // Retrieve the free memory pointer and its size
+                returnData := mload(0x40)
+                let size := returndatasize()
+                // Update the free memory pointer to be after the memory allocated for the return data (ensure 32 byte alignment)
+                mstore(0x40, add(returnData, and(add(size, 0x3f), not(0x1f))))
+                // Store the return data length in the first 32 bytes and the actual data in the rest of the allocated memory
+                mstore(returnData, size)
+                let returnDataStartPtr := add(returnData, 0x20)
+                returndatacopy(returnDataStartPtr, 0x00, size)
+                // Propagate the error if specified
+                if iszero(_tolerateReversion) { revert(returnDataStartPtr, size) }
+            }
+            // Emit the log if reversions are tolerated
+            emit AccountingSyncFailed(_marketKernel, returnData);
+        }
+    }
+
     /**
      * @notice Adds or removes market kernels from the syncer
      * @dev Validates each kernel before addition to ensure it was deployed by the canonical Royco Factory
@@ -138,7 +168,7 @@ contract RoycoMarketSyncer is RoycoBase {
         // Execute the addition or removal of kernels
         RoycoMarketSyncerState storage $ = _getRoycoMarketSyncerStorage();
         uint256 numKernels = _marketKernels.length;
-        for (uint256 i = 0; i < numKernels; ++i) {
+        for (uint256 i = 0; i < numKernels;) {
             address marketKernel = _marketKernels[i];
             // If this is an addition, validate that the kernel was deployed by the Royco factory and add it if it doesn't exist
             if (_isAddition) {
@@ -150,6 +180,9 @@ contract RoycoMarketSyncer is RoycoBase {
             else {
                 require($.marketKernels.remove(marketKernel), KERNEL_DOES_NOT_EXISTS(marketKernel));
                 emit MarketKernelRemoved(marketKernel);
+            }
+            unchecked {
+                ++i;
             }
         }
     }
