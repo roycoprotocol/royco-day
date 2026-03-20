@@ -47,7 +47,7 @@ abstract contract IdenticalERC4626SharesOracleQuoter is IdenticalAssetsOracleQuo
 
         // Resolve the vault base asset to NAV unit conversion rate, scaled to WAD precision
         uint256 baseAssetToNAVUnitConversionRateWAD = getStoredConversionRateWAD();
-        // If the stored conversion rate is the sentinel value, the cache hasn't been warmed, so query the oracle for the rate
+        // If the stored conversion rate is the sentinel value, query the oracle for the rate
         if (baseAssetToNAVUnitConversionRateWAD == SENTINEL_CONVERSION_RATE) baseAssetToNAVUnitConversionRateWAD = _getConversionRateFromOracleWAD();
 
         // Calculate the conversion rate from tranche to NAV units, scaled to WAD precision
