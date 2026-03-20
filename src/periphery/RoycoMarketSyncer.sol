@@ -80,11 +80,25 @@ contract RoycoMarketSyncer is RoycoBase {
         uint256 numKernels = $.marketKernels.length();
         for (uint256 i = 0; i < numKernels; ++i) {
             address marketKernel = $.marketKernels.at(i);
-            (bool syncSucceeded, bytes memory returnData) = marketKernel.call(ACCOUNTING_SYNC_CALLDATA);
+            (bool syncSucceeded,) = marketKernel.call(ACCOUNTING_SYNC_CALLDATA);
             // If the sync reverted, handle it according to the tolerance specified
             if (!syncSucceeded) {
+                // Fetch the return data if the sync failed
+                bytes memory returnData;
+                assembly ("memory-safe") {
+                    returnData := mload(0x40)
+                    let size := returndatasize()
+                    mstore(0x40, add(returnData, and(add(add(size, 0x20), 0x1f), not(0x1f))))
+                    mstore(returnData, size)
+                    returndatacopy(add(returnData, 0x20), 0x00, size)
+                }
+                // Emit the log and propogate the error up if specified
                 emit AccountingSyncFailed(marketKernel, returnData);
-                if (!_tolerateReversions) assembly ("memory-safe") { revert(add(returnData, 32), mload(returnData)) }
+                if (!_tolerateReversions) {
+                    assembly ("memory-safe") {
+                        revert(add(returnData, 0x20), mload(returnData))
+                    }
+                }
             }
         }
     }
