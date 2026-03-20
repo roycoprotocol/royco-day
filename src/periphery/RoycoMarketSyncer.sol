@@ -50,11 +50,11 @@ contract RoycoMarketSyncer is RoycoBase {
 
     /// @notice Thrown when attempting to add a kernel that is already registered with this syncer
     /// @param kernel The address of the kernel that already exists
-    error KERNEL_ALREADY_EXISTS(address kernel);
+    error KERNEL_ALREADY_REGISTERED(address kernel);
 
     /// @notice Thrown when attempting to remove a kernel that is not registered with this syncer
     /// @param kernel The address of the kernel that does not exist
-    error KERNEL_DOES_NOT_EXISTS(address kernel);
+    error KERNEL_IS_NOT_REGISTERED(address kernel);
 
     /**
      * @notice Initializes the market syncer state
@@ -173,12 +173,12 @@ contract RoycoMarketSyncer is RoycoBase {
             // If this is an addition, validate that the kernel was deployed by the Royco factory and add it if it doesn't exist
             if (_isAddition) {
                 _validateMarketKernel(marketKernel);
-                require($.marketKernels.add(marketKernel), KERNEL_ALREADY_EXISTS(marketKernel));
+                require($.marketKernels.add(marketKernel), KERNEL_ALREADY_REGISTERED(marketKernel));
                 emit MarketKernelAdded(marketKernel);
             }
             // If this is a removal, remove the kernel if it exists
             else {
-                require($.marketKernels.remove(marketKernel), KERNEL_DOES_NOT_EXISTS(marketKernel));
+                require($.marketKernels.remove(marketKernel), KERNEL_IS_NOT_REGISTERED(marketKernel));
                 emit MarketKernelRemoved(marketKernel);
             }
             unchecked {

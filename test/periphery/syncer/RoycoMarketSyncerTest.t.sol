@@ -435,7 +435,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
 
         // Try to add again - should revert
         vm.prank(KERNEL_ADMIN_ADDRESS);
-        vm.expectRevert(abi.encodeWithSelector(RoycoMarketSyncer.KERNEL_ALREADY_EXISTS.selector, address(mockKernel1)));
+        vm.expectRevert(abi.encodeWithSelector(RoycoMarketSyncer.KERNEL_ALREADY_REGISTERED.selector, address(mockKernel1)));
         syncer.addMarketKernels(kernels);
     }
 
@@ -495,7 +495,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         address[] memory kernels = _singleKernelArray(address(mockKernel1));
 
         vm.prank(KERNEL_ADMIN_ADDRESS);
-        vm.expectRevert(abi.encodeWithSelector(RoycoMarketSyncer.KERNEL_DOES_NOT_EXISTS.selector, address(mockKernel1)));
+        vm.expectRevert(abi.encodeWithSelector(RoycoMarketSyncer.KERNEL_IS_NOT_REGISTERED.selector, address(mockKernel1)));
         syncer.removeMarketKernels(kernels);
     }
 
