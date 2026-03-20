@@ -76,13 +76,14 @@ contract RoycoMarketSyncer is RoycoBase {
      */
     function executeBatchAccountingSync(bool _tolerateReversions) external whenNotPaused restricted {
         // Execute the NAV synchronization for each registered kernel
-        address[] memory marketKernels = getMarketKernels();
-        uint256 numKernels = marketKernels.length;
+        RoycoMarketSyncerState storage $ = _getRoycoMarketSyncerStorage();
+        uint256 numKernels = $.marketKernels.length();
         for (uint256 i = 0; i < numKernels; ++i) {
-            (bool syncSucceeded, bytes memory returnData) = marketKernels[i].call(ACCOUNTING_SYNC_CALLDATA);
+            address marketKernel = $.marketKernels.at(i);
+            (bool syncSucceeded, bytes memory returnData) = marketKernel.call(ACCOUNTING_SYNC_CALLDATA);
             // If the sync reverted, handle it according to the tolerance specified
             if (!syncSucceeded) {
-                emit AccountingSyncFailed(marketKernels[i], returnData);
+                emit AccountingSyncFailed(marketKernel, returnData);
                 if (!_tolerateReversions) assembly ("memory-safe") { revert(add(returnData, 32), mload(returnData)) }
             }
         }
