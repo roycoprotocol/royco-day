@@ -56,7 +56,7 @@ contract DeploySyncerScript is SyncerDeploymentConfig, AccessManagerConfigUtils,
 
         // Generate Safe transaction JSON for factory configuration
         if (GENERATE_SAFE_TX_JSON) {
-            generateFactoryConfigSafeJson(config.roycoFactory, syncer, config.syncOperators);
+            generateFactoryConfigSafeJson(config.roycoFactory, syncer, config.configSpecificSyncOperators);
         }
     }
 

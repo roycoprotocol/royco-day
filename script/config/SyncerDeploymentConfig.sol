@@ -38,7 +38,7 @@ abstract contract SyncerDeploymentConfig {
         uint256 chainId;
         address roycoFactory;
         address[] marketKernels;
-        address[] syncOperators;
+        address[] configSpecificSyncOperators;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -46,6 +46,14 @@ abstract contract SyncerDeploymentConfig {
     // ═══════════════════════════════════════════════════════════════════════════
 
     mapping(string syncerName => SyncerConfig) internal _syncerConfigs;
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // BASE SYNC OPERATORS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev Base sync operators that are granted SYNC_ROLE for all syncers
+    /// @dev First address is the Royco backend keeper
+    address[] internal _baseSyncOperators = [0x806836249FEbbF6ca3008BFF6C3257110f435480];
 
     // ═══════════════════════════════════════════════════════════════════════════
     // ERRORS
@@ -67,13 +75,21 @@ abstract contract SyncerDeploymentConfig {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function getSyncerConfig(string memory syncerName) public view returns (SyncerConfig memory) {
-        SyncerConfig memory config = _syncerConfigs[syncerName];
-        if (config.roycoFactory == address(0)) {
+        SyncerConfig storage storedConfig = _syncerConfigs[syncerName];
+        if (storedConfig.roycoFactory == address(0)) {
             revert SyncerConfigNotFound(syncerName);
         }
-        if (config.chainId != block.chainid) {
-            revert SyncerChainIdMismatch(syncerName, config.chainId, block.chainid);
+        if (storedConfig.chainId != block.chainid) {
+            revert SyncerChainIdMismatch(syncerName, storedConfig.chainId, block.chainid);
         }
+
+        // Build config with combined sync operators (base + config-specific)
+        SyncerConfig memory config;
+        config.chainId = storedConfig.chainId;
+        config.roycoFactory = storedConfig.roycoFactory;
+        config.marketKernels = storedConfig.marketKernels;
+        config.configSpecificSyncOperators = _combineArrays(_baseSyncOperators, storedConfig.configSpecificSyncOperators);
+
         return config;
     }
 
@@ -123,5 +139,16 @@ abstract contract SyncerDeploymentConfig {
         // Market kernels to add to the syncer:
         // - Metastreet sUSDai
         config.marketKernels.push(0xFdb17E53eA5d342124b8473188BCB9F05F1949CA);
+    }
+
+    /// @notice Combines two address arrays into one
+    function _combineArrays(address[] storage _base, address[] storage _additional) internal view returns (address[] memory combined) {
+        combined = new address[](_base.length + _additional.length);
+        for (uint256 i = 0; i < _base.length; i++) {
+            combined[i] = _base[i];
+        }
+        for (uint256 i = 0; i < _additional.length; i++) {
+            combined[_base.length + i] = _additional[i];
+        }
     }
 }
