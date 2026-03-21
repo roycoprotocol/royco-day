@@ -1775,6 +1775,93 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         assertTrue(foundEvent, "AccountingSyncFailed event should be emitted");
     }
 
+    /// @notice Test large error is propagated correctly when not tolerant
+    function test_executeAccountingSync_largeError_notTolerant() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        _addKernels(kernels);
+
+        mockKernel1.setRevertType(MockKernel.RevertType.LargeError);
+        mockKernel1.setLargeErrorSize(1024);
+
+        // Get expected error bytes by calling kernel directly
+        bytes memory expectedErrorBytes;
+        try mockKernel1.syncTrancheAccounting() {
+            revert("Should have reverted");
+        } catch (bytes memory errorBytes) {
+            expectedErrorBytes = errorBytes;
+        }
+
+        // Verify the error is propagated exactly
+        bytes memory actualErrorBytes;
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        try syncer.executeBatchAccountingSync(false) {
+            revert("Should have reverted");
+        } catch (bytes memory errorBytes) {
+            actualErrorBytes = errorBytes;
+        }
+
+        assertEq(actualErrorBytes, expectedErrorBytes, "Large error bytes should be propagated exactly");
+    }
+
+    /// @notice Test executeBatchSyncFor with large error tolerant
+    function test_executeBatchSyncFor_largeError_tolerant() external {
+        mockKernel1.setRevertType(MockKernel.RevertType.LargeError);
+        mockKernel1.setLargeErrorSize(1024);
+
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+
+        // Get expected error bytes
+        bytes memory expectedErrorBytes;
+        try mockKernel1.syncTrancheAccounting() {
+            revert("Should have reverted");
+        } catch (bytes memory errorBytes) {
+            expectedErrorBytes = errorBytes;
+        }
+
+        vm.recordLogs();
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSyncFor(kernels, true);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 eventSig = keccak256("AccountingSyncFailed(address,bytes)");
+
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                bytes memory emittedErrorBytes = abi.decode(logs[i].data, (bytes));
+                assertEq(emittedErrorBytes, expectedErrorBytes, "Large error bytes should match");
+                break;
+            }
+        }
+    }
+
+    /// @notice Test executeBatchSyncFor with large error not tolerant
+    function test_executeBatchSyncFor_largeError_notTolerant() external {
+        mockKernel1.setRevertType(MockKernel.RevertType.LargeError);
+        mockKernel1.setLargeErrorSize(1024);
+
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+
+        // Get expected error bytes
+        bytes memory expectedErrorBytes;
+        try mockKernel1.syncTrancheAccounting() {
+            revert("Should have reverted");
+        } catch (bytes memory errorBytes) {
+            expectedErrorBytes = errorBytes;
+        }
+
+        // Verify the error is propagated exactly
+        bytes memory actualErrorBytes;
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        try syncer.executeBatchAccountingSyncFor(kernels, false) {
+            revert("Should have reverted");
+        } catch (bytes memory errorBytes) {
+            actualErrorBytes = errorBytes;
+        }
+
+        assertEq(actualErrorBytes, expectedErrorBytes, "Large error bytes should be propagated exactly");
+    }
+
     /// @notice Test all kernels failing in batch with tolerance
     function test_executeAccountingSync_allKernelsFail_tolerant() external {
         address[] memory kernels = _getAllKernels();
