@@ -15,30 +15,68 @@ import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoFactory } from "../../../src/interfaces/IRoycoFactory.sol";
 import { RoycoMarketSyncer } from "../../../src/periphery/RoycoMarketSyncer.sol";
 
-/// @dev Mock kernel contract for testing
+/// @dev Mock kernel contract for testing with configurable revert behavior
 contract MockKernel {
     address public immutable SENIOR_TRANCHE;
-    bool public shouldRevert;
-    bool public shouldRevertWithCustomError;
     uint256 public syncCallCount;
 
+    enum RevertType {
+        None,
+        StringRevert,
+        CustomError,
+        EmptyRevert,
+        Panic,
+        LargeError
+    }
+
+    RevertType public revertType;
+    uint256 public largeErrorSize;
+
     error CustomSyncError(uint256 code, string reason);
+    error LargeError(bytes data);
 
     constructor(address _seniorTranche) {
         SENIOR_TRANCHE = _seniorTranche;
     }
 
+    function setRevertType(RevertType _revertType) external {
+        revertType = _revertType;
+    }
+
+    function setLargeErrorSize(uint256 _size) external {
+        largeErrorSize = _size;
+    }
+
+    // Legacy setters for backwards compatibility with existing tests
     function setShouldRevert(bool _shouldRevert) external {
-        shouldRevert = _shouldRevert;
+        revertType = _shouldRevert ? RevertType.StringRevert : RevertType.None;
     }
 
     function setShouldRevertWithCustomError(bool _shouldRevert) external {
-        shouldRevertWithCustomError = _shouldRevert;
+        revertType = _shouldRevert ? RevertType.CustomError : RevertType.None;
     }
 
     function syncTrancheAccounting() external {
-        if (shouldRevertWithCustomError) revert CustomSyncError(42, "custom error");
-        if (shouldRevert) revert("MockKernel: sync failed");
+        if (revertType == RevertType.CustomError) {
+            revert CustomSyncError(42, "custom error");
+        }
+        if (revertType == RevertType.StringRevert) {
+            revert("MockKernel: sync failed");
+        }
+        if (revertType == RevertType.EmptyRevert) {
+            revert();
+        }
+        if (revertType == RevertType.Panic) {
+            assert(false);
+        }
+        if (revertType == RevertType.LargeError) {
+            uint256 size = largeErrorSize > 0 ? largeErrorSize : 1024;
+            bytes memory largeData = new bytes(size);
+            for (uint256 i = 0; i < size; i++) {
+                largeData[i] = bytes1(uint8(i % 256));
+            }
+            revert LargeError(largeData);
+        }
         syncCallCount++;
     }
 }
@@ -1512,5 +1550,485 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         assertEq(RoycoMarketSyncer.removeMarketKernels.selector, bytes4(keccak256("removeMarketKernels(address[])")));
         assertEq(IRoycoAuth.pause.selector, bytes4(keccak256("pause()")));
         assertEq(IRoycoAuth.unpause.selector, bytes4(keccak256("unpause()")));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SECTION 12: _executeAccountingSync COMPREHENSIVE EDGE CASE TESTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Test empty revert is handled correctly when tolerant
+    function test_executeAccountingSync_emptyRevert_tolerant() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        _addKernels(kernels);
+
+        mockKernel1.setRevertType(MockKernel.RevertType.EmptyRevert);
+
+        vm.recordLogs();
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSync(true);
+
+        // Verify event was emitted with empty error data
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 eventSig = keccak256("AccountingSyncFailed(address,bytes)");
+
+        bool foundEvent = false;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                foundEvent = true;
+                bytes memory emittedErrorBytes = abi.decode(logs[i].data, (bytes));
+                assertEq(emittedErrorBytes.length, 0, "Empty revert should have zero-length error bytes");
+                break;
+            }
+        }
+        assertTrue(foundEvent, "AccountingSyncFailed event should be emitted for empty revert");
+    }
+
+    /// @notice Test empty revert is propagated correctly when not tolerant
+    function test_executeAccountingSync_emptyRevert_notTolerant() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        _addKernels(kernels);
+
+        mockKernel1.setRevertType(MockKernel.RevertType.EmptyRevert);
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        vm.expectRevert(bytes(""));
+        syncer.executeBatchAccountingSync(false);
+    }
+
+    /// @notice Test panic (assert failure) is handled correctly when tolerant
+    function test_executeAccountingSync_panic_tolerant() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        _addKernels(kernels);
+
+        mockKernel1.setRevertType(MockKernel.RevertType.Panic);
+
+        vm.recordLogs();
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSync(true);
+
+        // Verify event was emitted with panic error data
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 eventSig = keccak256("AccountingSyncFailed(address,bytes)");
+
+        bool foundEvent = false;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                foundEvent = true;
+                bytes memory emittedErrorBytes = abi.decode(logs[i].data, (bytes));
+                // Panic errors have selector 0x4e487b71 followed by panic code
+                assertEq(bytes4(emittedErrorBytes), bytes4(0x4e487b71), "Should be a panic error");
+                break;
+            }
+        }
+        assertTrue(foundEvent, "AccountingSyncFailed event should be emitted for panic");
+    }
+
+    /// @notice Test panic is propagated correctly when not tolerant
+    function test_executeAccountingSync_panic_notTolerant() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        _addKernels(kernels);
+
+        mockKernel1.setRevertType(MockKernel.RevertType.Panic);
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        // Panic code 0x01 is for assert failures
+        vm.expectRevert(abi.encodeWithSelector(0x4e487b71, uint256(0x01)));
+        syncer.executeBatchAccountingSync(false);
+    }
+
+    /// @notice Test panic error bytes match exactly between kernel and syncer
+    function test_executeAccountingSync_panicErrorBytesMatchExactly() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        _addKernels(kernels);
+
+        mockKernel1.setRevertType(MockKernel.RevertType.Panic);
+
+        // Get expected panic error bytes from kernel
+        bytes memory expectedErrorBytes;
+        try mockKernel1.syncTrancheAccounting() {
+            revert("Should have reverted");
+        } catch (bytes memory errorBytes) {
+            expectedErrorBytes = errorBytes;
+        }
+
+        // Get actual error bytes from syncer
+        bytes memory actualErrorBytes;
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        try syncer.executeBatchAccountingSync(false) {
+            revert("Should have reverted");
+        } catch (bytes memory errorBytes) {
+            actualErrorBytes = errorBytes;
+        }
+
+        assertEq(actualErrorBytes, expectedErrorBytes, "Panic error bytes should match exactly");
+    }
+
+    /// @notice Test large error data (1KB) is handled correctly when tolerant
+    function test_executeAccountingSync_largeError_tolerant() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        _addKernels(kernels);
+
+        mockKernel1.setRevertType(MockKernel.RevertType.LargeError);
+        mockKernel1.setLargeErrorSize(1024);
+
+        vm.recordLogs();
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSync(true);
+
+        // Verify event was emitted with large error data
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 eventSig = keccak256("AccountingSyncFailed(address,bytes)");
+
+        bool foundEvent = false;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                foundEvent = true;
+                bytes memory emittedErrorBytes = abi.decode(logs[i].data, (bytes));
+                // LargeError selector (4 bytes) + ABI encoded bytes (offset + length + data)
+                assertTrue(emittedErrorBytes.length > 1024, "Should contain large error data");
+                break;
+            }
+        }
+        assertTrue(foundEvent, "AccountingSyncFailed event should be emitted for large error");
+    }
+
+    /// @notice Test large error data bytes match exactly
+    function test_executeAccountingSync_largeErrorBytesMatchExactly() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        _addKernels(kernels);
+
+        mockKernel1.setRevertType(MockKernel.RevertType.LargeError);
+        mockKernel1.setLargeErrorSize(1024);
+
+        // Get expected error bytes from kernel
+        bytes memory expectedErrorBytes;
+        try mockKernel1.syncTrancheAccounting() {
+            revert("Should have reverted");
+        } catch (bytes memory errorBytes) {
+            expectedErrorBytes = errorBytes;
+        }
+
+        // Verify via event emission
+        vm.recordLogs();
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSync(true);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 eventSig = keccak256("AccountingSyncFailed(address,bytes)");
+
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                bytes memory emittedErrorBytes = abi.decode(logs[i].data, (bytes));
+                assertEq(emittedErrorBytes, expectedErrorBytes, "Large error bytes should match exactly");
+                break;
+            }
+        }
+    }
+
+    /// @notice Test very large error data (10KB) is handled correctly
+    function test_executeAccountingSync_veryLargeError_tolerant() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        _addKernels(kernels);
+
+        mockKernel1.setRevertType(MockKernel.RevertType.LargeError);
+        mockKernel1.setLargeErrorSize(10_240);
+
+        vm.recordLogs();
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSync(true);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 eventSig = keccak256("AccountingSyncFailed(address,bytes)");
+
+        bool foundEvent = false;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                foundEvent = true;
+                bytes memory emittedErrorBytes = abi.decode(logs[i].data, (bytes));
+                assertTrue(emittedErrorBytes.length > 10_240, "Should contain very large error data");
+                break;
+            }
+        }
+        assertTrue(foundEvent, "AccountingSyncFailed event should be emitted");
+    }
+
+    /// @notice Test all kernels failing in batch with tolerance
+    function test_executeAccountingSync_allKernelsFail_tolerant() external {
+        address[] memory kernels = _getAllKernels();
+        _addKernels(kernels);
+
+        // Set all kernels to fail with different error types
+        mockKernel1.setRevertType(MockKernel.RevertType.StringRevert);
+        mockKernel2.setRevertType(MockKernel.RevertType.CustomError);
+        mockKernel3.setRevertType(MockKernel.RevertType.EmptyRevert);
+
+        vm.recordLogs();
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSync(true);
+
+        // Verify 3 failure events were emitted
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 eventSig = keccak256("AccountingSyncFailed(address,bytes)");
+
+        uint256 failureEventCount = 0;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                failureEventCount++;
+            }
+        }
+        assertEq(failureEventCount, 3, "Should emit 3 failure events");
+    }
+
+    /// @notice Test last kernel failing in batch
+    function test_executeAccountingSync_lastKernelFails_tolerant() external {
+        address[] memory kernels = _getAllKernels();
+        _addKernels(kernels);
+
+        // Only last kernel fails
+        mockKernel3.setRevertType(MockKernel.RevertType.StringRevert);
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSync(true);
+
+        // Verify first two kernels were synced
+        assertEq(mockKernel1.syncCallCount(), 1, "Kernel1 should have synced");
+        assertEq(mockKernel2.syncCallCount(), 1, "Kernel2 should have synced");
+    }
+
+    /// @notice Test last kernel failing stops execution when not tolerant
+    function test_executeAccountingSync_lastKernelFails_notTolerant() external {
+        address[] memory kernels = _getAllKernels();
+        _addKernels(kernels);
+
+        mockKernel3.setRevertType(MockKernel.RevertType.StringRevert);
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        vm.expectRevert("MockKernel: sync failed");
+        syncer.executeBatchAccountingSync(false);
+
+        // Note: When the transaction reverts, all state changes are rolled back,
+        // so sync counts remain 0 even though kernels 1 & 2 were called before the revert
+        assertEq(mockKernel1.syncCallCount(), 0, "Kernel1 sync count rolled back");
+        assertEq(mockKernel2.syncCallCount(), 0, "Kernel2 sync count rolled back");
+    }
+
+    /// @notice Test calling EOA (no code) is handled gracefully
+    function test_executeBatchSyncFor_callingEOA_tolerant() external {
+        address eoa = makeAddr("EOA");
+        address[] memory kernels = new address[](1);
+        kernels[0] = eoa;
+
+        vm.recordLogs();
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSyncFor(kernels, true);
+
+        // Call to EOA succeeds (no code to execute), so no failure event
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 eventSig = keccak256("AccountingSyncFailed(address,bytes)");
+
+        uint256 failureEventCount = 0;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                failureEventCount++;
+            }
+        }
+        // Note: Calling an EOA with no code doesn't revert - it just succeeds
+        assertEq(failureEventCount, 0, "EOA call should not fail");
+    }
+
+    /// @notice Test multiple sync calls accumulate correctly
+    function test_executeAccountingSync_multipleSyncsAccumulate() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        _addKernels(kernels);
+
+        // Execute multiple syncs
+        for (uint256 i = 0; i < 10; i++) {
+            vm.prank(SYNC_OPERATOR_ADDRESS);
+            syncer.executeBatchAccountingSync(true);
+        }
+
+        assertEq(mockKernel1.syncCallCount(), 10, "Should have synced 10 times");
+    }
+
+    /// @notice Test alternating success and failure in batch
+    function test_executeAccountingSync_alternatingSuccessFailure() external {
+        address[] memory kernels = _getAllKernels();
+        _addKernels(kernels);
+
+        // Alternate: kernel1 succeeds, kernel2 fails, kernel3 succeeds
+        mockKernel2.setRevertType(MockKernel.RevertType.CustomError);
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSync(true);
+
+        assertEq(mockKernel1.syncCallCount(), 1, "Kernel1 should have synced");
+        assertEq(mockKernel3.syncCallCount(), 1, "Kernel3 should have synced");
+    }
+
+    /// @notice Test executeBatchSyncFor with empty revert
+    function test_executeBatchSyncFor_emptyRevert_errorBytesMatch() external {
+        mockKernel1.setRevertType(MockKernel.RevertType.EmptyRevert);
+
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+
+        // Get expected empty error bytes
+        bytes memory expectedErrorBytes;
+        try mockKernel1.syncTrancheAccounting() {
+            revert("Should have reverted");
+        } catch (bytes memory errorBytes) {
+            expectedErrorBytes = errorBytes;
+        }
+
+        vm.recordLogs();
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSyncFor(kernels, true);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 eventSig = keccak256("AccountingSyncFailed(address,bytes)");
+
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                bytes memory emittedErrorBytes = abi.decode(logs[i].data, (bytes));
+                assertEq(emittedErrorBytes, expectedErrorBytes, "Empty error bytes should match");
+                assertEq(emittedErrorBytes.length, 0, "Should be zero length");
+                break;
+            }
+        }
+    }
+
+    /// @notice Test executeBatchSyncFor with panic
+    function test_executeBatchSyncFor_panic_errorBytesMatch() external {
+        mockKernel1.setRevertType(MockKernel.RevertType.Panic);
+
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+
+        // Get expected panic error bytes
+        bytes memory expectedErrorBytes;
+        try mockKernel1.syncTrancheAccounting() {
+            revert("Should have reverted");
+        } catch (bytes memory errorBytes) {
+            expectedErrorBytes = errorBytes;
+        }
+
+        vm.recordLogs();
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSyncFor(kernels, true);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 eventSig = keccak256("AccountingSyncFailed(address,bytes)");
+
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                bytes memory emittedErrorBytes = abi.decode(logs[i].data, (bytes));
+                assertEq(emittedErrorBytes, expectedErrorBytes, "Panic error bytes should match");
+                break;
+            }
+        }
+    }
+
+    /// @notice Test custom error with various parameter sizes
+    function test_executeAccountingSync_customErrorBytesMatchExactly() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        _addKernels(kernels);
+
+        mockKernel1.setRevertType(MockKernel.RevertType.CustomError);
+
+        // Get expected custom error bytes
+        bytes memory expectedErrorBytes;
+        try mockKernel1.syncTrancheAccounting() {
+            revert("Should have reverted");
+        } catch (bytes memory errorBytes) {
+            expectedErrorBytes = errorBytes;
+        }
+
+        vm.recordLogs();
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSync(true);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 eventSig = keccak256("AccountingSyncFailed(address,bytes)");
+
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                bytes memory emittedErrorBytes = abi.decode(logs[i].data, (bytes));
+                assertEq(emittedErrorBytes, expectedErrorBytes, "Custom error bytes should match exactly");
+                // Verify it starts with CustomSyncError selector
+                assertEq(bytes4(emittedErrorBytes), MockKernel.CustomSyncError.selector, "Should be CustomSyncError");
+                break;
+            }
+        }
+    }
+
+    /// @notice Test kernel that resets between calls
+    function test_executeAccountingSync_kernelStateReset() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        _addKernels(kernels);
+
+        // First call fails
+        mockKernel1.setRevertType(MockKernel.RevertType.StringRevert);
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSync(true);
+        assertEq(mockKernel1.syncCallCount(), 0, "Should not have synced");
+
+        // Reset kernel to succeed
+        mockKernel1.setRevertType(MockKernel.RevertType.None);
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSync(true);
+        assertEq(mockKernel1.syncCallCount(), 1, "Should have synced after reset");
+    }
+
+    /// @notice Test indexed kernel address in event matches actual kernel
+    function test_executeAccountingSync_eventIndexedAddressCorrect() external {
+        address[] memory kernels = _getAllKernels();
+        _addKernels(kernels);
+
+        mockKernel1.setRevertType(MockKernel.RevertType.StringRevert);
+        mockKernel2.setRevertType(MockKernel.RevertType.CustomError);
+        mockKernel3.setRevertType(MockKernel.RevertType.EmptyRevert);
+
+        vm.recordLogs();
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSync(true);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 eventSig = keccak256("AccountingSyncFailed(address,bytes)");
+
+        address[] memory failedKernels = new address[](3);
+        uint256 count = 0;
+
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                address kernelAddr = address(uint160(uint256(logs[i].topics[1])));
+                failedKernels[count] = kernelAddr;
+                count++;
+            }
+        }
+
+        assertEq(count, 3, "Should have 3 failure events");
+        // Verify each kernel address was emitted (order may vary due to EnumerableSet)
+        bool found1 = false;
+        bool found2 = false;
+        bool found3 = false;
+        for (uint256 i = 0; i < 3; i++) {
+            if (failedKernels[i] == address(mockKernel1)) found1 = true;
+            if (failedKernels[i] == address(mockKernel2)) found2 = true;
+            if (failedKernels[i] == address(mockKernel3)) found3 = true;
+        }
+        assertTrue(found1, "Kernel1 should be in events");
+        assertTrue(found2, "Kernel2 should be in events");
+        assertTrue(found3, "Kernel3 should be in events");
     }
 }
