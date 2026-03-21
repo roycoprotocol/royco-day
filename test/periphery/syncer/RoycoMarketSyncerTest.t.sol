@@ -585,6 +585,46 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         syncer.executeBatchAccountingSync(true);
     }
 
+    /// @notice Test that emitted event contains exact error bytes
+    function test_executeBatchSync_emittedEventErrorBytesMatchExactly() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        _addKernels(kernels);
+
+        mockKernel1.setShouldRevert(true);
+
+        // Get expected error bytes by calling kernel directly
+        bytes memory expectedErrorBytes;
+        try mockKernel1.syncTrancheAccounting() {
+            revert("Should have reverted");
+        } catch (bytes memory errorBytes) {
+            expectedErrorBytes = errorBytes;
+        }
+
+        // Record logs
+        vm.recordLogs();
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSync(true);
+
+        // Find and verify the AccountingSyncFailed event
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 eventSig = keccak256("AccountingSyncFailed(address,bytes)");
+
+        bool foundEvent = false;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                foundEvent = true;
+                // Verify indexed kernel address
+                assertEq(address(uint160(uint256(logs[i].topics[1]))), address(mockKernel1), "Kernel address mismatch");
+                // Decode and verify error bytes from event data
+                bytes memory emittedErrorBytes = abi.decode(logs[i].data, (bytes));
+                assertEq(emittedErrorBytes, expectedErrorBytes, "Emitted error bytes should match exactly");
+                break;
+            }
+        }
+        assertTrue(foundEvent, "AccountingSyncFailed event not found");
+    }
+
     /// @notice Test batch sync reverts on failure when tolerance is false
     function test_executeBatchSync_revertsOnFailureWhenNotTolerant() external {
         address[] memory kernels = _singleKernelArray(address(mockKernel1));
@@ -757,6 +797,45 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
 
         vm.prank(SYNC_OPERATOR_ADDRESS);
         syncer.executeBatchAccountingSyncFor(kernels, true);
+    }
+
+    /// @notice Test that emitted event contains exact error bytes for specific kernels
+    function test_executeBatchSyncFor_emittedEventErrorBytesMatchExactly() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+
+        mockKernel1.setShouldRevert(true);
+
+        // Get expected error bytes by calling kernel directly
+        bytes memory expectedErrorBytes;
+        try mockKernel1.syncTrancheAccounting() {
+            revert("Should have reverted");
+        } catch (bytes memory errorBytes) {
+            expectedErrorBytes = errorBytes;
+        }
+
+        // Record logs
+        vm.recordLogs();
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSyncFor(kernels, true);
+
+        // Find and verify the AccountingSyncFailed event
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 eventSig = keccak256("AccountingSyncFailed(address,bytes)");
+
+        bool foundEvent = false;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                foundEvent = true;
+                // Verify indexed kernel address
+                assertEq(address(uint160(uint256(logs[i].topics[1]))), address(mockKernel1), "Kernel address mismatch");
+                // Decode and verify error bytes from event data
+                bytes memory emittedErrorBytes = abi.decode(logs[i].data, (bytes));
+                assertEq(emittedErrorBytes, expectedErrorBytes, "Emitted error bytes should match exactly");
+                break;
+            }
+        }
+        assertTrue(foundEvent, "AccountingSyncFailed event not found");
     }
 
     /// @notice Test batch sync for specific kernels reverts on failure when tolerance is false

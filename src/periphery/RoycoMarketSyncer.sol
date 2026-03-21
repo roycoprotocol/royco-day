@@ -20,9 +20,6 @@ contract RoycoMarketSyncer is RoycoBase {
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoMarketSyncerState")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ROYCO_MARKET_SYNCER_STORAGE_SLOT = 0x65f8145c32d6f7d600ded0f23ff9c2c2e262c975a2f7552b5c41fcd203e2aa00;
 
-    /// @dev The calldata for synchronizing NAV accounting for Royco markets
-    bytes private constant SYNC_ACCOUNTING_CALLDATA = abi.encodeCall(IRoycoKernel.syncTrancheAccounting, ());
-
     /// @notice Storage state for the Royco market syncer
     /// @custom:field marketKernels An enumerable set of the configured market kernels
     struct RoycoMarketSyncerState {
@@ -76,11 +73,10 @@ contract RoycoMarketSyncer is RoycoBase {
         // Execute the NAV synchronization for each registered kernel
         RoycoMarketSyncerState storage $ = _getRoycoMarketSyncerStorage();
         uint256 numKernels = $.marketKernels.length();
-        for (uint256 i = 0; i < numKernels;) {
-            _executeAccountingSync($.marketKernels.at(i), _tolerateReversions);
-            unchecked {
-                ++i;
-            }
+        // Allocate the accounting sync function selector to memory once and retrieve its pointer
+        uint256 syncSelectorPtr = _allocateSyncSelector();
+        for (uint256 i = 0; i < numKernels; ++i) {
+            _executeAccountingSync($.marketKernels.at(i), syncSelectorPtr, _tolerateReversions);
         }
     }
 
@@ -92,11 +88,10 @@ contract RoycoMarketSyncer is RoycoBase {
     function executeBatchAccountingSyncFor(address[] calldata _marketKernels, bool _tolerateReversions) external whenNotPaused restricted {
         // Execute the NAV synchronization for each specified kernel
         uint256 numKernels = _marketKernels.length;
-        for (uint256 i = 0; i < numKernels;) {
-            _executeAccountingSync(_marketKernels[i], _tolerateReversions);
-            unchecked {
-                ++i;
-            }
+        // Allocate the accounting sync function selector to memory once and retrieve its pointer
+        uint256 syncSelectorPtr = _allocateSyncSelector();
+        for (uint256 i = 0; i < numKernels; ++i) {
+            _executeAccountingSync(_marketKernels[i], syncSelectorPtr, _tolerateReversions);
         }
     }
 
@@ -131,30 +126,41 @@ contract RoycoMarketSyncer is RoycoBase {
      * @notice Executes a NAV accounting synchronization for the specified market kernel
      * @dev Uses low-level calls to gracefully handle reversions
      * @param _marketKernel The market kernel to execute the NAV synchronizations for
+     * @param _syncSelectorPtr Memory pointer to the pre-allocated syncTrancheAccounting selector
      * @param _tolerateReversion A boolean indicating whether to tolerate downstream reversions or propagate them upstream
      */
-    function _executeAccountingSync(address _marketKernel, bool _tolerateReversion) internal {
-        // Execute the accounting sync on the specified kernel
-        (bool syncSucceeded,) = _marketKernel.call(SYNC_ACCOUNTING_CALLDATA);
-        // If the sync reverted, handle it according to the tolerance specified
-        if (!syncSucceeded) {
-            // Fetch the return data if the sync failed
-            bytes memory returnData;
-            assembly ("memory-safe") {
+    function _executeAccountingSync(address _marketKernel, uint256 _syncSelectorPtr, bool _tolerateReversion) internal {
+        assembly ("memory-safe") {
+            let syncSucceeded := call(gas(), _marketKernel, 0, _syncSelectorPtr, 0x04, 0x00, 0x00)
+            // If the sync reverted, handle it according to the specified tolerance
+            if iszero(syncSucceeded) {
                 // Retrieve the free memory pointer and the return data size
-                returnData := mload(0x40)
+                let returnDataPtr := mload(0x40)
                 let size := returndatasize()
-                // Update the free memory pointer to be after the memory allocated for the return data (ensure 32 byte alignment)
-                mstore(0x40, add(returnData, and(add(size, 0x3f), not(0x1f))))
-                // Store the return data length in the first 32 bytes and the actual data in the rest of the allocated memory
-                mstore(returnData, size)
-                let returnDataStartPtr := add(returnData, 0x20)
-                returndatacopy(returnDataStartPtr, 0x00, size)
-                // Propagate the error if specified
-                if iszero(_tolerateReversion) { revert(returnDataStartPtr, size) }
+                // Preemptively propagate the error if specified
+                if iszero(_tolerateReversion) {
+                    returndatacopy(returnDataPtr, 0x00, size)
+                    revert(returnDataPtr, size)
+                }
+                // Emit the AccountingSyncFailed event if reversions are tolerated
+                // NOTE: No need to update the free memory pointer because the log data will be used once
+                // ABI encode the event data for emission
+                // Store the offset of the return data bytes
+                mstore(returnDataPtr, 0x20)
+                // Store the length of the return data
+                mstore(add(returnDataPtr, 0x20), size)
+                // Store the return data itself
+                returndatacopy(add(returnDataPtr, 0x40), 0x00, size)
+                // Emit the event
+                log2(
+                    returnDataPtr,
+                    // The size to copy includes the offset, length, and return data length
+                    add(0x40, size),
+                    // Keccak256 hash of the AccountingSyncFailed event's signature
+                    0x1b6499ba89419ff3aa2cf89283a3c9a58e1146549fd35d8d6f1189a9c2107c9f,
+                    _marketKernel
+                )
             }
-            // Emit the log if reversions are tolerated
-            emit AccountingSyncFailed(_marketKernel, returnData);
         }
     }
 
@@ -168,7 +174,7 @@ contract RoycoMarketSyncer is RoycoBase {
         // Execute the addition or removal of kernels
         RoycoMarketSyncerState storage $ = _getRoycoMarketSyncerStorage();
         uint256 numKernels = _marketKernels.length;
-        for (uint256 i = 0; i < numKernels;) {
+        for (uint256 i = 0; i < numKernels; ++i) {
             address marketKernel = _marketKernels[i];
             // If this is an addition, validate that the kernel was deployed by the Royco factory and add it if it doesn't exist
             if (_isAddition) {
@@ -180,9 +186,6 @@ contract RoycoMarketSyncer is RoycoBase {
             else {
                 require($.marketKernels.remove(marketKernel), KERNEL_IS_NOT_REGISTERED(marketKernel));
                 emit MarketKernelRemoved(marketKernel);
-            }
-            unchecked {
-                ++i;
             }
         }
     }
@@ -202,6 +205,20 @@ contract RoycoMarketSyncer is RoycoBase {
 
         // Ensure that the kernel was deployed by the Royco factory
         require(juniorTranche != address(0) && _ostensibleMarketKernel == IRoycoVaultTranche(seniorTranche).KERNEL(), INVALID_KERNEL(_ostensibleMarketKernel));
+    }
+
+    /**
+     * @notice Allocates memory and stores the syncTrancheAccounting selector for batch operations
+     * @dev Stores the selector once to avoid repeated mstore operations in loops
+     * @return syncSelectorPtr Memory pointer to the stored selector
+     */
+    function _allocateSyncSelector() internal pure returns (uint256 syncSelectorPtr) {
+        bytes4 syncSelector = IRoycoKernel.syncTrancheAccounting.selector;
+        assembly ("memory-safe") {
+            syncSelectorPtr := mload(0x40)
+            mstore(0x40, add(syncSelectorPtr, 0x20))
+            mstore(syncSelectorPtr, syncSelector)
+        }
     }
 
     /**
