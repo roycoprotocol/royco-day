@@ -616,8 +616,17 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         // Set kernel to fail
         mockKernel1.setShouldRevert(true);
 
-        vm.expectEmit(true, false, false, false, address(syncer));
-        emit RoycoMarketSyncer.AccountingSyncFailed(address(mockKernel1), "");
+        // Get expected error bytes by calling kernel directly
+        bytes memory expectedErrorBytes;
+        try mockKernel1.syncTrancheAccounting() {
+            revert("Should have reverted");
+        } catch (bytes memory errorBytes) {
+            expectedErrorBytes = errorBytes;
+        }
+
+        // Check all event parameters: indexed address AND error data
+        vm.expectEmit(true, false, false, true, address(syncer));
+        emit RoycoMarketSyncer.AccountingSyncFailed(address(mockKernel1), expectedErrorBytes);
 
         vm.prank(SYNC_OPERATOR_ADDRESS);
         syncer.executeBatchAccountingSync(true);
@@ -830,8 +839,17 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
 
         mockKernel1.setShouldRevert(true);
 
-        vm.expectEmit(true, false, false, false, address(syncer));
-        emit RoycoMarketSyncer.AccountingSyncFailed(address(mockKernel1), "");
+        // Get expected error bytes by calling kernel directly
+        bytes memory expectedErrorBytes;
+        try mockKernel1.syncTrancheAccounting() {
+            revert("Should have reverted");
+        } catch (bytes memory errorBytes) {
+            expectedErrorBytes = errorBytes;
+        }
+
+        // Check all event parameters: indexed address AND error data
+        vm.expectEmit(true, false, false, true, address(syncer));
+        emit RoycoMarketSyncer.AccountingSyncFailed(address(mockKernel1), expectedErrorBytes);
 
         vm.prank(SYNC_OPERATOR_ADDRESS);
         syncer.executeBatchAccountingSyncFor(kernels, true);

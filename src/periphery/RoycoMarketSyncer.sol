@@ -154,8 +154,8 @@ contract RoycoMarketSyncer is RoycoBase {
                 // Emit the event
                 log2(
                     returnDataPtr,
-                    // The size to copy includes the offset, length, and return data length
-                    add(0x40, size),
+                    // The size to copy includes the offset, length, and return data padded to 32 bytes
+                    add(0x40, and(add(size, 0x1f), not(0x1f))),
                     // Keccak256 hash of the AccountingSyncFailed event's signature
                     0x1b6499ba89419ff3aa2cf89283a3c9a58e1146549fd35d8d6f1189a9c2107c9f,
                     _marketKernel
