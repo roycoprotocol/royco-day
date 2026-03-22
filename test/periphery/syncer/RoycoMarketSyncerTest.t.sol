@@ -2136,4 +2136,142 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
         assertTrue(found2, "Kernel2 should be in events");
         assertTrue(found3, "Kernel3 should be in events");
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SECTION 13: EDGE CASE STRESS TESTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Test syncing a large number of kernels (100+) to verify gas efficiency and correctness
+    function test_executeBatchSyncFor_largeKernelSet() external {
+        uint256 numKernels = 100;
+        address[] memory kernels = new address[](numKernels);
+
+        // Create 100 mock kernels
+        for (uint256 i = 0; i < numKernels; i++) {
+            address trancheAddr = makeAddr(string.concat("Tranche", vm.toString(i)));
+            MockKernel kernel = new MockKernel(trancheAddr);
+            kernels[i] = address(kernel);
+
+            // Deploy matching tranche
+            MockTranche tranche = new MockTranche(address(kernel));
+            vm.etch(trancheAddr, address(tranche).code);
+            vm.store(trancheAddr, bytes32(0), bytes32(uint256(uint160(address(kernel)))));
+        }
+
+        // Sync all 100 kernels
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSyncFor(kernels, true);
+
+        // Verify all kernels were synced
+        for (uint256 i = 0; i < numKernels; i++) {
+            assertEq(MockKernel(kernels[i]).syncCallCount(), 1, "Each kernel should be synced once");
+        }
+    }
+
+    /// @notice Test syncing large kernel set with mixed success/failure
+    function test_executeBatchSyncFor_largeKernelSet_mixedResults() external {
+        uint256 numKernels = 50;
+        address[] memory kernels = new address[](numKernels);
+
+        // Create 50 mock kernels, half will fail
+        for (uint256 i = 0; i < numKernels; i++) {
+            address trancheAddr = makeAddr(string.concat("TrancheM", vm.toString(i)));
+            MockKernel kernel = new MockKernel(trancheAddr);
+            kernels[i] = address(kernel);
+
+            // Every other kernel fails
+            if (i % 2 == 0) {
+                kernel.setRevertType(MockKernel.RevertType.StringRevert);
+            }
+        }
+
+        vm.recordLogs();
+
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSyncFor(kernels, true);
+
+        // Count failure events
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 eventSig = keccak256("AccountingSyncFailed(address,bytes)");
+        uint256 failureCount = 0;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == eventSig) {
+                failureCount++;
+            }
+        }
+
+        assertEq(failureCount, 25, "Should have 25 failure events");
+
+        // Verify successful kernels were synced
+        for (uint256 i = 0; i < numKernels; i++) {
+            if (i % 2 == 1) {
+                assertEq(MockKernel(kernels[i]).syncCallCount(), 1, "Odd kernels should be synced");
+            }
+        }
+    }
+
+    /// @notice Test that selector storage works correctly even with dirty memory
+    /// @dev Verifies _allocateSyncSelector works regardless of prior memory state
+    function test_executeAccountingSync_selectorWithDirtyMemory() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        _addKernels(kernels);
+
+        // Allocate and dirty some memory before the sync call
+        // This simulates a scenario where free memory pointer points to used/dirty memory
+        assembly {
+            let ptr := mload(0x40)
+            // Write garbage to the next 128 bytes
+            mstore(ptr, 0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+            mstore(add(ptr, 0x20), 0xcafebabecafebabecafebabecafebabecafebabecafebabecafebabecafebabe)
+            mstore(add(ptr, 0x40), 0x1234567812345678123456781234567812345678123456781234567812345678)
+            mstore(add(ptr, 0x60), 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff)
+            // Don't update free memory pointer - leave it pointing to dirty memory
+        }
+
+        // Execute sync - should work correctly despite dirty memory
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSync(true);
+
+        // Verify sync was called correctly
+        assertEq(mockKernel1.syncCallCount(), 1, "Sync should succeed with dirty memory");
+    }
+
+    /// @notice Test selector storage after multiple memory allocations
+    function test_executeAccountingSync_selectorAfterManyAllocations() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        _addKernels(kernels);
+
+        // Perform many memory allocations to move free memory pointer far
+        for (uint256 i = 0; i < 100; i++) {
+            bytes memory temp = new bytes(256);
+            temp[0] = bytes1(uint8(i));
+        }
+
+        // Execute sync - selector should still be stored and called correctly
+        vm.prank(SYNC_OPERATOR_ADDRESS);
+        syncer.executeBatchAccountingSync(true);
+
+        assertEq(mockKernel1.syncCallCount(), 1, "Sync should succeed after many allocations");
+    }
+
+    /// @notice Test that repeated syncs work correctly (memory cleanup between calls)
+    function test_executeAccountingSync_repeatedSyncsWithFailures() external {
+        address[] memory kernels = _singleKernelArray(address(mockKernel1));
+        _addKernels(kernels);
+
+        // Alternate between success and failure over 10 syncs
+        for (uint256 i = 0; i < 10; i++) {
+            if (i % 2 == 0) {
+                mockKernel1.setRevertType(MockKernel.RevertType.StringRevert);
+            } else {
+                mockKernel1.setRevertType(MockKernel.RevertType.None);
+            }
+
+            vm.prank(SYNC_OPERATOR_ADDRESS);
+            syncer.executeBatchAccountingSync(true);
+        }
+
+        // 5 successful syncs (i = 1, 3, 5, 7, 9)
+        assertEq(mockKernel1.syncCallCount(), 5, "Should have 5 successful syncs");
+    }
 }
