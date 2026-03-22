@@ -25,8 +25,8 @@ contract DeploySyncerScript is SyncerDeploymentConfig, AccessManagerConfigUtils,
     /// @dev Deployment salt for Royco syncers
     bytes32 constant SYNCER_SALT_BASE = keccak256("ROYCO_SYNCER");
 
-    /// @dev Output path for the Safe transaction JSON
-    string constant SAFE_TX_OUTPUT_PATH = "output/syncer_role_config.json";
+    /// @dev Suffix for the Safe transaction JSON file name (prepended with chain ID)
+    string constant SAFE_TX_OUTPUT_FILE_NAME_SUFFIX = "_syncer_role_config";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // DEPLOYMENT FLAGS
@@ -114,14 +114,20 @@ contract DeploySyncerScript is SyncerDeploymentConfig, AccessManagerConfigUtils,
         // Build the list of transactions needed to configure the syncer
         SafeTransaction[] memory transactions = buildSyncerConfigTransactions(_factory, _syncer, _syncOperators);
 
+        string memory outputFileName = string(abi.encodePacked(vm.toString(block.chainid), SAFE_TX_OUTPUT_FILE_NAME_SUFFIX));
         // Write the Safe-compatible JSON using inherited utility
-        writeSafeTransactionJson(transactions, SAFE_TX_OUTPUT_PATH, "RoycoMarketSyncer Factory Configuration");
+        writeSafeTransactionJson(
+            transactions,
+            outputFileName,
+            "Royco Market Syncer Factory Configuration",
+            "Sets up the roles configuration for the Royco Market Syncer on the Royco Factory"
+        );
 
         if (ENABLE_LOGGING) {
             console2.log("");
             console2.log("========================================");
             console2.log("Safe Transaction JSON Generated:");
-            console2.log("  Path:", SAFE_TX_OUTPUT_PATH);
+            console2.log("  File Name:", outputFileName);
             console2.log("  Transactions:", transactions.length);
             console2.log("========================================");
             console2.log("");
