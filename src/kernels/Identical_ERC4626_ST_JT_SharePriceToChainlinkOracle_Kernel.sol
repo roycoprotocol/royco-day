@@ -9,7 +9,7 @@ import { IdenticalERC4626SharesToChainlinkOracleQuoter } from "./base/quoter/Ide
  * @title Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel
  * @author Waymont
  * @notice The senior and junior tranches transfer in the same yield bearing ERC4626 shares (sUSDS, sUSDe, etc.)
- * @dev NAV computations use convert tranche units (ERC4626 shares) to base assets using the vault's exchange rate and then convert base assets to NAV units using a Chainlink (compatible) oracle or an admin set exchange rate
+ * @dev NAV computations convert tranche units (ERC4626 shares) to base assets using the vault's exchange rate and then convert base assets to NAV units using a Chainlink (compatible) oracle or an admin set exchange rate
  */
 contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel is RoycoKernel, IdenticalERC4626SharesToChainlinkOracleQuoter {
     /// @notice Constructs the kernel state

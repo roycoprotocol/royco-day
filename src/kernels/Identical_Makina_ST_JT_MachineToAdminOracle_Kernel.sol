@@ -9,6 +9,7 @@ import { IdenticalMakinaSharesToAdminOracleQuoter } from "./base/quoter/Identica
  * @title Identical_Makina_ST_JT_MachineToAdminOracle_Kernel
  * @author Waymont
  * @notice The senior and junior tranches transfer in the same yield bearing Makina machine shares (DUSD, DBIT, etc.)
+ * @dev NAV computations convert tranche units (Makina machine shares) to base assets using the machine's exchange rate and then convert base assets to NAV units using an admin set exchange rate
  */
 contract Identical_Makina_ST_JT_MachineToAdminOracle_Kernel is RoycoKernel, IdenticalMakinaSharesToAdminOracleQuoter {
     /**
