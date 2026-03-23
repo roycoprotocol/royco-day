@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { DeployScript } from "../../../../script/Deploy.s.sol";
-import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
+import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
@@ -50,9 +50,9 @@ contract PendlePTcUSD_Test is YieldBearingERC20Chainlink_TestBase {
     // DEPLOYMENT
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Deploys the PT-cUSD kernel and market using parameters from DeploymentConfig
+    /// @notice Deploys the PT-cUSD kernel and market using parameters from MarketDeploymentConfig
     function _deployKernelAndMarket() internal virtual override returns (DeployScript.DeploymentResult memory) {
-        DeploymentConfig.MarketDeploymentConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("PT-cUSD");
+        MarketDeploymentConfig.MarketConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("PT-cUSD");
 
         // Decode kernel-specific params from the deployment config
         DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams memory kernelParams =

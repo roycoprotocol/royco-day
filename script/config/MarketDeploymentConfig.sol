@@ -4,10 +4,10 @@ pragma solidity ^0.8.28;
 import { DeployScript } from "../Deploy.s.sol";
 
 /**
- * @title DeploymentConfig
+ * @title MarketDeploymentConfig
  * @notice Single configuration contract for all deployment parameters
  */
-abstract contract DeploymentConfig {
+abstract contract MarketDeploymentConfig {
     // ═══════════════════════════════════════════════════════════════════════════
     // CHAIN IDs
     // ═══════════════════════════════════════════════════════════════════════════
@@ -71,7 +71,7 @@ abstract contract DeploymentConfig {
     // MARKET-SPECIFIC CONFIG
     // ═══════════════════════════════════════════════════════════════════════════
 
-    struct MarketDeploymentConfig {
+    struct MarketConfig {
         // Market identification
         string marketName;
         uint256 chainId;
@@ -110,7 +110,7 @@ abstract contract DeploymentConfig {
     // MARKET CONFIG MAPPING
     // ═══════════════════════════════════════════════════════════════════════════
 
-    mapping(string marketName => MarketDeploymentConfig) internal _marketConfigs;
+    mapping(string marketName => MarketConfig) internal _marketConfigs;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // ERRORS
@@ -154,8 +154,8 @@ abstract contract DeploymentConfig {
     // MARKET CONFIG GETTER
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function getMarketConfig(string memory marketName) public view returns (MarketDeploymentConfig memory) {
-        MarketDeploymentConfig memory config = _marketConfigs[marketName];
+    function getMarketConfig(string memory marketName) public view returns (MarketConfig memory) {
+        MarketConfig memory config = _marketConfigs[marketName];
         if (bytes(config.marketName).length == 0) {
             revert MarketConfigNotFound(marketName);
         }
@@ -170,7 +170,7 @@ abstract contract DeploymentConfig {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _initializeMarketConfigs() internal {
-        _marketConfigs[STCUSD] = MarketDeploymentConfig({
+        _marketConfigs[STCUSD] = MarketConfig({
             marketName: STCUSD,
             chainId: MAINNET,
             seniorTrancheName: _seniorTrancheName(STCUSD),
@@ -211,7 +211,7 @@ abstract contract DeploymentConfig {
             transferAgentAddress: address(0)
         });
 
-        _marketConfigs[SNUSD] = MarketDeploymentConfig({
+        _marketConfigs[SNUSD] = MarketConfig({
             marketName: SNUSD,
             chainId: MAINNET,
             seniorTrancheName: _seniorTrancheName(SNUSD),
@@ -254,7 +254,7 @@ abstract contract DeploymentConfig {
             transferAgentAddress: address(0)
         });
 
-        _marketConfigs[SAVUSD] = MarketDeploymentConfig({
+        _marketConfigs[SAVUSD] = MarketConfig({
             marketName: SAVUSD,
             chainId: AVALANCHE,
             seniorTrancheName: _seniorTrancheName(SAVUSD),
@@ -297,7 +297,7 @@ abstract contract DeploymentConfig {
             transferAgentAddress: address(0)
         });
 
-        _marketConfigs[AUTOUSD] = MarketDeploymentConfig({
+        _marketConfigs[AUTOUSD] = MarketConfig({
             marketName: AUTOUSD,
             chainId: MAINNET,
             seniorTrancheName: _seniorTrancheName(AUTOUSD),
@@ -340,7 +340,7 @@ abstract contract DeploymentConfig {
             transferAgentAddress: address(0)
         });
 
-        _marketConfigs[MFONE] = MarketDeploymentConfig({
+        _marketConfigs[MFONE] = MarketConfig({
             marketName: MFONE,
             chainId: MAINNET,
             seniorTrancheName: _seniorTrancheName(MFONE),
@@ -381,7 +381,7 @@ abstract contract DeploymentConfig {
             transferAgentAddress: address(0)
         });
 
-        _marketConfigs[PT_CUSD] = MarketDeploymentConfig({
+        _marketConfigs[PT_CUSD] = MarketConfig({
             marketName: PT_CUSD,
             chainId: MAINNET,
             seniorTrancheName: _seniorTrancheName(PT_CUSD),
@@ -421,7 +421,7 @@ abstract contract DeploymentConfig {
             transferAgentAddress: address(0)
         });
 
-        _marketConfigs[REUSD] = MarketDeploymentConfig({
+        _marketConfigs[REUSD] = MarketConfig({
             marketName: REUSD,
             chainId: MAINNET,
             seniorTrancheName: _seniorTrancheName(REUSD),
@@ -461,7 +461,7 @@ abstract contract DeploymentConfig {
             transferAgentAddress: address(0)
         });
 
-        _marketConfigs[AA_FALCONX_USDC] = MarketDeploymentConfig({
+        _marketConfigs[AA_FALCONX_USDC] = MarketConfig({
             marketName: AA_FALCONX_USDC,
             chainId: MAINNET,
             seniorTrancheName: _seniorTrancheName(AA_FALCONX_USDC),
@@ -495,7 +495,7 @@ abstract contract DeploymentConfig {
             transferAgentAddress: address(0)
         });
 
-        _marketConfigs[SMOKEHOUSE_USDC] = MarketDeploymentConfig({
+        _marketConfigs[SMOKEHOUSE_USDC] = MarketConfig({
             marketName: SMOKEHOUSE_USDC,
             chainId: MAINNET,
             seniorTrancheName: _seniorTrancheName(SMOKEHOUSE_USDC),
@@ -538,7 +538,7 @@ abstract contract DeploymentConfig {
             transferAgentAddress: address(0)
         });
 
-        _marketConfigs[GAUNTLET_USDC_FRONTIER] = MarketDeploymentConfig({
+        _marketConfigs[GAUNTLET_USDC_FRONTIER] = MarketConfig({
             marketName: GAUNTLET_USDC_FRONTIER,
             chainId: MAINNET,
             seniorTrancheName: _seniorTrancheName(GAUNTLET_USDC_FRONTIER),
@@ -580,7 +580,7 @@ abstract contract DeploymentConfig {
             transferAgentAddress: address(0)
         });
 
-        _marketConfigs[ACRED] = MarketDeploymentConfig({
+        _marketConfigs[ACRED] = MarketConfig({
             marketName: ACRED,
             chainId: MAINNET,
             seniorTrancheName: _seniorTrancheName(ACRED),
@@ -625,7 +625,7 @@ abstract contract DeploymentConfig {
             transferAgentAddress: address(0)
         });
 
-        _marketConfigs[MAKINA_DUSD] = MarketDeploymentConfig({
+        _marketConfigs[MAKINA_DUSD] = MarketConfig({
             marketName: MAKINA_DUSD,
             chainId: MAINNET,
             seniorTrancheName: _seniorTrancheName(MAKINA_DUSD),
@@ -664,7 +664,7 @@ abstract contract DeploymentConfig {
             transferAgentAddress: address(0)
         });
 
-        _marketConfigs[SUSDAI] = MarketDeploymentConfig({
+        _marketConfigs[SUSDAI] = MarketConfig({
             marketName: SUSDAI,
             chainId: ARBITRUM,
             seniorTrancheName: _seniorTrancheName(SUSDAI),
@@ -698,7 +698,7 @@ abstract contract DeploymentConfig {
             transferAgentAddress: address(0)
         });
 
-        _marketConfigs[YO_USD] = MarketDeploymentConfig({
+        _marketConfigs[YO_USD] = MarketConfig({
             marketName: YO_USD,
             chainId: BASE,
             seniorTrancheName: _seniorTrancheName(YO_USD),
@@ -740,7 +740,7 @@ abstract contract DeploymentConfig {
             transferAgentAddress: address(0)
         });
 
-        _marketConfigs[SYRUP_USDC] = MarketDeploymentConfig({
+        _marketConfigs[SYRUP_USDC] = MarketConfig({
             marketName: SYRUP_USDC,
             chainId: MAINNET,
             seniorTrancheName: _seniorTrancheName(SYRUP_USDC),

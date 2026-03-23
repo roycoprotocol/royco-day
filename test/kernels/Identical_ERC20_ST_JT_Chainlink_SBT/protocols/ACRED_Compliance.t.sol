@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { DeployScript } from "../../../../script/Deploy.s.sol";
-import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
+import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
 import { IRoycoAccountant } from "../../../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoKernel } from "../../../../src/interfaces/IRoycoKernel.sol";
 import { IRoycoVaultTranche } from "../../../../src/interfaces/IRoycoVaultTranche.sol";
@@ -85,7 +85,7 @@ contract ACRED_ComplianceTest is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
     }
 
     function _deployACRED() private returns (DeployScript.DeploymentResult memory) {
-        DeploymentConfig.MarketDeploymentConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig("ACRED");
+        MarketDeploymentConfig.MarketConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig("ACRED");
         _overrideStaleness(cfg);
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
         return DEPLOY_SCRIPT.deploy(
@@ -93,7 +93,7 @@ contract ACRED_ComplianceTest is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
         );
     }
 
-    function _overrideStaleness(DeploymentConfig.MarketDeploymentConfig memory _cfg) private pure {
+    function _overrideStaleness(MarketDeploymentConfig.MarketConfig memory _cfg) private pure {
         DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams memory kp =
             abi.decode(_cfg.kernelSpecificParams, (DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams));
         kp.stalenessThresholdSeconds = _getStalenessThreshold();

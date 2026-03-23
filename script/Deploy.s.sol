@@ -29,7 +29,7 @@ import { RoycoSeniorTranche } from "../src/tranches/RoycoSeniorTranche.sol";
 import { AdaptiveCurveYDM_V1 } from "../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { StaticCurveYDM } from "../src/ydm/StaticCurveYDM.sol";
-import { DeploymentConfig } from "./config/DeploymentConfig.sol";
+import { MarketDeploymentConfig } from "./config/MarketDeploymentConfig.sol";
 import { Create2DeployUtils } from "./utils/Create2DeployUtils.sol";
 import { Script } from "lib/forge-std/src/Script.sol";
 import { console2 } from "lib/forge-std/src/console2.sol";
@@ -41,8 +41,8 @@ import { console2 } from "lib/forge-std/src/console2.sol";
 ///   - Script (Foundry scripting)
 ///   - Create2DeployUtils (deterministic deployments via CREATE2)
 ///   - RolesConfiguration (role constants and config)
-///   - DeploymentConfig (per-chain and per-market configuration)
-contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, DeploymentConfig {
+///   - MarketDeploymentConfig (per-chain and per-market configuration)
+contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketDeploymentConfig {
     // Custom errors
     error UnsupportedKernelType(KernelType kernelType);
     error UnsupportedYDMType(YDMType ydmType);
@@ -188,12 +188,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     }
 
     /// @notice Deploy a market using Solidity configuration
-    /// @param marketName The name of the market to deploy (must match a config in DeploymentConfig)
+    /// @param marketName The name of the market to deploy (must match a config in MarketDeploymentConfig)
     /// @param deployerPrivateKey The private key of the deployer
     /// @return result The deployment result containing all deployed contract addresses
     function deployFromConfig(string memory marketName, uint256 deployerPrivateKey) public returns (DeploymentResult memory) {
         ChainConfig memory chainConfig = getChainConfig(block.chainid);
-        MarketDeploymentConfig memory marketConfig = getMarketConfig(marketName);
+        MarketConfig memory marketConfig = getMarketConfig(marketName);
 
         // Build role assignments from chain config
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = generateRolesAssignments(
@@ -230,7 +230,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     }
 
     /// @notice Prints all deployment parameters for verification before deployment
-    function _printDeploymentParams(MarketDeploymentConfig memory _config, address _factoryAdmin, address _protocolFeeRecipient) internal view {
+    function _printDeploymentParams(MarketConfig memory _config, address _factoryAdmin, address _protocolFeeRecipient) internal view {
         console2.log("=== DEPLOYMENT PARAMETERS ===");
         console2.log("");
 
@@ -295,7 +295,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     /// @param _deployerPrivateKey The private key used to broadcast deployment transactions
     /// @return The deployment result containing all deployed contract addresses
     function deploy(
-        MarketDeploymentConfig memory _config,
+        MarketConfig memory _config,
         address _factoryAdmin,
         address _protocolFeeRecipient,
         uint32 _scheduledOperationsExpirySeconds,
@@ -619,7 +619,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     function _deployMarket(
         RoycoFactory factory,
         address ydmAddress,
-        MarketDeploymentConfig memory _config,
+        MarketConfig memory _config,
         address _protocolFeeRecipient
     )
         internal
@@ -1058,11 +1058,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     /// @param _factoryAddress The address of the factory
     /// @param _config The market deployment configuration
     /// @return The initialization data for the accountant proxy
-    function _buildAccountantInitializationData(
-        address _ydmAddress,
-        address _factoryAddress,
-        MarketDeploymentConfig memory _config
-    )
+    function _buildAccountantInitializationData(address _ydmAddress, address _factoryAddress, MarketConfig memory _config)
         internal
         pure
         returns (bytes memory)
@@ -1088,7 +1084,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     /// @param _factoryAddress The address of the factory
     /// @param _config The market deployment configuration
     /// @return The initialization data for the senior tranche proxy
-    function _buildSeniorTrancheInitializationData(address _factoryAddress, MarketDeploymentConfig memory _config) internal pure returns (bytes memory) {
+    function _buildSeniorTrancheInitializationData(address _factoryAddress, MarketConfig memory _config) internal pure returns (bytes memory) {
         IRoycoVaultTranche.RoycoTrancheInitParams memory trancheParams = IRoycoVaultTranche.RoycoTrancheInitParams({
             name: _config.seniorTrancheName, symbol: _config.seniorTrancheSymbol, initialAuthority: _factoryAddress
         });
@@ -1100,7 +1096,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, Deploym
     /// @param _factoryAddress The address of the factory
     /// @param _config The market deployment configuration
     /// @return The initialization data for the junior tranche proxy
-    function _buildJuniorTrancheInitializationData(address _factoryAddress, MarketDeploymentConfig memory _config) internal pure returns (bytes memory) {
+    function _buildJuniorTrancheInitializationData(address _factoryAddress, MarketConfig memory _config) internal pure returns (bytes memory) {
         IRoycoVaultTranche.RoycoTrancheInitParams memory trancheParams = IRoycoVaultTranche.RoycoTrancheInitParams({
             name: _config.juniorTrancheName, symbol: _config.juniorTrancheSymbol, initialAuthority: _factoryAddress
         });

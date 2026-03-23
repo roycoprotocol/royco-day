@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { Vm } from "../../lib/forge-std/src/Vm.sol";
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
-import { DeploymentConfig } from "../../script/config/DeploymentConfig.sol";
+import { MarketDeploymentConfig } from "../../script/config/MarketDeploymentConfig.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
 import { BaseTest } from "../base/BaseTest.t.sol";
@@ -71,7 +71,7 @@ contract GuardianCancellationTest is BaseTest {
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
         // Build deployment config
-        DeploymentConfig.MarketDeploymentConfig memory config = DeploymentConfig.MarketDeploymentConfig({
+        MarketDeploymentConfig.MarketConfig memory config = MarketDeploymentConfig.MarketConfig({
             marketName: "test",
             chainId: block.chainid,
             seniorTrancheName: SENIOR_TRANCHE_NAME,

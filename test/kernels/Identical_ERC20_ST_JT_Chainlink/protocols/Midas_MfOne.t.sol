@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { DeployScript } from "../../../../script/Deploy.s.sol";
-import { DeploymentConfig } from "../../../../script/config/DeploymentConfig.sol";
+import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/libraries/Units.sol";
@@ -61,7 +61,7 @@ contract MfOne_Test is YieldBearingERC20Chainlink_TestBase {
     }
 
     /// @notice Returns the initial reference-asset-to-NAV conversion rate
-    /// @dev 1:1 conversion (WAD) as configured in DeploymentConfig
+    /// @dev 1:1 conversion (WAD) as configured in MarketDeploymentConfig
     function _getInitialConversionRate() internal pure override returns (uint256) {
         return 1e18;
     }
@@ -96,13 +96,13 @@ contract MfOne_Test is YieldBearingERC20Chainlink_TestBase {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // DEPLOYMENT (uses DeploymentConfig)
+    // DEPLOYMENT (uses MarketDeploymentConfig)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Deploys the mF-ONE kernel and market using parameters from DeploymentConfig
+    /// @notice Deploys the mF-ONE kernel and market using parameters from MarketDeploymentConfig
     function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
-        // Read config from the deploy script (which inherits DeploymentConfig)
-        DeploymentConfig.MarketDeploymentConfig memory mfOneConfig = DEPLOY_SCRIPT.getMarketConfig("mF-ONE");
+        // Read config from the deploy script (which inherits MarketDeploymentConfig)
+        MarketDeploymentConfig.MarketConfig memory mfOneConfig = DEPLOY_SCRIPT.getMarketConfig("mF-ONE");
 
         // Decode kernel-specific params from the deployment config
         DeployScript.IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams memory kernelParams =

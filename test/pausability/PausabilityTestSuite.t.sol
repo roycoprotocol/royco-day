@@ -6,7 +6,7 @@ import { IAccessManaged } from "../../lib/openzeppelin-contracts/contracts/acces
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { Pausable } from "../../lib/openzeppelin-contracts/contracts/utils/Pausable.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
-import { DeploymentConfig } from "../../script/config/DeploymentConfig.sol";
+import { MarketDeploymentConfig } from "../../script/config/MarketDeploymentConfig.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
@@ -66,7 +66,7 @@ contract PausabilityTestSuite is BaseTest {
         // Build role assignments using the centralized function
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
 
-        DeploymentConfig.MarketDeploymentConfig memory config = DeploymentConfig.MarketDeploymentConfig({
+        MarketDeploymentConfig.MarketConfig memory config = MarketDeploymentConfig.MarketConfig({
             marketName: "sNUSD",
             chainId: block.chainid,
             seniorTrancheName: "Royco Senior sNUSD",
