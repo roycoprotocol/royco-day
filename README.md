@@ -6,7 +6,7 @@ Dawn enables structured risk tranching for any yield source by splitting it into
 
 ### NAV Types
 
-Each market tracks two types of NAV (Net Asset Value) per tranche:
+Each market tracks two types of NAVs (Net Asset Value) per tranche:
 
 **Raw NAV**: The pure asset value of the tranche based on underlying prices, excluding any coverage adjustments or yield share (risk premium). This represents the actual market value of the tranche's holdings.
 
@@ -23,12 +23,14 @@ Utilization =   ─────────────────────�
 ```
 
 **Parameters:**
-- `COVERAGE`: The minimum required coverage percentage (e.g., 20% means JT must be able to cover 20% of ST losses at all times)
-- `β`: Beta is JT's sensitivity to the same downside stress that affects ST (0 if JT is in a risk-free investment, 1 if JT and ST are in the same underlying investment)
+- `COVERAGE`: The minimum required coverage percentage (eg. 20% means JT must be able to cover 20% of ST losses at all times)
+- `β`: Beta is JT's sensitivity to the same downside stress that affects ST (eg. 0 if JT is in a risk-free investment, 1 if JT and ST are in the same underlying investment)
 
-Markets target a slight excess of junior capital above the minimum coverage requirement (90% utilization) to keep the junior tranche perpetually liquid. To maintain this target, the risk premium paid by seniors to juniors adapts to supply and demand signals on a per-second basis. As utilization approaches 100%, the junior's risk premium increases to attract more junior capital.
+Intuitively, when utilization is less than or equal to 100%, the market is fully collateralized from a coverage lens. Consequently, when utilization breaches 100%, the market has suffered sufficient losses such that the minimum coverage requirement is violated.
 
-Each market also defines a **liquidation utilization threshold**. When utilization exceeds this threshold, the market is deemed unhealthy and ST redeemers receive a self-liquidation bonus funded by JT assets, incentivizing seniors to exit to restore the market into a healthy state. This threshold must be greater than 100% because utilization can only breach 100% after losses have occurred and JT has provided coverage (reducing JT effective NAV). For example, a threshold of 150% means the market enters liquidation mode when JT's remaining buffer can only cover two-thirds of the required coverage for senior exposure. Formally, at x% utilization, JT's buffer equals 1/x of the required coverage.
+Markets target a slight excess of junior capital above the minimum coverage requirement (90% utilization) to keep the junior tranche perpetually liquid. To maintain this target, the risk premium paid by seniors to juniors adapts to supply and demand signals. As utilization approaches 100%, the junior's risk premium increases to attract more junior capital.
+
+Each market also defines a **liquidation utilization threshold**. When utilization exceeds this threshold, the market is deemed unhealthy and ST redeemers receive a self-liquidation bonus funded by JT assets, incentivizing seniors to exit to restore the market into a healthy state. This threshold must be greater than 100% to ensure that the market is only considered unhealthy when the minimum coverage requirement is violated. A threshold of 150% means the market enters liquidation mode when JT's remaining buffer can only cover two-thirds of the required coverage relative to senior exposure.
 
 ## Architecture
 
@@ -46,7 +48,9 @@ Each market has two ERC20 token contracts representing the two tranches:
 
 Both tranches are ERC20Permit-enabled, pausable, and support standard deposit/redeem operations.
 
-Royco tranches are natively composable across DeFi. Senior tranches transform high-risk vault tokens into leverage-eligible collateral for lending markets, unlocking net-new capital that wasn't accessible before. Beyond lending, tranches can be paired on AMMs, split on Pendle for fixed or variable rate exposure, and recursively tranched into layered risk structures.
+Royco tranches are natively composable across DeFi. Senior tranches transform high-risk vault tokens into leverage-eligible collateral for lending markets, unlocking net-new capital that wasn't accessible before.
+
+Beyond lending, tranches can be paired on AMMs, split on Pendle for fixed or variable rate exposure, and recursively tranched into layered risk structures.
 
 ### Kernel
 
@@ -58,7 +62,7 @@ The Kernel enforces coverage requirements: it will block operations that would l
 
 The **Accountant** maintains the financial state of each market. Before and after every operation, it synchronizes tranche accounting by:
 
-1. Reconciling any unrealized PnL since the last accounting sync via the deltas between the current and last checkpointed raw NAVs of each tranche.
+1. Reconciling any unrealized PnL since the last accounting sync via the deltas between the current and last checkpointed raw NAVs of each tranche
 2. Applying coverage obligations on losses
 3. Tracking impermanent losses (temporary losses that may recover)
 4. Distributing yield from senior to junior (risk premium) as instructed by the market's YDM
@@ -82,7 +86,7 @@ Dawn supports multiple YDM implementations:
 
 Markets operate as perpetual instruments with full liquidity for both tranches under normal conditions. If senior capital incurs a loss, junior coverage is immediately applied and the market enters a fixed-term regime. This gives the underlying position time to recover before junior LPs realize any losses. If the position recovers, juniors are made whole and the market shifts back to a perpetual state. In the event that losses persist and coverage runs thin, seniors can exit early with their guaranteed protection intact.
 
-Markets operate in one of two states:
+The two states are:
 
 **PERPETUAL**: Normal operation. All deposits and redemptions are enabled (subject to coverage constraints), the YDM actively adapts, and protocol fees accrue.
 
@@ -119,11 +123,17 @@ Dawn's pluggable quoter architecture enables integration with any yield-bearing 
 
 ## Extended Capabilities
 
-**Flexible Deployment**: Senior and junior capital within the same market can be deployed into identical or disparate yield sources. For example, seniors might be invested in Ethena while juniors are invested in Aave.
+**Flexible Deployment**: Senior and junior capital within the same market can be deployed into identical or disparate yield sources.
 
-**Depeg Protection**: Markets backed by synthetic assets use oracles that value the underlying based on actual backing rather than secondary market prices. If a depeg occurs, the loss is absorbed by junior coverage rather than passed through at stale valuations.
+For example, seniors might be invested in Ethena while juniors are invested in Aave.
 
-**Recursive Tranching**: Tranches can be used as inputs into new markets, enabling layered risk structures. Tranching a yield source produces Senior A and Junior A. Retranching Senior A produces Senior B and Junior B:
+**Depeg Protection**: Markets backed by synthetic assets use oracles that value the underlying based on actual backing rather than secondary market prices.
+
+If a depeg occurs, the loss is absorbed by junior coverage rather than passed through at stale valuations.
+
+**Recursive Tranching**: Tranches can be used as inputs into new markets, enabling layered risk structures.
+
+Tranching a yield source produces Senior A and Junior A. Retranching Senior A produces Senior B and Junior B:
 
 ```
 Senior:    Senior B
