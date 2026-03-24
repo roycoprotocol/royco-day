@@ -40,17 +40,17 @@ The **RoycoFactory** is a singleton contract that deploys and manages all Dawn m
 
 ### Tranches
 
-Each market has two ERC20 token contracts representing the two tranches:
+Each market has two ERC4626-style vault contracts representing the two tranches:
 
 **Senior Tranche (ST)**: The capital-protected tier. Senior LPs receive downside protection from the junior tranche when the underlying yield source experiences losses, the junior tranche absorbs them first. In exchange for this protection, senior LPs pay a risk premium (portion of their yield) to junior LPs. Senior has first claim on any recoveries after a loss event.
 
 **Junior Tranche (JT)**: The first-loss capital tier. Junior LPs provide a coverage buffer that protects senior capital from losses. In return, they earn a risk premium from senior yield. The size of this premium is determined by the market's Yield Distribution Model (YDM).
 
-Both tranches are ERC20Permit-enabled, pausable, and support standard deposit/redeem operations.
+Both tranches are ERC20Permit enabled, pausable, and support standard preview and deposit/redeem operations.
 
 Royco tranches are natively composable across DeFi. Senior tranches transform high-risk vault tokens into leverage-eligible collateral for lending markets, unlocking net-new capital that wasn't accessible before.
 
-Beyond lending, tranches can be paired on AMMs, split on Pendle for fixed or variable rate exposure, and recursively tranched into layered risk structures.
+Beyond lending, tranches can be paired on AMMs/CLOBs, split on Pendle for fixed or variable rate exposure, and recursively tranched into layered risk structures.
 
 ### Kernel
 
