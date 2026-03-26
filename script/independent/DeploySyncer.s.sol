@@ -153,9 +153,9 @@ contract DeploySyncerScript is SyncerDeploymentConfig, AccessManagerConfigUtils,
         pure
         returns (SafeTransaction[] memory transactions)
     {
-        // Base transactions: 3 for setTargetFunctionRole (one per role)
+        // Base transactions: 3 for setTargetFunctionRole + 1 for granting syncer SYNC_ROLE
         // Plus 1 grantRole per sync operator
-        uint256 numTransactions = 3 + _syncOperators.length;
+        uint256 numTransactions = 4 + _syncOperators.length;
         transactions = new SafeTransaction[](numTransactions);
 
         // Transaction 1: SYNC_ROLE functions
@@ -177,9 +177,12 @@ contract DeploySyncerScript is SyncerDeploymentConfig, AccessManagerConfigUtils,
         upgraderSelectors[0] = UUPSUpgradeable.upgradeToAndCall.selector;
         transactions[2] = buildSetTargetFunctionRole(_factory, _syncer, upgraderSelectors, ADMIN_UPGRADER_ROLE);
 
-        // Transactions 4+: Grant SYNC_ROLE to each operator
+        // Transaction 4: Grant SYNC_ROLE to the syncer (required to call syncTrancheAccounting on kernels)
+        transactions[3] = buildGrantRole(_factory, SYNC_ROLE, _syncer, 0);
+
+        // Transactions 5+: Grant SYNC_ROLE to each operator
         for (uint256 i = 0; i < _syncOperators.length; i++) {
-            transactions[3 + i] = buildGrantRole(_factory, SYNC_ROLE, _syncOperators[i], 0);
+            transactions[4 + i] = buildGrantRole(_factory, SYNC_ROLE, _syncOperators[i], 0);
         }
     }
 }
