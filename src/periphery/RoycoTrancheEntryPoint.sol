@@ -39,7 +39,6 @@ contract RoycoTrancheEntryPoint is RoycoBase {
         uint24 depositDelaySeconds;
         uint24 redemptionDelaySeconds;
         mapping(address user => mapping(uint256 requestNonce => DepositRequest depositRequest)) userToNonceToDepositRequest;
-        mapping(address user => uint64 keeperBonusWAD) userToKeeperBonusWAD;
     }
 
     /**
@@ -58,6 +57,15 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      * @param sharesMinted The amount of tranche shares minted to the depositor
      */
     event DepositExecuted(address indexed user, uint256 indexed nonce, uint256 sharesMinted);
+
+    /**
+     * @notice Emitted when a deposit request is cancelled
+     * @param user The user whose deposit request was cancelled
+     * @param nonce The nonce identifying the cancelled request
+     * @param receiver The address that received the returned escrowed assets
+     * @param assets The amount of assets returned
+     */
+    event DepositRequestCancelled(address indexed user, uint256 indexed nonce, address receiver, TRANCHE_UNIT assets);
 
     /// @notice Emitted when the deposit delay is updated for a kernel
     /// @param depositDelaySeconds The new deposit delay in seconds
@@ -165,13 +173,10 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      * @return trancheSharesMinted The amount of tranche shares minted to the caller
      */
     function executeDeposit(uint256 _requestNonce) public restricted returns (uint256 trancheSharesMinted) {
-        // Retrieve the user's specified deposit request
+        // Retrieve the user's specified deposit request and assert its validity
         RoycoTrancheEntryPointState storage $ = _getRoycoTrancheEntryPointStorage();
         DepositRequest memory userDepositRequest = $.userToNonceToDepositRequest[msg.sender][_requestNonce];
-
-        // Ensure that the request exists, hasn't been executed, and hasn't been cancelled
-        uint256 executableAtTimestamp = userDepositRequest.executableAtTimestamp;
-        require(executableAtTimestamp != 0 && executableAtTimestamp <= block.timestamp, INVALID_REQUEST(_requestNonce));
+        _assertRequestValidity(_requestNonce, userDepositRequest.executableAtTimestamp);
 
         // Mark the request as executed
         delete $.userToNonceToDepositRequest[msg.sender][_requestNonce];
@@ -182,6 +187,46 @@ contract RoycoTrancheEntryPoint is RoycoBase {
         // Emit the deposit execution event
         emit DepositExecuted(msg.sender, _requestNonce, trancheSharesMinted);
     }
+
+    /**
+     * @notice Cancels multiple pending deposit requests for the caller, returning escrowed assets
+     * @param _requestNonces The nonces of the deposit requests to cancel
+     * @param _receiver The address to receive the returned escrowed assets
+     */
+    function cancelDepositRequests(uint256[] calldata _requestNonces, address _receiver) external restricted {
+        // Execute the user specified deposit request cancellations
+        uint256 numRequestsToCancel = _requestNonces.length;
+        for (uint256 i = 0; i < numRequestsToCancel; ++i) {
+            cancelDepositRequest(_requestNonces[i], _receiver);
+        }
+    }
+
+    /**
+     * @notice Cancels a pending deposit request for the caller, returning escrowed assets
+     * @param _requestNonce The nonce of the deposit request to cancel
+     * @param _receiver The address to receive the returned escrowed assets
+     */
+    function cancelDepositRequest(uint256 _requestNonce, address _receiver) public restricted {
+        // Ensure the receiver isn't null
+        require(_receiver != address(0), NULL_ADDRESS());
+        // Retrieve the user's specified deposit request and assert that it exists
+        RoycoTrancheEntryPointState storage $ = _getRoycoTrancheEntryPointStorage();
+        DepositRequest memory userDepositRequest = $.userToNonceToDepositRequest[msg.sender][_requestNonce];
+        require(userDepositRequest.assets != ZERO_TRANCHE_UNITS, INVALID_REQUEST(_requestNonce));
+
+        // Mark the request as cancelled
+        delete $.userToNonceToDepositRequest[msg.sender][_requestNonce];
+
+        // Return the assets from the cancelled request to the specified receiver
+        IERC20(ROYCO_TRANCHE_ASSET).safeTransfer(_receiver, toUint256(userDepositRequest.assets));
+
+        // Emit the deposit request cancellation event
+        emit DepositRequestCancelled(msg.sender, _requestNonce, _receiver, userDepositRequest.assets);
+    }
+
+    /// =============================
+    /// Entry Point Redemption Functions
+    /// =============================
 
     /// =============================
     /// Admin Functions
@@ -204,6 +249,17 @@ contract RoycoTrancheEntryPoint is RoycoBase {
         _getRoycoTrancheEntryPointStorage().redemptionDelaySeconds = _redemptionDelaySeconds;
         emit RedemptionDelayUpdated(_redemptionDelaySeconds);
     }
+
+    /// =============================
+    /// Internal Utility Functions
+    /// =============================
+
+    /**
+     * @dev Asserts that a request exists and is executable (not executed already or cancelled)
+     * @param _requestNonce The nonce of the request being validated
+     * @param _executableAtTimestamp The timestamp after which the request can be executed
+     */
+    function _assertRequestValidity(uint256 _requestNonce, uint256 _executableAtTimestamp) internal view { }
 
     /**
      * @notice Returns a storage pointer to the RoycoTrancheEntryPointState storage
