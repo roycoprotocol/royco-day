@@ -172,6 +172,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
         uint64 _executorBonusWAD
     )
         external
+        whenNotPaused
         restricted
         returns (uint256 requestNonce, uint32 executableAtTimestamp)
     {
@@ -224,7 +225,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      * @param _requestNonce The nonce of the deposit request to execute
      * @return trancheSharesMinted The amount of tranche shares minted to the receiver
      */
-    function executeDeposit(address _user, uint256 _requestNonce) public restricted returns (uint256 trancheSharesMinted) {
+    function executeDeposit(address _user, uint256 _requestNonce) public whenNotPaused restricted returns (uint256 trancheSharesMinted) {
         // Retrieve the user's specified deposit request and assert its validity
         RoycoTrancheEntryPointState storage $ = _getRoycoTrancheEntryPointStorage();
         DepositRequest memory userDepositRequest = $.userToNonceToDepositRequest[_user][_requestNonce];
@@ -270,7 +271,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      * @param _requestNonces The nonces of the deposit requests to cancel
      * @param _receiver The address to receive the returned escrowed assets
      */
-    function cancelDepositRequests(uint256[] calldata _requestNonces, address _receiver) external restricted {
+    function cancelDepositRequests(uint256[] calldata _requestNonces, address _receiver) external whenNotPaused restricted {
         // Execute the user specified deposit request cancellations
         uint256 numRequestsToCancel = _requestNonces.length;
         for (uint256 i = 0; i < numRequestsToCancel; ++i) {
@@ -283,7 +284,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      * @param _requestNonce The nonce of the deposit request to cancel
      * @param _receiver The address to receive the returned escrowed assets
      */
-    function cancelDepositRequest(uint256 _requestNonce, address _receiver) public restricted {
+    function cancelDepositRequest(uint256 _requestNonce, address _receiver) public whenNotPaused restricted {
         // Ensure the receiver isn't null
         require(_receiver != address(0), NULL_ADDRESS());
         // Retrieve the user's specified deposit request and assert that it exists
