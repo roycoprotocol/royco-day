@@ -46,7 +46,7 @@ contract DeploySyncerScript is SyncerDeploymentConfig, AccessManagerConfigUtils,
         ENABLE_LOGGING = true;
 
         // Read config from environment variables
-        string memory syncerName = vm.envOr("SYNCER_NAME", MAINNET_SYNCER);
+        string memory syncerName = block.chainid == MAINNET ? MAINNET_SYNCER : block.chainid == AVALANCHE ? AVALANCHE_SYNCER : ARBITRUM_SYNCER;
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
         SyncerConfig memory config = getSyncerConfig(syncerName);
