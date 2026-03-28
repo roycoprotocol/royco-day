@@ -203,7 +203,8 @@ contract RoycoTrancheEntryPoint is RoycoBase {
     }
 
     /**
-     * @notice Executes multiple pending deposit requests for the caller
+     * @notice Executes multiple pending deposit requests for the specified user
+     * @param _user The user whose deposit requests should be executed
      * @param _requestNonces The nonces of the deposit requests to execute
      * @return trancheSharesMinted The amounts of tranche shares minted for each executed request
      */
@@ -217,10 +218,11 @@ contract RoycoTrancheEntryPoint is RoycoBase {
     }
 
     /**
-     * @notice Executes a pending deposit request for the caller
+     * @notice Executes a pending deposit request for the specified user
      * @dev The request must exist and the configured delay period must have elapsed
+     * @param _user The user whose deposit request should be executed
      * @param _requestNonce The nonce of the deposit request to execute
-     * @return trancheSharesMinted The amount of tranche shares minted to the caller
+     * @return trancheSharesMinted The amount of tranche shares minted to the receiver
      */
     function executeDeposit(address _user, uint256 _requestNonce) public restricted returns (uint256 trancheSharesMinted) {
         // Retrieve the user's specified deposit request and assert its validity
