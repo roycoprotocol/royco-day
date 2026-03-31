@@ -309,6 +309,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
     {
         // Execute the user specified deposit requests
         uint256 numRequestsToExecute = _requestNonces.length;
+        require(numRequestsToExecute == _assetsToDeposit.length, ARRAY_LENGTH_MISMATCH());
         trancheSharesMinted = new uint256[](numRequestsToExecute);
         for (uint256 i = 0; i < numRequestsToExecute; ++i) {
             trancheSharesMinted[i] = executeDeposit(_user, _requestNonces[i], _assetsToDeposit[i]);
