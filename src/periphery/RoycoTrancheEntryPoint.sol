@@ -8,7 +8,7 @@ import { RoycoBase } from "../base/RoycoBase.sol";
 import { IRoycoFactory } from "../interfaces/IRoycoFactory.sol";
 import { IRoycoKernel } from "../interfaces/IRoycoKernel.sol";
 import { IRoycoVaultTranche, TrancheType } from "../interfaces/IRoycoVaultTranche.sol";
-import { MAX_NAV_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../libraries/Constants.sol";
+import { MAX_NAV_UNITS, MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../libraries/Constants.sol";
 import { AssetClaims } from "../libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toUint256 } from "../libraries/Units.sol";
 import { UtilsLib } from "../libraries/UtilsLib.sol";
@@ -135,10 +135,13 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      * @param user The user whose deposit request was executed
      * @param nonce The nonce identifying the executed request
      * @param executor The address that executed the request (user or executor)
+     * @param assetsDeposited The amount of assets deposited into the tranche (after bonus deduction if applicable)
      * @param sharesMinted The amount of tranche shares minted to the receiver
      * @param bonusAssets The amount of assets paid to the executor as a bonus (0 if self-executed)
      */
-    event DepositExecuted(address indexed user, uint256 indexed nonce, address indexed executor, uint256 sharesMinted, TRANCHE_UNIT bonusAssets);
+    event DepositExecuted(
+        address indexed user, uint256 indexed nonce, address indexed executor, TRANCHE_UNIT assetsDeposited, uint256 sharesMinted, TRANCHE_UNIT bonusAssets
+    );
 
     /**
      * @notice Emitted when a deposit request is cancelled
@@ -293,14 +296,22 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      * @notice Executes multiple pending deposit requests for the specified user
      * @param _user The user whose deposit requests should be executed
      * @param _requestNonces The nonces of the deposit requests to execute
+     * @param _assetsToDeposit The amounts of assets to deposit for each request (use MAX_TRANCHE_UNITS to deposit the maximum possible)
      * @return trancheSharesMinted The amounts of tranche shares minted for each executed request
      */
-    function executeDeposits(address _user, uint256[] calldata _requestNonces) external restricted returns (uint256[] memory trancheSharesMinted) {
+    function executeDeposits(
+        address _user,
+        uint256[] calldata _requestNonces,
+        TRANCHE_UNIT[] calldata _assetsToDeposit
+    )
+        external
+        returns (uint256[] memory trancheSharesMinted)
+    {
         // Execute the user specified deposit requests
         uint256 numRequestsToExecute = _requestNonces.length;
         trancheSharesMinted = new uint256[](numRequestsToExecute);
         for (uint256 i = 0; i < numRequestsToExecute; ++i) {
-            trancheSharesMinted[i] = executeDeposit(_user, _requestNonces[i]);
+            trancheSharesMinted[i] = executeDeposit(_user, _requestNonces[i], _assetsToDeposit[i]);
         }
     }
 
@@ -310,9 +321,19 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      *      If executed by a third party, the executor bonus is paid in assets before depositing the remainder.
      * @param _user The user whose deposit request should be executed
      * @param _requestNonce The nonce of the deposit request to execute
+     * @param _assetsToDeposit The amount of assets to deposit (use MAX_TRANCHE_UNITS to deposit the maximum possible)
      * @return trancheSharesMinted The amount of tranche shares minted to the receiver
      */
-    function executeDeposit(address _user, uint256 _requestNonce) public whenNotPaused restricted returns (uint256 trancheSharesMinted) {
+    function executeDeposit(
+        address _user,
+        uint256 _requestNonce,
+        TRANCHE_UNIT _assetsToDeposit
+    )
+        public
+        whenNotPaused
+        restricted
+        returns (uint256 trancheSharesMinted)
+    {
         // Retrieve the user's specified deposit request and assert its validity
         RoycoTrancheEntryPointState storage $ = _getRoycoTrancheEntryPointStorage();
         DepositRequest memory request = $.userToNonceToDepositRequest[_user][_requestNonce];
@@ -323,31 +344,39 @@ contract RoycoTrancheEntryPoint is RoycoBase {
         EnrichedTrancheConfig memory config = $.trancheToConfig[tranche];
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
 
-        // Mark the request as executed
-        delete $.userToNonceToDepositRequest[_user][_requestNonce];
+        // Resolve the actual amount of assets to deposit
+        _assetsToDeposit = (_assetsToDeposit == MAX_TRANCHE_UNITS)
+            ? UnitsMathLib.min(IRoycoVaultTranche(tranche).maxDeposit(request.baseRequest.receiver), request.assets)
+            : _assetsToDeposit;
+        if (_assetsToDeposit == ZERO_TRANCHE_UNITS) return 0;
+
+        // Mark the assets as deposited
+        TRANCHE_UNIT assetsLeftToDeposit = request.assets - _assetsToDeposit;
+        if (assetsLeftToDeposit == ZERO_TRANCHE_UNITS) delete $.userToNonceToDepositRequest[_user][_requestNonce];
+        else $.userToNonceToDepositRequest[_user][_requestNonce].assets = assetsLeftToDeposit;
 
         // Execute the deposit on the underlying tranche
         TRANCHE_UNIT bonusAssets;
         // If this is a self-deposit or there is no executor bonus configured, mint shares directly to the specified recipient
         if (_user == msg.sender || request.baseRequest.executorBonusWAD == 0) {
-            IERC20(config.asset).forceApprove(tranche, toUint256(request.assets));
-            trancheSharesMinted = IRoycoVaultTranche(tranche).deposit(request.assets, request.baseRequest.receiver);
+            IERC20(config.asset).forceApprove(tranche, toUint256(_assetsToDeposit));
+            trancheSharesMinted = IRoycoVaultTranche(tranche).deposit(_assetsToDeposit, request.baseRequest.receiver);
         }
         // If this is an third party execution, remit the executor bonus and deposit the remaining assets
         else {
             // Ensure that the user has opted into third party execution
             require(request.baseRequest.executorBonusWAD != type(uint64).max, EXECUTOR_EXECUTION_DISABLED());
             // Compute and transfer bonus assets to the executor
-            bonusAssets = request.assets.mulDiv(request.baseRequest.executorBonusWAD, WAD, Math.Rounding.Floor);
+            bonusAssets = _assetsToDeposit.mulDiv(request.baseRequest.executorBonusWAD, WAD, Math.Rounding.Floor);
             if (bonusAssets != ZERO_TRANCHE_UNITS) IERC20(config.asset).safeTransfer(msg.sender, toUint256(bonusAssets));
             // Deposit assets and mint shares directly to the specified receiver
-            request.assets = request.assets - bonusAssets;
-            IERC20(config.asset).forceApprove(tranche, toUint256(request.assets));
-            trancheSharesMinted = IRoycoVaultTranche(tranche).deposit(request.assets, request.baseRequest.receiver);
+            _assetsToDeposit = _assetsToDeposit - bonusAssets;
+            IERC20(config.asset).forceApprove(tranche, toUint256(_assetsToDeposit));
+            trancheSharesMinted = IRoycoVaultTranche(tranche).deposit(_assetsToDeposit, request.baseRequest.receiver);
         }
 
         // Emit the deposit execution event
-        emit DepositExecuted(_user, _requestNonce, msg.sender, trancheSharesMinted, bonusAssets);
+        emit DepositExecuted(_user, _requestNonce, msg.sender, _assetsToDeposit, trancheSharesMinted, bonusAssets);
     }
 
     /**
