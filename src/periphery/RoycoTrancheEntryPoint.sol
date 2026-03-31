@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { ERC20BurnableUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
 import { IERC20, SafeERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoBase } from "../base/RoycoBase.sol";
 import { IRoycoFactory } from "../interfaces/IRoycoFactory.sol";
 import { IRoycoKernel } from "../interfaces/IRoycoKernel.sol";
 import { IRoycoVaultTranche, TrancheType } from "../interfaces/IRoycoVaultTranche.sol";
-import { MAX_NAV_UNITS, WAD, ZERO_TRANCHE_UNITS } from "../libraries/Constants.sol";
+import { MAX_NAV_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../libraries/Constants.sol";
 import { AssetClaims } from "../libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toUint256 } from "../libraries/Units.sol";
+import { UtilsLib } from "../libraries/UtilsLib.sol";
 
 /**
  * @title RoycoTrancheEntryPoint
@@ -19,6 +21,7 @@ import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toUint256 } from "../libraries/Un
 contract RoycoTrancheEntryPoint is RoycoBase {
     using SafeERC20 for IERC20;
     using UnitsMathLib for TRANCHE_UNIT;
+    using UnitsMathLib for uint256;
 
     /// @dev Storage slot for RoycoTrancheEntryPointState using ERC-7201 pattern
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoTrancheEntryPoint")) - 1)) & ~bytes32(uint256(0xff))
@@ -26,7 +29,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
 
     /**
      * @notice Defines the recipient of yield accrued during the redemption delay period
-     * @dev Accrued yield is any positive delta between the execution NAV and the NAV at request time for the shares redeemed
+     * @dev Accrued yield is any positive delta between the execution NAV and the NAV at request time for the shares being redeemed
      * @custom:type PROTOCOL - Accrued yield is sent to the protocol fee recipient
      * @custom:type REDEEMING_LP - Accrued yield is retained by the redeeming LP
      * @custom:type REMAINING_LPS - Accrued yield stays in the pool for remaining tranche LPs
@@ -104,12 +107,14 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      * @custom:field trancheToConfig - A mapping of tranches to their enriched entry point configurations
      * @custom:field userToNonceToDepositRequest - A mapping tracking each user's deposit requests by nonce
      * @custom:field userToNonceToRedemptionRequest - A mapping tracking each user's redemption requests by nonce
+     * @custom:field trancheToProtocolFeeShares - A mapping tracking the protocol fee shares accrued for each tranche
      */
     struct RoycoTrancheEntryPointState {
         uint256 lastRequestNonce;
         mapping(address tranche => EnrichedTrancheConfig config) trancheToConfig;
         mapping(address user => mapping(uint256 requestNonce => DepositRequest request)) userToNonceToDepositRequest;
         mapping(address user => mapping(uint256 requestNonce => RedemptionRequest request)) userToNonceToRedemptionRequest;
+        mapping(address tranche => uint256 protocolFeeShares) trancheToProtocolFeeShares;
     }
 
     /**
@@ -119,8 +124,11 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      * @param tranche The tranche for which the deposit was requested
      * @param assets The amount of assets requested to be deposited into the tranche
      * @param executableAtTimestamp The timestamp at which the request can be executed
+     * @param executorBonusWAD The bonus percentage offered to executors (type(uint64).max if opted out), scaled to WAD precision
      */
-    event DepositRequested(address indexed user, uint256 indexed nonce, address indexed tranche, TRANCHE_UNIT assets, uint32 executableAtTimestamp);
+    event DepositRequested(
+        address indexed user, uint256 indexed nonce, address indexed tranche, TRANCHE_UNIT assets, uint32 executableAtTimestamp, uint64 executorBonusWAD
+    );
 
     /**
      * @notice Emitted when a deposit request is executed
@@ -148,8 +156,30 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      * @param tranche The tranche for which the redemption was requested
      * @param shares The amount of shares requested to be redeemed from the tranche
      * @param executableAtTimestamp The timestamp at which the request can be executed
+     * @param executorBonusWAD The bonus percentage offered to executors (type(uint64).max if opted out), scaled to WAD precision
      */
-    event RedemptionRequested(address indexed user, uint256 indexed nonce, address indexed tranche, uint256 shares, uint32 executableAtTimestamp);
+    event RedemptionRequested(
+        address indexed user, uint256 indexed nonce, address indexed tranche, uint256 shares, uint32 executableAtTimestamp, uint64 executorBonusWAD
+    );
+
+    /**
+     * @notice Emitted when a redemption request is executed
+     * @param user The user whose redemption request was executed
+     * @param nonce The nonce identifying the executed request
+     * @param executor The address that executed the request (user or executor)
+     * @param userClaims The asset claims withdrawn to the receiver
+     * @param bonusClaims The asset claims paid to the executor as a bonus (zero if self-executed)
+     */
+    event RedemptionExecuted(address indexed user, uint256 indexed nonce, address indexed executor, AssetClaims userClaims, AssetClaims bonusClaims);
+
+    /**
+     * @notice Emitted when a redemption request is cancelled
+     * @param user The user whose redemption request was cancelled
+     * @param nonce The nonce identifying the cancelled request
+     * @param receiver The address that received the returned escrowed shares
+     * @param shares The amount of shares returned
+     */
+    event RedemptionRequestCancelled(address indexed user, uint256 indexed nonce, address receiver, uint256 shares);
 
     /**
      * @notice Emitted when a tranche's entry point configuration is updated
@@ -158,14 +188,29 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      */
     event TrancheConfigUpdated(address indexed tranche, TrancheConfig config);
 
+    /**
+     * @notice Emitted when protocol fee shares are accrued from a redemption's accrued yield
+     * @param tranche The tranche for which protocol fee shares were accrued
+     * @param shares The amount of shares accrued as protocol fees
+     */
+    event ProtocolFeeSharesAccrued(address indexed tranche, uint256 shares);
+
+    /**
+     * @notice Emitted when protocol fee shares are collected
+     * @param tranche The tranche from which protocol fee shares were collected
+     * @param receiver The address that received the collected shares
+     * @param shares The amount of shares collected
+     */
+    event ProtocolFeeSharesCollected(address indexed tranche, address indexed receiver, uint256 shares);
+
     /// @dev Thrown when the specified tranche wasn't deployed by the canonical Royco Factory
     error INVALID_TRANCHE();
 
     /// @dev Thrown when requesting to deposit or redeem a zero amount of tranche assets or shares respectively
     error MUST_REQUEST_NON_ZERO_AMOUNT();
 
-    /// @dev Thrown when the number of tranches and configs provided do not match
-    error EACH_TRANCHE_MUST_HAVE_A_CONFIG();
+    /// @dev Thrown when the lengths of provided arrays do not match
+    error ARRAY_LENGTH_MISMATCH();
 
     /// @dev Thrown when attempting to request a deposit or redemption for a tranche that is not enabled
     error TRANCHE_NOT_ENABLED();
@@ -241,7 +286,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
         IERC20(config.asset).safeTransferFrom(msg.sender, address(this), toUint256(_assets));
 
         // Emit the deposit request event
-        emit DepositRequested(msg.sender, requestNonce, _tranche, _assets, executableAtTimestamp);
+        emit DepositRequested(msg.sender, requestNonce, _tranche, _assets, executableAtTimestamp, _executorBonusWAD);
     }
 
     /**
@@ -288,14 +333,14 @@ contract RoycoTrancheEntryPoint is RoycoBase {
             IERC20(config.asset).forceApprove(tranche, toUint256(request.assets));
             trancheSharesMinted = IRoycoVaultTranche(tranche).deposit(request.assets, request.baseRequest.receiver);
         }
-        // If this is an external execution, compute and remit the executor bonus
+        // If this is an third party execution, remit the executor bonus and deposit the remaining assets
         else {
-            // Ensure that the user has opted into external execution
+            // Ensure that the user has opted into third party execution
             require(request.baseRequest.executorBonusWAD != type(uint64).max, EXECUTOR_EXECUTION_DISABLED());
             // Compute and transfer bonus assets to the executor
             bonusAssets = request.assets.mulDiv(request.baseRequest.executorBonusWAD, WAD, Math.Rounding.Floor);
             if (bonusAssets != ZERO_TRANCHE_UNITS) IERC20(config.asset).safeTransfer(msg.sender, toUint256(bonusAssets));
-            // Mint shares to the user
+            // Deposit assets and mint shares directly to the specified receiver
             request.assets = request.assets - bonusAssets;
             IERC20(config.asset).forceApprove(tranche, toUint256(request.assets));
             trancheSharesMinted = IRoycoVaultTranche(tranche).deposit(request.assets, request.baseRequest.receiver);
@@ -310,7 +355,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      * @param _requestNonces The nonces of the deposit requests to cancel
      * @param _receiver The address to receive the returned escrowed assets
      */
-    function cancelDepositRequests(uint256[] calldata _requestNonces, address _receiver) external restricted {
+    function cancelDepositRequests(uint256[] calldata _requestNonces, address _receiver) external {
         // Execute the user specified deposit request cancellations
         uint256 numRequestsToCancel = _requestNonces.length;
         for (uint256 i = 0; i < numRequestsToCancel; ++i) {
@@ -392,21 +437,21 @@ contract RoycoTrancheEntryPoint is RoycoBase {
         IERC20(_tranche).safeTransferFrom(msg.sender, address(this), _shares);
 
         // Emit the redemption request event
-        emit RedemptionRequested(msg.sender, requestNonce, _tranche, _shares, executableAtTimestamp);
+        emit RedemptionRequested(msg.sender, requestNonce, _tranche, _shares, executableAtTimestamp, _executorBonusWAD);
     }
 
     /**
      * @notice Executes multiple pending redemption requests for the specified user
      * @param _user The user whose redemption requests should be executed
      * @param _requestNonces The nonces of the redemption requests to execute
-     * @return assetsWithdrawn The assets withdrawn to the request-specific receiver upon executing each executed request
+     * @return userClaims The assets withdrawn to the request-specific receiver upon executing each executed request
      */
-    function executeRedemptions(address _user, uint256[] calldata _requestNonces) external restricted returns (AssetClaims[] memory assetsWithdrawn) {
+    function executeRedemptions(address _user, uint256[] calldata _requestNonces) external returns (AssetClaims[] memory userClaims) {
         // Execute the user specified redemption requests
         uint256 numRequestsToExecute = _requestNonces.length;
-        assetsWithdrawn = new AssetClaims[](numRequestsToExecute);
+        userClaims = new AssetClaims[](numRequestsToExecute);
         for (uint256 i = 0; i < numRequestsToExecute; ++i) {
-            assetsWithdrawn[i] = executeRedemption(_user, _requestNonces[i]);
+            userClaims[i] = executeRedemption(_user, _requestNonces[i]);
         }
     }
 
@@ -415,9 +460,9 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      * @dev The request must exist and the configured delay period must have elapsed
      * @param _user The user whose redemption request should be executed
      * @param _requestNonce The nonce of the redemption request to execute
-     * @return assetsWithdrawn The assets withdrawn to the request-specific receiver upon executing this redemption request
+     * @return userClaims The assets withdrawn to the request-specific receiver upon executing this redemption request
      */
-    function executeRedemption(address _user, uint256 _requestNonce) public whenNotPaused restricted returns (AssetClaims memory assetsWithdrawn) {
+    function executeRedemption(address _user, uint256 _requestNonce) public whenNotPaused restricted returns (AssetClaims memory userClaims) {
         // Retrieve the user's specified redemption request and assert its validity
         RoycoTrancheEntryPointState storage $ = _getRoycoTrancheEntryPointStorage();
         RedemptionRequest memory request = $.userToNonceToRedemptionRequest[_user][_requestNonce];
@@ -431,8 +476,83 @@ contract RoycoTrancheEntryPoint is RoycoBase {
         // Mark the request as executed
         delete $.userToNonceToRedemptionRequest[_user][_requestNonce];
 
-        // Emit the deposit execution event
-        // emit DepositExecuted(_user, _requestNonce, msg.sender, trancheSharesMinted, bonusShares);
+        // If this is a self-redemption or there is no executor bonus configured, withdraw assets directly to the specified recipient
+        AssetClaims memory bonusClaims;
+        if (_user == msg.sender || request.baseRequest.executorBonusWAD == 0) {
+            // Redeem shares and route yield directly to the receiver
+            userClaims = _redeemWithYieldRouting(tranche, config, request.shares, request.navAtRequestTime, request.baseRequest.receiver);
+        }
+        // If this is a third party execution, withdraw the assets, handle any yield as configured, and remit the executor bonus
+        else {
+            // Ensure that the user has opted into third party execution
+            require(request.baseRequest.executorBonusWAD != type(uint64).max, EXECUTOR_EXECUTION_DISABLED());
+
+            // Redeem shares and route yield to this contract for bonus calculation
+            userClaims = _redeemWithYieldRouting(tranche, config, request.shares, request.navAtRequestTime, address(this));
+
+            // Scale the asset claims to compute the executor bonus and the receiver's portion
+            bonusClaims = UtilsLib.scaleAssetClaims(userClaims, request.baseRequest.executorBonusWAD, WAD);
+            userClaims.stAssets = userClaims.stAssets - bonusClaims.stAssets;
+            userClaims.jtAssets = userClaims.jtAssets - bonusClaims.jtAssets;
+            userClaims.nav = userClaims.nav - bonusClaims.nav;
+
+            // Transfer bonus and remaining assets to executor and receiver respectively
+            address kernel = IRoycoVaultTranche(tranche).KERNEL();
+            address stAsset = IRoycoKernel(kernel).ST_ASSET();
+            address jtAsset = IRoycoKernel(kernel).JT_ASSET();
+            if (stAsset == jtAsset) {
+                // Batch transfer if same asset
+                TRANCHE_UNIT totalBonus = bonusClaims.stAssets + bonusClaims.jtAssets;
+                TRANCHE_UNIT totalUserAssets = userClaims.stAssets + userClaims.jtAssets;
+                if (totalBonus != ZERO_TRANCHE_UNITS) IERC20(stAsset).safeTransfer(msg.sender, toUint256(totalBonus));
+                if (totalUserAssets != ZERO_TRANCHE_UNITS) IERC20(stAsset).safeTransfer(request.baseRequest.receiver, toUint256(totalUserAssets));
+            } else {
+                // Transfer each asset separately
+                if (bonusClaims.stAssets != ZERO_TRANCHE_UNITS) IERC20(stAsset).safeTransfer(msg.sender, toUint256(bonusClaims.stAssets));
+                if (bonusClaims.jtAssets != ZERO_TRANCHE_UNITS) IERC20(jtAsset).safeTransfer(msg.sender, toUint256(bonusClaims.jtAssets));
+                if (userClaims.stAssets != ZERO_TRANCHE_UNITS) IERC20(stAsset).safeTransfer(request.baseRequest.receiver, toUint256(userClaims.stAssets));
+                if (userClaims.jtAssets != ZERO_TRANCHE_UNITS) IERC20(jtAsset).safeTransfer(request.baseRequest.receiver, toUint256(userClaims.jtAssets));
+            }
+        }
+
+        // Emit the redemption execution event
+        emit RedemptionExecuted(_user, _requestNonce, msg.sender, userClaims, bonusClaims);
+    }
+
+    /**
+     * @notice Cancels multiple pending redemption requests for the caller, returning escrowed shares
+     * @param _requestNonces The nonces of the redemption requests to cancel
+     * @param _receiver The address to receive the returned escrowed shares
+     */
+    function cancelRedemptionRequests(uint256[] calldata _requestNonces, address _receiver) external {
+        // Execute the user specified redemption request cancellations
+        uint256 numRequestsToCancel = _requestNonces.length;
+        for (uint256 i = 0; i < numRequestsToCancel; ++i) {
+            cancelRedemptionRequest(_requestNonces[i], _receiver);
+        }
+    }
+
+    /**
+     * @notice Cancels a pending redemption request for the caller, returning escrowed shares
+     * @param _requestNonce The nonce of the redemption request to cancel
+     * @param _receiver The address to receive the returned escrowed shares
+     */
+    function cancelRedemptionRequest(uint256 _requestNonce, address _receiver) public whenNotPaused restricted {
+        // Ensure the receiver isn't null
+        require(_receiver != address(0), NULL_ADDRESS());
+        // Retrieve the user's specified redemption request and assert that it exists
+        RoycoTrancheEntryPointState storage $ = _getRoycoTrancheEntryPointStorage();
+        RedemptionRequest memory request = $.userToNonceToRedemptionRequest[msg.sender][_requestNonce];
+        require(request.shares != 0, INVALID_REQUEST(_requestNonce));
+
+        // Mark the request as cancelled
+        delete $.userToNonceToRedemptionRequest[msg.sender][_requestNonce];
+
+        // Return the shares from the cancelled request to the specified receiver
+        IERC20(request.baseRequest.tranche).safeTransfer(_receiver, request.shares);
+
+        // Emit the redemption request cancellation event
+        emit RedemptionRequestCancelled(msg.sender, _requestNonce, _receiver, request.shares);
     }
 
     /// =============================
@@ -444,8 +564,32 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      * @param _tranches The tranches to modify configurations for
      * @param _configs The new configurations for each tranche
      */
-    function modifyTrancheConfigs(address[] calldata _tranches, TrancheConfig[] calldata _configs) public restricted {
+    function modifyTrancheConfigs(address[] calldata _tranches, TrancheConfig[] calldata _configs) external restricted {
         _modifyTrancheConfigs(_tranches, _configs);
+    }
+
+    /**
+     * @notice Collects accumulated protocol fee shares from the specified tranches
+     * @param _tranches The tranches to collect protocol fees from
+     * @param _sharesToClaim The amount of protocol fee shares to claim for each tranche (use type(uint256).max to claim all available)
+     * @param _receiver The address to receive the collected protocol fee shares
+     */
+    function collectProtocolFees(address[] calldata _tranches, uint256[] calldata _sharesToClaim, address _receiver) external restricted {
+        require(_receiver != address(0), NULL_ADDRESS());
+        // Ensure that each tranche has a specified amount of protocol fee shares to claim
+        uint256 numTranches = _tranches.length;
+        require(numTranches == _sharesToClaim.length, ARRAY_LENGTH_MISMATCH());
+
+        // Claim the specified protocol fee shares for each specified tranche
+        RoycoTrancheEntryPointState storage $ = _getRoycoTrancheEntryPointStorage();
+        for (uint256 i = 0; i < numTranches; ++i) {
+            address tranche = _tranches[i];
+            uint256 sharesToClaim = (_sharesToClaim[i] == type(uint256).max) ? $.trancheToProtocolFeeShares[tranche] : _sharesToClaim[i];
+            if (sharesToClaim == 0) continue;
+            $.trancheToProtocolFeeShares[tranche] -= sharesToClaim;
+            IERC20(tranche).safeTransfer(_receiver, sharesToClaim);
+            emit ProtocolFeeSharesCollected(tranche, _receiver, sharesToClaim);
+        }
     }
 
     /// =============================
@@ -462,6 +606,52 @@ contract RoycoTrancheEntryPoint is RoycoBase {
     }
 
     /**
+     * @dev Redeems shares and routes accrued yield based on the tranche's configuration
+     * @param _tranche The tranche to redeem from
+     * @param _config The enriched tranche configuration
+     * @param _shares The amount of shares to redeem
+     * @param _navAtRequestTime The NAV at the time the redemption was requested
+     * @param _receiver The address to receive the redeemed assets
+     * @return userClaims The assets withdrawn from the tranche for the user after routing yield as configured
+     */
+    function _redeemWithYieldRouting(
+        address _tranche,
+        EnrichedTrancheConfig memory _config,
+        uint256 _shares,
+        NAV_UNIT _navAtRequestTime,
+        address _receiver
+    )
+        internal
+        returns (AssetClaims memory userClaims)
+    {
+        // If the entire value of the shares goes to the LP, redeem all the shares
+        if (_config.baseConfig.yieldRecipient == AccruedYieldRecipient.REDEEMING_LP) {
+            userClaims = IRoycoVaultTranche(_tranche).redeem(_shares, _receiver, address(this));
+        } else {
+            // Compute the tranche shares equivalent to the value of the yield accrued since placing the request
+            NAV_UNIT navAtExecutionTime = IRoycoVaultTranche(_tranche).convertToAssets(_shares).nav;
+            uint256 accruedYieldShares;
+            if (navAtExecutionTime > _navAtRequestTime) {
+                accruedYieldShares = _shares.mulDiv((navAtExecutionTime - _navAtRequestTime), navAtExecutionTime, Math.Rounding.Floor);
+            }
+            // Redeem the shares the user is entitled to
+            userClaims = IRoycoVaultTranche(_tranche).redeem((_shares - accruedYieldShares), _receiver, address(this));
+            // If yield was accrued, handle it using the configured method
+            if (accruedYieldShares != 0) {
+                // If accrued yield is sent to the protocol, add them to the protocol accounting
+                if (_config.baseConfig.yieldRecipient == AccruedYieldRecipient.PROTOCOL) {
+                    _getRoycoTrancheEntryPointStorage().trancheToProtocolFeeShares[_tranche] += accruedYieldShares;
+                    emit ProtocolFeeSharesAccrued(_tranche, accruedYieldShares);
+                }
+                // If accrued yield should be distributed to the remaining LPs, burn the shares, effectively donating the yield to the pool
+                else {
+                    ERC20BurnableUpgradeable(_tranche).burn(accruedYieldShares);
+                }
+            }
+        }
+    }
+
+    /**
      * @dev Modifies the entry point configuration for the specified tranches
      * @param _tranches The tranches to modify configurations for
      * @param _configs The new configurations for each tranche
@@ -469,7 +659,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
     function _modifyTrancheConfigs(address[] calldata _tranches, TrancheConfig[] calldata _configs) internal {
         // Ensure that each tranche has a specified config
         uint256 numTranches = _tranches.length;
-        require(numTranches == _configs.length, EACH_TRANCHE_MUST_HAVE_A_CONFIG());
+        require(numTranches == _configs.length, ARRAY_LENGTH_MISMATCH());
 
         // Ensure that each tranche was deployed by the Royco factory and update their configurations
         RoycoTrancheEntryPointState storage $ = _getRoycoTrancheEntryPointStorage();
@@ -495,7 +685,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
     /**
      * @notice Returns a storage pointer to the RoycoTrancheEntryPointState storage
      * @dev Uses ERC-7201 storage slot pattern for collision-resistant storage
-     * @return $ Storage pointer to the kernel's state
+     * @return $ Storage pointer to the entry point's state
      */
     function _getRoycoTrancheEntryPointStorage() internal pure returns (RoycoTrancheEntryPointState storage $) {
         assembly ("memory-safe") {
