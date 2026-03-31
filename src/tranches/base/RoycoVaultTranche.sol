@@ -91,7 +91,18 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     }
 
     /// @inheritdoc IRoycoVaultTranche
-    function redeem(uint256 _shares, address _receiver, address _owner) public virtual override(IRoycoVaultTranche) whenNotPaused restricted returns (AssetClaims memory claims) {
+    function redeem(
+        uint256 _shares,
+        address _receiver,
+        address _owner
+    )
+        public
+        virtual
+        override(IRoycoVaultTranche)
+        whenNotPaused
+        restricted
+        returns (AssetClaims memory claims)
+    {
         require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
         require(_shares != 0, MUST_REQUEST_NON_ZERO_SHARES());
 
