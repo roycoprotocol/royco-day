@@ -553,9 +553,9 @@ contract RoycoTrancheEntryPoint is RoycoBase {
         } else {
             $.userToNonceToRedemptionRequest[_user][_requestNonce].shares = sharesLeftToRedeem;
             if (request.navAtRequestTime != MAX_NAV_UNITS) {
-                NAV_UNIT navAtRequestTimeForSharesToRedeem = request.navAtRequestTime.mulDiv(_sharesToRedeem, request.shares, Math.Rounding.Floor);
-                $.userToNonceToRedemptionRequest[_user][_requestNonce].navAtRequestTime = request.navAtRequestTime - navAtRequestTimeForSharesToRedeem;
-                request.navAtRequestTime = navAtRequestTimeForSharesToRedeem;
+                NAV_UNIT navOfSharesLeftToRedeem = request.navAtRequestTime.mulDiv(sharesLeftToRedeem, request.shares, Math.Rounding.Floor);
+                $.userToNonceToRedemptionRequest[_user][_requestNonce].navAtRequestTime = navOfSharesLeftToRedeem;
+                request.navAtRequestTime = request.navAtRequestTime - navOfSharesLeftToRedeem;
             }
         }
 
