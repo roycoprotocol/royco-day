@@ -185,7 +185,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
         uint256 indexed nonce,
         address indexed executor,
         uint256 sharesRedeemed,
-        uint256 yieldSharesForfeited,
+        uint256 forfeitedYieldShares,
         AssetClaims userClaims,
         AssetClaims bonusClaims
     );
@@ -561,11 +561,11 @@ contract RoycoTrancheEntryPoint is RoycoBase {
 
         // If this is a self-redemption or there is no executor bonus configured, withdraw assets directly to the specified recipient
         uint256 userSharesRedeemed;
-        uint256 yieldSharesForfeited;
+        uint256 forfeitedYieldShares;
         AssetClaims memory bonusClaims;
         if (_user == msg.sender || request.baseRequest.executorBonusWAD == 0) {
             // Redeem shares and route yield directly to the receiver
-            (userSharesRedeemed, yieldSharesForfeited, userClaims) =
+            (userSharesRedeemed, forfeitedYieldShares, userClaims) =
                 _redeemWithYieldRouting(tranche, config, _sharesToRedeem, request.navAtRequestTime, request.baseRequest.receiver);
         }
         // If this is a third party execution, withdraw the assets, handle any yield as configured, and remit the executor bonus
@@ -574,7 +574,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
             require(request.baseRequest.executorBonusWAD != type(uint64).max, EXECUTOR_EXECUTION_DISABLED());
 
             // Redeem shares and route yield to this contract for bonus calculation
-            (userSharesRedeemed, yieldSharesForfeited, userClaims) =
+            (userSharesRedeemed, forfeitedYieldShares, userClaims) =
                 _redeemWithYieldRouting(tranche, config, _sharesToRedeem, request.navAtRequestTime, address(this));
 
             // Scale the asset claims to compute the executor bonus and the receiver's portion
@@ -603,7 +603,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
         }
 
         // Emit the redemption execution event
-        emit RedemptionExecuted(_user, _requestNonce, msg.sender, userSharesRedeemed, yieldSharesForfeited, userClaims, bonusClaims);
+        emit RedemptionExecuted(_user, _requestNonce, msg.sender, userSharesRedeemed, forfeitedYieldShares, userClaims, bonusClaims);
     }
 
     /**
@@ -700,7 +700,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      * @param _navAtRequestTime The NAV of the shares being redeemed at the time the redemption was requested
      * @param _receiver The address to receive the redeemed assets
      * @return userSharesRedeemed The shares actually redeemed for the user (total minus forfeited)
-     * @return yieldSharesForfeited The shares forfeited equating to the yield accrued during the request lifecycle (zero if NAV decreased or the redeeming LP keeps the yield for this tranche)
+     * @return forfeitedYieldShares The shares forfeited equating to the yield accrued during the request lifecycle (zero if NAV decreased or the redeeming LP keeps the yield for this tranche)
      * @return userClaims The assets withdrawn from the tranche for the user after routing yield as configured
      */
     function _redeemWithYieldRouting(
@@ -711,8 +711,10 @@ contract RoycoTrancheEntryPoint is RoycoBase {
         address _receiver
     )
         internal
-        returns (uint256 userSharesRedeemed, uint256 yieldSharesForfeited, AssetClaims memory userClaims)
+        returns (uint256 userSharesRedeemed, uint256 forfeitedYieldShares, AssetClaims memory userClaims)
     {
+        // Initialize the user's shares redeemed as the input
+        userSharesRedeemed = _shares;
         // If the entire value of the shares goes to the LP, redeem all the shares
         if (_config.baseConfig.yieldRecipient == AccruedYieldRecipient.REDEEMING_LP) {
             userClaims = IRoycoVaultTranche(_tranche).redeem(_shares, _receiver, address(this));
@@ -720,20 +722,20 @@ contract RoycoTrancheEntryPoint is RoycoBase {
             // Compute the tranche shares equivalent to the value of the yield accrued since placing the request
             NAV_UNIT navAtExecutionTime = IRoycoVaultTranche(_tranche).convertToAssets(_shares).nav;
             if (navAtExecutionTime > _navAtRequestTime) {
-                yieldSharesForfeited = _shares.mulDiv((navAtExecutionTime - _navAtRequestTime), navAtExecutionTime, Math.Rounding.Floor);
+                forfeitedYieldShares = _shares.mulDiv((navAtExecutionTime - _navAtRequestTime), navAtExecutionTime, Math.Rounding.Floor);
             }
-            // Redeem the shares the user is entitled to
-            userClaims = IRoycoVaultTranche(_tranche).redeem((userSharesRedeemed = _shares - yieldSharesForfeited), _receiver, address(this));
+            // Redeem the shares the user is entitled to after deducting the forfeited yield shares
+            userClaims = IRoycoVaultTranche(_tranche).redeem((userSharesRedeemed -= forfeitedYieldShares), _receiver, address(this));
             // If yield was accrued, handle it using the configured method
-            if (yieldSharesForfeited != 0) {
+            if (forfeitedYieldShares != 0) {
                 // If accrued yield is sent to the protocol, add them to the protocol accounting
                 if (_config.baseConfig.yieldRecipient == AccruedYieldRecipient.PROTOCOL) {
-                    _getRoycoTrancheEntryPointStorage().trancheToProtocolFeeShares[_tranche] += yieldSharesForfeited;
-                    emit ProtocolFeeSharesAccrued(_tranche, yieldSharesForfeited);
+                    _getRoycoTrancheEntryPointStorage().trancheToProtocolFeeShares[_tranche] += forfeitedYieldShares;
+                    emit ProtocolFeeSharesAccrued(_tranche, forfeitedYieldShares);
                 }
                 // If accrued yield should be distributed to the remaining LPs, burn the shares, effectively donating the yield to the pool
                 else {
-                    ERC20BurnableUpgradeable(_tranche).burn(yieldSharesForfeited);
+                    ERC20BurnableUpgradeable(_tranche).burn(forfeitedYieldShares);
                 }
             }
         }
