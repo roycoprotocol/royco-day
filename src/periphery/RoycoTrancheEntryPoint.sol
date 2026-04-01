@@ -16,10 +16,14 @@ import { UtilsLib } from "../libraries/UtilsLib.sol";
 /**
  * @title RoycoTrancheEntryPoint
  * @author Shivaansh Kapoor, Ankur Dubey
- * @notice Periphery contract enabling bespoke deposit and redemption flows on Royco Tranches
+ * @notice Periphery contract enabling asynchronous deposit and redemption flows on Royco Tranches
+ * @dev Enforces configurable delays between request and execution to prevent oracle front-running attacks.
+ *      Supports third-party executors (keepers) with configurable bonus incentives.
+ *      Partial execution is supported, allowing requests to be fulfilled incrementally.
  */
 contract RoycoTrancheEntryPoint is RoycoBase {
     using SafeERC20 for IERC20;
+    using UnitsMathLib for NAV_UNIT;
     using UnitsMathLib for TRANCHE_UNIT;
     using UnitsMathLib for uint256;
 
@@ -76,8 +80,9 @@ contract RoycoTrancheEntryPoint is RoycoBase {
 
     /**
      * @notice A pending redemption request
-     * @custom:field shares - The amount of shares to redeem
-     * @custom:field navAtRequestTime - The NAV of the shares requested for redemption at the time of the redemption request
+     * @custom:field shares - The amount of escrowed shares pending redemption
+     * @custom:field navAtRequestTime - The total NAV of escrowed shares at request time, used to calculate yield forfeiture on execution.
+     *                                  Set to MAX_NAV_UNITS when yieldRecipient is REDEEMING_LP (disables yield forfeiture).
      * @custom:field baseRequest - The base request data shared across request types
      */
     struct RedemptionRequest {
@@ -91,8 +96,8 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      * @custom:field tranche - The Royco tranche that this request is for
      * @custom:field receiver - The address that will receive the output assets or shares
      * @custom:field executableAtTimestamp - The timestamp after which the request can be executed
-     * @custom:field executorBonusWAD - The bonus percentage paid to executors for executing the request, scaled to WAD precision
-     *                                  Set to type(uint64).max to opt out of executor execution
+     * @custom:field executorBonusWAD - The bonus percentage (0-100%) paid to third-party executors, scaled to WAD precision.
+     *                                  Set to type(uint64).max to restrict execution to the request owner only.
      */
     struct BaseRequest {
         address tranche;
@@ -170,10 +175,20 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      * @param user The user whose redemption request was executed
      * @param nonce The nonce identifying the executed request
      * @param executor The address that executed the request (user or executor)
+     * @param sharesRedeemed The shares redeemed for the user which equate to the user claims
+     * @param sharesRedeemed The shares forfeited equating to the yield accrued during the request lifecycle (zero if NAV decreased or the redeeming LP keeps the yield for this tranche)
      * @param userClaims The asset claims withdrawn to the receiver
      * @param bonusClaims The asset claims paid to the executor as a bonus (zero if self-executed)
      */
-    event RedemptionExecuted(address indexed user, uint256 indexed nonce, address indexed executor, AssetClaims userClaims, AssetClaims bonusClaims);
+    event RedemptionExecuted(
+        address indexed user,
+        uint256 indexed nonce,
+        address indexed executor,
+        uint256 sharesRedeemed,
+        uint256 yieldSharesForfeited,
+        AssetClaims userClaims,
+        AssetClaims bonusClaims
+    );
 
     /**
      * @notice Emitted when a redemption request is cancelled
@@ -218,7 +233,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
     /// @dev Thrown when attempting to request a deposit or redemption for a tranche that is not enabled
     error TRANCHE_NOT_ENABLED();
 
-    /// @dev Thrown when trying to execute a deposit or redemption that does not exist, was already executed, or has been cancelled
+    /// @dev Thrown when a request does not exist, was already executed/cancelled, or is not yet executable
     error INVALID_REQUEST(uint256 requestNonce);
 
     /// @dev Thrown when the executor bonus exceeds 100% (WAD) and is not the opt-out sentinel value
@@ -248,9 +263,9 @@ contract RoycoTrancheEntryPoint is RoycoBase {
     /**
      * @notice Requests a deposit into the tranche, escrowing assets until the delay period elapses and the request is executed
      * @param _tranche The tranche to deposit into
-     * @param _assets The amount of tranche assets to deposit
+     * @param _assets The amount of underlying assets to deposit, denominated in tranche asset units
      * @param _receiver The address that will receive the minted tranche shares
-     * @param _executorBonusWAD The bonus percentage, scaled to WAD precision, to pay executors for executing this request (use type(uint64).max to opt out of executor execution entirely)
+     * @param _executorBonusWAD The bonus percentage (0-100%), scaled to WAD precision, to pay executors for executing this request (use type(uint64).max to restrict execution to self only)
      * @return requestNonce The unique nonce identifying this deposit request
      * @return executableAtTimestamp The timestamp at which this request can be executed
      */
@@ -296,7 +311,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      * @notice Executes multiple pending deposit requests for the specified user
      * @param _user The user whose deposit requests should be executed
      * @param _requestNonces The nonces of the deposit requests to execute
-     * @param _assetsToDeposit The amounts of assets to deposit for each request (use MAX_TRANCHE_UNITS to deposit the maximum possible)
+     * @param _assetsToDeposit The amounts of assets to deposit for each request (use MAX_TRANCHE_UNITS to deposit min(requestedAssets, maxDeposit))
      * @return trancheSharesMinted The amounts of tranche shares minted for each executed request
      */
     function executeDeposits(
@@ -335,6 +350,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
         restricted
         returns (uint256 trancheSharesMinted)
     {
+        require(_assetsToDeposit != ZERO_TRANCHE_UNITS, MUST_REQUEST_NON_ZERO_AMOUNT());
         // Retrieve the user's specified deposit request and assert its validity
         RoycoTrancheEntryPointState storage $ = _getRoycoTrancheEntryPointStorage();
         DepositRequest memory request = $.userToNonceToDepositRequest[_user][_requestNonce];
@@ -349,6 +365,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
         _assetsToDeposit = (_assetsToDeposit == MAX_TRANCHE_UNITS)
             ? UnitsMathLib.min(IRoycoVaultTranche(tranche).maxDeposit(request.baseRequest.receiver), request.assets)
             : _assetsToDeposit;
+        // Return early without reverting if maxDeposit is 0 due to market conditions
         if (_assetsToDeposit == ZERO_TRANCHE_UNITS) return 0;
 
         // Mark the assets as deposited
@@ -454,6 +471,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
         // Register the user's redemption request with a fresh nonce
         RedemptionRequest storage request = $.userToNonceToRedemptionRequest[msg.sender][requestNonce = ++$.lastRequestNonce];
         request.shares = _shares;
+        // If the redeeming LP receives the yield accrued, set to MAX_NAV_UNITS so that navAtExecutionTime is never greater, effectively disabling yield forfeiture
         request.navAtRequestTime =
         (config.baseConfig.yieldRecipient != AccruedYieldRecipient.REDEEMING_LP ? IRoycoVaultTranche(_tranche).convertToAssets(_shares).nav : MAX_NAV_UNITS);
         request.baseRequest = BaseRequest({
@@ -474,14 +492,23 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      * @notice Executes multiple pending redemption requests for the specified user
      * @param _user The user whose redemption requests should be executed
      * @param _requestNonces The nonces of the redemption requests to execute
+     * @param _sharesToRedeem The amount of shares to redeem for the redemption requests to execute (use type(uint256).max to redeem the maximum possible)
      * @return userClaims The assets withdrawn to the request-specific receiver upon executing each executed request
      */
-    function executeRedemptions(address _user, uint256[] calldata _requestNonces) external returns (AssetClaims[] memory userClaims) {
+    function executeRedemptions(
+        address _user,
+        uint256[] calldata _requestNonces,
+        uint256[] calldata _sharesToRedeem
+    )
+        external
+        returns (AssetClaims[] memory userClaims)
+    {
         // Execute the user specified redemption requests
         uint256 numRequestsToExecute = _requestNonces.length;
+        require(numRequestsToExecute == _sharesToRedeem.length, ARRAY_LENGTH_MISMATCH());
         userClaims = new AssetClaims[](numRequestsToExecute);
         for (uint256 i = 0; i < numRequestsToExecute; ++i) {
-            userClaims[i] = executeRedemption(_user, _requestNonces[i]);
+            userClaims[i] = executeRedemption(_user, _requestNonces[i], _sharesToRedeem[i]);
         }
     }
 
@@ -490,9 +517,20 @@ contract RoycoTrancheEntryPoint is RoycoBase {
      * @dev The request must exist and the configured delay period must have elapsed
      * @param _user The user whose redemption request should be executed
      * @param _requestNonce The nonce of the redemption request to execute
+     * @param _sharesToRedeem The amount of shares to redeem (use type(uint256).max to redeem the maximum possible)
      * @return userClaims The assets withdrawn to the request-specific receiver upon executing this redemption request
      */
-    function executeRedemption(address _user, uint256 _requestNonce) public whenNotPaused restricted returns (AssetClaims memory userClaims) {
+    function executeRedemption(
+        address _user,
+        uint256 _requestNonce,
+        uint256 _sharesToRedeem
+    )
+        public
+        whenNotPaused
+        restricted
+        returns (AssetClaims memory userClaims)
+    {
+        require(_sharesToRedeem != 0, MUST_REQUEST_NON_ZERO_AMOUNT());
         // Retrieve the user's specified redemption request and assert its validity
         RoycoTrancheEntryPointState storage $ = _getRoycoTrancheEntryPointStorage();
         RedemptionRequest memory request = $.userToNonceToRedemptionRequest[_user][_requestNonce];
@@ -503,14 +541,32 @@ contract RoycoTrancheEntryPoint is RoycoBase {
         EnrichedTrancheConfig memory config = $.trancheToConfig[tranche];
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
 
-        // Mark the request as executed
-        delete $.userToNonceToRedemptionRequest[_user][_requestNonce];
+        // Resolve the actual amount of shares to redeem
+        _sharesToRedeem =
+            (_sharesToRedeem == type(uint256).max) ? Math.min(IRoycoVaultTranche(tranche).maxRedeem(address(this)), request.shares) : _sharesToRedeem;
+        if (_sharesToRedeem == 0) return AssetClaims(ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, ZERO_NAV_UNITS);
+
+        // Mark the shares as redeemed
+        uint256 sharesLeftToRedeem = request.shares - _sharesToRedeem;
+        if (sharesLeftToRedeem == 0) {
+            delete $.userToNonceToRedemptionRequest[_user][_requestNonce];
+        } else {
+            $.userToNonceToRedemptionRequest[_user][_requestNonce].shares = sharesLeftToRedeem;
+            if (request.navAtRequestTime != MAX_NAV_UNITS) {
+                NAV_UNIT navAtRequestTimeForSharesToRedeem = request.navAtRequestTime.mulDiv(_sharesToRedeem, request.shares, Math.Rounding.Floor);
+                $.userToNonceToRedemptionRequest[_user][_requestNonce].navAtRequestTime = request.navAtRequestTime - navAtRequestTimeForSharesToRedeem;
+                request.navAtRequestTime = navAtRequestTimeForSharesToRedeem;
+            }
+        }
 
         // If this is a self-redemption or there is no executor bonus configured, withdraw assets directly to the specified recipient
+        uint256 userSharesRedeemed;
+        uint256 yieldSharesForfeited;
         AssetClaims memory bonusClaims;
         if (_user == msg.sender || request.baseRequest.executorBonusWAD == 0) {
             // Redeem shares and route yield directly to the receiver
-            userClaims = _redeemWithYieldRouting(tranche, config, request.shares, request.navAtRequestTime, request.baseRequest.receiver);
+            (userSharesRedeemed, yieldSharesForfeited, userClaims) =
+                _redeemWithYieldRouting(tranche, config, _sharesToRedeem, request.navAtRequestTime, request.baseRequest.receiver);
         }
         // If this is a third party execution, withdraw the assets, handle any yield as configured, and remit the executor bonus
         else {
@@ -518,7 +574,8 @@ contract RoycoTrancheEntryPoint is RoycoBase {
             require(request.baseRequest.executorBonusWAD != type(uint64).max, EXECUTOR_EXECUTION_DISABLED());
 
             // Redeem shares and route yield to this contract for bonus calculation
-            userClaims = _redeemWithYieldRouting(tranche, config, request.shares, request.navAtRequestTime, address(this));
+            (userSharesRedeemed, yieldSharesForfeited, userClaims) =
+                _redeemWithYieldRouting(tranche, config, _sharesToRedeem, request.navAtRequestTime, address(this));
 
             // Scale the asset claims to compute the executor bonus and the receiver's portion
             bonusClaims = UtilsLib.scaleAssetClaims(userClaims, request.baseRequest.executorBonusWAD, WAD);
@@ -546,7 +603,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
         }
 
         // Emit the redemption execution event
-        emit RedemptionExecuted(_user, _requestNonce, msg.sender, userClaims, bonusClaims);
+        emit RedemptionExecuted(_user, _requestNonce, msg.sender, userSharesRedeemed, yieldSharesForfeited, userClaims, bonusClaims);
     }
 
     /**
@@ -637,11 +694,13 @@ contract RoycoTrancheEntryPoint is RoycoBase {
 
     /**
      * @dev Redeems shares and routes accrued yield based on the tranche's configuration
-     * @param _tranche The tranche to redeem from
+     * @param _tranche The tranche to redeem shares from
      * @param _config The enriched tranche configuration
-     * @param _shares The amount of shares to redeem
-     * @param _navAtRequestTime The NAV at the time the redemption was requested
+     * @param _shares The amount of shares to redeem from the tranche
+     * @param _navAtRequestTime The NAV of the shares being redeemed at the time the redemption was requested
      * @param _receiver The address to receive the redeemed assets
+     * @return userSharesRedeemed The shares actually redeemed for the user (total minus forfeited)
+     * @return yieldSharesForfeited The shares forfeited equating to the yield accrued during the request lifecycle (zero if NAV decreased or the redeeming LP keeps the yield for this tranche)
      * @return userClaims The assets withdrawn from the tranche for the user after routing yield as configured
      */
     function _redeemWithYieldRouting(
@@ -652,7 +711,7 @@ contract RoycoTrancheEntryPoint is RoycoBase {
         address _receiver
     )
         internal
-        returns (AssetClaims memory userClaims)
+        returns (uint256 userSharesRedeemed, uint256 yieldSharesForfeited, AssetClaims memory userClaims)
     {
         // If the entire value of the shares goes to the LP, redeem all the shares
         if (_config.baseConfig.yieldRecipient == AccruedYieldRecipient.REDEEMING_LP) {
@@ -660,22 +719,21 @@ contract RoycoTrancheEntryPoint is RoycoBase {
         } else {
             // Compute the tranche shares equivalent to the value of the yield accrued since placing the request
             NAV_UNIT navAtExecutionTime = IRoycoVaultTranche(_tranche).convertToAssets(_shares).nav;
-            uint256 accruedYieldShares;
             if (navAtExecutionTime > _navAtRequestTime) {
-                accruedYieldShares = _shares.mulDiv((navAtExecutionTime - _navAtRequestTime), navAtExecutionTime, Math.Rounding.Floor);
+                yieldSharesForfeited = _shares.mulDiv((navAtExecutionTime - _navAtRequestTime), navAtExecutionTime, Math.Rounding.Floor);
             }
             // Redeem the shares the user is entitled to
-            userClaims = IRoycoVaultTranche(_tranche).redeem((_shares - accruedYieldShares), _receiver, address(this));
+            userClaims = IRoycoVaultTranche(_tranche).redeem((userSharesRedeemed = _shares - yieldSharesForfeited), _receiver, address(this));
             // If yield was accrued, handle it using the configured method
-            if (accruedYieldShares != 0) {
+            if (yieldSharesForfeited != 0) {
                 // If accrued yield is sent to the protocol, add them to the protocol accounting
                 if (_config.baseConfig.yieldRecipient == AccruedYieldRecipient.PROTOCOL) {
-                    _getRoycoTrancheEntryPointStorage().trancheToProtocolFeeShares[_tranche] += accruedYieldShares;
-                    emit ProtocolFeeSharesAccrued(_tranche, accruedYieldShares);
+                    _getRoycoTrancheEntryPointStorage().trancheToProtocolFeeShares[_tranche] += yieldSharesForfeited;
+                    emit ProtocolFeeSharesAccrued(_tranche, yieldSharesForfeited);
                 }
                 // If accrued yield should be distributed to the remaining LPs, burn the shares, effectively donating the yield to the pool
                 else {
-                    ERC20BurnableUpgradeable(_tranche).burn(accruedYieldShares);
+                    ERC20BurnableUpgradeable(_tranche).burn(yieldSharesForfeited);
                 }
             }
         }
