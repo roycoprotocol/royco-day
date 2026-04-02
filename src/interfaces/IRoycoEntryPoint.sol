@@ -5,10 +5,10 @@ import { AssetClaims } from "../libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "../libraries/Units.sol";
 
 /**
- * @title IRoycoTrancheEntryPoint
- * @notice Interface for the RoycoTrancheEntryPoint contract enabling asynchronous deposit and redemption flows on Royco Tranches
+ * @title IRoycoEntryPoint
+ * @notice Interface for the RoycoEntryPoint contract enabling asynchronous deposit and redemption flows on Royco Tranches
  */
-interface IRoycoTrancheEntryPoint {
+interface IRoycoEntryPoint {
     /**
      * @notice Defines the recipient of yield accrued during the redemption delay period
      * @dev Accrued yield is any positive delta between the execution NAV and the NAV at request time for the shares being redeemed
@@ -333,4 +333,44 @@ interface IRoycoTrancheEntryPoint {
      * @param _receiver The address to receive the collected protocol fee shares
      */
     function collectProtocolFees(address[] calldata _tranches, uint256[] calldata _sharesToClaim, address _receiver) external;
+
+    /// =============================
+    /// State Accessor Functions
+    /// =============================
+
+    /**
+     * @notice Returns the last assigned request nonce
+     * @return nonce The last request nonce that was assigned
+     */
+    function getLastRequestNonce() external view returns (uint256 nonce);
+
+    /**
+     * @notice Returns the configuration for a specific tranche
+     * @param _tranche The tranche to get configuration for
+     * @return config The enriched configuration for the tranche
+     */
+    function getTrancheConfig(address _tranche) external view returns (EnrichedTrancheConfig memory config);
+
+    /**
+     * @notice Returns a deposit request for a specific user and nonce
+     * @param _user The user who owns the deposit request
+     * @param _requestNonce The nonce of the deposit request
+     * @return request The deposit request data
+     */
+    function getDepositRequest(address _user, uint256 _requestNonce) external view returns (DepositRequest memory request);
+
+    /**
+     * @notice Returns a redemption request for a specific user and nonce
+     * @param _user The user who owns the redemption request
+     * @param _requestNonce The nonce of the redemption request
+     * @return request The redemption request data
+     */
+    function getRedemptionRequest(address _user, uint256 _requestNonce) external view returns (RedemptionRequest memory request);
+
+    /**
+     * @notice Returns the accumulated protocol fee shares for a specific tranche
+     * @param _tranche The tranche to get protocol fee shares for
+     * @return shares The amount of protocol fee shares accumulated for the tranche
+     */
+    function getProtocolFeeSharesPendingCollection(address _tranche) external view returns (uint256 shares);
 }

@@ -5,9 +5,9 @@ import { ERC20BurnableUpgradeable } from "../../lib/openzeppelin-contracts-upgra
 import { IERC20, SafeERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoBase } from "../base/RoycoBase.sol";
+import { IRoycoEntryPoint } from "../interfaces/IRoycoEntryPoint.sol";
 import { IRoycoFactory } from "../interfaces/IRoycoFactory.sol";
 import { IRoycoKernel } from "../interfaces/IRoycoKernel.sol";
-import { IRoycoTrancheEntryPoint } from "../interfaces/IRoycoTrancheEntryPoint.sol";
 import { IRoycoVaultTranche, TrancheType } from "../interfaces/IRoycoVaultTranche.sol";
 import { MAX_NAV_UNITS, MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../libraries/Constants.sol";
 import { AssetClaims } from "../libraries/Types.sol";
@@ -15,21 +15,21 @@ import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toUint256 } from "../libraries/Un
 import { UtilsLib } from "../libraries/UtilsLib.sol";
 
 /**
- * @title RoycoTrancheEntryPoint
+ * @title RoycoEntryPoint
  * @author Shivaansh Kapoor, Ankur Dubey
  * @notice Periphery contract enabling asynchronous deposit and redemption flows on Royco Tranches
  * @dev Enforces configurable delays between request and execution to prevent oracle front-running attacks
  *      Supports third-party executors (keepers) with configurable bonus incentives
  *      Partial execution is supported, allowing requests to be fulfilled incrementally
  */
-contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
+contract RoycoEntryPoint is RoycoBase, IRoycoEntryPoint {
     using SafeERC20 for IERC20;
     using UnitsMathLib for NAV_UNIT;
     using UnitsMathLib for TRANCHE_UNIT;
     using UnitsMathLib for uint256;
 
-    /// @dev Storage slot for RoycoTrancheEntryPointState using ERC-7201 pattern
-    // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoTrancheEntryPoint")) - 1)) & ~bytes32(uint256(0xff))
+    /// @dev Storage slot for RoycoEntryPointState using ERC-7201 pattern
+    // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoEntryPoint")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ROYCO_ENTRY_POINT_STORAGE_SLOT = 0x97dbcf4566a2e818822a3079c61056404fedac337d5f1e2910e98e13410bdb00;
 
     /**
@@ -40,7 +40,7 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
      * @custom:field userToNonceToRedemptionRequest - A mapping tracking each user's redemption requests by nonce
      * @custom:field trancheToProtocolFeeShares - A mapping tracking the protocol fee shares accrued for each tranche
      */
-    struct RoycoTrancheEntryPointState {
+    struct RoycoEntryPointState {
         uint256 lastRequestNonce;
         mapping(address tranche => EnrichedTrancheConfig config) trancheToConfig;
         mapping(address user => mapping(uint256 requestNonce => DepositRequest request)) userToNonceToDepositRequest;
@@ -66,7 +66,7 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
     /// Entry Point Deposit Functions
     /// =============================
 
-    /// @inheritdoc IRoycoTrancheEntryPoint
+    /// @inheritdoc IRoycoEntryPoint
     function requestDeposit(
         address _tranche,
         TRANCHE_UNIT _assets,
@@ -74,7 +74,7 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
         uint64 _executorBonusWAD
     )
         external
-        override(IRoycoTrancheEntryPoint)
+        override(IRoycoEntryPoint)
         whenNotPaused
         restricted
         returns (uint256 requestNonce, uint32 executableAtTimestamp)
@@ -85,7 +85,7 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
         require(_executorBonusWAD <= WAD || _executorBonusWAD == type(uint64).max, INVALID_EXECUTOR_BONUS());
 
         // Ensure that the tranche is enabled on this entry point
-        RoycoTrancheEntryPointState storage $ = _getRoycoTrancheEntryPointStorage();
+        RoycoEntryPointState storage $ = _getRoycoEntryPointStorage();
         EnrichedTrancheConfig memory config = $.trancheToConfig[_tranche];
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
 
@@ -106,14 +106,14 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
         emit DepositRequested(msg.sender, requestNonce, _tranche, _assets, executableAtTimestamp, _executorBonusWAD);
     }
 
-    /// @inheritdoc IRoycoTrancheEntryPoint
+    /// @inheritdoc IRoycoEntryPoint
     function executeDeposits(
         address _user,
         uint256[] calldata _requestNonces,
         TRANCHE_UNIT[] calldata _assetsToDeposit
     )
         external
-        override(IRoycoTrancheEntryPoint)
+        override(IRoycoEntryPoint)
         returns (uint256[] memory trancheSharesMinted)
     {
         // Execute the user specified deposit requests
@@ -125,21 +125,21 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
         }
     }
 
-    /// @inheritdoc IRoycoTrancheEntryPoint
+    /// @inheritdoc IRoycoEntryPoint
     function executeDeposit(
         address _user,
         uint256 _requestNonce,
         TRANCHE_UNIT _assetsToDeposit
     )
         public
-        override(IRoycoTrancheEntryPoint)
+        override(IRoycoEntryPoint)
         whenNotPaused
         restricted
         returns (uint256 trancheSharesMinted)
     {
         require(_assetsToDeposit != ZERO_TRANCHE_UNITS, ZERO_AMOUNT());
         // Retrieve the user's specified deposit request and assert its validity
-        RoycoTrancheEntryPointState storage $ = _getRoycoTrancheEntryPointStorage();
+        RoycoEntryPointState storage $ = _getRoycoEntryPointStorage();
         DepositRequest memory request = $.userToNonceToDepositRequest[_user][_requestNonce];
         _validateRequestExecution(_requestNonce, request.baseRequest.executableAtTimestamp);
 
@@ -184,8 +184,8 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
         emit DepositExecuted(_user, _requestNonce, msg.sender, _assetsToDeposit, trancheSharesMinted, bonusAssets);
     }
 
-    /// @inheritdoc IRoycoTrancheEntryPoint
-    function cancelDepositRequests(uint256[] calldata _requestNonces, address _receiver) external override(IRoycoTrancheEntryPoint) {
+    /// @inheritdoc IRoycoEntryPoint
+    function cancelDepositRequests(uint256[] calldata _requestNonces, address _receiver) external override(IRoycoEntryPoint) {
         // Execute the user specified deposit request cancellations
         uint256 numRequestsToCancel = _requestNonces.length;
         for (uint256 i = 0; i < numRequestsToCancel; ++i) {
@@ -193,12 +193,12 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
         }
     }
 
-    /// @inheritdoc IRoycoTrancheEntryPoint
-    function cancelDepositRequest(uint256 _requestNonce, address _receiver) public override(IRoycoTrancheEntryPoint) whenNotPaused restricted {
+    /// @inheritdoc IRoycoEntryPoint
+    function cancelDepositRequest(uint256 _requestNonce, address _receiver) public override(IRoycoEntryPoint) whenNotPaused restricted {
         // Ensure the receiver isn't null
         require(_receiver != address(0), NULL_ADDRESS());
         // Retrieve the user's specified deposit request and assert that it exists
-        RoycoTrancheEntryPointState storage $ = _getRoycoTrancheEntryPointStorage();
+        RoycoEntryPointState storage $ = _getRoycoEntryPointStorage();
         DepositRequest memory request = $.userToNonceToDepositRequest[msg.sender][_requestNonce];
         require(request.assets != ZERO_TRANCHE_UNITS, INVALID_REQUEST(_requestNonce));
 
@@ -217,7 +217,7 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
     /// Entry Point Redemption Functions
     /// =============================
 
-    /// @inheritdoc IRoycoTrancheEntryPoint
+    /// @inheritdoc IRoycoEntryPoint
     function requestRedemption(
         address _tranche,
         uint256 _shares,
@@ -225,7 +225,7 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
         uint64 _executorBonusWAD
     )
         external
-        override(IRoycoTrancheEntryPoint)
+        override(IRoycoEntryPoint)
         whenNotPaused
         restricted
         returns (uint256 requestNonce, uint32 executableAtTimestamp)
@@ -236,7 +236,7 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
         require(_executorBonusWAD <= WAD || _executorBonusWAD == type(uint64).max, INVALID_EXECUTOR_BONUS());
 
         // Ensure that the tranche is enabled on this entry point
-        RoycoTrancheEntryPointState storage $ = _getRoycoTrancheEntryPointStorage();
+        RoycoEntryPointState storage $ = _getRoycoEntryPointStorage();
         EnrichedTrancheConfig memory config = $.trancheToConfig[_tranche];
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
 
@@ -260,14 +260,14 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
         emit RedemptionRequested(msg.sender, requestNonce, _tranche, _shares, executableAtTimestamp, _executorBonusWAD);
     }
 
-    /// @inheritdoc IRoycoTrancheEntryPoint
+    /// @inheritdoc IRoycoEntryPoint
     function executeRedemptions(
         address _user,
         uint256[] calldata _requestNonces,
         uint256[] calldata _sharesToRedeem
     )
         external
-        override(IRoycoTrancheEntryPoint)
+        override(IRoycoEntryPoint)
         returns (AssetClaims[] memory userClaims)
     {
         // Execute the user specified redemption requests
@@ -279,21 +279,21 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
         }
     }
 
-    /// @inheritdoc IRoycoTrancheEntryPoint
+    /// @inheritdoc IRoycoEntryPoint
     function executeRedemption(
         address _user,
         uint256 _requestNonce,
         uint256 _sharesToRedeem
     )
         public
-        override(IRoycoTrancheEntryPoint)
+        override(IRoycoEntryPoint)
         whenNotPaused
         restricted
         returns (AssetClaims memory userClaims)
     {
         require(_sharesToRedeem != 0, ZERO_AMOUNT());
         // Retrieve the user's specified redemption request and assert its validity
-        RoycoTrancheEntryPointState storage $ = _getRoycoTrancheEntryPointStorage();
+        RoycoEntryPointState storage $ = _getRoycoEntryPointStorage();
         RedemptionRequest memory request = $.userToNonceToRedemptionRequest[_user][_requestNonce];
         _validateRequestExecution(_requestNonce, request.baseRequest.executableAtTimestamp);
 
@@ -368,8 +368,8 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
         emit RedemptionExecuted(_user, _requestNonce, msg.sender, userSharesRedeemed, forfeitedYieldShares, userClaims, bonusClaims);
     }
 
-    /// @inheritdoc IRoycoTrancheEntryPoint
-    function cancelRedemptionRequests(uint256[] calldata _requestNonces, address _receiver) external override(IRoycoTrancheEntryPoint) {
+    /// @inheritdoc IRoycoEntryPoint
+    function cancelRedemptionRequests(uint256[] calldata _requestNonces, address _receiver) external override(IRoycoEntryPoint) {
         // Execute the user specified redemption request cancellations
         uint256 numRequestsToCancel = _requestNonces.length;
         for (uint256 i = 0; i < numRequestsToCancel; ++i) {
@@ -377,12 +377,12 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
         }
     }
 
-    /// @inheritdoc IRoycoTrancheEntryPoint
-    function cancelRedemptionRequest(uint256 _requestNonce, address _receiver) public override(IRoycoTrancheEntryPoint) whenNotPaused restricted {
+    /// @inheritdoc IRoycoEntryPoint
+    function cancelRedemptionRequest(uint256 _requestNonce, address _receiver) public override(IRoycoEntryPoint) whenNotPaused restricted {
         // Ensure the receiver isn't null
         require(_receiver != address(0), NULL_ADDRESS());
         // Retrieve the user's specified redemption request and assert that it exists
-        RoycoTrancheEntryPointState storage $ = _getRoycoTrancheEntryPointStorage();
+        RoycoEntryPointState storage $ = _getRoycoEntryPointStorage();
         RedemptionRequest memory request = $.userToNonceToRedemptionRequest[msg.sender][_requestNonce];
         require(request.shares != 0, INVALID_REQUEST(_requestNonce));
 
@@ -400,19 +400,19 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
     /// Admin Functions
     /// =============================
 
-    /// @inheritdoc IRoycoTrancheEntryPoint
-    function modifyTrancheConfigs(address[] calldata _tranches, TrancheConfig[] calldata _configs) external override(IRoycoTrancheEntryPoint) restricted {
+    /// @inheritdoc IRoycoEntryPoint
+    function modifyTrancheConfigs(address[] calldata _tranches, TrancheConfig[] calldata _configs) external override(IRoycoEntryPoint) restricted {
         _modifyTrancheConfigs(_tranches, _configs);
     }
 
-    /// @inheritdoc IRoycoTrancheEntryPoint
+    /// @inheritdoc IRoycoEntryPoint
     function collectProtocolFees(
         address[] calldata _tranches,
         uint256[] calldata _sharesToClaim,
         address _receiver
     )
         external
-        override(IRoycoTrancheEntryPoint)
+        override(IRoycoEntryPoint)
         restricted
     {
         require(_receiver != address(0), NULL_ADDRESS());
@@ -421,7 +421,7 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
         require(numTranches == _sharesToClaim.length, ARRAY_LENGTH_MISMATCH());
 
         // Claim the specified protocol fee shares for each specified tranche
-        RoycoTrancheEntryPointState storage $ = _getRoycoTrancheEntryPointStorage();
+        RoycoEntryPointState storage $ = _getRoycoEntryPointStorage();
         for (uint256 i = 0; i < numTranches; ++i) {
             address tranche = _tranches[i];
             uint256 sharesToClaim = (_sharesToClaim[i] == type(uint256).max) ? $.trancheToProtocolFeeShares[tranche] : _sharesToClaim[i];
@@ -430,6 +430,35 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
             IERC20(tranche).safeTransfer(_receiver, sharesToClaim);
             emit ProtocolFeeSharesCollected(tranche, _receiver, sharesToClaim);
         }
+    }
+
+    /// =============================
+    /// State Accessor Functions
+    /// =============================
+
+    /// @inheritdoc IRoycoEntryPoint
+    function getLastRequestNonce() external view override(IRoycoEntryPoint) returns (uint256 nonce) {
+        return _getRoycoEntryPointStorage().lastRequestNonce;
+    }
+
+    /// @inheritdoc IRoycoEntryPoint
+    function getTrancheConfig(address _tranche) external view override(IRoycoEntryPoint) returns (EnrichedTrancheConfig memory config) {
+        return _getRoycoEntryPointStorage().trancheToConfig[_tranche];
+    }
+
+    /// @inheritdoc IRoycoEntryPoint
+    function getDepositRequest(address _user, uint256 _requestNonce) external view override(IRoycoEntryPoint) returns (DepositRequest memory request) {
+        return _getRoycoEntryPointStorage().userToNonceToDepositRequest[_user][_requestNonce];
+    }
+
+    /// @inheritdoc IRoycoEntryPoint
+    function getRedemptionRequest(address _user, uint256 _requestNonce) external view override(IRoycoEntryPoint) returns (RedemptionRequest memory request) {
+        return _getRoycoEntryPointStorage().userToNonceToRedemptionRequest[_user][_requestNonce];
+    }
+
+    /// @inheritdoc IRoycoEntryPoint
+    function getProtocolFeeSharesPendingCollection(address _tranche) external view override(IRoycoEntryPoint) returns (uint256 shares) {
+        return _getRoycoEntryPointStorage().trancheToProtocolFeeShares[_tranche];
     }
 
     /// =============================
@@ -483,7 +512,7 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
             if (forfeitedYieldShares != 0) {
                 // If accrued yield is sent to the protocol, add them to the protocol accounting
                 if (_config.baseConfig.yieldRecipient == AccruedYieldRecipient.PROTOCOL) {
-                    _getRoycoTrancheEntryPointStorage().trancheToProtocolFeeShares[_tranche] += forfeitedYieldShares;
+                    _getRoycoEntryPointStorage().trancheToProtocolFeeShares[_tranche] += forfeitedYieldShares;
                     emit ProtocolFeeSharesAccrued(_tranche, forfeitedYieldShares);
                 }
                 // If accrued yield should be distributed to the remaining LPs, burn the shares, effectively donating the yield to the pool
@@ -505,7 +534,7 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
         require(numTranches == _configs.length, ARRAY_LENGTH_MISMATCH());
 
         // Ensure that each tranche was deployed by the Royco factory and update their configurations
-        RoycoTrancheEntryPointState storage $ = _getRoycoTrancheEntryPointStorage();
+        RoycoEntryPointState storage $ = _getRoycoEntryPointStorage();
         for (uint256 i = 0; i < numTranches; ++i) {
             address tranche = _tranches[i];
             _validateTranche(tranche);
@@ -526,11 +555,11 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
     }
 
     /**
-     * @notice Returns a storage pointer to the RoycoTrancheEntryPointState storage
+     * @notice Returns a storage pointer to the RoycoEntryPointState storage
      * @dev Uses ERC-7201 storage slot pattern for collision-resistant storage
      * @return $ Storage pointer to the entry point's state
      */
-    function _getRoycoTrancheEntryPointStorage() internal pure returns (RoycoTrancheEntryPointState storage $) {
+    function _getRoycoEntryPointStorage() internal pure returns (RoycoEntryPointState storage $) {
         assembly ("memory-safe") {
             $.slot := ROYCO_ENTRY_POINT_STORAGE_SLOT
         }
