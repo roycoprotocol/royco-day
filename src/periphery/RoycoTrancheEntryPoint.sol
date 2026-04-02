@@ -74,6 +74,7 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
         uint64 _executorBonusWAD
     )
         external
+        override(IRoycoTrancheEntryPoint)
         whenNotPaused
         restricted
         returns (uint256 requestNonce, uint32 executableAtTimestamp)
@@ -112,6 +113,7 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
         TRANCHE_UNIT[] calldata _assetsToDeposit
     )
         external
+        override(IRoycoTrancheEntryPoint)
         returns (uint256[] memory trancheSharesMinted)
     {
         // Execute the user specified deposit requests
@@ -130,6 +132,7 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
         TRANCHE_UNIT _assetsToDeposit
     )
         public
+        override(IRoycoTrancheEntryPoint)
         whenNotPaused
         restricted
         returns (uint256 trancheSharesMinted)
@@ -182,7 +185,7 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
     }
 
     /// @inheritdoc IRoycoTrancheEntryPoint
-    function cancelDepositRequests(uint256[] calldata _requestNonces, address _receiver) external {
+    function cancelDepositRequests(uint256[] calldata _requestNonces, address _receiver) external override(IRoycoTrancheEntryPoint) {
         // Execute the user specified deposit request cancellations
         uint256 numRequestsToCancel = _requestNonces.length;
         for (uint256 i = 0; i < numRequestsToCancel; ++i) {
@@ -191,7 +194,7 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
     }
 
     /// @inheritdoc IRoycoTrancheEntryPoint
-    function cancelDepositRequest(uint256 _requestNonce, address _receiver) public whenNotPaused restricted {
+    function cancelDepositRequest(uint256 _requestNonce, address _receiver) public override(IRoycoTrancheEntryPoint) whenNotPaused restricted {
         // Ensure the receiver isn't null
         require(_receiver != address(0), NULL_ADDRESS());
         // Retrieve the user's specified deposit request and assert that it exists
@@ -222,6 +225,7 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
         uint64 _executorBonusWAD
     )
         external
+        override(IRoycoTrancheEntryPoint)
         whenNotPaused
         restricted
         returns (uint256 requestNonce, uint32 executableAtTimestamp)
@@ -263,6 +267,7 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
         uint256[] calldata _sharesToRedeem
     )
         external
+        override(IRoycoTrancheEntryPoint)
         returns (AssetClaims[] memory userClaims)
     {
         // Execute the user specified redemption requests
@@ -281,6 +286,7 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
         uint256 _sharesToRedeem
     )
         public
+        override(IRoycoTrancheEntryPoint)
         whenNotPaused
         restricted
         returns (AssetClaims memory userClaims)
@@ -363,7 +369,7 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
     }
 
     /// @inheritdoc IRoycoTrancheEntryPoint
-    function cancelRedemptionRequests(uint256[] calldata _requestNonces, address _receiver) external {
+    function cancelRedemptionRequests(uint256[] calldata _requestNonces, address _receiver) external override(IRoycoTrancheEntryPoint) {
         // Execute the user specified redemption request cancellations
         uint256 numRequestsToCancel = _requestNonces.length;
         for (uint256 i = 0; i < numRequestsToCancel; ++i) {
@@ -372,7 +378,7 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
     }
 
     /// @inheritdoc IRoycoTrancheEntryPoint
-    function cancelRedemptionRequest(uint256 _requestNonce, address _receiver) public whenNotPaused restricted {
+    function cancelRedemptionRequest(uint256 _requestNonce, address _receiver) public override(IRoycoTrancheEntryPoint) whenNotPaused restricted {
         // Ensure the receiver isn't null
         require(_receiver != address(0), NULL_ADDRESS());
         // Retrieve the user's specified redemption request and assert that it exists
@@ -395,12 +401,20 @@ contract RoycoTrancheEntryPoint is RoycoBase, IRoycoTrancheEntryPoint {
     /// =============================
 
     /// @inheritdoc IRoycoTrancheEntryPoint
-    function modifyTrancheConfigs(address[] calldata _tranches, TrancheConfig[] calldata _configs) external restricted {
+    function modifyTrancheConfigs(address[] calldata _tranches, TrancheConfig[] calldata _configs) external override(IRoycoTrancheEntryPoint) restricted {
         _modifyTrancheConfigs(_tranches, _configs);
     }
 
     /// @inheritdoc IRoycoTrancheEntryPoint
-    function collectProtocolFees(address[] calldata _tranches, uint256[] calldata _sharesToClaim, address _receiver) external restricted {
+    function collectProtocolFees(
+        address[] calldata _tranches,
+        uint256[] calldata _sharesToClaim,
+        address _receiver
+    )
+        external
+        override(IRoycoTrancheEntryPoint)
+        restricted
+    {
         require(_receiver != address(0), NULL_ADDRESS());
         // Ensure that each tranche has a specified amount of protocol fee shares to claim
         uint256 numTranches = _tranches.length;
