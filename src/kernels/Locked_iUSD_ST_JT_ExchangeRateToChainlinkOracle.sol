@@ -15,7 +15,7 @@ import { IAccessControlEnumerable } from "@openzeppelin/contracts/access/extensi
  * @title Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle
  * @author Waymont
  * @notice The senior and junior tranches transfer in Infinifi Locked iUSD tokens with the same unwinding epochs
- * @notice Tranche share transfers enforce the same restrictions as Maple Pool token transfers
+ * @notice Tranche share transfers enforce the same restrictions as InfiniFi locked iUSD token transfers
  * @dev NAV computations employ the exchange rate between locked iUSD tokens to iUSD and then a chainlink (compatible) or an admin oracle set rate to convert iUSD to NAV units
  */
 contract Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle is Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel {
@@ -39,7 +39,7 @@ contract Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle is Identical_ERC4626_ST
      * @notice Constructs the kernel state
      * @param _params The standard construction parameters for the Royco kernel
      * @param _lockingController The address of InfiniFi's locking controller
-     * @param _unwindingEpochs The address of InfiniFi's locking controller
+     * @param _unwindingEpochs The unwinding epochs for the locked iUSD token
      */
     constructor(
         RoycoKernelConstructionParams memory _params,
@@ -50,7 +50,7 @@ contract Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle is Identical_ERC4626_ST
     {
         // Ensure that the tranche assets are the canonical locked iUSD token for the specified unwinding epoch
         require(ILockingController(_lockingController).shareToken(_unwindingEpochs) == ST_ASSET, TRANCHE_ASSET_AND_UNWINDING_EPOCHS_MISMATCH());
-        // Set the address of the InfiniFi core and locking controller contracts
+        // Set the immutable state
         INFINIFI_CORE = ILockingController(_lockingController).core();
         INFINIFI_LOCKING_CONTROLLER = _lockingController;
         UNWINDING_EPOCHS = _unwindingEpochs;
@@ -76,7 +76,7 @@ contract Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle is Identical_ERC4626_ST
         // If the stored conversion rate is the sentinel value, query the oracle for the rate
         if (iUSDToNAVUnitConversionRateWAD == SENTINEL_CONVERSION_RATE) iUSDToNAVUnitConversionRateWAD = _getConversionRateFromOracleWAD();
 
-        // Calculate the conversion rate from Maple pool tokens to NAV units, scaled to WAD precision
+        // Calculate the conversion rate from locked iUSD tokens to NAV units, scaled to WAD precision
         liUSDToNAVUnitConversionRateWAD = liUSDToIUSDNAVUnitConversionRateWAD.mulDiv(iUSDToNAVUnitConversionRateWAD, WAD, Math.Rounding.Floor);
     }
 
