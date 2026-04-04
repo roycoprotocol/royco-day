@@ -15,7 +15,6 @@ import { IAccessControlEnumerable } from "@openzeppelin/contracts/access/extensi
  * @title Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle
  * @author Waymont
  * @notice The senior and junior tranches transfer in Infinifi Locked iUSD tokens with the same unwinding epochs
- * @notice Tranche share transfers enforce the same restrictions as InfiniFi locked iUSD token transfers
  * @dev NAV computations employ the exchange rate between locked iUSD tokens to iUSD and then a chainlink (compatible) or an admin oracle set rate to convert iUSD to NAV units
  */
 contract Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle is Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel {
