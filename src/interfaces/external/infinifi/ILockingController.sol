@@ -4,9 +4,6 @@ pragma solidity ^0.8.0;
 /// @title ILockingController
 /// @notice Abridged interface for the Infinifi Locking Controller contract
 interface ILockingController {
-    /// @notice Returns the address of the InfiniFiCore access control contract
-    function core() external view returns (address);
-
     /// @notice Returns the exchange rate of receipt tokens per share token for a given lock duration
     /// @param _unwindingEpochs The lock duration in epochs (1-13 weeks)
     /// @return Exchange rate in WAD (18 decimals), e.g., 1.05e18 means 1 share = 1.05 receipt tokens

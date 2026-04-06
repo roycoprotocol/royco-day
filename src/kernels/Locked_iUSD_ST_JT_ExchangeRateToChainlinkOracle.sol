@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { IInfiniFiGateway } from "../interfaces/external/infinifi/IInfiniFiGateway.sol";
 import { ILockingController } from "../interfaces/external/infinifi/ILockingController.sol";
 import { IYieldSharingV2 } from "../interfaces/external/infinifi/IYieldSharingV2.sol";
 import { WAD } from "../libraries/Constants.sol";
@@ -9,7 +10,6 @@ import {
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel
 } from "./Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel.sol";
 import { AssetClaims, Math, RoycoKernel, SyncedAccountingState, TrancheType } from "./base/RoycoKernel.sol";
-import { IAccessControlEnumerable } from "@openzeppelin/contracts/access/extensions/IAccessControlEnumerable.sol";
 
 /**
  * @title Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle
@@ -19,14 +19,14 @@ import { IAccessControlEnumerable } from "@openzeppelin/contracts/access/extensi
  */
 contract Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle is Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel {
     using Math for uint256;
-    /// @dev The role of the finance manager responsible for synchronizing accounting state for the InfiniFi protocol
-    bytes32 private constant FINANCE_MANAGER_ROLE = keccak256("FINANCE_MANAGER");
+    /// @dev The key used in the InfiniFi gateway to identify the locking controller contract
+    string private constant LOCKING_CONTROLLER_KEY = "lockingController";
 
-    /// @notice The address of InfiniFi core contract
-    address public immutable INFINIFI_CORE;
+    /// @dev The key used in the InfiniFi gateway to identify the yield sharing contract
+    string private constant YIELD_SHARING_KEY = "yieldSharing";
 
-    /// @notice The address of InfiniFi's locking controller
-    address public immutable INFINIFI_LOCKING_CONTROLLER;
+    /// @notice The address of InfiniFi gateway contract
+    address public immutable INFINIFI_GATEWAY;
 
     /// @notice The unwinding epochs for the locked iUSD token (tranche assets)
     uint32 private immutable UNWINDING_EPOCHS;
@@ -34,25 +34,33 @@ contract Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle is Identical_ERC4626_ST
     /// @dev Thrown when the tranche assets (locked iUSD) aren't the share token for the specified unwinding epochs
     error TRANCHE_ASSET_AND_UNWINDING_EPOCHS_MISMATCH();
 
+    /// @dev A modifier which synchronizes the accounting for all InfiniFi tokens before a function call, ensuring the exchange rates are fresh
+    modifier withSyncedInfinifiAccounting() {
+        IYieldSharingV2(_getInfinifiContract(YIELD_SHARING_KEY)).accrue();
+        _;
+    }
+
     /**
      * @notice Constructs the kernel state
      * @param _params The standard construction parameters for the Royco kernel
-     * @param _lockingController The address of InfiniFi's locking controller
+     * @param _gateway The address of InfiniFi's gateway
      * @param _unwindingEpochs The unwinding epochs for the locked iUSD token
      */
     constructor(
         RoycoKernelConstructionParams memory _params,
-        address _lockingController,
+        address _gateway,
         uint32 _unwindingEpochs
     )
         Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel(_params)
     {
-        // Ensure that the tranche assets are the canonical locked iUSD token for the specified unwinding epoch
-        require(ILockingController(_lockingController).shareToken(_unwindingEpochs) == ST_ASSET, TRANCHE_ASSET_AND_UNWINDING_EPOCHS_MISMATCH());
         // Set the immutable state
-        INFINIFI_CORE = ILockingController(_lockingController).core();
-        INFINIFI_LOCKING_CONTROLLER = _lockingController;
+        INFINIFI_GATEWAY = _gateway;
         UNWINDING_EPOCHS = _unwindingEpochs;
+        // Ensure that the tranche assets are the canonical locked iUSD token for the specified unwinding epoch
+        require(
+            ILockingController(_getInfinifiContract(LOCKING_CONTROLLER_KEY)).shareToken(_unwindingEpochs) == ST_ASSET,
+            TRANCHE_ASSET_AND_UNWINDING_EPOCHS_MISMATCH()
+        );
     }
 
     /**
@@ -68,7 +76,7 @@ contract Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle is Identical_ERC4626_ST
     {
         // Fetch the conversion rate from the InfiniFi locked iUSD token to iUSD
         // NOTE: The output is already scaled to WAD precision
-        uint256 liUSDToIUSDNAVUnitConversionRateWAD = ILockingController(INFINIFI_LOCKING_CONTROLLER).exchangeRate(UNWINDING_EPOCHS);
+        uint256 liUSDToIUSDNAVUnitConversionRateWAD = ILockingController(_getInfinifiContract(LOCKING_CONTROLLER_KEY)).exchangeRate(UNWINDING_EPOCHS);
 
         // Resolve the iUSD to NAV unit conversion rate, scaled to WAD precision
         uint256 iUSDToNAVUnitConversionRateWAD = getStoredConversionRateWAD();
@@ -81,8 +89,7 @@ contract Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle is Identical_ERC4626_ST
 
     /// @inheritdoc RoycoKernel
     /// @dev Synchronizes InfiniFi's internal accounting before synchronizing tranche accounting, ensuring fresh NAVs
-    function _preOpSyncTrancheAccounting() internal override(RoycoKernel) returns (SyncedAccountingState memory) {
-        _syncInfinifiAccounting();
+    function _preOpSyncTrancheAccounting() internal override(RoycoKernel) withSyncedInfinifiAccounting returns (SyncedAccountingState memory) {
         return super._preOpSyncTrancheAccounting();
     }
 
@@ -91,14 +98,15 @@ contract Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle is Identical_ERC4626_ST
     function _preOpSyncTrancheAccounting(TrancheType _trancheType)
         internal
         override(RoycoKernel)
+        withSyncedInfinifiAccounting
         returns (SyncedAccountingState memory, AssetClaims memory, uint256)
     {
-        _syncInfinifiAccounting();
         return super._preOpSyncTrancheAccounting(_trancheType);
     }
 
-    /// @dev Synchronizes the accounting for all InfiniFi tokens, ensuring the exchange rates are fresh
-    function _syncInfinifiAccounting() internal {
-        IYieldSharingV2(IAccessControlEnumerable(INFINIFI_CORE).getRoleMember(FINANCE_MANAGER_ROLE, 0)).accrue();
+    /// @dev Returns an InfiniFi contract given its key in the gateway
+    /// @param _key The key identifying the contract in the InfiniFi gateway
+    function _getInfinifiContract(string memory _key) internal view returns (address) {
+        return IInfiniFiGateway(INFINIFI_GATEWAY).getAddress(_key);
     }
 }
