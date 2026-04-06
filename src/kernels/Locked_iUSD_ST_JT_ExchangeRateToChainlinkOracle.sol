@@ -5,20 +5,18 @@ import { IInfiniFiGateway } from "../interfaces/external/infinifi/IInfiniFiGatew
 import { ILockingController } from "../interfaces/external/infinifi/ILockingController.sol";
 import { IYieldSharingV2 } from "../interfaces/external/infinifi/IYieldSharingV2.sol";
 import { WAD } from "../libraries/Constants.sol";
-import {
-    IdenticalERC4626SharesToChainlinkOracleQuoter,
-    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel
-} from "./Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel.sol";
-import { AssetClaims, Math, RoycoKernel, SyncedAccountingState, TrancheType } from "./base/RoycoKernel.sol";
+import { AssetClaims, IRoycoKernel, Math, RoycoKernel, SyncedAccountingState, TrancheType } from "./base/RoycoKernel.sol";
+import { IdenticalAssetsChainlinkOracleQuoter, IdenticalAssetsOracleQuoter } from "./base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
 
 /**
  * @title Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle
  * @author Waymont
- * @notice The senior and junior tranches transfer in Infinifi Locked iUSD tokens with the same unwinding epochs
+ * @notice The senior and junior tranches transfer in InfiniFi Locked iUSD tokens with the same unwinding epochs
  * @dev NAV computations employ the exchange rate between locked iUSD tokens to iUSD and then a chainlink (compatible) or an admin oracle set rate to convert iUSD to NAV units
  */
-contract Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle is Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel {
+contract Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle is IdenticalAssetsChainlinkOracleQuoter {
     using Math for uint256;
+
     /// @dev The key used in the InfiniFi gateway to identify the locking controller contract
     string private constant LOCKING_CONTROLLER_KEY = "lockingController";
 
@@ -29,38 +27,59 @@ contract Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle is Identical_ERC4626_ST
     address public immutable INFINIFI_GATEWAY;
 
     /// @notice The unwinding epochs for the locked iUSD token (tranche assets)
-    uint32 private immutable UNWINDING_EPOCHS;
+    uint32 private immutable TRANCHE_ASSET_UNWINDING_EPOCHS;
 
     /// @dev Thrown when the tranche assets (locked iUSD) aren't the share token for the specified unwinding epochs
-    error TRANCHE_ASSET_AND_UNWINDING_EPOCHS_MISMATCH();
+    error TRANCHE_ASSET_AND_TRANCHE_ASSET_UNWINDING_EPOCHS_MISMATCH();
 
-    /// @dev A modifier which synchronizes the accounting for all InfiniFi tokens before a function call, ensuring the exchange rates are fresh
-    modifier withSyncedInfinifiAccounting() {
-        IYieldSharingV2(_getInfinifiContract(YIELD_SHARING_KEY)).accrue();
+    /// @dev A modifier which synchronizes the accounting for InfiniFi before a function call, ensuring that the exchange rates used for NAV computations are fresh
+    modifier withSyncedInfiniFiAccounting() {
+        IYieldSharingV2(_getInfiniFiContract(YIELD_SHARING_KEY)).accrue();
         _;
     }
 
     /**
      * @notice Constructs the kernel state
      * @param _params The standard construction parameters for the Royco kernel
-     * @param _gateway The address of InfiniFi's gateway
-     * @param _unwindingEpochs The unwinding epochs for the locked iUSD token
+     * @param _infiniFiGateway The address of InfiniFi's gateway
+     * @param _trancheAssetUnwindingEpochs The unwinding epochs for the locked iUSD token (tranche assets)
      */
-    constructor(
-        RoycoKernelConstructionParams memory _params,
-        address _gateway,
-        uint32 _unwindingEpochs
-    )
-        Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel(_params)
-    {
+    constructor(RoycoKernelConstructionParams memory _params, address _infiniFiGateway, uint32 _trancheAssetUnwindingEpochs) RoycoKernel(_params) {
+        require(_infiniFiGateway != address(0), NULL_ADDRESS());
+
         // Set the immutable state
-        INFINIFI_GATEWAY = _gateway;
-        UNWINDING_EPOCHS = _unwindingEpochs;
-        // Ensure that the tranche assets are the canonical locked iUSD token for the specified unwinding epoch
+        INFINIFI_GATEWAY = _infiniFiGateway;
+        TRANCHE_ASSET_UNWINDING_EPOCHS = _trancheAssetUnwindingEpochs;
+
+        // Ensure that the tranche assets match the locked iUSD token for the specified unwinding epoch
         require(
-            ILockingController(_getInfinifiContract(LOCKING_CONTROLLER_KEY)).shareToken(_unwindingEpochs) == ST_ASSET,
-            TRANCHE_ASSET_AND_UNWINDING_EPOCHS_MISMATCH()
+            ILockingController(_getInfiniFiContract(LOCKING_CONTROLLER_KEY)).shareToken(_trancheAssetUnwindingEpochs) == ST_ASSET,
+            TRANCHE_ASSET_AND_TRANCHE_ASSET_UNWINDING_EPOCHS_MISMATCH()
         );
+    }
+
+    /**
+     * @notice Initializes the kernel state
+     * @param _params The standard initialization parameters for the Royco Kernel
+     * @param _initialIUSDToNAVUnitsConversionRateWAD The initial iUSD to NAV units (USD) conversion rate, scaled to WAD precision
+     * @param _iUSDToNAVUnitsOracle The oracle to fetch the price of iUSD in NAV units (USD)
+     * @param _stalenessThresholdSeconds The staleness threshold in seconds for the oracle
+     */
+    function initialize(
+        IRoycoKernel.RoycoKernelInitParams calldata _params,
+        uint256 _initialIUSDToNAVUnitsConversionRateWAD,
+        address _iUSDToNAVUnitsOracle,
+        uint48 _stalenessThresholdSeconds
+    )
+        external
+        initializer
+    {
+        // Initialize the base kernel state
+        __RoycoKernel_init(_params);
+        // Initialize the identical assets oracle quoter
+        __IdenticalAssetsOracleQuoter_init_unchained(_initialIUSDToNAVUnitsConversionRateWAD);
+        // Initialize the identical assets chainlink oracle quoter
+        __IdenticalAssetsChainlinkOracleQuoter_init_unchained(_iUSDToNAVUnitsOracle, _stalenessThresholdSeconds);
     }
 
     /**
@@ -71,12 +90,13 @@ contract Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle is Identical_ERC4626_ST
         public
         view
         virtual
-        override(IdenticalERC4626SharesToChainlinkOracleQuoter)
+        override(IdenticalAssetsChainlinkOracleQuoter)
         returns (uint256 liUSDToNAVUnitConversionRateWAD)
     {
         // Fetch the conversion rate from the InfiniFi locked iUSD token to iUSD
         // NOTE: The output is already scaled to WAD precision
-        uint256 liUSDToIUSDNAVUnitConversionRateWAD = ILockingController(_getInfinifiContract(LOCKING_CONTROLLER_KEY)).exchangeRate(UNWINDING_EPOCHS);
+        uint256 liUSDToIUSDNAVUnitConversionRateWAD =
+            ILockingController(_getInfiniFiContract(LOCKING_CONTROLLER_KEY)).exchangeRate(TRANCHE_ASSET_UNWINDING_EPOCHS);
 
         // Resolve the iUSD to NAV unit conversion rate, scaled to WAD precision
         uint256 iUSDToNAVUnitConversionRateWAD = getStoredConversionRateWAD();
@@ -87,9 +107,17 @@ contract Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle is Identical_ERC4626_ST
         liUSDToNAVUnitConversionRateWAD = liUSDToIUSDNAVUnitConversionRateWAD.mulDiv(iUSDToNAVUnitConversionRateWAD, WAD, Math.Rounding.Floor);
     }
 
+    /// @dev Fetches the iUSD price in terms of NAV units via a Chainlink compatible oracle
+    function _getConversionRateFromOracleWAD() internal view override(IdenticalAssetsOracleQuoter) returns (uint256) {
+        // Fetch the iUSD price in NAV units and its precision
+        (uint256 iUSDPriceInNAVUnits, uint256 pricePrecision) = _queryChainlinkOracle();
+        // Return the price scaled to WAD precision
+        return pricePrecision == WAD ? iUSDPriceInNAVUnits : iUSDPriceInNAVUnits.mulDiv(WAD, pricePrecision, Math.Rounding.Floor);
+    }
+
     /// @inheritdoc RoycoKernel
     /// @dev Synchronizes InfiniFi's internal accounting before synchronizing tranche accounting, ensuring fresh NAVs
-    function _preOpSyncTrancheAccounting() internal override(RoycoKernel) withSyncedInfinifiAccounting returns (SyncedAccountingState memory) {
+    function _preOpSyncTrancheAccounting() internal override(RoycoKernel) withSyncedInfiniFiAccounting returns (SyncedAccountingState memory) {
         return super._preOpSyncTrancheAccounting();
     }
 
@@ -98,7 +126,7 @@ contract Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle is Identical_ERC4626_ST
     function _preOpSyncTrancheAccounting(TrancheType _trancheType)
         internal
         override(RoycoKernel)
-        withSyncedInfinifiAccounting
+        withSyncedInfiniFiAccounting
         returns (SyncedAccountingState memory, AssetClaims memory, uint256)
     {
         return super._preOpSyncTrancheAccounting(_trancheType);
@@ -106,7 +134,7 @@ contract Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle is Identical_ERC4626_ST
 
     /// @dev Returns an InfiniFi contract given its key in the gateway
     /// @param _key The key identifying the contract in the InfiniFi gateway
-    function _getInfinifiContract(string memory _key) internal view returns (address) {
+    function _getInfiniFiContract(string memory _key) internal view returns (address) {
         return IInfiniFiGateway(INFINIFI_GATEWAY).getAddress(_key);
     }
 }

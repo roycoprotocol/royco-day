@@ -7,4 +7,8 @@ interface IYieldSharingV2 {
     /// @notice Distributes any unaccrued yield to stakers and lockers
     /// @dev Call this before reading exchangeRate to ensure it reflects latest profits/losses
     function accrue() external;
+
+    /// @notice Returns the address of the Accounting contract
+    /// @return The Accounting contract address (immutable)
+    function accounting() external view returns (address);
 }

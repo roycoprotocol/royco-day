@@ -45,6 +45,7 @@ abstract contract MarketDeploymentConfig {
     string public constant SUSDAI = "sUSDai";
     string public constant YO_USD = "yoUSD";
     string public constant SYRUP_USDC = "syrupUSDC";
+    string public constant LIUSD_4W = "liUSD-4w";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CHAIN-SPECIFIC CONFIG (defined once per chain)
@@ -776,6 +777,50 @@ abstract contract MarketDeploymentConfig {
                     jtYieldShareAtTargetUtilWAD: 0.03e18,
                     jtYieldShareAtFullUtilWAD: 0.1e18,
                     maxAdaptationSpeedWAD: uint64(75e18 / uint256(365 days))
+                })
+            ),
+            transferAgentAddress: address(0)
+        });
+
+        _marketConfigs[LIUSD_4W] = MarketConfig({
+            marketName: LIUSD_4W,
+            chainId: MAINNET,
+            seniorTrancheName: _seniorTrancheName(LIUSD_4W),
+            seniorTrancheSymbol: _seniorTrancheSymbol(LIUSD_4W),
+            juniorTrancheName: _juniorTrancheName(LIUSD_4W),
+            juniorTrancheSymbol: _juniorTrancheSymbol(LIUSD_4W),
+            seniorAsset: 0x66bCF6151D5558AfB47c38B20663589843156078,
+            juniorAsset: 0x66bCF6151D5558AfB47c38B20663589843156078,
+            stDustTolerance: 5,
+            jtDustTolerance: 5,
+            kernelType: DeployScript.KernelType.Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle_Kernel,
+            kernelSpecificParams: abi.encode(
+                DeployScript.LockedIUSDKernelParams({
+                    infiniFiGateway: 0x3f04b65Ddbd87f9CE0A2e7Eb24d80e7fb87625b5,
+                    unwindingEpochs: 4,
+                    // Use SENTINEL_CONVERSION_RATE (0) to enable oracle-based pricing
+                    initialConversionRateWAD: 0,
+                    // iUSD/USD Chainlink oracle
+                    iUSDToNavAssetOracle: 0xF81Aa28A4F68124683AfadA81e8EBBf6e2867067,
+                    stalenessThresholdSeconds: 86_400
+                })
+            ),
+            enforceVaultSharesTransferWhitelist: false,
+            stSelfLiquidationBonusWAD: 0,
+            stProtocolFeeWAD: 0.1e18,
+            jtProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0.45e18,
+            coverageWAD: 0.1e18,
+            betaWAD: 1e18,
+            liquidationUtilizationWAD: 1.1111e18,
+            fixedTermDurationSeconds: 0,
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
+            ydmSpecificParams: abi.encode(
+                DeployScript.AdaptiveCurveYDM_V2_Params({
+                    jtYieldShareAtZeroUtilWAD: 0.11e18,
+                    jtYieldShareAtTargetUtilWAD: 0.11e18,
+                    jtYieldShareAtFullUtilWAD: 0.31e18,
+                    maxAdaptationSpeedWAD: uint64(50e18 / uint256(365 days))
                 })
             ),
             transferAgentAddress: address(0)
