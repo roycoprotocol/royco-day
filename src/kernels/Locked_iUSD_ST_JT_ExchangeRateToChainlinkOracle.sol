@@ -30,7 +30,7 @@ contract Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle is IdenticalAssetsChain
     uint32 private immutable TRANCHE_ASSET_UNWINDING_EPOCHS;
 
     /// @dev Thrown when the tranche assets (locked iUSD) aren't the share token for the specified unwinding epochs
-    error TRANCHE_ASSET_AND_TRANCHE_ASSET_UNWINDING_EPOCHS_MISMATCH();
+    error TRANCHE_ASSET_AND_UNWINDING_EPOCHS_MISMATCH();
 
     /// @dev A modifier which synchronizes the accounting for InfiniFi before a function call, ensuring that the exchange rates used for NAV computations are fresh
     modifier withSyncedInfiniFiAccounting() {
@@ -54,7 +54,7 @@ contract Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle is IdenticalAssetsChain
         // Ensure that the tranche assets match the locked iUSD token for the specified unwinding epoch
         require(
             ILockingController(_getInfiniFiContract(LOCKING_CONTROLLER_KEY)).shareToken(_trancheAssetUnwindingEpochs) == ST_ASSET,
-            TRANCHE_ASSET_AND_TRANCHE_ASSET_UNWINDING_EPOCHS_MISMATCH()
+            TRANCHE_ASSET_AND_UNWINDING_EPOCHS_MISMATCH()
         );
     }
 
