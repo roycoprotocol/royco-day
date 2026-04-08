@@ -9,7 +9,6 @@ import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { IInfiniFiGateway } from "../../../../src/interfaces/external/infinifi/IInfiniFiGateway.sol";
 import { ILockingController } from "../../../../src/interfaces/external/infinifi/ILockingController.sol";
-import { IYieldSharingV2 } from "../../../../src/interfaces/external/infinifi/IYieldSharingV2.sol";
 import { Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle } from "../../../../src/kernels/Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/libraries/Units.sol";
@@ -89,7 +88,6 @@ contract InfiniFi_liUSD_4w_Test is Locked_iUSD_TestBase {
         super.setUp();
 
         // NOTE: We intentionally do NOT mock any external contracts here.
-        // - YieldSharingV2.accrue() runs naturally - tests real integration
         // - LockingController.exchangeRate() returns real values until simulation
         // - Chainlink oracle returns real values until simulation
         //
@@ -224,18 +222,5 @@ contract InfiniFi_liUSD_4w_Test is Locked_iUSD_TestBase {
 
         // Allow small delta due to rounding
         assertApproxEqRel(actualRate, expectedRate, 1e15, "Conversion rate should match expected calculation");
-    }
-
-    /// @notice Tests that the kernel correctly syncs InfiniFi accounting before operations
-    function test_liUSD4w_syncInfiniFiAccountingCalled() external {
-        // Record calls to YieldSharingV2.accrue()
-        address yieldSharing = IInfiniFiGateway(INFINIFI_GATEWAY).getAddress("yieldSharing");
-
-        _depositJT(ALICE_ADDRESS, 1000e18);
-
-        // Expect accrue to be called during deposit (via _preOpSyncTrancheAccounting)
-        vm.expectCall(yieldSharing, abi.encodeWithSelector(IYieldSharingV2.accrue.selector));
-
-        _depositJT(JT_BOB_ADDRESS, 1000e18);
     }
 }

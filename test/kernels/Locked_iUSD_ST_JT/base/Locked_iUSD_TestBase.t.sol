@@ -7,7 +7,6 @@ import { IRoycoAuth } from "../../../../src/interfaces/IRoycoAuth.sol";
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { IInfiniFiGateway } from "../../../../src/interfaces/external/infinifi/IInfiniFiGateway.sol";
 import { ILockingController } from "../../../../src/interfaces/external/infinifi/ILockingController.sol";
-import { IYieldSharingV2 } from "../../../../src/interfaces/external/infinifi/IYieldSharingV2.sol";
 import { Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle } from "../../../../src/kernels/Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle.sol";
 import { IdenticalAssetsChainlinkOracleQuoter } from "../../../../src/kernels/base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
@@ -24,7 +23,6 @@ import { AbstractKernelTestSuite } from "../../abstract/AbstractKernelTestSuite.
 /// The final conversion: trancheToNAV = liUSDToiUSD * iUSDToNAV / WAD
 ///
 /// MOCKING STRATEGY:
-///   - YieldSharingV2.accrue() is NEVER mocked - the kernel should call real accrue()
 ///   - LockingController.exchangeRate() is only mocked when simulateYield/simulateLoss is called
 ///   - Chainlink oracle is only mocked when simulateYield/simulateLoss is called
 ///   - Normal operations (deposit, redeem, etc.) use real on-chain values until simulation
