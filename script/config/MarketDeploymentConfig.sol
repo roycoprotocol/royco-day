@@ -45,6 +45,7 @@ abstract contract MarketDeploymentConfig {
     string public constant SUSDAI = "sUSDai";
     string public constant YO_USD = "yoUSD";
     string public constant SYRUP_USDC = "syrupUSDC";
+    string public constant APYUSD = "apyUSD";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CHAIN-SPECIFIC CONFIG (defined once per chain)
@@ -230,6 +231,48 @@ abstract contract MarketDeploymentConfig {
                         // https://app.redstone.finance/app/feeds/ethereum-mainnet/nusd_fundamental/
                         baseAssetToNavAssetOracle: 0x5e7281f74e74D76347f0b8f4a36Fd3cb29c19d95,
                         // Updates to this oracle are pushed every 12 hours, so we set the staleness threshold to 48 hours for safety
+                        stalenessThresholdSeconds: 48 hours
+                    })
+            ),
+            enforceVaultSharesTransferWhitelist: false,
+            stSelfLiquidationBonusWAD: 0.005e18,
+            stProtocolFeeWAD: 0.1e18,
+            jtProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0.45e18,
+            coverageWAD: 0.1e18,
+            betaWAD: 1e18,
+            liquidationUtilizationWAD: 1.0009009e18,
+            fixedTermDurationSeconds: 0, // Market is not expected to have volatility, so no fixed term
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
+            ydmSpecificParams: abi.encode(
+                DeployScript.AdaptiveCurveYDM_V2_Params({
+                    jtYieldShareAtZeroUtilWAD: 0.11e18,
+                    jtYieldShareAtTargetUtilWAD: 0.11e18,
+                    jtYieldShareAtFullUtilWAD: 0.31e18,
+                    maxAdaptationSpeedWAD: uint64(50e18 / uint256(365 days))
+                })
+            ),
+            transferAgentAddress: address(0)
+        });
+
+        _marketConfigs[APYUSD] = MarketConfig({
+            marketName: APYUSD,
+            chainId: MAINNET,
+            seniorTrancheName: _seniorTrancheName(APYUSD),
+            seniorTrancheSymbol: _seniorTrancheSymbol(APYUSD),
+            juniorTrancheName: _juniorTrancheName(APYUSD),
+            juniorTrancheSymbol: _juniorTrancheSymbol(APYUSD),
+            seniorAsset: 0x38EEb52F0771140d10c4E9A9a72349A329Fe8a6A,
+            juniorAsset: 0x38EEb52F0771140d10c4E9A9a72349A329Fe8a6A,
+            stDustTolerance: 5,
+            jtDustTolerance: 5,
+            kernelType: DeployScript.KernelType.apyUSD_ST_JT_SharePriceToChainlinkOracle_Kernel,
+            kernelSpecificParams: abi.encode(
+                DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
+                        // Enable the Oracle Leg by setting the initial conversion rate to the sentinel conversion rate
+                        initialConversionRateWAD: 0,
+                        baseAssetToNavAssetOracle: 0x2037a5Eb67aa9B2FBF50042B724D8c4dB80F23b4,
+                        // Mirror sNUSD: updates pushed every 12 hours, staleness threshold set to 48 hours for safety
                         stalenessThresholdSeconds: 48 hours
                     })
             ),
