@@ -782,8 +782,8 @@ abstract contract MarketDeploymentConfig {
             ),
             transferAgentAddress: address(0)
         });
-        
-                _marketConfigs[SUSDAT] = MarketConfig({
+
+        _marketConfigs[SUSDAT] = MarketConfig({
             marketName: SUSDAT,
             chainId: MAINNET,
             seniorTrancheName: _seniorTrancheName(SUSDAT),
@@ -825,7 +825,6 @@ abstract contract MarketDeploymentConfig {
             ),
             transferAgentAddress: address(0)
         });
-    }
 
         _marketConfigs[LIUSD_4W] = MarketConfig({
             marketName: LIUSD_4W,
