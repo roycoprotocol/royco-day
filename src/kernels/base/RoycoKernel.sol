@@ -542,16 +542,17 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         onlyTranche
         whenNotPaused
     {
-        // Check if caller is blacklisted or not
-        require(!isBlacklisted(_caller), ACCOUNT_BLACKLISTED(_caller));
-
-        // Check if the sender is blacklisted if not a mint
-        require(_from == address(0) || !isBlacklisted(_from), ACCOUNT_BLACKLISTED(_from));
-
+        // Check the blacklist if it is enabled
+        bool blacklistEnabled = _getRoycoKernelStorage().isBlacklistEnabled;
+        if (blacklistEnabled) {
+            // Check if caller is blacklisted or not
+            require(!isBlacklisted(_caller), ACCOUNT_BLACKLISTED(_caller));
+            // Check if the sender is blacklisted if not a mint
+            require(_from == address(0) || !isBlacklisted(_from), ACCOUNT_BLACKLISTED(_from));
+        }
         // Check if the recipient is blacklisted if not a redeem
         if (_to != address(0)) {
-            require(!isBlacklisted(_to), ACCOUNT_BLACKLISTED(_to));
-
+            require(!blacklistEnabled || !isBlacklisted(_to), ACCOUNT_BLACKLISTED(_to));
             // If transferring shares, ensure that the recipient is a whitelisted LP for the tranche
             // It is assumed that the sender is already a whitelisted LP
             if (ENFORCE_TRANCHE_SHARES_TRANSFER_WHITELIST) {
