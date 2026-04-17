@@ -475,7 +475,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             NAV_UNIT coverageApplied = UnitsMathLib.min(stLoss, jtEffectiveNAV);
             if (coverageApplied != ZERO_NAV_UNITS) {
                 // If there was a JT protocol fee taken on their appreciation, recalculate it using the JT net gain after applying coverage applied
-                if (jtProtocolFeeAccrued > ZERO_NAV_UNITS) {
+                if (jtProtocolFeeAccrued != ZERO_NAV_UNITS) {
                     jtNetGain = jtNetGain.saturatingSub(coverageApplied);
                     jtProtocolFeeAccrued = (jtNetGain > $.jtNAVDustTolerance) ? jtNetGain.mulDiv($.jtProtocolFeeWAD, WAD, Math.Rounding.Floor) : ZERO_NAV_UNITS;
                 }
