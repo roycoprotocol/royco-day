@@ -83,6 +83,13 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // Default: no-op. Override for protocols with stale price checks.
     }
 
+    /// @notice Whether this kernel requires time warps for yield/loss simulation
+    /// @dev Override to return false for kernels where yield/loss is simulated via mocked rates
+    ///      rather than actual time-dependent accrual mechanisms
+    function _requiresTimeWarpForYield() internal virtual returns (bool) {
+        return true;
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // SETUP
     // ═══════════════════════════════════════════════════════════════════════════
@@ -578,8 +585,11 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // Simulate ST yield
         simulateSTYield(_yieldPercentage * 1e16);
 
-        // Warp time for yield distribution
-        vm.warp(vm.getBlockTimestamp() + 1 days);
+        // Warp time for yield distribution (if needed by kernel)
+        if (_requiresTimeWarpForYield()) {
+            vm.warp(vm.getBlockTimestamp() + 1 days);
+            _refreshOraclesAfterWarp();
+        }
 
         // Trigger sync
         vm.prank(SYNC_ROLE_ADDRESS);
@@ -602,8 +612,11 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // Simulate yield
         simulateJTYield(_yieldPercentage * 1e16);
 
-        // Warp time
-        vm.warp(vm.getBlockTimestamp() + 1 days);
+        // Warp time (if needed by kernel)
+        if (_requiresTimeWarpForYield()) {
+            vm.warp(vm.getBlockTimestamp() + 1 days);
+            _refreshOraclesAfterWarp();
+        }
 
         // Trigger sync
         vm.prank(SYNC_ROLE_ADDRESS);
@@ -828,7 +841,10 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Step 3: Simulate yield
         simulateJTYield(_yieldPercentage * 1e16);
-        vm.warp(vm.getBlockTimestamp() + 1 days);
+        if (_requiresTimeWarpForYield()) {
+            vm.warp(vm.getBlockTimestamp() + 1 days);
+            _refreshOraclesAfterWarp();
+        }
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
 
@@ -1029,7 +1045,10 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         NAV_UNIT jtNavBeforeYield = JT.totalAssets().nav;
 
         simulateJTYield(_yieldPercentage * 1e16);
-        vm.warp(vm.getBlockTimestamp() + 1 days);
+        if (_requiresTimeWarpForYield()) {
+            vm.warp(vm.getBlockTimestamp() + 1 days);
+            _refreshOraclesAfterWarp();
+        }
 
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
@@ -1278,7 +1297,10 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
             NAV_UNIT jtNavBeforeYield = JT.totalAssets().nav;
 
             simulateJTYield(_yieldPercentage * 1e16);
-            vm.warp(vm.getBlockTimestamp() + 1 days);
+            if (_requiresTimeWarpForYield()) {
+                vm.warp(vm.getBlockTimestamp() + 1 days);
+                _refreshOraclesAfterWarp();
+            }
 
             vm.prank(SYNC_ROLE_ADDRESS);
             KERNEL.syncTrancheAccounting();
@@ -1910,7 +1932,10 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Simulate yield
         simulateJTYield(_yieldPercentage * 1e16);
-        vm.warp(vm.getBlockTimestamp() + 1 days);
+        if (_requiresTimeWarpForYield()) {
+            vm.warp(vm.getBlockTimestamp() + 1 days);
+            _refreshOraclesAfterWarp();
+        }
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
 

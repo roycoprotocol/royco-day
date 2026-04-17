@@ -18,6 +18,7 @@ import {
 import { Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel } from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel.sol";
 import { Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel } from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel.sol";
 import { Identical_Makina_ST_JT_MachineToAdminOracle_Kernel } from "../src/kernels/Identical_Makina_ST_JT_MachineToAdminOracle_Kernel.sol";
+import { Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle } from "../src/kernels/Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle.sol";
 import { MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel } from "../src/kernels/MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.sol";
 import { ReUSD_ST_JT_ICLOracle_Kernel } from "../src/kernels/ReUSD_ST_JT_ICLOracle_Kernel.sol";
 import { IdenticalAssetsChainlinkOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
@@ -71,6 +72,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         Identical_Makina_ST_JT_MachineToAdminOracle_Kernel,
         sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel,
         MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel,
+        Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle_Kernel,
         sUSDat_ST_JT_SharePriceToChainlinkOracle_Kernel
     }
 
@@ -121,6 +123,15 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
     /// @notice Deployment parameters for kernels that employ the IdenticalAssetsAdminOracleQuoter
     struct IdenticalAssetsAdminOracleQuoterKernelParams {
         uint256 initialConversionRateWAD;
+    }
+
+    /// @notice Deployment parameters for Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle_Kernel
+    struct LockedIUSDKernelParams {
+        address infiniFiGateway;
+        uint32 unwindingEpochs;
+        uint256 initialConversionRateWAD;
+        address iUSDToNavAssetOracle;
+        uint48 stalenessThresholdSeconds;
     }
 
     /// @notice Deployment parameters for StaticCurveYDM
@@ -935,6 +946,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
             return abi.encodePacked(type(sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel).creationCode, abi.encode(_cp));
         } else if (_kernelType == KernelType.MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel) {
             return abi.encodePacked(type(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel).creationCode, abi.encode(_cp));
+        } else if (_kernelType == KernelType.Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle_Kernel) {
+            LockedIUSDKernelParams memory kp = abi.decode(_kernelSpecificParams, (LockedIUSDKernelParams));
+            return abi.encodePacked(type(Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle).creationCode, abi.encode(_cp, kp.infiniFiGateway, kp.unwindingEpochs));
         } else if (_kernelType == KernelType.sUSDat_ST_JT_SharePriceToChainlinkOracle_Kernel) {
             return abi.encodePacked(type(sUSDat_ST_JT_SharePriceToChainlinkOracle_Kernel).creationCode, abi.encode(_cp));
         } else {
@@ -1018,6 +1032,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
             return abi.encodeCall(
                 Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel.initialize,
                 (kernelParams, kernelParams2.initialConversionRateWAD, kernelParams2.baseAssetToNavAssetOracle, kernelParams2.stalenessThresholdSeconds)
+            );
+        } else if (_kernelType == KernelType.Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle_Kernel) {
+            LockedIUSDKernelParams memory kernelParams2 = abi.decode(_kernelSpecificParams, (LockedIUSDKernelParams));
+            return abi.encodeCall(
+                Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle.initialize,
+                (kernelParams, kernelParams2.initialConversionRateWAD, kernelParams2.iUSDToNavAssetOracle, kernelParams2.stalenessThresholdSeconds)
             );
         } else if (_kernelType == KernelType.sUSDat_ST_JT_SharePriceToChainlinkOracle_Kernel) {
             IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams memory kernelParams2 =
