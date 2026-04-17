@@ -383,6 +383,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         IRoycoKernel(KERNEL).preTrancheBalanceUpdateHook(msg.sender, _from, _to, _value);
 
         // Call the parent contract update function to update the balance
-        super._update(_from, _to, _value);
+        // NOTE: This will execute even if the tranche is in a paused state
+        ERC20Upgradeable._update(_from, _to, _value);
     }
 }
