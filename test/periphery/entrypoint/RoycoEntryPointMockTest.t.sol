@@ -1602,13 +1602,13 @@ contract RoycoEntryPointMockTest is Test, RolesConfiguration {
         users[1] = userB;
         uint256[] memory nonces = new uint256[](2);
         nonces[0] = nonceA;
-        nonces[1] = 9_999; // bogus
+        nonces[1] = 9999; // bogus
         uint256[] memory amounts = new uint256[](2);
         amounts[0] = type(uint256).max;
         amounts[1] = type(uint256).max;
 
         vm.prank(executor);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoEntryPoint.INVALID_REQUEST.selector, uint256(9_999)));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoEntryPoint.INVALID_REQUEST.selector, uint256(9999)));
         entryPoint.executeRedemptions(users, nonces, amounts);
     }
 
