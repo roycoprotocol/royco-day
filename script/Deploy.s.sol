@@ -21,6 +21,7 @@ import { Identical_Makina_ST_JT_MachineToAdminOracle_Kernel } from "../src/kerne
 import { Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle } from "../src/kernels/Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle.sol";
 import { MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel } from "../src/kernels/MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.sol";
 import { ReUSD_ST_JT_ICLOracle_Kernel } from "../src/kernels/ReUSD_ST_JT_ICLOracle_Kernel.sol";
+import { apyUSD_ST_JT_SharePriceToChainlinkOracle_Kernel } from "../src/kernels/apyUSD_ST_JT_SharePriceToChainlinkOracle_Kernel.sol";
 import { IdenticalAssetsChainlinkOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
 import { IdenticalAssetsOracleQuoter } from "../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
 import { sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel } from "../src/kernels/sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel.sol";
@@ -72,6 +73,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         Identical_Makina_ST_JT_MachineToAdminOracle_Kernel,
         sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel,
         MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel,
+        apyUSD_ST_JT_SharePriceToChainlinkOracle_Kernel,
         Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle_Kernel,
         sUSDat_ST_JT_SharePriceToChainlinkOracle_Kernel
     }
@@ -946,6 +948,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
             return abi.encodePacked(type(sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel).creationCode, abi.encode(_cp));
         } else if (_kernelType == KernelType.MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel) {
             return abi.encodePacked(type(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel).creationCode, abi.encode(_cp));
+        } else if (_kernelType == KernelType.apyUSD_ST_JT_SharePriceToChainlinkOracle_Kernel) {
+            return abi.encodePacked(type(apyUSD_ST_JT_SharePriceToChainlinkOracle_Kernel).creationCode, abi.encode(_cp));
         } else if (_kernelType == KernelType.Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle_Kernel) {
             LockedIUSDKernelParams memory kp = abi.decode(_kernelSpecificParams, (LockedIUSDKernelParams));
             return abi.encodePacked(type(Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle).creationCode, abi.encode(_cp, kp.infiniFiGateway, kp.unwindingEpochs));
@@ -1033,6 +1037,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
                 Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel.initialize,
                 (kernelParams, kernelParams2.initialConversionRateWAD, kernelParams2.baseAssetToNavAssetOracle, kernelParams2.stalenessThresholdSeconds)
             );
+        } else if (_kernelType == KernelType.apyUSD_ST_JT_SharePriceToChainlinkOracle_Kernel) {
+            IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams memory kernelParams2 =
+                abi.decode(_kernelSpecificParams, (IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams));
         } else if (_kernelType == KernelType.Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle_Kernel) {
             LockedIUSDKernelParams memory kernelParams2 = abi.decode(_kernelSpecificParams, (LockedIUSDKernelParams));
             return abi.encodeCall(
