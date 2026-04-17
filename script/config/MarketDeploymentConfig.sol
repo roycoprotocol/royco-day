@@ -46,6 +46,7 @@ abstract contract MarketDeploymentConfig {
     string public constant YO_USD = "yoUSD";
     string public constant SYRUP_USDC = "syrupUSDC";
     string public constant LIUSD_4W = "liUSD-4w";
+    string public constant SUSDAT = "sUSDat";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CHAIN-SPECIFIC CONFIG (defined once per chain)
@@ -781,6 +782,50 @@ abstract contract MarketDeploymentConfig {
             ),
             transferAgentAddress: address(0)
         });
+        
+                _marketConfigs[SUSDAT] = MarketConfig({
+            marketName: SUSDAT,
+            chainId: MAINNET,
+            seniorTrancheName: _seniorTrancheName(SUSDAT),
+            seniorTrancheSymbol: _seniorTrancheSymbol(SUSDAT),
+            juniorTrancheName: _juniorTrancheName(SUSDAT),
+            juniorTrancheSymbol: _juniorTrancheSymbol(SUSDAT),
+            seniorAsset: 0xD166337499E176bbC38a1FBd113Ab144e5bd2Df7,
+            juniorAsset: 0xD166337499E176bbC38a1FBd113Ab144e5bd2Df7,
+            stDustTolerance: 5,
+            jtDustTolerance: 5,
+            kernelType: DeployScript.KernelType.sUSDat_ST_JT_SharePriceToChainlinkOracle_Kernel,
+            kernelSpecificParams: abi.encode(
+                DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
+                        // Disable the Oracle Leg by setting the initial conversion rate to 1e18
+                        initialConversionRateWAD: 1e18,
+                        // Filler oracle address since the Oracle Leg is disabled
+                        baseAssetToNavAssetOracle: address(1),
+                        // Filler staleness threshold since the Oracle Leg is disabled
+                        stalenessThresholdSeconds: 86_400
+                    })
+            ),
+            enforceVaultSharesTransferWhitelist: false,
+            stSelfLiquidationBonusWAD: 0.05e18,
+            stProtocolFeeWAD: 0.1e18,
+            jtProtocolFeeWAD: 0.2e18,
+            jtYieldShareProtocolFeeWAD: 0.2e18,
+            coverageWAD: 0.1e18,
+            betaWAD: 1e18,
+            liquidationUtilizationWAD: 1.1111e18,
+            fixedTermDurationSeconds: 0,
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
+            ydmSpecificParams: abi.encode(
+                DeployScript.AdaptiveCurveYDM_V2_Params({
+                    jtYieldShareAtZeroUtilWAD: 0.05e18,
+                    jtYieldShareAtTargetUtilWAD: 0.05e18,
+                    jtYieldShareAtFullUtilWAD: 0.4e18,
+                    maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
+                })
+            ),
+            transferAgentAddress: address(0)
+        });
+    }
 
         _marketConfigs[LIUSD_4W] = MarketConfig({
             marketName: LIUSD_4W,
