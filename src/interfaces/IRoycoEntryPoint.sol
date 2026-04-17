@@ -223,14 +223,14 @@ interface IRoycoEntryPoint {
         returns (uint256 requestNonce, uint32 executableAtTimestamp);
 
     /**
-     * @notice Executes multiple pending deposit requests for the specified user
-     * @param _user The user whose deposit requests should be executed
+     * @notice Executes multiple pending deposit requests across the specified users
+     * @param _users The users whose deposit requests should be executed
      * @param _requestNonces The nonces of the deposit requests to execute
      * @param _assetsToDeposit The amounts of assets to deposit for each request (use MAX_TRANCHE_UNITS to deposit min(requestedAssets, maxDeposit))
      * @return trancheSharesMinted The amounts of tranche shares minted for each executed request
      */
     function executeDeposits(
-        address _user,
+        address[] calldata _users,
         uint256[] calldata _requestNonces,
         TRANCHE_UNIT[] calldata _assetsToDeposit
     )
@@ -281,14 +281,14 @@ interface IRoycoEntryPoint {
         returns (uint256 requestNonce, uint32 executableAtTimestamp);
 
     /**
-     * @notice Executes multiple pending redemption requests for the specified user
-     * @param _user The user whose redemption requests should be executed
+     * @notice Executes multiple pending redemption requests across the specified users
+     * @param _users The users whose redemption requests should be executed
      * @param _requestNonces The nonces of the redemption requests to execute
      * @param _sharesToRedeem The amount of shares to redeem for the redemption requests to execute (use type(uint256).max to redeem the maximum possible)
      * @return userClaims The assets withdrawn to the request-specific receiver upon executing each executed request
      */
     function executeRedemptions(
-        address _user,
+        address[] calldata _users,
         uint256[] calldata _requestNonces,
         uint256[] calldata _sharesToRedeem
     )

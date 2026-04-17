@@ -159,7 +159,7 @@ contract MockTranche is IRoycoVaultTranche, ERC20 {
 
     function deposit(TRANCHE_UNIT _assets, address _receiver) external override returns (uint256 shares) {
         uint256 assetAmount = toUint256(_assets);
-        require(assetAmount > 0, "MUST_DEPOSIT_NON_ZERO_ASSETS");
+        require(assetAmount > 0, "MUST_MINT_NON_ZERO_SHARES");
 
         shares = _convertToShares(assetAmount);
 

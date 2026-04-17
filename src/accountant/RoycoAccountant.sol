@@ -804,12 +804,18 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
      * @param _liquidationUtilizationWAD The liquidation utilization threshold for this market, scaled to WAD precision
      */
     function _validateCoverageConfig(uint64 _coverageWAD, uint96 _betaWAD, uint256 _liquidationUtilizationWAD) internal pure {
-        // Ensure that the coverage requirement is valid
-        require((_coverageWAD >= MIN_COVERAGE_WAD) && (_coverageWAD <= MAX_COVERAGE_WAD), INVALID_COVERAGE_CONFIG());
-        // Ensure that JT withdrawals are not permanently bricked
-        require(uint256(_coverageWAD).mulDiv(_betaWAD, WAD, Math.Rounding.Ceil) < WAD, INVALID_COVERAGE_CONFIG());
-        // Ensure that the liquidation utilization threshold can only be breached once the NAVs have experienced losses
-        require(_liquidationUtilizationWAD > WAD, INVALID_COVERAGE_CONFIG());
+        require(
+            // Ensure that the coverage requirement is valid
+            (_coverageWAD >= MIN_COVERAGE_WAD) && (_coverageWAD <= MAX_COVERAGE_WAD) && 
+                // Ensure that beta is valid
+                // NOTE: Beta cannot exceed 1 because the junior tranche should never be in a more loss-prone investment than the senior tranche
+                (_betaWAD <= WAD) && 
+                // Ensure that JT withdrawals are not permanently bricked
+                (uint256(_coverageWAD).mulDiv(_betaWAD, WAD, Math.Rounding.Ceil) < WAD) && 
+                // Ensure that the liquidation utilization threshold can only be breached once the NAVs have experienced losses
+                (_liquidationUtilizationWAD > WAD),
+            INVALID_COVERAGE_CONFIG()
+        );
     }
 
     /**

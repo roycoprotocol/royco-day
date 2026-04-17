@@ -919,8 +919,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
 
         // Case 2: Bonus sourced from both JT's claim on ST assets and JT's claim on JT assets
         // maxBonus = (stUserWeightedClaimNAV + jtClaimOnSTRawNAV * (1 - β)) * jtEffectiveNAV / (totalCoveredExposure - β * jtEffectiveNAV)
-        NAV_UNIT weightedClaimWithSTSourceAdjustmentNAV =
-            stUserWeightedClaimNAV + _jtClaimOnSTRawNAV.mulDiv(Math.saturatingSub(WAD, _state.betaWAD), WAD, Math.Rounding.Floor);
+        NAV_UNIT weightedClaimWithSTSourceAdjustmentNAV = stUserWeightedClaimNAV + _jtClaimOnSTRawNAV.mulDiv((WAD - _state.betaWAD), WAD, Math.Rounding.Floor);
         return weightedClaimWithSTSourceAdjustmentNAV.mulDiv(
             jtEffectiveNAV, (totalCoveredExposure - jtEffectiveNAV.mulDiv(_state.betaWAD, WAD, Math.Rounding.Floor)), Math.Rounding.Floor
         );

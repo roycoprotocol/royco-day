@@ -67,8 +67,8 @@ interface IRoycoVaultTranche is IERC20Metadata {
      */
     event SharesSeizedAndRedeemed(address indexed caller, address indexed from, address indexed to, AssetClaims claims, uint256 shares);
 
-    /// @notice Thrown when a deposit is requested with zero assets
-    error MUST_DEPOSIT_NON_ZERO_ASSETS();
+    /// @notice Thrown when a deposit would mint zero tranche shares (either zero assets or dust amount that rounds to zero shares)
+    error MUST_MINT_NON_ZERO_SHARES();
 
     /// @notice Thrown when a redemption is requested with zero shares
     error MUST_REQUEST_NON_ZERO_SHARES();

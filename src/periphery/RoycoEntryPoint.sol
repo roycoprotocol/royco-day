@@ -108,7 +108,7 @@ contract RoycoEntryPoint is RoycoBase, IRoycoEntryPoint {
 
     /// @inheritdoc IRoycoEntryPoint
     function executeDeposits(
-        address _user,
+        address[] calldata _users,
         uint256[] calldata _requestNonces,
         TRANCHE_UNIT[] calldata _assetsToDeposit
     )
@@ -120,10 +120,10 @@ contract RoycoEntryPoint is RoycoBase, IRoycoEntryPoint {
     {
         // Execute the user specified deposit requests
         uint256 numRequestsToExecute = _requestNonces.length;
-        require(numRequestsToExecute == _assetsToDeposit.length, ARRAY_LENGTH_MISMATCH());
+        require(numRequestsToExecute == _users.length && numRequestsToExecute == _assetsToDeposit.length, ARRAY_LENGTH_MISMATCH());
         trancheSharesMinted = new uint256[](numRequestsToExecute);
         for (uint256 i = 0; i < numRequestsToExecute; ++i) {
-            trancheSharesMinted[i] = _executeDeposit(_user, _requestNonces[i], _assetsToDeposit[i]);
+            trancheSharesMinted[i] = _executeDeposit(_users[i], _requestNonces[i], _assetsToDeposit[i]);
         }
     }
 
@@ -220,7 +220,7 @@ contract RoycoEntryPoint is RoycoBase, IRoycoEntryPoint {
 
     /// @inheritdoc IRoycoEntryPoint
     function executeRedemptions(
-        address _user,
+        address[] calldata _users,
         uint256[] calldata _requestNonces,
         uint256[] calldata _sharesToRedeem
     )
@@ -232,10 +232,10 @@ contract RoycoEntryPoint is RoycoBase, IRoycoEntryPoint {
     {
         // Execute the user specified redemption requests
         uint256 numRequestsToExecute = _requestNonces.length;
-        require(numRequestsToExecute == _sharesToRedeem.length, ARRAY_LENGTH_MISMATCH());
+        require(numRequestsToExecute == _users.length && numRequestsToExecute == _sharesToRedeem.length, ARRAY_LENGTH_MISMATCH());
         userClaims = new AssetClaims[](numRequestsToExecute);
         for (uint256 i = 0; i < numRequestsToExecute; ++i) {
-            userClaims[i] = _executeRedemption(_user, _requestNonces[i], _sharesToRedeem[i]);
+            userClaims[i] = _executeRedemption(_users[i], _requestNonces[i], _sharesToRedeem[i]);
         }
     }
 
@@ -431,6 +431,7 @@ contract RoycoEntryPoint is RoycoBase, IRoycoEntryPoint {
         // Resolve the actual amount of shares to redeem
         _sharesToRedeem =
             (_sharesToRedeem == type(uint256).max) ? Math.min(IRoycoVaultTranche(tranche).maxRedeem(address(this)), request.shares) : _sharesToRedeem;
+        // Return early without reverting if maxRedeem is 0 due to market conditions
         if (_sharesToRedeem == 0) return AssetClaims(ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, ZERO_NAV_UNITS);
 
         // Mark the shares as redeemed
