@@ -1040,6 +1040,11 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         } else if (_kernelType == KernelType.apyUSD_ST_JT_SharePriceToChainlinkOracle_Kernel) {
             IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams memory kernelParams2 =
                 abi.decode(_kernelSpecificParams, (IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams));
+            // apyUSD kernel inherits initialize from Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel
+            return abi.encodeCall(
+                Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel.initialize,
+                (kernelParams, kernelParams2.initialConversionRateWAD, kernelParams2.baseAssetToNavAssetOracle, kernelParams2.stalenessThresholdSeconds)
+            );
         } else if (_kernelType == KernelType.Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle_Kernel) {
             LockedIUSDKernelParams memory kernelParams2 = abi.decode(_kernelSpecificParams, (LockedIUSDKernelParams));
             return abi.encodeCall(
