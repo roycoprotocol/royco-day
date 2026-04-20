@@ -404,8 +404,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
     /// @param _lpRole The role value for the LP role
     /// @return The roles configuration for the tranche contract
     function _buildTrancheRolesConfig(address _tranche, uint64 _lpRole) private pure returns (IRoycoFactory.RolesTargetConfiguration memory) {
-        bytes4[] memory selectors = new bytes4[](7);
-        uint64[] memory roleValues = new uint64[](7);
+        bytes4[] memory selectors = new bytes4[](9);
+        uint64[] memory roleValues = new uint64[](9);
 
         selectors[0] = IRoycoVaultTranche.deposit.selector;
         roleValues[0] = _lpRole;
@@ -421,6 +421,10 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         roleValues[5] = TRANSFER_AGENT_ROLE;
         selectors[6] = IRoycoVaultTranche.seizeAndRedeemShares.selector;
         roleValues[6] = TRANSFER_AGENT_ROLE;
+        selectors[7] = IRoycoVaultTranche.burn.selector;
+        roleValues[7] = BURNER_ROLE;
+        selectors[8] = IRoycoVaultTranche.burnFrom.selector;
+        roleValues[8] = BURNER_ROLE;
 
         return IRoycoFactory.RolesTargetConfiguration({ target: _tranche, selectors: selectors, roles: roleValues });
     }
