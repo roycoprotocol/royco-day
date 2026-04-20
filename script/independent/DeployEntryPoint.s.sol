@@ -207,7 +207,8 @@ contract DeployEntryPointScript is EntryPointDeploymentConfig, AccessManagerConf
         // ── Grant LP roles to the entry point itself ─────────────────────────
         IAccessManager(_factory).grantRole(ST_LP_ROLE, _entryPoint, 0);
         IAccessManager(_factory).grantRole(JT_LP_ROLE, _entryPoint, 0);
-        if (ENABLE_LOGGING) console2.log("  [OK] Granted ST_LP_ROLE + JT_LP_ROLE to entry point");
+        IAccessManager(_factory).grantRole(BURNER_ROLE, _entryPoint, 0);
+        if (ENABLE_LOGGING) console2.log("  [OK] Granted ST_LP_ROLE + JT_LP_ROLE + BURNER_ROLE to entry point");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -289,14 +290,15 @@ contract DeployEntryPointScript is EntryPointDeploymentConfig, AccessManagerConf
         bytes4[] memory upgraderSelectors = new bytes4[](1);
         upgraderSelectors[0] = UUPSUpgradeable.upgradeToAndCall.selector;
 
-        // 4 setTargetFunctionRole + 2 grantRole = 6 total
-        transactions = new SafeTransaction[](6);
+        // 4 setTargetFunctionRole + 3 grantRole = 7 total
+        transactions = new SafeTransaction[](7);
         transactions[0] = buildSetTargetFunctionRole(_factory, _entryPoint, lpSelectors, ST_LP_ROLE);
         transactions[1] = buildSetTargetFunctionRole(_factory, _entryPoint, adminSelectors, ADMIN_KERNEL_ROLE);
         transactions[2] = buildSetTargetFunctionRole(_factory, _entryPoint, pauserSelectors, ADMIN_PAUSER_ROLE);
         transactions[3] = buildSetTargetFunctionRole(_factory, _entryPoint, upgraderSelectors, ADMIN_UPGRADER_ROLE);
         transactions[4] = buildGrantRole(_factory, ST_LP_ROLE, _entryPoint, 0);
         transactions[5] = buildGrantRole(_factory, JT_LP_ROLE, _entryPoint, 0);
+        transactions[6] = buildGrantRole(_factory, BURNER_ROLE, _entryPoint, 0);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

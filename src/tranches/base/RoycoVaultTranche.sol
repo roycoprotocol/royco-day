@@ -195,12 +195,12 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     }
 
     /// @inheritdoc ERC20BurnableUpgradeable
-    function burn(uint256 _shares) public override(ERC20BurnableUpgradeable) whenNotPaused restricted {
+    function burn(uint256 _shares) public override(ERC20BurnableUpgradeable, IRoycoVaultTranche) whenNotPaused restricted {
         super.burn(_shares);
     }
 
     /// @inheritdoc ERC20BurnableUpgradeable
-    function burnFrom(address _account, uint256 _shares) public override(ERC20BurnableUpgradeable) whenNotPaused restricted {
+    function burnFrom(address _account, uint256 _shares) public override(ERC20BurnableUpgradeable, IRoycoVaultTranche) whenNotPaused restricted {
         super.burnFrom(_account, _shares);
     }
 
