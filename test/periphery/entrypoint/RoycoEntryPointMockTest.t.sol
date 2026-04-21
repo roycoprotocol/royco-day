@@ -275,7 +275,7 @@ contract RoycoEntryPointMockTest is Test, RolesConfiguration {
 
         // Executor should not be able to execute
         vm.prank(executor);
-        vm.expectRevert(IRoycoEntryPoint.EXECUTOR_EXECUTION_DISABLED.selector);
+        vm.expectRevert(IRoycoEntryPoint.THIRD_PARTY_EXECUTION_DISABLED.selector);
         entryPoint.executeDeposit(userA, nonce, MAX_TRANCHE_UNITS);
 
         // User can still execute
@@ -1774,7 +1774,7 @@ contract RoycoEntryPointMockTest is Test, RolesConfiguration {
 
         // Third party tries to execute
         vm.prank(executor);
-        vm.expectRevert(IRoycoEntryPoint.EXECUTOR_EXECUTION_DISABLED.selector);
+        vm.expectRevert(IRoycoEntryPoint.THIRD_PARTY_EXECUTION_DISABLED.selector);
         entryPoint.executeRedemption(userA, nonce, type(uint256).max);
     }
 

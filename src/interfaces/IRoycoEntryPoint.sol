@@ -202,7 +202,7 @@ interface IRoycoEntryPoint {
     error INVALID_EXECUTOR_BONUS();
 
     /// @dev Thrown when a non-owner attempts to execute a request that has opted out of executor execution
-    error EXECUTOR_EXECUTION_DISABLED();
+    error THIRD_PARTY_EXECUTION_DISABLED();
 
     /**
      * @notice Requests a deposit into the tranche, escrowing assets until the delay period elapses and the request is executed

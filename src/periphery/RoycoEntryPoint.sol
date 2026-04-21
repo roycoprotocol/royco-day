@@ -394,7 +394,7 @@ contract RoycoEntryPoint is RoycoBase, IRoycoEntryPoint {
         // If this is an third party execution, remit the executor bonus and deposit the remaining assets
         else {
             // Ensure that the user has opted into third party execution
-            require(request.baseRequest.executorBonusWAD != type(uint64).max, EXECUTOR_EXECUTION_DISABLED());
+            require(request.baseRequest.executorBonusWAD != type(uint64).max, THIRD_PARTY_EXECUTION_DISABLED());
             // Compute and transfer bonus assets to the executor
             bonusAssets = _assetsToDeposit.mulDiv(request.baseRequest.executorBonusWAD, WAD, Math.Rounding.Floor);
             if (bonusAssets != ZERO_TRANCHE_UNITS) IERC20(config.asset).safeTransfer(msg.sender, toUint256(bonusAssets));
@@ -460,7 +460,7 @@ contract RoycoEntryPoint is RoycoBase, IRoycoEntryPoint {
         // If this is a third party execution, withdraw the assets, handle any yield as configured, and remit the executor bonus
         else {
             // Ensure that the user has opted into third party execution
-            require(request.baseRequest.executorBonusWAD != type(uint64).max, EXECUTOR_EXECUTION_DISABLED());
+            require(request.baseRequest.executorBonusWAD != type(uint64).max, THIRD_PARTY_EXECUTION_DISABLED());
 
             // Redeem shares and route yield to this contract for bonus calculation
             (userSharesRedeemed, forfeitedYieldShares, userClaims) =
