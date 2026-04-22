@@ -196,8 +196,8 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     /// @inheritdoc IRoycoKernel
     /// @dev ST deposits are allowed if the market is in a PERPETUAL or FIXED_TERM state, granted that the market's coverage requirement is satisfied post-deposit
     function stMaxDeposit(address _receiver) public view virtual override(IRoycoKernel) returns (TRANCHE_UNIT) {
-        // If the receiver is blacklisted, return zero tranche units
-        if (isBlacklisted(_receiver)) return ZERO_TRANCHE_UNITS;
+        // If the receiver is blacklisted or the kernel is currently paused, return zero tranche units
+        if (isBlacklisted(_receiver) || paused()) return ZERO_TRANCHE_UNITS;
         // If ST IL exists, ST deposits are disabled to preclude existing ST's from getting diluted and realizing losses
         if (_previewSyncTrancheAccounting().stImpermanentLoss != ZERO_NAV_UNITS) return ZERO_TRANCHE_UNITS;
         // ST deposits are enabled as long as ST IL is nonexistent and coverage is satisfied
@@ -221,8 +221,8 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
             uint256 totalTrancheSharesAfterMintingFees
         )
     {
-        // If the owner is blacklisted, return zero claims
-        if (isBlacklisted(_owner)) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+        // If the owner is blacklisted or the kernel is currently paused, return zero claims
+        if (isBlacklisted(_owner) || paused()) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
         SyncedAccountingState memory state;
         AssetClaims memory stNotionalClaims;
@@ -245,8 +245,8 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     /// @inheritdoc IRoycoKernel
     /// @dev JT deposits are allowed if the market is in a PERPETUAL state
     function jtMaxDeposit(address _receiver) public view virtual override(IRoycoKernel) returns (TRANCHE_UNIT) {
-        // If the receiver is blacklisted, return zero tranche units
-        if (isBlacklisted(_receiver)) return ZERO_TRANCHE_UNITS;
+        // If the receiver is blacklisted or the kernel is currently paused, return zero tranche units
+        if (isBlacklisted(_receiver) || paused()) return ZERO_TRANCHE_UNITS;
         // If the market is in a state where JT deposits are not allowed, return zero tranche units
         if ((_previewSyncTrancheAccounting()).marketState != MarketState.PERPETUAL) return ZERO_TRANCHE_UNITS;
         return MAX_TRANCHE_UNITS;
@@ -267,8 +267,8 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
             uint256 totalTrancheSharesAfterMintingFees
         )
     {
-        // If the owner is blacklisted, return zero claims
-        if (isBlacklisted(_owner)) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+        // If the owner is blacklisted or the kernel is currently paused, return zero claims
+        if (isBlacklisted(_owner) || paused()) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
         // Get the total claims the junior tranche has on each tranche's assets
         SyncedAccountingState memory state;
