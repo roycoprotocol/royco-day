@@ -1430,20 +1430,20 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration {
     // These tests explicitly verify that the production role configuration from
     // buildSyncerConfigTransactions matches expected values and is correctly applied.
 
-    /// @notice Verify buildSyncerConfigTransactions returns exactly 3 transactions when no sync operators
+    /// @notice Verify buildSyncerConfigTransactions returns exactly 4 transactions when no sync operators
     function test_productionConfig_transactionCount_noOperators() external view {
         DeploySyncerScript.SafeTransaction[] memory txs = deployScript.buildSyncerConfigTransactions(address(factory), address(syncer), new address[](0));
-        assertEq(txs.length, 3, "Should have exactly 3 role configuration transactions with no operators");
+        assertEq(txs.length, 4, "Should have exactly 4 role configuration transactions with no operators");
     }
 
-    /// @notice Verify buildSyncerConfigTransactions returns 3 + N transactions with N sync operators
+    /// @notice Verify buildSyncerConfigTransactions returns 4 + N transactions with N sync operators
     function test_productionConfig_transactionCount_withOperators() external view {
         address[] memory syncOperators = new address[](2);
         syncOperators[0] = address(0x1111);
         syncOperators[1] = address(0x2222);
 
         DeploySyncerScript.SafeTransaction[] memory txs = deployScript.buildSyncerConfigTransactions(address(factory), address(syncer), syncOperators);
-        assertEq(txs.length, 5, "Should have 3 role config + 2 grantRole transactions");
+        assertEq(txs.length, 6, "Should have 4 role config + 2 grantRole transactions");
     }
 
     /// @notice Verify all transactions target the factory

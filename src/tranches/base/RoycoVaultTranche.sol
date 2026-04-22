@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { ERC20Upgradeable, IERC20, IERC20Metadata } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/ERC20Upgradeable.sol";
+import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
 import { ERC20PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20PausableUpgradeable.sol";
 import { ERC20PermitUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -20,7 +21,7 @@ import { UtilsLib } from "../../libraries/UtilsLib.sol";
  * @notice Abstract base contract implementing core vault functionality for Royco tranches (ST and JT)
  * @dev Tranches interact with the kernel for asset operations and the accountant for NAV synchronizations
  */
-abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20PausableUpgradeable, ERC20PermitUpgradeable {
+abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20PausableUpgradeable, ERC20BurnableUpgradeable, ERC20PermitUpgradeable {
     using Math for uint256;
     using UnitsMathLib for uint256;
     using SafeERC20 for IERC20;
@@ -54,6 +55,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // Initialize the parent contracts
         __ERC20_init_unchained(_params.name, _params.symbol);
         __ERC20Pausable_init();
+        __ERC20Burnable_init();
         __ERC20Permit_init(_params.name);
         __RoycoBase_init(_params.initialAuthority);
     }
@@ -63,9 +65,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     /// =============================
 
     /// @inheritdoc IRoycoVaultTranche
-    function deposit(TRANCHE_UNIT _assets, address _receiver) public virtual override whenNotPaused restricted returns (uint256 shares) {
+    function deposit(TRANCHE_UNIT _assets, address _receiver) public virtual override(IRoycoVaultTranche) whenNotPaused restricted returns (uint256 shares) {
         require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
-        require(_assets != toTrancheUnits(0), MUST_DEPOSIT_NON_ZERO_ASSETS());
 
         // Transfer the assets to the kernel
         IERC20(ASSET).safeTransferFrom(msg.sender, KERNEL, toUint256(_assets));
@@ -81,6 +82,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // shares are minted to the user at the effective NAV of the tranche
         // effectiveNAVToMintAt is the effective NAV of the tranche before the deposit is made, ie. the NAV at which the shares will be minted
         shares = _convertToShares(valueAllocated, totalSupply(), effectiveNAVToMintAt, Math.Rounding.Floor);
+        require(shares != 0, MUST_MINT_NON_ZERO_SHARES());
 
         // Mint the shares to the receiver
         _mint(_receiver, shares);
@@ -89,7 +91,18 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     }
 
     /// @inheritdoc IRoycoVaultTranche
-    function redeem(uint256 _shares, address _receiver, address _owner) public virtual override whenNotPaused restricted returns (AssetClaims memory claims) {
+    function redeem(
+        uint256 _shares,
+        address _receiver,
+        address _owner
+    )
+        public
+        virtual
+        override(IRoycoVaultTranche)
+        whenNotPaused
+        restricted
+        returns (AssetClaims memory claims)
+    {
         require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
         require(_shares != 0, MUST_REQUEST_NON_ZERO_SHARES());
 
@@ -179,6 +192,16 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         super._update(_from, address(0), _shares);
 
         emit SharesSeizedAndRedeemed(msg.sender, _from, _receiver, claims, _shares);
+    }
+
+    /// @inheritdoc ERC20BurnableUpgradeable
+    function burn(uint256 _shares) public override(ERC20BurnableUpgradeable, IRoycoVaultTranche) whenNotPaused restricted {
+        super.burn(_shares);
+    }
+
+    /// @inheritdoc ERC20BurnableUpgradeable
+    function burnFrom(address _account, uint256 _shares) public override(ERC20BurnableUpgradeable, IRoycoVaultTranche) whenNotPaused restricted {
+        super.burnFrom(_account, _shares);
     }
 
     /// =============================
@@ -360,6 +383,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         IRoycoKernel(KERNEL).preTrancheBalanceUpdateHook(msg.sender, _from, _to, _value);
 
         // Call the parent contract update function to update the balance
-        super._update(_from, _to, _value);
+        // NOTE: This will execute even if the tranche is in a paused state
+        ERC20Upgradeable._update(_from, _to, _value);
     }
 }
