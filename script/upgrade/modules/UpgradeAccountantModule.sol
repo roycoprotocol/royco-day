@@ -35,8 +35,8 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
     error UpgradeAccountantModule__NotAnAccountantProxy(address proxy);
     error UpgradeAccountantModule__NewImplIdenticalToOld(address impl);
     error UpgradeAccountantModule__KernelImmutableChanged(address expected, address actual);
-    error UpgradeAccountantModule__StateChanged(string field);
-    error UpgradeAccountantModule__PreviewSyncMismatch(string field);
+    error UpgradeAccountantModule__StateChanged();
+    error UpgradeAccountantModule__PreviewSyncMismatch();
 
     /// @inheritdoc UpgradeModuleBase
     function prepare(uint256 _chainId, string memory _saltVersion, bytes memory _payload) external view override returns (PreparedUpgrade memory prepared) {
@@ -120,54 +120,15 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
     // EQUALITY HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
+    /// @dev Whole-struct hash comparison. Catches every field — including any field added later
+    ///      to `RoycoAccountantState` without code changes here. The trade-off is the diagnostic
+    ///      string is generic instead of naming the exact field that differs.
     function _assertStateEqual(IRoycoAccountant.RoycoAccountantState memory a, IRoycoAccountant.RoycoAccountantState memory b) internal pure {
-        require(a.lastMarketState == b.lastMarketState, UpgradeAccountantModule__StateChanged("lastMarketState"));
-        require(a.fixedTermDurationSeconds == b.fixedTermDurationSeconds, UpgradeAccountantModule__StateChanged("fixedTermDurationSeconds"));
-        require(a.fixedTermEndTimestamp == b.fixedTermEndTimestamp, UpgradeAccountantModule__StateChanged("fixedTermEndTimestamp"));
-        require(a.coverageWAD == b.coverageWAD, UpgradeAccountantModule__StateChanged("coverageWAD"));
-        require(a.betaWAD == b.betaWAD, UpgradeAccountantModule__StateChanged("betaWAD"));
-        require(a.stProtocolFeeWAD == b.stProtocolFeeWAD, UpgradeAccountantModule__StateChanged("stProtocolFeeWAD"));
-        require(a.jtProtocolFeeWAD == b.jtProtocolFeeWAD, UpgradeAccountantModule__StateChanged("jtProtocolFeeWAD"));
-        require(a.yieldShareProtocolFeeWAD == b.yieldShareProtocolFeeWAD, UpgradeAccountantModule__StateChanged("yieldShareProtocolFeeWAD"));
-        require(a.liquidationUtilizationWAD == b.liquidationUtilizationWAD, UpgradeAccountantModule__StateChanged("liquidationUtilizationWAD"));
-        require(a.ydm == b.ydm, UpgradeAccountantModule__StateChanged("ydm"));
-        require(NAV_UNIT.unwrap(a.lastSTRawNAV) == NAV_UNIT.unwrap(b.lastSTRawNAV), UpgradeAccountantModule__StateChanged("lastSTRawNAV"));
-        require(NAV_UNIT.unwrap(a.lastJTRawNAV) == NAV_UNIT.unwrap(b.lastJTRawNAV), UpgradeAccountantModule__StateChanged("lastJTRawNAV"));
-        require(NAV_UNIT.unwrap(a.lastSTEffectiveNAV) == NAV_UNIT.unwrap(b.lastSTEffectiveNAV), UpgradeAccountantModule__StateChanged("lastSTEffectiveNAV"));
-        require(NAV_UNIT.unwrap(a.lastJTEffectiveNAV) == NAV_UNIT.unwrap(b.lastJTEffectiveNAV), UpgradeAccountantModule__StateChanged("lastJTEffectiveNAV"));
-        require(
-            NAV_UNIT.unwrap(a.lastSTImpermanentLoss) == NAV_UNIT.unwrap(b.lastSTImpermanentLoss), UpgradeAccountantModule__StateChanged("lastSTImpermanentLoss")
-        );
-        require(
-            NAV_UNIT.unwrap(a.lastJTImpermanentLoss) == NAV_UNIT.unwrap(b.lastJTImpermanentLoss), UpgradeAccountantModule__StateChanged("lastJTImpermanentLoss")
-        );
-        require(a.twJTYieldShareAccruedWAD == b.twJTYieldShareAccruedWAD, UpgradeAccountantModule__StateChanged("twJTYieldShareAccruedWAD"));
-        require(a.lastAccrualTimestamp == b.lastAccrualTimestamp, UpgradeAccountantModule__StateChanged("lastAccrualTimestamp"));
-        require(a.lastDistributionTimestamp == b.lastDistributionTimestamp, UpgradeAccountantModule__StateChanged("lastDistributionTimestamp"));
-        require(NAV_UNIT.unwrap(a.stNAVDustTolerance) == NAV_UNIT.unwrap(b.stNAVDustTolerance), UpgradeAccountantModule__StateChanged("stNAVDustTolerance"));
-        require(NAV_UNIT.unwrap(a.jtNAVDustTolerance) == NAV_UNIT.unwrap(b.jtNAVDustTolerance), UpgradeAccountantModule__StateChanged("jtNAVDustTolerance"));
+        require(keccak256(abi.encode(a)) == keccak256(abi.encode(b)), UpgradeAccountantModule__StateChanged());
     }
 
+    /// @dev Same approach as `_assertStateEqual` — catches every `SyncedAccountingState` field.
     function _assertSyncEqual(SyncedAccountingState memory a, SyncedAccountingState memory b) internal pure {
-        require(a.marketState == b.marketState, UpgradeAccountantModule__PreviewSyncMismatch("marketState"));
-        require(NAV_UNIT.unwrap(a.stRawNAV) == NAV_UNIT.unwrap(b.stRawNAV), UpgradeAccountantModule__PreviewSyncMismatch("stRawNAV"));
-        require(NAV_UNIT.unwrap(a.jtRawNAV) == NAV_UNIT.unwrap(b.jtRawNAV), UpgradeAccountantModule__PreviewSyncMismatch("jtRawNAV"));
-        require(NAV_UNIT.unwrap(a.stEffectiveNAV) == NAV_UNIT.unwrap(b.stEffectiveNAV), UpgradeAccountantModule__PreviewSyncMismatch("stEffectiveNAV"));
-        require(NAV_UNIT.unwrap(a.jtEffectiveNAV) == NAV_UNIT.unwrap(b.jtEffectiveNAV), UpgradeAccountantModule__PreviewSyncMismatch("jtEffectiveNAV"));
-        require(NAV_UNIT.unwrap(a.stImpermanentLoss) == NAV_UNIT.unwrap(b.stImpermanentLoss), UpgradeAccountantModule__PreviewSyncMismatch("stImpermanentLoss"));
-        require(NAV_UNIT.unwrap(a.jtImpermanentLoss) == NAV_UNIT.unwrap(b.jtImpermanentLoss), UpgradeAccountantModule__PreviewSyncMismatch("jtImpermanentLoss"));
-        require(
-            NAV_UNIT.unwrap(a.stProtocolFeeAccrued) == NAV_UNIT.unwrap(b.stProtocolFeeAccrued),
-            UpgradeAccountantModule__PreviewSyncMismatch("stProtocolFeeAccrued")
-        );
-        require(
-            NAV_UNIT.unwrap(a.jtProtocolFeeAccrued) == NAV_UNIT.unwrap(b.jtProtocolFeeAccrued),
-            UpgradeAccountantModule__PreviewSyncMismatch("jtProtocolFeeAccrued")
-        );
-        require(a.utilizationWAD == b.utilizationWAD, UpgradeAccountantModule__PreviewSyncMismatch("utilizationWAD"));
-        require(a.fixedTermEndTimestamp == b.fixedTermEndTimestamp, UpgradeAccountantModule__PreviewSyncMismatch("fixedTermEndTimestamp"));
-        require(a.coverageWAD == b.coverageWAD, UpgradeAccountantModule__PreviewSyncMismatch("coverageWAD"));
-        require(a.betaWAD == b.betaWAD, UpgradeAccountantModule__PreviewSyncMismatch("betaWAD"));
-        require(a.liquidationUtilizationWAD == b.liquidationUtilizationWAD, UpgradeAccountantModule__PreviewSyncMismatch("liquidationUtilizationWAD"));
+        require(keccak256(abi.encode(a)) == keccak256(abi.encode(b)), UpgradeAccountantModule__PreviewSyncMismatch());
     }
 }

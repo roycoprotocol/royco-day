@@ -103,7 +103,9 @@ The system assumes constructor parameters do **not** change between old and new 
    - **Pre-deploy** every new impl (`vm.broadcast` — sent as a real tx when run with `--broadcast`). Skipped for impls already deployed at the predicted address (idempotent).
    - Simulate: schedule everything → warp 2 days → execute everything → call `module.verify()` after each execute. Any revert fails the run.
    - Write `output/upgrade/{chainId}_{schedule,execute,cancel}.json`
-5. Import the per-chain JSONs into the Safe Transaction Builder for each chain's Safe (the `ROOT_MULTISIG` holds `ADMIN_UPGRADER_ROLE`).
+5. Import the per-chain JSONs into the Safe Transaction Builder. **Importantly, schedule and execute go to a different multisig than cancel:**
+   - `{chainId}_schedule.json` and `{chainId}_execute.json` → **`ROOT_MULTISIG`** (`0x7c405bbD131e42af506d14e752f2e59B19D49997`). This multisig holds `ADMIN_UPGRADER_ROLE`, which authorizes scheduling and executing the upgrade.
+   - `{chainId}_cancel.json` → **`EXECUTOR_MULTISIG`** (`0x84d37A25e46029CE161111420E07cEb78880119e`). This multisig holds `GUARDIAN_ROLE`. Importing the cancel JSON into the ROOT multisig will revert with `AccessManagerUnauthorizedCall` because guardians are the only role allowed to cancel scheduled operations. The cancel calldata internally references `ROOT_MULTISIG` as the original scheduler — that's correct; the *sender* of the cancel tx must be the guardian.
 
 > ⚠️ The Safe execute batch references the new impl address directly. If you generate JSONs without `--broadcast` and then send them on-chain, the execute will revert because the impl does not exist there. Always `--broadcast` before importing into Safe.
 

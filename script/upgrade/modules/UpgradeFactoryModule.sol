@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 
+import { RolesConfiguration } from "../../../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 
 import { UpgradeModuleBase } from "./UpgradeModuleBase.sol";
@@ -17,16 +18,25 @@ import { UpgradeModuleBase } from "./UpgradeModuleBase.sol";
  *      The factory has no constructor arguments (`constructor() { _disableInitializers(); }`),
  *      so creation code is just `type(RoycoFactory).creationCode`.
  *
- *      Verification focuses on ownership + permission continuity, which is the entire point of
- *      the factory (it IS the AccessManager for every market):
+ *      Verification focuses on ownership + permission continuity:
  *        - `expiration()` — scheduled operations expiry timeout
- *        - For every known role in `RolesConfiguration`:
+ *        - For every role declared in `src/factory/RolesConfiguration.sol`:
  *            * role admin, role guardian, role grant-delay
  *            * membership of `ROOT_MULTISIG` and `EXECUTOR_MULTISIG` (is-member + execution delay)
- *        - ADMIN_ROLE (0) membership of both multisigs
  *      If any of these drift across the upgrade, `verify()` reverts.
+ *
+ *      Inherits `RolesConfiguration` directly so role-id constants are read from the same source
+ *      of truth used by `RoycoFactory`. This removes a previous duplication risk where renaming a
+ *      role in `RolesConfiguration` would silently misalign the verifier.
+ *
+ *      ⚠ ROLE-LIST MAINTENANCE: `_allRoles()` enumerates the role IDs to check. If a new role
+ *      is added to `RolesConfiguration`, it MUST also be added here — otherwise verify will
+ *      silently skip checking the new role's admin/guardian/grant-delay/membership across the
+ *      upgrade. There is no compile-time link between this list and the source enum because
+ *      Solidity does not support constant enumeration; treat this list as a checked invariant
+ *      to update whenever `RolesConfiguration` changes.
  */
-contract UpgradeFactoryModule is UpgradeModuleBase {
+contract UpgradeFactoryModule is UpgradeModuleBase, RolesConfiguration {
     error UpgradeFactoryModule__NotAFactoryProxy(address proxy);
     error UpgradeFactoryModule__NewImplIdenticalToOld(address impl);
     error UpgradeFactoryModule__ExpirationChanged(uint32 expected, uint32 actual);
@@ -36,27 +46,27 @@ contract UpgradeFactoryModule is UpgradeModuleBase {
     error UpgradeFactoryModule__MembershipChanged(uint64 role, address account, bool expectedIsMember, bool actualIsMember);
     error UpgradeFactoryModule__MembershipDelayChanged(uint64 role, address account, uint32 expectedDelay, uint32 actualDelay);
 
-    /// @dev All roles declared in `src/factory/RolesConfiguration.sol` + the AccessManager admin
-    ///      role (id 0). Ordering is stable so snapshot encoding and verification stay aligned.
-    ///      Extend this list if new roles are added to RolesConfiguration.
+    /// @dev All roles declared in `RolesConfiguration` + the AccessManager admin role (id 0).
+    ///      Ordering is stable so snapshot encoding and verification stay aligned.
+    ///      Add an entry here when a new role is introduced in `RolesConfiguration`.
     function _allRoles() internal pure returns (uint64[] memory roles) {
         roles = new uint64[](16);
-        roles[0] = 0; // ADMIN_ROLE (OpenZeppelin AccessManager default)
-        roles[1] = RolesConfigurationValues.ADMIN_PAUSER_ROLE;
-        roles[2] = RolesConfigurationValues.ADMIN_UPGRADER_ROLE;
-        roles[3] = RolesConfigurationValues.ST_LP_ROLE;
-        roles[4] = RolesConfigurationValues.JT_LP_ROLE;
-        roles[5] = RolesConfigurationValues.BURNER_ROLE;
-        roles[6] = RolesConfigurationValues.SYNC_ROLE;
-        roles[7] = RolesConfigurationValues.ADMIN_KERNEL_ROLE;
-        roles[8] = RolesConfigurationValues.TRANSFER_AGENT_ROLE;
-        roles[9] = RolesConfigurationValues.ADMIN_ACCOUNTANT_ROLE;
-        roles[10] = RolesConfigurationValues.ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        roles[11] = RolesConfigurationValues.ADMIN_ORACLE_QUOTER_ROLE;
-        roles[12] = RolesConfigurationValues.DEPLOYER_ROLE;
-        roles[13] = RolesConfigurationValues.LP_ROLE_ADMIN_ROLE;
-        roles[14] = RolesConfigurationValues.DEPLOYER_ROLE_ADMIN_ROLE;
-        roles[15] = RolesConfigurationValues.GUARDIAN_ROLE;
+        roles[0] = _ADMIN_ROLE; // OpenZeppelin AccessManager default
+        roles[1] = ADMIN_PAUSER_ROLE;
+        roles[2] = ADMIN_UPGRADER_ROLE;
+        roles[3] = ST_LP_ROLE;
+        roles[4] = JT_LP_ROLE;
+        roles[5] = BURNER_ROLE;
+        roles[6] = SYNC_ROLE;
+        roles[7] = ADMIN_KERNEL_ROLE;
+        roles[8] = TRANSFER_AGENT_ROLE;
+        roles[9] = ADMIN_ACCOUNTANT_ROLE;
+        roles[10] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
+        roles[11] = ADMIN_ORACLE_QUOTER_ROLE;
+        roles[12] = DEPLOYER_ROLE;
+        roles[13] = LP_ROLE_ADMIN_ROLE;
+        roles[14] = DEPLOYER_ROLE_ADMIN_ROLE;
+        roles[15] = GUARDIAN_ROLE;
     }
 
     /// @dev Accounts whose membership we snapshot per-role. Both multisigs cover the protocol's
@@ -182,27 +192,4 @@ contract UpgradeFactoryModule is UpgradeModuleBase {
             }
         }
     }
-}
-
-/// @notice Mirrors the role-ID constants from `src/factory/RolesConfiguration.sol`. Defined as a
-///         separate library so the factory module does not have to inherit `RolesConfiguration`
-///         (which would risk compile-time conflicts with `UpgradeBase`'s inheritance chain).
-///         Values must stay in lockstep with `src/factory/RolesConfiguration.sol`; a divergence
-///         is caught the first time the factory module runs against the live factory.
-library RolesConfigurationValues {
-    uint64 internal constant ADMIN_PAUSER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_PAUSER_ROLE"))));
-    uint64 internal constant ADMIN_UPGRADER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_UPGRADER_ROLE"))));
-    uint64 internal constant ST_LP_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ST_LP_ROLE"))));
-    uint64 internal constant JT_LP_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_JT_LP_ROLE"))));
-    uint64 internal constant BURNER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_BURNER_ROLE"))));
-    uint64 internal constant SYNC_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_SYNC_ROLE"))));
-    uint64 internal constant ADMIN_KERNEL_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_KERNEL_ROLE"))));
-    uint64 internal constant TRANSFER_AGENT_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_TRANSFER_AGENT_ROLE"))));
-    uint64 internal constant ADMIN_ACCOUNTANT_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_ACCOUNTANT_ROLE"))));
-    uint64 internal constant ADMIN_PROTOCOL_FEE_SETTER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_PROTOCOL_FEE_SETTER_ROLE"))));
-    uint64 internal constant ADMIN_ORACLE_QUOTER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_ORACLE_QUOTER_ROLE"))));
-    uint64 internal constant DEPLOYER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_DEPLOYER_ROLE"))));
-    uint64 internal constant LP_ROLE_ADMIN_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_LP_ROLE_ADMIN_ROLE"))));
-    uint64 internal constant DEPLOYER_ROLE_ADMIN_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_DEPLOYER_ROLE_ADMIN_ROLE"))));
-    uint64 internal constant GUARDIAN_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_GUARDIAN_ROLE"))));
 }

@@ -209,49 +209,46 @@ abstract contract UpgradeBase is UpgradeConfig, AccessManagerConfigUtils, Create
 
     function _writeJsonsForChain(uint256 _chainId, address _factory, PreparedUpgrade[] memory _ups) private {
         vm.createDir(UPGRADE_OUTPUT_DIRECTORY, true);
-
-        SafeTransaction[] memory txs = new SafeTransaction[](_ups.length);
         string memory fileBase = vm.toString(_chainId);
-
-        _fillTxs(txs, _factory, _ups, 0);
-        _writeOnePhase(txs, fileBase, "schedule");
-
-        _fillTxs(txs, _factory, _ups, 1);
-        _writeOnePhase(txs, fileBase, "execute");
-
-        _fillTxs(txs, _factory, _ups, 2);
-        _writeOnePhase(txs, fileBase, "cancel");
+        _writeOnePhase(_factory, _ups, 0, fileBase, "schedule");
+        _writeOnePhase(_factory, _ups, 1, fileBase, "execute");
+        _writeOnePhase(_factory, _ups, 2, fileBase, "cancel");
     }
 
-    function _fillTxs(SafeTransaction[] memory _txs, address _factory, PreparedUpgrade[] memory _ups, uint8 _phase) private pure {
-        for (uint256 i = 0; i < _ups.length; i++) {
-            UpgradeCall memory c = _ups[i].call;
-            if (_phase == 0) _txs[i] = _buildScheduleTx(_factory, c);
-            else if (_phase == 1) _txs[i] = _buildExecuteTx(_factory, c);
-            else _txs[i] = _buildCancelTx(_factory, c);
-        }
-    }
-
-    function _writeOnePhase(SafeTransaction[] memory _txs, string memory _fileBase, string memory _suffix) private {
+    /// @dev Builds and writes one phase batch JSON. Per-tx serialization (including the per-tx
+    ///      description) happens inline via `_serializeOneUpgradeTx` so the parallel `txs` /
+    ///      `descriptions` arrays from earlier never live simultaneously on the stack — this keeps
+    ///      via-IR's stack budget happy.
+    function _writeOnePhase(address _factory, PreparedUpgrade[] memory _ups, uint8 _phase, string memory _fileBase, string memory _suffix) private {
         string memory name = string.concat("Royco upgrade batch (chain ", _fileBase, ") - ", _suffix);
         string memory path = string.concat(UPGRADE_OUTPUT_DIRECTORY, _fileBase, "_", _suffix, ".json");
-        string memory finalJson = _buildSafeJson(_txs, name);
-        vm.writeJson(finalJson, path);
-    }
-
-    function _buildSafeJson(SafeTransaction[] memory _transactions, string memory _name) private returns (string memory) {
-        string[] memory txJsons = new string[](_transactions.length);
-        for (uint256 i = 0; i < _transactions.length; i++) {
-            txJsons[i] = _serializeOneTx(i, _transactions[i]);
+        string[] memory txJsons = new string[](_ups.length);
+        for (uint256 i = 0; i < _ups.length; i++) {
+            txJsons[i] = _serializeOneUpgradeTx(i, _factory, _ups[i], _phase, _suffix);
         }
-        return _wrapTxsInRoot(txJsons, _name);
+        vm.writeJson(_wrapTxsInRoot(txJsons, name), path);
     }
 
-    function _serializeOneTx(uint256 _i, SafeTransaction memory _tx) private returns (string memory) {
+    /// @dev Each tx serializes as `{ to, value, data, description }`. The `description` is a
+    ///      non-standard field (Safe Transaction Builder ignores unknown fields when importing) but
+    ///      survives in the on-disk JSON so reviewers grepping the file can see per-tx intent.
+    function _serializeOneUpgradeTx(
+        uint256 _i,
+        address _factory,
+        PreparedUpgrade memory _up,
+        uint8 _phase,
+        string memory _suffix
+    )
+        private
+        returns (string memory)
+    {
+        SafeTransaction memory phaseTx =
+            _phase == 0 ? _buildScheduleTx(_factory, _up.call) : (_phase == 1 ? _buildExecuteTx(_factory, _up.call) : _buildCancelTx(_factory, _up.call));
         string memory key = string.concat("tx", vm.toString(_i));
-        vm.serializeAddress(key, "to", _tx.to);
-        vm.serializeString(key, "value", vm.toString(_tx.value));
-        return vm.serializeBytes(key, "data", _tx.data);
+        vm.serializeAddress(key, "to", phaseTx.to);
+        vm.serializeString(key, "value", vm.toString(phaseTx.value));
+        vm.serializeString(key, "description", string.concat("[", _suffix, "] ", _up.call.description));
+        return vm.serializeBytes(key, "data", phaseTx.data);
     }
 
     function _wrapTxsInRoot(string[] memory _txJsons, string memory _name) private returns (string memory) {

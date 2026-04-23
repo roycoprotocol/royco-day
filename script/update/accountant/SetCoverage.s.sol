@@ -52,14 +52,8 @@ contract SetCoverage is ParameterUpdateBase {
      *      Valid range: 0.05e18 (5%) to 1e18 (100%).
      */
     function _initializeConfigs() internal {
-        // Neutrl → 7%
-        _configs.push(SetCoverageConfig({ chainId: MAINNET, marketName: SNUSD, newCoverageWAD: 0.07e18 }));
-        // Maple Syrup (public) → 2%
-        _configs.push(SetCoverageConfig({ chainId: MAINNET, marketName: SYRUP_USDC, newCoverageWAD: 0.02e18 }));
-        // sUSDAI → 7%
+        // sUSDai → 7%
         _configs.push(SetCoverageConfig({ chainId: ARBITRUM, marketName: SUSDAI, newCoverageWAD: 0.07e18 }));
-        // Avant → 4%
-        _configs.push(SetCoverageConfig({ chainId: AVALANCHE, marketName: SAVUSD, newCoverageWAD: 0.04e18 }));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
