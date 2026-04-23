@@ -154,7 +154,7 @@ abstract contract ParameterUpdateBase is AccessManagerConfigUtils, UpdateConfig 
         console2.log("    [OK] Schedule (authorization validated)");
 
         // Warp past the execution delay
-        vm.warp(block.timestamp + SIMULATION_WARP_DURATION);
+        vm.warp(vm.getBlockTimestamp() + SIMULATION_WARP_DURATION);
 
         // Execute — try/catch for oracle staleness
         vm.prank(ROOT_MULTISIG);
@@ -219,7 +219,7 @@ abstract contract ParameterUpdateBase is AccessManagerConfigUtils, UpdateConfig 
         string memory root = "root";
         vm.serializeString(root, "version", "1.0");
         vm.serializeString(root, "chainId", vm.toString(block.chainid));
-        vm.serializeUint(root, "createdAt", block.timestamp);
+        vm.serializeUint(root, "createdAt", vm.getBlockTimestamp());
 
         string memory meta = "meta";
         vm.serializeString(meta, "name", _name);
