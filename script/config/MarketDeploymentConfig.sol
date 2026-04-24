@@ -187,28 +187,27 @@ abstract contract MarketDeploymentConfig {
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
-                        // Disable the Oracle Leg by setting the initial conversion rate to 1e18
-                        initialConversionRateWAD: 1e18,
-                        baseAssetToNavAssetOracle: address(1),
-                        stalenessThresholdSeconds: 86_400
+                        // Enable the Oracle Leg by setting the initial conversion rate to the sentinel conversion rate
+                        initialConversionRateWAD: 0,
+                        // https://app.redstone.finance/push-feeds/cUSD_FUNDAMENTAL/ethereumMultiFeed
+                        baseAssetToNavAssetOracle: 0x9A5a3c3Ed0361505cC1D4e824B3854De5724434A,
+                        // 48 hours
+                        stalenessThresholdSeconds: 48 hours
                     })
             ),
             enforceVaultSharesTransferWhitelist: false,
-            stSelfLiquidationBonusWAD: 0.05e18,
+            stSelfLiquidationBonusWAD: 0,
             stProtocolFeeWAD: 0.1e18,
-            jtProtocolFeeWAD: 0.2e18,
-            jtYieldShareProtocolFeeWAD: 0.2e18,
-            coverageWAD: 0.1e18,
+            jtProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0.45e18,
+            coverageWAD: 0.03e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.1111e18,
-            fixedTermDurationSeconds: 0, // Market is not expected to have volatility, so no fixed term
+            liquidationUtilizationWAD: 1.0032441e18,
+            fixedTermDurationSeconds: 0,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.05e18,
-                    jtYieldShareAtTargetUtilWAD: 0.05e18,
-                    jtYieldShareAtFullUtilWAD: 0.4e18,
-                    maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
+                    jtYieldShareAtZeroUtilWAD: 0.06e18, jtYieldShareAtTargetUtilWAD: 0.06e18, jtYieldShareAtFullUtilWAD: 0.18e18, maxAdaptationSpeedWAD: 0
                 })
             ),
             transferAgentAddress: address(0)
@@ -520,21 +519,18 @@ abstract contract MarketDeploymentConfig {
             kernelType: DeployScript.KernelType.IdleCdoAA_ST_IdleCdoAA_JT,
             kernelSpecificParams: abi.encode(DeployScript.IdleAACdoSTCdoJTKernelParams({ idleCDO: 0x433D5B175148dA32Ffe1e1A37a939E1b7e79be4d })),
             enforceVaultSharesTransferWhitelist: false,
-            stSelfLiquidationBonusWAD: 0.05e18,
+            stSelfLiquidationBonusWAD: 0.01e18,
             stProtocolFeeWAD: 0.1e18,
-            jtProtocolFeeWAD: 0.1e18,
-            jtYieldShareProtocolFeeWAD: 0.1e18,
-            coverageWAD: 0.2e18,
+            jtProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0.45e18,
+            coverageWAD: 0.03e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 6.6667e18,
-            fixedTermDurationSeconds: 2 weeks,
+            liquidationUtilizationWAD: 2.94e18,
+            fixedTermDurationSeconds: 7 days,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.225e18,
-                    jtYieldShareAtTargetUtilWAD: 0.225e18,
-                    jtYieldShareAtFullUtilWAD: 1e18,
-                    maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
+                    jtYieldShareAtZeroUtilWAD: 0.06e18, jtYieldShareAtTargetUtilWAD: 0.06e18, jtYieldShareAtFullUtilWAD: 0.18e18, maxAdaptationSpeedWAD: 0
                 })
             ),
             transferAgentAddress: address(0)

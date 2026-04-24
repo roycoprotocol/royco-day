@@ -62,6 +62,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
     // Whether to print deployment parameters
     bool ENABLE_LOGGING = false;
 
+    RoycoFactory constant ROYCO_FACTORY_PRE_DEPLOYED = RoycoFactory(0x7cC6fB28eC7b5e7afC3cB3986141797ffc27253C);
+
     /// @notice Enum for kernel types
     enum KernelType {
         ReUSD_ST_ReUSD_JT,
@@ -326,8 +328,15 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         // Deploy implementations using CREATE2
         IYDM ydm = _deployYDM(_config.ydmType);
 
-        // Deploy factory with factory admin as admin and deployer as deployer
-        RoycoFactory factory = _deployFactory(_factoryAdmin, deployer, _scheduledOperationsExpirySeconds, _roleAssignments);
+        // Use an existing factory if it exists, otherwise deploy a new one
+        RoycoFactory factory;
+        if (address(ROYCO_FACTORY_PRE_DEPLOYED).code.length > 0) {
+            console2.log("Using pre-deployed factory at address:", address(ROYCO_FACTORY_PRE_DEPLOYED));
+            factory = ROYCO_FACTORY_PRE_DEPLOYED;
+        } else {
+            console2.log("Deploying factory...");
+            factory = _deployFactory(_factoryAdmin, deployer, _scheduledOperationsExpirySeconds, _roleAssignments);
+        }
 
         // Deploy all implementations. Then deploy the market using the factory
         (
