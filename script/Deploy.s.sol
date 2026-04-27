@@ -176,6 +176,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
     /// @notice Addresses for role assignments
     struct RoleAssignmentAddresses {
         address pauserAddress;
+        address unpauserAddress;
         address upgraderAddress;
         address syncRoleAddress;
         address adminKernelAddress;
@@ -216,6 +217,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = generateRolesAssignments(
             RoleAssignmentAddresses({
                 pauserAddress: chainConfig.pauserAddress,
+                unpauserAddress: chainConfig.unpauserAddress,
                 upgraderAddress: chainConfig.upgraderAddress,
                 syncRoleAddress: chainConfig.syncRoleAddress,
                 adminKernelAddress: chainConfig.adminKernelAddress,
@@ -417,8 +419,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
     }
 
     /// @notice Builds selector-to-role mappings for a tranche contract.
-    /// @dev Maps deposit/redeem to the LP role, pause/unpause to ADMIN_PAUSER_ROLE,
-    ///      upgradeToAndCall to ADMIN_UPGRADER_ROLE, and seize functions to TRANSFER_AGENT_ROLE.
+    /// @dev Maps deposit/redeem to the LP role, pause to ADMIN_PAUSER_ROLE, unpause to
+    ///      ADMIN_UNPAUSER_ROLE, upgradeToAndCall to ADMIN_UPGRADER_ROLE, and seize functions
+    ///      to TRANSFER_AGENT_ROLE.
     /// @param _tranche The address of the tranche contract
     /// @param _lpRole The role value for the LP role
     /// @return The roles configuration for the tranche contract
@@ -433,7 +436,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         selectors[2] = IRoycoAuth.pause.selector;
         roleValues[2] = ADMIN_PAUSER_ROLE;
         selectors[3] = IRoycoAuth.unpause.selector;
-        roleValues[3] = ADMIN_PAUSER_ROLE;
+        roleValues[3] = ADMIN_UNPAUSER_ROLE;
         selectors[4] = UUPSUpgradeable.upgradeToAndCall.selector;
         roleValues[4] = ADMIN_UPGRADER_ROLE;
         selectors[5] = IRoycoVaultTranche.seizeShares.selector;
@@ -450,8 +453,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
 
     /// @notice Builds selector-to-role mappings for the kernel contract.
     /// @dev Maps admin functions to ADMIN_KERNEL_ROLE, oracle quoter functions to ADMIN_ORACLE_QUOTER_ROLE,
-    ///      sync to SYNC_ROLE, pause/unpause to ADMIN_PAUSER_ROLE, upgrade to ADMIN_UPGRADER_ROLE,
-    ///      and blacklist functions to TRANSFER_AGENT_ROLE.
+    ///      sync to SYNC_ROLE, pause to ADMIN_PAUSER_ROLE, unpause to ADMIN_UNPAUSER_ROLE,
+    ///      upgrade to ADMIN_UPGRADER_ROLE, and blacklist functions to TRANSFER_AGENT_ROLE.
     /// @param _kernel The address of the kernel contract
     /// @return The roles configuration for the kernel contract
     function _buildKernelRolesConfig(address _kernel) private pure returns (IRoycoFactory.RolesTargetConfiguration memory) {
@@ -463,7 +466,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         selectors[1] = IRoycoAuth.pause.selector;
         roleValues[1] = ADMIN_PAUSER_ROLE;
         selectors[2] = IRoycoAuth.unpause.selector;
-        roleValues[2] = ADMIN_PAUSER_ROLE;
+        roleValues[2] = ADMIN_UNPAUSER_ROLE;
         selectors[3] = IdenticalAssetsOracleQuoter.setConversionRate.selector;
         roleValues[3] = ADMIN_ORACLE_QUOTER_ROLE;
         selectors[4] = IdenticalAssetsChainlinkOracleQuoter.setChainlinkOracle.selector;
@@ -511,7 +514,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         selectors[7] = IRoycoAuth.pause.selector;
         roleValues[7] = ADMIN_PAUSER_ROLE;
         selectors[8] = IRoycoAuth.unpause.selector;
-        roleValues[8] = ADMIN_PAUSER_ROLE;
+        roleValues[8] = ADMIN_UNPAUSER_ROLE;
         selectors[9] = UUPSUpgradeable.upgradeToAndCall.selector;
         roleValues[9] = ADMIN_UPGRADER_ROLE;
         selectors[10] = IRoycoAccountant.setSeniorTrancheDustTolerance.selector;
@@ -535,10 +538,11 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         pure
         returns (IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments)
     {
-        roleAssignments = new IRoycoFactory.RoleAssignmentConfiguration[](14);
+        roleAssignments = new IRoycoFactory.RoleAssignmentConfiguration[](15);
 
         // Get role configs from RolesConfiguration
         RoleConfig memory pauserConfig = getRoleConfig(ADMIN_PAUSER_ROLE);
+        RoleConfig memory unpauserConfig = getRoleConfig(ADMIN_UNPAUSER_ROLE);
         RoleConfig memory upgraderConfig = getRoleConfig(ADMIN_UPGRADER_ROLE);
         RoleConfig memory syncConfig = getRoleConfig(SYNC_ROLE);
         RoleConfig memory kernelConfig = getRoleConfig(ADMIN_KERNEL_ROLE);
@@ -639,6 +643,13 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
             roleAdminRole: transferAgentConfig.adminRole,
             assignee: _addresses.transferAgentAddress,
             executionDelay: transferAgentConfig.executionDelay
+        });
+
+        roleAssignments[14] = IRoycoFactory.RoleAssignmentConfiguration({
+            role: ADMIN_UNPAUSER_ROLE,
+            roleAdminRole: unpauserConfig.adminRole,
+            assignee: _addresses.unpauserAddress,
+            executionDelay: unpauserConfig.executionDelay
         });
     }
 

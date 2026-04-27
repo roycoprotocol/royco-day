@@ -41,6 +41,9 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
     Vm.Wallet internal PAUSER;
     address internal PAUSER_ADDRESS;
 
+    Vm.Wallet internal UNPAUSER;
+    address internal UNPAUSER_ADDRESS;
+
     Vm.Wallet internal UPGRADER;
     address internal UPGRADER_ADDRESS;
 
@@ -222,6 +225,9 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
         // Role-specific wallets
         PAUSER = _initWallet("PAUSER", 1000 ether);
         PAUSER_ADDRESS = PAUSER.addr;
+
+        UNPAUSER = _initWallet("UNPAUSER", 1000 ether);
+        UNPAUSER_ADDRESS = UNPAUSER.addr;
 
         UPGRADER = _initWallet("UPGRADER", 1000 ether);
         UPGRADER_ADDRESS = UPGRADER.addr;
@@ -496,6 +502,7 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
         return DEPLOY_SCRIPT.generateRolesAssignments(
             DeployScript.RoleAssignmentAddresses({
                 pauserAddress: PAUSER_ADDRESS,
+                unpauserAddress: UNPAUSER_ADDRESS,
                 upgraderAddress: UPGRADER_ADDRESS,
                 syncRoleAddress: SYNC_ROLE_ADDRESS,
                 adminKernelAddress: KERNEL_ADMIN_ADDRESS,
@@ -517,6 +524,9 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions {
     function _grantAllRoles() internal prankModifier(OWNER_ADDRESS) {
         // Grant ADMIN_PAUSER_ROLE
         FACTORY.grantRole(ADMIN_PAUSER_ROLE, PAUSER_ADDRESS, 0);
+
+        // Grant ADMIN_UNPAUSER_ROLE
+        FACTORY.grantRole(ADMIN_UNPAUSER_ROLE, UNPAUSER_ADDRESS, 0);
 
         // Grant ADMIN_UPGRADER_ROLE
         FACTORY.grantRole(ADMIN_UPGRADER_ROLE, UPGRADER_ADDRESS, 0);

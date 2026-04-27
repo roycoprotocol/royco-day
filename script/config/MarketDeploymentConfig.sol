@@ -57,6 +57,7 @@ abstract contract MarketDeploymentConfig {
         address factoryAdmin;
         address protocolFeeRecipient;
         address pauserAddress;
+        address unpauserAddress;
         address upgraderAddress;
         address syncRoleAddress;
         address adminKernelAddress;
@@ -139,6 +140,7 @@ abstract contract MarketDeploymentConfig {
             factoryAdmin: ROOT_MULTISIG,
             protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT,
             pauserAddress: ROOT_MULTISIG,
+            unpauserAddress: ROOT_MULTISIG,
             upgraderAddress: ROOT_MULTISIG,
             syncRoleAddress: ROOT_MULTISIG,
             adminKernelAddress: ROOT_MULTISIG,
@@ -272,27 +274,25 @@ abstract contract MarketDeploymentConfig {
                 DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
                         // Enable the Oracle Leg by setting the initial conversion rate to the sentinel conversion rate
                         initialConversionRateWAD: 0,
-                        baseAssetToNavAssetOracle: 0x2037a5Eb67aa9B2FBF50042B724D8c4dB80F23b4,
+                        // https://data.chain.link/feeds/ethereum/mainnet/apxusd-usd-exchange-rate
+                        baseAssetToNavAssetOracle: 0x651b101f72F82630cf59c68E6EE4305aFBd3B1F5,
                         // Mirror sNUSD: updates pushed every 12 hours, staleness threshold set to 48 hours for safety
                         stalenessThresholdSeconds: 48 hours
                     })
             ),
             enforceVaultSharesTransferWhitelist: false,
-            stSelfLiquidationBonusWAD: 0.005e18,
+            stSelfLiquidationBonusWAD: 0,
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0.45e18,
-            coverageWAD: 0.1e18,
+            coverageWAD: 0.15e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.0009009e18,
-            fixedTermDurationSeconds: 0, // Market is not expected to have volatility, so no fixed term
+            liquidationUtilizationWAD: 1.85e18,
+            fixedTermDurationSeconds: 30 days,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.11e18,
-                    jtYieldShareAtTargetUtilWAD: 0.11e18,
-                    jtYieldShareAtFullUtilWAD: 0.31e18,
-                    maxAdaptationSpeedWAD: uint64(50e18 / uint256(365 days))
+                    jtYieldShareAtZeroUtilWAD: 0.15e18, jtYieldShareAtTargetUtilWAD: 0.15e18, jtYieldShareAtFullUtilWAD: 0.4e18, maxAdaptationSpeedWAD: 0
                 })
             ),
             transferAgentAddress: address(0)
