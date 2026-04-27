@@ -333,6 +333,16 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         if (address(ROYCO_FACTORY_PRE_DEPLOYED).code.length > 0) {
             console2.log("Using pre-deployed factory at address:", address(ROYCO_FACTORY_PRE_DEPLOYED));
             factory = ROYCO_FACTORY_PRE_DEPLOYED;
+
+            // When forking from a state where the factory is already deployed (i.e. on-chain),
+            // the test wallets do not hold the roles that `factory.initialize(...)` would have
+            // granted to them. Replay the role grants by pranking as the on-chain admin
+            // (ROOT_MULTISIG holds role 0, which is the admin for every role with
+            // `adminRole: _ADMIN_ROLE` in RolesConfiguration).
+            //
+            // In production, the supplied wallets are expected to already hold their roles
+            // on-chain, so each `hasRole` check returns true and the prank is skipped.
+            _replayRoleAssignmentsForPreDeployedFactory(factory, deployer, _roleAssignments, _deployerPrivateKey);
         } else {
             console2.log("Deploying factory...");
             factory = _deployFactory(_factoryAdmin, deployer, _scheduledOperationsExpirySeconds, _roleAssignments);
@@ -876,6 +886,48 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         }
 
         return RoycoFactory(factoryProxyAddress);
+    }
+
+    /// @notice Replays the role assignments that `factory.initialize(...)` would have applied,
+    ///         for the case where the factory is already deployed at the canonical CREATE2 address.
+    /// @dev Only relevant in test/fork mode. In production every wallet is expected to already
+    ///      hold its role on-chain, so each `hasRole` check short-circuits and `vm.prank` is
+    ///      never reached.
+    /// @param _factory The pre-deployed factory
+    /// @param _deployer The deployer address that should hold DEPLOYER_ROLE
+    /// @param _roleAssignments The role assignments that would have been passed to `initialize`
+    /// @param _deployerPrivateKey The deployer key used to resume the outer broadcast
+    function _replayRoleAssignmentsForPreDeployedFactory(
+        RoycoFactory _factory,
+        address _deployer,
+        IRoycoFactory.RoleAssignmentConfiguration[] memory _roleAssignments,
+        uint256 _deployerPrivateKey
+    )
+        internal
+    {
+        // Pause the outer broadcast so we can prank as the on-chain admin
+        vm.stopBroadcast();
+
+        // 1. DEPLOYER_ROLE — granted unconditionally by `__RoycoFactory_init_unchained` to `_deployer`
+        (bool deployerHasRole,) = _factory.hasRole(DEPLOYER_ROLE, _deployer);
+        if (!deployerHasRole) {
+            vm.prank(ROOT_MULTISIG);
+            _factory.grantRole(DEPLOYER_ROLE, _deployer, 0);
+            if (ENABLE_LOGGING) console2.log("Granted DEPLOYER_ROLE to test deployer:", _deployer);
+        }
+
+        // 2. All caller-supplied role assignments
+        for (uint256 i = 0; i < _roleAssignments.length; i++) {
+            IRoycoFactory.RoleAssignmentConfiguration memory ra = _roleAssignments[i];
+            if (ra.assignee == address(0)) continue;
+            (bool assigneeHasRole,) = _factory.hasRole(ra.role, ra.assignee);
+            if (assigneeHasRole) continue;
+            vm.prank(ROOT_MULTISIG);
+            _factory.grantRole(ra.role, ra.assignee, ra.executionDelay);
+        }
+
+        // Resume the outer broadcast
+        vm.startBroadcast(_deployerPrivateKey);
     }
 
     /// @notice Deploys the kernel implementation via CREATE2. Generates creation code based on kernel type,
