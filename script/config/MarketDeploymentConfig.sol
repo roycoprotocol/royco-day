@@ -182,8 +182,8 @@ abstract contract MarketDeploymentConfig {
             juniorTrancheSymbol: _juniorTrancheSymbol(STCUSD),
             seniorAsset: 0x88887bE419578051FF9F4eb6C858A951921D8888,
             juniorAsset: 0x88887bE419578051FF9F4eb6C858A951921D8888,
-            stDustTolerance: 5,
-            jtDustTolerance: 5,
+            stDustTolerance: 1e16,
+            jtDustTolerance: 1e16,
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({

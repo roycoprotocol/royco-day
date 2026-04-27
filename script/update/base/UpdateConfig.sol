@@ -106,6 +106,7 @@ abstract contract UpdateConfig {
 
     function _initializeDeployedMarkets() internal {
         // ── Mainnet ──────────────────────────────────────────────────────────
+        _deployedKernels[MAINNET][STCUSD] = 0x9911F227E9428964D8A35B852513919C8DF92038;
         _deployedKernels[MAINNET][SNUSD] = 0x0aE0978B868804929fd4C06B3B22D9197B8cd3c6;
         _deployedKernels[MAINNET][AUTOUSD] = 0x8748D1c21CC550B435487F473d9Aaf6C84dA46A6;
         _deployedKernels[MAINNET][SMOKEHOUSE_USDC] = 0x6dBdf6EBdF02F50ec6a7d6F782850996928176F9;
