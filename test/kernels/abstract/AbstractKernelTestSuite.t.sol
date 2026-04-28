@@ -970,8 +970,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     ///      Use this upper bound; actual reduction is ≤ this for any (kS, kJ) combination.
     function _maxRedeemNAVTolerance() internal view returns (uint256) {
         IRoycoAccountant.RoycoAccountantState memory state = ACCOUNTANT.getState();
-        uint256 slack = toUint256(state.stNAVDustTolerance)
-            + toUint256(state.jtNAVDustTolerance).mulDiv(uint256(state.betaWAD), WAD, Math.Rounding.Ceil);
+        uint256 slack = toUint256(state.stNAVDustTolerance) + toUint256(state.jtNAVDustTolerance).mulDiv(uint256(state.betaWAD), WAD, Math.Rounding.Ceil);
         uint256 coverageRetentionWAD = WAD - uint256(state.coverageWAD);
         if (coverageRetentionWAD == 0) return type(uint256).max;
         return slack.mulDiv(WAD, coverageRetentionWAD, Math.Rounding.Ceil) + 3;
@@ -1409,9 +1408,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         uint256 charlieFinalMaxRedeem = JT.maxRedeem(CHARLIE_ADDRESS);
 
         assertApproxEqAbs(aliceFinalMaxRedeem, jtShares, _maxRedeemNAVTolerance(), "Alice should be able to redeem all");
-        assertApproxEqAbs(
-            charlieFinalMaxRedeem, additionalJTShares, _maxRedeemNAVTolerance(), "Charlie should be able to redeem all"
-        );
+        assertApproxEqAbs(charlieFinalMaxRedeem, additionalJTShares, _maxRedeemNAVTolerance(), "Charlie should be able to redeem all");
 
         // Verify NAV conservation
         _assertNAVConservation();
@@ -1638,11 +1635,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         assertEq(JT.allowance(ALICE_ADDRESS, JT_BOB_ADDRESS), jtShares, "Allowance should be set");
 
         // Check that maxRedeem is equal to the deposited shares
-        assertApproxEqAbs(
-            toUint256(JT.convertToAssets(JT.maxRedeem(ALICE_ADDRESS)).nav),
-            toUint256(JT.convertToAssets(jtShares).nav),
-            _maxRedeemNAVTolerance()
-        );
+        assertApproxEqAbs(toUint256(JT.convertToAssets(JT.maxRedeem(ALICE_ADDRESS)).nav), toUint256(JT.convertToAssets(jtShares).nav), _maxRedeemNAVTolerance());
         jtShares = JT.maxRedeem(ALICE_ADDRESS);
 
         uint256 bobAssetsBefore = IERC20(config.jtAsset).balanceOf(JT_BOB_ADDRESS);
