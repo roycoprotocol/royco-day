@@ -343,7 +343,10 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         // Compute the minimum junior tranche assets required to cover the exposure as per the market's coverage requirement
         NAV_UNIT requiredJTAssets = totalCoveredExposure.mulDiv($.coverageWAD, WAD, Math.Rounding.Ceil);
         // Compute the surplus coverage currently provided by the junior tranche based on its currently remaining loss-absorption buffer
-        NAV_UNIT surplusJTAssets = state.jtEffectiveNAV.saturatingSub(requiredJTAssets);
+        // Also account for the effective dust tolerance required to preclude reverts due to rounding after JT redemptions
+        NAV_UNIT surplusJTAssets = state.jtEffectiveNAV.saturatingSub(requiredJTAssets)
+            .saturatingSub($.stNAVDustTolerance + $.jtNAVDustTolerance.mulDiv(betaWAD, WAD, Math.Rounding.Ceil));
+        if (surplusJTAssets == ZERO_NAV_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         // Compute the total JT claim on NAV and preemptively return if zero
         NAV_UNIT totalJTClaims = _jtClaimOnStUnits + _jtClaimOnJtUnits;
@@ -362,9 +365,6 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         // Split it into individual tranche's claims
         stClaimable = totalNAVClaimable.mulDiv(kS_WAD, WAD, Math.Rounding.Floor);
         jtClaimable = totalNAVClaimable.mulDiv(kJ_WAD, WAD, Math.Rounding.Floor);
-        // Account for the market's dust tolerance to preclude reverts due to rounding after JT withdrawal
-        stClaimable = stClaimable.saturatingSub($.stNAVDustTolerance);
-        jtClaimable = jtClaimable.saturatingSub($.jtNAVDustTolerance);
     }
 
     /**
