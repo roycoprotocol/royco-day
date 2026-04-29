@@ -960,6 +960,22 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         return 100 * 10 ** decimals;
     }
 
+    /// @notice Worst-case NAV reduction in JT.maxRedeem(owner) attributable to the operational
+    ///         slack reserved by maxJTWithdrawalGivenCoverage, plus a small rounding margin.
+    /// @dev maxJTWithdrawalGivenCoverage reserves stNAVDustTolerance + jtNAVDustTolerance·β/WAD
+    ///      from surplusJTAssets.  This translates to a totalNAVClaimable reduction of
+    ///      slack · WAD / coverageRetentionWAD where coverageRetentionWAD = WAD − COV·(kS + β·kJ).
+    ///      Worst-case amplification occurs when (kS + β·kJ) saturates at WAD (e.g., pure-JT
+    ///      withdrawal with β=WAD), giving coverageRetentionWAD_min = WAD − coverageWAD.
+    ///      Use this upper bound; actual reduction is ≤ this for any (kS, kJ) combination.
+    function _maxRedeemNAVTolerance() internal view returns (uint256) {
+        IRoycoAccountant.RoycoAccountantState memory state = ACCOUNTANT.getState();
+        uint256 slack = toUint256(state.stNAVDustTolerance) + toUint256(state.jtNAVDustTolerance).mulDiv(uint256(state.betaWAD), WAD, Math.Rounding.Ceil);
+        uint256 coverageRetentionWAD = WAD - uint256(state.coverageWAD);
+        if (coverageRetentionWAD == 0) return type(uint256).max;
+        return slack.mulDiv(WAD, coverageRetentionWAD, Math.Rounding.Ceil) + 3;
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // SECTION 11: LONG SCENARIO-BASED TESTS
     // These tests run multi-step scenarios and verify view function values
@@ -1002,7 +1018,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         assertApproxEqAbs(
             toUint256(JT.convertToAssets(JT.maxRedeem(ALICE_ADDRESS)).nav),
             toUint256(JT.convertToAssets(jtShares).nav),
-            toUint256(ACCOUNTANT.getState().jtNAVDustTolerance) + 3,
+            _maxRedeemNAVTolerance(),
             "JT maxRedeem should equal shares"
         );
 
@@ -1391,10 +1407,8 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         uint256 aliceFinalMaxRedeem = JT.maxRedeem(ALICE_ADDRESS);
         uint256 charlieFinalMaxRedeem = JT.maxRedeem(CHARLIE_ADDRESS);
 
-        assertApproxEqAbs(aliceFinalMaxRedeem, jtShares, toUint256(ACCOUNTANT.getState().stNAVDustTolerance) + 3, "Alice should be able to redeem all");
-        assertApproxEqAbs(
-            charlieFinalMaxRedeem, additionalJTShares, toUint256(ACCOUNTANT.getState().stNAVDustTolerance) + 3, "Charlie should be able to redeem all"
-        );
+        assertApproxEqAbs(aliceFinalMaxRedeem, jtShares, _maxRedeemNAVTolerance(), "Alice should be able to redeem all");
+        assertApproxEqAbs(charlieFinalMaxRedeem, additionalJTShares, _maxRedeemNAVTolerance(), "Charlie should be able to redeem all");
 
         // Verify NAV conservation
         _assertNAVConservation();
@@ -1457,7 +1471,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         assertApproxEqAbs(
             toUint256(JT.convertToAssets(maxRedeemable).nav),
             toUint256(JT.convertToAssets(jtShares).nav),
-            toUint256(ACCOUNTANT.getState().jtNAVDustTolerance) + 3,
+            _maxRedeemNAVTolerance(),
             "maxRedeem should equal owned shares"
         );
 
@@ -1621,11 +1635,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         assertEq(JT.allowance(ALICE_ADDRESS, JT_BOB_ADDRESS), jtShares, "Allowance should be set");
 
         // Check that maxRedeem is equal to the deposited shares
-        assertApproxEqAbs(
-            toUint256(JT.convertToAssets(JT.maxRedeem(ALICE_ADDRESS)).nav),
-            toUint256(JT.convertToAssets(jtShares).nav),
-            toUint256(ACCOUNTANT.getState().jtNAVDustTolerance) + 3
-        );
+        assertApproxEqAbs(toUint256(JT.convertToAssets(JT.maxRedeem(ALICE_ADDRESS)).nav), toUint256(JT.convertToAssets(jtShares).nav), _maxRedeemNAVTolerance());
         jtShares = JT.maxRedeem(ALICE_ADDRESS);
 
         uint256 bobAssetsBefore = IERC20(config.jtAsset).balanceOf(JT_BOB_ADDRESS);
@@ -1638,7 +1648,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         assertGt(IERC20(config.jtAsset).balanceOf(JT_BOB_ADDRESS), bobAssetsBefore, "JT_BOB should receive assets");
 
         // Allowance should be spent
-        assertTrue(JT.allowance(ALICE_ADDRESS, JT_BOB_ADDRESS) <= toUint256(ACCOUNTANT.getState().stNAVDustTolerance) + 3, "Allowance should be spent");
+        assertTrue(JT.allowance(ALICE_ADDRESS, JT_BOB_ADDRESS) <= _maxRedeemNAVTolerance(), "Allowance should be spent");
     }
 
     /// @notice Test that allowance spending fails with insufficient allowance
@@ -1753,7 +1763,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         assertApproxEqAbs(
             toUint256(JT.convertToAssets(maxRedeemableNoST).nav),
             toUint256(JT.convertToAssets(jtShares).nav),
-            toUint256(ACCOUNTANT.getState().jtNAVDustTolerance) + 3,
+            _maxRedeemNAVTolerance(),
             "Should be able to redeem all initially"
         );
 
@@ -1824,7 +1834,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         assertApproxEqAbs(
             toUint256(JT.convertToAssets(maxRedeemable).nav),
             toUint256(JT.convertToAssets(jtShares).nav),
-            toUint256(ACCOUNTANT.getState().jtNAVDustTolerance) + 3,
+            _maxRedeemNAVTolerance(),
             "maxRedeem should equal full balance with no ST"
         );
     }
@@ -1860,7 +1870,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         assertApproxEqAbs(
             toUint256(JT.convertToAssets(maxRedeemBefore).nav),
             toUint256(JT.convertToAssets(jtShares).nav),
-            toUint256(ACCOUNTANT.getState().jtNAVDustTolerance) + 3,
+            _maxRedeemNAVTolerance(),
             "Initially should redeem all"
         );
 
