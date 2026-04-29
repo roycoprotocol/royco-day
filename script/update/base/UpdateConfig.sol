@@ -36,6 +36,10 @@ abstract contract UpdateConfig {
     /// @dev Executor multisig — holds the GUARDIAN_ROLE (can cancel pending operations)
     address internal constant EXECUTOR_MULTISIG = 0x84d37A25e46029CE161111420E07cEb78880119e;
 
+    /// @dev WCE multisig — operations multisig holding immediate-delay admin roles
+    ///      (e.g. ADMIN_ENTRY_POINT_ROLE with 0 delay).
+    address internal constant WCE_MULTISIG = 0x84d37A25e46029CE161111420E07cEb78880119e;
+
     // ═══════════════════════════════════════════════════════════════════════════
     // MARKET NAMES
     // ═══════════════════════════════════════════════════════════════════════════
@@ -47,6 +51,8 @@ abstract contract UpdateConfig {
     string internal constant SMOKEHOUSE_USDC = "SmokehouseUSDC";
     string internal constant SYRUP_USDC = "syrupUSDC";
     string internal constant SUSDAI = "sUSDai";
+    string internal constant PARETO_FALCONX = "ParetoFalconX";
+    string internal constant APYUSD = "apyUSD";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // TYPES
@@ -111,6 +117,8 @@ abstract contract UpdateConfig {
         _deployedKernels[MAINNET][AUTOUSD] = 0x8748D1c21CC550B435487F473d9Aaf6C84dA46A6;
         _deployedKernels[MAINNET][SMOKEHOUSE_USDC] = 0x6dBdf6EBdF02F50ec6a7d6F782850996928176F9;
         _deployedKernels[MAINNET][SYRUP_USDC] = 0xde1Ce2cF64808e50d000F93058784270E412B3A4;
+        _deployedKernels[MAINNET][PARETO_FALCONX] = 0x15bb63C07740ff972F76716cAcC5766f0C641791;
+        _deployedKernels[MAINNET][APYUSD] = 0xcFbdEA0990F21b103c8D123d0D5273B4ea269cb4;
 
         // ── Avalanche ────────────────────────────────────────────────────────
         _deployedKernels[AVALANCHE][SAVUSD] = 0x7240FF91b471217FF93349184ABE9f102Ca1955C;

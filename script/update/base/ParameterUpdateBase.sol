@@ -135,6 +135,95 @@ abstract contract ParameterUpdateBase is AccessManagerConfigUtils, UpdateConfig 
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // DIRECT-CALL FLOW (immediate-delay roles, e.g. WCE_MULTISIG)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Processes a batch of updates that the caller can submit as a direct call (no
+     *         schedule/execute split). Use this for roles whose execution delay is 0 — the
+     *         caller's restricted function call is permitted in the same block.
+     * @dev Forks the chain, simulates each update in isolation by pranking `_caller`, then
+     *      writes ONE Safe JSON containing the batched direct-call transactions.
+     * @param _chainId The chain to process
+     * @param _caller The address that will submit the Safe batch (must hold an immediate-delay role)
+     * @param _updates Array of updates for this chain
+     * @param _outputSubdir Subdirectory under output/update/ (e.g. "entrypoint")
+     * @param _outputPrefix File name prefix (e.g. "update_tranche_configs")
+     * @param _batchDescription Overall description for the Safe batch
+     */
+    function _processChainDirect(
+        uint256 _chainId,
+        address _caller,
+        UpdateParams[] memory _updates,
+        string memory _outputSubdir,
+        string memory _outputPrefix,
+        string memory _batchDescription
+    )
+        internal
+    {
+        require(_updates.length > 0, NoUpdatesForChain(_chainId));
+
+        string memory rpcUrl = _getRpcUrl(_chainId);
+        vm.createSelectFork(rpcUrl);
+
+        console2.log("");
+        console2.log("========================================");
+        console2.log("Processing chain (direct):", _chainId);
+        console2.log("  Caller:", _caller);
+        console2.log("  Updates:", _updates.length);
+        console2.log("========================================");
+
+        // Simulate each update in isolation using snapshots
+        for (uint256 i = 0; i < _updates.length; i++) {
+            uint256 snapshot = vm.snapshotState();
+            _simulateDirect(_caller, _updates[i]);
+            vm.revertToState(snapshot);
+        }
+
+        // Build a single batched JSON of direct-call SafeTransactions
+        SafeTransaction[] memory txs = new SafeTransaction[](_updates.length);
+        for (uint256 i = 0; i < _updates.length; i++) {
+            txs[i] = SafeTransaction({ to: _updates[i].target, value: 0, data: _updates[i].callData });
+        }
+
+        string memory fileBase = string.concat(_outputSubdir, "/", vm.toString(_chainId), "_", _outputPrefix);
+        _writeUpdateSafeTransactionJson(txs, fileBase, _batchDescription, _batchDescription);
+
+        console2.log("");
+        console2.log("  Output:", string.concat(UPDATE_OUTPUT_DIRECTORY, fileBase, ".json"));
+        console2.log("  Done.");
+    }
+
+    /// @dev Pranks `_caller` and direct-calls the target. Reverts on failure. Then runs the
+    ///      subclass `_verify` hook against the same `UpdateParams`.
+    function _simulateDirect(address _caller, UpdateParams memory _params) internal {
+        console2.log("  Simulating (direct):", _params.description);
+
+        vm.prank(_caller);
+        (bool ok, bytes memory ret) = _params.target.call(_params.callData);
+        require(ok, _decodeDirectRevert(ret));
+        console2.log("    [OK] Direct call");
+
+        _verify(_params);
+        console2.log("    [OK] Verification");
+    }
+
+    function _decodeDirectRevert(bytes memory _ret) internal pure returns (string memory) {
+        if (_ret.length >= 4) {
+            bytes memory hexAlphabet = "0123456789abcdef";
+            bytes memory out = new bytes(8);
+            bytes4 sel = bytes4(_ret);
+            for (uint256 i = 0; i < 4; i++) {
+                uint8 b = uint8(sel[i]);
+                out[2 * i] = hexAlphabet[b >> 4];
+                out[2 * i + 1] = hexAlphabet[b & 0x0f];
+            }
+            return string.concat("Direct call reverted; selector=0x", string(out));
+        }
+        return "Direct call reverted";
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // SIMULATION
     // ═══════════════════════════════════════════════════════════════════════════
 
