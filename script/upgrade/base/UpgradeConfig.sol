@@ -43,6 +43,9 @@ abstract contract UpgradeConfig {
     string internal constant SUSDAI = "sUSDai";
     string internal constant SMOKEHOUSE_USDC = "SmokehouseUSDC";
     string internal constant SYRUP_USDC = "syrupUSDC";
+    string internal constant STCUSD = "stcUSD";
+    string internal constant PARETO_FALCONX = "ParetoFalconX";
+    string internal constant APYUSD = "apyUSD";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // TYPES
@@ -143,6 +146,24 @@ abstract contract UpgradeConfig {
             accountant: 0x2995f615D0ec527eD43eBb22DE0DcB66084c98FE,
             kernel: 0xde1Ce2cF64808e50d000F93058784270E412B3A4
         });
+        _markets[MAINNET][STCUSD] = MarketAddresses({
+            seniorTranche: 0xa7Da92685ea436276B2e87aE12E5eE6DABaD5bB5,
+            juniorTranche: 0xe4060E83ad26618c7Ed56A02ce099beBA4f73b29,
+            accountant: 0x59609E6f6faD8b90C025E03a98ef44f7435B122d,
+            kernel: 0x9911F227E9428964D8A35B852513919C8DF92038
+        });
+        _markets[MAINNET][PARETO_FALCONX] = MarketAddresses({
+            seniorTranche: 0x694ADB3077BBecE31882B6d6A74fc4A4fA6a754b,
+            juniorTranche: 0x8E0ec43E51B88AA2324102e1A3D667822be51A6d,
+            accountant: 0x37543D7C1e0e5C4467398681180af00efB68D0Dd,
+            kernel: 0x15bb63C07740ff972F76716cAcC5766f0C641791
+        });
+        _markets[MAINNET][APYUSD] = MarketAddresses({
+            seniorTranche: 0xBd373c9D3D8976a4FECC504a93c768BBE8C3227C,
+            juniorTranche: 0xAB2ab53E1e2E2c5D7202918EC8c873712bcc4a2D,
+            accountant: 0x5A42DD2e3C30b20663BB86D40DB0ea28689BbD0f,
+            kernel: 0xcFbdEA0990F21b103c8D123d0D5273B4ea269cb4
+        });
 
         // ── Avalanche ────────────────────────────────────────────────────────
         _markets[AVALANCHE][SAVUSD] = MarketAddresses({
@@ -162,6 +183,10 @@ abstract contract UpgradeConfig {
 
         // ── Chainlink oracles to keep fresh through the 2-day simulation warp ─
         // Add any aggregator address whose staleness check would otherwise revert mid-simulation.
-        _chainlinkOracles[MAINNET].push(0x5e7281f74e74D76347f0b8f4a36Fd3cb29c19d95);
+        // Mocking `latestRoundData()` on the cap oracle short-circuits any RedStone push-feed
+        // adapter staleness checks reached transitively, so RedStone-backed feeds belong here too.
+        _chainlinkOracles[MAINNET].push(0x5e7281f74e74D76347f0b8f4a36Fd3cb29c19d95); // sNUSD: RedStone nusd_fundamental
+        _chainlinkOracles[MAINNET].push(0x9A5a3c3Ed0361505cC1D4e824B3854De5724434A); // stcUSD: RedStone cUSD_FUNDAMENTAL
+        _chainlinkOracles[MAINNET].push(0x651b101f72F82630cf59c68E6EE4305aFBd3B1F5); // apyUSD: Chainlink apxusd-usd
     }
 }

@@ -110,25 +110,22 @@ contract UpgradeBatch is UpgradeBase {
      * @notice Populate the upgrade list here. Empty by default.
      */
     function _initializeConfigs() internal {
-        string memory v = "V1.2.0";
-        UpgradeKind erc4626 = UpgradeKind.KERNEL_IDENTICAL_ERC4626_CHAINLINK;
-        UpgradeKind maple = UpgradeKind.KERNEL_MAPLE_POOL_V2_CHAINLINK;
-        UpgradeKind susdai = UpgradeKind.KERNEL_SUSDAI_ADMIN_ORACLE;
+        string memory v = "V1.2.1";
 
         // ── Mainnet ──────────────────────────────────────────────────────────
-        _pushMarketUpgrades(MAINNET, SNUSD, erc4626, v);
-        _pushMarketUpgrades(MAINNET, AUTOUSD, erc4626, v);
-        _pushMarketUpgrades(MAINNET, SMOKEHOUSE_USDC, erc4626, v);
-        _pushMarketUpgrades(MAINNET, SYRUP_USDC, maple, v);
-        _pushFactoryUpgrade(MAINNET, v);
+        _pushAccountantUpgrade(MAINNET, SNUSD, v);
+        _pushAccountantUpgrade(MAINNET, AUTOUSD, v);
+        _pushAccountantUpgrade(MAINNET, SMOKEHOUSE_USDC, v);
+        _pushAccountantUpgrade(MAINNET, SYRUP_USDC, v);
+        _pushAccountantUpgrade(MAINNET, STCUSD, v);
+        _pushAccountantUpgrade(MAINNET, PARETO_FALCONX, v);
+        _pushAccountantUpgrade(MAINNET, APYUSD, v);
 
         // ── Avalanche ────────────────────────────────────────────────────────
-        _pushMarketUpgrades(AVALANCHE, SAVUSD, erc4626, v);
-        _pushFactoryUpgrade(AVALANCHE, v);
+        _pushAccountantUpgrade(AVALANCHE, SAVUSD, v);
 
         // ── Arbitrum ─────────────────────────────────────────────────────────
-        _pushMarketUpgrades(ARBITRUM, SUSDAI, susdai, v);
-        _pushFactoryUpgrade(ARBITRUM, v);
+        _pushAccountantUpgrade(ARBITRUM, SUSDAI, v);
     }
 
     /// @dev Push ST + JT + Kernel + Accountant entries for a market. The caller picks the right
@@ -142,6 +139,13 @@ contract UpgradeBatch is UpgradeBase {
             UpgradeConfigEntry({ chainId: chainId, kind: UpgradeKind.TRANCHE, saltVersion: saltVersion, payload: abi.encode(marketName, TrancheType.JUNIOR) })
         );
         _configs.push(UpgradeConfigEntry({ chainId: chainId, kind: kernelKind, saltVersion: saltVersion, payload: abi.encode(marketName) }));
+        _configs.push(UpgradeConfigEntry({ chainId: chainId, kind: UpgradeKind.ACCOUNTANT, saltVersion: saltVersion, payload: abi.encode(marketName) }));
+    }
+
+    /// @dev Push a single accountant upgrade for a market. Use when only the accountant impl
+    ///      changes (vs. `_pushMarketUpgrades` which pushes the full ST + JT + kernel + accountant
+    ///      set for a market).
+    function _pushAccountantUpgrade(uint256 chainId, string memory marketName, string memory saltVersion) internal {
         _configs.push(UpgradeConfigEntry({ chainId: chainId, kind: UpgradeKind.ACCOUNTANT, saltVersion: saltVersion, payload: abi.encode(marketName) }));
     }
 
