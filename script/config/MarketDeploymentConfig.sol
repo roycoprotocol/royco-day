@@ -48,6 +48,7 @@ abstract contract MarketDeploymentConfig {
     string public constant APYUSD = "apyUSD";
     string public constant LIUSD_4W = "liUSD-4w";
     string public constant SUSDAT = "sUSDat";
+    string public constant EEARN = "eEARN";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CHAIN-SPECIFIC CONFIG (defined once per chain)
@@ -864,6 +865,53 @@ abstract contract MarketDeploymentConfig {
                     jtYieldShareAtTargetUtilWAD: 0.05e18,
                     jtYieldShareAtFullUtilWAD: 0.4e18,
                     maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
+                })
+            ),
+            transferAgentAddress: address(0)
+        });
+
+        _marketConfigs[EEARN] = MarketConfig({
+            marketName: EEARN,
+            chainId: MAINNET,
+            seniorTrancheName: _seniorTrancheName(EEARN),
+            seniorTrancheSymbol: _seniorTrancheSymbol(EEARN),
+            juniorTrancheName: _juniorTrancheName(EEARN),
+            juniorTrancheSymbol: _juniorTrancheSymbol(EEARN),
+            // Ember Earn vault (USDC-denominated ERC4626)
+            seniorAsset: 0x9be9294722f8AAd37b11a9792Be2C782182caFA2,
+            juniorAsset: 0x9be9294722f8AAd37b11a9792Be2C782182caFA2,
+            // USDC base asset has 6 decimals; NAV is 18-decimal, so dust = 5 * 10^(18-6)
+            stDustTolerance: 5 * (10 ** (18 - 6)),
+            jtDustTolerance: 5 * (10 ** (18 - 6)),
+            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel,
+            kernelSpecificParams: abi.encode(
+                DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
+                        // Disable the Oracle Leg by setting the initial conversion rate to 1e18 (USDC pegged at $1)
+                        initialConversionRateWAD: 1e18,
+                        // Filler oracle address since the Oracle Leg is disabled
+                        baseAssetToNavAssetOracle: address(1),
+                        // Filler staleness threshold since the Oracle Leg is disabled
+                        stalenessThresholdSeconds: 86_400
+                    })
+            ),
+            enforceVaultSharesTransferWhitelist: false,
+            stSelfLiquidationBonusWAD: 0.005e18, // TODO
+            stProtocolFeeWAD: 0.1e18, // TODO
+            jtProtocolFeeWAD: 0, // TODO
+            jtYieldShareProtocolFeeWAD: 0.45e18, // TODO
+            coverageWAD: 0.1e18,
+            betaWAD: 1e18,
+            // Matches the 10%-coverage USDC family (sNUSD/savUSD/apyUSD); SmokehouseUSDC's looser threshold is tuned for 7% coverage
+            liquidationUtilizationWAD: 1.0009009e18,
+            fixedTermDurationSeconds: 7 days,
+            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
+            // Curve mirrors the sNUSD/savUSD/apyUSD 10%-coverage USDC profile — tune to Ember-specific risk before mainnet
+            ydmSpecificParams: abi.encode(
+                DeployScript.AdaptiveCurveYDM_V2_Params({
+                    jtYieldShareAtZeroUtilWAD: 0.11e18,
+                    jtYieldShareAtTargetUtilWAD: 0.11e18,
+                    jtYieldShareAtFullUtilWAD: 0.31e18,
+                    maxAdaptationSpeedWAD: uint64(50e18 / uint256(365 days))
                 })
             ),
             transferAgentAddress: address(0)
