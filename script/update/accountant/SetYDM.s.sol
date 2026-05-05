@@ -60,81 +60,16 @@ contract SetYDM is ParameterUpdateBase {
      *      with `maxAdaptationSpeedWAD` forced to 0.
      */
     function _initializeConfigs() internal {
-        // sNUSD (Mainnet)
+        // apyUSD on Ethereum
         _configs.push(
             SetYDMConfig({
                 chainId: MAINNET,
-                marketName: SNUSD,
+                marketName: APYUSD,
                 ydm: ADAPTIVE_CURVE_YDM_V2,
-                jtYieldShareAtZeroUtilWAD: 0.11e18,
-                jtYieldShareAtTargetUtilWAD: 0.11e18,
-                jtYieldShareAtFullUtilWAD: 0.31e18,
-                maxAdaptationSpeedWAD: 0
-            })
-        );
-
-        // autoUSD (Mainnet)
-        _configs.push(
-            SetYDMConfig({
-                chainId: MAINNET,
-                marketName: AUTOUSD,
-                ydm: ADAPTIVE_CURVE_YDM_V2,
-                jtYieldShareAtZeroUtilWAD: 0.11e18,
-                jtYieldShareAtTargetUtilWAD: 0.11e18,
-                jtYieldShareAtFullUtilWAD: 0.31e18,
-                maxAdaptationSpeedWAD: 0
-            })
-        );
-
-        // SmokehouseUSDC (Mainnet — Morpho)
-        _configs.push(
-            SetYDMConfig({
-                chainId: MAINNET,
-                marketName: SMOKEHOUSE_USDC,
-                ydm: ADAPTIVE_CURVE_YDM_V2,
-                jtYieldShareAtZeroUtilWAD: 0.08e18,
-                jtYieldShareAtTargetUtilWAD: 0.08e18,
-                jtYieldShareAtFullUtilWAD: 0.21e18,
-                maxAdaptationSpeedWAD: 0
-            })
-        );
-
-        // syrupUSDC (Mainnet — Maple)
-        _configs.push(
-            SetYDMConfig({
-                chainId: MAINNET,
-                marketName: SYRUP_USDC,
-                ydm: ADAPTIVE_CURVE_YDM_V2,
-                jtYieldShareAtZeroUtilWAD: 0.03e18,
-                jtYieldShareAtTargetUtilWAD: 0.03e18,
-                jtYieldShareAtFullUtilWAD: 0.1e18,
-                maxAdaptationSpeedWAD: 0
-            })
-        );
-
-        // savUSD (Avalanche)
-        _configs.push(
-            SetYDMConfig({
-                chainId: AVALANCHE,
-                marketName: SAVUSD,
-                ydm: ADAPTIVE_CURVE_YDM_V2,
-                jtYieldShareAtZeroUtilWAD: 0.11e18,
-                jtYieldShareAtTargetUtilWAD: 0.11e18,
-                jtYieldShareAtFullUtilWAD: 0.31e18,
-                maxAdaptationSpeedWAD: 0
-            })
-        );
-
-        // sUSDai (Arbitrum)
-        _configs.push(
-            SetYDMConfig({
-                chainId: ARBITRUM,
-                marketName: SUSDAI,
-                ydm: ADAPTIVE_CURVE_YDM_V2,
-                jtYieldShareAtZeroUtilWAD: 0.11e18,
-                jtYieldShareAtTargetUtilWAD: 0.11e18,
-                jtYieldShareAtFullUtilWAD: 0.31e18,
-                maxAdaptationSpeedWAD: 0
+                jtYieldShareAtZeroUtilWAD: 0.15e18,
+                jtYieldShareAtTargetUtilWAD: 0.15e18,
+                jtYieldShareAtFullUtilWAD: 0.4e18,
+                maxAdaptationSpeedWAD: uint64(40e18 / uint256(365 days))
             })
         );
     }

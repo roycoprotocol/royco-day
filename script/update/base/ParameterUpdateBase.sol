@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
+import { ChainlinkFreshness } from "../../upgrade/base/ChainlinkFreshness.sol";
 import { AccessManagerConfigUtils } from "../../utils/AccessManagerConfigUtils.sol";
 import { UpdateConfig } from "./UpdateConfig.sol";
 import { console2 } from "lib/forge-std/src/console2.sol";
@@ -229,10 +230,12 @@ abstract contract ParameterUpdateBase is AccessManagerConfigUtils, UpdateConfig 
 
     /**
      * @notice Simulates the full schedule -> warp -> execute flow on the current fork
-     * @dev Schedule is hard-failing (validates authorization). Execute uses try/catch because
-     *      the 2-day warp can cause oracle staleness reverts on markets with strict oracle
-     *      freshness checks (e.g. Chainlink). In production, the oracle will be fresh when
-     *      execute is called.
+     * @dev Schedule is hard-failing (validates authorization). Before the warp the harness
+     *      captures `latestRoundData()` for every oracle registered via
+     *      `_chainlinkOracles[chainId]` in `UpdateConfig`, then re-`mockCall`s it post-warp with
+     *      `updatedAt = block.timestamp` so downstream staleness checks pass. Execute is still
+     *      wrapped in try/catch as a defensive fallback for oracles that haven't been registered
+     *      — mock-state and snapshot-revert remain isolated to the per-update bracket.
      */
     function _simulate(UpdateParams memory _params) internal {
         console2.log("  Simulating:", _params.description);
@@ -242,10 +245,17 @@ abstract contract ParameterUpdateBase is AccessManagerConfigUtils, UpdateConfig 
         IAccessManager(ROYCO_FACTORY).schedule(_params.target, _params.callData, uint48(0));
         console2.log("    [OK] Schedule (authorization validated)");
 
+        // Snapshot Chainlink-style oracle data BEFORE the warp; mock back with
+        // `updatedAt = block.timestamp` afterward to defeat downstream staleness checks.
+        address[] memory oracles = getChainlinkOracles(block.chainid);
+        bytes[] memory oraclePre = ChainlinkFreshness.capture(oracles);
+
         // Warp past the execution delay
         vm.warp(vm.getBlockTimestamp() + SIMULATION_WARP_DURATION);
 
-        // Execute — try/catch for oracle staleness
+        ChainlinkFreshness.mockFresh(oracles, oraclePre);
+
+        // Execute — try/catch as a fallback for any oracle staleness path not covered by the mock
         vm.prank(ROOT_MULTISIG);
         try IAccessManager(ROYCO_FACTORY).execute(_params.target, _params.callData) {
             console2.log("    [OK] Execute");

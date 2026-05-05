@@ -73,6 +73,12 @@ abstract contract UpdateConfig {
     /// @dev chainId → marketName → kernel address
     mapping(uint256 chainId => mapping(string marketName => address kernel)) internal _deployedKernels;
 
+    /// @dev Chainlink-style aggregators (`latestRoundData()`) that need to stay "fresh" through the
+    ///      2-day simulation warp. The harness captures `latestRoundData` for each entry pre-warp,
+    ///      then `vm.mockCall`s the oracle post-warp to keep the same `answer` but report
+    ///      `updatedAt = block.timestamp`, defeating downstream staleness checks.
+    mapping(uint256 chainId => address[] oracles) internal _chainlinkOracles;
+
     // ═══════════════════════════════════════════════════════════════════════════
     // ERRORS
     // ═══════════════════════════════════════════════════════════════════════════
@@ -90,6 +96,11 @@ abstract contract UpdateConfig {
     // ═══════════════════════════════════════════════════════════════════════════
     // GETTERS
     // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Returns the Chainlink-style oracles to keep fresh during simulation for `_chainId`.
+    function getChainlinkOracles(uint256 _chainId) public view returns (address[] memory oracles) {
+        oracles = _chainlinkOracles[_chainId];
+    }
 
     /**
      * @notice Resolves all market addresses from the kernel for the current chain
@@ -125,5 +136,13 @@ abstract contract UpdateConfig {
 
         // ── Arbitrum ─────────────────────────────────────────────────────────
         _deployedKernels[ARBITRUM][SUSDAI] = 0xFdb17E53eA5d342124b8473188BCB9F05F1949CA;
+
+        // ── Chainlink oracles to keep fresh through the 2-day simulation warp ─
+        // Add any aggregator address whose staleness check would otherwise revert mid-simulation.
+        // Mocking `latestRoundData()` on the cap oracle short-circuits any RedStone push-feed
+        // adapter staleness checks reached transitively, so RedStone-backed feeds belong here too.
+        _chainlinkOracles[MAINNET].push(0x5e7281f74e74D76347f0b8f4a36Fd3cb29c19d95); // sNUSD: RedStone nusd_fundamental
+        _chainlinkOracles[MAINNET].push(0x9A5a3c3Ed0361505cC1D4e824B3854De5724434A); // stcUSD: RedStone cUSD_FUNDAMENTAL
+        _chainlinkOracles[MAINNET].push(0x651b101f72F82630cf59c68E6EE4305aFBd3B1F5); // apyUSD: Chainlink apxusd-usd
     }
 }

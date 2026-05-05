@@ -33,7 +33,7 @@ contract UpdateTrancheConfigs is ParameterUpdateBase {
     /// @dev CREATE3-deterministic entry-point proxy address (same on every chain).
     address internal constant ENTRY_POINT = 0x63dA1229be88Fb4D20210147954a1a3e05f2581B;
 
-    uint24 internal constant NEW_DEPOSIT_DELAY = 24 hours;
+    uint24 internal constant NEW_DEPOSIT_DELAY = 5 minutes;
     uint24 internal constant NEW_REDEMPTION_DELAY = 24 hours;
 
     string internal constant OUTPUT_SUBDIR = "entrypoint";
@@ -59,23 +59,23 @@ contract UpdateTrancheConfigs is ParameterUpdateBase {
         // ── Mainnet ──────────────────────────────────────────────────────────
         ChainEntryPointConfig storage mainnet = _entryPointConfigs.push();
         mainnet.chainId = MAINNET;
-        // mainnet.markets.push(SNUSD);
-        // mainnet.markets.push(AUTOUSD);
-        // mainnet.markets.push(SMOKEHOUSE_USDC);
-        // mainnet.markets.push(SYRUP_USDC);
-        // mainnet.markets.push(STCUSD);
-        // mainnet.markets.push(PARETO_FALCONX);
+        mainnet.markets.push(SNUSD);
+        mainnet.markets.push(AUTOUSD);
+        mainnet.markets.push(SMOKEHOUSE_USDC);
+        mainnet.markets.push(SYRUP_USDC);
+        mainnet.markets.push(STCUSD);
+        mainnet.markets.push(PARETO_FALCONX);
         mainnet.markets.push(APYUSD);
 
         // ── Avalanche ────────────────────────────────────────────────────────
-        // ChainEntryPointConfig storage avalanche = _entryPointConfigs.push();
-        // avalanche.chainId = AVALANCHE;
-        // avalanche.markets.push(SAVUSD);
+        ChainEntryPointConfig storage avalanche = _entryPointConfigs.push();
+        avalanche.chainId = AVALANCHE;
+        avalanche.markets.push(SAVUSD);
 
         // ── Arbitrum ─────────────────────────────────────────────────────────
-        // ChainEntryPointConfig storage arbitrum = _entryPointConfigs.push();
-        // arbitrum.chainId = ARBITRUM;
-        // arbitrum.markets.push(SUSDAI);
+        ChainEntryPointConfig storage arbitrum = _entryPointConfigs.push();
+        arbitrum.chainId = ARBITRUM;
+        arbitrum.markets.push(SUSDAI);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -108,7 +108,7 @@ contract UpdateTrancheConfigs is ParameterUpdateBase {
             tranches[2 * i] = addrs.seniorTranche;
             configs[2 * i] = IRoycoEntryPoint.TrancheConfig({
                 enabled: true,
-                yieldRecipient: IRoycoEntryPoint.AccruedYieldRecipient.REDEEMING_LP,
+                yieldRecipient: IRoycoEntryPoint.AccruedYieldRecipient.PROTOCOL,
                 depositDelaySeconds: NEW_DEPOSIT_DELAY,
                 redemptionDelaySeconds: NEW_REDEMPTION_DELAY
             });
