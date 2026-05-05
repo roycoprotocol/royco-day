@@ -891,23 +891,18 @@ abstract contract MarketDeploymentConfig {
                     })
             ),
             enforceVaultSharesTransferWhitelist: false,
-            stSelfLiquidationBonusWAD: 0.005e18, // TODO
-            stProtocolFeeWAD: 0.1e18, // TODO
-            jtProtocolFeeWAD: 0, // TODO
-            jtYieldShareProtocolFeeWAD: 0.45e18, // TODO
+            stSelfLiquidationBonusWAD: 0,
+            stProtocolFeeWAD: 0.1e18,
+            jtProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0.45e18,
             coverageWAD: 0.1e18,
             betaWAD: 1e18,
-            // Matches the 10%-coverage USDC family (sNUSD/savUSD/apyUSD); SmokehouseUSDC's looser threshold is tuned for 7% coverage
-            liquidationUtilizationWAD: 1.0009009e18,
-            fixedTermDurationSeconds: 7 days,
+            liquidationUtilizationWAD: 1.0090909e18,
+            fixedTermDurationSeconds: 5 days,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
-            // Curve mirrors the sNUSD/savUSD/apyUSD 10%-coverage USDC profile — tune to Ember-specific risk before mainnet
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.11e18,
-                    jtYieldShareAtTargetUtilWAD: 0.11e18,
-                    jtYieldShareAtFullUtilWAD: 0.31e18,
-                    maxAdaptationSpeedWAD: uint64(50e18 / uint256(365 days))
+                    jtYieldShareAtZeroUtilWAD: 0.1e18, jtYieldShareAtTargetUtilWAD: 0.1e18, jtYieldShareAtFullUtilWAD: 0.3e18, maxAdaptationSpeedWAD: 0
                 })
             ),
             transferAgentAddress: address(0)
