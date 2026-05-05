@@ -59,23 +59,24 @@ contract UpdateTrancheConfigs is ParameterUpdateBase {
         // ── Mainnet ──────────────────────────────────────────────────────────
         ChainEntryPointConfig storage mainnet = _entryPointConfigs.push();
         mainnet.chainId = MAINNET;
-        mainnet.markets.push(SNUSD);
-        mainnet.markets.push(AUTOUSD);
-        mainnet.markets.push(SMOKEHOUSE_USDC);
-        mainnet.markets.push(SYRUP_USDC);
-        mainnet.markets.push(STCUSD);
-        mainnet.markets.push(PARETO_FALCONX);
-        mainnet.markets.push(APYUSD);
+        // mainnet.markets.push(SNUSD);
+        // mainnet.markets.push(AUTOUSD);
+        // mainnet.markets.push(SMOKEHOUSE_USDC);
+        // mainnet.markets.push(SYRUP_USDC);
+        // mainnet.markets.push(STCUSD);
+        // mainnet.markets.push(PARETO_FALCONX);
+        // mainnet.markets.push(APYUSD);
+        mainnet.markets.push(eEARN);
 
         // ── Avalanche ────────────────────────────────────────────────────────
-        ChainEntryPointConfig storage avalanche = _entryPointConfigs.push();
-        avalanche.chainId = AVALANCHE;
-        avalanche.markets.push(SAVUSD);
+        // ChainEntryPointConfig storage avalanche = _entryPointConfigs.push();
+        // avalanche.chainId = AVALANCHE;
+        // avalanche.markets.push(SAVUSD);
 
         // ── Arbitrum ─────────────────────────────────────────────────────────
-        ChainEntryPointConfig storage arbitrum = _entryPointConfigs.push();
-        arbitrum.chainId = ARBITRUM;
-        arbitrum.markets.push(SUSDAI);
+        // ChainEntryPointConfig storage arbitrum = _entryPointConfigs.push();
+        // arbitrum.chainId = ARBITRUM;
+        // arbitrum.markets.push(SUSDAI);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

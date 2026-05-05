@@ -53,6 +53,7 @@ abstract contract UpdateConfig {
     string internal constant SUSDAI = "sUSDai";
     string internal constant PARETO_FALCONX = "ParetoFalconX";
     string internal constant APYUSD = "apyUSD";
+    string internal constant eEARN = "eEARN";
 
     // ═══════════════════════════════════════════════════════════════════════════
     // TYPES
@@ -130,6 +131,7 @@ abstract contract UpdateConfig {
         _deployedKernels[MAINNET][SYRUP_USDC] = 0xde1Ce2cF64808e50d000F93058784270E412B3A4;
         _deployedKernels[MAINNET][PARETO_FALCONX] = 0x15bb63C07740ff972F76716cAcC5766f0C641791;
         _deployedKernels[MAINNET][APYUSD] = 0xcFbdEA0990F21b103c8D123d0D5273B4ea269cb4;
+        _deployedKernels[MAINNET][eEARN] = 0x36c1d7CaFa9A220fc1450fA070277aED69F8c9B2;
 
         // ── Avalanche ────────────────────────────────────────────────────────
         _deployedKernels[AVALANCHE][SAVUSD] = 0x7240FF91b471217FF93349184ABE9f102Ca1955C;

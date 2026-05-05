@@ -108,6 +108,7 @@ abstract contract ParameterUpdateBase is AccessManagerConfigUtils, UpdateConfig 
         }
 
         // Write one JSON per phase for this chain
+        vm.createDir(string.concat(UPDATE_OUTPUT_DIRECTORY, _outputSubdir), true);
         string memory fileBase = string.concat(_outputSubdir, "/", vm.toString(_chainId), "_", _outputPrefix);
 
         _writeUpdateSafeTransactionJson(scheduleTxs, string.concat(fileBase, "_schedule"), _batchDescription, string.concat(_batchDescription, " (schedule)"));
@@ -187,6 +188,7 @@ abstract contract ParameterUpdateBase is AccessManagerConfigUtils, UpdateConfig 
             txs[i] = SafeTransaction({ to: _updates[i].target, value: 0, data: _updates[i].callData });
         }
 
+        vm.createDir(string.concat(UPDATE_OUTPUT_DIRECTORY, _outputSubdir), true);
         string memory fileBase = string.concat(_outputSubdir, "/", vm.toString(_chainId), "_", _outputPrefix);
         _writeUpdateSafeTransactionJson(txs, fileBase, _batchDescription, _batchDescription);
 
