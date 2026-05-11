@@ -10,12 +10,9 @@ import { console2 } from "lib/forge-std/src/console2.sol";
 /**
  * @title DeployFundamentalStablecoinChainlinkOracleScript
  * @notice Deploys a FundamentalStablecoinChainlinkOracle deterministically via CREATE2.
- *         The salt is derived from (underlying oracle, min peg price) so the same inputs
- *         produce the same address on every chain, and distinct inputs deploy to distinct addresses.
- *
  * Environment variables:
  *   DEPLOYER_PRIVATE_KEY - Key for the deployer account
- *   ORACLE_CONFIG_NAME   - Named config to deploy (e.g., MAINNET_USDC_USD, MAINNET_CUSD_USD)
+ *   FUNDAMENTAL_STABLECOIN_CHAINLINK_ORACLE_CONFIG_NAME - Named config to deploy (e.g., MAINNET_USDC_USD, MAINNET_CUSD_USD)
  */
 contract DeployFundamentalStablecoinChainlinkOracleScript is FundamentalStablecoinChainlinkOracleDeploymentConfig, Create2DeployUtils {
     // ═══════════════════════════════════════════════════════════════════════════
@@ -31,7 +28,7 @@ contract DeployFundamentalStablecoinChainlinkOracleScript is FundamentalStableco
 
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
-        string memory oracleConfigName = vm.envString("ORACLE_CONFIG_NAME");
+        string memory oracleConfigName = vm.envString("FUNDAMENTAL_STABLECOIN_CHAINLINK_ORACLE_CONFIG_NAME");
 
         OracleConfig memory config = getOracleConfig(oracleConfigName);
         address oracle = deployOracle(config.underlyingOracle, config.minPegPrice, deployerPrivateKey);
@@ -53,10 +50,6 @@ contract DeployFundamentalStablecoinChainlinkOracleScript is FundamentalStableco
 
     /**
      * @notice Deploys a FundamentalStablecoinChainlinkOracle via CREATE2
-     * @dev The constructor args are already mixed into `keccak256(initCode)` by CREATE2, so distinct
-     *      (underlyingOracle, minPegPrice) tuples naturally deploy to distinct addresses under a fixed salt,
-     *      and identical tuples deploy to the same address on every chain.
-     *      Public so it can be exercised by integration tests.
      * @param _underlyingOracle The underlying stablecoin Chainlink (compatible) oracle to wrap
      * @param _minPegPrice The minimum price at which the underlying stablecoin is considered pegged to 1 quote asset
      * @param _deployerPrivateKey The private key for executing the deployment
