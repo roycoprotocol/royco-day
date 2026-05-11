@@ -5,7 +5,9 @@ import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/interfa
 import { IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
 
 import { DeployScript } from "../../../../script/Deploy.s.sol";
+import { FundamentalStablecoinChainlinkOracleDeploymentConfig } from "../../../../script/config/FundamentalStablecoinChainlinkOracleDeploymentConfig.sol";
 import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
+import { DeployFundamentalStablecoinChainlinkOracleScript } from "../../../../script/independent/DeployFundamentalStablecoinChainlinkOracle.s.sol";
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import {
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel
@@ -74,6 +76,17 @@ contract stcUSD_stcUSD_Test is YieldBearingERC4626_ChainlinkOracle_TestBase {
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+
+        DeployFundamentalStablecoinChainlinkOracleScript ORACLE_DEPLOY_SCRIPT = new DeployFundamentalStablecoinChainlinkOracleScript();
+        FundamentalStablecoinChainlinkOracleDeploymentConfig.OracleConfig memory oracleConfig =
+            ORACLE_DEPLOY_SCRIPT.getOracleConfig(ORACLE_DEPLOY_SCRIPT.MAINNET_CUSD_USD());
+        address cUSDOracle = ORACLE_DEPLOY_SCRIPT.deployOracle(oracleConfig.underlyingOracle, oracleConfig.minPegPrice, DEPLOYER.privateKey);
+
+        marketConfig.kernelSpecificParams = abi.encode(
+            DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
+                initialConversionRateWAD: 1e18, baseAssetToNavAssetOracle: cUSDOracle, stalenessThresholdSeconds: 86_400
+            })
+        );
 
         return DEPLOY_SCRIPT.deploy(
             marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roleAssignments, DEPLOYER.privateKey
