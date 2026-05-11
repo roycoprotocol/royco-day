@@ -8,6 +8,7 @@ import { RolesConfiguration } from "../../../src/factory/RolesConfiguration.sol"
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoKernel } from "../../../src/interfaces/IRoycoKernel.sol";
 
+import { ExtraRoles } from "../../config/ExtraRoles.sol";
 import { AccessManagerConfigUtils } from "../../utils/AccessManagerConfigUtils.sol";
 import { UpdateConfig } from "../base/UpdateConfig.sol";
 
@@ -60,7 +61,7 @@ import { UpdateConfig } from "../base/UpdateConfig.sol";
  *         (single Safe Transaction Builder JSON — no schedule/cancel files since these
  *         calls are not delayed under the current configuration).
  */
-contract ApplySecurityMigration is AccessManagerConfigUtils, UpdateConfig, RolesConfiguration {
+contract ApplySecurityMigration is AccessManagerConfigUtils, UpdateConfig, RolesConfiguration, ExtraRoles {
     // ═══════════════════════════════════════════════════════════════════════════
     // CONSTANTS
     // ═══════════════════════════════════════════════════════════════════════════

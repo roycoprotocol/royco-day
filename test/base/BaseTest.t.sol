@@ -6,6 +6,7 @@ import { Vm } from "../../lib/forge-std/src/Vm.sol";
 import { ERC20Mock } from "../../lib/openzeppelin-contracts/contracts/mocks/token/ERC20Mock.sol";
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
+import { ExtraRoles } from "../../script/config/ExtraRoles.sol";
 import { RoycoAccountant } from "../../src/accountant/RoycoAccountant.sol";
 import { RolesConfiguration, RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
@@ -19,7 +20,7 @@ import { RoycoJuniorTranche } from "../../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoSeniorTranche } from "../../src/tranches/RoycoSeniorTranche.sol";
 import { Assertions } from "./Assertions.t.sol";
 
-abstract contract BaseTest is Test, RolesConfiguration, Assertions {
+abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
     uint256 internal constant BPS = 0.0001e18;
 
     struct TrancheState {

@@ -10,6 +10,7 @@ import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoEntryPoint } from "../../src/interfaces/IRoycoEntryPoint.sol";
 import { RoycoEntryPoint } from "../../src/periphery/RoycoEntryPoint.sol";
 import { EntryPointDeploymentConfig } from "../config/EntryPointDeploymentConfig.sol";
+import { ExtraRoles } from "../config/ExtraRoles.sol";
 import { AccessManagerConfigUtils } from "../utils/AccessManagerConfigUtils.sol";
 import { Create2DeployUtils } from "../utils/Create2DeployUtils.sol";
 import { console2 } from "lib/forge-std/src/console2.sol";
@@ -22,7 +23,7 @@ import { console2 } from "lib/forge-std/src/console2.sol";
  *      configuration is generated separately via `buildFactoryConfigTransactions` and applied
  *      through a Safe transaction batch.
  */
-contract DeployEntryPointScript is EntryPointDeploymentConfig, AccessManagerConfigUtils, Create2DeployUtils, RolesConfiguration {
+contract DeployEntryPointScript is EntryPointDeploymentConfig, AccessManagerConfigUtils, Create2DeployUtils, RolesConfiguration, ExtraRoles {
     // ═══════════════════════════════════════════════════════════════════════════
     // DEPLOYMENT CONSTANTS
     // ═══════════════════════════════════════════════════════════════════════════

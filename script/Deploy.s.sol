@@ -32,6 +32,7 @@ import { RoycoSeniorTranche } from "../src/tranches/RoycoSeniorTranche.sol";
 import { AdaptiveCurveYDM_V1 } from "../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { StaticCurveYDM } from "../src/ydm/StaticCurveYDM.sol";
+import { ExtraRoles } from "./config/ExtraRoles.sol";
 import { MarketDeploymentConfig } from "./config/MarketDeploymentConfig.sol";
 import { Create2DeployUtils } from "./utils/Create2DeployUtils.sol";
 import { Script } from "lib/forge-std/src/Script.sol";
@@ -45,7 +46,7 @@ import { console2 } from "lib/forge-std/src/console2.sol";
 ///   - Create2DeployUtils (deterministic deployments via CREATE2)
 ///   - RolesConfiguration (role constants and config)
 ///   - MarketDeploymentConfig (per-chain and per-market configuration)
-contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketDeploymentConfig {
+contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketDeploymentConfig, ExtraRoles {
     // Custom errors
     error UnsupportedKernelType(KernelType kernelType);
     error UnsupportedYDMType(YDMType ydmType);
@@ -538,11 +539,15 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         pure
         returns (IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments)
     {
-        roleAssignments = new IRoycoFactory.RoleAssignmentConfiguration[](15);
+        // ADMIN_UNPAUSER_ROLE is intentionally NOT wired here: it lives in `ExtraRoles` and the
+        // canonical `RolesConfiguration` no longer knows it, so passing it through the factory's
+        // `initialize(_roles)` loop would revert in `getRoleConfig`. It is granted + wired
+        // separately (test setup grants directly via `factory.grantRole`; production wires it via
+        // `ApplySecurityMigration`).
+        roleAssignments = new IRoycoFactory.RoleAssignmentConfiguration[](14);
 
         // Get role configs from RolesConfiguration
         RoleConfig memory pauserConfig = getRoleConfig(ADMIN_PAUSER_ROLE);
-        RoleConfig memory unpauserConfig = getRoleConfig(ADMIN_UNPAUSER_ROLE);
         RoleConfig memory upgraderConfig = getRoleConfig(ADMIN_UPGRADER_ROLE);
         RoleConfig memory syncConfig = getRoleConfig(SYNC_ROLE);
         RoleConfig memory kernelConfig = getRoleConfig(ADMIN_KERNEL_ROLE);
@@ -643,13 +648,6 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
             roleAdminRole: transferAgentConfig.adminRole,
             assignee: _addresses.transferAgentAddress,
             executionDelay: transferAgentConfig.executionDelay
-        });
-
-        roleAssignments[14] = IRoycoFactory.RoleAssignmentConfiguration({
-            role: ADMIN_UNPAUSER_ROLE,
-            roleAdminRole: unpauserConfig.adminRole,
-            assignee: _addresses.unpauserAddress,
-            executionDelay: unpauserConfig.executionDelay
         });
     }
 

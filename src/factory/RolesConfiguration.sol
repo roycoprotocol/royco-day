@@ -18,7 +18,6 @@ abstract contract RolesConfiguration {
 
     /// Common roles
     uint64 public constant ADMIN_PAUSER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_PAUSER_ROLE"))));
-    uint64 public constant ADMIN_UNPAUSER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_UNPAUSER_ROLE"))));
     uint64 public constant ADMIN_UPGRADER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_UPGRADER_ROLE"))));
 
     /// Tranche roles
@@ -30,10 +29,6 @@ abstract contract RolesConfiguration {
     uint64 public constant SYNC_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_SYNC_ROLE"))));
     uint64 public constant ADMIN_KERNEL_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_KERNEL_ROLE"))));
     uint64 public constant TRANSFER_AGENT_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_TRANSFER_AGENT_ROLE"))));
-
-    /// Entry point roles
-    uint64 public constant ADMIN_ENTRY_POINT_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_ENTRY_POINT_ROLE"))));
-    uint64 public constant ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE"))));
 
     /// Accountant roles
     uint64 public constant ADMIN_ACCOUNTANT_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_ACCOUNTANT_ROLE"))));
@@ -74,12 +69,6 @@ abstract contract RolesConfiguration {
                 guardianRole: GUARDIAN_ROLE,
                 executionDelay: 0 // Pausing should be immediate
             });
-        } else if (role == ADMIN_UNPAUSER_ROLE) {
-            return RoleConfig({
-                adminRole: _ADMIN_ROLE,
-                guardianRole: GUARDIAN_ROLE,
-                executionDelay: 1 days // Unpause is delayed so an attacker who triggered a pause cannot rush an unpause
-            });
         } else if (role == ADMIN_UPGRADER_ROLE) {
             return RoleConfig({ adminRole: _ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
         } else if (role == ST_LP_ROLE || role == JT_LP_ROLE) {
@@ -105,19 +94,6 @@ abstract contract RolesConfiguration {
                 adminRole: _ADMIN_ROLE,
                 guardianRole: GUARDIAN_ROLE,
                 executionDelay: 2 days // Kernel admin operations require delay
-            });
-        } else if (role == ADMIN_ENTRY_POINT_ROLE) {
-            return
-                RoleConfig({
-                    adminRole: _ADMIN_ROLE,
-                    guardianRole: GUARDIAN_ROLE,
-                    executionDelay: 1 days // Entry point admin operations require Standard delay
-                });
-        } else if (role == ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE) {
-            return RoleConfig({
-                adminRole: _ADMIN_ROLE,
-                guardianRole: GUARDIAN_ROLE,
-                executionDelay: 0 // Entry point claim fee admin operations should be immediate
             });
         } else if (role == ADMIN_ACCOUNTANT_ROLE) {
             return RoleConfig({

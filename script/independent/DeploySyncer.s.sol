@@ -5,6 +5,7 @@ import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/co
 import { RolesConfiguration } from "../../src/factory/RolesConfiguration.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { RoycoMarketSyncer } from "../../src/periphery/RoycoMarketSyncer.sol";
+import { ExtraRoles } from "../config/ExtraRoles.sol";
 import { SyncerDeploymentConfig } from "../config/SyncerDeploymentConfig.sol";
 import { AccessManagerConfigUtils } from "../utils/AccessManagerConfigUtils.sol";
 import { Create2DeployUtils } from "../utils/Create2DeployUtils.sol";
@@ -17,7 +18,7 @@ import { console2 } from "lib/forge-std/src/console2.sol";
  *      Also generates a Safe-compatible JSON file containing the factory configuration transactions
  *      needed to make the syncer operational.
  */
-contract DeploySyncerScript is SyncerDeploymentConfig, AccessManagerConfigUtils, Create2DeployUtils, RolesConfiguration {
+contract DeploySyncerScript is SyncerDeploymentConfig, AccessManagerConfigUtils, Create2DeployUtils, RolesConfiguration, ExtraRoles {
     // ═══════════════════════════════════════════════════════════════════════════
     // DEPLOYMENT CONSTANTS
     // ═══════════════════════════════════════════════════════════════════════════
