@@ -13,7 +13,7 @@ import {
 } from "../../../../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/libraries/Units.sol";
 
-import { YieldBearingERC4626_ChainlinkOracle_TestBase } from "../base/YieldBearingERC4626_ChainlinkOracle_TestBase.t.sol";
+import { FundamentalStablecoinPeg_ERC4626_ChainlinkOracle_TestBase } from "../base/FundamentalStablecoinPeg_ERC4626_ChainlinkOracle_TestBase.t.sol";
 
 /// @title stcUSD_stcUSD_Test
 /// @notice Tests Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel with stcUSD
@@ -25,7 +25,7 @@ import { YieldBearingERC4626_ChainlinkOracle_TestBase } from "../base/YieldBeari
 ///   - NAV Unit: USD
 /// The deployment uses initialConversionRateWAD: 0 (sentinel mode) so the cUSD→USD
 /// FundamentalStablecoinChainlinkOracle provides the live rate.
-contract stcUSD_stcUSD_Test is YieldBearingERC4626_ChainlinkOracle_TestBase {
+contract stcUSD_stcUSD_Test is FundamentalStablecoinPeg_ERC4626_ChainlinkOracle_TestBase {
     // ═══════════════════════════════════════════════════════════════════════════
     // MAINNET ADDRESSES
     // ═══════════════════════════════════════════════════════════════════════════
