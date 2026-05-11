@@ -8,21 +8,24 @@ import { FundamentalStablecoinChainlinkOracleDeploymentConfig } from "../../../.
 import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
 import { DeployFundamentalStablecoinChainlinkOracleScript } from "../../../../script/independent/DeployFundamentalStablecoinChainlinkOracle.s.sol";
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
-import { WAD } from "../../../../src/libraries/Constants.sol";
+import {
+    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel
+} from "../../../../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/libraries/Units.sol";
 
-import { DisabledChainlinkOracle_ERC4626_TestBase } from "../base/DisabledChainlinkOracle_ERC4626_TestBase.t.sol";
+import { YieldBearingERC4626_ChainlinkOracle_TestBase } from "../base/YieldBearingERC4626_ChainlinkOracle_TestBase.t.sol";
 
 /// @title stcUSD_stcUSD_Test
-/// @notice Tests Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel with stcUSD (disabled oracle)
+/// @notice Tests Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel with stcUSD
 /// @dev Both ST and JT use stcUSD as the tranche asset on Ethereum mainnet
 ///
 /// stcUSD is an ERC4626 vault where:
 ///   - Tranche Unit: stcUSD shares
 ///   - Vault Asset: cUSD (the underlying)
 ///   - NAV Unit: USD
-/// The stored conversion rate is 1:1 (WAD), with the Chainlink oracle disabled (address(1)).
-contract stcUSD_stcUSD_Test is DisabledChainlinkOracle_ERC4626_TestBase {
+/// The deployment uses initialConversionRateWAD: 0 (sentinel mode) so the cUSD→USD
+/// FundamentalStablecoinChainlinkOracle provides the live rate.
+contract stcUSD_stcUSD_Test is YieldBearingERC4626_ChainlinkOracle_TestBase {
     // ═══════════════════════════════════════════════════════════════════════════
     // MAINNET ADDRESSES
     // ═══════════════════════════════════════════════════════════════════════════
@@ -50,6 +53,11 @@ contract stcUSD_stcUSD_Test is DisabledChainlinkOracle_ERC4626_TestBase {
             });
     }
 
+    /// @notice Returns the Chainlink oracle address from the deployed kernel configuration
+    function _getChainlinkOracle() internal view override returns (address) {
+        return Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel(address(KERNEL)).getChainlinkOracleConfiguration().oracle;
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // DEPLOYMENT (uses MarketDeploymentConfig)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -68,7 +76,7 @@ contract stcUSD_stcUSD_Test is DisabledChainlinkOracle_ERC4626_TestBase {
 
         marketConfig.kernelSpecificParams = abi.encode(
             DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
-                initialConversionRateWAD: 1e18, baseAssetToNavAssetOracle: cUSDOracle, stalenessThresholdSeconds: 86_400
+                initialConversionRateWAD: 0, baseAssetToNavAssetOracle: cUSDOracle, stalenessThresholdSeconds: 86_400
             })
         );
 
@@ -107,10 +115,13 @@ contract stcUSD_stcUSD_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         assertGt(sharePrice, 0, "stcUSD share price should be > 0");
     }
 
-    /// @notice Verifies initial stored conversion rate is WAD (1:1 for stablecoin)
+    /// @notice Verifies initial conversion rate is sentinel (0) and the oracle provides a positive effective rate
     function test_stcUSD_initialConversionRate() external view {
-        uint256 storedRate = _getConversionRate();
-        assertEq(storedRate, WAD, "Stored rate should be WAD (1:1 for stablecoin)");
+        uint256 storedRate = _getStoredConversionRate();
+        assertEq(storedRate, 0, "Stored rate should be 0 (sentinel mode for live cUSD oracle)");
+
+        uint256 effectiveRate = _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
+        assertGt(effectiveRate, 0, "Effective conversion rate should be positive from the cUSD oracle");
     }
 
     /// @notice Test that simulated yield works correctly for stcUSD
