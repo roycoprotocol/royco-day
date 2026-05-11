@@ -4,6 +4,8 @@ pragma solidity ^0.8.28;
 import { IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
 
 import { DeployScript } from "../../../../script/Deploy.s.sol";
+import { DeployFundamentalStablecoinChainlinkOracleScript } from "../../../../script/independent/DeployFundamentalStablecoinChainlinkOracle.s.sol";
+import { FundamentalStablecoinChainlinkOracleDeploymentConfig } from "../../../../script/config/FundamentalStablecoinChainlinkOracleDeploymentConfig.sol";
 import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
 import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
@@ -58,6 +60,19 @@ contract stcUSD_stcUSD_Test is DisabledChainlinkOracle_ERC4626_TestBase {
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+
+        DeployFundamentalStablecoinChainlinkOracleScript ORACLE_DEPLOY_SCRIPT = new DeployFundamentalStablecoinChainlinkOracleScript();
+        FundamentalStablecoinChainlinkOracleDeploymentConfig.OracleConfig memory oracleConfig =
+            ORACLE_DEPLOY_SCRIPT.getOracleConfig(ORACLE_DEPLOY_SCRIPT.MAINNET_CUSD_USD());
+        address cUSDOracle = ORACLE_DEPLOY_SCRIPT.deployOracle(oracleConfig.underlyingOracle, oracleConfig.minPegPrice, DEPLOYER.privateKey);
+
+        marketConfig.kernelSpecificParams = abi.encode(
+            DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
+                initialConversionRateWAD: 1e18,
+                baseAssetToNavAssetOracle: cUSDOracle,
+                stalenessThresholdSeconds: 86_400
+            })
+        );
 
         return DEPLOY_SCRIPT.deploy(
             marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roleAssignments, DEPLOYER.privateKey

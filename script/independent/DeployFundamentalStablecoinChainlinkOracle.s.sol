@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import { FundamentalStablecoinChainlinkOracle } from "../../src/periphery/oracle/FundamentalStablecoinChainlinkOracle.sol";
-
 import { FundamentalStablecoinChainlinkOracleDeploymentConfig } from "../config/FundamentalStablecoinChainlinkOracleDeploymentConfig.sol";
 import { Create2DeployUtils } from "../utils/Create2DeployUtils.sol";
 import { console2 } from "lib/forge-std/src/console2.sol";
