@@ -58,8 +58,9 @@ contract FundamentalStablecoinChainlinkOracle is AggregatorV3Interface {
     }
 
     /// @inheritdoc AggregatorV3Interface
-    function version() external pure override(AggregatorV3Interface) returns (uint256) {
-        return 1;
+    /// @notice The version matches the version of the underlying oracle
+    function version() external view override(AggregatorV3Interface) returns (uint256) {
+        return AggregatorV3Interface(ORACLE).version();
     }
 
     /// @inheritdoc AggregatorV3Interface
