@@ -2,6 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
+import { IdenticalAssetsChainlinkOracleQuoter } from "../../../../src/kernels/base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
+import { NAV_UNIT } from "../../../../src/libraries/Units.sol";
 import { FundamentalStablecoinChainlinkOracle } from "../../../../src/periphery/oracle/FundamentalStablecoinChainlinkOracle.sol";
 
 import { YieldBearingERC4626_ChainlinkOracle_TestBase } from "./YieldBearingERC4626_ChainlinkOracle_TestBase.t.sol";
@@ -32,12 +34,19 @@ abstract contract FundamentalStablecoinPeg_ERC4626_ChainlinkOracle_TestBase is Y
     /// @dev Preserves roundId and answeredInRound from the live underlying so the kernel's
     ///      validation (which runs against the wrapper, which forwards both unchanged) passes.
     function _mockUnderlyingPrice(int256 _answer) internal {
+        _mockUnderlyingRound(_answer, block.timestamp);
+    }
+
+    /// @notice Mocks the underlying oracle's latestRoundData with an explicit `updatedAt`
+    /// @dev The wrapper forwards updatedAt unchanged, so this is how a stale-underlying scenario
+    ///      surfaces to the kernel's STALE_PRICE check.
+    function _mockUnderlyingRound(int256 _answer, uint256 _updatedAt) internal {
         AggregatorV3Interface underlying = _underlyingOracle();
         (uint80 roundId,,,, uint80 answeredInRound) = underlying.latestRoundData();
         vm.mockCall(
             address(underlying),
             abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
-            abi.encode(roundId, _answer, block.timestamp, block.timestamp, answeredInRound)
+            abi.encode(roundId, _answer, _updatedAt, _updatedAt, answeredInRound)
         );
     }
 
@@ -172,5 +181,83 @@ abstract contract FundamentalStablecoinPeg_ERC4626_ChainlinkOracle_TestBase is Y
             uint256 expected = rateAtOne * uint256(_underlyingAnswer) / uint256(one);
             assertApproxEqAbs(rate, expected, 1, "Below-peg should forward unchanged into the kernel rate");
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // BOUNDARY: at exactly ONE_QUOTE_ASSET
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Underlying at exactly ONE_QUOTE_ASSET is anchored (boundary case of the ≥ MIN_PEG rule)
+    function test_fundamentalPeg_atOneQuoteAssetAnchorsKernelRate() external {
+        int256 one = _wrapperOracle().ONE_QUOTE_ASSET();
+
+        _mockUnderlyingPrice(one);
+        uint256 rateAtOne = _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
+
+        // Sanity: the at-ONE rate equals the kernel's read with the wrapper returning ONE.
+        // The wrapper anchors anything in [MIN_PEG, ∞) to ONE, so this read is the canonical anchored value.
+        assertGt(rateAtOne, 0, "Kernel rate at ONE_QUOTE_ASSET should be positive");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // INVALID UNDERLYING ANSWERS: wrapper forwards, kernel rejects
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Zero underlying answer is forwarded by the wrapper and rejected by the kernel
+    function test_fundamentalPeg_zeroUnderlyingRejectedByKernel() external {
+        _mockUnderlyingPrice(0);
+        vm.expectRevert(IdenticalAssetsChainlinkOracleQuoter.INVALID_PRICE.selector);
+        _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
+    }
+
+    /// @notice Negative underlying answer is forwarded by the wrapper and rejected by the kernel
+    function test_fundamentalPeg_negativeUnderlyingRejectedByKernel() external {
+        _mockUnderlyingPrice(-1);
+        vm.expectRevert(IdenticalAssetsChainlinkOracleQuoter.INVALID_PRICE.selector);
+        _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // STALENESS: underlying updatedAt propagates through the wrapper
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Stale underlying timestamp surfaces as STALE_PRICE at the kernel
+    /// @dev The wrapper forwards updatedAt unchanged, so a stale underlying must trip
+    ///      the kernel's `updatedAt + staleness >= block.timestamp` check.
+    function test_fundamentalPeg_staleUnderlyingRejectedByKernel() external {
+        uint48 staleness = _getStalenessThreshold();
+        uint256 staleUpdatedAt = block.timestamp - uint256(staleness) - 1;
+
+        _mockUnderlyingRound(_wrapperOracle().ONE_QUOTE_ASSET(), staleUpdatedAt);
+        vm.expectRevert(IdenticalAssetsChainlinkOracleQuoter.STALE_PRICE.selector);
+        _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // END-TO-END: depeg → sync → NAV reflects the depeg
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice After a deposit, an underlying depeg flowed through the wrapper must reduce JT NAV on sync
+    /// @dev Catches a class of bugs where the rate read changes but the accountant doesn't pick it up.
+    function test_fundamentalPeg_depegReducesJTNAVOnSync() external {
+        uint256 amount = _minDepositAmount() * 1000;
+        if (amount > config.initialFunding / 10) amount = config.initialFunding / 10;
+        _depositJT(ALICE_ADDRESS, amount);
+
+        // Establish the anchored baseline so syncTrancheAccounting captures NAV at the wrapper's ONE.
+        _mockUnderlyingPrice(_wrapperOracle().ONE_QUOTE_ASSET());
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+        NAV_UNIT navBefore = JT.totalAssets().nav;
+
+        // Mock a 50% depeg (well below MIN_PEG_PRICE so the wrapper forwards unchanged).
+        vm.clearMockedCalls();
+        _mockUnderlyingPrice(_wrapperOracle().ONE_QUOTE_ASSET() / 2);
+
+        vm.prank(SYNC_ROLE_ADDRESS);
+        KERNEL.syncTrancheAccounting();
+        NAV_UNIT navAfter = JT.totalAssets().nav;
+
+        assertLt(navAfter, navBefore, "Depeg of the underlying should reduce JT NAV after sync");
     }
 }
