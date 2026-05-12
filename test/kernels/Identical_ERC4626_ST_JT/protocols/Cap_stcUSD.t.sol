@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC20.sol";
 import { IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
-
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { FundamentalStablecoinChainlinkOracleDeploymentConfig } from "../../../../script/config/FundamentalStablecoinChainlinkOracleDeploymentConfig.sol";
 import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
@@ -13,22 +12,19 @@ import {
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel
 } from "../../../../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
-
-import { YieldBearingERC4626_ChainlinkOracle_TestBase } from "../base/YieldBearingERC4626_ChainlinkOracle_TestBase.t.sol";
+import { FundamentalStablecoinPeg_ERC4626_ChainlinkOracle_TestBase } from "../base/FundamentalStablecoinPeg_ERC4626_ChainlinkOracle_TestBase.t.sol";
 
 /// @title stcUSD_stcUSD_Test
 /// @notice Tests Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel with stcUSD
-/// @dev Both ST and JT use stcUSD as the tranche asset on Ethereum mainnet.
+/// @dev Both ST and JT use stcUSD as the tranche asset on Ethereum mainnet
 ///
 /// stcUSD is an ERC4626 vault where:
 ///   - Tranche Unit: stcUSD shares
 ///   - Vault Asset: cUSD (the underlying)
 ///   - NAV Unit: USD
-///
-/// The deployment uses `initialConversionRateWAD: 0` (sentinel mode), so the cUSD→USD leg is
-/// quoted live from the Cap fundamental price oracle on Redstone
-/// (`cUSD_FUNDAMENTAL` ethereumMultiFeed at `0x9A5a3c3Ed0361505cC1D4e824B3854De5724434A`).
-contract stcUSD_stcUSD_Test is YieldBearingERC4626_ChainlinkOracle_TestBase {
+/// The deployment uses initialConversionRateWAD: 0 (sentinel mode) so the cUSD→USD
+/// FundamentalStablecoinChainlinkOracle provides the live rate.
+contract stcUSD_stcUSD_Test is FundamentalStablecoinPeg_ERC4626_ChainlinkOracle_TestBase {
     // ═══════════════════════════════════════════════════════════════════════════
     // MAINNET ADDRESSES
     // ═══════════════════════════════════════════════════════════════════════════
@@ -84,7 +80,7 @@ contract stcUSD_stcUSD_Test is YieldBearingERC4626_ChainlinkOracle_TestBase {
 
         marketConfig.kernelSpecificParams = abi.encode(
             DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
-                initialConversionRateWAD: 1e18, baseAssetToNavAssetOracle: cUSDOracle, stalenessThresholdSeconds: 86_400
+                initialConversionRateWAD: 0, baseAssetToNavAssetOracle: cUSDOracle, stalenessThresholdSeconds: 86_400
             })
         );
 
@@ -123,16 +119,13 @@ contract stcUSD_stcUSD_Test is YieldBearingERC4626_ChainlinkOracle_TestBase {
         assertGt(sharePrice, 0, "stcUSD share price should be > 0");
     }
 
-    /// @notice Verifies initial conversion rate is sentinel (0) for live oracle mode
+    /// @notice Verifies initial conversion rate is sentinel (0) and the oracle provides a positive effective rate
     function test_stcUSD_initialConversionRate() external view {
         uint256 storedRate = _getStoredConversionRate();
+        assertEq(storedRate, 0, "Stored rate should be 0 (sentinel mode for live cUSD oracle)");
 
-        // The stored rate should be 0 (sentinel) — the live Cap fundamental oracle provides the cUSD→USD rate
-        assertEq(storedRate, 0, "Stored rate should be 0 (sentinel mode for live Cap fundamental oracle)");
-
-        // The effective conversion rate should be positive (from the oracle)
         uint256 effectiveRate = _kernelCast().getTrancheUnitToNAVUnitConversionRateWAD();
-        assertGt(effectiveRate, 0, "Effective conversion rate should be positive from Cap fundamental oracle");
+        assertGt(effectiveRate, 0, "Effective conversion rate should be positive from the cUSD oracle");
     }
 
     /// @notice Test that simulated yield works correctly for stcUSD

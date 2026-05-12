@@ -539,11 +539,10 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         pure
         returns (IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments)
     {
-        // ADMIN_UNPAUSER_ROLE is intentionally NOT wired here: it lives in `ExtraRoles` and the
-        // canonical `RolesConfiguration` no longer knows it, so passing it through the factory's
-        // `initialize(_roles)` loop would revert in `getRoleConfig`. It is granted + wired
-        // separately (test setup grants directly via `factory.grantRole`; production wires it via
-        // `ApplySecurityMigration`).
+        // ADMIN_UNPAUSER_ROLE lives in `ExtraRoles` and is intentionally NOT wired through
+        // `factory.initialize` (canonical `RolesConfiguration` no longer knows it, so the
+        // init loop's `getRoleConfig` would revert). Tests grant it post-init in `BaseTest`;
+        // production wires it via `ApplySecurityMigration`.
         roleAssignments = new IRoycoFactory.RoleAssignmentConfiguration[](14);
 
         // Get role configs from RolesConfiguration

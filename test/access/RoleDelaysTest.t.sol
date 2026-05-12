@@ -63,13 +63,18 @@ contract RoleDelaysTest is BaseTest {
     }
 
     /// @dev Inline factory deploy (no market needed). Uses BaseTest's role wallets so the
-    ///      `_generateRoleAssignments` plumbing produces a fully-populated factory.
+    ///      `_generateRoleAssignments` plumbing produces a fully-populated factory. Extra
+    ///      roles (`ADMIN_UNPAUSER_ROLE`) are granted post-init pranked as FNDN (=OWNER for
+    ///      this standalone deploy), mirroring `BaseTest._wireExtraRoles`.
     function _deployFactoryStandalone() internal {
         RoycoFactory factoryImpl = new RoycoFactory();
         IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
         bytes memory initData = abi.encodeCall(RoycoFactory.initialize, (OWNER_ADDRESS, DEPLOYER_ADDRESS, 1 weeks, roleAssignments));
         FACTORY = RoycoFactory(address(new ERC1967Proxy(address(factoryImpl), initData)));
         vm.label(address(FACTORY), "FACTORY");
+
+        vm.prank(OWNER_ADDRESS);
+        IAccessManager(address(FACTORY)).grantRole(ADMIN_UNPAUSER_ROLE, UNPAUSER_ADDRESS, 0);
     }
 
     function _deployMockTarget() internal {
