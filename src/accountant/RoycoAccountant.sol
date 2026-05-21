@@ -423,7 +423,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         NAV_UNIT stProtocolFeeAccrued;
         NAV_UNIT jtProtocolFeeAccrued;
 
-        // Last cross-tranche claims (the NAV that can't funded by the tranche's own raw NAV)
+        // Last cross-tranche claims (the NAV that can't be funded by the tranche's own raw NAV)
         NAV_UNIT stClaimOnJTRawNAV = UnitsMathLib.saturatingSub(stEffectiveNAV, lastSTRawNAV);
         NAV_UNIT jtClaimOnSTRawNAV = UnitsMathLib.saturatingSub(jtEffectiveNAV, lastJTRawNAV);
         // Last self-backed portion of the senior tranche's claim (the NAV funded by ST's own raw NAV)
@@ -436,21 +436,21 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         int256 deltaJTRawNAV = UnitsMathLib.computeNAVDelta(_jtRawNAV, lastJTRawNAV);
 
         // Attribute each pool's signed PNL to ST in proportion to its claim against that pool
-        int256 deltastClaimOnSTRawNAV = _attributeRawNAVDeltaToClaim(deltaSTRawNAV, stClaimOnSTRawNAV, lastSTRawNAV);
+        int256 deltaSTClaimOnSTRawNAV = _attributeRawNAVDeltaToClaim(deltaSTRawNAV, stClaimOnSTRawNAV, lastSTRawNAV);
         int256 deltaSTClaimOnJTRawNAV = _attributeRawNAVDeltaToClaim(deltaJTRawNAV, stClaimOnJTRawNAV, lastJTRawNAV);
 
-        // ST's delta is the sum of its claim-weighted shares of each pool's PNL
-        // JT's delta is computed as the residual so NAV conservation holds exactly, with no rounding drift
-        int256 deltaST = deltastClaimOnSTRawNAV + deltaSTClaimOnJTRawNAV;
-        int256 deltaJT = (deltaSTRawNAV + deltaJTRawNAV) - deltaST;
+        // ST's effective NAV delta is the sum of its claim-weighted shares of each pool's PNL
+        // JT's effective NAV delta is computed as the residual so NAV conservation holds exactly, with no rounding drift
+        int256 deltaSTEffectiveNAV = deltaSTClaimOnSTRawNAV + deltaSTClaimOnJTRawNAV;
+        int256 deltaJTEffectiveNAV = (deltaSTRawNAV + deltaJTRawNAV) - deltaSTEffectiveNAV;
 
         // The net JT gains after ST IL recovery. The JT protocol fee accrued is calculated using this NAV.
         NAV_UNIT jtNetGain = ZERO_NAV_UNITS;
         // Mark both the tranche NAVs to market
         /// @dev STEP_APPLY_JT_LOSS: The JT assets depreciated in value
-        if (deltaJT < 0) {
+        if (deltaJTEffectiveNAV < 0) {
             /// @dev STEP_JT_ABSORB_LOSS: JT's remaning loss-absorption buffer incurs as much of the loss as possible
-            NAV_UNIT jtLoss = toNAVUnits(-deltaJT);
+            NAV_UNIT jtLoss = toNAVUnits(-deltaJTEffectiveNAV);
             NAV_UNIT jtAbsorbableLoss = UnitsMathLib.min(jtLoss, jtEffectiveNAV);
             if (jtAbsorbableLoss != ZERO_NAV_UNITS) {
                 // Incur the maximum absorbable losses to remaining JT loss capital
@@ -465,8 +465,8 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                 stImpermanentLoss = (stImpermanentLoss + jtLoss);
             }
             /// @dev STEP_APPLY_JT_GAIN: The JT assets appreciated in value
-        } else if (deltaJT > 0) {
-            NAV_UNIT jtGain = toNAVUnits(deltaJT);
+        } else if (deltaJTEffectiveNAV > 0) {
+            NAV_UNIT jtGain = toNAVUnits(deltaJTEffectiveNAV);
             /// @dev STEP_ST_IMPERMANENT_LOSS_RECOVERY: First, recover any ST impermanent losses (first claim on JT appreciation)
             NAV_UNIT stImpermanentLossRecovery = UnitsMathLib.min(jtGain, stImpermanentLoss);
             if (stImpermanentLossRecovery != ZERO_NAV_UNITS) {
@@ -487,8 +487,8 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         }
 
         /// @dev STEP_APPLY_ST_LOSS: The ST assets depreciated in value
-        if (deltaST < 0) {
-            NAV_UNIT stLoss = toNAVUnits(-deltaST);
+        if (deltaSTEffectiveNAV < 0) {
+            NAV_UNIT stLoss = toNAVUnits(-deltaSTEffectiveNAV);
             /// @dev STEP_APPLY_JT_COVERAGE_TO_ST: Apply any possible coverage to ST provided by JT's loss-absorption buffer
             NAV_UNIT coverageApplied = UnitsMathLib.min(stLoss, jtEffectiveNAV);
             if (coverageApplied != ZERO_NAV_UNITS) {
@@ -511,8 +511,8 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                 stImpermanentLoss = (stImpermanentLoss + stLoss);
             }
             /// @dev STEP_APPLY_ST_GAIN: The ST assets appreciated in value
-        } else if (deltaST > 0) {
-            NAV_UNIT stGain = toNAVUnits(deltaST);
+        } else if (deltaSTEffectiveNAV > 0) {
+            NAV_UNIT stGain = toNAVUnits(deltaSTEffectiveNAV);
             /// @dev STEP_ST_IMPERMANENT_LOSS_RECOVERY: First, recover any ST impermanent losses (first claim on ST appreciation)
             NAV_UNIT impermanentLossRecovery = UnitsMathLib.min(stGain, stImpermanentLoss);
             if (impermanentLossRecovery != ZERO_NAV_UNITS) {
@@ -818,7 +818,11 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     /**
      * @notice Attributes a portion of a signed raw NAV delta to a tranche based on its claim against the raw pool
      * @dev Returns zero when there is no delta, no claim, or no pool to attribute against (uninitialized or empty states)
-     * @dev Rounds Floor on the absolute value of the delta, applying the 1 wei delta to the other tranche
+     * @dev Rounds Floor on the absolute value of the delta, biasing any dust into the residual tranche
+     *      Conservation is preserved by construction: the caller computes deltaJTEffectiveNAV as (deltaSTRawNAV + deltaJTRawNAV - deltaSTEffectiveNAV),
+     *      so any rounding-down of ST's attribution is exactly captured by the residual without drift
+     * @dev Claims are bounded by their respective raw pools by NAV conservation, so attributedMagnitude <= absDelta and
+     *      the int256 narrowing cannot overflow
      * @param _delta The signed raw NAV delta to attribute
      * @param _claimOnTrancheRawNAV The tranche's claim against the raw pool, scaled to NAV units
      * @param _lastTrancheRawNAV The total raw NAV of the pool at the last checkpoint, scaled to NAV units
