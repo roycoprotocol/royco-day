@@ -414,8 +414,8 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
 
         // Cache the last checkpointed market state, effective NAV, and impermanent losses for each tranche
         initialMarketState = $.lastMarketState;
-        NAV_UNIT lastSTRawNAV = $.lastSTRawNAV;
-        NAV_UNIT lastJTRawNAV = $.lastJTRawNAV;
+        NAV_UNIT stRawNAV = $.lastSTRawNAV;
+        NAV_UNIT jtRawNAV = $.lastJTRawNAV;
         NAV_UNIT stEffectiveNAV = $.lastSTEffectiveNAV;
         NAV_UNIT jtEffectiveNAV = $.lastJTEffectiveNAV;
         NAV_UNIT stImpermanentLoss = $.lastSTImpermanentLoss;
@@ -424,20 +424,20 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         NAV_UNIT jtProtocolFeeAccrued;
 
         // Last cross-tranche claims (the NAV that can't be funded by the tranche's own raw NAV)
-        NAV_UNIT stClaimOnJTRawNAV = UnitsMathLib.saturatingSub(stEffectiveNAV, lastSTRawNAV);
-        NAV_UNIT jtClaimOnSTRawNAV = UnitsMathLib.saturatingSub(jtEffectiveNAV, lastJTRawNAV);
+        NAV_UNIT stClaimOnJTRawNAV = UnitsMathLib.saturatingSub(stEffectiveNAV, stRawNAV);
+        NAV_UNIT jtClaimOnSTRawNAV = UnitsMathLib.saturatingSub(jtEffectiveNAV, jtRawNAV);
         // Last self-backed portion of the senior tranche's claim (the NAV funded by ST's own raw NAV)
         // NOTE: NAV conservation guarantees that this cannot underflow
-        NAV_UNIT stClaimOnSTRawNAV = (lastSTRawNAV - jtClaimOnSTRawNAV);
+        NAV_UNIT stClaimOnSTRawNAV = (stRawNAV - jtClaimOnSTRawNAV);
 
         // Compute the deltas in the raw NAVs of each tranche
         // The deltas represent the unrealized PNL of the underlying investment since the last NAV checkpoints
-        int256 deltaSTRawNAV = UnitsMathLib.computeNAVDelta(_stRawNAV, lastSTRawNAV);
-        int256 deltaJTRawNAV = UnitsMathLib.computeNAVDelta(_jtRawNAV, lastJTRawNAV);
+        int256 deltaSTRawNAV = UnitsMathLib.computeNAVDelta(_stRawNAV, stRawNAV);
+        int256 deltaJTRawNAV = UnitsMathLib.computeNAVDelta(_jtRawNAV, jtRawNAV);
 
         // Attribute each pool's signed PNL to ST in proportion to its claim against that pool
-        int256 deltaSTClaimOnSTRawNAV = _attributeRawNAVDeltaToClaim(deltaSTRawNAV, stClaimOnSTRawNAV, lastSTRawNAV);
-        int256 deltaSTClaimOnJTRawNAV = _attributeRawNAVDeltaToClaim(deltaJTRawNAV, stClaimOnJTRawNAV, lastJTRawNAV);
+        int256 deltaSTClaimOnSTRawNAV = _attributeRawNAVDeltaToClaim(deltaSTRawNAV, stClaimOnSTRawNAV, stRawNAV);
+        int256 deltaSTClaimOnJTRawNAV = _attributeRawNAVDeltaToClaim(deltaJTRawNAV, stClaimOnJTRawNAV, jtRawNAV);
 
         // ST's effective NAV delta is the sum of its claim-weighted shares of each pool's PNL
         // JT's effective NAV delta is computed as the residual so NAV conservation holds exactly, with no rounding drift
