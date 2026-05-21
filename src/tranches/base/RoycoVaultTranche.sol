@@ -232,6 +232,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     function convertToAssets(uint256 _shares) public view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
         // Get the post-sync tranche state: applying NAV reconciliation.
         (AssetClaims memory trancheClaims, uint256 trancheTotalShares) = _previewPostSyncTrancheState();
+        // Apply the virtual asset offset (+1 to claim.nav) so this read is symmetric with `_convertToShares`, which adds +1 to both supply and claim.nav.
+        trancheClaims.nav = _withVirtualAssets(trancheClaims.nav);
         return UtilsLib.scaleAssetClaims(trancheClaims, _shares, trancheTotalShares);
     }
 
