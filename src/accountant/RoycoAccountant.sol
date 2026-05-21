@@ -438,8 +438,8 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
 
             // Attribute each pool's signed PNL to ST in proportion to its claim against that pool
             // The resulting deltas are rounded down: in favor of seniors on losses and juniors on gains
-            int256 deltaSTClaimOnSTRawNAV = _attributeRawNAVDeltaToClaim(deltaSTRawNAV, stClaimOnSTRawNAV, lastSTRawNAV);
-            int256 deltaSTClaimOnJTRawNAV = _attributeRawNAVDeltaToClaim(deltaJTRawNAV, stClaimOnJTRawNAV, lastJTRawNAV);
+            int256 deltaSTClaimOnSTRawNAV = _attributeDeltaToClaimOnRawNAV(deltaSTRawNAV, stClaimOnSTRawNAV, lastSTRawNAV);
+            int256 deltaSTClaimOnJTRawNAV = _attributeDeltaToClaimOnRawNAV(deltaJTRawNAV, stClaimOnJTRawNAV, lastJTRawNAV);
 
             // ST's effective NAV delta is the sum of its claim-weighted shares of each pool's PNL and JT's effective NAV delta is computed as the residual
             // NOTE: NAV conservation holds: positive and negative rounding drift is absorbed by juniors
@@ -832,7 +832,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
      * @param _lastTrancheRawNAV The total raw NAV of the pool at the last checkpoint
      * @return attributedDelta The signed share of the delta attributable to the claim holder
      */
-    function _attributeRawNAVDeltaToClaim(
+    function _attributeDeltaToClaimOnRawNAV(
         int256 _delta,
         NAV_UNIT _claimOnTrancheRawNAV,
         NAV_UNIT _lastTrancheRawNAV
