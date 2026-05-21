@@ -20,6 +20,7 @@ import { Math, UtilsLib } from "../libraries/UtilsLib.sol";
 contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     using Math for uint256;
     using UnitsMathLib for NAV_UNIT;
+    using UnitsMathLib for uint256;
 
     /// @dev Storage slot for RoycoAccountantState using ERC-7201 pattern
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoAccountantState")) - 1)) & ~bytes32(uint256(0xff))
@@ -412,36 +413,37 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         // Get the storage pointer to the accountant state
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
 
-        // Compute the deltas for each tranche's effective NAV based on their current economic claims on each tranche's assets (raw NAVs)
-        int256 deltaSTEffectiveNAV;
-        int256 deltaJTEffectiveNAV;
         // Cache the last checkpointed effective NAV for each tranche
         NAV_UNIT stEffectiveNAV = $.lastSTEffectiveNAV;
         NAV_UNIT jtEffectiveNAV = $.lastJTEffectiveNAV;
+        // Compute the deltas for each tranche's effective NAV based on their last checkpointed economic claims on each tranche's raw NAVs
+        int256 deltaSTEffectiveNAV;
+        int256 deltaJTEffectiveNAV;
         {
             // Cache the last checkpointed raw NAV for each tranche
-            NAV_UNIT stRawNAV = $.lastSTRawNAV;
-            NAV_UNIT jtRawNAV = $.lastJTRawNAV;
+            NAV_UNIT lastSTRawNAV = $.lastSTRawNAV;
+            NAV_UNIT lastJTRawNAV = $.lastJTRawNAV;
 
-            // Cross-tranche claims (the NAV that can't be funded by the tranche's own raw NAV)
-            NAV_UNIT stClaimOnJTRawNAV = UnitsMathLib.saturatingSub(stEffectiveNAV, stRawNAV);
-            NAV_UNIT jtClaimOnSTRawNAV = UnitsMathLib.saturatingSub(jtEffectiveNAV, jtRawNAV);
+            // Last cross-tranche claims (the NAV that can't be funded by the tranche's own raw NAV)
+            NAV_UNIT stClaimOnJTRawNAV = UnitsMathLib.saturatingSub(stEffectiveNAV, lastSTRawNAV);
+            NAV_UNIT jtClaimOnSTRawNAV = UnitsMathLib.saturatingSub(jtEffectiveNAV, lastJTRawNAV);
             // Last self-backed portion of the senior tranche's claim (the NAV funded by ST's own raw NAV)
             // NOTE: NAV conservation guarantees that this cannot underflow
-            NAV_UNIT stClaimOnSTRawNAV = (stRawNAV - jtClaimOnSTRawNAV);
+            NAV_UNIT stClaimOnSTRawNAV = (lastSTRawNAV - jtClaimOnSTRawNAV);
 
             // Compute the deltas in the raw NAVs of each tranche
             // The deltas represent the unrealized PNL of the underlying investment since the last NAV checkpoints
-            int256 deltaSTRawNAV = UnitsMathLib.computeNAVDelta(_stRawNAV, stRawNAV);
-            int256 deltaJTRawNAV = UnitsMathLib.computeNAVDelta(_jtRawNAV, jtRawNAV);
+            int256 deltaSTRawNAV = UnitsMathLib.computeNAVDelta(_stRawNAV, lastSTRawNAV);
+            int256 deltaJTRawNAV = UnitsMathLib.computeNAVDelta(_jtRawNAV, lastJTRawNAV);
 
             // Attribute each pool's signed PNL to ST in proportion to its claim against that pool
-            int256 deltastClaimOnSTRawNAV = _attributeRawNAVDeltaToClaim(deltaSTRawNAV, stClaimOnSTRawNAV, stRawNAV);
-            int256 deltaSTClaimOnJTRawNAV = _attributeRawNAVDeltaToClaim(deltaJTRawNAV, stClaimOnJTRawNAV, jtRawNAV);
+            // The resulting deltas are rounded down: in favor of seniors on losses and juniors on gains
+            int256 deltaSTClaimOnSTRawNAV = _attributeRawNAVDeltaToClaim(deltaSTRawNAV, stClaimOnSTRawNAV, lastSTRawNAV);
+            int256 deltaSTClaimOnJTRawNAV = _attributeRawNAVDeltaToClaim(deltaJTRawNAV, stClaimOnJTRawNAV, lastJTRawNAV);
 
-            // ST's effective NAV delta is the sum of its claim-weighted shares of each pool's PNL
-            // JT's effective NAV delta is computed as the residual so NAV conservation holds exactly, with no rounding drift
-            deltaSTEffectiveNAV = deltastClaimOnSTRawNAV + deltaSTClaimOnJTRawNAV;
+            // ST's effective NAV delta is the sum of its claim-weighted shares of each pool's PNL and JT's effective NAV delta is computed as the residual
+            // NOTE: NAV conservation holds: positive and negative rounding drift is absorbed by juniors
+            deltaSTEffectiveNAV = deltaSTClaimOnSTRawNAV + deltaSTClaimOnJTRawNAV;
             deltaJTEffectiveNAV = (deltaSTRawNAV + deltaJTRawNAV) - deltaSTEffectiveNAV;
         }
 
@@ -824,16 +826,10 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     // =============================
 
     /**
-     * @notice Attributes a portion of a signed raw NAV delta to a tranche based on its claim against the raw pool
-     * @dev Returns zero when there is no delta, no claim, or no pool to attribute against (uninitialized or empty states)
-     * @dev Rounds Floor on the absolute value of the delta, biasing any dust into the residual tranche
-     *      Conservation is preserved by construction: the caller computes deltaJTEffectiveNAV as (deltaSTRawNAV + deltaJTRawNAV - deltaSTEffectiveNAV),
-     *      so any rounding-down of ST's attribution is exactly captured by the residual without drift
-     * @dev Claims are bounded by their respective raw pools by NAV conservation, so attributedMagnitude <= absDelta and
-     *      the int256 narrowing cannot overflow
+     * @notice Attributes a portion of a signed raw NAV delta to a tranche based on its proportional claim on the raw NAV
      * @param _delta The signed raw NAV delta to attribute
-     * @param _claimOnTrancheRawNAV The tranche's claim against the raw pool, scaled to NAV units
-     * @param _lastTrancheRawNAV The total raw NAV of the pool at the last checkpoint, scaled to NAV units
+     * @param _claimOnTrancheRawNAV The tranche's claim against the raw NAV
+     * @param _lastTrancheRawNAV The total raw NAV of the pool at the last checkpoint
      * @return attributedDelta The signed share of the delta attributable to the claim holder
      */
     function _attributeRawNAVDeltaToClaim(
@@ -845,13 +841,13 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         pure
         returns (int256 attributedDelta)
     {
-        // Nothing to attribute if any operand is zero
+        // No NAV to attribute to the tranche if any operand is zero
         if (_delta == 0 || _claimOnTrancheRawNAV == ZERO_NAV_UNITS || _lastTrancheRawNAV == ZERO_NAV_UNITS) return 0;
 
         // Work in unsigned magnitudes for the proportional split, then re-apply the original sign
-        // Floor on the magnitude routes any sub-wei dust into the residual side per the senior protection convention
+        // Floor on the magnitude routes the leftover wei from rounding into the complementary tranche
         uint256 absDelta = _delta < 0 ? uint256(-_delta) : uint256(_delta);
-        uint256 attributedMagnitude = UnitsMathLib.mulDiv(absDelta, _claimOnTrancheRawNAV, _lastTrancheRawNAV, Math.Rounding.Floor);
+        uint256 attributedMagnitude = absDelta.mulDiv(_claimOnTrancheRawNAV, _lastTrancheRawNAV, Math.Rounding.Floor);
         attributedDelta = _delta < 0 ? -int256(attributedMagnitude) : int256(attributedMagnitude);
     }
 
