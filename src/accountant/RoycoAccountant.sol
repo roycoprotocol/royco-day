@@ -423,7 +423,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             NAV_UNIT stRawNAV = $.lastSTRawNAV;
             NAV_UNIT jtRawNAV = $.lastJTRawNAV;
 
-            // Last cross-tranche claims (the NAV that can't be funded by the tranche's own raw NAV)
+            // Cross-tranche claims (the NAV that can't be funded by the tranche's own raw NAV)
             NAV_UNIT stClaimOnJTRawNAV = UnitsMathLib.saturatingSub(stEffectiveNAV, stRawNAV);
             NAV_UNIT jtClaimOnSTRawNAV = UnitsMathLib.saturatingSub(jtEffectiveNAV, jtRawNAV);
             // Last self-backed portion of the senior tranche's claim (the NAV funded by ST's own raw NAV)
@@ -436,12 +436,12 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             int256 deltaJTRawNAV = UnitsMathLib.computeNAVDelta(_jtRawNAV, jtRawNAV);
 
             // Attribute each pool's signed PNL to ST in proportion to its claim against that pool
-            int256 deltaSTClaimOnSTRawNAV = _attributeRawNAVDeltaToClaim(deltaSTRawNAV, stClaimOnSTRawNAV, stRawNAV);
+            int256 deltastClaimOnSTRawNAV = _attributeRawNAVDeltaToClaim(deltaSTRawNAV, stClaimOnSTRawNAV, stRawNAV);
             int256 deltaSTClaimOnJTRawNAV = _attributeRawNAVDeltaToClaim(deltaJTRawNAV, stClaimOnJTRawNAV, jtRawNAV);
 
             // ST's effective NAV delta is the sum of its claim-weighted shares of each pool's PNL
             // JT's effective NAV delta is computed as the residual so NAV conservation holds exactly, with no rounding drift
-            deltaSTEffectiveNAV = deltaSTClaimOnSTRawNAV + deltaSTClaimOnJTRawNAV;
+            deltaSTEffectiveNAV = deltastClaimOnSTRawNAV + deltaSTClaimOnJTRawNAV;
             deltaJTEffectiveNAV = (deltaSTRawNAV + deltaJTRawNAV) - deltaSTEffectiveNAV;
         }
 
