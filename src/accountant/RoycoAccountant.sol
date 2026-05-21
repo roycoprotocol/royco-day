@@ -414,6 +414,8 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
 
         // Cache the last checkpointed market state, effective NAV, and impermanent losses for each tranche
         initialMarketState = $.lastMarketState;
+        NAV_UNIT lastSTRawNAV = $.lastSTRawNAV;
+        NAV_UNIT lastJTRawNAV = $.lastJTRawNAV;
         NAV_UNIT stEffectiveNAV = $.lastSTEffectiveNAV;
         NAV_UNIT jtEffectiveNAV = $.lastJTEffectiveNAV;
         NAV_UNIT stImpermanentLoss = $.lastSTImpermanentLoss;
@@ -421,10 +423,26 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         NAV_UNIT stProtocolFeeAccrued;
         NAV_UNIT jtProtocolFeeAccrued;
 
+        // Last cross-tranche claims (the NAV that can't funded by the tranche's own raw NAV)
+        NAV_UNIT stClaimOnJTRawNAV = UnitsMathLib.saturatingSub(stEffectiveNAV, lastSTRawNAV);
+        NAV_UNIT jtClaimOnSTRawNAV = UnitsMathLib.saturatingSub(jtEffectiveNAV, lastJTRawNAV);
+        // Last self-backed portion of the senior tranche's claim (the NAV funded by ST's own raw NAV)
+        // NOTE: NAV conservation guarantees that this cannot underflow
+        NAV_UNIT stClaimOnSTRawNAV = (lastSTRawNAV - jtClaimOnSTRawNAV);
+
         // Compute the deltas in the raw NAVs of each tranche
         // The deltas represent the unrealized PNL of the underlying investment since the last NAV checkpoints
-        int256 deltaST = UnitsMathLib.computeNAVDelta(_stRawNAV, $.lastSTRawNAV);
-        int256 deltaJT = UnitsMathLib.computeNAVDelta(_jtRawNAV, $.lastJTRawNAV);
+        int256 deltaSTRawNAV = UnitsMathLib.computeNAVDelta(_stRawNAV, lastSTRawNAV);
+        int256 deltaJTRawNAV = UnitsMathLib.computeNAVDelta(_jtRawNAV, lastJTRawNAV);
+
+        // Attribute each pool's signed PNL to ST in proportion to its claim against that pool
+        int256 deltastClaimOnSTRawNAV = _attributeRawNAVDeltaToClaim(deltaSTRawNAV, stClaimOnSTRawNAV, lastSTRawNAV);
+        int256 deltaSTClaimOnJTRawNAV = _attributeRawNAVDeltaToClaim(deltaJTRawNAV, stClaimOnJTRawNAV, lastJTRawNAV);
+
+        // ST's delta is the sum of its claim-weighted shares of each pool's PNL
+        // JT's delta is computed as the residual so NAV conservation holds exactly, with no rounding drift
+        int256 deltaST = deltastClaimOnSTRawNAV + deltaSTClaimOnJTRawNAV;
+        int256 deltaJT = (deltaSTRawNAV + deltaJTRawNAV) - deltaST;
 
         // The net JT gains after ST IL recovery. The JT protocol fee accrued is calculated using this NAV.
         NAV_UNIT jtNetGain = ZERO_NAV_UNITS;
@@ -796,6 +814,34 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     // =============================
     // Internal Utility Functions
     // =============================
+
+    /**
+     * @notice Attributes a portion of a signed raw NAV delta to a tranche based on its claim against the raw pool
+     * @dev Returns zero when there is no delta, no claim, or no pool to attribute against (uninitialized or empty states)
+     * @dev Rounds Floor on the absolute value of the delta, applying the 1 wei delta to the other tranche
+     * @param _delta The signed raw NAV delta to attribute
+     * @param _claimOnTrancheRawNAV The tranche's claim against the raw pool, scaled to NAV units
+     * @param _lastTrancheRawNAV The total raw NAV of the pool at the last checkpoint, scaled to NAV units
+     * @return attributedDelta The signed share of the delta attributable to the claim holder
+     */
+    function _attributeRawNAVDeltaToClaim(
+        int256 _delta,
+        NAV_UNIT _claimOnTrancheRawNAV,
+        NAV_UNIT _lastTrancheRawNAV
+    )
+        internal
+        pure
+        returns (int256 attributedDelta)
+    {
+        // Nothing to attribute if any operand is zero
+        if (_delta == 0 || _claimOnTrancheRawNAV == ZERO_NAV_UNITS || _lastTrancheRawNAV == ZERO_NAV_UNITS) return 0;
+
+        // Work in unsigned magnitudes for the proportional split, then re-apply the original sign
+        // Floor on the magnitude routes any sub-wei dust into the residual side per the senior protection convention
+        uint256 absDelta = _delta < 0 ? uint256(-_delta) : uint256(_delta);
+        uint256 attributedMagnitude = UnitsMathLib.mulDiv(absDelta, _claimOnTrancheRawNAV, _lastTrancheRawNAV, Math.Rounding.Floor);
+        attributedDelta = _delta < 0 ? -int256(attributedMagnitude) : int256(attributedMagnitude);
+    }
 
     /**
      * @notice Validates the coverage requirement parameters of the market
