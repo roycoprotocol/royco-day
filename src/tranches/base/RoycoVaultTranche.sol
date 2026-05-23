@@ -232,8 +232,6 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     function convertToAssets(uint256 _shares) public view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
         // Get the post-sync tranche state: applying NAV reconciliation.
         (AssetClaims memory trancheClaims, uint256 trancheTotalShares) = _previewPostSyncTrancheState();
-        // Apply the virtual asset offset (+1 to claim.nav) so this read is symmetric with `_convertToShares`, which adds +1 to both supply and claim.nav.
-        trancheClaims.nav = _withVirtualAssets(trancheClaims.nav);
         return UtilsLib.scaleAssetClaims(trancheClaims, _shares, trancheTotalShares);
     }
 
@@ -245,9 +243,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
                 ? IRoycoKernel(KERNEL).stConvertTrancheUnitsToNAVUnits(_assets)
                 : IRoycoKernel(KERNEL).jtConvertTrancheUnitsToNAVUnits(_assets));
         (AssetClaims memory trancheClaims, uint256 trancheTotalShares) = _previewPostSyncTrancheState();
-        // trancheTotalShares includes virtual shares, while _convertToShares expects the total supply without virtual shares
-        // Subtract the virtual shares from the total supply to get the total supply without virtual shares
-        shares = _convertToShares(navAssets, _withoutVirtualShares(trancheTotalShares), trancheClaims.nav, Math.Rounding.Floor);
+        shares = _convertToShares(navAssets, trancheTotalShares, trancheClaims.nav, Math.Rounding.Floor);
     }
 
     /// @inheritdoc IRoycoVaultTranche
@@ -264,11 +260,10 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // Compute the shares to be minted to the protocol fee recipient to satisfy the ratio of total assets that the fee represents
         // Subtract fee assets from total tranche assets because fees are included in total tranche assets
         // Round in favor of the tranche
-        uint256 totalShares = totalSupply();
-        protocolFeeSharesMinted = _convertToShares(_protocolFeeNAV, totalShares, (_totalTrancheNAV - _protocolFeeNAV), Math.Rounding.Floor);
-
-        // The total tranche shares include the protocol fee shares and virtual shares
-        totalTrancheShares = _withVirtualShares(totalShares + protocolFeeSharesMinted);
+        totalTrancheShares = totalSupply();
+        totalTrancheShares += protocolFeeSharesMinted = _convertToShares(
+            _protocolFeeNAV, totalTrancheShares, (_totalTrancheNAV - _protocolFeeNAV), Math.Rounding.Floor
+        );
     }
 
     /// =============================
@@ -360,23 +355,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
      * @return shares The number of shares that have a claim on the specified amount of tranche controlled assets
      */
     function _convertToShares(NAV_UNIT _assets, uint256 _totalSupply, NAV_UNIT _totalAssets, Math.Rounding _rounding) internal pure returns (uint256 shares) {
-        return _withVirtualShares(_totalSupply).mulDiv(_assets, _withVirtualAssets(_totalAssets), _rounding);
-    }
-
-    /// @dev Returns the specified share quantity added to the tranche's virtual shares
-    function _withVirtualShares(uint256 _shares) internal pure returns (uint256) {
-        return _shares + 1;
-    }
-
-    /// @dev Returns the specified share quantity subtracted from the tranche's virtual shares
-    function _withoutVirtualShares(uint256 _shares) internal pure returns (uint256) {
-        return _shares - 1;
-    }
-
-    /// @dev Returns the specified NAV added to the tranche's virtual NAV (1)
-    function _withVirtualAssets(NAV_UNIT _assets) internal pure returns (NAV_UNIT) {
-        // NAV units are always in WAD precision, therefore 1 wei of NAV_UNITs are the virtual assets corresponding to 1 wei of tranche shares (WAD precision)
-        return _assets + toNAVUnits(uint256(1));
+        if (_totalSupply == 0 || toUint256(_totalAssets) == 0) return toUint256(_assets);
+        return _totalSupply.mulDiv(_assets, _totalAssets, _rounding);
     }
 
     /// @inheritdoc ERC20PausableUpgradeable
