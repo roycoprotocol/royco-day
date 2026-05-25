@@ -261,6 +261,11 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // Subtract fee assets from total tranche assets because fees are included in total tranche assets
         // Round in favor of the tranche
         totalTrancheShares = totalSupply();
+
+        // If the protocol fee NAV is zero, return zero shares
+        if (_protocolFeeNAV == ZERO_NAV_UNITS) return (0, totalTrancheShares);
+
+        // Calculate the shares to be minted to the protocol fee recipient and add it to the total tranche shares
         totalTrancheShares += protocolFeeSharesMinted = _convertToShares(
             _protocolFeeNAV, totalTrancheShares, (_totalTrancheNAV - _protocolFeeNAV), Math.Rounding.Floor
         );
@@ -355,7 +360,13 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
      * @return shares The number of shares that have a claim on the specified amount of tranche controlled assets
      */
     function _convertToShares(NAV_UNIT _assets, uint256 _totalSupply, NAV_UNIT _totalAssets, Math.Rounding _rounding) internal pure returns (uint256 shares) {
-        if (_totalSupply == 0 || toUint256(_totalAssets) == 0) return toUint256(_assets);
+        if (_totalSupply == 0) return toUint256(_assets);
+
+        // When total assets are zero, we want new depositors to dilute the existing unbacked share holders
+        // At this boundary condition, we assume all existing shares are backed by a single NAV unit
+        // This gives majority ownership of the deposited assets to the new depositor, diluting all existing share holders
+        if (_totalAssets == ZERO_NAV_UNITS) _totalAssets = toNAVUnits(uint256(1));
+
         return _totalSupply.mulDiv(_assets, _totalAssets, _rounding);
     }
 
