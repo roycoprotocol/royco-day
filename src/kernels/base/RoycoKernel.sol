@@ -348,17 +348,16 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         SyncedAccountingState memory state = _preOpSyncTrancheAccounting();
         // If ST IL exists, ST deposits are disabled to preclude existing ST's from getting diluted and realizing losses
         require(state.stImpermanentLoss == ZERO_NAV_UNITS, ST_DEPOSIT_DISABLED_IN_LOSS());
+        // The NAV to mint tranche shares at is the pre-deposit senior tranche controlled NAV
+        navToMintSharesAt = state.stEffectiveNAV;
+        // The precise value allocated is the value of the deposited assets
+        valueAllocated = stConvertTrancheUnitsToNAVUnits(_assets);
 
         // Process the deposit for the senior tranche
         _stDepositAssets(_assets);
 
         // Execute a post-deposit sync on accounting and enforce the market's coverage requirement
-        NAV_UNIT stPostDepositNAV = (_postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT)).stEffectiveNAV;
-
-        // The NAV to mint tranche shares at is the pre-deposit senior tranche controlled NAV
-        navToMintSharesAt = state.stEffectiveNAV;
-        // The precise value allocated is the delta between the pre and post deposit NAVs
-        valueAllocated = (stPostDepositNAV - navToMintSharesAt);
+        _postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT);
     }
 
     /// @inheritdoc IRoycoKernel
@@ -419,17 +418,16 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         SyncedAccountingState memory state = _preOpSyncTrancheAccounting();
         // Ensure that the market is in a state where JT deposits are enabled: PERPETUAL
         require(state.marketState == MarketState.PERPETUAL, JT_DEPOSIT_DISABLED_IN_FIXED_TERM_STATE());
+        // The NAV to mint tranche shares at is the pre-deposit junior tranche controlled NAV
+        navToMintSharesAt = state.jtEffectiveNAV;
+        // The precise value allocated is the value of the deposited assets
+        valueAllocated = jtConvertTrancheUnitsToNAVUnits(_assets);
 
         // Process the deposit for the junior tranche
         _jtDepositAssets(_assets);
 
         // Execute a post-deposit sync on accounting
-        NAV_UNIT jtPostDepositNAV = (_postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, ZERO_NAV_UNITS)).jtEffectiveNAV;
-
-        // The NAV to mint tranche shares at is the pre-deposit junior tranche controlled NAV
-        navToMintSharesAt = state.jtEffectiveNAV;
-        // The precise value allocated is the delta between the pre and post deposit NAVs
-        valueAllocated = (jtPostDepositNAV - navToMintSharesAt);
+        _postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, ZERO_NAV_UNITS);
     }
 
     /// @inheritdoc IRoycoKernel
