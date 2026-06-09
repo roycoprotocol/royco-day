@@ -272,12 +272,12 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
 
         // Get the total claims the junior tranche has on each tranche's assets
         SyncedAccountingState memory state;
-        AssetClaims memory jtNotionalClaims;
-        (state, jtNotionalClaims, totalTrancheSharesAfterMintingFees) = previewSyncTrancheAccounting(TrancheType.JUNIOR);
+        (state,, totalTrancheSharesAfterMintingFees) = previewSyncTrancheAccounting(TrancheType.JUNIOR);
 
-        // Get the max withdrawable ST and JT assets in NAV units from the accountant consider coverage requirement
-        claimOnStNAV = stConvertTrancheUnitsToNAVUnits(jtNotionalClaims.stAssets);
-        claimOnJtNAV = jtConvertTrancheUnitsToNAVUnits(jtNotionalClaims.jtAssets);
+        // Use the precise NAV claims directly from the decomposition instead of round-tripping them through tranche units (NAV -> tranche -> NAV).
+        (,, claimOnStNAV, claimOnJtNAV) = _decomposeNAVClaims(state);
+
+        // Get the max withdrawable ST and JT assets in NAV units from the accountant considering the coverage requirement
         (, NAV_UNIT stClaimableGivenCoverage, NAV_UNIT jtClaimableGivenCoverage) =
             IRoycoAccountant(ACCOUNTANT).maxJTWithdrawalGivenCoverage(state.stRawNAV, state.jtRawNAV, claimOnStNAV, claimOnJtNAV);
 
