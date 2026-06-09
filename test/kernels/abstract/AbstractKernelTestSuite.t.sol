@@ -2332,6 +2332,17 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // ST has no impermanent loss (JT absorbed it), but the market is now in a fixed-term state
         IRoycoAccountant.RoycoAccountantState memory accountantState = ACCOUNTANT.getState();
         assertEq(accountantState.lastSTImpermanentLoss, ZERO_NAV_UNITS, "ST should have no impermanent loss when JT absorbs all losses");
+
+        // Permanently perpetual markets (fixed-term duration of 0) never enter a fixed-term state: the JT coverage IL is erased and all operations remain enabled
+        if (accountantState.fixedTermDurationSeconds == 0) {
+            assertEq(uint256(accountantState.lastMarketState), uint256(MarketState.PERPETUAL), "Permanently perpetual market should remain perpetual after JT absorbs a loss");
+            assertGt(ST.maxDeposit(ST_CHARLIE_ADDRESS), ZERO_TRANCHE_UNITS, "ST deposits should remain enabled in a permanently perpetual market");
+            assertGt(JT.maxDeposit(ALICE_ADDRESS), ZERO_TRANCHE_UNITS, "JT deposits should remain enabled in a permanently perpetual market");
+            assertGt(ST.maxRedeem(BOB_ADDRESS), 0, "ST redemptions should remain enabled in a permanently perpetual market");
+            assertGt(JT.maxRedeem(ALICE_ADDRESS), 0, "JT redemptions should remain enabled in a permanently perpetual market");
+            return;
+        }
+
         assertEq(uint256(accountantState.lastMarketState), uint256(MarketState.FIXED_TERM), "Market should be in a fixed-term state after JT absorbs a loss");
 
         // Every operation is frozen during the fixed term: the max view functions all report zero, so the tranche-level deposit/redeem entrypoints have nothing to execute
