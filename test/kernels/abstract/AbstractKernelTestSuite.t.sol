@@ -2312,8 +2312,8 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         }
     }
 
-    /// @notice Test that small losses absorbed by JT do not disable ST deposits
-    function test_stDeposit_notDisabledWhenJTAbsorbsLoss() external {
+    /// @notice Test that when JT absorbs a loss the market enters a fixed-term state and ALL operations, including ST deposits, are disabled
+    function test_allOperationsDisabledInFixedTermWhenJTAbsorbsLoss() external {
         // Setup: Deposit more JT than ST to ensure JT can absorb losses
         uint256 jtDeposit = _minDepositAmount() * 100;
         _depositJT(ALICE_ADDRESS, jtDeposit);
@@ -2322,26 +2322,23 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         uint256 stDeposit = _minDepositAmount() * 5;
         _depositST(BOB_ADDRESS, stDeposit);
 
-        // Simulate a small loss that JT can fully absorb (5%)
+        // Simulate a small loss that JT fully absorbs as coverage (5%), moving the market into a fixed-term recovery state
         simulateJTLoss(0.05e18);
 
         // Sync accounting
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
 
-        // Verify no ST impermanent loss
-        NAV_UNIT stIL = ACCOUNTANT.getState().lastSTImpermanentLoss;
-        assertEq(stIL, ZERO_NAV_UNITS, "ST should have no impermanent loss when JT absorbs all losses");
+        // ST has no impermanent loss (JT absorbed it), but the market is now in a fixed-term state
+        IRoycoAccountant.RoycoAccountantState memory accountantState = ACCOUNTANT.getState();
+        assertEq(accountantState.lastSTImpermanentLoss, ZERO_NAV_UNITS, "ST should have no impermanent loss when JT absorbs all losses");
+        assertEq(uint256(accountantState.lastMarketState), uint256(MarketState.FIXED_TERM), "Market should be in a fixed-term state after JT absorbs a loss");
 
-        // ST deposits should still be allowed
-        TRANCHE_UNIT maxDeposit = ST.maxDeposit(ST_CHARLIE_ADDRESS);
-        assertGt(maxDeposit, ZERO_TRANCHE_UNITS, "ST deposits should still be allowed when JT absorbs loss");
-
-        // Should be able to deposit ST
-        uint256 newStDeposit = _minDepositAmount();
-        dealSTAsset(ST_CHARLIE_ADDRESS, newStDeposit);
-        _depositST(ST_CHARLIE_ADDRESS, newStDeposit);
-        assertGt(ST.balanceOf(ST_CHARLIE_ADDRESS), 0, "ST_CHARLIE should have ST shares");
+        // Every operation is frozen during the fixed term: the max view functions all report zero, so the tranche-level deposit/redeem entrypoints have nothing to execute
+        assertEq(toUint256(ST.maxDeposit(ST_CHARLIE_ADDRESS)), 0, "ST deposits should be disabled in a fixed-term state");
+        assertEq(toUint256(JT.maxDeposit(ALICE_ADDRESS)), 0, "JT deposits should be disabled in a fixed-term state");
+        assertEq(ST.maxRedeem(BOB_ADDRESS), 0, "ST redemptions should be disabled in a fixed-term state");
+        assertEq(JT.maxRedeem(ALICE_ADDRESS), 0, "JT redemptions should be disabled in a fixed-term state");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

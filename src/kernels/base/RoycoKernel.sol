@@ -194,12 +194,15 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     // =============================
 
     /// @inheritdoc IRoycoKernel
-    /// @dev ST deposits are allowed if the market is in a PERPETUAL or FIXED_TERM state, granted that the market's coverage requirement is satisfied post-deposit
+    /// @dev ST deposits are allowed only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-deposit
     function stMaxDeposit(address _receiver) public view virtual override(IRoycoKernel) returns (TRANCHE_UNIT) {
         // If the receiver is blacklisted or the kernel is currently paused, return zero tranche units
         if (isBlacklisted(_receiver) || paused()) return ZERO_TRANCHE_UNITS;
+        SyncedAccountingState memory state = _previewSyncTrancheAccounting();
+        // ST deposits are disabled during a fixed-term market state
+        if (state.marketState == MarketState.FIXED_TERM) return ZERO_TRANCHE_UNITS;
         // If ST IL exists, ST deposits are disabled to preclude existing ST's from getting diluted and realizing losses
-        if (_previewSyncTrancheAccounting().stImpermanentLoss != ZERO_NAV_UNITS) return ZERO_TRANCHE_UNITS;
+        if (state.stImpermanentLoss != ZERO_NAV_UNITS) return ZERO_TRANCHE_UNITS;
         // ST deposits are enabled as long as ST IL is nonexistent and coverage is satisfied
         // No need to include ST liquidation proceeds in the raw NAV because those assets are not exposed to any volatility
         NAV_UNIT stMaxDepositableNAV = IRoycoAccountant(ACCOUNTANT).maxSTDepositGivenCoverage(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
@@ -228,10 +231,8 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         AssetClaims memory stNotionalClaims;
         (state, stNotionalClaims, totalTrancheSharesAfterMintingFees) = previewSyncTrancheAccounting(TrancheType.SENIOR);
 
-        // If the market is in a state where ST withdrawals are not allowed, return zero claims
-        if (state.marketState != MarketState.PERPETUAL) {
-            return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
-        }
+        // ST redemptions are disabled during a fixed-term market state
+        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
         // Get the total claims the senior tranche has on each tranche's assets
         claimOnStNAV = stConvertTrancheUnitsToNAVUnits(stNotionalClaims.stAssets);
@@ -247,13 +248,13 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     function jtMaxDeposit(address _receiver) public view virtual override(IRoycoKernel) returns (TRANCHE_UNIT) {
         // If the receiver is blacklisted or the kernel is currently paused, return zero tranche units
         if (isBlacklisted(_receiver) || paused()) return ZERO_TRANCHE_UNITS;
-        // If the market is in a state where JT deposits are not allowed, return zero tranche units
-        if ((_previewSyncTrancheAccounting()).marketState != MarketState.PERPETUAL) return ZERO_TRANCHE_UNITS;
+        // JT deposits are disabled during a fixed-term market state
+        if ((_previewSyncTrancheAccounting()).marketState == MarketState.FIXED_TERM) return ZERO_TRANCHE_UNITS;
         return MAX_TRANCHE_UNITS;
     }
 
     /// @inheritdoc IRoycoKernel
-    /// @dev JT redemptions are allowed if the market is in a PERPETUAL or FIXED_TERM state, granted that the market's coverage requirement is satisfied post-redemption
+    /// @dev JT redemptions are allowed only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-redemption
     function jtMaxWithdrawable(address _owner)
         public
         view
@@ -273,6 +274,9 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         // Get the total claims the junior tranche has on each tranche's assets
         SyncedAccountingState memory state;
         (state,, totalTrancheSharesAfterMintingFees) = previewSyncTrancheAccounting(TrancheType.JUNIOR);
+
+        // JT redemptions are disabled during a fixed-term market state
+        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
         // Use the precise NAV claims directly from the decomposition instead of round-tripping them through tranche units (NAV -> tranche -> NAV).
         (,, claimOnStNAV, claimOnJtNAV) = _decomposeNAVClaims(state);
@@ -332,7 +336,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     // =============================
 
     /// @inheritdoc IRoycoKernel
-    /// @dev ST deposits are enabled if the market is in a PERPETUAL or FIXED_TERM state, granted that the market's coverage requirement is satisfied post-deposit
+    /// @dev ST deposits are enabled only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-deposit
     /// @dev ST deposits are disabled if the senior tranche has incurred any impermanent loss to prevent dilution
     function stDeposit(TRANCHE_UNIT _assets)
         external
@@ -346,6 +350,8 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     {
         // Execute an accounting sync to reconcile underlying PNL
         SyncedAccountingState memory state = _preOpSyncTrancheAccounting();
+        // ST deposits are disabled during a fixed-term market state
+        require(state.marketState == MarketState.PERPETUAL, DISABLED_IN_FIXED_TERM_STATE());
         // If ST IL exists, ST deposits are disabled to preclude existing ST's from getting diluted and realizing losses
         require(state.stImpermanentLoss == ZERO_NAV_UNITS, ST_DEPOSIT_DISABLED_IN_LOSS());
         // The NAV to mint tranche shares at is the pre-deposit senior tranche controlled NAV
@@ -380,8 +386,8 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         uint256 totalTrancheShares;
         // Execute an accounting sync to reconcile underlying PNL
         (state, userAssetClaims, totalTrancheShares) = _preOpSyncTrancheAccounting(TrancheType.SENIOR);
-        // Ensure that the market is in a state where ST redemptions are allowed: PERPETUAL
-        require(_bypassRedemptionRestrictions || state.marketState == MarketState.PERPETUAL, ST_REDEEM_DISABLED_IN_FIXED_TERM_STATE());
+        // ST redemptions are disabled during a fixed-term market state
+        require(_bypassRedemptionRestrictions || state.marketState == MarketState.PERPETUAL, DISABLED_IN_FIXED_TERM_STATE());
 
         // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
         // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
@@ -416,8 +422,8 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     {
         // Execute an accounting sync to reconcile underlying PNL
         SyncedAccountingState memory state = _preOpSyncTrancheAccounting();
-        // Ensure that the market is in a state where JT deposits are enabled: PERPETUAL
-        require(state.marketState == MarketState.PERPETUAL, JT_DEPOSIT_DISABLED_IN_FIXED_TERM_STATE());
+        // JT deposits are disabled during a fixed-term market state
+        require(state.marketState == MarketState.PERPETUAL, DISABLED_IN_FIXED_TERM_STATE());
         // The NAV to mint tranche shares at is the pre-deposit junior tranche controlled NAV
         navToMintSharesAt = state.jtEffectiveNAV;
         // The precise value allocated is the value of the deposited assets
@@ -431,7 +437,7 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
     }
 
     /// @inheritdoc IRoycoKernel
-    /// @dev JT redemptions are enabled if the market is in a PERPETUAL or FIXED_TERM state, granted that the market's coverage requirement is satisfied post-redemption
+    /// @dev JT redemptions are enabled only in a PERPETUAL market state (unless restrictions are bypassed for a seizure), granted that the market's coverage requirement is satisfied post-redemption
     function jtRedeem(
         uint256 _shares,
         address _receiver,
@@ -447,8 +453,11 @@ abstract contract RoycoKernel is IRoycoKernel, RoycoBase, ReentrancyGuardTransie
         returns (AssetClaims memory userAssetClaims)
     {
         // Execute a pre-op sync on accounting
+        SyncedAccountingState memory state;
         uint256 totalTrancheShares;
-        (, userAssetClaims, totalTrancheShares) = _preOpSyncTrancheAccounting(TrancheType.JUNIOR);
+        (state, userAssetClaims, totalTrancheShares) = _preOpSyncTrancheAccounting(TrancheType.JUNIOR);
+        // JT redemptions are disabled during a fixed-term market state
+        require(_bypassRedemptionRestrictions || state.marketState == MarketState.PERPETUAL, DISABLED_IN_FIXED_TERM_STATE());
 
         // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
         // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
