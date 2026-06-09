@@ -2335,7 +2335,11 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Permanently perpetual markets (fixed-term duration of 0) never enter a fixed-term state: the JT coverage IL is erased and all operations remain enabled
         if (accountantState.fixedTermDurationSeconds == 0) {
-            assertEq(uint256(accountantState.lastMarketState), uint256(MarketState.PERPETUAL), "Permanently perpetual market should remain perpetual after JT absorbs a loss");
+            assertEq(
+                uint256(accountantState.lastMarketState),
+                uint256(MarketState.PERPETUAL),
+                "Permanently perpetual market should remain perpetual after JT absorbs a loss"
+            );
             assertGt(ST.maxDeposit(ST_CHARLIE_ADDRESS), ZERO_TRANCHE_UNITS, "ST deposits should remain enabled in a permanently perpetual market");
             assertGt(JT.maxDeposit(ALICE_ADDRESS), ZERO_TRANCHE_UNITS, "JT deposits should remain enabled in a permanently perpetual market");
             assertGt(ST.maxRedeem(BOB_ADDRESS), 0, "ST redemptions should remain enabled in a permanently perpetual market");
