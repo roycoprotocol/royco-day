@@ -962,15 +962,16 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
     /// @notice Worst-case NAV reduction in JT.maxRedeem(owner) attributable to the operational
     ///         slack reserved by maxJTWithdrawalGivenCoverage, plus a small rounding margin.
-    /// @dev maxJTWithdrawalGivenCoverage reserves stNAVDustTolerance + jtNAVDustTolerance·β/WAD
-    ///      from surplusJTAssets.  This translates to a totalNAVClaimable reduction of
-    ///      slack · WAD / coverageRetentionWAD where coverageRetentionWAD = WAD − COV·(kS + β·kJ).
-    ///      Worst-case amplification occurs when (kS + β·kJ) saturates at WAD (e.g., pure-JT
-    ///      withdrawal with β=WAD), giving coverageRetentionWAD_min = WAD − coverageWAD.
+    /// @dev maxJTWithdrawalGivenCoverage reserves stNAVDustTolerance + jtNAVDustTolerance·β/WAD AND a fixed 2 NAV-unit
+    ///      margin (the L-04 fix that keeps redeem(maxRedeem) from reverting on the utilization ceil) from surplusJTAssets.
+    ///      This translates to a totalNAVClaimable reduction of slack · WAD / coverageRetentionWAD where
+    ///      coverageRetentionWAD = WAD − COV·(kS + β·kJ). Worst-case amplification occurs when (kS + β·kJ) saturates at
+    ///      WAD (e.g., pure-JT withdrawal with β=WAD), giving coverageRetentionWAD_min = WAD − coverageWAD.
     ///      Use this upper bound; actual reduction is ≤ this for any (kS, kJ) combination.
     function _maxRedeemNAVTolerance() internal view returns (uint256) {
         IRoycoAccountant.RoycoAccountantState memory state = ACCOUNTANT.getState();
-        uint256 slack = toUint256(state.stNAVDustTolerance) + toUint256(state.jtNAVDustTolerance).mulDiv(uint256(state.betaWAD), WAD, Math.Rounding.Ceil);
+        // Mirror every NAV unit maxJTWithdrawalGivenCoverage reserves from surplusJTAssets: the dust tolerances plus the fixed 2 NAV-unit ceil-rounding margin
+        uint256 slack = toUint256(state.stNAVDustTolerance) + toUint256(state.jtNAVDustTolerance).mulDiv(uint256(state.betaWAD), WAD, Math.Rounding.Ceil) + 2;
         uint256 coverageRetentionWAD = WAD - uint256(state.coverageWAD);
         if (coverageRetentionWAD == 0) return type(uint256).max;
         return slack.mulDiv(WAD, coverageRetentionWAD, Math.Rounding.Ceil) + 3;
