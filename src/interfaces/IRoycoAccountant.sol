@@ -14,13 +14,13 @@ interface IRoycoAccountant {
      * @custom:field stProtocolFeeWAD - The market's configured protocol fee percentage taken from yield earned by the senior tranche, scaled to WAD precision
      * @custom:field jtProtocolFeeWAD - The market's configured protocol fee percentage taken from yield earned by the junior tranche, scaled to WAD precision
      * @custom:field yieldShareProtocolFeeWAD - The market's configured protocol fee percentage taken from the yield share (risk premium) payed from the senior tranche yield to the junior tranche, scaled to WAD precision
-     * @custom:field coverageWAD - The coverage ratio that the senior tranche is expected to be protected by, scaled to WAD precision
+     * @custom:field minCoverageWAD - The coverage ratio that the senior tranche is expected to be protected by, scaled to WAD precision
      * @custom:field betaWAD - The junior tranche's sensitivity to the same downside stress that affects the senior tranche, scaled to WAD precision
      *                         For example, beta is 0 when JT is in the RFR and 1 when JT is in the same opportunity as senior
      * @custom:field ydm - The market's Yield Distribution Model (YDM), responsible for determining the yield share (risk premium) payed from the senior tranche yield to the junior tranche
      * @custom:field ydmInitializationData - The data used to initialize the YDM for this market
      * @custom:field fixedTermDurationSeconds - The duration of a fixed term for this market in seconds
-     * @custom:field liquidationUtilizationWAD - The liquidation utilization threshold for this market, scaled to WAD precision
+     * @custom:field liquidationCoverageUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
      * @custom:field stNAVDustTolerance - The worst case dust tolerance for stRawNAV from underlying NAV quoting/rounding
      * @custom:field jtNAVDustTolerance - The worst case dust tolerance for jtRawNAV from underlying NAV quoting/rounding
      */
@@ -28,12 +28,12 @@ interface IRoycoAccountant {
         uint64 stProtocolFeeWAD;
         uint64 jtProtocolFeeWAD;
         uint64 yieldShareProtocolFeeWAD;
-        uint64 coverageWAD;
+        uint64 minCoverageWAD;
         uint96 betaWAD;
         address ydm;
         bytes ydmInitializationData;
         uint24 fixedTermDurationSeconds;
-        uint256 liquidationUtilizationWAD;
+        uint256 liquidationCoverageUtilizationWAD;
         NAV_UNIT stNAVDustTolerance;
         NAV_UNIT jtNAVDustTolerance;
     }
@@ -44,13 +44,13 @@ interface IRoycoAccountant {
      * @custom:field lastMarketState - The last recorded state of this market (perpetual or fixed term)
      * @custom:field fixedTermDurationSeconds - The duration of a fixed term for this market in seconds
      * @custom:field fixedTermEndTimestamp - The end timestamp of the currently ongoing fixed term (set to 0 if the market is in a perpetual state)
-     * @custom:field coverageWAD - The coverage percentage that the senior tranche is expected to be protected by, scaled to WAD precision
+     * @custom:field minCoverageWAD - The coverage percentage that the senior tranche is expected to be protected by, scaled to WAD precision
      * @custom:field betaWAD - JT's percentage sensitivity to the same downside stress that affects ST, scaled to WAD precision
      *                         For example, beta is 0 when JT is in the RFR and 1e18 (100%) when JT is in the same opportunity as senior
      * @custom:field stProtocolFeeWAD - The market's configured protocol fee percentage charged from yield earned by the senior tranche, scaled to WAD precision
      * @custom:field jtProtocolFeeWAD - The market's configured protocol fee percentage charged from yield earned by the junior tranche, scaled to WAD precision
      * @custom:field yieldShareProtocolFeeWAD - The market's configured protocol fee percentage charged from the yield share (risk premium) payed from the senior tranche yield to the junior tranche, scaled to WAD precision
-     * @custom:field liquidationUtilizationWAD - The liquidation utilization threshold for this market, scaled to WAD precision
+     * @custom:field liquidationCoverageUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
      * @custom:field ydm - The market's Yield Distribution Model (YDM), responsible for determining the yield share (risk premium) payed from the senior tranche yield to the junior tranche
      * @custom:field lastSTRawNAV - The last recorded pure NAV (excluding any coverage taken and yield shared) of the senior tranche
      * @custom:field lastJTRawNAV - The last recorded pure NAV (excluding any coverage given and yield shared) of the junior tranche
@@ -70,12 +70,12 @@ interface IRoycoAccountant {
         MarketState lastMarketState;
         uint24 fixedTermDurationSeconds;
         uint32 fixedTermEndTimestamp;
-        uint64 coverageWAD;
+        uint64 minCoverageWAD;
         uint96 betaWAD;
         uint64 stProtocolFeeWAD;
         uint64 jtProtocolFeeWAD;
         uint64 yieldShareProtocolFeeWAD;
-        uint256 liquidationUtilizationWAD;
+        uint256 liquidationCoverageUtilizationWAD;
         address ydm;
         NAV_UNIT lastSTRawNAV;
         NAV_UNIT lastJTRawNAV;
@@ -91,8 +91,8 @@ interface IRoycoAccountant {
     }
 
     /**
-     * @notice Emitted when JT's share of ST yield is accrued based on the market's utilization since the last accrual
-     * @param jtYieldShareWAD JT's instantaneous yield share (YDM output) based on utilization since the last accrual
+     * @notice Emitted when JT's share of ST yield is accrued based on the market's coverageUtilization since the last accrual
+     * @param jtYieldShareWAD JT's instantaneous yield share (YDM output) based on coverageUtilization since the last accrual
      * @param twJTYieldShareAccruedWAD The time-weighted JT yield share accrued since the last yield distribution
      * @param accrualTimestamp The timestamp of this JT yield share accrual
      */
@@ -136,9 +136,9 @@ interface IRoycoAccountant {
 
     /**
      * @notice Emitted when the coverage percentage requirement is updated
-     * @param coverageWAD The new coverage percentage, scaled to WAD precision
+     * @param minCoverageWAD The new coverage percentage, scaled to WAD precision
      */
-    event CoverageUpdated(uint64 coverageWAD);
+    event CoverageUpdated(uint64 minCoverageWAD);
 
     /**
      * @notice Emitted when the beta sensitivity parameter is updated
@@ -148,9 +148,9 @@ interface IRoycoAccountant {
 
     /**
      * @notice Emitted when the liquidation threshold parameter is updated
-     * @param liquidationUtilizationWAD The new liquidation utilization threshold for this market, scaled to WAD precision
+     * @param liquidationCoverageUtilizationWAD The new liquidation coverageUtilization threshold for this market, scaled to WAD precision
      */
-    event LiquidationUtilizationUpdated(uint256 liquidationUtilizationWAD);
+    event LiquidationCoverageUtilizationUpdated(uint256 liquidationCoverageUtilizationWAD);
 
     /**
      * @notice Emitted when the fixed term duration is updated
@@ -182,9 +182,9 @@ interface IRoycoAccountant {
     event FixedTermEnded();
 
     /// @notice Thrown when the caller of the function is not the accountant's configured Royco Kernel
-    error ONLY_ROYCO_KERNEL();
+    error ONLY_ROYCO_DAWN_KERNEL();
 
-    /// @notice Thrown when the accountant's coverage configuration is invalid (can be due to incorrect coverage, beta, or liquidation utilization values)
+    /// @notice Thrown when the accountant's coverage configuration is invalid (can be due to incorrect coverage, beta, or liquidation coverageUtilization values)
     error INVALID_COVERAGE_CONFIG();
 
     /// @notice Thrown when the configured protocol fee exceeds the maximum
@@ -233,7 +233,7 @@ interface IRoycoAccountant {
      * @param _op The operation being executed in between the pre and post operation synchronizations
      * @param _stRawNAV The post-op senior tranche's raw NAV
      * @param _jtRawNAV The post-op junior tranche's raw NAV
-     * @param _stSelfLiquidationBonusNAV The self-liquidation bonus remitted to an ST LP on redemption after the liquidation utilization threshold has been breached, sourced from JT effective NAV
+     * @param _stSelfLiquidationBonusNAV The self-liquidation bonus remitted to an ST LP on redemption after the liquidation coverageUtilization threshold has been breached, sourced from JT effective NAV
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function postOpSyncTrancheAccounting(
@@ -331,9 +331,9 @@ interface IRoycoAccountant {
     /**
      * @notice Updates the coverage percentage requirement for this market
      * @dev Only callable by a designated admin
-     * @param _coverageWAD The new coverage percentage, scaled to WAD precision
+     * @param _minCoverageWAD The new coverage percentage, scaled to WAD precision
      */
-    function setCoverage(uint64 _coverageWAD) external;
+    function setCoverage(uint64 _minCoverageWAD) external;
 
     /**
      * @notice Updates the beta sensitivity parameter for this market
@@ -343,20 +343,20 @@ interface IRoycoAccountant {
     function setBeta(uint96 _betaWAD) external;
 
     /**
-     * @notice Updates the liquidation utilization threshold for this market
+     * @notice Updates the liquidation coverageUtilization threshold for this market
      * @dev Only callable by a designated admin
-     * @param _liquidationUtilizationWAD The new liquidation utilization threshold for this market, scaled to WAD precision
+     * @param _liquidationCoverageUtilizationWAD The new liquidation coverageUtilization threshold for this market, scaled to WAD precision
      */
-    function setLiquidationUtilization(uint256 _liquidationUtilizationWAD) external;
+    function setLiquidationCoverageUtilization(uint256 _liquidationCoverageUtilizationWAD) external;
 
     /**
-     * @notice Updates the coverage configuration (coverage, beta, and liquidation utilization) for this market
+     * @notice Updates the coverage configuration (coverage, beta, and liquidation coverageUtilization) for this market
      * @dev Only callable by a designated admin
-     * @param _coverageWAD The new coverage percentage, scaled to WAD precision
+     * @param _minCoverageWAD The new coverage percentage, scaled to WAD precision
      * @param _betaWAD The new beta parameter representing JT's sensitivity to downside stress, scaled to WAD precision
-     * @param _liquidationUtilizationWAD The new liquidation utilization threshold for this market, scaled to WAD precision
+     * @param _liquidationCoverageUtilizationWAD The new liquidation coverageUtilization threshold for this market, scaled to WAD precision
      */
-    function setCoverageConfiguration(uint64 _coverageWAD, uint96 _betaWAD, uint256 _liquidationUtilizationWAD) external;
+    function setCoverageConfiguration(uint64 _minCoverageWAD, uint96 _betaWAD, uint256 _liquidationCoverageUtilizationWAD) external;
 
     /**
      * @notice Updates the fixed term duration for this market

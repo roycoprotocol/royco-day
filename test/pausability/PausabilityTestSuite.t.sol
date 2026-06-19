@@ -57,9 +57,9 @@ contract PausabilityTestSuite is BaseTest {
             DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: WAD });
 
         DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
-            jtYieldShareAtZeroUtilWAD: 0.3e18, // Y_0 = Y_T (same as target)
-            jtYieldShareAtTargetUtilWAD: 0.3e18,
-            jtYieldShareAtFullUtilWAD: 1e18,
+            yieldShareAtZeroUtilWAD: 0.3e18, // Y_0 = Y_T (same as target)
+            yieldShareAtTargetUtilWAD: 0.3e18,
+            yieldShareAtFullUtilWAD: 1e18,
             maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
         });
 
@@ -84,9 +84,9 @@ contract PausabilityTestSuite is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            coverageWAD: COVERAGE_WAD,
+            minCoverageWAD: COVERAGE_WAD,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
+            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             transferAgentAddress: address(0),

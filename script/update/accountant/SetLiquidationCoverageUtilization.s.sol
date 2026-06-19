@@ -5,37 +5,37 @@ import { IRoycoAccountant } from "../../../src/interfaces/IRoycoAccountant.sol";
 import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
 
 /**
- * @title SetLiquidationUtilization
- * @notice Generates Safe transaction batches for updating `liquidationUtilizationWAD` on each
+ * @title SetLiquidationCoverageUtilization
+ * @notice Generates Safe transaction batches for updating `liquidationCoverageUtilizationWAD` on each
  *         market's accountant across multiple markets and chains.
  *
- * @dev `setLiquidationUtilization` is `restricted` to `ADMIN_ACCOUNTANT_ROLE` (timelocked). The
+ * @dev `setLiquidationCoverageUtilization` is `restricted` to `ADMIN_ACCOUNTANT_ROLE` (timelocked). The
  *      harness emits one batched Safe JSON per chain per phase (schedule, execute, cancel).
  *
  *      Usage:
  *      1. Add/update config entries in `_initializeConfigs()` for target markets
- *      2. Run: forge script script/update/accountant/SetLiquidationUtilization.s.sol
+ *      2. Run: forge script script/update/accountant/SetLiquidationCoverageUtilization.s.sol
  *      3. Import the generated JSON files from output/update/accountant/ into Safe Transaction Builder
  *
- *      Values are WAD precision: 1e18 = 100% utilization. The setter accepts values strictly above
- *      WAD (i.e. above 100% utilization) per the accountant's coverage-config validation.
+ *      Values are WAD precision: 1e18 = 100% coverageUtilization. The setter accepts values strictly above
+ *      WAD (i.e. above 100% coverageUtilization) per the accountant's coverage-config validation.
  */
-contract SetLiquidationUtilization is ParameterUpdateBase {
+contract SetLiquidationCoverageUtilization is ParameterUpdateBase {
     // ═══════════════════════════════════════════════════════════════════════════
     // TYPES
     // ═══════════════════════════════════════════════════════════════════════════
 
-    struct SetLiquidationUtilizationConfig {
+    struct SetLiquidationCoverageUtilizationConfig {
         uint256 chainId;
         string marketName;
-        uint256 newLiquidationUtilizationWAD;
+        uint256 newLiquidationCoverageUtilizationWAD;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // STORAGE
     // ═══════════════════════════════════════════════════════════════════════════
 
-    SetLiquidationUtilizationConfig[] internal _configs;
+    SetLiquidationCoverageUtilizationConfig[] internal _configs;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CONSTRUCTOR
@@ -49,32 +49,32 @@ contract SetLiquidationUtilization is ParameterUpdateBase {
     // CONFIG
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Configure liquidation-utilization updates here.
+    /// @notice Configure liquidation-coverageUtilization updates here.
     /// @dev Values are WAD-scaled fractional percentages (1e18 = 100%).
     function _initializeConfigs() internal {
         // ── Mainnet ──────────────────────────────────────────────────────────
         // sNUSD                : 100.14306%
-        _configs.push(SetLiquidationUtilizationConfig({ chainId: MAINNET, marketName: SNUSD, newLiquidationUtilizationWAD: 1.0014306e18 }));
+        _configs.push(SetLiquidationCoverageUtilizationConfig({ chainId: MAINNET, marketName: SNUSD, newLiquidationCoverageUtilizationWAD: 1.0014306e18 }));
         // autoUSD              : 125.00000%
-        _configs.push(SetLiquidationUtilizationConfig({ chainId: MAINNET, marketName: AUTOUSD, newLiquidationUtilizationWAD: 1.25e18 }));
+        _configs.push(SetLiquidationCoverageUtilizationConfig({ chainId: MAINNET, marketName: AUTOUSD, newLiquidationCoverageUtilizationWAD: 1.25e18 }));
         // syrupUSDC            : 133.33333%
-        _configs.push(SetLiquidationUtilizationConfig({ chainId: MAINNET, marketName: SYRUP_USDC, newLiquidationUtilizationWAD: 1.3333333e18 }));
+        _configs.push(SetLiquidationCoverageUtilizationConfig({ chainId: MAINNET, marketName: SYRUP_USDC, newLiquidationCoverageUtilizationWAD: 1.3333333e18 }));
         // stcUSD               : 100.33445%
-        _configs.push(SetLiquidationUtilizationConfig({ chainId: MAINNET, marketName: STCUSD, newLiquidationUtilizationWAD: 1.0033445e18 }));
+        _configs.push(SetLiquidationCoverageUtilizationConfig({ chainId: MAINNET, marketName: STCUSD, newLiquidationCoverageUtilizationWAD: 1.0033445e18 }));
         // ParetoFalconX        : 300.00000%
-        _configs.push(SetLiquidationUtilizationConfig({ chainId: MAINNET, marketName: PARETO_FALCONX, newLiquidationUtilizationWAD: 3.0e18 }));
+        _configs.push(SetLiquidationCoverageUtilizationConfig({ chainId: MAINNET, marketName: PARETO_FALCONX, newLiquidationCoverageUtilizationWAD: 3.0e18 }));
         // apyUSD               : 200.00000%
-        _configs.push(SetLiquidationUtilizationConfig({ chainId: MAINNET, marketName: APYUSD, newLiquidationUtilizationWAD: 2.0e18 }));
+        _configs.push(SetLiquidationCoverageUtilizationConfig({ chainId: MAINNET, marketName: APYUSD, newLiquidationCoverageUtilizationWAD: 2.0e18 }));
         // eEARN                : 101.01010%
-        _configs.push(SetLiquidationUtilizationConfig({ chainId: MAINNET, marketName: eEARN, newLiquidationUtilizationWAD: 1.010101e18 }));
+        _configs.push(SetLiquidationCoverageUtilizationConfig({ chainId: MAINNET, marketName: eEARN, newLiquidationCoverageUtilizationWAD: 1.010101e18 }));
 
         // ── Avalanche ────────────────────────────────────────────────────────
         // savUSD               : 100.05003%
-        // _configs.push(SetLiquidationUtilizationConfig({ chainId: AVALANCHE, marketName: SAVUSD, newLiquidationUtilizationWAD: 1.0005003e18 }));
+        // _configs.push(SetLiquidationCoverageUtilizationConfig({ chainId: AVALANCHE, marketName: SAVUSD, newLiquidationCoverageUtilizationWAD: 1.0005003e18 }));
 
         // ── Arbitrum ─────────────────────────────────────────────────────────
         // sUSDai               : 116.66667%
-        _configs.push(SetLiquidationUtilizationConfig({ chainId: ARBITRUM, marketName: SUSDAI, newLiquidationUtilizationWAD: 1.1666667e18 }));
+        _configs.push(SetLiquidationCoverageUtilizationConfig({ chainId: ARBITRUM, marketName: SUSDAI, newLiquidationCoverageUtilizationWAD: 1.1666667e18 }));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -101,18 +101,18 @@ contract SetLiquidationUtilization is ParameterUpdateBase {
             uint256 idx = 0;
             for (uint256 i = 0; i < _configs.length; i++) {
                 if (_configs[i].chainId != chainId) continue;
-                SetLiquidationUtilizationConfig storage cfg = _configs[i];
+                SetLiquidationCoverageUtilizationConfig storage cfg = _configs[i];
                 MarketAddresses memory addrs = getMarketAddresses(cfg.marketName);
                 updates[idx] = UpdateParams({
                     marketName: cfg.marketName,
                     target: addrs.accountant,
-                    callData: abi.encodeCall(IRoycoAccountant.setLiquidationUtilization, (cfg.newLiquidationUtilizationWAD)),
-                    description: string.concat("Set liquidationUtilizationWAD for ", cfg.marketName, " to ", vm.toString(cfg.newLiquidationUtilizationWAD))
+                    callData: abi.encodeCall(IRoycoAccountant.setLiquidationCoverageUtilization, (cfg.newLiquidationCoverageUtilizationWAD)),
+                    description: string.concat("Set liquidationCoverageUtilizationWAD for ", cfg.marketName, " to ", vm.toString(cfg.newLiquidationCoverageUtilizationWAD))
                 });
                 idx++;
             }
 
-            _processChain(chainId, updates, "accountant", "set_liquidation_utilization", "Set liquidation utilization");
+            _processChain(chainId, updates, "accountant", "set_liquidation_coverageUtilization", "Set liquidation coverageUtilization");
         }
     }
 
@@ -130,7 +130,7 @@ contract SetLiquidationUtilization is ParameterUpdateBase {
             expected := mload(add(cd, 36))
         }
 
-        require(state.liquidationUtilizationWAD == expected, VerificationFailed("liquidationUtilizationWAD mismatch after execution"));
+        require(state.liquidationCoverageUtilizationWAD == expected, VerificationFailed("liquidationCoverageUtilizationWAD mismatch after execution"));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

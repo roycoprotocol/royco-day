@@ -677,7 +677,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
         TRANCHE_UNIT maxSTDepositInitial = ST.maxDeposit(CHARLIE_ADDRESS);
         assertGt(toUint256(maxSTDepositInitial), 0, "Initial maxSTDeposit should be > 0 after JT deposit");
 
-        // Deposit some ST to have utilization (use less than max to leave room)
+        // Deposit some ST to have coverageUtilization (use less than max to leave room)
         uint256 stAmount = toUint256(maxSTDepositInitial) * _stPercentage / 100;
         if (stAmount < _minDepositAmount()) return;
 
@@ -808,12 +808,12 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
     function testFuzz_vaultSharePrice_significantLoss_createsImpermanentLoss(uint256 _jtAmount, uint256 _stPercentage, uint256 _lossPercentage) external {
         // Use smaller bounds to avoid balance issues
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 100);
-        _stPercentage = bound(_stPercentage, 50, 80); // High ST utilization
+        _stPercentage = bound(_stPercentage, 50, 80); // High ST coverageUtilization
         _lossPercentage = bound(_lossPercentage, 25, 35); // Significant but bounded loss
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
 
-        // Deposit ST with high utilization
+        // Deposit ST with high coverageUtilization
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) * _stPercentage / 100;
         // Cap to BOB's available balance (low coverage markets can have maxSTDeposit > initialFunding)

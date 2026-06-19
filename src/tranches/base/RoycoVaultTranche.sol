@@ -8,12 +8,12 @@ import { ERC20PermitUpgradeable } from "../../../lib/openzeppelin-contracts-upgr
 import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoBase } from "../../base/RoycoBase.sol";
-import { IRoycoKernel } from "../../interfaces/IRoycoKernel.sol";
+import { IRoycoDawnKernel } from "../../interfaces/IRoycoDawnKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { WAD_DECIMALS, ZERO_NAV_UNITS } from "../../libraries/Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toNAVUnits, toTrancheUnits, toUint256 } from "../../libraries/Units.sol";
-import { UtilsLib } from "../../libraries/UtilsLib.sol";
+import { DawnUtilsLib } from "../../libraries/DawnUtilsLib.sol";
 
 /**
  * @title RoycoVaultTranche
@@ -73,7 +73,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
         // Deposit the assets into the Royco market and get the fraction of total assets allocated
         (NAV_UNIT valueAllocated, NAV_UNIT effectiveNAVToMintAt) =
-            (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoKernel(KERNEL).stDeposit(_assets) : IRoycoKernel(KERNEL).jtDeposit(_assets));
+            (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoDawnKernel(KERNEL).stDeposit(_assets) : IRoycoDawnKernel(KERNEL).jtDeposit(_assets));
 
         // effectiveNAVToMint at can be zero initially when the tranche is deployed
         require(valueAllocated != ZERO_NAV_UNITS, INVALID_VALUE_ALLOCATED());
@@ -115,8 +115,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // It is expected that the kernel transfers the assets directly to the receiver
         claims =
         (TRANCHE_TYPE() == TrancheType.SENIOR
-                ? IRoycoKernel(KERNEL).stRedeem(_shares, _receiver, false)
-                : IRoycoKernel(KERNEL).jtRedeem(_shares, _receiver, false));
+                ? IRoycoDawnKernel(KERNEL).stRedeem(_shares, _receiver, false)
+                : IRoycoDawnKernel(KERNEL).jtRedeem(_shares, _receiver, false));
 
         // Burn shares after kernel processes redemption (kernel depends on pre-burn total supply)
         _burn(_owner, _shares);
@@ -184,8 +184,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // It is expected that the kernel transfers the assets directly to the receiver
         claims =
         (TRANCHE_TYPE() == TrancheType.SENIOR
-                ? IRoycoKernel(KERNEL).stRedeem(_shares, _receiver, true)
-                : IRoycoKernel(KERNEL).jtRedeem(_shares, _receiver, true));
+                ? IRoycoDawnKernel(KERNEL).stRedeem(_shares, _receiver, true)
+                : IRoycoDawnKernel(KERNEL).jtRedeem(_shares, _receiver, true));
 
         // Burn shares after kernel processes redemption
         // Bypass the balance update hook
@@ -212,7 +212,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     function previewDeposit(TRANCHE_UNIT _assets) external view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
         // Get the state of the tranche before the deposit and the value allocated to the tranche
         (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated) =
-            (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoKernel(KERNEL).stPreviewDeposit(_assets) : IRoycoKernel(KERNEL).jtPreviewDeposit(_assets));
+            (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoDawnKernel(KERNEL).stPreviewDeposit(_assets) : IRoycoDawnKernel(KERNEL).jtPreviewDeposit(_assets));
 
         // Preview the total tranche shares after minting any protocol fee shares post-sync
         NAV_UNIT feeAccrued = TRANCHE_TYPE() == TrancheType.SENIOR ? stateBeforeDeposit.stProtocolFeeAccrued : stateBeforeDeposit.jtProtocolFeeAccrued;
@@ -225,14 +225,14 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @inheritdoc IRoycoVaultTranche
     function previewRedeem(uint256 _shares) external view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
-        claims = (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoKernel(KERNEL).stPreviewRedeem(_shares) : IRoycoKernel(KERNEL).jtPreviewRedeem(_shares));
+        claims = (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoDawnKernel(KERNEL).stPreviewRedeem(_shares) : IRoycoDawnKernel(KERNEL).jtPreviewRedeem(_shares));
     }
 
     /// @inheritdoc IRoycoVaultTranche
     function convertToAssets(uint256 _shares) public view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
         // Get the post-sync tranche state: applying NAV reconciliation.
         (AssetClaims memory trancheClaims, uint256 trancheTotalShares) = _previewPostSyncTrancheState();
-        return UtilsLib.scaleAssetClaims(trancheClaims, _shares, trancheTotalShares);
+        return DawnUtilsLib.scaleAssetClaims(trancheClaims, _shares, trancheTotalShares);
     }
 
     /// @inheritdoc IRoycoVaultTranche
@@ -240,8 +240,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // Get the post-sync tranche state: applying NAV reconciliation.
         NAV_UNIT navAssets =
         (TRANCHE_TYPE() == TrancheType.SENIOR
-                ? IRoycoKernel(KERNEL).stConvertTrancheUnitsToNAVUnits(_assets)
-                : IRoycoKernel(KERNEL).jtConvertTrancheUnitsToNAVUnits(_assets));
+                ? IRoycoDawnKernel(KERNEL).stConvertTrancheUnitsToNAVUnits(_assets)
+                : IRoycoDawnKernel(KERNEL).jtConvertTrancheUnitsToNAVUnits(_assets));
         (AssetClaims memory trancheClaims, uint256 trancheTotalShares) = _previewPostSyncTrancheState();
         shares = _convertToShares(navAssets, trancheTotalShares, trancheClaims.nav, Math.Rounding.Floor);
     }
@@ -277,7 +277,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @inheritdoc IRoycoVaultTranche
     function maxDeposit(address _receiver) external view virtual override(IRoycoVaultTranche) returns (TRANCHE_UNIT assets) {
-        assets = (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoKernel(KERNEL).stMaxDeposit(_receiver) : IRoycoKernel(KERNEL).jtMaxDeposit(_receiver));
+        assets = (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoDawnKernel(KERNEL).stMaxDeposit(_receiver) : IRoycoDawnKernel(KERNEL).jtMaxDeposit(_receiver));
     }
 
     /// @inheritdoc IRoycoVaultTranche
@@ -294,7 +294,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         uint256 sharesOwned = balanceOf(_owner);
         // Get the notional claims and the max withdrawable assets for the tranche
         (NAV_UNIT claimOnStNAV, NAV_UNIT claimOnJtNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalSharesAfterMintingFees) =
-            (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoKernel(KERNEL).stMaxWithdrawable(_owner) : IRoycoKernel(KERNEL).jtMaxWithdrawable(_owner));
+            (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoDawnKernel(KERNEL).stMaxWithdrawable(_owner) : IRoycoDawnKernel(KERNEL).jtMaxWithdrawable(_owner));
 
         // We do not allow redemptions if the tranche has no claims on the assets
         if (claimOnStNAV + claimOnJtNAV == ZERO_NAV_UNITS) return 0;
@@ -314,12 +314,12 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @inheritdoc IRoycoVaultTranche
     function totalAssets() external view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
-        (, claims,) = IRoycoKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
+        (, claims,) = IRoycoDawnKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
     }
 
     /// @inheritdoc IRoycoVaultTranche
     function getRawNAV() external view virtual override(IRoycoVaultTranche) returns (NAV_UNIT nav) {
-        (SyncedAccountingState memory state,,) = IRoycoKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
+        (SyncedAccountingState memory state,,) = IRoycoDawnKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
         nav = TRANCHE_TYPE() == TrancheType.SENIOR ? state.stRawNAV : state.jtRawNAV;
     }
 
@@ -348,7 +348,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
      * @return trancheTotalShares The total supply of tranche shares (including marginally minted fee shares)
      */
     function _previewPostSyncTrancheState() internal view returns (AssetClaims memory trancheClaims, uint256 trancheTotalShares) {
-        (, trancheClaims, trancheTotalShares) = IRoycoKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
+        (, trancheClaims, trancheTotalShares) = IRoycoDawnKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
     }
 
     /**
@@ -373,7 +373,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     /// @inheritdoc ERC20PausableUpgradeable
     function _update(address _from, address _to, uint256 _value) internal override(ERC20PausableUpgradeable, ERC20Upgradeable) whenNotPaused {
         // Call the kernel pre-balance update hook to assert that the balance update is valid
-        IRoycoKernel(KERNEL).preTrancheBalanceUpdateHook(msg.sender, _from, _to, _value);
+        IRoycoDawnKernel(KERNEL).preTrancheBalanceUpdateHook(msg.sender, _from, _to, _value);
 
         // Call the parent contract update function to update the balance
         // NOTE: This will execute even if the tranche is in a paused state

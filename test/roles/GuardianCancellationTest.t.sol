@@ -61,9 +61,9 @@ contract GuardianCancellationTest is BaseTest {
 
         // Build YDM params (AdaptiveCurve_V2)
         DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
-            jtYieldShareAtZeroUtilWAD: 0.225e18, // Y_0 = Y_T (same as target)
-            jtYieldShareAtTargetUtilWAD: 0.225e18,
-            jtYieldShareAtFullUtilWAD: 1e18,
+            yieldShareAtZeroUtilWAD: 0.225e18, // Y_0 = Y_T (same as target)
+            yieldShareAtTargetUtilWAD: 0.225e18,
+            yieldShareAtFullUtilWAD: 1e18,
             maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
         });
 
@@ -89,9 +89,9 @@ contract GuardianCancellationTest is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            coverageWAD: COVERAGE_WAD,
+            minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
+            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(ydmParams),
@@ -189,10 +189,10 @@ contract GuardianCancellationTest is BaseTest {
         FACTORY.execute(address(ACCOUNTANT), data);
     }
 
-    /// @notice Test that guardian can cancel a scheduled accountant admin operation (setLiquidationUtilization)
-    function test_guardian_canCancelAccountantAdminSetLiquidationUtilization() public {
-        uint256 newLiquidationUtilization = 5e18;
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setLiquidationUtilization, (newLiquidationUtilization));
+    /// @notice Test that guardian can cancel a scheduled accountant admin operation (setLiquidationCoverageUtilization)
+    function test_guardian_canCancelAccountantAdminSetLiquidationCoverageUtilization() public {
+        uint256 newLiquidationCoverageUtilization = 5e18;
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setLiquidationCoverageUtilization, (newLiquidationCoverageUtilization));
 
         // Schedule the operation as accountant admin
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
@@ -429,8 +429,8 @@ contract GuardianCancellationTest is BaseTest {
     function test_role_accountantAdmin_canSetCoverageConfiguration() public {
         uint64 newCoverage = 0.3e18;
         uint96 newBeta = 0.5e18;
-        uint256 newLiquidationUtilization = 3e18;
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverageConfiguration, (newCoverage, newBeta, newLiquidationUtilization));
+        uint256 newLiquidationCoverageUtilization = 3e18;
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverageConfiguration, (newCoverage, newBeta, newLiquidationCoverageUtilization));
 
         // Schedule as accountant admin
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
@@ -448,8 +448,8 @@ contract GuardianCancellationTest is BaseTest {
     function test_role_nonAccountantAdmin_cannotSetCoverageConfiguration() public {
         uint64 newCoverage = 0.3e18;
         uint96 newBeta = 0.5e18;
-        uint256 newLiquidationUtilization = 3e18;
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverageConfiguration, (newCoverage, newBeta, newLiquidationUtilization));
+        uint256 newLiquidationCoverageUtilization = 3e18;
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverageConfiguration, (newCoverage, newBeta, newLiquidationCoverageUtilization));
 
         vm.prank(address(0xBAD));
         vm.expectRevert();

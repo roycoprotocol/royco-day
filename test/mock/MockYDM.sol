@@ -15,11 +15,11 @@ contract MockYDMOverWAD {
         yieldShareToReturn = _yieldShare;
     }
 
-    function previewJTYieldShare(MarketState, NAV_UNIT, NAV_UNIT, uint256, uint256, NAV_UNIT) external view returns (uint256) {
+    function previewYieldShare(MarketState, NAV_UNIT, NAV_UNIT, uint256, uint256, NAV_UNIT) external view returns (uint256) {
         return yieldShareToReturn;
     }
 
-    function jtYieldShare(MarketState, NAV_UNIT, NAV_UNIT, uint256, uint256, NAV_UNIT) external view returns (uint256) {
+    function yieldShare(MarketState, NAV_UNIT, NAV_UNIT, uint256, uint256, NAV_UNIT) external view returns (uint256) {
         return yieldShareToReturn;
     }
 }
@@ -35,11 +35,11 @@ contract MockYDMWithInit {
         initialized = true;
     }
 
-    function previewJTYieldShare(MarketState, NAV_UNIT, NAV_UNIT, uint256, uint256, NAV_UNIT) external pure returns (uint256) {
+    function previewYieldShare(MarketState, NAV_UNIT, NAV_UNIT, uint256, uint256, NAV_UNIT) external pure returns (uint256) {
         return 0.5e18;
     }
 
-    function jtYieldShare(MarketState, NAV_UNIT, NAV_UNIT, uint256, uint256, NAV_UNIT) external pure returns (uint256) {
+    function yieldShare(MarketState, NAV_UNIT, NAV_UNIT, uint256, uint256, NAV_UNIT) external pure returns (uint256) {
         return 0.5e18;
     }
 }

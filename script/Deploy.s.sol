@@ -7,7 +7,7 @@ import { RolesConfiguration, RoycoFactory } from "../src/factory/RoycoFactory.so
 import { IRoycoAccountant } from "../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoAuth } from "../src/interfaces/IRoycoAuth.sol";
 import { IRoycoFactory } from "../src/interfaces/IRoycoFactory.sol";
-import { IRoycoKernel } from "../src/interfaces/IRoycoKernel.sol";
+import { IRoycoDawnKernel } from "../src/interfaces/IRoycoDawnKernel.sol";
 import { IRoycoVaultTranche } from "../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../src/interfaces/IYDM.sol";
 import { Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel } from "../src/kernels/Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel.sol";
@@ -141,22 +141,22 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
 
     /// @notice Deployment parameters for StaticCurveYDM
     struct StaticCurveYDMParams {
-        uint64 jtYieldShareAtZeroUtilWAD;
-        uint64 jtYieldShareAtTargetUtilWAD;
-        uint64 jtYieldShareAtFullUtilWAD;
+        uint64 yieldShareAtZeroUtilWAD;
+        uint64 yieldShareAtTargetUtilWAD;
+        uint64 yieldShareAtFullUtilWAD;
     }
 
     /// @notice Deployment parameters for AdaptiveCurveYDM_V1
     struct AdaptiveCurveYDM_V1_Params {
-        uint64 jtYieldShareAtTargetUtilWAD;
-        uint64 jtYieldShareAtFullUtilWAD;
+        uint64 yieldShareAtTargetUtilWAD;
+        uint64 yieldShareAtFullUtilWAD;
     }
 
     /// @notice Deployment parameters for AdaptiveCurveYDM_V2
     struct AdaptiveCurveYDM_V2_Params {
-        uint64 jtYieldShareAtZeroUtilWAD;
-        uint64 jtYieldShareAtTargetUtilWAD;
-        uint64 jtYieldShareAtFullUtilWAD;
+        uint64 yieldShareAtZeroUtilWAD;
+        uint64 yieldShareAtTargetUtilWAD;
+        uint64 yieldShareAtFullUtilWAD;
         uint64 maxAdaptationSpeedWAD;
     }
 
@@ -171,7 +171,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         IRoycoVaultTranche seniorTranche;
         IRoycoVaultTranche juniorTranche;
         IRoycoAccountant accountant;
-        IRoycoKernel kernel;
+        IRoycoDawnKernel kernel;
     }
 
     /// @notice Addresses for role assignments
@@ -291,9 +291,9 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         console2.log("--- Accountant Config ---");
         console2.log("ST Protocol Fee (WAD):", uint256(_config.stProtocolFeeWAD));
         console2.log("JT Protocol Fee (WAD):", uint256(_config.jtProtocolFeeWAD));
-        console2.log("Coverage (WAD):", uint256(_config.coverageWAD));
+        console2.log("Coverage (WAD):", uint256(_config.minCoverageWAD));
         console2.log("Beta (WAD):", uint256(_config.betaWAD));
-        console2.log("Liquidation Utilization (WAD):", uint256(_config.liquidationUtilizationWAD));
+        console2.log("Liquidation CoverageUtilization (WAD):", uint256(_config.liquidationCoverageUtilizationWAD));
         console2.log("Fixed Term Duration (seconds):", uint256(_config.fixedTermDurationSeconds));
         console2.log("");
 
@@ -462,7 +462,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         bytes4[] memory selectors = new bytes4[](11);
         uint64[] memory roleValues = new uint64[](11);
 
-        selectors[0] = IRoycoKernel.setProtocolFeeRecipient.selector;
+        selectors[0] = IRoycoDawnKernel.setProtocolFeeRecipient.selector;
         roleValues[0] = ADMIN_KERNEL_ROLE;
         selectors[1] = IRoycoAuth.pause.selector;
         roleValues[1] = ADMIN_PAUSER_ROLE;
@@ -474,22 +474,22 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         roleValues[4] = ADMIN_ORACLE_QUOTER_ROLE;
         selectors[5] = UUPSUpgradeable.upgradeToAndCall.selector;
         roleValues[5] = ADMIN_UPGRADER_ROLE;
-        selectors[6] = IRoycoKernel.syncTrancheAccounting.selector;
+        selectors[6] = IRoycoDawnKernel.syncTrancheAccounting.selector;
         roleValues[6] = SYNC_ROLE;
-        selectors[7] = IRoycoKernel.setSeniorTrancheSelfLiquidationBonus.selector;
+        selectors[7] = IRoycoDawnKernel.setSeniorTrancheSelfLiquidationBonus.selector;
         roleValues[7] = ADMIN_KERNEL_ROLE;
-        selectors[8] = IRoycoKernel.blacklistAccounts.selector;
+        selectors[8] = IRoycoDawnKernel.blacklistAccounts.selector;
         roleValues[8] = TRANSFER_AGENT_ROLE;
-        selectors[9] = IRoycoKernel.unblacklistAccounts.selector;
+        selectors[9] = IRoycoDawnKernel.unblacklistAccounts.selector;
         roleValues[9] = TRANSFER_AGENT_ROLE;
-        selectors[10] = IRoycoKernel.setBlacklistStatus.selector;
+        selectors[10] = IRoycoDawnKernel.setBlacklistStatus.selector;
         roleValues[10] = TRANSFER_AGENT_ROLE;
 
         return IRoycoFactory.RolesTargetConfiguration({ target: _kernel, selectors: selectors, roles: roleValues });
     }
 
     /// @notice Builds selector-to-role mappings for the accountant contract.
-    /// @dev Maps setYDM/setCoverage/setBeta/setLiquidationUtilization/setFixedTermDuration/dust tolerances/coverage config
+    /// @dev Maps setYDM/setCoverage/setBeta/setLiquidationCoverageUtilization/setFixedTermDuration/dust tolerances/coverage config
     ///      to ADMIN_ACCOUNTANT_ROLE, fee setters to ADMIN_PROTOCOL_FEE_SETTER_ROLE, and shared
     ///      pause/unpause/upgrade to their respective roles.
     /// @param _accountant The address of the accountant contract
@@ -508,7 +508,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         roleValues[3] = ADMIN_ACCOUNTANT_ROLE;
         selectors[4] = IRoycoAccountant.setBeta.selector;
         roleValues[4] = ADMIN_ACCOUNTANT_ROLE;
-        selectors[5] = IRoycoAccountant.setLiquidationUtilization.selector;
+        selectors[5] = IRoycoAccountant.setLiquidationCoverageUtilization.selector;
         roleValues[5] = ADMIN_ACCOUNTANT_ROLE;
         selectors[6] = IRoycoAccountant.setFixedTermDuration.selector;
         roleValues[6] = ADMIN_ACCOUNTANT_ROLE;
@@ -740,7 +740,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
             juniorTrancheSymbol: _config.juniorTrancheSymbol,
             seniorTrancheImplementation: IRoycoVaultTranche(address(stImpl)),
             juniorTrancheImplementation: IRoycoVaultTranche(address(jtImpl)),
-            kernelImplementation: IRoycoKernel(address(kernelImpl)),
+            kernelImplementation: IRoycoDawnKernel(address(kernelImpl)),
             accountantImplementation: IRoycoAccountant(address(accountantImpl)),
             seniorTrancheInitializationData: seniorTrancheInitializationData,
             juniorTrancheInitializationData: juniorTrancheInitializationData,
@@ -964,7 +964,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         internal
         returns (address)
     {
-        IRoycoKernel.RoycoKernelConstructionParams memory cp = IRoycoKernel.RoycoKernelConstructionParams({
+        IRoycoDawnKernel.RoycoDawnKernelConstructionParams memory cp = IRoycoDawnKernel.RoycoDawnKernelConstructionParams({
             seniorTranche: _expectedSeniorTrancheAddress,
             stAsset: _seniorAsset,
             juniorTranche: _expectedJuniorTrancheAddress,
@@ -994,7 +994,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
     function _buildKernelCreationCode(
         KernelType _kernelType,
         bytes memory _kernelSpecificParams,
-        IRoycoKernel.RoycoKernelConstructionParams memory _cp
+        IRoycoDawnKernel.RoycoDawnKernelConstructionParams memory _cp
     )
         private
         pure
@@ -1053,7 +1053,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         pure
         returns (bytes memory)
     {
-        IRoycoKernel.RoycoKernelInitParams memory kernelParams = IRoycoKernel.RoycoKernelInitParams({
+        IRoycoDawnKernel.RoycoDawnKernelInitParams memory kernelParams = IRoycoDawnKernel.RoycoDawnKernelInitParams({
             initialAuthority: _factoryAddress, protocolFeeRecipient: _protocolFeeRecipient, stSelfLiquidationBonusWAD: _stSelfLiquidationBonusWAD
         });
 
@@ -1146,20 +1146,20 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
             StaticCurveYDMParams memory ydmParams = abi.decode(_ydmSpecificParams, (StaticCurveYDMParams));
             ydmInitializationData = abi.encodeCall(
                 StaticCurveYDM.initializeYDMForMarket,
-                (ydmParams.jtYieldShareAtZeroUtilWAD, ydmParams.jtYieldShareAtTargetUtilWAD, ydmParams.jtYieldShareAtFullUtilWAD)
+                (ydmParams.yieldShareAtZeroUtilWAD, ydmParams.yieldShareAtTargetUtilWAD, ydmParams.yieldShareAtFullUtilWAD)
             );
         } else if (_ydmType == YDMType.AdaptiveCurve_V1) {
             AdaptiveCurveYDM_V1_Params memory ydmParams = abi.decode(_ydmSpecificParams, (AdaptiveCurveYDM_V1_Params));
             ydmInitializationData =
-                abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (ydmParams.jtYieldShareAtTargetUtilWAD, ydmParams.jtYieldShareAtFullUtilWAD));
+                abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (ydmParams.yieldShareAtTargetUtilWAD, ydmParams.yieldShareAtFullUtilWAD));
         } else if (_ydmType == YDMType.AdaptiveCurve_V2) {
             AdaptiveCurveYDM_V2_Params memory ydmParams = abi.decode(_ydmSpecificParams, (AdaptiveCurveYDM_V2_Params));
             ydmInitializationData = abi.encodeCall(
                 AdaptiveCurveYDM_V2.initializeYDMForMarket,
                 (
-                    ydmParams.jtYieldShareAtZeroUtilWAD,
-                    ydmParams.jtYieldShareAtTargetUtilWAD,
-                    ydmParams.jtYieldShareAtFullUtilWAD,
+                    ydmParams.yieldShareAtZeroUtilWAD,
+                    ydmParams.yieldShareAtTargetUtilWAD,
+                    ydmParams.yieldShareAtFullUtilWAD,
                     ydmParams.maxAdaptationSpeedWAD
                 )
             );
@@ -1183,12 +1183,12 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
             stProtocolFeeWAD: _config.stProtocolFeeWAD,
             jtProtocolFeeWAD: _config.jtProtocolFeeWAD,
             yieldShareProtocolFeeWAD: _config.jtYieldShareProtocolFeeWAD,
-            coverageWAD: _config.coverageWAD,
+            minCoverageWAD: _config.minCoverageWAD,
             betaWAD: _config.betaWAD,
             ydm: _ydmAddress,
             ydmInitializationData: _buildYDMInitializationData(_config.ydmType, _config.ydmSpecificParams),
             fixedTermDurationSeconds: _config.fixedTermDurationSeconds,
-            liquidationUtilizationWAD: _config.liquidationUtilizationWAD,
+            liquidationCoverageUtilizationWAD: _config.liquidationCoverageUtilizationWAD,
             stNAVDustTolerance: toNAVUnits(_config.stDustTolerance),
             jtNAVDustTolerance: toNAVUnits(_config.jtDustTolerance)
         });

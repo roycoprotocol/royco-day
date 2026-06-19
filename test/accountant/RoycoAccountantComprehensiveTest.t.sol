@@ -10,7 +10,7 @@ import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { MAX_PROTOCOL_FEE_WAD, MIN_COVERAGE_WAD, WAD, ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
 import { MarketState, SyncedAccountingState } from "../../src/libraries/Types.sol";
 import { NAV_UNIT, UnitsMathLib, toUint256 } from "../../src/libraries/Units.sol";
-import { UtilsLib } from "../../src/libraries/UtilsLib.sol";
+import { DawnUtilsLib } from "../../src/libraries/DawnUtilsLib.sol";
 import { AdaptiveCurveYDM_V1 } from "../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { BaseTest } from "../base/BaseTest.t.sol";
 import { MockYDMOverWAD, MockYDMWithInit } from "../mock/MockYDM.sol";
@@ -83,7 +83,7 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
             FIXED_TERM_DURATION_SECONDS,
             DUST_TOLERANCE,
             DUST_TOLERANCE,
-            LIQUIDATION_UTILIZATION_WAD,
+            LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             YDM_JT_YIELD_AT_TARGET,
             YDM_JT_YIELD_AT_FULL
         );
@@ -94,13 +94,13 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
         /* kernel */
         uint64 stProtocolFeeWAD,
         uint64 jtProtocolFeeWAD,
-        uint64 coverageWAD,
+        uint64 minCoverageWAD,
         uint96 betaWAD,
         address ydm,
         uint24 fixedTermDuration,
         NAV_UNIT stNAVDustTolerance,
         NAV_UNIT jtNAVDustTolerance,
-        uint256 liquidationUtilizationWAD,
+        uint256 liquidationCoverageUtilizationWAD,
         uint64 jtYieldAtTarget,
         uint64 jtYieldAtFull
     )
@@ -113,12 +113,12 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
             stProtocolFeeWAD: stProtocolFeeWAD,
             jtProtocolFeeWAD: jtProtocolFeeWAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: coverageWAD,
+            minCoverageWAD: minCoverageWAD,
             betaWAD: betaWAD,
             ydm: ydm,
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: fixedTermDuration,
-            liquidationUtilizationWAD: liquidationUtilizationWAD,
+            liquidationCoverageUtilizationWAD: liquidationCoverageUtilizationWAD,
             stNAVDustTolerance: stNAVDustTolerance,
             jtNAVDustTolerance: jtNAVDustTolerance
         });
@@ -510,7 +510,7 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
             0, // Zero duration
             DUST_TOLERANCE,
             DUST_TOLERANCE,
-            LIQUIDATION_UTILIZATION_WAD,
+            LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             YDM_JT_YIELD_AT_TARGET,
             YDM_JT_YIELD_AT_FULL
         );
@@ -771,7 +771,7 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
             FIXED_TERM_DURATION_SECONDS,
             DUST_TOLERANCE,
             DUST_TOLERANCE,
-            LIQUIDATION_UTILIZATION_WAD,
+            LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             YDM_JT_YIELD_AT_TARGET,
             YDM_JT_YIELD_AT_FULL
         );
@@ -786,9 +786,9 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
 
     /// @notice Test beta = 1 (JT in same opportunity as ST, full sensitivity)
     function test_beta_one() public {
-        // For beta=1 configuration, liquidationUtilization must be > WAD (100%)
+        // For beta=1 configuration, liquidationCoverageUtilization must be > WAD (100%)
         // Using 2e18 (200%) as a valid threshold
-        uint256 liquidationUtilizationForBeta1 = 2e18;
+        uint256 liquidationCoverageUtilizationForBeta1 = 2e18;
 
         IRoycoAccountant oneBetaAccountant = _deployAccountant(
             MOCK_KERNEL,
@@ -800,7 +800,7 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
             FIXED_TERM_DURATION_SECONDS,
             DUST_TOLERANCE,
             DUST_TOLERANCE,
-            liquidationUtilizationForBeta1,
+            liquidationCoverageUtilizationForBeta1,
             YDM_JT_YIELD_AT_TARGET,
             YDM_JT_YIELD_AT_FULL
         );
@@ -956,11 +956,11 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
     }
 
     /// @notice INVARIANT: JT yield share capped at 100%
-    function testFuzz_invariant_jtYieldShareCapped(uint256 stGain, uint256 timeElapsed) public {
+    function testFuzz_invariant_yieldShareCapped(uint256 stGain, uint256 timeElapsed) public {
         stGain = bound(stGain, 1e18, MAX_NAV / 4);
         timeElapsed = bound(timeElapsed, 1, 365 days);
 
-        _initializeAccountantState(10e18, 200e18); // Low ST, high JT for high utilization
+        _initializeAccountantState(10e18, 200e18); // Low ST, high JT for high coverageUtilization
         vm.warp(vm.getBlockTimestamp() + timeElapsed);
 
         uint256 jtEffBefore = toUint256(accountant.getState().lastJTEffectiveNAV);
@@ -1142,20 +1142,20 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
         assertTrue(toUint256(state.jtImpermanentLoss) >= 0, "jtCoverageIL non-negative");
     }
 
-    function _computeMaxInitialLTV(uint64 coverageWAD, uint96 betaWAD) internal pure returns (uint256) {
-        uint256 betaCov = uint256(coverageWAD).mulDiv(betaWAD, WAD, Math.Rounding.Floor);
+    function _computeMaxInitialLTV(uint64 minCoverageWAD, uint96 betaWAD) internal pure returns (uint256) {
+        uint256 betaCov = uint256(minCoverageWAD).mulDiv(betaWAD, WAD, Math.Rounding.Floor);
         uint256 numerator = WAD - betaCov;
-        uint256 denominator = WAD + coverageWAD - betaCov;
+        uint256 denominator = WAD + minCoverageWAD - betaCov;
         return numerator.mulDiv(WAD, denominator, Math.Rounding.Ceil);
     }
 
     function _assertConfigFields(SyncedAccountingState memory state) internal view {
         IRoycoAccountant.RoycoAccountantState memory accountantState = accountant.getState();
 
-        // Verify utilization is computed correctly
+        // Verify coverageUtilization is computed correctly
         uint256 expectedUtil =
-            UtilsLib.computeUtilization(state.stRawNAV, state.jtRawNAV, accountantState.betaWAD, accountantState.coverageWAD, state.jtEffectiveNAV);
-        assertEq(state.utilizationWAD, expectedUtil, "utilizationWAD mismatch");
+            DawnUtilsLib.computeCoverageUtilization(state.stRawNAV, state.jtRawNAV, accountantState.betaWAD, accountantState.minCoverageWAD, state.jtEffectiveNAV);
+        assertEq(state.coverageUtilizationWAD, expectedUtil, "coverageUtilizationWAD mismatch");
 
         // Verify fixed term end timestamp based on market state
         if (state.marketState == MarketState.PERPETUAL) {
@@ -1199,7 +1199,7 @@ contract RoycoAccountantRevertTest is BaseTest {
             FIXED_TERM_DURATION_SECONDS,
             DUST_TOLERANCE,
             DUST_TOLERANCE,
-            LIQUIDATION_UTILIZATION_WAD
+            LIQUIDATION_COVERAGE_UTILIZATION_WAD
         );
     }
 
@@ -1208,13 +1208,13 @@ contract RoycoAccountantRevertTest is BaseTest {
         /* kernel */
         uint64 stProtocolFeeWAD,
         uint64 jtProtocolFeeWAD,
-        uint64 coverageWAD,
+        uint64 minCoverageWAD,
         uint96 betaWAD,
         address ydm,
         uint24 fixedTermDuration,
         NAV_UNIT stNAVDustTolerance,
         NAV_UNIT jtNAVDustTolerance,
-        uint256 liquidationUtilizationWAD
+        uint256 liquidationCoverageUtilizationWAD
     )
         internal
         returns (IRoycoAccountant)
@@ -1225,12 +1225,12 @@ contract RoycoAccountantRevertTest is BaseTest {
             stProtocolFeeWAD: stProtocolFeeWAD,
             jtProtocolFeeWAD: jtProtocolFeeWAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: coverageWAD,
+            minCoverageWAD: minCoverageWAD,
             betaWAD: betaWAD,
             ydm: ydm,
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: fixedTermDuration,
-            liquidationUtilizationWAD: liquidationUtilizationWAD,
+            liquidationCoverageUtilizationWAD: liquidationCoverageUtilizationWAD,
             stNAVDustTolerance: stNAVDustTolerance,
             jtNAVDustTolerance: jtNAVDustTolerance
         });
@@ -1245,13 +1245,13 @@ contract RoycoAccountantRevertTest is BaseTest {
     }
 
     // =========================================================================
-    // ONLY_ROYCO_KERNEL REVERT TESTS
+    // ONLY_ROYCO_DAWN_KERNEL REVERT TESTS
     // =========================================================================
 
     /// @notice Test syncTrancheAccounting reverts when called by non-kernel
     function test_revert_preOpSync_onlyKernel() public {
         vm.prank(NON_KERNEL);
-        vm.expectRevert(IRoycoAccountant.ONLY_ROYCO_KERNEL.selector);
+        vm.expectRevert(IRoycoAccountant.ONLY_ROYCO_DAWN_KERNEL.selector);
         accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
     }
 
@@ -1263,7 +1263,7 @@ contract RoycoAccountantRevertTest is BaseTest {
 
         // Then try to call postOpSync as non-kernel
         vm.prank(NON_KERNEL);
-        vm.expectRevert(IRoycoAccountant.ONLY_ROYCO_KERNEL.selector);
+        vm.expectRevert(IRoycoAccountant.ONLY_ROYCO_DAWN_KERNEL.selector);
         accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
     }
 
@@ -1273,7 +1273,7 @@ contract RoycoAccountantRevertTest is BaseTest {
         accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
 
         vm.prank(NON_KERNEL);
-        vm.expectRevert(IRoycoAccountant.ONLY_ROYCO_KERNEL.selector);
+        vm.expectRevert(IRoycoAccountant.ONLY_ROYCO_DAWN_KERNEL.selector);
         accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(100e18), _nav(50e18));
     }
 
@@ -1380,12 +1380,12 @@ contract RoycoAccountantRevertTest is BaseTest {
             stProtocolFeeWAD: uint64(MAX_PROTOCOL_FEE_WAD + 1), // Exceeds max
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: COVERAGE_WAD,
+            minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
+            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -1403,12 +1403,12 @@ contract RoycoAccountantRevertTest is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: uint64(MAX_PROTOCOL_FEE_WAD + 1), // Exceeds max
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: COVERAGE_WAD,
+            minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
+            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -1426,12 +1426,12 @@ contract RoycoAccountantRevertTest is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: uint64(MIN_COVERAGE_WAD - 1), // Below min
+            minCoverageWAD: uint64(MIN_COVERAGE_WAD - 1), // Below min
             betaWAD: BETA_WAD,
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
+            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -1449,12 +1449,12 @@ contract RoycoAccountantRevertTest is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: uint64(WAD), // >= WAD
+            minCoverageWAD: uint64(WAD), // >= WAD
             betaWAD: BETA_WAD,
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
+            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -1472,12 +1472,12 @@ contract RoycoAccountantRevertTest is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: COVERAGE_WAD,
+            minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
             ydm: address(0), // Null YDM
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
+            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -1501,12 +1501,12 @@ contract RoycoAccountantRevertTest is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: COVERAGE_WAD,
+            minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationUtilizationWAD: uint64(maxLTV), // LLTV <= maxLTV is invalid
+            liquidationCoverageUtilizationWAD: uint64(maxLTV), // LLTV <= maxLTV is invalid
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -1524,12 +1524,12 @@ contract RoycoAccountantRevertTest is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: COVERAGE_WAD,
+            minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationUtilizationWAD: uint64(WAD), // LLTV >= WAD is invalid
+            liquidationCoverageUtilizationWAD: uint64(WAD), // LLTV >= WAD is invalid
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -1548,12 +1548,12 @@ contract RoycoAccountantRevertTest is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: 0.9e18,
+            minCoverageWAD: 0.9e18,
             betaWAD: 1.2e18, // coverage * beta >= WAD
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
+            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -1574,7 +1574,7 @@ contract RoycoAccountantRevertTest is BaseTest {
         jtNav = bound(jtNav, 1e6, 1e30);
 
         vm.prank(caller);
-        vm.expectRevert(IRoycoAccountant.ONLY_ROYCO_KERNEL.selector);
+        vm.expectRevert(IRoycoAccountant.ONLY_ROYCO_DAWN_KERNEL.selector);
         accountant.preOpSyncTrancheAccounting(_nav(stNav), _nav(jtNav));
     }
 
@@ -1635,12 +1635,12 @@ contract RoycoAccountantInvariantTest is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: COVERAGE_WAD,
+            minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
+            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -1732,7 +1732,7 @@ contract RoycoAccountantInvariantTest is BaseTest {
         }
 
         // If LTV >= LLTV OR ST IL > 0, market must be in PERPETUAL state
-        if (ltvWAD >= LIQUIDATION_UTILIZATION_WAD || stIL > 0) {
+        if (ltvWAD >= LIQUIDATION_COVERAGE_UTILIZATION_WAD || stIL > 0) {
             assertEq(
                 uint8(state.lastMarketState),
                 uint8(MarketState.PERPETUAL),
@@ -1742,7 +1742,7 @@ contract RoycoAccountantInvariantTest is BaseTest {
 
         // If in FIXED_TERM, must have JT coverage IL and LTV < LLTV and no ST IL
         if (state.lastMarketState == MarketState.FIXED_TERM) {
-            assertLt(ltvWAD, LIQUIDATION_UTILIZATION_WAD, "INVARIANT VIOLATED: FIXED_TERM with LTV >= LLTV after preOpSync");
+            assertLt(ltvWAD, LIQUIDATION_COVERAGE_UTILIZATION_WAD, "INVARIANT VIOLATED: FIXED_TERM with LTV >= LLTV after preOpSync");
             assertEq(stIL, 0, "INVARIANT VIOLATED: FIXED_TERM with ST IL > 0 after preOpSync");
             assertGt(toUint256(state.lastJTImpermanentLoss), 0, "INVARIANT VIOLATED: FIXED_TERM without JT coverage IL after preOpSync");
         }
@@ -1898,7 +1898,7 @@ contract AccountantHandler is BaseTest {
  * @notice Tests that if LLTV wasn't breached in preOpSync, it cannot be breached in postOpSync
  * @dev Key invariant: PostOpSync cannot breach LLTV because:
  *      1. PostOpSync doesn't process PnL (no external gains/losses that could cause IL)
- *      2. ST deposits enforce coverage (utilization <= 1 implies LTV < LLTV)
+ *      2. ST deposits enforce coverage (coverageUtilization <= 1 implies LTV < LLTV)
  *      3. JT deposits increase JT effective NAV (decreases LTV)
  *      4. ST withdrawals decrease both numerator and denominator proportionally
  *      5. JT withdrawals enforce coverage
@@ -1930,12 +1930,12 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: COVERAGE_WAD,
+            minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
+            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -1988,7 +1988,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
             _computeLTV(toUint256(preOpState.lastSTEffectiveNAV), toUint256(preOpState.lastSTImpermanentLoss), toUint256(preOpState.lastJTEffectiveNAV));
 
         // Verify preOp didn't breach LLTV
-        if (preOpLTV >= LIQUIDATION_UTILIZATION_WAD) {
+        if (preOpLTV >= LIQUIDATION_COVERAGE_UTILIZATION_WAD) {
             // Skip test if preOp already breached (this is expected for some inputs)
             return;
         }
@@ -2004,7 +2004,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
 
             // INVARIANT: Post-op LTV should not breach LLTV
             // Note: LTV may increase but should stay below LLTV
-            assertLt(postOpLTV, LIQUIDATION_UTILIZATION_WAD, "LLTV breached after ST deposit when preOp was safe");
+            assertLt(postOpLTV, LIQUIDATION_COVERAGE_UTILIZATION_WAD, "LLTV breached after ST deposit when preOp was safe");
         } catch {
             // Revert is acceptable - coverage check may have failed, which is correct behavior
         }
@@ -2046,7 +2046,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
         uint256 preOpLTV =
             _computeLTV(toUint256(preOpState.lastSTEffectiveNAV), toUint256(preOpState.lastSTImpermanentLoss), toUint256(preOpState.lastJTEffectiveNAV));
 
-        if (preOpLTV >= LIQUIDATION_UTILIZATION_WAD) {
+        if (preOpLTV >= LIQUIDATION_COVERAGE_UTILIZATION_WAD) {
             return; // Skip if already breached
         }
 
@@ -2059,7 +2059,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
                 _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.stImpermanentLoss), toUint256(postOpState.jtEffectiveNAV));
 
             // INVARIANT: Post-op LTV should not breach LLTV
-            assertLt(postOpLTV, LIQUIDATION_UTILIZATION_WAD, "LLTV breached after ST withdrawal when preOp was safe");
+            assertLt(postOpLTV, LIQUIDATION_COVERAGE_UTILIZATION_WAD, "LLTV breached after ST withdrawal when preOp was safe");
         } catch {
             // Revert is acceptable for invalid states
         }
@@ -2077,7 +2077,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
         uint256 preOpLTV =
             _computeLTV(toUint256(preOpState.lastSTEffectiveNAV), toUint256(preOpState.lastSTImpermanentLoss), toUint256(preOpState.lastJTEffectiveNAV));
 
-        if (preOpLTV >= LIQUIDATION_UTILIZATION_WAD) {
+        if (preOpLTV >= LIQUIDATION_COVERAGE_UTILIZATION_WAD) {
             return;
         }
 
@@ -2090,7 +2090,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
                 _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.stImpermanentLoss), toUint256(postOpState.jtEffectiveNAV));
 
             // INVARIANT: If coverage passed, LTV should be below LLTV
-            assertLt(postOpLTV, LIQUIDATION_UTILIZATION_WAD, "LLTV breached after JT withdrawal with coverage enforcement");
+            assertLt(postOpLTV, LIQUIDATION_COVERAGE_UTILIZATION_WAD, "LLTV breached after JT withdrawal with coverage enforcement");
         } catch {
             // Coverage check failed - this is correct behavior
         }
@@ -2121,7 +2121,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
             uint256 preOpLTV = _computeLTV(toUint256(preOpState.stEffectiveNAV), toUint256(preOpState.stImpermanentLoss), toUint256(preOpState.jtEffectiveNAV));
 
             // If preOp already breached LLTV, market should be PERPETUAL
-            if (preOpLTV >= LIQUIDATION_UTILIZATION_WAD) {
+            if (preOpLTV >= LIQUIDATION_COVERAGE_UTILIZATION_WAD) {
                 assertEq(uint8(preOpState.marketState), uint8(MarketState.PERPETUAL), "Should be perpetual when LLTV breached");
                 return;
             }
@@ -2135,7 +2135,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
                     _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.stImpermanentLoss), toUint256(postOpState.jtEffectiveNAV));
 
                 // INVARIANT: If both preOp and postOp succeeded without LLTV breach, LTV stays safe
-                assertLt(postOpLTV, LIQUIDATION_UTILIZATION_WAD, "LLTV breached in post-op after safe pre-op");
+                assertLt(postOpLTV, LIQUIDATION_COVERAGE_UTILIZATION_WAD, "LLTV breached in post-op after safe pre-op");
             } catch {
                 // Coverage check failed - acceptable
             }
@@ -2159,7 +2159,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
             // Check LTV after ST deposit
             IRoycoAccountant.RoycoAccountantState memory state1 = accountant.getState();
             uint256 ltv1 = _computeLTV(toUint256(state1.lastSTEffectiveNAV), toUint256(state1.lastSTImpermanentLoss), toUint256(state1.lastJTEffectiveNAV));
-            assertLt(ltv1, LIQUIDATION_UTILIZATION_WAD, "LLTV breached after ST deposit");
+            assertLt(ltv1, LIQUIDATION_COVERAGE_UTILIZATION_WAD, "LLTV breached after ST deposit");
 
             // Operation 2: JT deposit (should improve LTV)
             vm.prank(MOCK_KERNEL);
@@ -2170,7 +2170,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
 
             // LTV should be same or better after JT deposit
             assertLe(ltv2, ltv1, "JT deposit worsened LTV");
-            assertLt(ltv2, LIQUIDATION_UTILIZATION_WAD, "LLTV breached after JT deposit");
+            assertLt(ltv2, LIQUIDATION_COVERAGE_UTILIZATION_WAD, "LLTV breached after JT deposit");
         } catch {
             // Coverage check failed on initial ST deposit - acceptable
         }
@@ -2182,7 +2182,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
 
     /// @notice LLTV remains safe even at boundary conditions
     function test_lltv_boundaryConditions() public {
-        // Initialize at high utilization but below LLTV
+        // Initialize at high coverageUtilization but below LLTV
         uint256 stNav = 100e18;
         uint256 jtNav = 20e18; // Low JT relative to ST
 
@@ -2192,7 +2192,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
         uint256 initialLTV = _computeLTV(toUint256(state.lastSTEffectiveNAV), toUint256(state.lastSTImpermanentLoss), toUint256(state.lastJTEffectiveNAV));
 
         // If already at or above LLTV, this test doesn't apply
-        if (initialLTV >= LIQUIDATION_UTILIZATION_WAD) {
+        if (initialLTV >= LIQUIDATION_COVERAGE_UTILIZATION_WAD) {
             return;
         }
 
@@ -2203,7 +2203,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
         uint256 finalLTV = _computeLTV(toUint256(postState.stEffectiveNAV), toUint256(postState.stImpermanentLoss), toUint256(postState.jtEffectiveNAV));
 
         assertLt(finalLTV, initialLTV, "JT deposit should improve LTV");
-        assertLt(finalLTV, LIQUIDATION_UTILIZATION_WAD, "LLTV should remain safe");
+        assertLt(finalLTV, LIQUIDATION_COVERAGE_UTILIZATION_WAD, "LLTV should remain safe");
     }
 
     /// @notice Zero operations (no change) maintain LLTV
@@ -2288,12 +2288,12 @@ contract RoycoAccountantAdminTest is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: COVERAGE_WAD,
+            minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
+            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -2324,7 +2324,7 @@ contract RoycoAccountantAdminTest is BaseTest {
         vm.prank(OWNER_ADDRESS);
         accountant.setCoverage(newCoverage);
 
-        assertEq(accountant.getState().coverageWAD, newCoverage, "Coverage not updated");
+        assertEq(accountant.getState().minCoverageWAD, newCoverage, "Coverage not updated");
     }
 
     function test_setCoverage_triggersSync() public {
@@ -2351,7 +2351,7 @@ contract RoycoAccountantAdminTest is BaseTest {
 
         vm.prank(OWNER_ADDRESS);
         try accountant.setCoverage(newCoverage) {
-            assertEq(accountant.getState().coverageWAD, newCoverage);
+            assertEq(accountant.getState().minCoverageWAD, newCoverage);
         } catch {
             // Invalid config - acceptable
         }
@@ -2373,7 +2373,7 @@ contract RoycoAccountantAdminTest is BaseTest {
     function testFuzz_setBeta(uint96 newBeta) public {
         newBeta = uint96(bound(newBeta, 0, 2e18));
 
-        uint64 coverage = accountant.getState().coverageWAD;
+        uint64 coverage = accountant.getState().minCoverageWAD;
         if (uint256(coverage) * newBeta / WAD >= WAD) {
             return; // Skip invalid config
         }
@@ -2387,24 +2387,24 @@ contract RoycoAccountantAdminTest is BaseTest {
     }
 
     // =========================================================================
-    // setLiquidationUtilization Tests
+    // setLiquidationCoverageUtilization Tests
     // =========================================================================
 
-    function test_setLiquidationUtilization_success() public {
-        uint256 newLiquidationUtilization = 5e18; // 500% - must be > 100%
+    function test_setLiquidationCoverageUtilization_success() public {
+        uint256 newLiquidationCoverageUtilization = 5e18; // 500% - must be > 100%
 
         vm.prank(OWNER_ADDRESS);
-        accountant.setLiquidationUtilization(newLiquidationUtilization);
+        accountant.setLiquidationCoverageUtilization(newLiquidationCoverageUtilization);
 
-        assertEq(accountant.getState().liquidationUtilizationWAD, newLiquidationUtilization, "liquidationUtilization not updated");
+        assertEq(accountant.getState().liquidationCoverageUtilizationWAD, newLiquidationCoverageUtilization, "liquidationCoverageUtilization not updated");
     }
 
-    function testFuzz_setLiquidationUtilization(uint256 newLiquidationUtilization) public {
-        newLiquidationUtilization = bound(newLiquidationUtilization, WAD + 1, 100e18); // Must be > 100%
+    function testFuzz_setLiquidationCoverageUtilization(uint256 newLiquidationCoverageUtilization) public {
+        newLiquidationCoverageUtilization = bound(newLiquidationCoverageUtilization, WAD + 1, 100e18); // Must be > 100%
 
         vm.prank(OWNER_ADDRESS);
-        try accountant.setLiquidationUtilization(newLiquidationUtilization) {
-            assertEq(accountant.getState().liquidationUtilizationWAD, newLiquidationUtilization);
+        try accountant.setLiquidationCoverageUtilization(newLiquidationCoverageUtilization) {
+            assertEq(accountant.getState().liquidationCoverageUtilizationWAD, newLiquidationCoverageUtilization);
         } catch {
             // Invalid config - acceptable
         }
@@ -2551,12 +2551,12 @@ contract RoycoAccountantEdgeCaseTest is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: COVERAGE_WAD,
+            minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
+            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -2895,7 +2895,7 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
             FIXED_TERM_DURATION_SECONDS,
             DUST_TOLERANCE,
             DUST_TOLERANCE,
-            LIQUIDATION_UTILIZATION_WAD,
+            LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             0.3e18,
             0.9e18
         );
@@ -2905,13 +2905,13 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
         address kernel,
         uint64 stProtocolFeeWAD,
         uint64 jtProtocolFeeWAD,
-        uint64 coverageWAD,
+        uint64 minCoverageWAD,
         uint96 betaWAD,
         address ydm,
         uint24 fixedTermDuration,
         NAV_UNIT stNAVDustTolerance,
         NAV_UNIT jtNAVDustTolerance,
-        uint256 liquidationUtilizationWAD,
+        uint256 liquidationCoverageUtilizationWAD,
         uint64 jtYieldAtTarget,
         uint64 jtYieldAtFull
     )
@@ -2925,12 +2925,12 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
             stProtocolFeeWAD: stProtocolFeeWAD,
             jtProtocolFeeWAD: jtProtocolFeeWAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: coverageWAD,
+            minCoverageWAD: minCoverageWAD,
             betaWAD: betaWAD,
             ydm: ydm,
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: fixedTermDuration,
-            liquidationUtilizationWAD: liquidationUtilizationWAD,
+            liquidationCoverageUtilizationWAD: liquidationCoverageUtilizationWAD,
             stNAVDustTolerance: stNAVDustTolerance,
             jtNAVDustTolerance: jtNAVDustTolerance
         });
@@ -2945,12 +2945,12 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: COVERAGE_WAD,
+            minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
             ydm: ydm,
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
+            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -3144,7 +3144,7 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
             FIXED_TERM_DURATION_SECONDS,
             DUST_TOLERANCE,
             DUST_TOLERANCE,
-            LIQUIDATION_UTILIZATION_WAD,
+            LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             0.3e18,
             0.9e18
         );
@@ -3189,25 +3189,25 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
     }
 
     // =========================================================================
-    // LIQUIDATION UTILIZATION VALIDATION EDGE CASES
+    // LIQUIDATION COVERAGE_UTILIZATION VALIDATION EDGE CASES
     // =========================================================================
 
-    /// @notice Test liquidationUtilization validation - value below WAD should fail
-    function test_liquidationUtilizationValidation_belowWAD() public {
-        // liquidationUtilization must be > WAD (> 100%)
-        uint256 invalidLiquidationUtilization = WAD / 2; // 50% - invalid
+    /// @notice Test liquidationCoverageUtilization validation - value below WAD should fail
+    function test_liquidationCoverageUtilizationValidation_belowWAD() public {
+        // liquidationCoverageUtilization must be > WAD (> 100%)
+        uint256 invalidLiquidationCoverageUtilization = WAD / 2; // 50% - invalid
 
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: COVERAGE_WAD,
+            minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationUtilizationWAD: invalidLiquidationUtilization,
+            liquidationCoverageUtilizationWAD: invalidLiquidationCoverageUtilization,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -3217,21 +3217,21 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
         new ERC1967Proxy(address(accountantImpl), initData);
     }
 
-    /// @notice Test liquidationUtilization validation - value exactly at WAD should fail
-    function test_liquidationUtilizationValidation_atWAD() public {
-        uint256 invalidLiquidationUtilization = WAD; // exactly 100% - invalid
+    /// @notice Test liquidationCoverageUtilization validation - value exactly at WAD should fail
+    function test_liquidationCoverageUtilizationValidation_atWAD() public {
+        uint256 invalidLiquidationCoverageUtilization = WAD; // exactly 100% - invalid
 
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
         IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: COVERAGE_WAD,
+            minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationUtilizationWAD: invalidLiquidationUtilization,
+            liquidationCoverageUtilizationWAD: invalidLiquidationCoverageUtilization,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -3326,12 +3326,12 @@ contract RoycoAccountantAdditionalBranchTests is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: COVERAGE_WAD,
+            minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
+            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -3364,12 +3364,12 @@ contract RoycoAccountantAdditionalBranchTests is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: invalidCoverage,
+            minCoverageWAD: invalidCoverage,
             betaWAD: BETA_WAD,
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
+            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -3388,12 +3388,12 @@ contract RoycoAccountantAdditionalBranchTests is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: invalidCoverage,
+            minCoverageWAD: invalidCoverage,
             betaWAD: BETA_WAD,
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
+            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });
@@ -3415,12 +3415,12 @@ contract RoycoAccountantAdditionalBranchTests is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: highCoverage,
+            minCoverageWAD: highCoverage,
             betaWAD: highBeta,
             ydm: address(adaptiveYDM),
             ydmInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationUtilizationWAD: 0.99e18, // High LLTV to pass that check
+            liquidationCoverageUtilizationWAD: 0.99e18, // High LLTV to pass that check
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
         });

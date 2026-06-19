@@ -6,7 +6,7 @@ import { DeployScript } from "../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../script/config/MarketDeploymentConfig.sol";
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
-import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
+import { IRoycoDawnKernel } from "../../src/interfaces/IRoycoDawnKernel.sol";
 import { IdenticalAssetsOracleQuoter } from "../../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../src/libraries/Types.sol";
@@ -57,14 +57,14 @@ contract AccountantAttributionFuzzTest is BaseTest {
         return (FORK_BLOCK, vm.envString("MAINNET_RPC_URL"));
     }
 
-    function _deployMarket(uint256 _jtYieldShareWAD) internal returns (DeployScript.DeploymentResult memory) {
+    function _deployMarket(uint256 _yieldShareWAD) internal returns (DeployScript.DeploymentResult memory) {
         DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams memory kernelParams =
             DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: WAD });
 
         DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
-            jtYieldShareAtZeroUtilWAD: uint64(_jtYieldShareWAD),
-            jtYieldShareAtTargetUtilWAD: uint64(_jtYieldShareWAD),
-            jtYieldShareAtFullUtilWAD: 1e18,
+            yieldShareAtZeroUtilWAD: uint64(_yieldShareWAD),
+            yieldShareAtTargetUtilWAD: uint64(_yieldShareWAD),
+            yieldShareAtFullUtilWAD: 1e18,
             maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
         });
 
@@ -88,9 +88,9 @@ contract AccountantAttributionFuzzTest is BaseTest {
             stProtocolFeeWAD: 0,
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0,
-            coverageWAD: COVERAGE_WAD,
+            minCoverageWAD: COVERAGE_WAD,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
+            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             // Always PERPETUAL so ST redeems aren't blocked by fixed-term gating in fuzz runs.
             fixedTermDurationSeconds: 0,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
@@ -154,14 +154,14 @@ contract AccountantAttributionFuzzTest is BaseTest {
         assertEq(ST.totalSupply(), 0, "ST total supply should be 0");
 
         SyncedAccountingState memory pre;
-        (pre,,) = IRoycoKernel(address(KERNEL)).previewSyncTrancheAccounting(TrancheType.SENIOR);
+        (pre,,) = IRoycoDawnKernel(address(KERNEL)).previewSyncTrancheAccounting(TrancheType.SENIOR);
         uint256 stEffPre = toUint256(pre.stEffectiveNAV);
 
         _bumpStoredConversionRate(WAD + _yield2WAD);
         _sync();
 
         SyncedAccountingState memory post;
-        (post,,) = IRoycoKernel(address(KERNEL)).previewSyncTrancheAccounting(TrancheType.SENIOR);
+        (post,,) = IRoycoDawnKernel(address(KERNEL)).previewSyncTrancheAccounting(TrancheType.SENIOR);
         uint256 stEffPost = toUint256(post.stEffectiveNAV);
 
         // INVARIANT — with zero ST supply, `stEffectiveNAV` must not absorb the next yield.

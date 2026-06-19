@@ -417,7 +417,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
     function testFuzz_ST_redeem_sync(uint256 _jtAmount, uint256 _stPercentage) external {
         _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
-        _stPercentage = bound(_stPercentage, 10, 50); // Keep utilization below 100%
+        _stPercentage = bound(_stPercentage, 10, 50); // Keep coverageUtilization below 100%
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
 
@@ -637,7 +637,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function testFuzz_loss_JTAbsorbsFirst(uint256 _jtAmount, uint256 _stPercentage, uint256 _lossPercentage) external {
-        uint256 coverage = ACCOUNTANT.getState().coverageWAD;
+        uint256 coverage = ACCOUNTANT.getState().minCoverageWAD;
 
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 50);
@@ -677,7 +677,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
     function testFuzz_loss_STLoss_JTProvidesCoverage(uint256 _jtAmount, uint256 _stPercentage, uint256 _lossPercentage) external {
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 10);
-        _stPercentage = bound(_stPercentage, 10, 30); // Keep utilization moderate
+        _stPercentage = bound(_stPercentage, 10, 30); // Keep coverageUtilization moderate
         _lossPercentage = bound(_lossPercentage, 1, 10); // Small loss
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -741,7 +741,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Check state - may transition to FIXED_TERM depending on configuration
         IRoycoAccountant.RoycoAccountantState memory accountantState = ACCOUNTANT.getState();
-        // State could be PERPETUAL or FIXED_TERM depending on utilization and liquidation threshold
+        // State could be PERPETUAL or FIXED_TERM depending on coverageUtilization and liquidation threshold
         assertTrue(
             accountantState.lastMarketState == MarketState.PERPETUAL || accountantState.lastMarketState == MarketState.FIXED_TERM,
             "State should be valid after ST loss"
@@ -875,7 +875,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     }
 
     function testFuzz_fullFlow_depositLossRedeem(uint256 _jtAmount, uint256 _stPercentage, uint256 _lossPercentage) external {
-        uint256 coverage = ACCOUNTANT.getState().coverageWAD;
+        uint256 coverage = ACCOUNTANT.getState().minCoverageWAD;
 
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 10, 30);
@@ -963,16 +963,16 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     /// @notice Worst-case NAV reduction in JT.maxRedeem(owner) attributable to the operational
     ///         slack reserved by maxJTWithdrawalGivenCoverage, plus a small rounding margin.
     /// @dev maxJTWithdrawalGivenCoverage reserves stNAVDustTolerance + jtNAVDustTolerance·β/WAD AND a fixed 2 NAV-unit
-    ///      margin (the L-04 fix that keeps redeem(maxRedeem) from reverting on the utilization ceil) from surplusJTAssets.
+    ///      margin (the L-04 fix that keeps redeem(maxRedeem) from reverting on the coverageUtilization ceil) from surplusJTAssets.
     ///      This translates to a totalNAVClaimable reduction of slack · WAD / coverageRetentionWAD where
     ///      coverageRetentionWAD = WAD − COV·(kS + β·kJ). Worst-case amplification occurs when (kS + β·kJ) saturates at
-    ///      WAD (e.g., pure-JT withdrawal with β=WAD), giving coverageRetentionWAD_min = WAD − coverageWAD.
+    ///      WAD (e.g., pure-JT withdrawal with β=WAD), giving coverageRetentionWAD_min = WAD − minCoverageWAD.
     ///      Use this upper bound; actual reduction is ≤ this for any (kS, kJ) combination.
     function _maxRedeemNAVTolerance() internal view returns (uint256) {
         IRoycoAccountant.RoycoAccountantState memory state = ACCOUNTANT.getState();
         // Mirror every NAV unit maxJTWithdrawalGivenCoverage reserves from surplusJTAssets: the dust tolerances plus the fixed 2 NAV-unit ceil-rounding margin
         uint256 slack = toUint256(state.stNAVDustTolerance) + toUint256(state.jtNAVDustTolerance).mulDiv(uint256(state.betaWAD), WAD, Math.Rounding.Ceil) + 2;
-        uint256 coverageRetentionWAD = WAD - uint256(state.coverageWAD);
+        uint256 coverageRetentionWAD = WAD - uint256(state.minCoverageWAD);
         if (coverageRetentionWAD == 0) return type(uint256).max;
         return slack.mulDiv(WAD, coverageRetentionWAD, Math.Rounding.Ceil) + 3;
     }
@@ -1158,7 +1158,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         _numJTDepositors = bound(_numJTDepositors, 2, 5);
         _stPercentage = bound(_stPercentage, 20, 60);
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        _lossPercentage = bound(_lossPercentage, 1, state.coverageWAD / 1e16 - 1);
+        _lossPercentage = bound(_lossPercentage, 1, state.minCoverageWAD / 1e16 - 1);
 
         // ═══════════════════════════════════════════════════════════════════════════
         // STEP 1: Multiple JT depositors
@@ -1353,8 +1353,8 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         assertGt(toUint256(cumulativeYieldToJT), 0, "Should have accumulated yield");
     }
 
-    /// @notice High utilization scenario: Test coverage limits
-    function testFuzz_scenario_highUtilization_verifyCoverageLimits(uint256 _jtAmount, uint256 _additionalJTAmount) external {
+    /// @notice High coverageUtilization scenario: Test coverage limits
+    function testFuzz_scenario_highCoverageUtilization_verifyCoverageLimits(uint256 _jtAmount, uint256 _additionalJTAmount) external {
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 4);
         _additionalJTAmount = bound(_additionalJTAmount, _minDepositAmount() * 5, config.initialFunding / 4);
 
@@ -1368,7 +1368,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         assertGt(initialSTMaxDeposit, ZERO_TRANCHE_UNITS, "ST maxDeposit should be > 0");
 
         // ═══════════════════════════════════════════════════════════════════════════
-        // STEP 2: ST deposits to max (100% utilization)
+        // STEP 2: ST deposits to max (100% coverageUtilization)
         // ═══════════════════════════════════════════════════════════════════════════
 
         uint256 stAmount = toUint256(initialSTMaxDeposit);
@@ -1377,7 +1377,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         uint256 stShares = _depositST(BOB_ADDRESS, stAmount);
 
-        // Verify high utilization state
+        // Verify high coverageUtilization state
         TRANCHE_UNIT stMaxDepositAfter = ST.maxDeposit(BOB_ADDRESS);
         assertLt(stMaxDepositAfter, initialSTMaxDeposit, "ST maxDeposit should decrease");
 
@@ -2358,16 +2358,16 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
     // ═══════════════════════════════════════════════════════════════════════════
     // SECTION: SELF-LIQUIDATION BONUS TESTS
-    // Tests the ST self-liquidation bonus mechanism when utilization exceeds
+    // Tests the ST self-liquidation bonus mechanism when coverageUtilization exceeds
     // the liquidation threshold. Verifies precise bonus calculation, state
     // transitions, NAV conservation, and asset claim distribution.
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Test that ST redemption does NOT receive bonus when utilization is below liquidation threshold
+    /// @notice Test that ST redemption does NOT receive bonus when coverageUtilization is below liquidation threshold
     /// @dev This is the critical base case - bonus should only apply when market is stressed
     function testFuzz_selfLiquidationBonus_notAppliedBelowThreshold(uint256 _jtAmount, uint256 _stPercentage) external {
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 4);
-        _stPercentage = bound(_stPercentage, 10, 40); // Keep utilization low
+        _stPercentage = bound(_stPercentage, 10, 40); // Keep coverageUtilization low
 
         // Setup: Deposit JT and ST
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -2379,9 +2379,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         uint256 stShares = _depositST(BOB_ADDRESS, stAmount);
 
-        // Verify utilization is below liquidation threshold
+        // Verify coverageUtilization is below liquidation threshold
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        assertLt(state.utilizationWAD, state.liquidationUtilizationWAD, "Utilization should be below liquidation threshold");
+        assertLt(state.coverageUtilizationWAD, state.liquidationCoverageUtilizationWAD, "CoverageUtilization should be below liquidation threshold");
 
         // Get ST's claims without bonus (directly from NAV decomposition)
         NAV_UNIT stEffectiveNAV = state.stEffectiveNAV;
@@ -2405,7 +2405,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         _assertNAVConservation();
     }
 
-    /// @notice Test that ST redemption receives precise bonus when utilization exceeds liquidation threshold
+    /// @notice Test that ST redemption receives precise bonus when coverageUtilization exceeds liquidation threshold
     /// @dev Verifies exact bonus calculation: bonus = stUserNAV * stSelfLiquidationBonusWAD / WAD
     function testFuzz_selfLiquidationBonus_appliedAboveThreshold_preciseCalculation(uint256 _jtAmount, uint256 _stPercentage) external {
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 4);
@@ -2422,22 +2422,22 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         uint256 stShares = _depositST(BOB_ADDRESS, stAmount);
 
         // Record state before loss
-        // Simulate severe loss to push utilization above liquidation threshold
-        // We need utilization >= liquidationUtilizationWAD
+        // Simulate severe loss to push coverageUtilization above liquidation threshold
+        // We need coverageUtilizationWAD >= liquidationCoverageUtilizationWAD
         simulateJTLoss(0.8e18); // 80% loss to drastically reduce JT effective NAV
 
         // Sync accounting
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
 
-        // Check if utilization is above threshold
+        // Check if coverageUtilization is above threshold
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
-        // Skip if utilization is still below threshold (JT absorbed all losses)
-        if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
+        // Skip if coverageUtilization is still below threshold (JT absorbed all losses)
+        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
 
-        // Record utilization before redemption for invariant check
-        uint256 utilizationBefore = state.utilizationWAD;
+        // Record coverageUtilization before redemption for invariant check
+        uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
 
         // Get the configured bonus percentage
         uint64 bonusWAD = KERNEL.getState().stSelfLiquidationBonusWAD;
@@ -2446,7 +2446,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         AssetClaims memory previewClaims = ST.previewRedeem(stShares);
 
         // ═══════════════════════════════════════════════════════════════════════════
-        // PRECISE BONUS CALCULATION - must match _computeMaxUtilizationNeutralBonus
+        // PRECISE BONUS CALCULATION - must match _computeMaxCoverageUtilizationNeutralBonus
         // ═══════════════════════════════════════════════════════════════════════════
 
         NAV_UNIT stClaimsNAV = state.stEffectiveNAV;
@@ -2454,7 +2454,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // 1. Desired bonus (uncapped)
         NAV_UNIT desiredBonus = toNAVUnits(toUint256(stClaimsNAV) * bonusWAD / WAD);
 
-        // 2. Compute maxUtilizationNeutralBonus using the formula:
+        // 2. Compute maxCoverageUtilizationNeutralBonus using the formula:
         //    totalCoveredExposure = stRawNAV + jtRawNAV * β
         //    stUserWeightedClaimNAV = userSTClaim + userJTClaim * β (for full redeem, this equals stEffectiveNAV adjusted)
         //    Case 1: maxBonus = stUserWeightedClaimNAV * jtEffectiveNAV / (totalCoveredExposure - jtEffectiveNAV)
@@ -2464,19 +2464,19 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // For full redemption, user's weighted claim ≈ stEffectiveNAV (simplified for this test)
         uint256 stUserWeightedClaimNAV = toUint256(stClaimsNAV);
 
-        NAV_UNIT maxUtilizationNeutralBonus;
+        NAV_UNIT maxCoverageUtilizationNeutralBonus;
         if (totalCoveredExposure <= jtEffNAV) {
             // Healthy state - any bonus up to jtEffectiveNAV is safe
-            maxUtilizationNeutralBonus = state.jtEffectiveNAV;
+            maxCoverageUtilizationNeutralBonus = state.jtEffectiveNAV;
         } else {
             // Case 1 formula: stUserWeightedClaimNAV * jtEffectiveNAV / (totalCoveredExposure - jtEffectiveNAV)
-            maxUtilizationNeutralBonus = toNAVUnits(stUserWeightedClaimNAV * jtEffNAV / (totalCoveredExposure - jtEffNAV));
+            maxCoverageUtilizationNeutralBonus = toNAVUnits(stUserWeightedClaimNAV * jtEffNAV / (totalCoveredExposure - jtEffNAV));
         }
 
-        // 3. Expected actual bonus = min(desiredBonus, jtEffectiveNAV, maxUtilizationNeutralBonus)
+        // 3. Expected actual bonus = min(desiredBonus, jtEffectiveNAV, maxCoverageUtilizationNeutralBonus)
         NAV_UNIT expectedActualBonus = desiredBonus;
         if (state.jtEffectiveNAV < expectedActualBonus) expectedActualBonus = state.jtEffectiveNAV;
-        if (maxUtilizationNeutralBonus < expectedActualBonus) expectedActualBonus = maxUtilizationNeutralBonus;
+        if (maxCoverageUtilizationNeutralBonus < expectedActualBonus) expectedActualBonus = maxCoverageUtilizationNeutralBonus;
 
         // Execute redemption
         vm.prank(BOB_ADDRESS);
@@ -2495,12 +2495,12 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // Preview should match actual
         assertApproxEqRel(toUint256(actualClaims.nav), toUint256(previewClaims.nav), PREVIEW_RELATIVE_DELTA, "Preview NAV should match actual NAV");
 
-        // CRITICAL INVARIANT: U' <= U (utilization must not increase after redemption)
+        // CRITICAL INVARIANT: U' <= U (coverageUtilization must not increase after redemption)
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
         (SyncedAccountingState memory stateAfter,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
         if (stateAfter.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(stateAfter.utilizationWAD, utilizationBefore, "INVARIANT: U' <= U violated");
+            assertLe(stateAfter.coverageUtilizationWAD, coverageUtilizationBefore, "INVARIANT: U' <= U violated");
         }
 
         // Verify NAV conservation
@@ -2515,7 +2515,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // Setup: Deposit JT with small amount
         _depositJT(ALICE_ADDRESS, _jtAmount);
 
-        // Deposit maximum ST to maximize utilization
+        // Deposit maximum ST to maximize coverageUtilization
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit);
         if (stAmount > config.initialFunding) stAmount = config.initialFunding;
@@ -2533,11 +2533,11 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // Check state
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
-        // Skip if utilization is still below threshold
-        if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
+        // Skip if coverageUtilization is still below threshold
+        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
 
-        // Record utilization before redemption for invariant check
-        uint256 utilizationBefore = state.utilizationWAD;
+        // Record coverageUtilization before redemption for invariant check
+        uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
 
         // ═══════════════════════════════════════════════════════════════════════════
         // PRECISE BONUS CALCULATION WITH ALL THREE CAPS
@@ -2550,21 +2550,21 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // 1. Desired bonus
         NAV_UNIT desiredBonus = toNAVUnits(toUint256(stClaimsNAV) * bonusWAD / WAD);
 
-        // 2. Compute maxUtilizationNeutralBonus
+        // 2. Compute maxCoverageUtilizationNeutralBonus
         uint256 totalCoveredExposure = toUint256(state.stRawNAV) + toUint256(state.jtRawNAV) * state.betaWAD / WAD;
         uint256 stUserWeightedClaimNAV = toUint256(stClaimsNAV);
 
-        NAV_UNIT maxUtilizationNeutralBonus;
+        NAV_UNIT maxCoverageUtilizationNeutralBonus;
         if (totalCoveredExposure <= jtEffNAV || jtEffNAV == 0) {
-            maxUtilizationNeutralBonus = state.jtEffectiveNAV;
+            maxCoverageUtilizationNeutralBonus = state.jtEffectiveNAV;
         } else {
-            maxUtilizationNeutralBonus = toNAVUnits(stUserWeightedClaimNAV * jtEffNAV / (totalCoveredExposure - jtEffNAV));
+            maxCoverageUtilizationNeutralBonus = toNAVUnits(stUserWeightedClaimNAV * jtEffNAV / (totalCoveredExposure - jtEffNAV));
         }
 
-        // 3. Expected bonus = min(desiredBonus, jtEffectiveNAV, maxUtilizationNeutralBonus)
+        // 3. Expected bonus = min(desiredBonus, jtEffectiveNAV, maxCoverageUtilizationNeutralBonus)
         NAV_UNIT expectedActualBonus = desiredBonus;
         if (state.jtEffectiveNAV < expectedActualBonus) expectedActualBonus = state.jtEffectiveNAV;
-        if (maxUtilizationNeutralBonus < expectedActualBonus) expectedActualBonus = maxUtilizationNeutralBonus;
+        if (maxCoverageUtilizationNeutralBonus < expectedActualBonus) expectedActualBonus = maxCoverageUtilizationNeutralBonus;
 
         // Execute redemption
         vm.prank(BOB_ADDRESS);
@@ -2576,12 +2576,12 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
             toUint256(actualClaims.nav), toUint256(expectedTotalNAV), MAX_RELATIVE_DELTA, "Bonus should equal min(desired, jtEffNAV, maxUtilNeutral)"
         );
 
-        // CRITICAL INVARIANT: U' <= U (utilization must not increase after redemption)
+        // CRITICAL INVARIANT: U' <= U (coverageUtilization must not increase after redemption)
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
         (SyncedAccountingState memory stateAfter,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
         if (stateAfter.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(stateAfter.utilizationWAD, utilizationBefore, "INVARIANT: U' <= U violated");
+            assertLe(stateAfter.coverageUtilizationWAD, coverageUtilizationBefore, "INVARIANT: U' <= U violated");
         }
 
         // Verify NAV conservation
@@ -2612,12 +2612,12 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
 
-        // Check if utilization is above threshold
+        // Check if coverageUtilization is above threshold
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
 
-        // Record utilization before redemption for invariant check
-        uint256 utilizationBefore = state.utilizationWAD;
+        // Record coverageUtilization before redemption for invariant check
+        uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
 
         // Calculate shares to redeem (partial redemption)
         uint256 sharesToRedeem = stShares * _redeemPercentage / 100;
@@ -2641,12 +2641,12 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
             toUint256(actualClaims.jtAssets), toUint256(previewClaims.jtAssets), PREVIEW_RELATIVE_DELTA, "Preview JT assets should match actual JT assets"
         );
 
-        // CRITICAL INVARIANT: U' <= U (utilization must not increase after redemption)
+        // CRITICAL INVARIANT: U' <= U (coverageUtilization must not increase after redemption)
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
         (SyncedAccountingState memory stateAfter,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
         if (stateAfter.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(stateAfter.utilizationWAD, utilizationBefore, "INVARIANT: U' <= U violated");
+            assertLe(stateAfter.coverageUtilizationWAD, coverageUtilizationBefore, "INVARIANT: U' <= U violated");
         }
     }
 
@@ -2679,10 +2679,10 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Check if we're in liquidation state
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
 
-        // Record utilization before redemption for invariant check
-        uint256 utilizationBefore = state.utilizationWAD;
+        // Record coverageUtilization before redemption for invariant check
+        uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
 
         // Execute ST redemption with bonus
         vm.prank(BOB_ADDRESS);
@@ -2692,16 +2692,16 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // The bonus comes from JT's effective NAV, so total should still balance
         _assertNAVConservation();
 
-        // Sync and check utilization invariant
+        // Sync and check coverageUtilization invariant
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
 
         // Verify JT effective NAV was reduced by the bonus amount
         (SyncedAccountingState memory stateAfterRedeem,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
-        // CRITICAL INVARIANT: U' <= U (utilization must not increase after redemption)
+        // CRITICAL INVARIANT: U' <= U (coverageUtilization must not increase after redemption)
         if (stateAfterRedeem.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(stateAfterRedeem.utilizationWAD, utilizationBefore, "INVARIANT: U' <= U violated");
+            assertLe(stateAfterRedeem.coverageUtilizationWAD, coverageUtilizationBefore, "INVARIANT: U' <= U violated");
         }
 
         // JT effective NAV should be less than or equal to before (reduced by bonus)
@@ -2737,11 +2737,11 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Check if we're in liquidation state
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
 
-        // Record JT effective NAV and utilization before redemptions
+        // Record JT effective NAV and coverageUtilization before redemptions
         NAV_UNIT jtEffNAVBefore = state.jtEffectiveNAV;
-        uint256 util0 = state.utilizationWAD;
+        uint256 util0 = state.coverageUtilizationWAD;
 
         // Bob redeems first
         vm.prank(BOB_ADDRESS);
@@ -2755,9 +2755,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
         (SyncedAccountingState memory stateAfterBob,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
         if (stateAfterBob.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(stateAfterBob.utilizationWAD, util0, "INVARIANT: U' <= U violated after Bob's redemption");
+            assertLe(stateAfterBob.coverageUtilizationWAD, util0, "INVARIANT: U' <= U violated after Bob's redemption");
         }
-        uint256 util1 = stateAfterBob.utilizationWAD;
+        uint256 util1 = stateAfterBob.coverageUtilizationWAD;
 
         // Charlie redeems second
         vm.prank(ST_CHARLIE_ADDRESS);
@@ -2771,7 +2771,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
         (SyncedAccountingState memory stateAfterCharlie,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
         if (stateAfterCharlie.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(stateAfterCharlie.utilizationWAD, util1, "INVARIANT: U' <= U violated after Charlie's redemption");
+            assertLe(stateAfterCharlie.coverageUtilizationWAD, util1, "INVARIANT: U' <= U violated after Charlie's redemption");
         }
 
         // Verify both received bonus (NAV should exceed their proportional ST effective NAV)
@@ -2828,10 +2828,10 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Check if we're in liquidation state
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
 
-        // Record utilization before redemption for invariant check
-        uint256 utilizationBefore = state.utilizationWAD;
+        // Record coverageUtilization before redemption for invariant check
+        uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
 
         // Get the configured bonus percentage
         uint64 bonusWAD = KERNEL.getState().stSelfLiquidationBonusWAD;
@@ -2873,12 +2873,12 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
             }
         }
 
-        // CRITICAL INVARIANT: U' <= U (utilization must not increase after redemption)
+        // CRITICAL INVARIANT: U' <= U (coverageUtilization must not increase after redemption)
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
         (SyncedAccountingState memory stateAfter,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
         if (stateAfter.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(stateAfter.utilizationWAD, utilizationBefore, "INVARIANT: U' <= U violated");
+            assertLe(stateAfter.coverageUtilizationWAD, coverageUtilizationBefore, "INVARIANT: U' <= U violated");
         }
 
         // Verify NAV conservation
@@ -2909,7 +2909,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory stateAfterLoss,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (stateAfterLoss.utilizationWAD < stateAfterLoss.liquidationUtilizationWAD) return; // skip if liquidation can't be triggered
+        if (stateAfterLoss.coverageUtilizationWAD < stateAfterLoss.liquidationCoverageUtilizationWAD) return; // skip if liquidation can't be triggered
 
         vm.prank(BOB_ADDRESS);
         ST.redeem(bobStShares, BOB_ADDRESS, BOB_ADDRESS);
@@ -2944,16 +2944,16 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // SECTION: SELF-LIQUIDATION BONUS - UTILIZATION INVARIANT TESTS
-    // These tests verify the critical invariant: U' <= U (post-redemption utilization
-    // must not exceed original utilization). This prevents bank run dynamics where
+    // SECTION: SELF-LIQUIDATION BONUS - COVERAGE_UTILIZATION INVARIANT TESTS
+    // These tests verify the critical invariant: U' <= U (post-redemption coverageUtilization
+    // must not exceed original coverageUtilization). This prevents bank run dynamics where
     // early redeemers drain coverage from remaining LPs.
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Verify the critical invariant: post-redemption utilization <= original utilization
+    /// @notice Verify the critical invariant: post-redemption coverageUtilization <= original coverageUtilization
     /// @dev This is the core protection against bank run dynamics
     /// @dev Formula: U' = ((ST_RAW' + JT_RAW' * β) * COV) / JT_EFFECTIVE_NAV' <= U
-    function testFuzz_selfLiquidationBonus_utilizationInvariant_doesNotIncrease(uint256 _jtAmount, uint256 _stPercentage, uint256 _redeemPercentage) external {
+    function testFuzz_selfLiquidationBonus_coverageUtilizationInvariant_doesNotIncrease(uint256 _jtAmount, uint256 _stPercentage, uint256 _redeemPercentage) external {
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 4);
         _stPercentage = bound(_stPercentage, 30, 80);
         _redeemPercentage = bound(_redeemPercentage, 10, 100);
@@ -2976,9 +2976,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Get pre-redemption state
         (SyncedAccountingState memory stateBefore,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (stateBefore.utilizationWAD < stateBefore.liquidationUtilizationWAD) return;
+        if (stateBefore.coverageUtilizationWAD < stateBefore.liquidationCoverageUtilizationWAD) return;
 
-        uint256 utilizationBefore = stateBefore.utilizationWAD;
+        uint256 coverageUtilizationBefore = stateBefore.coverageUtilizationWAD;
 
         // Execute partial redemption with bonus
         uint256 sharesToRedeem = stShares * _redeemPercentage / 100;
@@ -2996,17 +2996,17 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // CRITICAL INVARIANT: U' <= U
         // Only check if there's still exposure in the market
         if (stateAfter.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(stateAfter.utilizationWAD, utilizationBefore, "INVARIANT VIOLATED: Post-redemption utilization must not exceed original utilization");
+            assertLe(stateAfter.coverageUtilizationWAD, coverageUtilizationBefore, "INVARIANT VIOLATED: Post-redemption coverageUtilization must not exceed original coverageUtilization");
         }
 
         _assertNAVConservation();
     }
 
-    /// @notice Verify utilization invariant holds under extreme undercollateralization
-    /// @dev Tests edge case where utilization is very high (>200%)
-    function testFuzz_selfLiquidationBonus_utilizationInvariant_extremeUndercollateralization(uint256 _jtAmount, uint256 _stPercentage) external {
+    /// @notice Verify coverageUtilization invariant holds under extreme undercollateralization
+    /// @dev Tests edge case where coverageUtilization is very high (>200%)
+    function testFuzz_selfLiquidationBonus_coverageUtilizationInvariant_extremeUndercollateralization(uint256 _jtAmount, uint256 _stPercentage) external {
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 5, config.initialFunding / 10);
-        _stPercentage = bound(_stPercentage, 70, 95); // High ST allocation for extreme utilization
+        _stPercentage = bound(_stPercentage, 70, 95); // High ST allocation for extreme coverageUtilization
 
         // Setup with high ST/JT ratio
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -3025,9 +3025,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory stateBefore,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (stateBefore.utilizationWAD < stateBefore.liquidationUtilizationWAD) return;
+        if (stateBefore.coverageUtilizationWAD < stateBefore.liquidationCoverageUtilizationWAD) return;
 
-        uint256 utilizationBefore = stateBefore.utilizationWAD;
+        uint256 coverageUtilizationBefore = stateBefore.coverageUtilizationWAD;
 
         // Full redemption
         vm.prank(BOB_ADDRESS);
@@ -3040,15 +3040,15 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Invariant must hold even under extreme conditions
         if (stateAfter.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(stateAfter.utilizationWAD, utilizationBefore, "INVARIANT VIOLATED: Utilization increased under extreme undercollateralization");
+            assertLe(stateAfter.coverageUtilizationWAD, coverageUtilizationBefore, "INVARIANT VIOLATED: CoverageUtilization increased under extreme undercollateralization");
         }
 
         _assertNAVConservation();
     }
 
-    /// @notice Verify sequential redemptions maintain non-increasing utilization
-    /// @dev Each redemption should not increase utilization for remaining LPs (bank run prevention)
-    function testFuzz_selfLiquidationBonus_utilizationInvariant_sequentialRedemptions(uint256 _jtAmount) external {
+    /// @notice Verify sequential redemptions maintain non-increasing coverageUtilization
+    /// @dev Each redemption should not increase coverageUtilization for remaining LPs (bank run prevention)
+    function testFuzz_selfLiquidationBonus_coverageUtilizationInvariant_sequentialRedemptions(uint256 _jtAmount) external {
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 20, config.initialFunding / 4);
 
         // Setup: JT coverage + 3 ST depositors
@@ -3074,9 +3074,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory state0,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state0.utilizationWAD < state0.liquidationUtilizationWAD) return;
+        if (state0.coverageUtilizationWAD < state0.liquidationCoverageUtilizationWAD) return;
 
-        uint256 util0 = state0.utilizationWAD;
+        uint256 util0 = state0.coverageUtilizationWAD;
 
         // Redemption 1: Bob
         vm.prank(BOB_ADDRESS);
@@ -3088,10 +3088,10 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         (SyncedAccountingState memory state1,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
         if (state1.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(state1.utilizationWAD, util0, "Utilization increased after redemption 1");
+            assertLe(state1.coverageUtilizationWAD, util0, "CoverageUtilization increased after redemption 1");
         }
 
-        uint256 util1 = state1.utilizationWAD;
+        uint256 util1 = state1.coverageUtilizationWAD;
         _assertNAVConservation();
 
         // Redemption 2: Charlie
@@ -3104,10 +3104,10 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         (SyncedAccountingState memory state2,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
         if (state2.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(state2.utilizationWAD, util1, "Utilization increased after redemption 2");
+            assertLe(state2.coverageUtilizationWAD, util1, "CoverageUtilization increased after redemption 2");
         }
 
-        uint256 util2 = state2.utilizationWAD;
+        uint256 util2 = state2.coverageUtilizationWAD;
         _assertNAVConservation();
 
         // Redemption 3: Third depositor
@@ -3120,7 +3120,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         (SyncedAccountingState memory state3,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
         if (state3.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(state3.utilizationWAD, util2, "Utilization increased after redemption 3");
+            assertLe(state3.coverageUtilizationWAD, util2, "CoverageUtilization increased after redemption 3");
         }
 
         _assertNAVConservation();
@@ -3150,7 +3150,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
 
         // Both redeem
         vm.prank(BOB_ADDRESS);
@@ -3173,9 +3173,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
     // ═══════════════════════════════════════════════════════════════════════════
     // SECTION: SELF-LIQUIDATION BONUS - CASE 2 AND EDGE CASE TESTS
-    // These tests explicitly verify Case 2 of _computeMaxUtilizationNeutralBonus
+    // These tests explicitly verify Case 2 of _computeMaxCoverageUtilizationNeutralBonus
     // (when bonus must be sourced from BOTH ST and JT assets) and stress test
-    // the maxUtilizationNeutralBonus cap as the binding constraint.
+    // the maxCoverageUtilizationNeutralBonus cap as the binding constraint.
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice DETERMINISTIC test: Guarantees liquidation is triggered and verifies U' <= U
@@ -3207,8 +3207,8 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
         // If we're in liquidation, verify the invariant
-        if (state.utilizationWAD >= state.liquidationUtilizationWAD) {
-            uint256 utilizationBefore = state.utilizationWAD;
+        if (state.coverageUtilizationWAD >= state.liquidationCoverageUtilizationWAD) {
+            uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
 
             vm.prank(BOB_ADDRESS);
             ST.redeem(stShares, BOB_ADDRESS, BOB_ADDRESS);
@@ -3220,7 +3220,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
             // CRITICAL INVARIANT: U' <= U
             if (stateAfter.stRawNAV > ZERO_NAV_UNITS) {
-                assertLe(stateAfter.utilizationWAD, utilizationBefore, "DETERMINISTIC: U' <= U violated");
+                assertLe(stateAfter.coverageUtilizationWAD, coverageUtilizationBefore, "DETERMINISTIC: U' <= U violated");
             }
         }
 
@@ -3250,9 +3250,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
-        if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
 
-        uint256 utilizationBefore = state.utilizationWAD;
+        uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
         vm.prank(BOB_ADDRESS);
         AssetClaims memory claims = ST.redeem(stShares, BOB_ADDRESS, BOB_ADDRESS);
 
@@ -3267,14 +3267,14 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         (SyncedAccountingState memory stateAfter,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
         if (stateAfter.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(stateAfter.utilizationWAD, utilizationBefore, "DETERMINISTIC: U' <= U violated in formula check");
+            assertLe(stateAfter.coverageUtilizationWAD, coverageUtilizationBefore, "DETERMINISTIC: U' <= U violated in formula check");
         }
 
         _assertNAVConservation();
     }
 
-    /// @notice DETERMINISTIC test: Verifies utilization monotonically decreases with 3 redemptions
-    function test_selfLiquidationBonus_deterministic_monotonicUtilization() external {
+    /// @notice DETERMINISTIC test: Verifies coverageUtilization monotonically decreases with 3 redemptions
+    function test_selfLiquidationBonus_deterministic_monotonicCoverageUtilization() external {
         uint256 jtAmount = _minDepositAmount() * 30;
         if (jtAmount > config.initialFunding / 2) jtAmount = config.initialFunding / 2;
 
@@ -3297,9 +3297,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory state0,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state0.utilizationWAD < state0.liquidationUtilizationWAD) return;
+        if (state0.coverageUtilizationWAD < state0.liquidationCoverageUtilizationWAD) return;
 
-        uint256 u0 = state0.utilizationWAD;
+        uint256 u0 = state0.coverageUtilizationWAD;
 
         // Redemption 1
         vm.prank(BOB_ADDRESS);
@@ -3307,7 +3307,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
         (SyncedAccountingState memory state1,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        uint256 u1 = state1.stRawNAV > ZERO_NAV_UNITS ? state1.utilizationWAD : 0;
+        uint256 u1 = state1.stRawNAV > ZERO_NAV_UNITS ? state1.coverageUtilizationWAD : 0;
         if (u1 > 0) assertLe(u1, u0, "DETERMINISTIC: U1 > U0");
 
         // Redemption 2
@@ -3316,7 +3316,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
         (SyncedAccountingState memory state2,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        uint256 u2 = state2.stRawNAV > ZERO_NAV_UNITS ? state2.utilizationWAD : 0;
+        uint256 u2 = state2.stRawNAV > ZERO_NAV_UNITS ? state2.coverageUtilizationWAD : 0;
         if (u2 > 0 && u1 > 0) assertLe(u2, u1, "DETERMINISTIC: U2 > U1");
 
         // Redemption 3
@@ -3325,7 +3325,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
         (SyncedAccountingState memory state3,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        uint256 u3 = state3.stRawNAV > ZERO_NAV_UNITS ? state3.utilizationWAD : 0;
+        uint256 u3 = state3.stRawNAV > ZERO_NAV_UNITS ? state3.coverageUtilizationWAD : 0;
         if (u3 > 0 && u2 > 0) assertLe(u3, u2, "DETERMINISTIC: U3 > U2");
 
         _assertNAVConservation();
@@ -3356,7 +3356,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
 
         // Calculate jtClaimOnSTRawNAV (cross-tranche claim)
         NAV_UNIT jtClaimOnSTRawNAV = state.jtEffectiveNAV > state.jtRawNAV ? state.jtEffectiveNAV - state.jtRawNAV : ZERO_NAV_UNITS;
@@ -3375,8 +3375,8 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // If Case 1 is sufficient, this test doesn't apply to current config
         if (case1MaxBonus <= toUint256(jtClaimOnSTRawNAV)) return;
 
-        // Record utilization before
-        uint256 utilizationBefore = state.utilizationWAD;
+        // Record coverageUtilization before
+        uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
 
         // Execute redemption - this should trigger Case 2
         vm.prank(BOB_ADDRESS);
@@ -3392,15 +3392,15 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
         (SyncedAccountingState memory stateAfter,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
         if (stateAfter.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(stateAfter.utilizationWAD, utilizationBefore, "INVARIANT: U' <= U violated in Case 2");
+            assertLe(stateAfter.coverageUtilizationWAD, coverageUtilizationBefore, "INVARIANT: U' <= U violated in Case 2");
         }
 
         _assertNAVConservation();
     }
 
-    /// @notice Test that maxUtilizationNeutralBonus is the BINDING constraint (not desired or JT cap)
-    /// @dev Verifies the function's core purpose: preventing utilization increase
-    function testFuzz_selfLiquidationBonus_utilizationNeutralCap_isBindingConstraint(uint256 _jtAmount, uint256 _stPercentage) external {
+    /// @notice Test that maxCoverageUtilizationNeutralBonus is the BINDING constraint (not desired or JT cap)
+    /// @dev Verifies the function's core purpose: preventing coverageUtilization increase
+    function testFuzz_selfLiquidationBonus_coverageUtilizationNeutralCap_isBindingConstraint(uint256 _jtAmount, uint256 _stPercentage) external {
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 8);
         _stPercentage = bound(_stPercentage, 50, 85);
 
@@ -3413,16 +3413,16 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         uint256 stShares = _depositST(BOB_ADDRESS, stAmount);
 
-        // Severe loss to create high utilization
+        // Severe loss to create high coverageUtilization
         simulateJTLoss(0.88e18);
 
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
 
-        uint256 utilizationBefore = state.utilizationWAD;
+        uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
 
         // Calculate the three caps
         uint64 bonusWAD = KERNEL.getState().stSelfLiquidationBonusWAD;
@@ -3435,7 +3435,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // 2. JT effective NAV cap
         uint256 jtCap = jtEffNAV;
 
-        // 3. maxUtilizationNeutralBonus (Case 1 formula for simplicity)
+        // 3. maxCoverageUtilizationNeutralBonus (Case 1 formula for simplicity)
         uint256 totalCoveredExposure = toUint256(state.stRawNAV) + toUint256(state.jtRawNAV) * state.betaWAD / WAD;
         uint256 maxUtilNeutralBonus = 0;
         if (totalCoveredExposure > jtEffNAV && jtEffNAV > 0) {
@@ -3445,7 +3445,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // We want scenarios where maxUtilNeutralBonus is the binding constraint
         // i.e., maxUtilNeutralBonus < desiredBonus AND maxUtilNeutralBonus < jtCap
-        bool utilizationCapIsBinding = maxUtilNeutralBonus < desiredBonus && maxUtilNeutralBonus < jtCap;
+        bool coverageUtilizationCapIsBinding = maxUtilNeutralBonus < desiredBonus && maxUtilNeutralBonus < jtCap;
 
         // Execute redemption
         vm.prank(BOB_ADDRESS);
@@ -3456,10 +3456,10 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         uint256 expectedBaseNAV = toUint256(stClaimsNAV);
         uint256 actualBonus = actualNavReceived > expectedBaseNAV ? actualNavReceived - expectedBaseNAV : 0;
 
-        // If utilization cap should be binding, verify bonus is close to maxUtilNeutralBonus
-        if (utilizationCapIsBinding && maxUtilNeutralBonus > 0 && actualBonus > 0) {
+        // If coverageUtilization cap should be binding, verify bonus is close to maxUtilNeutralBonus
+        if (coverageUtilizationCapIsBinding && maxUtilNeutralBonus > 0 && actualBonus > 0) {
             assertApproxEqRel(
-                actualBonus, maxUtilNeutralBonus, MAX_RELATIVE_DELTA, "When utilization cap is binding, actual bonus should equal maxUtilNeutralBonus"
+                actualBonus, maxUtilNeutralBonus, MAX_RELATIVE_DELTA, "When coverageUtilization cap is binding, actual bonus should equal maxUtilNeutralBonus"
             );
         }
 
@@ -3468,7 +3468,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
         (SyncedAccountingState memory stateAfter,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
         if (stateAfter.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(stateAfter.utilizationWAD, utilizationBefore, "INVARIANT: U' <= U violated");
+            assertLe(stateAfter.coverageUtilizationWAD, coverageUtilizationBefore, "INVARIANT: U' <= U violated");
         }
 
         _assertNAVConservation();
@@ -3496,9 +3496,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
 
-        uint256 utilizationBefore = state.utilizationWAD;
+        uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
 
         // Get all values needed for Case 2 formula
         uint256 T = toUint256(state.stRawNAV) + toUint256(state.jtRawNAV) * state.betaWAD / WAD;
@@ -3560,7 +3560,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
         (SyncedAccountingState memory stateAfter,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
         if (stateAfter.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(stateAfter.utilizationWAD, utilizationBefore, "INVARIANT: U' <= U violated");
+            assertLe(stateAfter.coverageUtilizationWAD, coverageUtilizationBefore, "INVARIANT: U' <= U violated");
         }
 
         _assertNAVConservation();
@@ -3596,11 +3596,11 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory state0,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state0.utilizationWAD < state0.liquidationUtilizationWAD) return;
+        if (state0.coverageUtilizationWAD < state0.liquidationCoverageUtilizationWAD) return;
 
-        // Track utilization after each "attack"
-        uint256[] memory utilizations = new uint256[](5);
-        utilizations[0] = state0.utilizationWAD;
+        // Track coverageUtilization after each "attack"
+        uint256[] memory coverageUtilizations = new uint256[](5);
+        coverageUtilizations[0] = state0.coverageUtilizationWAD;
 
         // Attacker 1: Full redemption
         vm.prank(BOB_ADDRESS);
@@ -3609,10 +3609,10 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
         (SyncedAccountingState memory state1,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        utilizations[1] = state1.stRawNAV > ZERO_NAV_UNITS ? state1.utilizationWAD : 0;
+        coverageUtilizations[1] = state1.stRawNAV > ZERO_NAV_UNITS ? state1.coverageUtilizationWAD : 0;
 
         if (state1.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(utilizations[1], utilizations[0], "U increased after attacker 1");
+            assertLe(coverageUtilizations[1], coverageUtilizations[0], "U increased after attacker 1");
         }
 
         // Attacker 2
@@ -3622,10 +3622,10 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
         (SyncedAccountingState memory state2,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        utilizations[2] = state2.stRawNAV > ZERO_NAV_UNITS ? state2.utilizationWAD : 0;
+        coverageUtilizations[2] = state2.stRawNAV > ZERO_NAV_UNITS ? state2.coverageUtilizationWAD : 0;
 
         if (state2.stRawNAV > ZERO_NAV_UNITS && state1.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(utilizations[2], utilizations[1], "U increased after attacker 2");
+            assertLe(coverageUtilizations[2], coverageUtilizations[1], "U increased after attacker 2");
         }
 
         // Attacker 3
@@ -3635,10 +3635,10 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
         (SyncedAccountingState memory state3,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        utilizations[3] = state3.stRawNAV > ZERO_NAV_UNITS ? state3.utilizationWAD : 0;
+        coverageUtilizations[3] = state3.stRawNAV > ZERO_NAV_UNITS ? state3.coverageUtilizationWAD : 0;
 
         if (state3.stRawNAV > ZERO_NAV_UNITS && state2.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(utilizations[3], utilizations[2], "U increased after attacker 3");
+            assertLe(coverageUtilizations[3], coverageUtilizations[2], "U increased after attacker 3");
         }
 
         // Attacker 4 (final)
@@ -3648,16 +3648,16 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
         (SyncedAccountingState memory state4,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        utilizations[4] = state4.stRawNAV > ZERO_NAV_UNITS ? state4.utilizationWAD : 0;
+        coverageUtilizations[4] = state4.stRawNAV > ZERO_NAV_UNITS ? state4.coverageUtilizationWAD : 0;
 
         if (state4.stRawNAV > ZERO_NAV_UNITS && state3.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(utilizations[4], utilizations[3], "U increased after attacker 4");
+            assertLe(coverageUtilizations[4], coverageUtilizations[3], "U increased after attacker 4");
         }
 
-        // CRITICAL: Utilization must be monotonically non-increasing throughout attack
+        // CRITICAL: CoverageUtilization must be monotonically non-increasing throughout attack
         for (uint256 i = 1; i < 5; i++) {
-            if (utilizations[i] > 0 && utilizations[i - 1] > 0) {
-                assertLe(utilizations[i], utilizations[i - 1], "Utilization increased during coordinated attack");
+            if (coverageUtilizations[i] > 0 && coverageUtilizations[i - 1] > 0) {
+                assertLe(coverageUtilizations[i], coverageUtilizations[i - 1], "CoverageUtilization increased during coordinated attack");
             }
         }
 
@@ -3688,9 +3688,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
         // Skip if not in liquidation (shouldn't happen with 98% loss)
-        if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
 
-        uint256 utilizationBefore = state.utilizationWAD;
+        uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
         uint256 jtEffectiveBefore = toUint256(state.jtEffectiveNAV);
 
         // Redemption should not revert even with near-zero JT
@@ -3706,7 +3706,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         (SyncedAccountingState memory stateAfter,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
         if (stateAfter.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(stateAfter.utilizationWAD, utilizationBefore, "INVARIANT: U' <= U violated with near-zero JT");
+            assertLe(stateAfter.coverageUtilizationWAD, coverageUtilizationBefore, "INVARIANT: U' <= U violated with near-zero JT");
         }
 
         // JT effective should have decreased (or stayed at 0)
@@ -3715,9 +3715,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         _assertNAVConservation();
     }
 
-    /// @notice Verify utilization is STRICTLY monotonically non-increasing across many redemptions
+    /// @notice Verify coverageUtilization is STRICTLY monotonically non-increasing across many redemptions
     /// @dev Each U_i must be <= U_{i-1} (not just <= U_0)
-    function testFuzz_selfLiquidationBonus_utilizationStrictlyMonotonic(uint256 _jtAmount) external {
+    function testFuzz_selfLiquidationBonus_coverageUtilizationStrictlyMonotonic(uint256 _jtAmount) external {
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 50, config.initialFunding / 3);
 
         _depositJT(ALICE_ADDRESS, _jtAmount);
@@ -3752,9 +3752,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory state0,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state0.utilizationWAD < state0.liquidationUtilizationWAD) return;
+        if (state0.coverageUtilizationWAD < state0.liquidationCoverageUtilizationWAD) return;
 
-        uint256 prevUtilization = state0.utilizationWAD;
+        uint256 prevCoverageUtilization = state0.coverageUtilizationWAD;
 
         // Sequential redemptions - each must maintain U' <= U_prev
         for (uint256 i = 0; i < numDepositors; i++) {
@@ -3767,8 +3767,8 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
             (SyncedAccountingState memory stateAfter,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
             if (stateAfter.stRawNAV > ZERO_NAV_UNITS) {
-                assertLe(stateAfter.utilizationWAD, prevUtilization, string(abi.encodePacked("Utilization increased after redemption ", vm.toString(i))));
-                prevUtilization = stateAfter.utilizationWAD;
+                assertLe(stateAfter.coverageUtilizationWAD, prevCoverageUtilization, string(abi.encodePacked("CoverageUtilization increased after redemption ", vm.toString(i))));
+                prevCoverageUtilization = stateAfter.coverageUtilizationWAD;
             }
 
             _assertNAVConservation();
@@ -3800,7 +3800,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // With complete wipeout, jtEffectiveNAV should be near 0
         // The function should handle this gracefully and return 0 bonus
-        uint256 utilizationBefore = state.utilizationWAD;
+        uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
 
         // Redemption should NOT revert
         vm.prank(BOB_ADDRESS);
@@ -3815,8 +3815,8 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
         (SyncedAccountingState memory stateAfter,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
-        if (stateAfter.stRawNAV > ZERO_NAV_UNITS && utilizationBefore < type(uint256).max) {
-            assertLe(stateAfter.utilizationWAD, utilizationBefore, "INVARIANT: U' <= U violated on JT wipeout");
+        if (stateAfter.stRawNAV > ZERO_NAV_UNITS && coverageUtilizationBefore < type(uint256).max) {
+            assertLe(stateAfter.coverageUtilizationWAD, coverageUtilizationBefore, "INVARIANT: U' <= U violated on JT wipeout");
         }
 
         _assertNAVConservation();
@@ -3844,9 +3844,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
 
-        uint256 utilizationBefore = state.utilizationWAD;
+        uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
 
         // Partial redemption
         uint256 sharesToRedeem = stShares * _redemptionPercent / 100;
@@ -3864,13 +3864,13 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         (SyncedAccountingState memory stateAfter,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
         if (stateAfter.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(stateAfter.utilizationWAD, utilizationBefore, "INVARIANT: U' <= U violated on partial redemption");
+            assertLe(stateAfter.coverageUtilizationWAD, coverageUtilizationBefore, "INVARIANT: U' <= U violated on partial redemption");
         }
 
         // Remaining shares should still be redeemable
         uint256 remainingShares = stShares - sharesToRedeem;
         if (remainingShares > 0) {
-            uint256 utilizationMid = stateAfter.utilizationWAD;
+            uint256 coverageUtilizationMid = stateAfter.coverageUtilizationWAD;
 
             vm.prank(BOB_ADDRESS);
             ST.redeem(remainingShares, BOB_ADDRESS, BOB_ADDRESS);
@@ -3880,7 +3880,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
             (SyncedAccountingState memory stateFinal,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
             if (stateFinal.stRawNAV > ZERO_NAV_UNITS) {
-                assertLe(stateFinal.utilizationWAD, utilizationMid, "INVARIANT: U' <= U violated on second partial redemption");
+                assertLe(stateFinal.coverageUtilizationWAD, coverageUtilizationMid, "INVARIANT: U' <= U violated on second partial redemption");
             }
         }
 
@@ -3888,7 +3888,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     }
 
     /// @notice Test that bonus is correctly bounded by all three caps
-    /// @dev Verifies: actualBonus = min(desiredBonus, jtEffectiveNAV, maxUtilizationNeutralBonus)
+    /// @dev Verifies: actualBonus = min(desiredBonus, jtEffectiveNAV, maxCoverageUtilizationNeutralBonus)
     function testFuzz_selfLiquidationBonus_threeWayCap_verification(uint256 _jtAmount, uint256 _stPercentage) external {
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 8, config.initialFunding / 7);
         _stPercentage = bound(_stPercentage, 45, 88);
@@ -3909,9 +3909,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state.utilizationWAD < state.liquidationUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
 
-        uint256 utilizationBefore = state.utilizationWAD;
+        uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
 
         // Calculate all three caps
         uint64 bonusWAD = KERNEL.getState().stSelfLiquidationBonusWAD;
@@ -3924,7 +3924,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // Cap 2: JT effective NAV
         uint256 cap2_jtEffective = jtEffNAV;
 
-        // Cap 3: Max utilization neutral (simplified Case 1 formula)
+        // Cap 3: Max coverageUtilization neutral (simplified Case 1 formula)
         uint256 T = toUint256(state.stRawNAV) + toUint256(state.jtRawNAV) * state.betaWAD / WAD;
         uint256 cap3_utilNeutral = type(uint256).max;
         if (T > jtEffNAV && jtEffNAV > 0) {
@@ -3949,7 +3949,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // For cap3, use larger tolerance due to approximation
         if (cap3_utilNeutral < type(uint256).max / 2) {
             // Only check if cap3 is meaningful (not near max)
-            assertLe(actualBonus, cap3_utilNeutral * 101 / 100 + 1e6, "Bonus significantly exceeded utilization neutral cap");
+            assertLe(actualBonus, cap3_utilNeutral * 101 / 100 + 1e6, "Bonus significantly exceeded coverageUtilization neutral cap");
         }
 
         // CRITICAL INVARIANT
@@ -3958,7 +3958,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         (SyncedAccountingState memory stateAfter,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
         if (stateAfter.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(stateAfter.utilizationWAD, utilizationBefore, "INVARIANT: U' <= U violated in three-way cap test");
+            assertLe(stateAfter.coverageUtilizationWAD, coverageUtilizationBefore, "INVARIANT: U' <= U violated in three-way cap test");
         }
 
         _assertNAVConservation();

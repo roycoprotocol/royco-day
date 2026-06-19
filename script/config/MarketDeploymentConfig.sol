@@ -101,9 +101,9 @@ abstract contract MarketDeploymentConfig {
         uint64 stProtocolFeeWAD;
         uint64 jtProtocolFeeWAD;
         uint64 jtYieldShareProtocolFeeWAD;
-        uint64 coverageWAD;
+        uint64 minCoverageWAD;
         uint96 betaWAD;
-        uint256 liquidationUtilizationWAD;
+        uint256 liquidationCoverageUtilizationWAD;
         uint24 fixedTermDurationSeconds;
         // YDM
         DeployScript.YDMType ydmType;
@@ -204,14 +204,14 @@ abstract contract MarketDeploymentConfig {
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0.45e18,
-            coverageWAD: 0.03e18,
+            minCoverageWAD: 0.03e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.0032441e18,
+            liquidationCoverageUtilizationWAD: 1.0032441e18,
             fixedTermDurationSeconds: 0,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.06e18, jtYieldShareAtTargetUtilWAD: 0.06e18, jtYieldShareAtFullUtilWAD: 0.18e18, maxAdaptationSpeedWAD: 0
+                    yieldShareAtZeroUtilWAD: 0.06e18, yieldShareAtTargetUtilWAD: 0.06e18, yieldShareAtFullUtilWAD: 0.18e18, maxAdaptationSpeedWAD: 0
                 })
             ),
             transferAgentAddress: address(0)
@@ -244,16 +244,16 @@ abstract contract MarketDeploymentConfig {
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0.45e18,
-            coverageWAD: 0.1e18,
+            minCoverageWAD: 0.1e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.0009009e18,
+            liquidationCoverageUtilizationWAD: 1.0009009e18,
             fixedTermDurationSeconds: 0, // Market is not expected to have volatility, so no fixed term
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.11e18,
-                    jtYieldShareAtTargetUtilWAD: 0.11e18,
-                    jtYieldShareAtFullUtilWAD: 0.31e18,
+                    yieldShareAtZeroUtilWAD: 0.11e18,
+                    yieldShareAtTargetUtilWAD: 0.11e18,
+                    yieldShareAtFullUtilWAD: 0.31e18,
                     maxAdaptationSpeedWAD: uint64(50e18 / uint256(365 days))
                 })
             ),
@@ -287,14 +287,14 @@ abstract contract MarketDeploymentConfig {
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0.45e18,
-            coverageWAD: 0.15e18,
+            minCoverageWAD: 0.15e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.85e18,
+            liquidationCoverageUtilizationWAD: 1.85e18,
             fixedTermDurationSeconds: 30 days,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.15e18, jtYieldShareAtTargetUtilWAD: 0.15e18, jtYieldShareAtFullUtilWAD: 0.4e18, maxAdaptationSpeedWAD: 0
+                    yieldShareAtZeroUtilWAD: 0.15e18, yieldShareAtTargetUtilWAD: 0.15e18, yieldShareAtFullUtilWAD: 0.4e18, maxAdaptationSpeedWAD: 0
                 })
             ),
             transferAgentAddress: address(0)
@@ -327,16 +327,16 @@ abstract contract MarketDeploymentConfig {
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0.45e18,
-            coverageWAD: 0.1e18,
+            minCoverageWAD: 0.1e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.0009009e18,
+            liquidationCoverageUtilizationWAD: 1.0009009e18,
             fixedTermDurationSeconds: 0, // Market is not expected to have volatility, so no fixed term
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.11e18,
-                    jtYieldShareAtTargetUtilWAD: 0.11e18,
-                    jtYieldShareAtFullUtilWAD: 0.31e18,
+                    yieldShareAtZeroUtilWAD: 0.11e18,
+                    yieldShareAtTargetUtilWAD: 0.11e18,
+                    yieldShareAtFullUtilWAD: 0.31e18,
                     maxAdaptationSpeedWAD: uint64(50e18 / uint256(365 days))
                 })
             ),
@@ -370,16 +370,16 @@ abstract contract MarketDeploymentConfig {
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0.45e18,
-            coverageWAD: 0.1e18,
+            minCoverageWAD: 0.1e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.225e18,
+            liquidationCoverageUtilizationWAD: 1.225e18,
             fixedTermDurationSeconds: 2 days,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.11e18,
-                    jtYieldShareAtTargetUtilWAD: 0.11e18,
-                    jtYieldShareAtFullUtilWAD: 0.31e18,
+                    yieldShareAtZeroUtilWAD: 0.11e18,
+                    yieldShareAtTargetUtilWAD: 0.11e18,
+                    yieldShareAtFullUtilWAD: 0.31e18,
                     maxAdaptationSpeedWAD: uint64(75e18 / uint256(365 days))
                 })
             ),
@@ -410,17 +410,17 @@ abstract contract MarketDeploymentConfig {
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
             jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
-            coverageWAD: 0.1e18, // TODO
+            minCoverageWAD: 0.1e18, // TODO
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.1111e18, // TODO
+            liquidationCoverageUtilizationWAD: 1.1111e18, // TODO
             fixedTermDurationSeconds: 2 days, // TODO
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: // TODO
             abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.05e18,
-                    jtYieldShareAtTargetUtilWAD: 0.05e18,
-                    jtYieldShareAtFullUtilWAD: 0.4e18,
+                    yieldShareAtZeroUtilWAD: 0.05e18,
+                    yieldShareAtTargetUtilWAD: 0.05e18,
+                    yieldShareAtFullUtilWAD: 0.4e18,
                     maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
                 })
             ),
@@ -451,16 +451,16 @@ abstract contract MarketDeploymentConfig {
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.1e18,
             jtYieldShareProtocolFeeWAD: 0.1e18,
-            coverageWAD: 0.2e18,
+            minCoverageWAD: 0.2e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 6.6667e18,
+            liquidationCoverageUtilizationWAD: 6.6667e18,
             fixedTermDurationSeconds: 2 weeks,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.3e18,
-                    jtYieldShareAtTargetUtilWAD: 0.3e18,
-                    jtYieldShareAtFullUtilWAD: 1e18,
+                    yieldShareAtZeroUtilWAD: 0.3e18,
+                    yieldShareAtTargetUtilWAD: 0.3e18,
+                    yieldShareAtFullUtilWAD: 1e18,
                     maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
                 })
             ),
@@ -491,16 +491,16 @@ abstract contract MarketDeploymentConfig {
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.1e18,
             jtYieldShareProtocolFeeWAD: 0.1e18,
-            coverageWAD: 0.2e18,
+            minCoverageWAD: 0.2e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 6.6667e18,
+            liquidationCoverageUtilizationWAD: 6.6667e18,
             fixedTermDurationSeconds: 2 weeks,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.3e18,
-                    jtYieldShareAtTargetUtilWAD: 0.3e18,
-                    jtYieldShareAtFullUtilWAD: 1e18,
+                    yieldShareAtZeroUtilWAD: 0.3e18,
+                    yieldShareAtTargetUtilWAD: 0.3e18,
+                    yieldShareAtFullUtilWAD: 1e18,
                     maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
                 })
             ),
@@ -525,14 +525,14 @@ abstract contract MarketDeploymentConfig {
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0.45e18,
-            coverageWAD: 0.03e18,
+            minCoverageWAD: 0.03e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 2.94e18,
+            liquidationCoverageUtilizationWAD: 2.94e18,
             fixedTermDurationSeconds: 7 days,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.06e18, jtYieldShareAtTargetUtilWAD: 0.06e18, jtYieldShareAtFullUtilWAD: 0.18e18, maxAdaptationSpeedWAD: 0
+                    yieldShareAtZeroUtilWAD: 0.06e18, yieldShareAtTargetUtilWAD: 0.06e18, yieldShareAtFullUtilWAD: 0.18e18, maxAdaptationSpeedWAD: 0
                 })
             ),
             transferAgentAddress: address(0)
@@ -565,16 +565,16 @@ abstract contract MarketDeploymentConfig {
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0.45e18,
-            coverageWAD: 0.07e18,
+            minCoverageWAD: 0.07e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.0013305e18,
+            liquidationCoverageUtilizationWAD: 1.0013305e18,
             fixedTermDurationSeconds: 0,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.08e18,
-                    jtYieldShareAtTargetUtilWAD: 0.08e18,
-                    jtYieldShareAtFullUtilWAD: 0.21e18,
+                    yieldShareAtZeroUtilWAD: 0.08e18,
+                    yieldShareAtTargetUtilWAD: 0.08e18,
+                    yieldShareAtFullUtilWAD: 0.21e18,
                     maxAdaptationSpeedWAD: uint64(75e18 / uint256(365 days))
                 })
             ),
@@ -606,17 +606,17 @@ abstract contract MarketDeploymentConfig {
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
             jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
-            coverageWAD: 0.075e18, // TODO
+            minCoverageWAD: 0.075e18, // TODO
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.875e18, // TODO
+            liquidationCoverageUtilizationWAD: 1.875e18, // TODO
             fixedTermDurationSeconds: 7 days, // TODO
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: // TODO
             abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.052e18,
-                    jtYieldShareAtTargetUtilWAD: 0.052e18,
-                    jtYieldShareAtFullUtilWAD: 0.3e18,
+                    yieldShareAtZeroUtilWAD: 0.052e18,
+                    yieldShareAtTargetUtilWAD: 0.052e18,
+                    yieldShareAtFullUtilWAD: 0.3e18,
                     maxAdaptationSpeedWAD: uint64(25e18 / uint256(365 days))
                 })
             ),
@@ -651,16 +651,16 @@ abstract contract MarketDeploymentConfig {
             stProtocolFeeWAD: 0,
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0,
-            coverageWAD: 0.18e18,
+            minCoverageWAD: 0.18e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.1025e18,
+            liquidationCoverageUtilizationWAD: 1.1025e18,
             fixedTermDurationSeconds: 7 days,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.22e18,
-                    jtYieldShareAtTargetUtilWAD: 0.22e18,
-                    jtYieldShareAtFullUtilWAD: 0.59e18,
+                    yieldShareAtZeroUtilWAD: 0.22e18,
+                    yieldShareAtTargetUtilWAD: 0.22e18,
+                    yieldShareAtFullUtilWAD: 0.59e18,
                     maxAdaptationSpeedWAD: uint64(50e18 / uint256(365 days))
                 })
             ),
@@ -690,17 +690,17 @@ abstract contract MarketDeploymentConfig {
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
             jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
-            coverageWAD: 0.1e18, // TODO
+            minCoverageWAD: 0.1e18, // TODO
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.1111e18, // TODO
+            liquidationCoverageUtilizationWAD: 1.1111e18, // TODO
             fixedTermDurationSeconds: 2 days, // TODO
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: // TODO
             abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.07e18,
-                    jtYieldShareAtTargetUtilWAD: 0.07e18,
-                    jtYieldShareAtFullUtilWAD: 0.45e18,
+                    yieldShareAtZeroUtilWAD: 0.07e18,
+                    yieldShareAtTargetUtilWAD: 0.07e18,
+                    yieldShareAtFullUtilWAD: 0.45e18,
                     maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
                 })
             ),
@@ -725,16 +725,16 @@ abstract contract MarketDeploymentConfig {
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0.45e18,
-            coverageWAD: 0.1e18,
+            minCoverageWAD: 0.1e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.1e18,
+            liquidationCoverageUtilizationWAD: 1.1e18,
             fixedTermDurationSeconds: 7 days,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.11e18,
-                    jtYieldShareAtTargetUtilWAD: 0.11e18,
-                    jtYieldShareAtFullUtilWAD: 0.31e18,
+                    yieldShareAtZeroUtilWAD: 0.11e18,
+                    yieldShareAtTargetUtilWAD: 0.11e18,
+                    yieldShareAtFullUtilWAD: 0.31e18,
                     maxAdaptationSpeedWAD: uint64(50e18 / uint256(365 days))
                 })
             ),
@@ -766,17 +766,17 @@ abstract contract MarketDeploymentConfig {
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
             jtYieldShareProtocolFeeWAD: 0.2e18, // TODO
-            coverageWAD: 0.1e18, // TODO
+            minCoverageWAD: 0.1e18, // TODO
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.1111e18, // TODO
+            liquidationCoverageUtilizationWAD: 1.1111e18, // TODO
             fixedTermDurationSeconds: 2 days, // TODO
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: // TODO
             abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.07e18,
-                    jtYieldShareAtTargetUtilWAD: 0.07e18,
-                    jtYieldShareAtFullUtilWAD: 0.45e18,
+                    yieldShareAtZeroUtilWAD: 0.07e18,
+                    yieldShareAtTargetUtilWAD: 0.07e18,
+                    yieldShareAtFullUtilWAD: 0.45e18,
                     maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
                 })
             ),
@@ -808,16 +808,16 @@ abstract contract MarketDeploymentConfig {
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0.45e18,
-            coverageWAD: 0.03e18,
+            minCoverageWAD: 0.03e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.194e18,
+            liquidationCoverageUtilizationWAD: 1.194e18,
             fixedTermDurationSeconds: 7 days,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.03e18,
-                    jtYieldShareAtTargetUtilWAD: 0.03e18,
-                    jtYieldShareAtFullUtilWAD: 0.1e18,
+                    yieldShareAtZeroUtilWAD: 0.03e18,
+                    yieldShareAtTargetUtilWAD: 0.03e18,
+                    yieldShareAtFullUtilWAD: 0.1e18,
                     maxAdaptationSpeedWAD: uint64(75e18 / uint256(365 days))
                 })
             ),
@@ -851,16 +851,16 @@ abstract contract MarketDeploymentConfig {
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0.2e18,
             jtYieldShareProtocolFeeWAD: 0.2e18,
-            coverageWAD: 0.1e18,
+            minCoverageWAD: 0.1e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.1111e18,
+            liquidationCoverageUtilizationWAD: 1.1111e18,
             fixedTermDurationSeconds: 0,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.05e18,
-                    jtYieldShareAtTargetUtilWAD: 0.05e18,
-                    jtYieldShareAtFullUtilWAD: 0.4e18,
+                    yieldShareAtZeroUtilWAD: 0.05e18,
+                    yieldShareAtTargetUtilWAD: 0.05e18,
+                    yieldShareAtFullUtilWAD: 0.4e18,
                     maxAdaptationSpeedWAD: uint64(80e18 / uint256(365 days))
                 })
             ),
@@ -896,14 +896,14 @@ abstract contract MarketDeploymentConfig {
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0.45e18,
-            coverageWAD: 0.1e18,
+            minCoverageWAD: 0.1e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.0090909e18,
+            liquidationCoverageUtilizationWAD: 1.0090909e18,
             fixedTermDurationSeconds: 5 days,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.1e18, jtYieldShareAtTargetUtilWAD: 0.1e18, jtYieldShareAtFullUtilWAD: 0.3e18, maxAdaptationSpeedWAD: 0
+                    yieldShareAtZeroUtilWAD: 0.1e18, yieldShareAtTargetUtilWAD: 0.1e18, yieldShareAtFullUtilWAD: 0.3e18, maxAdaptationSpeedWAD: 0
                 })
             ),
             transferAgentAddress: address(0)
@@ -937,16 +937,16 @@ abstract contract MarketDeploymentConfig {
             stProtocolFeeWAD: 0.1e18,
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0.45e18,
-            coverageWAD: 0.1e18,
+            minCoverageWAD: 0.1e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 1.1111e18,
+            liquidationCoverageUtilizationWAD: 1.1111e18,
             fixedTermDurationSeconds: 0,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.11e18,
-                    jtYieldShareAtTargetUtilWAD: 0.11e18,
-                    jtYieldShareAtFullUtilWAD: 0.31e18,
+                    yieldShareAtZeroUtilWAD: 0.11e18,
+                    yieldShareAtTargetUtilWAD: 0.11e18,
+                    yieldShareAtFullUtilWAD: 0.31e18,
                     maxAdaptationSpeedWAD: uint64(50e18 / uint256(365 days))
                 })
             ),
@@ -976,14 +976,14 @@ abstract contract MarketDeploymentConfig {
             stProtocolFeeWAD: 0,
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0,
-            coverageWAD: 0.1e18,
+            minCoverageWAD: 0.1e18,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: 2e18,
+            liquidationCoverageUtilizationWAD: 2e18,
             fixedTermDurationSeconds: 0,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    jtYieldShareAtZeroUtilWAD: 0.2e18, jtYieldShareAtTargetUtilWAD: 0.2e18, jtYieldShareAtFullUtilWAD: 0.4e18, maxAdaptationSpeedWAD: 0
+                    yieldShareAtZeroUtilWAD: 0.2e18, yieldShareAtTargetUtilWAD: 0.2e18, yieldShareAtFullUtilWAD: 0.4e18, maxAdaptationSpeedWAD: 0
                 })
             ),
             transferAgentAddress: address(0)

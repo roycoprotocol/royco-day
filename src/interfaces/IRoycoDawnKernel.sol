@@ -5,11 +5,11 @@ import { AssetClaims, SyncedAccountingState, TrancheType } from "../libraries/Ty
 import { NAV_UNIT, TRANCHE_UNIT } from "../libraries/Units.sol";
 
 /**
- * @title IRoycoKernel
+ * @title IRoycoDawnKernel
  * @notice Interface for the base Royco kernel contract
  * @dev The kernel contract is responsible for orchestrating all operations for both tranches in a Royco market
  */
-interface IRoycoKernel {
+interface IRoycoDawnKernel {
     /**
      * @notice Construction parameters for the Royco Kernel
      * @custom:field seniorTranche - The address of the Royco senior tranche associated with this kernel
@@ -19,7 +19,7 @@ interface IRoycoKernel {
      * @custom:field accountant - The address of the accountant for the Royco market
      * @custom:field enforceVaultSharesTransferWhitelist Whether to enforce the vault shares transfer whitelist
      */
-    struct RoycoKernelConstructionParams {
+    struct RoycoDawnKernelConstructionParams {
         address seniorTranche;
         address stAsset;
         address juniorTranche;
@@ -32,25 +32,26 @@ interface IRoycoKernel {
      * @notice Initialization parameters for the Royco Kernel
      * @custom:field initialAuthority - The access manager for this kernel
      * @custom:field protocolFeeRecipient - The market's protocol fee recipient
-     * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when liquidation utilization threshold has been breached, scaled to WAD precision
+     * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached, scaled to WAD precision
      */
-    struct RoycoKernelInitParams {
+    struct RoycoDawnKernelInitParams {
         address initialAuthority;
         address protocolFeeRecipient;
         uint64 stSelfLiquidationBonusWAD;
     }
 
     /**
-     * @notice Storage state for the Royco Kernel
+     * @notice Storage state for the Royco Dawn Kernel
      * @custom:storage-location erc7201:Royco.storage.RoycoKernelState
+     * @dev NOTE: The erc7201 namespace is intentionally retained as the pre-rename "Royco.storage.RoycoKernelState" to keep the computed storage slot (and thus storage layout) unchanged
      * @custom:field protocolFeeRecipient - The market's configured protocol fee recipient
-     * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when liquidation utilization threshold has been breached, scaled to WAD precision
+     * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached, scaled to WAD precision
      * @custom:field stOwnedYieldBearingAssets - The yield bearing assets held by the ST, in ST's asset units
      * @custom:field jtOwnedYieldBearingAssets - The yield bearing assets held by the JT, in JT's asset units
      * @custom:field isBlacklistEnabled - A boolean indicating whether the blacklist is enforced for this market
      * @custom:field isBlacklisted - A mapping of accounts to a boolean indicating if they are blacklisted
      */
-    struct RoycoKernelState {
+    struct RoycoDawnKernelState {
         address protocolFeeRecipient;
         uint64 stSelfLiquidationBonusWAD;
         TRANCHE_UNIT stOwnedYieldBearingAssets;
@@ -60,7 +61,7 @@ interface IRoycoKernel {
     }
 
     /// @notice Viewable state for the Royco Kernel
-    struct RoycoKernelStateView {
+    struct RoycoDawnKernelStateView {
         bool isBlacklistEnabled;
         address protocolFeeRecipient;
         uint64 stSelfLiquidationBonusWAD;
@@ -76,7 +77,7 @@ interface IRoycoKernel {
 
     /**
      * @notice Emitted when the ST self-liquidation bonus is updated
-     * @param stSelfLiquidationBonusWAD The new ST self-liquidation bonus remitted to redeeming ST LPs when liquidation utilization threshold has been breached
+     * @param stSelfLiquidationBonusWAD The new ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached
      */
     event SeniorTrancheSelfLiquidationBonusUpdated(uint64 stSelfLiquidationBonusWAD);
 
@@ -175,7 +176,7 @@ interface IRoycoKernel {
     function setProtocolFeeRecipient(address _protocolFeeRecipient) external;
 
     /**
-     * @notice Sets the ST self-liquidation bonus remitted to redeeming ST LPs when liquidation utilization threshold has been breached
+     * @notice Sets the ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached
      * @dev Only callable by a designated admin
      * @param _stSelfLiquidationBonusWAD The ST self liquidation bonus, scaled to WAD precision
      */
@@ -210,7 +211,7 @@ interface IRoycoKernel {
      * @notice Retrieves the state of the Royco kernel
      * @return state The Royco kernel's state, including the protocol fee recipient and the kernel's controlled tranche and base assets
      */
-    function getState() external view returns (RoycoKernelStateView memory state);
+    function getState() external view returns (RoycoDawnKernelStateView memory state);
 
     /**
      * @notice Converts the specified ST assets denominated in its tranche units to the kernel's NAV units

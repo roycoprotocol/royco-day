@@ -23,7 +23,7 @@ contract SetCoverage is ParameterUpdateBase {
     struct SetCoverageConfig {
         uint256 chainId;
         string marketName;
-        uint64 newCoverageWAD;
+        uint64 newMinCoverageWAD;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -53,7 +53,7 @@ contract SetCoverage is ParameterUpdateBase {
      */
     function _initializeConfigs() internal {
         // sUSDai → 7%
-        _configs.push(SetCoverageConfig({ chainId: ARBITRUM, marketName: SUSDAI, newCoverageWAD: 0.07e18 }));
+        _configs.push(SetCoverageConfig({ chainId: ARBITRUM, marketName: SUSDAI, newMinCoverageWAD: 0.07e18 }));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -89,8 +89,8 @@ contract SetCoverage is ParameterUpdateBase {
                     updates[idx] = UpdateParams({
                         marketName: cfg.marketName,
                         target: addrs.accountant,
-                        callData: abi.encodeCall(IRoycoAccountant.setCoverage, (cfg.newCoverageWAD)),
-                        description: string.concat("Set coverage for ", cfg.marketName, " to ", vm.toString(cfg.newCoverageWAD))
+                        callData: abi.encodeCall(IRoycoAccountant.setCoverage, (cfg.newMinCoverageWAD)),
+                        description: string.concat("Set coverage for ", cfg.marketName, " to ", vm.toString(cfg.newMinCoverageWAD))
                     });
                     idx++;
                 }
@@ -114,7 +114,7 @@ contract SetCoverage is ParameterUpdateBase {
             expected := mload(add(cd, 36))
         }
 
-        require(state.coverageWAD == expected, VerificationFailed("Coverage mismatch after execution"));
+        require(state.minCoverageWAD == expected, VerificationFailed("Coverage mismatch after execution"));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -11,7 +11,7 @@ import { RoycoAccountant } from "../../src/accountant/RoycoAccountant.sol";
 import { RolesConfiguration, RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
-import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
+import { IRoycoDawnKernel } from "../../src/interfaces/IRoycoDawnKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
 import { AssetClaims, TrancheType } from "../../src/libraries/Types.sol";
@@ -138,7 +138,7 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
     address internal KERNEL_IMPL;
     IRoycoVaultTranche internal ST;
     IRoycoVaultTranche internal JT;
-    IRoycoKernel internal KERNEL;
+    IRoycoDawnKernel internal KERNEL;
     IRoycoAccountant internal ACCOUNTANT;
 
     // -----------------------------------------
@@ -154,7 +154,7 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
     uint96 internal BETA_WAD = 0; // Different opportunities
     uint64 internal ST_PROTOCOL_FEE_WAD = 0.1e18; // 10% protocol fee
     uint64 internal JT_PROTOCOL_FEE_WAD = 0.1e18; // 10% protocol fee
-    uint256 internal LIQUIDATION_UTILIZATION_WAD = 6.4667e18; // Liquidation utilization threshold
+    uint256 internal LIQUIDATION_COVERAGE_UTILIZATION_WAD = 6.4667e18; // Liquidation coverageUtilization threshold
     uint24 internal FIXED_TERM_DURATION_SECONDS = 2 weeks; // 2 weeks in seconds
     NAV_UNIT internal DUST_TOLERANCE = toNAVUnits(uint256(1));
 
@@ -650,9 +650,9 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
     }
 
     /// @notice Sets the coverage via accountant admin (with scheduling)
-    /// @param _newCoverageWAD The new coverage in WAD
-    function _setCoverage(uint64 _newCoverageWAD) internal {
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverage, (_newCoverageWAD));
+    /// @param _newMinCoverageWAD The new coverage in WAD
+    function _setCoverage(uint64 _newMinCoverageWAD) internal {
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverage, (_newMinCoverageWAD));
         _executeAccountantAdminOperation(address(ACCOUNTANT), data);
     }
 

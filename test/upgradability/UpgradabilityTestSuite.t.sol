@@ -12,7 +12,7 @@ import { RoycoAccountant } from "../../src/accountant/RoycoAccountant.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
-import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
+import { IRoycoDawnKernel } from "../../src/interfaces/IRoycoDawnKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel } from "../../src/kernels/Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
@@ -80,9 +80,9 @@ contract UpgradabilityTestSuite is BaseTest {
             DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: WAD });
 
         DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
-            jtYieldShareAtZeroUtilWAD: 0.3e18, // Y_0 = Y_T (same as target)
-            jtYieldShareAtTargetUtilWAD: 0.3e18,
-            jtYieldShareAtFullUtilWAD: 1e18,
+            yieldShareAtZeroUtilWAD: 0.3e18, // Y_0 = Y_T (same as target)
+            yieldShareAtTargetUtilWAD: 0.3e18,
+            yieldShareAtFullUtilWAD: 1e18,
             maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
         });
 
@@ -107,9 +107,9 @@ contract UpgradabilityTestSuite is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            coverageWAD: COVERAGE_WAD,
+            minCoverageWAD: COVERAGE_WAD,
             betaWAD: 1e18,
-            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
+            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(ydmParams),
@@ -143,7 +143,7 @@ contract UpgradabilityTestSuite is BaseTest {
         newAccountantImpl = new RoycoAccountant(address(KERNEL));
         vm.label(address(newAccountantImpl), "NewAccountantImpl");
 
-        IRoycoKernel.RoycoKernelConstructionParams memory constructionParams = IRoycoKernel.RoycoKernelConstructionParams({
+        IRoycoDawnKernel.RoycoDawnKernelConstructionParams memory constructionParams = IRoycoDawnKernel.RoycoDawnKernelConstructionParams({
             seniorTranche: address(ST),
             stAsset: SNUSD,
             juniorTranche: address(JT),
@@ -200,9 +200,9 @@ contract UpgradabilityTestSuite is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: COVERAGE_WAD,
+            minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
+            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             ydm: address(YDM),
             ydmInitializationData: "",
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
@@ -216,7 +216,7 @@ contract UpgradabilityTestSuite is BaseTest {
 
     /// @notice Test that Kernel implementation cannot be initialized
     function test_kernelImplementation_cannotBeInitialized() external {
-        IRoycoKernel.RoycoKernelInitParams memory params = IRoycoKernel.RoycoKernelInitParams({
+        IRoycoDawnKernel.RoycoDawnKernelInitParams memory params = IRoycoDawnKernel.RoycoDawnKernelInitParams({
             initialAuthority: address(FACTORY), protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS, stSelfLiquidationBonusWAD: 0
         });
 
@@ -248,9 +248,9 @@ contract UpgradabilityTestSuite is BaseTest {
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
-            coverageWAD: COVERAGE_WAD,
+            minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            liquidationUtilizationWAD: LIQUIDATION_UTILIZATION_WAD,
+            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             ydm: address(YDM),
             ydmInitializationData: "",
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
@@ -264,7 +264,7 @@ contract UpgradabilityTestSuite is BaseTest {
 
     /// @notice Test that new Kernel implementation cannot be initialized
     function test_newKernelImplementation_cannotBeInitialized() external {
-        IRoycoKernel.RoycoKernelInitParams memory params = IRoycoKernel.RoycoKernelInitParams({
+        IRoycoDawnKernel.RoycoDawnKernelInitParams memory params = IRoycoDawnKernel.RoycoDawnKernelInitParams({
             initialAuthority: address(FACTORY), protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS, stSelfLiquidationBonusWAD: 0
         });
 
@@ -300,12 +300,12 @@ contract UpgradabilityTestSuite is BaseTest {
 
     /// @notice Test that Accountant can be upgraded by upgrader
     function test_accountantProxy_canBeUpgradedByUpgrader() external {
-        uint64 coverageBefore = ACCOUNTANT.getState().coverageWAD;
+        uint64 coverageBefore = ACCOUNTANT.getState().minCoverageWAD;
         address kernelBefore = ACCOUNTANT.KERNEL();
 
         _executeUpgrade(address(ACCOUNTANT), address(newAccountantImpl));
 
-        assertEq(ACCOUNTANT.getState().coverageWAD, coverageBefore, "Coverage should be preserved after upgrade");
+        assertEq(ACCOUNTANT.getState().minCoverageWAD, coverageBefore, "Coverage should be preserved after upgrade");
         assertEq(ACCOUNTANT.KERNEL(), kernelBefore, "Kernel should be preserved after upgrade");
     }
 

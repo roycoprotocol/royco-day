@@ -25,15 +25,15 @@ int256 constant WAD_INT = int256(WAD);
 uint256 constant WAD_DECIMALS = 18;
 
 /**
- * @dev Constant for the target utilization (kink) of the junior tranche's loss capital (90%)
- * @dev Utilization = ((ST_RAW_NAV + (JT_RAW_NAV * β)) * COV) / JT_EFFECTIVE_NAV
- * @dev If Utilization <= 1, the senior tranche exposure is collateralized as per the market's configured coverage requirement
- *      If Utilization > 1, the senior tranche exposure is undercollateralized as per the market's configured coverage requirement
+ * @dev Constant for the target coverageUtilization (kink) of the junior tranche's loss capital (90%)
+ * @dev CoverageUtilization = ((ST_RAW_NAV + (JT_RAW_NAV * β)) * COV) / JT_EFFECTIVE_NAV
+ * @dev If CoverageUtilization <= 1, the senior tranche exposure is collateralized as per the market's configured coverage requirement
+ *      If CoverageUtilization > 1, the senior tranche exposure is undercollateralized as per the market's configured coverage requirement
  */
-uint256 constant TARGET_UTILIZATION_WAD = 0.9e18;
+uint256 constant TARGET_COVERAGE_UTILIZATION_WAD = 0.9e18;
 
-/// @dev Constant for the target utilization (kink) of the junior tranche's loss capital (90%) as an integer
-int256 constant TARGET_UTILIZATION_WAD_INT = 0.9e18;
+/// @dev Constant for the target coverageUtilization (kink) of the junior tranche's loss capital (90%) as an integer
+int256 constant TARGET_COVERAGE_UTILIZATION_WAD_INT = 0.9e18;
 
 /// @dev The minimum configurable coverage percentage (1%), scaled to WAD precision
 uint256 constant MIN_COVERAGE_WAD = 0.01e18;

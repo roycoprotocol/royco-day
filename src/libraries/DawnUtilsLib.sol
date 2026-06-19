@@ -7,47 +7,47 @@ import { AssetClaims } from "./Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib } from "./Units.sol";
 
 /**
- * @title UtilsLib
+ * @title DawnUtilsLib
  * @author Waymont
- * @notice A library providing utility functions for the Royco protocol
+ * @notice A library providing utility functions for the Royco Dawn protocol
  */
-library UtilsLib {
+library DawnUtilsLib {
     using UnitsMathLib for NAV_UNIT;
     using UnitsMathLib for TRANCHE_UNIT;
     using UnitsMathLib for uint256;
 
     /**
-     * @notice Computes the utilization of the Royco market given the market's state
+     * @notice Computes the coverage utilization of the Royco market given the market's state
      * @dev Informally: (total coverage required for exposure) / (loss absorption buffer)
-     * @dev Formally: Utilization = ((ST_RAW_NAV + (JT_RAW_NAV * β)) * COV) / JT_EFFECTIVE_NAV
+     * @dev Formally: COVERAGE_UTILIZATION = ((ST_RAW_NAV + (JT_RAW_NAV * β)) * MIN_COVERAGE) / JT_EFFECTIVE_NAV
      * @dev Rounding favors ensuring senior tranche protection
      * @param _stRawNAV The raw net asset value of the senior tranche invested assets
      * @param _jtRawNAV The raw net asset value of the junior tranche invested assets
      * @param _betaWAD The JT's sensitivity to the same downside stress that affects ST, scaled to WAD precision
      *                 For example, beta is 0 when JT is in the RFR and 1 when JT is in the same opportunity as senior
-     * @param _coverageWAD The ratio of current total exposure that is expected to be protected by the market's junior capital, scaled to WAD precision
+     * @param _minCoverageWAD The ratio of current total exposure that is expected to be protected by the market's junior capital, scaled to WAD precision
      * @param _jtEffectiveNAV The junior tranche net asset value after absorbing JT losses, providing coverage to ST, and accruing JT yield and ST yield share (risk premium)
-     * @return utilization The utilization of the Royco market, scaled to WAD precision
+     * @return coverageUtilizationWAD The coverage utilization of the Royco market, scaled to WAD precision
      */
-    function computeUtilization(
+    function computeCoverageUtilization(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
         uint256 _betaWAD,
-        uint256 _coverageWAD,
+        uint256 _minCoverageWAD,
         NAV_UNIT _jtEffectiveNAV
     )
         internal
         pure
-        returns (uint256 utilization)
+        returns (uint256 coverageUtilizationWAD)
     {
         // Compute the total exposure that the junior tranche is obligated to protect against a coverage sized drawdown
         NAV_UNIT totalCoveredExposure = _stRawNAV + _jtRawNAV.mulDiv(_betaWAD, WAD, Math.Rounding.Ceil);
-        // If there is no covered exposure, there is nothing the junior buffer needs to protect, so utilization is 0
+        // If there is no covered exposure, there is nothing the junior buffer needs to protect, so coverage utilization is 0
         if (totalCoveredExposure == ZERO_NAV_UNITS) return 0;
-        // If there is no remaining JT loss-absorption buffer but covered exposure exists, utilization is effectively infinite
+        // If there is no remaining JT loss-absorption buffer but covered exposure exists, coverage utilization is effectively infinite
         if (_jtEffectiveNAV == ZERO_NAV_UNITS) return type(uint256).max;
-        // Return the computed utilization
-        utilization = _coverageWAD.mulDiv(totalCoveredExposure, _jtEffectiveNAV, Math.Rounding.Ceil);
+        // Return the computed coverage utilization, rounding in favor of the senior tranche
+        coverageUtilizationWAD = _minCoverageWAD.mulDiv(totalCoveredExposure, _jtEffectiveNAV, Math.Rounding.Ceil);
     }
 
     /**

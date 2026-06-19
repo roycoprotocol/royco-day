@@ -5,7 +5,7 @@ import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/E
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
 import { IRoycoAccountant } from "../../../../src/interfaces/IRoycoAccountant.sol";
-import { IRoycoKernel } from "../../../../src/interfaces/IRoycoKernel.sol";
+import { IRoycoDawnKernel } from "../../../../src/interfaces/IRoycoDawnKernel.sol";
 import { IRoycoVaultTranche } from "../../../../src/interfaces/IRoycoVaultTranche.sol";
 import {
     Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel
@@ -133,7 +133,7 @@ contract ACRED_ComplianceTest is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
         uint256 amount = 10e6;
         vm.startPrank(BOB_ADDRESS);
         IERC20(config.stAsset).approve(address(ST), amount);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoKernel.ACCOUNT_BLACKLISTED.selector, BOB_ADDRESS));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDawnKernel.ACCOUNT_BLACKLISTED.selector, BOB_ADDRESS));
         ST.deposit(toTrancheUnits(amount), BOB_ADDRESS);
         vm.stopPrank();
     }
@@ -148,7 +148,7 @@ contract ACRED_ComplianceTest is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
 
         // BOB tries to redeem ST — should revert
         vm.startPrank(BOB_ADDRESS);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoKernel.ACCOUNT_BLACKLISTED.selector, BOB_ADDRESS));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDawnKernel.ACCOUNT_BLACKLISTED.selector, BOB_ADDRESS));
         ST.redeem(stShares, BOB_ADDRESS, BOB_ADDRESS);
         vm.stopPrank();
     }
@@ -301,7 +301,7 @@ contract ACRED_ComplianceTest is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
 
         // BOB tries to redeem ST normally — should revert
         vm.startPrank(BOB_ADDRESS);
-        vm.expectRevert(IRoycoKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
+        vm.expectRevert(IRoycoDawnKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
         ST.redeem(stShares, BOB_ADDRESS, BOB_ADDRESS);
         vm.stopPrank();
     }
@@ -313,7 +313,7 @@ contract ACRED_ComplianceTest is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
         _depositJT(ALICE_ADDRESS, jtAmount);
         uint256 jtShares = IERC20(address(JT)).balanceOf(ALICE_ADDRESS);
 
-        // Deposit ST to create coverage utilization — deposit 50% of max to ensure we have ST
+        // Deposit ST to create coverage coverageUtilization — deposit 50% of max to ensure we have ST
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) / 2;
         require(stAmount >= _minDepositAmount(), "ST deposit amount too small");
@@ -333,7 +333,7 @@ contract ACRED_ComplianceTest is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
         uint256 jtAmount = 100e6;
         uint256 jtShares = _depositJT(ALICE_ADDRESS, jtAmount);
 
-        // Deposit ST to create coverage utilization — deposit 50% of max
+        // Deposit ST to create coverage coverageUtilization — deposit 50% of max
         TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
         uint256 stAmount = toUint256(maxSTDeposit) / 2;
         require(stAmount >= _minDepositAmount(), "ST deposit amount too small");

@@ -22,9 +22,9 @@ Edit the `_initializeConfigs()` function in the relevant script. Add entries for
 ```solidity
 // In script/update/accountant/SetCoverage.s.sol
 function _initializeConfigs() internal {
-    _configs.push(SetCoverageConfig({ chainId: MAINNET, marketName: SNUSD, newCoverageWAD: 0.15e18 }));
-    _configs.push(SetCoverageConfig({ chainId: MAINNET, marketName: AUTOUSD, newCoverageWAD: 0.12e18 }));
-    _configs.push(SetCoverageConfig({ chainId: AVALANCHE, marketName: SAVUSD, newCoverageWAD: 0.1e18 }));
+    _configs.push(SetCoverageConfig({ chainId: MAINNET, marketName: SNUSD, newMinCoverageWAD: 0.15e18 }));
+    _configs.push(SetCoverageConfig({ chainId: MAINNET, marketName: AUTOUSD, newMinCoverageWAD: 0.12e18 }));
+    _configs.push(SetCoverageConfig({ chainId: AVALANCHE, marketName: SAVUSD, newMinCoverageWAD: 0.1e18 }));
 }
 ```
 
@@ -63,7 +63,7 @@ script/update/
 ├── accountant/
 │   ├── SetCoverage.s.sol              # Coverage ratio
 │   ├── SetBeta.s.sol                  # Beta sensitivity parameter
-│   ├── SetLiquidationUtilization.s.sol
+│   ├── SetLiquidationCoverageUtilization.s.sol
 │   ├── SetCoverageConfiguration.s.sol # Combined: coverage + beta + liquidation
 │   ├── SetSeniorTrancheProtocolFee.s.sol
 │   ├── SetJuniorTrancheProtocolFee.s.sol

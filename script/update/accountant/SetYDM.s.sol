@@ -30,9 +30,9 @@ contract SetYDM is ParameterUpdateBase {
         uint256 chainId;
         string marketName;
         address ydm;
-        uint64 jtYieldShareAtZeroUtilWAD;
-        uint64 jtYieldShareAtTargetUtilWAD;
-        uint64 jtYieldShareAtFullUtilWAD;
+        uint64 yieldShareAtZeroUtilWAD;
+        uint64 yieldShareAtTargetUtilWAD;
+        uint64 yieldShareAtFullUtilWAD;
         uint64 maxAdaptationSpeedWAD;
     }
 
@@ -67,9 +67,9 @@ contract SetYDM is ParameterUpdateBase {
                 chainId: MAINNET,
                 marketName: SYRUP_USDC,
                 ydm: ADAPTIVE_CURVE_YDM_V2,
-                jtYieldShareAtZeroUtilWAD: 0.07e18,
-                jtYieldShareAtTargetUtilWAD: 0.07e18,
-                jtYieldShareAtFullUtilWAD: 0.11e18,
+                yieldShareAtZeroUtilWAD: 0.07e18,
+                yieldShareAtTargetUtilWAD: 0.07e18,
+                yieldShareAtFullUtilWAD: 0.11e18,
                 maxAdaptationSpeedWAD: uint64(40e18 / uint256(365 days))
             })
         );
@@ -79,9 +79,9 @@ contract SetYDM is ParameterUpdateBase {
                 chainId: MAINNET,
                 marketName: STCUSD,
                 ydm: ADAPTIVE_CURVE_YDM_V2,
-                jtYieldShareAtZeroUtilWAD: 0.06e18,
-                jtYieldShareAtTargetUtilWAD: 0.06e18,
-                jtYieldShareAtFullUtilWAD: 0.18e18,
+                yieldShareAtZeroUtilWAD: 0.06e18,
+                yieldShareAtTargetUtilWAD: 0.06e18,
+                yieldShareAtFullUtilWAD: 0.18e18,
                 maxAdaptationSpeedWAD: uint64(40e18 / uint256(365 days))
             })
         );
@@ -93,9 +93,9 @@ contract SetYDM is ParameterUpdateBase {
                 chainId: ARBITRUM,
                 marketName: SUSDAI,
                 ydm: ADAPTIVE_CURVE_YDM_V2,
-                jtYieldShareAtZeroUtilWAD: 0.11e18,
-                jtYieldShareAtTargetUtilWAD: 0.11e18,
-                jtYieldShareAtFullUtilWAD: 0.31e18,
+                yieldShareAtZeroUtilWAD: 0.11e18,
+                yieldShareAtTargetUtilWAD: 0.11e18,
+                yieldShareAtFullUtilWAD: 0.31e18,
                 maxAdaptationSpeedWAD: uint64(40e18 / uint256(365 days))
             })
         );
@@ -134,7 +134,7 @@ contract SetYDM is ParameterUpdateBase {
 
                     bytes memory ydmInitData = abi.encodeCall(
                         AdaptiveCurveYDM_V2.initializeYDMForMarket,
-                        (cfg.jtYieldShareAtZeroUtilWAD, cfg.jtYieldShareAtTargetUtilWAD, cfg.jtYieldShareAtFullUtilWAD, cfg.maxAdaptationSpeedWAD)
+                        (cfg.yieldShareAtZeroUtilWAD, cfg.yieldShareAtTargetUtilWAD, cfg.yieldShareAtFullUtilWAD, cfg.maxAdaptationSpeedWAD)
                     );
 
                     updates[idx] = UpdateParams({
@@ -177,14 +177,14 @@ contract SetYDM is ParameterUpdateBase {
         uint64 expectedPremium = expectedFullUtilWAD - expectedTargetUtilWAD;
 
         (
-            uint64 jtYieldShareAtTargetWAD,
+            uint64 yieldShareAtTargetWAD,
             uint32 lastAdaptationTimestamp,
             uint64 maxAdaptationSpeedWAD,
             uint64 discountToTargetAtZeroUtilWAD,
             uint64 premiumToTargetAtFullUtilWAD
         ) = AdaptiveCurveYDM_V2(expectedYDM).accountantToCurve(_params.target);
 
-        require(jtYieldShareAtTargetWAD == expectedTargetUtilWAD, VerificationFailed("jtYieldShareAtTargetWAD mismatch"));
+        require(yieldShareAtTargetWAD == expectedTargetUtilWAD, VerificationFailed("yieldShareAtTargetWAD mismatch"));
         require(maxAdaptationSpeedWAD == expectedMaxAdaptationSpeedWAD, VerificationFailed("maxAdaptationSpeedWAD mismatch"));
         require(discountToTargetAtZeroUtilWAD == expectedDiscount, VerificationFailed("discountToTargetAtZeroUtilWAD mismatch"));
         require(premiumToTargetAtFullUtilWAD == expectedPremium, VerificationFailed("premiumToTargetAtFullUtilWAD mismatch"));

@@ -6,7 +6,7 @@ import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/co
 import { IERC4626 } from "../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { RoycoAccountant } from "../../src/accountant/RoycoAccountant.sol";
-import { IRoycoKernel } from "../../src/interfaces/IRoycoKernel.sol";
+import { IRoycoDawnKernel } from "../../src/interfaces/IRoycoDawnKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { toUint256 } from "../../src/libraries/Units.sol";
 
@@ -75,17 +75,17 @@ contract LiveSavUSDAttributionBugPoCTest is Test {
 
         // Yield arrives, risk premium gets distributed to JT.
         _bumpSavUSDSharePrice(1.1e18);
-        IRoycoKernel(KERNEL).syncTrancheAccounting();
+        IRoycoDawnKernel(KERNEL).syncTrancheAccounting();
 
         // Majority ST holders drain.
         _redeemAll(ST_HOLDER_1);
         _redeemAll(ST_HOLDER_2);
         _redeemAll(ST_HOLDER_3);
-        IRoycoKernel(KERNEL).syncTrancheAccounting();
+        IRoycoDawnKernel(KERNEL).syncTrancheAccounting();
 
         // Second yield event - the moment the bug surfaces.
         _bumpSavUSDSharePrice(1.1e18);
-        IRoycoKernel(KERNEL).syncTrancheAccounting();
+        IRoycoDawnKernel(KERNEL).syncTrancheAccounting();
 
         uint256 postSharePriceWAD = toUint256(IRoycoVaultTranche(ST).convertToAssets(1e18).nav);
         assertGt(postSharePriceWAD, preDrainSharePriceWAD * 10, "BUG: per-share NAV jumped >10x after majority drain");
@@ -104,17 +104,17 @@ contract LiveSavUSDAttributionBugPoCTest is Test {
         UUPSUpgradeable(ACCOUNTANT).upgradeToAndCall(address(newImpl), "");
 
         _bumpSavUSDSharePrice(1.1e18);
-        IRoycoKernel(KERNEL).syncTrancheAccounting();
+        IRoycoDawnKernel(KERNEL).syncTrancheAccounting();
 
         uint256 preDrainSharePriceWAD = toUint256(IRoycoVaultTranche(ST).convertToAssets(1e18).nav);
 
         _redeemAll(ST_HOLDER_1);
         _redeemAll(ST_HOLDER_2);
         _redeemAll(ST_HOLDER_3);
-        IRoycoKernel(KERNEL).syncTrancheAccounting();
+        IRoycoDawnKernel(KERNEL).syncTrancheAccounting();
 
         _bumpSavUSDSharePrice(1.1e18);
-        IRoycoKernel(KERNEL).syncTrancheAccounting();
+        IRoycoDawnKernel(KERNEL).syncTrancheAccounting();
 
         uint256 postSharePriceWAD = toUint256(IRoycoVaultTranche(ST).convertToAssets(1e18).nav);
         assertLt(postSharePriceWAD, preDrainSharePriceWAD * 11 / 10, "FIX FAILED: per-share NAV jumped >1.21x after majority drain");

@@ -7,12 +7,12 @@ import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math
 import { RoycoBase } from "../base/RoycoBase.sol";
 import { IRoycoEntryPoint } from "../interfaces/IRoycoEntryPoint.sol";
 import { IRoycoFactory } from "../interfaces/IRoycoFactory.sol";
-import { IRoycoKernel } from "../interfaces/IRoycoKernel.sol";
+import { IRoycoDawnKernel } from "../interfaces/IRoycoDawnKernel.sol";
 import { IRoycoVaultTranche, TrancheType } from "../interfaces/IRoycoVaultTranche.sol";
 import { MAX_NAV_UNITS, MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../libraries/Constants.sol";
 import { AssetClaims } from "../libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toUint256 } from "../libraries/Units.sol";
-import { UtilsLib } from "../libraries/UtilsLib.sol";
+import { DawnUtilsLib } from "../libraries/DawnUtilsLib.sol";
 
 /**
  * @title RoycoEntryPoint
@@ -467,15 +467,15 @@ contract RoycoEntryPoint is RoycoBase, IRoycoEntryPoint {
                 _redeemWithYieldRouting(tranche, config, _sharesToRedeem, request.navAtRequestTime, address(this));
 
             // Scale the asset claims to compute the executor bonus and the receiver's portion
-            bonusClaims = UtilsLib.scaleAssetClaims(userClaims, request.baseRequest.executorBonusWAD, WAD);
+            bonusClaims = DawnUtilsLib.scaleAssetClaims(userClaims, request.baseRequest.executorBonusWAD, WAD);
             userClaims.stAssets = userClaims.stAssets - bonusClaims.stAssets;
             userClaims.jtAssets = userClaims.jtAssets - bonusClaims.jtAssets;
             userClaims.nav = userClaims.nav - bonusClaims.nav;
 
             // Transfer bonus and remaining assets to executor and receiver respectively
             address kernel = IRoycoVaultTranche(tranche).KERNEL();
-            address stAsset = IRoycoKernel(kernel).ST_ASSET();
-            address jtAsset = IRoycoKernel(kernel).JT_ASSET();
+            address stAsset = IRoycoDawnKernel(kernel).ST_ASSET();
+            address jtAsset = IRoycoDawnKernel(kernel).JT_ASSET();
             if (stAsset == jtAsset) {
                 // Batch transfer if same asset
                 TRANCHE_UNIT totalBonus = bonusClaims.stAssets + bonusClaims.jtAssets;

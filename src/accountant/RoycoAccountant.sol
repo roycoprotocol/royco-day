@@ -3,12 +3,12 @@ pragma solidity ^0.8.28;
 
 import { RoycoBase } from "../base/RoycoBase.sol";
 import { IRoycoAccountant } from "../interfaces/IRoycoAccountant.sol";
-import { IRoycoKernel } from "../interfaces/IRoycoKernel.sol";
+import { IRoycoDawnKernel } from "../interfaces/IRoycoDawnKernel.sol";
 import { IYDM } from "../interfaces/IYDM.sol";
 import { MAX_COVERAGE_WAD, MAX_PROTOCOL_FEE_WAD, MIN_COVERAGE_WAD, WAD, ZERO_NAV_UNITS } from "../libraries/Constants.sol";
+import { DawnUtilsLib, Math } from "../libraries/DawnUtilsLib.sol";
 import { MarketState, NAV_UNIT, Operation, SyncedAccountingState } from "../libraries/Types.sol";
 import { UnitsMathLib, toNAVUnits, toUint256 } from "../libraries/Units.sol";
-import { Math, UtilsLib } from "../libraries/UtilsLib.sol";
 
 /**
  * @title RoycoAccountant
@@ -31,14 +31,14 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
 
     /// @dev Permissions the function to only be callable by the market's kernel
     /// @dev Should be placed on all state mutating NAV synchronization functions
-    modifier onlyRoycoKernel() {
-        require(msg.sender == KERNEL, ONLY_ROYCO_KERNEL());
+    modifier onlyRoycoDawnKernel() {
+        require(msg.sender == KERNEL, ONLY_ROYCO_DAWN_KERNEL());
         _;
     }
 
     /// @dev Synchronizes the market's accounting to reconcile unrealized PNL at the start of the call
     modifier withSyncedAccounting() {
-        IRoycoKernel(KERNEL).syncTrancheAccounting();
+        IRoycoDawnKernel(KERNEL).syncTrancheAccounting();
         _;
     }
 
@@ -70,7 +70,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             MAX_PROTOCOL_FEE_EXCEEDED()
         );
         // Validate the market's initial coverage configuration
-        _validateCoverageConfig(_params.coverageWAD, _params.betaWAD, _params.liquidationUtilizationWAD);
+        _validateCoverageConfig(_params.minCoverageWAD, _params.betaWAD, _params.liquidationCoverageUtilizationWAD);
         // Initialize the YDM for this market
         _initializeYDM(_params.ydm, _params.ydmInitializationData);
 
@@ -84,12 +84,12 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         emit JuniorTrancheProtocolFeeUpdated(_params.jtProtocolFeeWAD);
         $.yieldShareProtocolFeeWAD = _params.yieldShareProtocolFeeWAD;
         emit YieldShareProtocolFeeUpdated(_params.yieldShareProtocolFeeWAD);
-        $.coverageWAD = _params.coverageWAD;
-        emit CoverageUpdated(_params.coverageWAD);
+        $.minCoverageWAD = _params.minCoverageWAD;
+        emit CoverageUpdated(_params.minCoverageWAD);
         $.betaWAD = _params.betaWAD;
         emit BetaUpdated(_params.betaWAD);
-        $.liquidationUtilizationWAD = _params.liquidationUtilizationWAD;
-        emit LiquidationUtilizationUpdated(_params.liquidationUtilizationWAD);
+        $.liquidationCoverageUtilizationWAD = _params.liquidationCoverageUtilizationWAD;
+        emit LiquidationCoverageUtilizationUpdated(_params.liquidationCoverageUtilizationWAD);
         $.ydm = _params.ydm;
         emit YDMUpdated(_params.ydm);
         $.stNAVDustTolerance = _params.stNAVDustTolerance;
@@ -109,7 +109,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     )
         public
         override(IRoycoAccountant)
-        onlyRoycoKernel
+        onlyRoycoDawnKernel
         returns (SyncedAccountingState memory state)
     {
         // Get the storage pointer to the accountant state
@@ -175,7 +175,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     )
         public
         override(IRoycoAccountant)
-        onlyRoycoKernel
+        onlyRoycoDawnKernel
         returns (SyncedAccountingState memory state)
     {
         // Get the storage pointer to the accountant state
@@ -239,7 +239,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
 
         // Marshal the post-sync state and return to the caller
         uint256 betaWAD = $.betaWAD;
-        uint256 coverageWAD = $.coverageWAD;
+        uint256 minCoverageWAD = $.minCoverageWAD;
         state = SyncedAccountingState({
             // The market state is guaranteed to be identical to the persisted
             marketState: $.lastMarketState,
@@ -252,11 +252,11 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             // No protocol fees taken on deposit or withdrawal
             stProtocolFeeAccrued: ZERO_NAV_UNITS,
             jtProtocolFeeAccrued: ZERO_NAV_UNITS,
-            utilizationWAD: UtilsLib.computeUtilization(_stRawNAV, _jtRawNAV, betaWAD, coverageWAD, jtEffectiveNAV),
+            coverageUtilizationWAD: DawnUtilsLib.computeCoverageUtilization(_stRawNAV, _jtRawNAV, betaWAD, minCoverageWAD, jtEffectiveNAV),
             fixedTermEndTimestamp: $.fixedTermEndTimestamp,
-            coverageWAD: coverageWAD,
+            minCoverageWAD: minCoverageWAD,
             betaWAD: betaWAD,
-            liquidationUtilizationWAD: $.liquidationUtilizationWAD
+            liquidationCoverageUtilizationWAD: $.liquidationCoverageUtilizationWAD
         });
     }
 
@@ -274,7 +274,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         // This is called during a ST Deposit or JT Withdrawal, so the self-liquidation bonus is not applicable
         state = postOpSyncTrancheAccounting(_op, _stRawNAV, _jtRawNAV, ZERO_NAV_UNITS);
         // Enforce the market's coverage requirement
-        require(_isCoverageRequirementSatisfied(state.utilizationWAD), COVERAGE_REQUIREMENT_UNSATISFIED());
+        require(_isCoverageRequirementSatisfied(state.coverageUtilizationWAD), COVERAGE_REQUIREMENT_UNSATISFIED());
     }
 
     // =============================
@@ -285,9 +285,10 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     function isCoverageRequirementSatisfied() public view override(IRoycoAccountant) returns (bool) {
         // Get the storage pointer to the accountant state
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
-        // Compute the utilization and return whether or not the senior tranche is properly collateralized based on persisted NAVs
-        uint256 utilization = UtilsLib.computeUtilization($.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.coverageWAD, $.lastJTEffectiveNAV);
-        return _isCoverageRequirementSatisfied(utilization);
+        // Compute the coverageUtilization and return whether or not the senior tranche is properly collateralized based on persisted NAVs
+        uint256 coverageUtilizationWAD =
+            DawnUtilsLib.computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV);
+        return _isCoverageRequirementSatisfied(coverageUtilizationWAD);
     }
 
     /**
@@ -303,7 +304,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         (SyncedAccountingState memory state,,,) = _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _previewJTYieldShareAccrual());
         // Solve for x, rounding in favor of senior protection
         // Compute the total covered assets by the junior tranche loss absorption buffer
-        NAV_UNIT totalCoveredAssets = state.jtEffectiveNAV.mulDiv(WAD, $.coverageWAD, Math.Rounding.Floor);
+        NAV_UNIT totalCoveredAssets = state.jtEffectiveNAV.mulDiv(WAD, $.minCoverageWAD, Math.Rounding.Floor);
         // Compute the assets required to cover current junior tranche exposure
         // Also account for JT's dust tolerance to preclude reverts due to rounding after ST deposit (if both are exposed to the same underlying rounding)
         NAV_UNIT jtCoverageRequired = _jtRawNAV.mulDiv($.betaWAD, WAD, Math.Rounding.Ceil) + $.jtNAVDustTolerance;
@@ -342,10 +343,10 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         // Compute the total covered exposure of the underlying investment, rounding in favor of senior protection
         NAV_UNIT totalCoveredExposure = _stRawNAV + _jtRawNAV.mulDiv(betaWAD, WAD, Math.Rounding.Ceil);
         // Compute the minimum junior tranche assets required to cover the exposure as per the market's coverage requirement
-        NAV_UNIT requiredJTAssets = totalCoveredExposure.mulDiv($.coverageWAD, WAD, Math.Rounding.Ceil);
+        NAV_UNIT requiredJTAssets = totalCoveredExposure.mulDiv($.minCoverageWAD, WAD, Math.Rounding.Ceil);
         // Compute the surplus coverage currently provided by the junior tranche based on its currently remaining loss-absorption buffer
         // Also account for the effective dust tolerance required to preclude reverts due to rounding after JT redemptions
-        // Additionally absorb the worst case inner-ceil rounding in the utilization computation
+        // Additionally absorb the worst case inner-ceil rounding in the coverageUtilization computation
         NAV_UNIT surplusJTAssets = state.jtEffectiveNAV.saturatingSub(requiredJTAssets)
             .saturatingSub($.stNAVDustTolerance + $.jtNAVDustTolerance.mulDiv(betaWAD, WAD, Math.Rounding.Ceil)).saturatingSub(toNAVUnits(uint256(2)));
         if (surplusJTAssets == ZERO_NAV_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS);
@@ -354,12 +355,12 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         NAV_UNIT totalJTClaims = _jtClaimOnStUnits + _jtClaimOnJtUnits;
         if (totalJTClaims == ZERO_NAV_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         // Calculate K_S
-        uint256 kS_WAD = toUint256(_jtClaimOnStUnits.mulDiv(WAD, totalJTClaims, Math.Rounding.Floor));
+        uint256 kS_WAD = _jtClaimOnStUnits.mulDiv(WAD, totalJTClaims, Math.Rounding.Floor);
         // Calculate K_J
-        uint256 kJ_WAD = toUint256(_jtClaimOnJtUnits.mulDiv(WAD, totalJTClaims, Math.Rounding.Floor));
+        uint256 kJ_WAD = _jtClaimOnJtUnits.mulDiv(WAD, totalJTClaims, Math.Rounding.Floor);
         // Compute how much coverage the system retains per 1 nav unit of JT assets withdrawn scaled to WAD precision
         uint256 coverageRetentionWAD =
-            (WAD - uint256($.coverageWAD).mulDiv(kS_WAD + uint256(betaWAD).mulDiv(kJ_WAD, WAD, Math.Rounding.Floor), WAD, Math.Rounding.Floor));
+            (WAD - uint256($.minCoverageWAD).mulDiv(kS_WAD + uint256(betaWAD).mulDiv(kJ_WAD, WAD, Math.Rounding.Floor), WAD, Math.Rounding.Floor));
         // Calculate how much of the surplus can be withdrawn while satisfying the coverage requirement
         totalNAVClaimable = surplusJTAssets.mulDiv(WAD, coverageRetentionWAD, Math.Rounding.Floor);
         if (totalNAVClaimable == ZERO_NAV_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS);
@@ -370,7 +371,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     }
 
     /**
-     * @notice Returns whether the coverage requirement is satisfied given the utilization
+     * @notice Returns whether the coverage requirement is satisfied given the coverageUtilization
      * @dev Junior capital must be sufficient to absorb losses to the senior exposure up to the coverage ratio
      * @dev Informally: junior loss absorption buffer >= total covered exposure
      * @dev Formally: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * COV
@@ -379,13 +380,13 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
      *      β is the JT's sensitivity to the same downside stress that affects ST (eg. 0 if JT is in RFR and 1 if JT and ST are in the same opportunity)
      * @dev If we rearrange the coverage requirement, we get:
      *      1 >= ((ST_RAW_NAV + (JT_RAW_NAV * β)) * COV) / JT_EFFECTIVE_NAV
-     *      Notice that the RHS is identical to how we define utilization
-     *      Hence, the coverage requirement can be written as 1 >= Utilization, or equivalently, Utilization <= 1
-     * @param _utilizationWAD The utilization of the market, scaled to WAD precision
+     *      Notice that the RHS is identical to how we define coverageUtilization
+     *      Hence, the coverage requirement can be written as 1 >= CoverageUtilization, or equivalently, CoverageUtilization <= 1
+     * @param _coverageUtilizationWAD The coverageUtilization of the market, scaled to WAD precision
      * @return satisfied A boolean indicating whether the coverage requirement is satisfied
      */
-    function _isCoverageRequirementSatisfied(uint256 _utilizationWAD) internal pure returns (bool) {
-        return (_utilizationWAD <= WAD);
+    function _isCoverageRequirementSatisfied(uint256 _coverageUtilizationWAD) internal pure returns (bool) {
+        return (_coverageUtilizationWAD <= WAD);
     }
 
     // =============================
@@ -560,7 +561,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
                 if (elapsed == 0) {
                     // Get the instantaneous YDM output and ensure that the yield share cannot be more than 100% of senior appreciation
                     uint256 instantaneousJtYieldShareWAD =
-                        IYDM($.ydm).previewJTYieldShare(initialMarketState, $.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.coverageWAD, $.lastJTEffectiveNAV);
+                        IYDM($.ydm).previewYieldShare(initialMarketState, $.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV);
                     if (instantaneousJtYieldShareWAD > WAD) instantaneousJtYieldShareWAD = WAD;
                     yieldShare = stGain.mulDiv(instantaneousJtYieldShareWAD, WAD, Math.Rounding.Floor);
                 } else {
@@ -586,25 +587,25 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         require((_stRawNAV + _jtRawNAV) == (stEffectiveNAV + jtEffectiveNAV), NAV_CONSERVATION_VIOLATION());
 
         // Determine the resulting market state:
-        // 1. Forced Perpetual: The fixed-term duration is set to 0 (permanently perpetual), current fixed-term elapsed, or liquidation utilization threshold has been breached (undercollateralized) or ST IL exists (distressed)
+        // 1. Forced Perpetual: The fixed-term duration is set to 0 (permanently perpetual), current fixed-term elapsed, or liquidation coverageUtilization threshold has been breached (undercollateralized) or ST IL exists (distressed)
         // 2. Normal Perpetual: JT coverage IL is within dust tolerance (staying perpetual) or fully recovered (exiting fixed-term for perpetual)
-        // 3. Fixed-term: The JT coverage IL is above the dust tolerance of the market, fixed-term duration hasn't elapsed, liquidation utilization threshold hasn't been breached, and ST IL nonexistent
+        // 3. Fixed-term: The JT coverage IL is above the dust tolerance of the market, fixed-term duration hasn't elapsed, liquidation coverageUtilization threshold hasn't been breached, and ST IL nonexistent
         MarketState resultingMarketState;
         uint32 fixedTermEndTimestamp = $.fixedTermEndTimestamp;
         uint24 fixedTermDurationSeconds = $.fixedTermDurationSeconds;
         uint96 betaWAD = $.betaWAD;
-        uint64 coverageWAD = $.coverageWAD;
-        uint256 utilizationWAD = UtilsLib.computeUtilization(_stRawNAV, _jtRawNAV, betaWAD, coverageWAD, jtEffectiveNAV);
-        uint256 liquidationUtilizationWAD = $.liquidationUtilizationWAD;
+        uint64 minCoverageWAD = $.minCoverageWAD;
+        uint256 coverageUtilizationWAD = DawnUtilsLib.computeCoverageUtilization(_stRawNAV, _jtRawNAV, betaWAD, minCoverageWAD, jtEffectiveNAV);
+        uint256 liquidationCoverageUtilizationWAD = $.liquidationCoverageUtilizationWAD;
         // If the market is permanently perpetual, the fixed-term elapsed, undercollateralized, or distressed, the market must be in a a perpetual state
         if (
             fixedTermDurationSeconds == 0 || (initialMarketState == MarketState.FIXED_TERM && fixedTermEndTimestamp <= block.timestamp)
-                || utilizationWAD >= liquidationUtilizationWAD || stImpermanentLoss != ZERO_NAV_UNITS
+                || coverageUtilizationWAD >= liquidationCoverageUtilizationWAD || stImpermanentLoss != ZERO_NAV_UNITS
         ) {
             // JT coverage impermanent loss has to be explicitly cleared in this branch:
             // If the fixed-term duration is 0, the market is permanently in a perpetual state and never incurs any JT coverage IL
             // If the current fixed-term has elapsed, the market needs to transition to a perpetual state since the transient JT protection period is complete
-            // If the liquidation utilization threshold has been breached without existent ST IL, the market is approaching an uncollateralized state: ST needs to be able to withdraw to avoid losses and the YDM needs to kick in to reinstate proper collateralization
+            // If the liquidation coverageUtilization threshold has been breached without existent ST IL, the market is approaching an uncollateralized state: ST needs to be able to withdraw to avoid losses and the YDM needs to kick in to reinstate proper collateralization
             // If ST IL exists, the market is in a distressed state: STs need to be able to book losses and any future appreciation will go to making ST whole again
             jtImpermanentLossErased = jtImpermanentLoss;
             jtImpermanentLoss = ZERO_NAV_UNITS;
@@ -647,11 +648,11 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
             jtImpermanentLoss: jtImpermanentLoss,
             stProtocolFeeAccrued: stProtocolFeeAccrued,
             jtProtocolFeeAccrued: jtProtocolFeeAccrued,
-            utilizationWAD: utilizationWAD,
+            coverageUtilizationWAD: coverageUtilizationWAD,
             fixedTermEndTimestamp: fixedTermEndTimestamp,
-            coverageWAD: coverageWAD,
+            minCoverageWAD: minCoverageWAD,
             betaWAD: betaWAD,
-            liquidationUtilizationWAD: liquidationUtilizationWAD
+            liquidationCoverageUtilizationWAD: liquidationCoverageUtilizationWAD
         });
     }
 
@@ -679,7 +680,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         if (elapsed == 0) return $.twJTYieldShareAccruedWAD;
 
         // Get the instantaneous JT yield share, scaled to WAD precision
-        uint256 jtYieldShareWAD = IYDM($.ydm).jtYieldShare($.lastMarketState, $.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.coverageWAD, $.lastJTEffectiveNAV);
+        uint256 jtYieldShareWAD = IYDM($.ydm).yieldShare($.lastMarketState, $.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV);
         // Ensure that JT cannot earn more than 100% of senior appreciation
         if (jtYieldShareWAD > WAD) jtYieldShareWAD = WAD;
 
@@ -710,7 +711,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
 
         // Get the instantaneous JT yield share, scaled to WAD precision
         uint256 jtYieldShareWAD =
-            IYDM($.ydm).previewJTYieldShare($.lastMarketState, $.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.coverageWAD, $.lastJTEffectiveNAV);
+            IYDM($.ydm).previewYieldShare($.lastMarketState, $.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV);
         // Ensure that JT cannot earn more than 100% of senior appreciation
         if (jtYieldShareWAD > WAD) jtYieldShareWAD = WAD;
 
@@ -755,37 +756,37 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     }
 
     /// @inheritdoc IRoycoAccountant
-    function setCoverage(uint64 _coverageWAD) external override(IRoycoAccountant) restricted withSyncedAccounting {
+    function setCoverage(uint64 _minCoverageWAD) external override(IRoycoAccountant) restricted withSyncedAccounting {
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
         // Validate the new coverage configuration
-        _validateCoverageConfig(_coverageWAD, $.betaWAD, $.liquidationUtilizationWAD);
-        $.coverageWAD = _coverageWAD;
-        emit CoverageUpdated(_coverageWAD);
+        _validateCoverageConfig(_minCoverageWAD, $.betaWAD, $.liquidationCoverageUtilizationWAD);
+        $.minCoverageWAD = _minCoverageWAD;
+        emit CoverageUpdated(_minCoverageWAD);
     }
 
     /// @inheritdoc IRoycoAccountant
     function setBeta(uint96 _betaWAD) external override(IRoycoAccountant) restricted withSyncedAccounting {
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
         // Validate the new coverage configuration
-        _validateCoverageConfig($.coverageWAD, _betaWAD, $.liquidationUtilizationWAD);
+        _validateCoverageConfig($.minCoverageWAD, _betaWAD, $.liquidationCoverageUtilizationWAD);
         $.betaWAD = _betaWAD;
         emit BetaUpdated(_betaWAD);
     }
 
     /// @inheritdoc IRoycoAccountant
-    function setLiquidationUtilization(uint256 _liquidationUtilizationWAD) external override(IRoycoAccountant) restricted withSyncedAccounting {
+    function setLiquidationCoverageUtilization(uint256 _liquidationCoverageUtilizationWAD) external override(IRoycoAccountant) restricted withSyncedAccounting {
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
         // Validate the new coverage configuration
-        _validateCoverageConfig($.coverageWAD, $.betaWAD, _liquidationUtilizationWAD);
-        $.liquidationUtilizationWAD = _liquidationUtilizationWAD;
-        emit LiquidationUtilizationUpdated(_liquidationUtilizationWAD);
+        _validateCoverageConfig($.minCoverageWAD, $.betaWAD, _liquidationCoverageUtilizationWAD);
+        $.liquidationCoverageUtilizationWAD = _liquidationCoverageUtilizationWAD;
+        emit LiquidationCoverageUtilizationUpdated(_liquidationCoverageUtilizationWAD);
     }
 
     /// @inheritdoc IRoycoAccountant
     function setCoverageConfiguration(
-        uint64 _coverageWAD,
+        uint64 _minCoverageWAD,
         uint96 _betaWAD,
-        uint256 _liquidationUtilizationWAD
+        uint256 _liquidationCoverageUtilizationWAD
     )
         external
         override(IRoycoAccountant)
@@ -793,15 +794,15 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         withSyncedAccounting
     {
         // Validate the new coverage configuration
-        _validateCoverageConfig(_coverageWAD, _betaWAD, _liquidationUtilizationWAD);
+        _validateCoverageConfig(_minCoverageWAD, _betaWAD, _liquidationCoverageUtilizationWAD);
         // Set the new config
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
-        $.coverageWAD = _coverageWAD;
-        emit CoverageUpdated(_coverageWAD);
+        $.minCoverageWAD = _minCoverageWAD;
+        emit CoverageUpdated(_minCoverageWAD);
         $.betaWAD = _betaWAD;
         emit BetaUpdated(_betaWAD);
-        $.liquidationUtilizationWAD = _liquidationUtilizationWAD;
-        emit LiquidationUtilizationUpdated(_liquidationUtilizationWAD);
+        $.liquidationCoverageUtilizationWAD = _liquidationCoverageUtilizationWAD;
+        emit LiquidationCoverageUtilizationUpdated(_liquidationCoverageUtilizationWAD);
     }
 
     /// @inheritdoc IRoycoAccountant
@@ -861,21 +862,21 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
 
     /**
      * @notice Validates the coverage requirement parameters of the market
-     * @param _coverageWAD The coverage ratio that the senior tranche is expected to be protected by, scaled to WAD precision
+     * @param _minCoverageWAD The coverage ratio that the senior tranche is expected to be protected by, scaled to WAD precision
      * @param _betaWAD The JT's sensitivity to the same downside stress that affects ST, scaled to WAD precision
-     * @param _liquidationUtilizationWAD The liquidation utilization threshold for this market, scaled to WAD precision
+     * @param _liquidationCoverageUtilizationWAD The liquidation coverageUtilization threshold for this market, scaled to WAD precision
      */
-    function _validateCoverageConfig(uint64 _coverageWAD, uint96 _betaWAD, uint256 _liquidationUtilizationWAD) internal pure {
+    function _validateCoverageConfig(uint64 _minCoverageWAD, uint96 _betaWAD, uint256 _liquidationCoverageUtilizationWAD) internal pure {
         require(
             // Ensure that the coverage requirement is valid
-            (_coverageWAD >= MIN_COVERAGE_WAD) && (_coverageWAD <= MAX_COVERAGE_WAD) && 
+            (_minCoverageWAD >= MIN_COVERAGE_WAD) && (_minCoverageWAD <= MAX_COVERAGE_WAD) && 
                 // Ensure that beta is valid
                 // NOTE: Beta cannot exceed 1 because the junior tranche should never be in a more loss-prone investment than the senior tranche
                 (_betaWAD <= WAD) && 
                 // Ensure that JT withdrawals are not permanently bricked
-                (uint256(_coverageWAD).mulDiv(_betaWAD, WAD, Math.Rounding.Ceil) < WAD) && 
-                // Ensure that the liquidation utilization threshold can only be breached once the NAVs have experienced losses
-                (_liquidationUtilizationWAD > WAD),
+                (uint256(_minCoverageWAD).mulDiv(_betaWAD, WAD, Math.Rounding.Ceil) < WAD) && 
+                // Ensure that the liquidation coverageUtilization threshold can only be breached once the NAVs have experienced losses
+                (_liquidationCoverageUtilizationWAD > WAD),
             INVALID_COVERAGE_CONFIG()
         );
     }
