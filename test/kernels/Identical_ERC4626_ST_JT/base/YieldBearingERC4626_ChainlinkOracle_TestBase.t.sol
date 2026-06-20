@@ -605,8 +605,11 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
         assertLe(maxRedeemAfter, maxRedeemBefore, "maxRedeem should decrease or stay same after loss with ST claims");
     }
 
-    /// @notice Tests that significant loss creates impermanent loss and disables ST deposits
-    function testFuzz_vaultSharePrice_significantLoss_createsImpermanentLoss(uint256 _jtAmount, uint256 _stPercentage, uint256 _lossPercentage) external {
+    /// @notice Tests that significant loss is absorbed by JT coverage of ST (jtCoverageImpermanentLoss)
+    /// @dev ST IL no longer exists. A significant loss is covered by JT effective NAV and booked as
+    ///      jtCoverageImpermanentLoss. ST deposits remain governed only by the coverage requirement,
+    ///      not blocked by impermanent loss.
+    function testFuzz_vaultSharePrice_significantLoss_createsCoverageImpermanentLoss(uint256 _jtAmount, uint256 _stPercentage, uint256 _lossPercentage) external {
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 100);
         _stPercentage = bound(_stPercentage, 50, 80);
         _lossPercentage = bound(_lossPercentage, 25, 35);
@@ -623,7 +626,7 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
         _depositST(BOB_ADDRESS, stAmount);
 
         (SyncedAccountingState memory stateBefore,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        NAV_UNIT impermanentLossBefore = stateBefore.stImpermanentLoss;
+        NAV_UNIT impermanentLossBefore = stateBefore.jtCoverageImpermanentLoss;
 
         uint256 lossWAD = _lossPercentage * 1e16;
         simulateVaultSharePriceLoss(lossWAD);
@@ -632,17 +635,16 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory stateAfter,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        NAV_UNIT impermanentLossAfter = stateAfter.stImpermanentLoss;
+        NAV_UNIT impermanentLossAfter = stateAfter.jtCoverageImpermanentLoss;
 
-        if (impermanentLossAfter > impermanentLossBefore) {
-            TRANCHE_UNIT maxSTDepositAfterLoss = ST.maxDeposit(CHARLIE_ADDRESS);
-            assertEq(toUint256(maxSTDepositAfterLoss), 0, "ST deposits should be disabled during impermanent loss");
-            assertGt(toUint256(impermanentLossAfter), 0, "Impermanent loss should be tracked in accountant state");
-        }
+        // Loss can only increase JT's coverage of ST (never decrease it without a subsequent gain)
+        assertGe(toUint256(impermanentLossAfter), toUint256(impermanentLossBefore), "JT coverage impermanent loss should not decrease after a loss");
     }
 
-    /// @notice Tests that share price recovery reduces impermanent loss
-    function testFuzz_vaultSharePrice_recovery_reducesImpermanentLoss(uint256 _jtAmount, uint256 _stPercentage, uint256 _lossPercentage) external {
+    /// @notice Tests that share price recovery reduces JT coverage impermanent loss
+    /// @dev ST IL no longer exists. On gains, the only IL-recovery step is recovering
+    ///      jtCoverageImpermanentLoss (JT recovers what it previously used to cover ST loss).
+    function testFuzz_vaultSharePrice_recovery_reducesCoverageImpermanentLoss(uint256 _jtAmount, uint256 _stPercentage, uint256 _lossPercentage) external {
         _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 50, 80);
         _lossPercentage = bound(_lossPercentage, 15, 25);
@@ -667,7 +669,7 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory stateAfterLoss,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        NAV_UNIT impermanentLossAfterDrop = stateAfterLoss.stImpermanentLoss;
+        NAV_UNIT impermanentLossAfterDrop = stateAfterLoss.jtCoverageImpermanentLoss;
 
         // Recover share price to original
         uint256 currentSharePrice = _getCurrentSharePriceWAD();
@@ -682,13 +684,17 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
         assertApproxEqRel(_getCurrentSharePriceWAD(), initialSharePrice, 1e15, "Share price should recover to approximately initial");
 
         (SyncedAccountingState memory stateAfterRecovery,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        NAV_UNIT impermanentLossAfterRecovery = stateAfterRecovery.stImpermanentLoss;
+        NAV_UNIT impermanentLossAfterRecovery = stateAfterRecovery.jtCoverageImpermanentLoss;
 
-        assertLe(toUint256(impermanentLossAfterRecovery), toUint256(impermanentLossAfterDrop), "Impermanent loss should decrease after share price recovery");
+        assertLe(
+            toUint256(impermanentLossAfterRecovery),
+            toUint256(impermanentLossAfterDrop),
+            "JT coverage impermanent loss should decrease after share price recovery"
+        );
 
         if (impermanentLossAfterRecovery == ZERO_NAV_UNITS) {
             NAV_UNIT jtNAVAfterRecovery = JT.totalAssets().nav;
-            assertGt(toUint256(jtNAVAfterRecovery), 0, "JT NAV should be positive after impermanent loss is cleared");
+            assertGt(toUint256(jtNAVAfterRecovery), 0, "JT NAV should be positive after coverage impermanent loss is cleared");
         }
     }
 

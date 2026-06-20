@@ -2078,7 +2078,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         assertEq(uint256(ACCOUNTANT.getState().lastMarketState), uint256(MarketState.PERPETUAL), "Market should still be PERPETUAL after all deposit cycles");
 
         // Verify no JT coverage impermanent loss accumulated
-        NAV_UNIT jtCoverageIL = ACCOUNTANT.getState().lastJTImpermanentLoss;
+        NAV_UNIT jtCoverageIL = ACCOUNTANT.getState().lastJTCoverageImpermanentLoss;
         assertEq(toUint256(jtCoverageIL), 0, "JT coverage IL should be 0 with no yield/loss - only deposits");
     }
 
@@ -2167,27 +2167,25 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Verify no significant impermanent losses accumulated from pure deposit/withdraw
         // (allow for dust tolerance from underlying protocol rounding)
-        NAV_UNIT stIL = ACCOUNTANT.getState().lastSTImpermanentLoss;
-        NAV_UNIT jtCoverageIL = ACCOUNTANT.getState().lastJTImpermanentLoss;
+        NAV_UNIT jtCoverageIL = ACCOUNTANT.getState().lastJTCoverageImpermanentLoss;
         NAV_UNIT stNAVDustTolerance = ACCOUNTANT.getState().stNAVDustTolerance;
 
-        assertEq(toUint256(stIL), 0, "ST IL should be 0 with no yield/loss");
         assertLe(toUint256(jtCoverageIL), toUint256(stNAVDustTolerance), "JT coverage IL should be within dust tolerance");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // SECTION: ST DEPOSIT DISABLED WHEN IMPERMANENT LOSS EXISTS
+    // SECTION: ST DEPOSIT ENABLEMENT VIA COVERAGE
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Test that ST deposits are allowed when there is no impermanent loss
-    function test_stDeposit_allowedWhenNoImpermanentLoss() external {
+    /// @notice Test that ST deposits are allowed once JT provides coverage
+    function test_stDeposit_allowedWithJTCoverage() external {
         // Deposit JT first to provide coverage
         uint256 jtDeposit = _minDepositAmount() * 10;
         _depositJT(ALICE_ADDRESS, jtDeposit);
 
         // ST max deposit should be non-zero (deposits allowed)
         TRANCHE_UNIT maxDeposit = ST.maxDeposit(BOB_ADDRESS);
-        assertGt(maxDeposit, ZERO_TRANCHE_UNITS, "ST deposits should be allowed when no impermanent loss");
+        assertGt(maxDeposit, ZERO_TRANCHE_UNITS, "ST deposits should be allowed once JT provides coverage");
 
         // Should be able to deposit ST
         uint256 stDeposit = _minDepositAmount();
@@ -2195,121 +2193,6 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Verify deposit succeeded
         assertGt(ST.balanceOf(BOB_ADDRESS), 0, "BOB should have ST shares after deposit");
-    }
-
-    /// @notice Test that stMaxDeposit returns zero when ST impermanent loss exists
-    function test_stMaxDeposit_returnsZeroWhenImpermanentLossExists() external {
-        // Setup: Deposit JT and ST with high ST:JT ratio so losses exceed JT capacity
-        uint256 jtDeposit = _minDepositAmount() * 5;
-        _depositJT(ALICE_ADDRESS, jtDeposit);
-
-        // Deposit maximum ST allowed
-        TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
-        uint256 stDeposit = toUint256(maxSTDeposit);
-        if (stDeposit < _minDepositAmount()) return; // Skip if no ST deposits allowed
-        _depositST(BOB_ADDRESS, stDeposit);
-
-        // Verify ST deposits are initially allowed for new depositors
-        // Simulate a massive loss that exceeds JT capacity (50% loss)
-        // This will cause ST impermanent loss since JT cannot cover all losses
-        simulateJTLoss(0.5e18);
-
-        // Sync accounting to register the loss
-        vm.prank(SYNC_ROLE_ADDRESS);
-        KERNEL.syncTrancheAccounting();
-
-        // Check if ST impermanent loss exists
-        NAV_UNIT stIL = ACCOUNTANT.getState().lastSTImpermanentLoss;
-        if (stIL == ZERO_NAV_UNITS) {
-            // JT was able to absorb all losses, skip this test
-            return;
-        }
-
-        // ST max deposit should now be zero
-        TRANCHE_UNIT maxDepositAfter = ST.maxDeposit(CHARLIE_ADDRESS);
-        assertEq(maxDepositAfter, ZERO_TRANCHE_UNITS, "ST deposits should be disabled when impermanent loss exists");
-    }
-
-    /// @notice Test that ST deposit reverts when impermanent loss exists
-    function test_stDeposit_revertsWhenImpermanentLossExists() external {
-        // Setup: Deposit JT and ST with high ST:JT ratio
-        uint256 jtDeposit = _minDepositAmount() * 5;
-        _depositJT(ALICE_ADDRESS, jtDeposit);
-
-        TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
-        uint256 stDeposit = toUint256(maxSTDeposit);
-        if (stDeposit < _minDepositAmount()) return;
-        _depositST(BOB_ADDRESS, stDeposit);
-
-        // Simulate a massive loss that exceeds JT capacity
-        simulateJTLoss(0.5e18);
-
-        // Sync accounting to register the loss
-        vm.prank(SYNC_ROLE_ADDRESS);
-        KERNEL.syncTrancheAccounting();
-
-        // Check if ST impermanent loss exists
-        NAV_UNIT stIL = ACCOUNTANT.getState().lastSTImpermanentLoss;
-        if (stIL == ZERO_NAV_UNITS) {
-            // JT was able to absorb all losses, skip this test
-            return;
-        }
-
-        // Attempting to deposit ST should revert
-        uint256 newStDeposit = _minDepositAmount();
-        dealSTAsset(ST_CHARLIE_ADDRESS, newStDeposit);
-
-        vm.startPrank(ST_CHARLIE_ADDRESS);
-        IERC20(config.stAsset).approve(address(ST), newStDeposit);
-
-        // Should revert with ST_DEPOSIT_DISABLED_IN_LOSS
-        vm.expectRevert();
-        ST.deposit(toTrancheUnits(newStDeposit), ST_CHARLIE_ADDRESS);
-        vm.stopPrank();
-    }
-
-    /// @notice Test that ST deposits are re-enabled after impermanent loss is recovered
-    function test_stDeposit_reenabledAfterImpermanentLossRecovery() external {
-        // Setup: Deposit JT and ST
-        uint256 jtDeposit = _minDepositAmount() * 5;
-        _depositJT(ALICE_ADDRESS, jtDeposit);
-
-        TRANCHE_UNIT maxSTDeposit = ST.maxDeposit(BOB_ADDRESS);
-        uint256 stDeposit = toUint256(maxSTDeposit);
-        if (stDeposit < _minDepositAmount()) return;
-        _depositST(BOB_ADDRESS, stDeposit);
-
-        // Simulate a loss that creates ST impermanent loss
-        simulateJTLoss(0.5e18);
-
-        // Sync accounting
-        vm.prank(SYNC_ROLE_ADDRESS);
-        KERNEL.syncTrancheAccounting();
-
-        // Check if ST impermanent loss exists
-        NAV_UNIT stILBeforeRecovery = ACCOUNTANT.getState().lastSTImpermanentLoss;
-        if (stILBeforeRecovery == ZERO_NAV_UNITS) {
-            // JT was able to absorb all losses, skip this test
-            return;
-        }
-
-        // Verify deposits are disabled
-        assertEq(ST.maxDeposit(CHARLIE_ADDRESS), ZERO_TRANCHE_UNITS, "ST deposits should be disabled");
-
-        // Simulate recovery (large yield to recover the impermanent loss)
-        simulateJTYield(2e18); // 200% yield to recover from 50% loss
-
-        // Sync accounting
-        vm.prank(SYNC_ROLE_ADDRESS);
-        KERNEL.syncTrancheAccounting();
-
-        // Check if impermanent loss was recovered
-        NAV_UNIT stILAfterRecovery = ACCOUNTANT.getState().lastSTImpermanentLoss;
-        if (stILAfterRecovery == ZERO_NAV_UNITS) {
-            // ST deposits should be re-enabled
-            TRANCHE_UNIT maxDepositAfterRecovery = ST.maxDeposit(CHARLIE_ADDRESS);
-            assertGt(maxDepositAfterRecovery, ZERO_TRANCHE_UNITS, "ST deposits should be re-enabled after full recovery");
-        }
     }
 
     /// @notice Test that when JT absorbs a loss the market enters a fixed-term state and ALL operations, including ST deposits, are disabled
@@ -2329,9 +2212,8 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
 
-        // ST has no impermanent loss (JT absorbed it), but the market is now in a fixed-term state
+        // JT absorbs the loss as coverage, but the market is now in a fixed-term state
         IRoycoAccountant.RoycoAccountantState memory accountantState = ACCOUNTANT.getState();
-        assertEq(accountantState.lastSTImpermanentLoss, ZERO_NAV_UNITS, "ST should have no impermanent loss when JT absorbs all losses");
 
         // Permanently perpetual markets (fixed-term duration of 0) never enter a fixed-term state: the JT coverage IL is erased and all operations remain enabled
         if (accountantState.fixedTermDurationSeconds == 0) {

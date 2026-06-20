@@ -275,9 +275,7 @@ contract RoycoAccountantTest is BaseTest {
 
         assertEq(state.stRawNAV, stRawNAV, "stRawNAV mismatch");
         assertEq(state.jtRawNAV, jtRawNAV, "jtRawNAV mismatch");
-        assertEq(state.stImpermanentLoss, ZERO_NAV_UNITS, "no ST IL initially");
-        assertEq(state.jtImpermanentLoss, ZERO_NAV_UNITS, "no JT coverage IL initially");
-        // jtSelfImpermanentLoss was removed from SyncedAccountingState
+        assertEq(state.jtCoverageImpermanentLoss, ZERO_NAV_UNITS, "no JT coverage IL initially");
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "should be perpetual");
         _assertNAVConservation(state);
     }
@@ -338,8 +336,7 @@ contract RoycoAccountantTest is BaseTest {
 
         assertEq(toUint256(state.stEffectiveNAV), stEffBefore, "ST fully covered");
         assertEq(toUint256(state.jtEffectiveNAV), jtEffBefore - stLoss, "JT provides coverage");
-        assertEq(toUint256(state.jtImpermanentLoss), stLoss, "JT coverage IL equals loss");
-        assertEq(toUint256(state.stImpermanentLoss), 0, "no ST IL");
+        assertEq(toUint256(state.jtCoverageImpermanentLoss), stLoss, "JT coverage IL equals loss");
         _assertNAVConservation(state);
     }
 
@@ -355,7 +352,8 @@ contract RoycoAccountantTest is BaseTest {
         SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(newStRaw), _nav(50e18));
 
         assertEq(toUint256(state.jtEffectiveNAV), 0, "JT exhausted");
-        assertGt(toUint256(state.stImpermanentLoss), 0, "ST has IL");
+        // Residual uncovered ST loss reduces ST effective NAV (no longer tracked as recoverable ST IL)
+        assertLt(toUint256(state.stEffectiveNAV), stEffBefore, "ST takes uncovered loss");
         _assertNAVConservation(state);
     }
 
@@ -421,8 +419,7 @@ contract RoycoAccountantTest is BaseTest {
 
         assertEq(toUint256(state.stEffectiveNAV), stEffBefore, "ST covered");
         assertEq(toUint256(state.jtEffectiveNAV), jtEffBefore - jtLoss - stLoss, "JT absorbs both");
-        // jtSelfImpermanentLoss removed from SyncedAccountingState
-        assertEq(toUint256(state.jtImpermanentLoss), stLoss, "JT coverage IL");
+        assertEq(toUint256(state.jtCoverageImpermanentLoss), stLoss, "JT coverage IL");
         _assertNAVConservation(state);
     }
 
@@ -454,7 +451,7 @@ contract RoycoAccountantTest is BaseTest {
         SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 - stLoss), _nav(50e18 + jtGain));
 
         assertEq(toUint256(state.stEffectiveNAV), stEffBefore, "ST covered");
-        assertEq(toUint256(state.jtImpermanentLoss), stLoss, "JT coverage IL");
+        assertEq(toUint256(state.jtCoverageImpermanentLoss), stLoss, "JT coverage IL");
         _assertNAVConservation(state);
     }
 
@@ -477,24 +474,6 @@ contract RoycoAccountantTest is BaseTest {
     // IL RECOVERY
     // =========================================================================
 
-    function test_preOpSync_stILRecovery_fromJTGain() public {
-        _initializeAccountantState(100e18, 10e18);
-
-        uint256 stLoss = 40e18;
-        vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state1 = accountant.preOpSyncTrancheAccounting(_nav(100e18 - stLoss), _nav(10e18));
-
-        uint256 stIL = toUint256(state1.stImpermanentLoss);
-        assertGt(stIL, 0, "ST IL created");
-
-        uint256 jtGain = 50e18;
-        vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(100e18 - stLoss), _nav(10e18 + jtGain));
-
-        assertEq(toUint256(state2.stImpermanentLoss), 0, "ST IL recovered");
-        _assertNAVConservation(state2);
-    }
-
     function test_preOpSync_jtCoverageILRecovery_fromSTGain() public {
         _initializeAccountantState(100e18, 50e18);
 
@@ -502,14 +481,14 @@ contract RoycoAccountantTest is BaseTest {
         vm.prank(MOCK_KERNEL);
         SyncedAccountingState memory state1 = accountant.preOpSyncTrancheAccounting(_nav(100e18 - stLoss), _nav(50e18));
 
-        assertEq(toUint256(state1.jtImpermanentLoss), stLoss, "JT coverage IL created");
+        assertEq(toUint256(state1.jtCoverageImpermanentLoss), stLoss, "JT coverage IL created");
 
         vm.warp(vm.getBlockTimestamp() + 1 days);
         uint256 stGain = 30e18;
         vm.prank(MOCK_KERNEL);
         SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(100e18 - stLoss + stGain), _nav(50e18));
 
-        assertEq(toUint256(state2.jtImpermanentLoss), 0, "JT coverage IL recovered");
+        assertEq(toUint256(state2.jtCoverageImpermanentLoss), 0, "JT coverage IL recovered");
         _assertNAVConservation(state2);
     }
 
@@ -544,7 +523,7 @@ contract RoycoAccountantTest is BaseTest {
         SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 - stLoss), _nav(50e18));
 
         assertEq(uint8(state.marketState), uint8(MarketState.FIXED_TERM), "transitioned to FIXED_TERM");
-        assertGt(toUint256(state.jtImpermanentLoss), 0, "JT coverage IL exists");
+        assertGt(toUint256(state.jtCoverageImpermanentLoss), 0, "JT coverage IL exists");
         assertGt(accountant.getState().fixedTermEndTimestamp, vm.getBlockTimestamp(), "fixed term end set");
     }
 
@@ -562,7 +541,7 @@ contract RoycoAccountantTest is BaseTest {
         SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(80e18), _nav(50e18));
 
         assertEq(uint8(state2.marketState), uint8(MarketState.PERPETUAL), "back to PERPETUAL");
-        assertEq(toUint256(state2.jtImpermanentLoss), 0, "JT coverage IL cleared");
+        assertEq(toUint256(state2.jtCoverageImpermanentLoss), 0, "JT coverage IL cleared");
     }
 
     function test_stateTransition_alwaysPerpetual_whenDurationZero() public {
@@ -618,29 +597,31 @@ contract RoycoAccountantTest is BaseTest {
         vm.prank(MOCK_KERNEL);
         SyncedAccountingState memory state1 = accountant.preOpSyncTrancheAccounting(_nav(80e18), _nav(50e18));
         assertEq(uint8(state1.marketState), uint8(MarketState.FIXED_TERM));
-        assertGt(toUint256(state1.jtImpermanentLoss), 0, "IL exists");
+        assertGt(toUint256(state1.jtCoverageImpermanentLoss), 0, "IL exists");
 
         vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(MOCK_KERNEL);
         SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(110e18), _nav(50e18));
 
         assertEq(uint8(state2.marketState), uint8(MarketState.PERPETUAL), "back to PERPETUAL via recovery");
-        assertEq(toUint256(state2.jtImpermanentLoss), 0, "IL cleared via recovery");
+        assertEq(toUint256(state2.jtCoverageImpermanentLoss), 0, "IL cleared via recovery");
     }
 
-    function test_stateTransition_fixedTermToPerpetual_stILCreated() public {
+    function test_stateTransition_fixedTermToPerpetual_uncollateralized() public {
         _initializeAccountantState(100e18, 50e18);
 
         vm.prank(MOCK_KERNEL);
         SyncedAccountingState memory state1 = accountant.preOpSyncTrancheAccounting(_nav(80e18), _nav(50e18));
         assertEq(uint8(state1.marketState), uint8(MarketState.FIXED_TERM));
 
-        // Massive loss to 0 ST NAV — drains JT and creates ST IL
+        // ST loss exactly exhausts JT effective NAV while ST keeps value: market becomes uncollateralized
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(0), _nav(50e18));
+        SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(50e18), _nav(50e18));
 
-        assertEq(uint8(state2.marketState), uint8(MarketState.PERPETUAL), "PERPETUAL when ST has IL");
-        assertGt(toUint256(state2.stImpermanentLoss), 0, "ST IL exists");
+        assertEq(toUint256(state2.jtEffectiveNAV), 0, "JT exhausted by coverage");
+        assertGt(toUint256(state2.stEffectiveNAV), 0, "ST retains value");
+        assertEq(uint8(state2.marketState), uint8(MarketState.PERPETUAL), "PERPETUAL when uncollateralized");
+        assertEq(toUint256(state2.jtCoverageImpermanentLoss), 0, "JT coverage IL cleared on uncollateralization");
     }
 
     function test_stateTransition_staysFixedTerm_partialRecovery() public {
@@ -649,15 +630,15 @@ contract RoycoAccountantTest is BaseTest {
         vm.prank(MOCK_KERNEL);
         SyncedAccountingState memory state1 = accountant.preOpSyncTrancheAccounting(_nav(80e18), _nav(50e18));
         assertEq(uint8(state1.marketState), uint8(MarketState.FIXED_TERM));
-        uint256 initialIL = toUint256(state1.jtImpermanentLoss);
+        uint256 initialIL = toUint256(state1.jtCoverageImpermanentLoss);
 
         vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(MOCK_KERNEL);
         SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(90e18), _nav(50e18));
 
         assertEq(uint8(state2.marketState), uint8(MarketState.FIXED_TERM), "stays FIXED_TERM");
-        assertLt(toUint256(state2.jtImpermanentLoss), initialIL, "IL reduced but not zero");
-        assertGt(toUint256(state2.jtImpermanentLoss), 0, "IL still exists");
+        assertLt(toUint256(state2.jtCoverageImpermanentLoss), initialIL, "IL reduced but not zero");
+        assertGt(toUint256(state2.jtCoverageImpermanentLoss), 0, "IL still exists");
     }
 
     function test_stateTransition_exactlyAtExpiry() public {
@@ -674,7 +655,7 @@ contract RoycoAccountantTest is BaseTest {
         SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(80e18), _nav(50e18));
 
         assertEq(uint8(state2.marketState), uint8(MarketState.PERPETUAL), "PERPETUAL at exact expiry");
-        assertEq(toUint256(state2.jtImpermanentLoss), 0, "IL cleared at expiry");
+        assertEq(toUint256(state2.jtCoverageImpermanentLoss), 0, "IL cleared at expiry");
     }
 
     function test_stateTransition_multipleRapidTransitions() public {
@@ -720,7 +701,8 @@ contract RoycoAccountantTest is BaseTest {
             vm.prank(MOCK_KERNEL);
             SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(newStNav), _nav(jtNav));
 
-            if (toUint256(state.jtImpermanentLoss) > 0 && toUint256(state.stImpermanentLoss) == 0) {
+            // Loss is bounded below JT effective NAV, so JT is never exhausted (market stays collateralized)
+            if (toUint256(state.jtCoverageImpermanentLoss) > 0) {
                 assertEq(uint8(state.marketState), uint8(MarketState.FIXED_TERM));
             }
         }
@@ -821,27 +803,6 @@ contract RoycoAccountantTest is BaseTest {
         accountant.postOpSyncTrancheAccounting(Operation.JT_REDEEM, _nav(100e18), _nav(60e18), ZERO_NAV_UNITS);
     }
 
-    function test_postOpSync_stWithdrawal_scalesSTIL() public {
-        _initializeAccountantState(100e18, 10e18);
-
-        vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(50e18), _nav(10e18));
-
-        IRoycoAccountant.RoycoAccountantState memory stateBefore = accountant.getState();
-        uint256 stILBefore = toUint256(stateBefore.lastSTImpermanentLoss);
-        uint256 stEffBefore = toUint256(stateBefore.lastSTEffectiveNAV);
-
-        vm.prank(MOCK_KERNEL);
-        accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(25e18), _nav(10e18), ZERO_NAV_UNITS);
-
-        IRoycoAccountant.RoycoAccountantState memory stateAfter = accountant.getState();
-        uint256 stILAfter = toUint256(stateAfter.lastSTImpermanentLoss);
-        uint256 stEffAfter = toUint256(stateAfter.lastSTEffectiveNAV);
-
-        uint256 expectedIL = stILBefore.mulDiv(stEffAfter, stEffBefore, Math.Rounding.Ceil);
-        assertApproxEqAbs(stILAfter, expectedIL, 1, "ST IL scales proportionally");
-    }
-
     function test_postOpSync_jtWithdrawal_scalesJTCoverageIL() public {
         _initializeAccountantState(100e18, 50e18);
 
@@ -849,14 +810,14 @@ contract RoycoAccountantTest is BaseTest {
         accountant.preOpSyncTrancheAccounting(_nav(80e18), _nav(50e18));
 
         IRoycoAccountant.RoycoAccountantState memory stateBefore = accountant.getState();
-        uint256 jtCovILBefore = toUint256(stateBefore.lastJTImpermanentLoss);
+        uint256 jtCovILBefore = toUint256(stateBefore.lastJTCoverageImpermanentLoss);
         uint256 jtEffBefore = toUint256(stateBefore.lastJTEffectiveNAV);
 
         vm.prank(MOCK_KERNEL);
         accountant.postOpSyncTrancheAccounting(Operation.JT_REDEEM, _nav(80e18), _nav(25e18), ZERO_NAV_UNITS);
 
         IRoycoAccountant.RoycoAccountantState memory stateAfter = accountant.getState();
-        uint256 jtCovILAfter = toUint256(stateAfter.lastJTImpermanentLoss);
+        uint256 jtCovILAfter = toUint256(stateAfter.lastJTCoverageImpermanentLoss);
         uint256 jtEffAfter = toUint256(stateAfter.lastJTEffectiveNAV);
 
         uint256 expectedIL = jtCovILBefore.mulDiv(jtEffAfter, jtEffBefore, Math.Rounding.Floor);
@@ -989,7 +950,7 @@ contract RoycoAccountantTest is BaseTest {
         vm.prank(MOCK_KERNEL);
         SyncedAccountingState memory state1 = accountant.preOpSyncTrancheAccounting(_nav(80e18), _nav(50e18));
 
-        assertEq(toUint256(state1.jtImpermanentLoss), 20e18, "first loss recorded");
+        assertEq(toUint256(state1.jtCoverageImpermanentLoss), 20e18, "first loss recorded");
         assertEq(uint8(state1.marketState), uint8(MarketState.FIXED_TERM), "in FIXED_TERM");
         _assertNAVConservation(state1);
 
@@ -997,30 +958,31 @@ contract RoycoAccountantTest is BaseTest {
         vm.prank(MOCK_KERNEL);
         SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(95e18), _nav(50e18));
 
-        assertEq(toUint256(state2.jtImpermanentLoss), 5e18, "partial recovery");
+        assertEq(toUint256(state2.jtCoverageImpermanentLoss), 5e18, "partial recovery");
         _assertNAVConservation(state2);
 
         vm.prank(MOCK_KERNEL);
         SyncedAccountingState memory state3 = accountant.preOpSyncTrancheAccounting(_nav(85e18), _nav(50e18));
 
-        assertEq(toUint256(state3.jtImpermanentLoss), 15e18, "second loss added");
+        assertEq(toUint256(state3.jtCoverageImpermanentLoss), 15e18, "second loss added");
         _assertNAVConservation(state3);
     }
 
-    function test_sequence_jtExhaustion_stIL_fullRecovery() public {
+    function test_sequence_jtExhaustion_recovery() public {
         _initializeAccountantState(100e18, 20e18);
 
+        // ST loss exceeds JT effective NAV: JT is fully exhausted providing coverage
         vm.prank(MOCK_KERNEL);
         SyncedAccountingState memory state1 = accountant.preOpSyncTrancheAccounting(_nav(60e18), _nav(20e18));
 
         assertEq(toUint256(state1.jtEffectiveNAV), 0, "JT exhausted");
-        assertGt(toUint256(state1.stImpermanentLoss), 0, "ST IL created");
         _assertNAVConservation(state1);
 
+        // A large JT gain restores JT effective NAV above zero
         vm.prank(MOCK_KERNEL);
         SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(60e18), _nav(20e18 + 50e18));
 
-        assertEq(toUint256(state2.stImpermanentLoss), 0, "ST IL recovered");
+        assertGt(toUint256(state2.jtEffectiveNAV), 0, "JT recovers");
         _assertNAVConservation(state2);
     }
 
@@ -1104,8 +1066,9 @@ contract RoycoAccountantTest is BaseTest {
 
         IRoycoAccountant.RoycoAccountantState memory state = accountant.getState();
 
-        if (toUint256(state.lastSTImpermanentLoss) > 0) {
-            assertEq(toUint256(state.lastJTEffectiveNAV), 0, "JT exhausted if ST has IL");
+        // ST effective NAV can only fall below its raw NAV (ST bearing uncovered loss) once JT coverage is exhausted
+        if (toUint256(state.lastSTEffectiveNAV) < toUint256(state.lastSTRawNAV)) {
+            assertEq(toUint256(state.lastJTEffectiveNAV), 0, "JT exhausted if ST bears uncovered loss");
         }
     }
 
@@ -1145,7 +1108,7 @@ contract RoycoAccountantTest is BaseTest {
             vm.prank(MOCK_KERNEL);
             SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(stRaw - lossAmount), _nav(jtRaw));
 
-            assertEq(toUint256(state2.jtImpermanentLoss), 0, "JT coverage IL cleared");
+            assertEq(toUint256(state2.jtCoverageImpermanentLoss), 0, "JT coverage IL cleared");
         }
     }
 
@@ -1179,7 +1142,7 @@ contract RoycoAccountantTest is BaseTest {
         assertLe(postOpState.coverageUtilizationWAD, WAD, "Coverage must be satisfied after JT withdrawal");
     }
 
-    function testFuzz_invariant_stILRequiresJTExhaustion(uint256 stRaw, uint256 jtRaw, uint256 lossAmount) public {
+    function testFuzz_invariant_uncoveredSTLossRequiresJTExhaustion(uint256 stRaw, uint256 jtRaw, uint256 lossAmount) public {
         stRaw = bound(stRaw, 10e18, MAX_NAV / 4);
         jtRaw = bound(jtRaw, stRaw / 4, stRaw);
         lossAmount = bound(lossAmount, 1e18, stRaw);
@@ -1190,12 +1153,13 @@ contract RoycoAccountantTest is BaseTest {
         vm.prank(MOCK_KERNEL);
         SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(newStRaw), _nav(jtRaw));
 
-        if (toUint256(state.stImpermanentLoss) > 0) {
-            assertEq(toUint256(state.jtEffectiveNAV), 0, "ST IL requires JT to be exhausted");
+        // ST effective NAV can only drop below its raw NAV (ST bearing uncovered loss) once JT coverage is exhausted
+        if (toUint256(state.stEffectiveNAV) < toUint256(state.stRawNAV)) {
+            assertEq(toUint256(state.jtEffectiveNAV), 0, "uncovered ST loss requires JT to be exhausted");
         }
     }
 
-    function test_invariant_stILRequiresJTExhaustion() public {
+    function test_invariant_uncoveredSTLossRequiresJTExhaustion() public {
         _initializeAccountantState(100e18, 20e18);
         IRoycoAccountant.RoycoAccountantState memory baseState = accountant.getState();
         uint256 jtEffBefore = toUint256(baseState.lastJTEffectiveNAV);
@@ -1204,8 +1168,9 @@ contract RoycoAccountantTest is BaseTest {
         vm.prank(MOCK_KERNEL);
         SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 - massiveLoss), _nav(20e18));
 
-        if (toUint256(state.stImpermanentLoss) > 0) {
-            assertEq(toUint256(state.jtEffectiveNAV), 0, "ST IL requires JT to be exhausted first");
+        // ST effective NAV can only drop below its raw NAV (ST bearing uncovered loss) once JT coverage is exhausted
+        if (toUint256(state.stEffectiveNAV) < toUint256(state.stRawNAV)) {
+            assertEq(toUint256(state.jtEffectiveNAV), 0, "uncovered ST loss requires JT to be exhausted first");
         }
     }
 
@@ -1217,9 +1182,7 @@ contract RoycoAccountantTest is BaseTest {
 
         // Without any loss, coverageUtilization should be below liquidation threshold
         assertLt(state.coverageUtilizationWAD, state.liquidationCoverageUtilizationWAD, "Liquidation should not be triggered without loss");
-        assertEq(toUint256(state.jtImpermanentLoss), 0, "no JT coverage IL");
-        // jtSelfImpermanentLoss removed from SyncedAccountingState
-        assertEq(toUint256(state.stImpermanentLoss), 0, "no ST IL");
+        assertEq(toUint256(state.jtCoverageImpermanentLoss), 0, "no JT coverage IL");
     }
 
     // =========================================================================

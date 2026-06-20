@@ -33,11 +33,13 @@ interface IRoycoDawnKernel {
      * @custom:field initialAuthority - The access manager for this kernel
      * @custom:field protocolFeeRecipient - The market's protocol fee recipient
      * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached, scaled to WAD precision
+     * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables blacklist screening)
      */
     struct RoycoDawnKernelInitParams {
         address initialAuthority;
         address protocolFeeRecipient;
         uint64 stSelfLiquidationBonusWAD;
+        address roycoBlacklist;
     }
 
     /**
@@ -48,25 +50,14 @@ interface IRoycoDawnKernel {
      * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached, scaled to WAD precision
      * @custom:field stOwnedYieldBearingAssets - The yield bearing assets held by the ST, in ST's asset units
      * @custom:field jtOwnedYieldBearingAssets - The yield bearing assets held by the JT, in JT's asset units
-     * @custom:field isBlacklistEnabled - A boolean indicating whether the blacklist is enforced for this market
-     * @custom:field isBlacklisted - A mapping of accounts to a boolean indicating if they are blacklisted
+     * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables blacklist screening)
      */
     struct RoycoDawnKernelState {
         address protocolFeeRecipient;
         uint64 stSelfLiquidationBonusWAD;
         TRANCHE_UNIT stOwnedYieldBearingAssets;
         TRANCHE_UNIT jtOwnedYieldBearingAssets;
-        bool isBlacklistEnabled;
-        mapping(address account => bool isBlacklisted) isBlacklisted;
-    }
-
-    /// @notice Viewable state for the Royco Kernel
-    struct RoycoDawnKernelStateView {
-        bool isBlacklistEnabled;
-        address protocolFeeRecipient;
-        uint64 stSelfLiquidationBonusWAD;
-        TRANCHE_UNIT stOwnedYieldBearingAssets;
-        TRANCHE_UNIT jtOwnedYieldBearingAssets;
+        address roycoBlacklist;
     }
 
     /**
@@ -82,22 +73,10 @@ interface IRoycoDawnKernel {
     event SeniorTrancheSelfLiquidationBonusUpdated(uint64 stSelfLiquidationBonusWAD);
 
     /**
-     * @notice Emitted when an account is blacklisted
-     * @param account The address of the account
+     * @notice Emitted when the market's blacklist contract is updated
+     * @param roycoBlacklist The new blacklist contract address (the null address if screening is disabled)
      */
-    event AccountBlacklisted(address indexed account);
-
-    /**
-     * @notice Emitted when an account is unblacklisted
-     * @param account The address of the account
-     */
-    event AccountUnblacklisted(address indexed account);
-
-    /**
-     * @notice Emitted when the blacklist status is updated
-     * @param isBlacklistEnabled The new blacklist enabled state
-     */
-    event BlacklistStatusUpdated(bool isBlacklistEnabled);
+    event RoycoBlacklistUpdated(address roycoBlacklist);
 
     /// @notice Thrown when the tranche and the kernel's corresponding tranche assets don't match
     error TRANCHE_AND_KERNEL_ASSETS_MISMATCH();
@@ -108,9 +87,6 @@ interface IRoycoDawnKernel {
     /// @notice Thrown when the caller of a permissioned function isn't the market's junior tranche
     error ONLY_JUNIOR_TRANCHE();
 
-    /// @notice Thrown when a ST LP is attempting to deposit when ST impermanent loss exists
-    error ST_DEPOSIT_DISABLED_IN_LOSS();
-
     /// @notice Thrown when an LP is attempting to deposit into or redeem from the market while it is in a fixed term state
     error DISABLED_IN_FIXED_TERM_STATE();
 
@@ -120,23 +96,8 @@ interface IRoycoDawnKernel {
     /// @notice Thrown when the specified account is the null address
     error NULL_DEPOSITOR();
 
-    /// @notice Thrown when the specified account is already blacklisted
-    error ACCOUNT_ALREADY_BLACKLISTED(address account);
-
-    /// @notice Thrown when the specified account is not blacklisted
-    error ACCOUNT_NOT_BLACKLISTED(address account);
-
-    /// @notice Thrown when the specified account is blacklisted
-    error ACCOUNT_BLACKLISTED(address account);
-
-    /// @notice Thrown when the blacklist status is already set
-    error BLACKLIST_STATUS_ALREADY_SET(bool isBlacklistEnabled);
-
     /// @notice Thrown when the to address is not whitelisted on the tranche
     error ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(address to);
-
-    /// @notice Thrown when the array of accounts is empty
-    error EMPTY_ARRAY();
 
     /**
      * @notice Retrieves the senior tranche address
@@ -183,35 +144,18 @@ interface IRoycoDawnKernel {
     function setSeniorTrancheSelfLiquidationBonus(uint64 _stSelfLiquidationBonusWAD) external;
 
     /**
-     * @notice Blacklists the assets of the specified addresses
-     * @param _accounts The addresses of the accounts to blacklist
+     * @notice Sets the blacklist contract consulted on tranche balance updates for this market
+     * @dev Only callable by a designated admin
+     * @dev Setting the blacklist to the null address disables blacklist screening for this market
+     * @param _roycoBlacklist The address of the market's blacklist contract (or the null address to disable screening)
      */
-    function blacklistAccounts(address[] calldata _accounts) external;
-
-    /**
-     * @notice Unblacklists the assets of the specified addresses
-     * @param _accounts The addresses of the accounts to unblacklist
-     */
-    function unblacklistAccounts(address[] calldata _accounts) external;
-
-    /**
-     * @notice Checks if the specified account is blacklisted
-     * @param _account The address of the account to check
-     * @return isBlacklisted Whether the account is blacklisted
-     */
-    function isBlacklisted(address _account) external view returns (bool);
-
-    /**
-     * @notice Sets the blacklist enabled state
-     * @param _blacklistEnabled The new blacklist enabled state
-     */
-    function setBlacklistStatus(bool _blacklistEnabled) external;
+    function setRoycoBlacklist(address _roycoBlacklist) external;
 
     /**
      * @notice Retrieves the state of the Royco kernel
      * @return state The Royco kernel's state, including the protocol fee recipient and the kernel's controlled tranche and base assets
      */
-    function getState() external view returns (RoycoDawnKernelStateView memory state);
+    function getState() external view returns (RoycoDawnKernelState memory state);
 
     /**
      * @notice Converts the specified ST assets denominated in its tranche units to the kernel's NAV units

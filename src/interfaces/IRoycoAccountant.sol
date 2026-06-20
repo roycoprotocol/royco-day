@@ -56,15 +56,14 @@ interface IRoycoAccountant {
      * @custom:field lastJTRawNAV - The last recorded pure NAV (excluding any coverage given and yield shared) of the junior tranche
      * @custom:field lastSTEffectiveNAV - The last recorded effective NAV (including any prior applied coverage, ST yield distribution, and uncovered losses) of the senior tranche
      * @custom:field lastJTEffectiveNAV - The last recorded effective NAV (including any prior provided coverage, JT yield, ST yield distribution, and JT losses) of the junior tranche
-     * @custom:field lastSTImpermanentLoss - The impermanent loss that ST has suffered after exhausting JT's loss-absorption buffer
-     *                                   This represents the first claim on capital that the senior tranche has on future ST and JT recoveries
-     * @custom:field lastJTImpermanentLoss - The impermanent loss that JT has suffered after providing coverage for ST losses
-     *                                           This represents the second claim on capital that the junior tranche has on future ST recoveries
+     * @custom:field lastJTCoverageImpermanentLoss - The impermanent loss that JT has suffered after providing coverage for ST losses
+     *                                           This represents the claim on capital that the junior tranche has on future ST recoveries
      * @custom:field twJTYieldShareAccruedWAD - The time-weighted junior tranche yield share (YDM output) since the last yield distribution, scaled to WAD precision
      * @custom:field lastAccrualTimestamp - The timestamp at which the time-weighted JT yield share accumulator was last updated
      * @custom:field lastDistributionTimestamp - The timestamp at which the last ST yield distribution occurred
      * @custom:field stNAVDustTolerance - The worst case dust tolerance for stRawNAV from underlying NAV quoting/rounding
      * @custom:field jtNAVDustTolerance - The worst case dust tolerance for jtRawNAV from underlying NAV quoting/rounding
+     * @custom:field effectiveNAVDustTolerance - Effective NAV deltas are claim-weighted linear combinations of stRawNAV and jtRawNAV deltas, so the worst-case dust is bounded by the sum of the raw NAV dust tolerances
      */
     struct RoycoAccountantState {
         MarketState lastMarketState;
@@ -81,13 +80,13 @@ interface IRoycoAccountant {
         NAV_UNIT lastJTRawNAV;
         NAV_UNIT lastSTEffectiveNAV;
         NAV_UNIT lastJTEffectiveNAV;
-        NAV_UNIT lastSTImpermanentLoss;
-        NAV_UNIT lastJTImpermanentLoss;
+        NAV_UNIT lastJTCoverageImpermanentLoss;
         uint192 twJTYieldShareAccruedWAD;
         uint32 lastAccrualTimestamp;
         uint32 lastDistributionTimestamp;
         NAV_UNIT stNAVDustTolerance;
         NAV_UNIT jtNAVDustTolerance;
+        NAV_UNIT effectiveNAVDustTolerance;
     }
 
     /**
@@ -172,9 +171,9 @@ interface IRoycoAccountant {
 
     /**
      * @notice Emitted when JT's coverage loss is realized and reset to zero when transitioning from a fixed term state to a perpetual state
-     * @param jtImpermanentLossErased The amount of JT coverage loss erased when transitioning from a fixed term state to a perpetual state
+     * @param jtCoverageImpermanentLossErased The amount of JT coverage loss erased when transitioning from a fixed term state to a perpetual state
      */
-    event JTImpermanentLossReset(NAV_UNIT jtImpermanentLossErased);
+    event JTCoverageImpermanentLossReset(NAV_UNIT jtCoverageImpermanentLossErased);
 
     /**
      * @notice Emitted when a fixed term regime is ended by this market
@@ -192,6 +191,9 @@ interface IRoycoAccountant {
 
     /// @notice Thrown when the YDM failed to initialize
     error FAILED_TO_INITIALIZE_YDM(bytes data);
+
+    /// @notice Thrown when the YDM returns a JT yield share exceeding 100% of senior appreciation
+    error INVALID_YDM_OUTPUT();
 
     /// @notice Thrown when the sum of the raw NAVs don't equal the sum of the effective NAVs of both tranches
     error NAV_CONSERVATION_VIOLATION();

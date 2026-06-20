@@ -25,7 +25,7 @@ import { UpgradeModuleBase } from "./UpgradeModuleBase.sol";
  *      `snapshotState()` (post-warp) captures:
  *        - `KERNEL()` immutable
  *        - Full `getState()` (every storage field including fees, coverage, beta, ydm, last*NAV,
- *          last*ImpermanentLoss, accrual/distribution timestamps, dust tolerances)
+ *          lastJTCoverageImpermanentLoss, accrual/distribution timestamps, dust tolerances incl. effectiveNAVDustTolerance)
  *        - `previewSyncTrancheAccounting(stRawNAV, jtRawNAV)` at post-warp time using the kernel's
  *          current raw tranche NAVs — catches any drift in the sync math post-upgrade
  *

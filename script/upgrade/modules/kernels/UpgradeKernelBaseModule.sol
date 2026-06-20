@@ -129,7 +129,7 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
     ///      calls them back-to-back), so any oracle-driven math is reproducible.
     function _snapshotCommon(address _proxy) internal view returns (bytes memory) {
         IRoycoDawnKernel k = IRoycoDawnKernel(_proxy);
-        IRoycoDawnKernel.RoycoDawnKernelStateView memory state = k.getState();
+        IRoycoDawnKernel.RoycoDawnKernelState memory state = k.getState();
         uint256 stConv = NAV_UNIT.unwrap(k.stConvertTrancheUnitsToNAVUnits(_oneTrancheUnit()));
         uint256 jtConv = NAV_UNIT.unwrap(k.jtConvertTrancheUnitsToNAVUnits(_oneTrancheUnit()));
         return abi.encode(
@@ -153,10 +153,10 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
             address jtAsset,
             address accountant,
             bool enforceWhitelist,
-            IRoycoDawnKernel.RoycoDawnKernelStateView memory state,
+            IRoycoDawnKernel.RoycoDawnKernelState memory state,
             uint256 stConvRate,
             uint256 jtConvRate
-        ) = abi.decode(_snap, (address, address, address, address, address, bool, IRoycoDawnKernel.RoycoDawnKernelStateView, uint256, uint256));
+        ) = abi.decode(_snap, (address, address, address, address, address, bool, IRoycoDawnKernel.RoycoDawnKernelState, uint256, uint256));
 
         IRoycoDawnKernel k = IRoycoDawnKernel(_proxy);
         require(k.SENIOR_TRANCHE() == senior, UpgradeKernelBaseModule__ImmutableChanged("SENIOR_TRANCHE"));
@@ -169,8 +169,8 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
             UpgradeKernelBaseModule__ImmutableChanged("ENFORCE_TRANCHE_SHARES_TRANSFER_WHITELIST")
         );
 
-        IRoycoDawnKernel.RoycoDawnKernelStateView memory post = k.getState();
-        require(post.isBlacklistEnabled == state.isBlacklistEnabled, UpgradeKernelBaseModule__StateChanged("isBlacklistEnabled"));
+        IRoycoDawnKernel.RoycoDawnKernelState memory post = k.getState();
+        require(post.roycoBlacklist == state.roycoBlacklist, UpgradeKernelBaseModule__StateChanged("roycoBlacklist"));
         require(post.protocolFeeRecipient == state.protocolFeeRecipient, UpgradeKernelBaseModule__StateChanged("protocolFeeRecipient"));
         require(post.stSelfLiquidationBonusWAD == state.stSelfLiquidationBonusWAD, UpgradeKernelBaseModule__StateChanged("stSelfLiquidationBonusWAD"));
         require(

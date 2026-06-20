@@ -217,7 +217,10 @@ contract UpgradabilityTestSuite is BaseTest {
     /// @notice Test that Kernel implementation cannot be initialized
     function test_kernelImplementation_cannotBeInitialized() external {
         IRoycoDawnKernel.RoycoDawnKernelInitParams memory params = IRoycoDawnKernel.RoycoDawnKernelInitParams({
-            initialAuthority: address(FACTORY), protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS, stSelfLiquidationBonusWAD: 0
+            initialAuthority: address(FACTORY),
+            protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
+            stSelfLiquidationBonusWAD: 0,
+            roycoBlacklist: address(0)
         });
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
@@ -265,7 +268,10 @@ contract UpgradabilityTestSuite is BaseTest {
     /// @notice Test that new Kernel implementation cannot be initialized
     function test_newKernelImplementation_cannotBeInitialized() external {
         IRoycoDawnKernel.RoycoDawnKernelInitParams memory params = IRoycoDawnKernel.RoycoDawnKernelInitParams({
-            initialAuthority: address(FACTORY), protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS, stSelfLiquidationBonusWAD: 0
+            initialAuthority: address(FACTORY),
+            protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
+            stSelfLiquidationBonusWAD: 0,
+            roycoBlacklist: address(0)
         });
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);

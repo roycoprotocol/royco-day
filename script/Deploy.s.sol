@@ -3,9 +3,11 @@ pragma solidity ^0.8.28;
 
 import { UUPSUpgradeable } from "../lib/openzeppelin-contracts/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { RoycoAccountant } from "../src/accountant/RoycoAccountant.sol";
+import { RoycoBlacklist } from "../src/auth/RoycoBlacklist.sol";
 import { RolesConfiguration, RoycoFactory } from "../src/factory/RoycoFactory.sol";
 import { IRoycoAccountant } from "../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoAuth } from "../src/interfaces/IRoycoAuth.sol";
+import { IRoycoBlacklist } from "../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoFactory } from "../src/interfaces/IRoycoFactory.sol";
 import { IRoycoDawnKernel } from "../src/interfaces/IRoycoDawnKernel.sol";
 import { IRoycoVaultTranche } from "../src/interfaces/IRoycoVaultTranche.sol";
@@ -59,6 +61,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
     bytes32 constant YDM_SALT = keccak256("ROYCO_YDM_IMPLEMENTATION_V2");
     bytes32 constant FACTORY_SALT_BASE = keccak256("ROYCO_FACTORY_IMPLEMENTATION_V2");
     bytes32 constant MARKET_DEPLOYMENT_SALT = keccak256("ROYCO_MARKET_DEPLOYMENT_V2");
+    bytes32 constant BLACKLIST_IMPL_SALT = keccak256("ROYCO_BLACKLIST_IMPLEMENTATION_V2");
+    bytes32 constant BLACKLIST_PROXY_SALT = keccak256("ROYCO_BLACKLIST_PROXY_V2");
 
     // Whether to print deployment parameters
     bool ENABLE_LOGGING = false;
@@ -172,6 +176,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         IRoycoVaultTranche juniorTranche;
         IRoycoAccountant accountant;
         IRoycoDawnKernel kernel;
+        address roycoBlacklist;
     }
 
     /// @notice Addresses for role assignments
@@ -351,6 +356,11 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
             factory = _deployFactory(_factoryAdmin, deployer, _scheduledOperationsExpirySeconds, _roleAssignments);
         }
 
+        // Deploy (or reuse) the chain's single shared blacklist before the market so the kernel can be pointed at it.
+        // The blacklist is deployed once per chain via CREATE2; its function-role wiring is a one-time admin action
+        // performed separately (see script/update/blacklist), not folded into this deployer-broadcast path.
+        address roycoBlacklist = _deployBlacklist(address(factory));
+
         // Deploy all implementations. Then deploy the market using the factory
         (
             IRoycoFactory.RoycoMarket memory market,
@@ -358,7 +368,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
             RoycoJuniorTranche jtTrancheImpl,
             address kernelImpl,
             RoycoAccountant accountantImpl
-        ) = _deployMarket(factory, address(ydm), _config, _protocolFeeRecipient);
+        ) = _deployMarket(factory, address(ydm), _config, _protocolFeeRecipient, roycoBlacklist);
 
         // Build deployment result
         DeploymentResult memory result = DeploymentResult({
@@ -371,7 +381,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
             seniorTranche: market.seniorTranche,
             juniorTranche: market.juniorTranche,
             accountant: market.accountant,
-            kernel: market.kernel
+            kernel: market.kernel,
+            roycoBlacklist: roycoBlacklist
         });
 
         if (ENABLE_LOGGING) {
@@ -379,6 +390,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
             console2.log("=== Deployment Summary ===");
             console2.log("Factory:", address(result.factory));
             console2.log("Factory Admin:", _factoryAdmin);
+            console2.log("Blacklist (Proxy):", result.roycoBlacklist);
             console2.log("YDM:", address(result.ydm));
             console2.log("Accountant Implementation:", address(result.accountantImplementation));
             console2.log("ST Tranche Implementation:", address(result.stTrancheImplementation));
@@ -459,8 +471,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
     /// @param _kernel The address of the kernel contract
     /// @return The roles configuration for the kernel contract
     function _buildKernelRolesConfig(address _kernel) private pure returns (IRoycoFactory.RolesTargetConfiguration memory) {
-        bytes4[] memory selectors = new bytes4[](11);
-        uint64[] memory roleValues = new uint64[](11);
+        bytes4[] memory selectors = new bytes4[](9);
+        uint64[] memory roleValues = new uint64[](9);
 
         selectors[0] = IRoycoDawnKernel.setProtocolFeeRecipient.selector;
         roleValues[0] = ADMIN_KERNEL_ROLE;
@@ -478,12 +490,10 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         roleValues[6] = SYNC_ROLE;
         selectors[7] = IRoycoDawnKernel.setSeniorTrancheSelfLiquidationBonus.selector;
         roleValues[7] = ADMIN_KERNEL_ROLE;
-        selectors[8] = IRoycoDawnKernel.blacklistAccounts.selector;
-        roleValues[8] = TRANSFER_AGENT_ROLE;
-        selectors[9] = IRoycoDawnKernel.unblacklistAccounts.selector;
-        roleValues[9] = TRANSFER_AGENT_ROLE;
-        selectors[10] = IRoycoDawnKernel.setBlacklistStatus.selector;
-        roleValues[10] = TRANSFER_AGENT_ROLE;
+        // setRoycoBlacklist re-points the kernel at a blacklist contract; account-level blacklisting lives on the
+        // shared RoycoBlacklist contract and is role-wired there (see script/update/blacklist)
+        selectors[8] = IRoycoDawnKernel.setRoycoBlacklist.selector;
+        roleValues[8] = ADMIN_KERNEL_ROLE;
 
         return IRoycoFactory.RolesTargetConfiguration({ target: _kernel, selectors: selectors, roles: roleValues });
     }
@@ -666,7 +676,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         RoycoFactory factory,
         address ydmAddress,
         MarketConfig memory _config,
-        address _protocolFeeRecipient
+        address _protocolFeeRecipient,
+        address _roycoBlacklist
     )
         internal
         returns (
@@ -722,7 +733,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         // Build initialization data
         address factoryAddress = address(factory);
         bytes memory kernelInitializationData = _buildKernelInitializationData(
-            _config.kernelType, _config.kernelSpecificParams, factoryAddress, _protocolFeeRecipient, _config.stSelfLiquidationBonusWAD
+            _config.kernelType, _config.kernelSpecificParams, factoryAddress, _protocolFeeRecipient, _config.stSelfLiquidationBonusWAD, _roycoBlacklist
         );
         bytes memory accountantInitializationData = _buildAccountantInitializationData(ydmAddress, factoryAddress, _config);
         bytes memory seniorTrancheInitializationData = _buildSeniorTrancheInitializationData(factoryAddress, _config);
@@ -850,6 +861,31 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
             }
         }
         return IYDM(addr);
+    }
+
+    /// @notice Deploys (or returns) the chain's single shared RoycoBlacklist via CREATE2.
+    /// @dev One blacklist is shared by every kernel on a chain. It is deployed deterministically with the factory as its
+    ///      AccessManager authority and is initialized with NO sanctions list and NO blacklisted accounts, so its proxy
+    ///      address depends only on the factory and stays stable regardless of sanctions configuration. The per-chain
+    ///      Chainalysis sanctions list is wired post-deploy via `setSanctionsList` (see script/update/blacklist), and the
+    ///      blacklist's function-role wiring on the factory is a one-time admin action performed separately.
+    /// @param _factory The factory address, which acts as the blacklist's AccessManager authority
+    /// @return blacklist The address of the chain's shared blacklist proxy
+    function _deployBlacklist(address _factory) internal returns (address blacklist) {
+        // Deploy the blacklist implementation
+        (address implAddr, bool implAlreadyDeployed) = deployWithSanityChecks(BLACKLIST_IMPL_SALT, type(RoycoBlacklist).creationCode, false);
+        if (ENABLE_LOGGING) {
+            console2.log(implAlreadyDeployed ? "Blacklist implementation already deployed at:" : "Blacklist implementation deployed at:", implAddr);
+        }
+
+        // Deploy the blacklist proxy (authority = factory; no sanctions list / no initial accounts for a deterministic address)
+        address[] memory initialBlacklistedAccounts = new address[](0);
+        bytes memory initData = abi.encodeCall(RoycoBlacklist.initialize, (_factory, address(0), initialBlacklistedAccounts));
+        bool proxyAlreadyDeployed;
+        (blacklist, proxyAlreadyDeployed) = deployWithSanityChecks(BLACKLIST_PROXY_SALT, getERC1967ProxyCreationCode(implAddr, initData), false);
+        if (ENABLE_LOGGING) {
+            console2.log(proxyAlreadyDeployed ? "Blacklist proxy already deployed at:" : "Blacklist proxy deployed at:", blacklist);
+        }
     }
 
     /// @notice Deploys the factory implementation and its UUPS proxy via CREATE2.
@@ -1041,20 +1077,26 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
     /// @param _factoryAddress The address of the factory
     /// @param _protocolFeeRecipient The address that receives protocol fees
     /// @param _stSelfLiquidationBonusWAD The self-liquidation bonus for the senior tranche
+    /// @param _roycoBlacklist The chain's shared blacklist the kernel screens tranche balance updates against
     /// @return The initialization data for the kernel proxy
     function _buildKernelInitializationData(
         KernelType _kernelType,
         bytes memory _kernelSpecificParams,
         address _factoryAddress,
         address _protocolFeeRecipient,
-        uint64 _stSelfLiquidationBonusWAD
+        uint64 _stSelfLiquidationBonusWAD,
+        address _roycoBlacklist
     )
         internal
         pure
         returns (bytes memory)
     {
         IRoycoDawnKernel.RoycoDawnKernelInitParams memory kernelParams = IRoycoDawnKernel.RoycoDawnKernelInitParams({
-            initialAuthority: _factoryAddress, protocolFeeRecipient: _protocolFeeRecipient, stSelfLiquidationBonusWAD: _stSelfLiquidationBonusWAD
+            initialAuthority: _factoryAddress,
+            protocolFeeRecipient: _protocolFeeRecipient,
+            stSelfLiquidationBonusWAD: _stSelfLiquidationBonusWAD,
+            // The chain's shared blacklist; kernels screen all tranche balance updates against it (the null address disables screening)
+            roycoBlacklist: _roycoBlacklist
         });
 
         if (_kernelType == KernelType.ReUSD_ST_ReUSD_JT) {

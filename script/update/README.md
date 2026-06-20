@@ -75,12 +75,15 @@ script/update/
 ├── kernel/
 │   ├── SetProtocolFeeRecipient.s.sol
 │   ├── SetSeniorTrancheSelfLiquidationBonus.s.sol
-│   ├── SetBlacklistStatus.s.sol
-│   ├── BlacklistAccounts.s.sol
-│   └── UnblacklistAccounts.s.sol
+│   └── SetChainlinkOracle.s.sol
 └── factory/
     └── SetScheduledOperationsExpiry.s.sol
 ```
+
+> Blacklisting is managed by the chain's shared `RoycoBlacklist` contract, not the kernel. Its admin
+> actions (`blacklistAccounts` / `unblacklistAccounts` under the transfer-agent role, `setSanctionsList`
+> under the kernel-admin role) and the one-time `setTargetFunctionRole` role wiring on the factory are
+> executed directly by the controlling multisig like any other admin call, so they have no dedicated scripts.
 
 Output files — one batched JSON per chain per phase:
 

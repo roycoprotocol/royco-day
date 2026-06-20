@@ -5,6 +5,7 @@ import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/E
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
 import { IRoycoAccountant } from "../../../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoBlacklist } from "../../../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDawnKernel } from "../../../../src/interfaces/IRoycoDawnKernel.sol";
 import { IRoycoVaultTranche } from "../../../../src/interfaces/IRoycoVaultTranche.sol";
 import {
@@ -108,14 +109,14 @@ contract ACRED_ComplianceTest is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
         address[] memory depositors = new address[](1);
         depositors[0] = _who;
         vm.prank(TRANSFER_AGENT_ADDRESS);
-        KERNEL.blacklistAccounts(depositors);
+        BLACKLIST.blacklistAccounts(depositors);
     }
 
     function _unblacklist(address _who) internal {
         address[] memory depositors = new address[](1);
         depositors[0] = _who;
         vm.prank(TRANSFER_AGENT_ADDRESS);
-        KERNEL.unblacklistAccounts(depositors);
+        BLACKLIST.unblacklistAccounts(depositors);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -133,7 +134,7 @@ contract ACRED_ComplianceTest is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
         uint256 amount = 10e6;
         vm.startPrank(BOB_ADDRESS);
         IERC20(config.stAsset).approve(address(ST), amount);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDawnKernel.ACCOUNT_BLACKLISTED.selector, BOB_ADDRESS));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoBlacklist.ACCOUNT_BLACKLISTED.selector, BOB_ADDRESS));
         ST.deposit(toTrancheUnits(amount), BOB_ADDRESS);
         vm.stopPrank();
     }
@@ -148,7 +149,7 @@ contract ACRED_ComplianceTest is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
 
         // BOB tries to redeem ST — should revert
         vm.startPrank(BOB_ADDRESS);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDawnKernel.ACCOUNT_BLACKLISTED.selector, BOB_ADDRESS));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoBlacklist.ACCOUNT_BLACKLISTED.selector, BOB_ADDRESS));
         ST.redeem(stShares, BOB_ADDRESS, BOB_ADDRESS);
         vm.stopPrank();
     }
@@ -398,14 +399,18 @@ contract ACRED_ComplianceTest is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
         // ALICE tries to blacklist — should revert
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert();
-        KERNEL.blacklistAccounts(depositors);
+        BLACKLIST.blacklistAccounts(depositors);
     }
 
-    function test_setBlacklistStatus_revertsForNonTransferAgent() external {
-        // ALICE tries to enable blacklist — should revert
+    function test_unblacklist_revertsForNonTransferAgent() external {
+        // Blacklist BOB as the transfer agent, then have ALICE try to unblacklist — should revert
+        _blacklist(BOB_ADDRESS);
+
+        address[] memory depositors = new address[](1);
+        depositors[0] = BOB_ADDRESS;
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert();
-        KERNEL.setBlacklistStatus(true);
+        BLACKLIST.unblacklistAccounts(depositors);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

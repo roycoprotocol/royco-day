@@ -7,12 +7,13 @@ import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/E
 import { ReentrancyGuardTransient } from "../../../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuardTransient.sol";
 import { RoycoBase } from "../../base/RoycoBase.sol";
 import { IRoycoAccountant } from "../../interfaces/IRoycoAccountant.sol";
+import { IRoycoBlacklist } from "../../interfaces/IRoycoBlacklist.sol";
 import { IRoycoDawnKernel } from "../../interfaces/IRoycoDawnKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../libraries/Constants.sol";
+import { DawnUtilsLib } from "../../libraries/DawnUtilsLib.sol";
 import { AssetClaims, MarketState, Operation, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
 import { Math, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toUint256 } from "../../libraries/Units.sol";
-import { DawnUtilsLib } from "../../libraries/DawnUtilsLib.sol";
 
 /**
  * @title RoycoDawnKernel
@@ -120,9 +121,10 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
         RoycoDawnKernelState storage $ = _getRoycoDawnKernelStorage();
         $.protocolFeeRecipient = _params.protocolFeeRecipient;
         $.stSelfLiquidationBonusWAD = _params.stSelfLiquidationBonusWAD;
-        $.isBlacklistEnabled = true; // Enable the blacklist by default
+        $.roycoBlacklist = _params.roycoBlacklist;
 
         emit ProtocolFeeRecipientUpdated(_params.protocolFeeRecipient);
+        emit RoycoBlacklistUpdated(_params.roycoBlacklist);
     }
 
     // =============================
@@ -198,13 +200,11 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
     /// @dev ST deposits are allowed only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-deposit
     function stMaxDeposit(address _receiver) public view virtual override(IRoycoDawnKernel) returns (TRANCHE_UNIT) {
         // If the receiver is blacklisted or the kernel is currently paused, return zero tranche units
-        if (isBlacklisted(_receiver) || paused()) return ZERO_TRANCHE_UNITS;
+        if (_isBlacklisted(_receiver) || paused()) return ZERO_TRANCHE_UNITS;
         SyncedAccountingState memory state = _previewSyncTrancheAccounting();
         // ST deposits are disabled during a fixed-term market state
         if (state.marketState == MarketState.FIXED_TERM) return ZERO_TRANCHE_UNITS;
-        // If ST IL exists, ST deposits are disabled to preclude existing ST's from getting diluted and realizing losses
-        if (state.stImpermanentLoss != ZERO_NAV_UNITS) return ZERO_TRANCHE_UNITS;
-        // ST deposits are enabled as long as ST IL is nonexistent and coverage is satisfied
+        // ST deposits are enabled as long as the market's coverage requirement is satisfied
         // No need to include ST liquidation proceeds in the raw NAV because those assets are not exposed to any volatility
         NAV_UNIT stMaxDepositableNAV = IRoycoAccountant(ACCOUNTANT).maxSTDepositGivenCoverage(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
         return stConvertNAVUnitsToTrancheUnits(stMaxDepositableNAV);
@@ -226,7 +226,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
         )
     {
         // If the owner is blacklisted or the kernel is currently paused, return zero claims
-        if (isBlacklisted(_owner) || paused()) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+        if (_isBlacklisted(_owner) || paused()) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
         SyncedAccountingState memory state;
         AssetClaims memory stNotionalClaims;
@@ -248,7 +248,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
     /// @dev JT deposits are allowed if the market is in a PERPETUAL state
     function jtMaxDeposit(address _receiver) public view virtual override(IRoycoDawnKernel) returns (TRANCHE_UNIT) {
         // If the receiver is blacklisted or the kernel is currently paused, return zero tranche units
-        if (isBlacklisted(_receiver) || paused()) return ZERO_TRANCHE_UNITS;
+        if (_isBlacklisted(_receiver) || paused()) return ZERO_TRANCHE_UNITS;
         // JT deposits are disabled during a fixed-term market state
         if ((_previewSyncTrancheAccounting()).marketState == MarketState.FIXED_TERM) return ZERO_TRANCHE_UNITS;
         return MAX_TRANCHE_UNITS;
@@ -270,7 +270,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
         )
     {
         // If the owner is blacklisted or the kernel is currently paused, return zero claims
-        if (isBlacklisted(_owner) || paused()) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+        if (_isBlacklisted(_owner) || paused()) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
         // Get the total claims the junior tranche has on each tranche's assets
         SyncedAccountingState memory state;
@@ -353,8 +353,6 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
         SyncedAccountingState memory state = _preOpSyncTrancheAccounting();
         // ST deposits are disabled during a fixed-term market state
         require(state.marketState == MarketState.PERPETUAL, DISABLED_IN_FIXED_TERM_STATE());
-        // If ST IL exists, ST deposits are disabled to preclude existing ST's from getting diluted and realizing losses
-        require(state.stImpermanentLoss == ZERO_NAV_UNITS, ST_DEPOSIT_DISABLED_IN_LOSS());
         // The NAV to mint tranche shares at is the pre-deposit senior tranche controlled NAV
         navToMintSharesAt = state.stEffectiveNAV;
         // The precise value allocated is the value of the deposited assets
@@ -494,76 +492,55 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
     }
 
     /// @inheritdoc IRoycoDawnKernel
-    function setBlacklistStatus(bool _blacklistEnabled) external override(IRoycoDawnKernel) restricted {
-        RoycoDawnKernelState storage $ = _getRoycoDawnKernelStorage();
-        require($.isBlacklistEnabled != _blacklistEnabled, BLACKLIST_STATUS_ALREADY_SET(_blacklistEnabled));
-        $.isBlacklistEnabled = _blacklistEnabled;
-        emit BlacklistStatusUpdated(_blacklistEnabled);
-    }
-
-    /// @inheritdoc IRoycoDawnKernel
-    function blacklistAccounts(address[] calldata _accounts) external override(IRoycoDawnKernel) restricted {
-        require(_accounts.length != 0, EMPTY_ARRAY());
-        RoycoDawnKernelState storage $ = _getRoycoDawnKernelStorage();
-        for (uint256 i = 0; i < _accounts.length; i++) {
-            address account = _accounts[i];
-            require(account != address(0), NULL_ADDRESS());
-            require(!$.isBlacklisted[account], ACCOUNT_ALREADY_BLACKLISTED(account));
-            $.isBlacklisted[account] = true;
-            emit AccountBlacklisted(account);
-        }
-    }
-
-    /// @inheritdoc IRoycoDawnKernel
-    function unblacklistAccounts(address[] calldata _accounts) external override(IRoycoDawnKernel) restricted {
-        require(_accounts.length != 0, EMPTY_ARRAY());
-        RoycoDawnKernelState storage $ = _getRoycoDawnKernelStorage();
-        for (uint256 i = 0; i < _accounts.length; i++) {
-            address account = _accounts[i];
-            require(account != address(0), NULL_ADDRESS());
-            require($.isBlacklisted[account], ACCOUNT_NOT_BLACKLISTED(account));
-            $.isBlacklisted[account] = false;
-            emit AccountUnblacklisted(account);
-        }
+    function setRoycoBlacklist(address _roycoBlacklist) external override(IRoycoDawnKernel) restricted {
+        _getRoycoDawnKernelStorage().roycoBlacklist = _roycoBlacklist;
+        emit RoycoBlacklistUpdated(_roycoBlacklist);
     }
 
     // =============================
     // Tranche Compliance Methods
     // =============================
 
-    /// @inheritdoc IRoycoDawnKernel
-    function isBlacklisted(address _account) public view override(IRoycoDawnKernel) returns (bool) {
-        RoycoDawnKernelState storage $ = _getRoycoDawnKernelStorage();
-        return $.isBlacklistEnabled && $.isBlacklisted[_account];
+    /**
+     * @notice Returns whether the specified account is screened out by the market's blacklist
+     * @dev Returns false when no blacklist is configured (the null address disables screening)
+     * @param _account The address of the account to check
+     * @return Whether the account is blacklisted by the market's configured blacklist
+     */
+    function _isBlacklisted(address _account) internal view returns (bool) {
+        address roycoBlacklist = _getRoycoDawnKernelStorage().roycoBlacklist;
+        return (roycoBlacklist != address(0) && IRoycoBlacklist(roycoBlacklist).isBlacklisted(_account));
     }
 
     /// @inheritdoc IRoycoDawnKernel
-    function preTrancheBalanceUpdateHook(address _caller, address _from, address _to, uint256 _value)
+    function preTrancheBalanceUpdateHook(
+        address _caller,
+        address _from,
+        address _to,
+        uint256 _value
+    )
         external
         override(IRoycoDawnKernel)
         onlyTranche
         whenNotPaused
     {
-        // Check the blacklist if it is enabled
-        bool blacklistEnabled = _getRoycoDawnKernelStorage().isBlacklistEnabled;
-        if (blacklistEnabled) {
-            // Check if caller is blacklisted or not
-            require(!isBlacklisted(_caller), ACCOUNT_BLACKLISTED(_caller));
-            // Check if the sender is blacklisted if not a mint
-            require(_from == address(0) || !isBlacklisted(_from), ACCOUNT_BLACKLISTED(_from));
+        // Batch screen the involved accounts against the market's blacklist if one is configured (the null address disables screening)
+        address roycoBlacklist = _getRoycoDawnKernelStorage().roycoBlacklist;
+        if (roycoBlacklist != address(0)) {
+            address[] memory accountsToScreen = new address[](3);
+            accountsToScreen[0] = _caller;
+            accountsToScreen[1] = _from;
+            accountsToScreen[2] = _to;
+            IRoycoBlacklist(roycoBlacklist).enforceNotBlacklisted(accountsToScreen);
         }
-        // Check if the recipient is blacklisted if not a redeem
-        if (_to != address(0)) {
-            require(!blacklistEnabled || !isBlacklisted(_to), ACCOUNT_BLACKLISTED(_to));
-            // If transferring shares, ensure that the recipient is a whitelisted LP for the tranche
+        // If transferring shares, ensure that the recipient is a whitelisted LP for the tranche
+        if (_to != address(0) && ENFORCE_TRANCHE_SHARES_TRANSFER_WHITELIST) {
             // It is assumed that the sender is already a whitelisted LP
-            if (ENFORCE_TRANCHE_SHARES_TRANSFER_WHITELIST) {
-                address authority = authority();
-                // Check if the to address can call the deposit function on the tranche
-                // @dev msg.sender is the tranche address
-                (bool isWhitelistedTrancheLP,) = IAccessManager(authority).canCall(_to, msg.sender, IRoycoVaultTranche.deposit.selector);
-                require(_to != authority && isWhitelistedTrancheLP, ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(_to));
-            }
+            address authority = authority();
+            // Check if the to address can call the deposit function on the tranche
+            /// @dev msg.sender is the tranche address
+            (bool isWhitelistedTrancheLP,) = IAccessManager(authority).canCall(_to, msg.sender, IRoycoVaultTranche.deposit.selector);
+            require(_to != authority && isWhitelistedTrancheLP, ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(_to));
         }
 
         // Call the market specific pre-balance update hook
@@ -950,15 +927,8 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
     // =============================
 
     /// @inheritdoc IRoycoDawnKernel
-    function getState() external view override(IRoycoDawnKernel) returns (RoycoDawnKernelStateView memory) {
-        RoycoDawnKernelState storage $ = _getRoycoDawnKernelStorage();
-        return RoycoDawnKernelStateView({
-            isBlacklistEnabled: $.isBlacklistEnabled,
-            protocolFeeRecipient: $.protocolFeeRecipient,
-            stSelfLiquidationBonusWAD: $.stSelfLiquidationBonusWAD,
-            stOwnedYieldBearingAssets: $.stOwnedYieldBearingAssets,
-            jtOwnedYieldBearingAssets: $.jtOwnedYieldBearingAssets
-        });
+    function getState() external view override(IRoycoDawnKernel) returns (RoycoDawnKernelState memory) {
+        return _getRoycoDawnKernelStorage();
     }
 
     /**

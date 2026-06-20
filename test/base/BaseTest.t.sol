@@ -10,6 +10,7 @@ import { ExtraRoles } from "../../script/config/ExtraRoles.sol";
 import { RoycoAccountant } from "../../src/accountant/RoycoAccountant.sol";
 import { RolesConfiguration, RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoBlacklist } from "../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IRoycoDawnKernel } from "../../src/interfaces/IRoycoDawnKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
@@ -140,6 +141,7 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
     IRoycoVaultTranche internal JT;
     IRoycoDawnKernel internal KERNEL;
     IRoycoAccountant internal ACCOUNTANT;
+    IRoycoBlacklist internal BLACKLIST;
 
     // -----------------------------------------
     // Royco Deployments Parameters
@@ -341,10 +343,39 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
         KERNEL = _deploymentResult.kernel;
         vm.label(address(KERNEL), "Kernel");
 
+        BLACKLIST = IRoycoBlacklist(_deploymentResult.roycoBlacklist);
+        vm.label(address(BLACKLIST), "Blacklist");
+
         FACTORY = _deploymentResult.factory;
         vm.label(address(FACTORY), "Factory");
 
         _wireExtraRoles();
+        _wireBlacklistRoles();
+    }
+
+    /// @dev Wires the shared blacklist's function-roles on the factory (the blacklist's AccessManager authority).
+    ///      In production this is a one-time admin action per chain (see script/update/blacklist); here it is replayed
+    ///      against the freshly deployed blacklist by pranking the factory admin, mirroring `_wireExtraRoles`.
+    function _wireBlacklistRoles() internal {
+        if (address(BLACKLIST) == address(0)) return;
+
+        // Resolve the factory admin (role 0): OWNER for a fresh in-memory deploy, ROOT_MULTISIG on a forked chain.
+        address fndn;
+        (bool ownerIsAdmin,) = FACTORY.hasRole(0, OWNER_ADDRESS);
+        fndn = ownerIsAdmin ? OWNER_ADDRESS : 0x7c405bbD131e42af506d14e752f2e59B19D49997;
+
+        // blacklistAccounts / unblacklistAccounts are gated by the transfer agent role
+        bytes4[] memory agentSelectors = new bytes4[](2);
+        agentSelectors[0] = IRoycoBlacklist.blacklistAccounts.selector;
+        agentSelectors[1] = IRoycoBlacklist.unblacklistAccounts.selector;
+        vm.prank(fndn);
+        FACTORY.setTargetFunctionRole(address(BLACKLIST), agentSelectors, TRANSFER_AGENT_ROLE);
+
+        // setSanctionsList is a kernel-admin configuration action
+        bytes4[] memory adminSelectors = new bytes4[](1);
+        adminSelectors[0] = IRoycoBlacklist.setSanctionsList.selector;
+        vm.prank(fndn);
+        FACTORY.setTargetFunctionRole(address(BLACKLIST), adminSelectors, ADMIN_KERNEL_ROLE);
     }
 
     /// @dev Wires roles that live in `ExtraRoles` and are intentionally NOT passed through

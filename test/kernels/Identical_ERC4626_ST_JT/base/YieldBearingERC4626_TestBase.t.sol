@@ -801,10 +801,11 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // IMPERMANENT LOSS WITH SHARE PRICE DROP
+    // JT COVERAGE IMPERMANENT LOSS WITH SHARE PRICE DROP
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Tests that significant loss creates impermanent loss and disables ST deposits
+    /// @notice Tests that significant loss creates JT coverage impermanent loss
+    /// @dev ST losses are covered by JT effective NAV and booked as jtCoverageImpermanentLoss
     function testFuzz_vaultSharePrice_significantLoss_createsImpermanentLoss(uint256 _jtAmount, uint256 _stPercentage, uint256 _lossPercentage) external {
         // Use smaller bounds to avoid balance issues
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 100);
@@ -825,7 +826,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
 
         // Record state before loss
         (SyncedAccountingState memory stateBefore,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        NAV_UNIT impermanentLossBefore = stateBefore.stImpermanentLoss;
+        NAV_UNIT impermanentLossBefore = stateBefore.jtCoverageImpermanentLoss;
 
         // Simulate significant share price loss
         uint256 lossWAD = _lossPercentage * 1e16;
@@ -834,22 +835,19 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
         vm.prank(SYNC_ROLE_ADDRESS);
         KERNEL.syncTrancheAccounting();
 
-        // Check impermanent loss state after sync
+        // Check JT coverage impermanent loss state after sync
         (SyncedAccountingState memory stateAfter,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        NAV_UNIT impermanentLossAfter = stateAfter.stImpermanentLoss;
+        NAV_UNIT impermanentLossAfter = stateAfter.jtCoverageImpermanentLoss;
 
-        // Verify state transition: impermanent loss should be tracked
+        // Verify state transition: JT coverage impermanent loss should be tracked when JT covers ST losses
         if (impermanentLossAfter > impermanentLossBefore) {
-            // Verify ST deposits are disabled (accountant state transition)
-            TRANCHE_UNIT maxSTDepositAfterLoss = ST.maxDeposit(CHARLIE_ADDRESS);
-            assertEq(toUint256(maxSTDepositAfterLoss), 0, "ST deposits should be disabled during impermanent loss");
-
-            // Verify impermanent loss is non-zero and tracked in state
-            assertGt(toUint256(impermanentLossAfter), 0, "Impermanent loss should be tracked in accountant state");
+            // Verify JT coverage impermanent loss is non-zero and tracked in state
+            assertGt(toUint256(impermanentLossAfter), 0, "JT coverage impermanent loss should be tracked in accountant state");
         }
     }
 
-    /// @notice Tests that share price recovery reduces impermanent loss and re-enables ST deposits
+    /// @notice Tests that share price recovery reduces JT coverage impermanent loss
+    /// @dev On ST gains, the IL recovery step recovers jtCoverageImpermanentLoss
     function testFuzz_vaultSharePrice_recovery_reducesImpermanentLoss(uint256 _jtAmount, uint256 _stPercentage, uint256 _lossPercentage) external {
         _jtAmount = bound(_jtAmount, _minDepositAmount(), config.initialFunding / 10);
         _stPercentage = bound(_stPercentage, 50, 80);
@@ -869,7 +867,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
         // Record initial share price
         uint256 initialSharePrice = _getCurrentSharePriceWAD();
 
-        // Simulate loss to create impermanent loss
+        // Simulate loss to create JT coverage impermanent loss
         uint256 lossWAD = _lossPercentage * 1e16;
         simulateVaultSharePriceLoss(lossWAD);
 
@@ -877,7 +875,7 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory stateAfterLoss,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        NAV_UNIT impermanentLossAfterDrop = stateAfterLoss.stImpermanentLoss;
+        NAV_UNIT impermanentLossAfterDrop = stateAfterLoss.jtCoverageImpermanentLoss;
 
         // Now recover: simulate yield that brings share price back to original
         // Current price is initialSharePrice * (1 - loss), need to multiply by 1/(1-loss) to get back
@@ -893,17 +891,21 @@ abstract contract YieldBearingERC4626_TestBase is AbstractKernelTestSuite {
         // Verify share price recovered to expected value
         assertApproxEqRel(_getCurrentSharePriceWAD(), initialSharePrice, 1e15, "Share price should recover to approximately initial");
 
-        // Check impermanent loss state transition after recovery
+        // Check JT coverage impermanent loss state transition after recovery
         (SyncedAccountingState memory stateAfterRecovery,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        NAV_UNIT impermanentLossAfterRecovery = stateAfterRecovery.stImpermanentLoss;
+        NAV_UNIT impermanentLossAfterRecovery = stateAfterRecovery.jtCoverageImpermanentLoss;
 
-        // Verify state transition: impermanent loss should be reduced
-        assertLe(toUint256(impermanentLossAfterRecovery), toUint256(impermanentLossAfterDrop), "Impermanent loss should decrease after share price recovery");
+        // Verify state transition: JT coverage impermanent loss should be reduced
+        assertLe(
+            toUint256(impermanentLossAfterRecovery),
+            toUint256(impermanentLossAfterDrop),
+            "JT coverage impermanent loss should decrease after share price recovery"
+        );
 
-        // If impermanent loss is cleared, verify JT NAV is positive again
+        // If JT coverage impermanent loss is cleared, verify JT NAV is positive again
         if (impermanentLossAfterRecovery == ZERO_NAV_UNITS) {
             NAV_UNIT jtNAVAfterRecovery = JT.totalAssets().nav;
-            assertGt(toUint256(jtNAVAfterRecovery), 0, "JT NAV should be positive after impermanent loss is cleared");
+            assertGt(toUint256(jtNAVAfterRecovery), 0, "JT NAV should be positive after JT coverage impermanent loss is cleared");
         }
     }
 

@@ -158,6 +158,28 @@ abstract contract MarketDeploymentConfig {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // CHAINALYSIS SANCTIONS LIST GETTER
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Returns the canonical Chainalysis sanctions oracle for the given chain.
+    /// @dev Consumed by the SetSanctionsList ops script to wire the shared blacklist's screening list per chain.
+    ///      Returns the null address for chains without a known oracle (e.g. local/test chains), which disables
+    ///      Chainalysis screening while leaving the local blacklist mapping fully functional.
+    /// @param _chainId The chain id to look up
+    /// @return The Chainalysis sanctions oracle address for the chain, or the null address if none is configured
+    function getChainalysisSanctionsList(uint256 _chainId) public pure returns (address) {
+        // Chainalysis deploys its sanctions oracle at the same address on most chains; Base is the exception.
+        if (_chainId == MAINNET || _chainId == AVALANCHE || _chainId == ARBITRUM) {
+            return 0x40C57923924B5c5c5455c48D93317139ADDaC8fb;
+        }
+        if (_chainId == BASE) {
+            return 0x3A91A31cB3dC49b4db9Ce721F50a9D076c8D739B;
+        }
+        // No Chainalysis oracle configured for this chain (e.g. local/test chains): disables sanctions screening
+        return address(0);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // MARKET CONFIG GETTER
     // ═══════════════════════════════════════════════════════════════════════════
 
