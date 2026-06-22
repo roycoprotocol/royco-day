@@ -126,13 +126,13 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
 
         // Preview synchronization of the tranche NAVs and the JT coverage impermanent loss
         MarketState initialMarketState;
-        bool yieldDistributed;
+        bool riskPremiumPaid;
         NAV_UNIT jtCoverageImpermanentLossErased;
-        (state, initialMarketState, yieldDistributed, jtCoverageImpermanentLossErased) =
+        (state, initialMarketState, riskPremiumPaid, jtCoverageImpermanentLossErased) =
             _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _accrueJTYieldShare());
 
         // ST yield was split between ST and JT
-        if (yieldDistributed) {
+        if (riskPremiumPaid) {
             // Reset the accumulator and update the last yield distribution timestamp
             delete $.twJTYieldShareAccruedWAD;
             $.lastDistributionTimestamp = uint32(block.timestamp);
@@ -295,9 +295,9 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
 
     /**
      * @inheritdoc IRoycoAccountant
-     * @dev Coverage Invariant: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * COV
-     * @dev Max assets depositable into ST, x: JT_EFFECTIVE_NAV = ((ST_RAW_NAV + x) + (JT_RAW_NAV * β)) * COV
-     *      Isolate x: x = (JT_EFFECTIVE_NAV / COV) - (JT_RAW_NAV * β) - ST_RAW_NAV
+     * @dev Coverage Invariant: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * MIN_COVERAGE
+     * @dev Max assets depositable into ST, x: JT_EFFECTIVE_NAV = ((ST_RAW_NAV + x) + (JT_RAW_NAV * β)) * MIN_COVERAGE
+     *      Isolate x: x = (JT_EFFECTIVE_NAV / MIN_COVERAGE) - (JT_RAW_NAV * β) - ST_RAW_NAV
      */
     function maxSTDepositGivenCoverage(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external view override(IRoycoAccountant) returns (NAV_UNIT maxSTDeposit) {
         // Get the storage pointer to the accountant state
@@ -317,13 +317,13 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
 
     /**
      * @inheritdoc IRoycoAccountant
-     * @dev Coverage Invariant: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * COV
+     * @dev Coverage Invariant: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * MIN_COVERAGE
      * @dev When assets are claimed from the JT, they are always liquidated in the same proportion as the tranche's total claims on the ST and JT assets
      * @dev Let S be the JT's total claims on ST assets and J be the JT's total claims on JT assets, in NAV Units. The total claims on the ST and JT assets are S + J NAV Units
      * @dev Let K_S be S / (S + J) and K_J be J / (S + J)
      * @dev Therefore, if a total NAV of y is claimed from the JT, K_S * y will be claimed from the ST_RAW_NAV and K_J * y will be claimed from the JT_RAW_NAV
      * @dev Max assets withdrawable from JT, y: (JT_EFFECTIVE_NAV - y) = ((ST_RAW_NAV - K_S * y) + ((JT_RAW_NAV - K_J * y) * β)) * COV
-     *      Isolate y: y = (JT_EFFECTIVE_NAV - (COV * (ST_RAW_NAV + (JT_RAW_NAV * β)))) / (1 - (COV * (K_S + β * K_J)))
+     *      Isolate y: y = (JT_EFFECTIVE_NAV - (MIN_COVERAGE * (ST_RAW_NAV + (JT_RAW_NAV * β)))) / (1 - (MIN_COVERAGE * (K_S + β * K_J)))
      */
     function maxJTWithdrawalGivenCoverage(
         NAV_UNIT _stRawNAV,
@@ -349,9 +349,9 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         // Compute the surplus coverage currently provided by the junior tranche based on its currently remaining loss-absorption buffer
         // Also account for the effective dust tolerance required to preclude reverts due to rounding after JT redemptions
         NAV_UNIT surplusJTAssets = state.jtEffectiveNAV.saturatingSub(requiredJTAssets)
-            .saturatingSub($.stNAVDustTolerance + $.jtNAVDustTolerance.mulDiv(betaWAD, WAD, Math.Rounding.Ceil))
+            .saturatingSub($.stNAVDustTolerance + $.jtNAVDustTolerance.mulDiv(betaWAD, WAD, Math.Rounding.Ceil)).
             // Additionally absorb the worst case inner-ceil rounding in the coverageUtilization computation
-            .saturatingSub(toNAVUnits(uint256(2)));
+            saturatingSub(toNAVUnits(uint256(2)));
         if (surplusJTAssets == ZERO_NAV_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         // Compute the total JT claim on NAV and preemptively return if zero
@@ -377,12 +377,12 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
      * @notice Returns whether the coverage requirement is satisfied given the coverageUtilization
      * @dev Junior capital must be sufficient to absorb losses to the senior exposure up to the coverage ratio
      * @dev Informally: junior loss absorption buffer >= total covered exposure
-     * @dev Formally: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * COV
+     * @dev Formally: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * MIN_COVERAGE
      *      JT_EFFECTIVE_NAV is JT's current loss absorption buffer after applying all prior JT yield accrual and coverage adjustments
      *      ST_RAW_NAV and JT_RAW_NAV are the mark-to-market NAVs of the tranches
      *      β is the JT's sensitivity to the same downside stress that affects ST (eg. 0 if JT is in RFR and 1 if JT and ST are in the same opportunity)
      * @dev If we rearrange the coverage requirement, we get:
-     *      1 >= ((ST_RAW_NAV + (JT_RAW_NAV * β)) * COV) / JT_EFFECTIVE_NAV
+     *      1 >= ((ST_RAW_NAV + (JT_RAW_NAV * β)) * MIN_COVERAGE) / JT_EFFECTIVE_NAV
      *      Notice that the RHS is identical to how we define coverageUtilization
      *      Hence, the coverage requirement can be written as 1 >= CoverageUtilization, or equivalently, CoverageUtilization <= 1
      * @param _coverageUtilizationWAD The coverageUtilization of the market, scaled to WAD precision
@@ -403,7 +403,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
      * @param _twJTYieldShareAccruedWAD The currently accrued time-weighted JT yield share YDM output since the last distribution, scaled to WAD precision
      * @return state A struct containing all mark-to-market NAV, JT coverage impermanent loss, and fee data after executing the sync
      * @return initialMarketState The initial state the market was in before the synchronization
-     * @return yieldDistributed A boolean indicating whether ST yield was split between ST and JT
+     * @return riskPremiumPaid A boolean indicating whether ST yield was split between ST and JT
      * @return jtCoverageImpermanentLossErased The amount of JT coverage loss erased (reset to 0)
      */
     function _previewSyncTrancheAccounting(
@@ -413,7 +413,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     )
         internal
         view
-        returns (SyncedAccountingState memory state, MarketState initialMarketState, bool yieldDistributed, NAV_UNIT jtCoverageImpermanentLossErased)
+        returns (SyncedAccountingState memory state, MarketState initialMarketState, bool riskPremiumPaid, NAV_UNIT jtCoverageImpermanentLossErased)
     {
         // Get the storage pointer to the accountant state
         RoycoAccountantState storage $ = _getRoycoAccountantStorage();
@@ -434,8 +434,13 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         // NOTE: They depend only on last-sync state, so they are constant for any raw NAV inputs measured against this checkpoint
         uint256 elapsedSinceLastDistribution = block.timestamp - $.lastDistributionTimestamp;
         // The instantaneous share is only consumed when the last distribution happened in the same block, so it is fetched lazily
+        // The YDM is driven by the market's coverage utilization: the JT risk premium scales with how utilized the JT coverage buffer is
         uint256 instantaneousJTYieldShareWAD = elapsedSinceLastDistribution == 0
-            ? IYDM($.ydm).previewYieldShare(initialMarketState, $.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV)
+            ? IYDM($.ydm)
+                .previewYieldShare(
+                    initialMarketState,
+                    DawnUtilsLib.computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV)
+                )
             : 0;
         // The JT yield share can never exceed 100% of senior appreciation: a larger share means the YDM is buggy
         require(instantaneousJTYieldShareWAD <= WAD, INVALID_YDM_OUTPUT());
@@ -446,7 +451,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         // Execute the PnL attribution and settlement waterfall
         NAV_UNIT stProtocolFeeAccrued;
         NAV_UNIT jtProtocolFeeAccrued;
-        (checkpoint, stProtocolFeeAccrued, jtProtocolFeeAccrued, yieldDistributed) = AccountingLib.applyProfitAndLossWaterfall(
+        (checkpoint, stProtocolFeeAccrued, jtProtocolFeeAccrued, riskPremiumPaid) = AccountingLib.applyProfitAndLossWaterfall(
             _stRawNAV,
             _jtRawNAV,
             PnLWaterfallParams({
@@ -502,8 +507,11 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         // Preemptively return if last accrual was in the same block
         if (elapsed == 0) return $.twJTYieldShareAccruedWAD;
 
-        // Get the instantaneous JT yield share, scaled to WAD precision
-        uint256 jtYieldShareWAD = IYDM($.ydm).yieldShare($.lastMarketState, $.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV);
+        // Get the instantaneous JT yield share, scaled to WAD precision, driven by the market's coverage utilization
+        uint256 jtYieldShareWAD = IYDM($.ydm)
+            .yieldShare(
+                $.lastMarketState, DawnUtilsLib.computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV)
+            );
         // The JT yield share can never exceed 100% of senior appreciation: a larger share means the YDM is buggy
         require(jtYieldShareWAD <= WAD, INVALID_YDM_OUTPUT());
 
@@ -532,9 +540,11 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         // Preemptively return if last accrual was in the same block
         if (elapsed == 0) return $.twJTYieldShareAccruedWAD;
 
-        // Get the instantaneous JT yield share, scaled to WAD precision
-        uint256 jtYieldShareWAD =
-            IYDM($.ydm).previewYieldShare($.lastMarketState, $.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV);
+        // Get the instantaneous JT yield share, scaled to WAD precision, driven by the market's coverage utilization
+        uint256 jtYieldShareWAD = IYDM($.ydm)
+            .previewYieldShare(
+                $.lastMarketState, DawnUtilsLib.computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV)
+            );
         // The JT yield share can never exceed 100% of senior appreciation: a larger share means the YDM is buggy
         require(jtYieldShareWAD <= WAD, INVALID_YDM_OUTPUT());
 

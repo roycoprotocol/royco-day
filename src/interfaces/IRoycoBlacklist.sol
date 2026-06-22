@@ -39,14 +39,14 @@ interface IRoycoBlacklist {
     error ACCOUNT_BLACKLISTED(address account);
 
     /**
-     * @notice Blacklists the assets of the specified addresses
+     * @notice Blacklists the specified addresses from holding or transferring Royco tranche shares
      * @dev Idempotent: blacklisting an already-blacklisted account is a no-op (still emits AccountBlacklisted)
      * @param _accounts The addresses of the accounts to blacklist
      */
     function blacklistAccounts(address[] calldata _accounts) external;
 
     /**
-     * @notice Unblacklists the assets of the specified addresses
+     * @notice Unblacklists the specified addresses from holding or transferring Royco tranche shares
      * @dev Idempotent: unblacklisting a non-blacklisted account is a no-op (still emits AccountUnblacklisted)
      * @param _accounts The addresses of the accounts to unblacklist
      */

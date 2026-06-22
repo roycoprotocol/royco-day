@@ -3,26 +3,29 @@ pragma solidity ^0.8.28;
 
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IYDM, MarketState } from "../interfaces/IYDM.sol";
-import { TARGET_COVERAGE_UTILIZATION_WAD, WAD } from "../libraries/Constants.sol";
-import { NAV_UNIT } from "../libraries/Units.sol";
-import { DawnUtilsLib } from "../libraries/DawnUtilsLib.sol";
+import { WAD } from "../libraries/Constants.sol";
+import { BaseYDM } from "./base/BaseYDM.sol";
 
 /**
  * @title StaticCurveYDM
  * @author Shivaansh Kapoor, Ankur Dubey
  * @notice Royco's static curve yield distribution model (YDM)
- * @dev Responsible for computing the yield distribution between the senior and junior tranches of a Royco market
- * @dev The curve is defined as piece-wise function parameterized by the coverageUtilization of a Royco market
+ * @dev A general-purpose model for paying a tranche's yield as a premium to a capital pool that provides a service to that tranche
+ * @dev It is parameterized purely by the utilization of that service, so the same contract prices any tranche-yield premium
+ * @dev Utilization is the fraction of the capital pool's service capacity that is currently in use: the ratio of demand for the service the pool provides to the pool's capacity to supply it, scaled to WAD precision
+ * @dev At zero utilization the service is unused and the capital is abundant, so it earns the least; at WAD utilization demand equals the pool's full capacity; demand beyond capacity is reported above WAD and capped to WAD here
+ * @dev The premium rises with utilization so scarcer service is paid more, pulling additional capital into the pool
+ * @dev The curve is a piece-wise function parameterized by the utilization and a per-instance target utilization (the kink) supplied at construction
  */
-contract StaticCurveYDM is IYDM {
+contract StaticCurveYDM is BaseYDM {
     using Math for uint256;
 
     /**
      * @notice Represents the state of a market's YDM
-     * @custom:field yieldShareAtZeroUtilWAD - The JT yield share at zero coverageUtilization, scaled to WAD precision
-     * @custom:field slopeLtTargetUtilWAD - The slope when the market's coverageUtilization is less than the target coverageUtilization, scaled to WAD precision
-     * @custom:field yieldShareAtTargetWAD - The JT yield share at target coverageUtilization, scaled to WAD precision
-     * @custom:field slopeGteTargetUtilWAD - The slope when the market's coverageUtilization is greater than or equal to the target coverageUtilization, scaled to WAD precision
+     * @custom:field yieldShareAtZeroUtilWAD - The yield share at zero utilization, scaled to WAD precision
+     * @custom:field slopeLtTargetUtilWAD - The slope when the market's utilization is less than the target utilization, scaled to WAD precision
+     * @custom:field yieldShareAtTargetWAD - The yield share at target utilization, scaled to WAD precision
+     * @custom:field slopeGteTargetUtilWAD - The slope when the market's utilization is greater than or equal to the target utilization, scaled to WAD precision
      */
     struct StaticYieldCurve {
         uint64 yieldShareAtZeroUtilWAD;
@@ -38,125 +41,100 @@ contract StaticCurveYDM is IYDM {
     /**
      * @notice Emitted when the static curve YDM is initialized for a market
      * @param accountant The accountant for the market that the YDM was initialized for
-     * @param yieldShareAtZeroUtilWAD The JT yield share at zero coverageUtilization, scaled to WAD precision
-     * @param slopeLtTargetUtilWAD The slope when the market's coverageUtilization is less than the target coverageUtilization, scaled to WAD precision
-     * @param slopeGteTargetUtilWAD The slope when the market's coverageUtilization is greater than or equal to the target coverageUtilization, scaled to WAD precision
+     * @param yieldShareAtZeroUtilWAD The yield share at zero utilization, scaled to WAD precision
+     * @param slopeLtTargetUtilWAD The slope when the market's utilization is less than the target utilization, scaled to WAD precision
+     * @param slopeGteTargetUtilWAD The slope when the market's utilization is greater than or equal to the target utilization, scaled to WAD precision
      */
     event StaticCurveYdmInitialized(address indexed accountant, uint256 yieldShareAtZeroUtilWAD, uint256 slopeLtTargetUtilWAD, uint256 slopeGteTargetUtilWAD);
 
     /**
-     * @notice Emitted when the JT yield share is updated
+     * @notice Emitted when the yield share is updated
      * @param accountant The accountant for the market that the yield share was updated for
-     * @param yieldShareWAD The JT yield share output (returned to the accountant)
+     * @param yieldShareWAD The yield share output (returned to the accountant)
      */
     event YdmOutput(address indexed accountant, uint256 yieldShareWAD);
 
     /**
+     * @notice Sets the per-instance target utilization (the kink) shared by every market this YDM serves
+     * @dev Must be greater than zero so the curve regions are well defined when utilization is zero; concrete models may further constrain it
+     * @param _targetUtilizationWAD The target utilization (the kink) for this model, in the range (0, 100%], scaled to WAD precision
+     */
+    constructor(uint256 _targetUtilizationWAD) BaseYDM(_targetUtilizationWAD) { }
+
+    /**
      * @notice Initializes the YDM curve for a particular Royco market
      * @dev Must be called during the initialization of the accountant for the Royco market
-     * @dev Setting all three initialization parameters to the same value emulates a fixed JT yield share YDM
-     * @param _yieldShareAtZeroUtilWAD The JT yield share at 0% coverageUtilization, scaled to WAD precision
-     * @param _yieldShareAtTargetWAD The JT yield share at target coverageUtilization, scaled to WAD precision
-     * @param _yieldShareAtFullUtilWAD The JT yield share at 100% coverageUtilization, scaled to WAD precision
+     * @dev Setting all three initialization parameters to the same value emulates a fixed yield share YDM
+     * @param _yieldShareAtZeroUtilWAD The yield share at 0% utilization, scaled to WAD precision
+     * @param _yieldShareAtTargetWAD The yield share at target utilization, scaled to WAD precision
+     * @param _yieldShareAtFullUtilWAD The yield share at 100% utilization, scaled to WAD precision
      */
     function initializeYDMForMarket(uint64 _yieldShareAtZeroUtilWAD, uint64 _yieldShareAtTargetWAD, uint64 _yieldShareAtFullUtilWAD) external {
         // Ensure that the static YDM curve is valid
         require(
-            _yieldShareAtZeroUtilWAD <= _yieldShareAtTargetWAD && _yieldShareAtTargetWAD <= _yieldShareAtFullUtilWAD
-                && _yieldShareAtFullUtilWAD <= WAD && _yieldShareAtTargetWAD > 0,
+            _yieldShareAtZeroUtilWAD <= _yieldShareAtTargetWAD && _yieldShareAtTargetWAD <= _yieldShareAtFullUtilWAD && _yieldShareAtFullUtilWAD <= WAD
+                && _yieldShareAtTargetWAD > 0,
             INVALID_YDM_INITIALIZATION()
         );
 
         // Initialize the YDM curve for this market (2 SSTOREs: slot0 = y0 + slopeLt, slot1 = yT + slopeGte)
         StaticYieldCurve storage curve = accountantToCurve[msg.sender];
         curve.yieldShareAtZeroUtilWAD = _yieldShareAtZeroUtilWAD;
-        curve.slopeLtTargetUtilWAD = _computeSlope(_yieldShareAtZeroUtilWAD, _yieldShareAtTargetWAD, 0, TARGET_COVERAGE_UTILIZATION_WAD);
+        curve.slopeLtTargetUtilWAD = _computeSlope(_yieldShareAtZeroUtilWAD, _yieldShareAtTargetWAD, 0, TARGET_UTILIZATION_WAD);
         curve.yieldShareAtTargetWAD = _yieldShareAtTargetWAD;
-        curve.slopeGteTargetUtilWAD = _computeSlope(_yieldShareAtTargetWAD, _yieldShareAtFullUtilWAD, TARGET_COVERAGE_UTILIZATION_WAD, WAD);
+        curve.slopeGteTargetUtilWAD = _computeSlope(_yieldShareAtTargetWAD, _yieldShareAtFullUtilWAD, TARGET_UTILIZATION_WAD, WAD);
 
         emit StaticCurveYdmInitialized(msg.sender, _yieldShareAtZeroUtilWAD, curve.slopeLtTargetUtilWAD, curve.slopeGteTargetUtilWAD);
     }
 
     /// @inheritdoc IYDM
-    function previewYieldShare(
-        MarketState,
-        NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV,
-        uint256 _betaWAD,
-        uint256 _minCoverageWAD,
-        NAV_UNIT _jtEffectiveNAV
-    )
-        external
-        view
-        override(IYDM)
-        returns (uint256)
-    {
-        return _yieldShare(_stRawNAV, _jtRawNAV, _betaWAD, _minCoverageWAD, _jtEffectiveNAV);
+    function previewYieldShare(MarketState, uint256 _utilizationWAD) external view override(IYDM) returns (uint256) {
+        return _yieldShare(_utilizationWAD);
     }
 
     /// @inheritdoc IYDM
-    function yieldShare(
-        MarketState,
-        NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV,
-        uint256 _betaWAD,
-        uint256 _minCoverageWAD,
-        NAV_UNIT _jtEffectiveNAV
-    )
-        external
-        override(IYDM)
-        returns (uint256 yieldShareWAD)
-    {
-        yieldShareWAD = _yieldShare(_stRawNAV, _jtRawNAV, _betaWAD, _minCoverageWAD, _jtEffectiveNAV);
+    function yieldShare(MarketState, uint256 _utilizationWAD) external override(IYDM) returns (uint256 yieldShareWAD) {
+        yieldShareWAD = _yieldShare(_utilizationWAD);
         emit YdmOutput(msg.sender, yieldShareWAD);
     }
 
-    /// @dev View helper to compute the instantaneous JT yield share based on the defined static curve
-    function _yieldShare(
-        NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV,
-        uint256 _betaWAD,
-        uint256 _minCoverageWAD,
-        NAV_UNIT _jtEffectiveNAV
-    )
-        internal
-        view
-        returns (uint256)
-    {
+    /// @dev View helper to compute the instantaneous yield share at the given utilization based on the defined static curve
+    function _yieldShare(uint256 _utilizationWAD) internal view returns (uint256) {
         /**
          * Yield Distribution Model (piecewise curve):
          *
-         *   Y(U) = Y_0 + S_lt * U                if U < 0.9  (below target)
-         *        = Y_T + S_gte * (U - 0.9)       if U >= 0.9 (at or above target)
+         *   Y(U) = Y_0 + S_lt * U                if U < U_T  (below target)
+         *        = Y_T + S_gte * (U - U_T)       if U >= U_T (at or above target)
          *
-         * Y(U)  → Percentage of ST yield paid to the junior tranche
-         * U     → CoverageUtilization = ((ST_RAW_NAV + (JT_RAW_NAV * β)) * COV) / JT_EFFECTIVE_NAV
-         * Y_0   → JT yield share at zero coverageUtilization
-         * Y_T   → JT yield share at target (90%) coverageUtilization
-         * S_lt  → Slope below target coverageUtilization: (Y_T - Y_0) / 0.9
-         * S_gte → Slope at or above target coverageUtilization: (Y_full - Y_T) / 0.1
+         * Y(U)  → Share of the paying tranche's yield routed to the capital pool as a premium
+         * U     → Utilization of the service the capital pool provides
+         * U_T   → Target utilization (the kink), configured per instance via TARGET_UTILIZATION_WAD
+         * Y_0   → Yield share at zero utilization
+         * Y_T   → Yield share at target utilization
+         * S_lt  → Slope below target utilization: (Y_T - Y_0) / U_T
+         * S_gte → Slope at or above target utilization: (Y_full - Y_T) / (1 - U_T)
          *
-         * Below 90% coverageUtilization, JT yield allocation rises from Y_0 based on S_lt.
-         * At or above 90% coverageUtilization, JT yield allocation rises from Y_T based on S_gte,
-         * penalizing high coverageUtilization and incentivizing JT deposits or ST withdrawals.
-         * Output is capped at 100% when coverageUtilization reaches or exceeds 100%.
+         * Below the target, the yield allocation rises from Y_0 based on S_lt.
+         * At or above the target, the allocation rises from Y_T based on S_gte, penalizing high utilization and
+         * incentivizing more capital into the pool or less demand on its service.
+         * Output is capped at 100% when utilization reaches or exceeds 100%.
          */
 
-        // Compute the coverageUtilization of the market and bound it to 100%
-        uint256 coverageUtilizationWAD = DawnUtilsLib.computeCoverageUtilization(_stRawNAV, _jtRawNAV, _betaWAD, _minCoverageWAD, _jtEffectiveNAV);
-        if (coverageUtilizationWAD > WAD) coverageUtilizationWAD = WAD;
+        // Bound the supplied utilization to 100%
+        uint256 utilizationWAD = _utilizationWAD;
+        if (utilizationWAD > WAD) utilizationWAD = WAD;
 
         // Retrieve the static curve for this market
         StaticYieldCurve storage curve = accountantToCurve[msg.sender];
         uint256 yieldShareAtTargetWAD = curve.yieldShareAtTargetWAD;
         require(yieldShareAtTargetWAD != 0, UNINITIALIZED_YDM());
-        // Compute Y(U), rounding in favor the senior tranche
-        if (coverageUtilizationWAD < TARGET_COVERAGE_UTILIZATION_WAD) {
-            // If coverageUtilization is below the target (kink), apply the first leg of Y(U)
-            return uint256(curve.slopeLtTargetUtilWAD).mulDiv(coverageUtilizationWAD, WAD, Math.Rounding.Floor) + curve.yieldShareAtZeroUtilWAD;
+        // Compute Y(U), rounding down in favor of the paying tranche
+        if (utilizationWAD < TARGET_UTILIZATION_WAD) {
+            // If utilization is below the target (kink), apply the first leg of Y(U)
+            return uint256(curve.slopeLtTargetUtilWAD).mulDiv(utilizationWAD, WAD, Math.Rounding.Floor) + curve.yieldShareAtZeroUtilWAD;
         } else {
-            // If coverageUtilization is at or above the target (kink), apply the second leg of Y(U)
-            return uint256(curve.slopeGteTargetUtilWAD).mulDiv((coverageUtilizationWAD - TARGET_COVERAGE_UTILIZATION_WAD), WAD, Math.Rounding.Floor) + yieldShareAtTargetWAD;
+            // If utilization is at or above the target (kink), apply the second leg of Y(U)
+            return uint256(curve.slopeGteTargetUtilWAD).mulDiv((utilizationWAD - TARGET_UTILIZATION_WAD), WAD, Math.Rounding.Floor) + yieldShareAtTargetWAD;
         }
     }
 

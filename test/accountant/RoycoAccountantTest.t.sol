@@ -35,7 +35,7 @@ contract RoycoAccountantTest is BaseTest {
 
         MOCK_KERNEL = makeAddr("MOCK_KERNEL");
         accessManager = new AccessManager(OWNER_ADDRESS);
-        adaptiveYDM = new AdaptiveCurveYDM_V1();
+        adaptiveYDM = new AdaptiveCurveYDM_V1(TARGET_COVERAGE_UTILIZATION_WAD);
         accountantImpl = new RoycoAccountant(MOCK_KERNEL);
 
         accountant = _deployAccountant(
@@ -306,7 +306,7 @@ contract RoycoAccountantTest is BaseTest {
     // GAIN/LOSS PERMUTATIONS
     // =========================================================================
 
-    function test_preOpSync_stGain_yieldDistributed() public {
+    function test_preOpSync_stGain_riskPremiumPaid() public {
         _initializeAccountantState(100e18, 50e18);
         IRoycoAccountant.RoycoAccountantState memory baseState = accountant.getState();
         uint256 stEffBefore = toUint256(baseState.lastSTEffectiveNAV);

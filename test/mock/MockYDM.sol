@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { MarketState, NAV_UNIT } from "../../src/libraries/Types.sol";
+import { MarketState } from "../../src/libraries/Types.sol";
 
 /// @notice Mock YDM that returns a yield share > 100% (> WAD) to test capping logic
 contract MockYDMOverWAD {
@@ -15,11 +15,11 @@ contract MockYDMOverWAD {
         yieldShareToReturn = _yieldShare;
     }
 
-    function previewYieldShare(MarketState, NAV_UNIT, NAV_UNIT, uint256, uint256, NAV_UNIT) external view returns (uint256) {
+    function previewYieldShare(MarketState, uint256) external view returns (uint256) {
         return yieldShareToReturn;
     }
 
-    function yieldShare(MarketState, NAV_UNIT, NAV_UNIT, uint256, uint256, NAV_UNIT) external view returns (uint256) {
+    function yieldShare(MarketState, uint256) external view returns (uint256) {
         return yieldShareToReturn;
     }
 }
@@ -35,11 +35,11 @@ contract MockYDMWithInit {
         initialized = true;
     }
 
-    function previewYieldShare(MarketState, NAV_UNIT, NAV_UNIT, uint256, uint256, NAV_UNIT) external pure returns (uint256) {
+    function previewYieldShare(MarketState, uint256) external pure returns (uint256) {
         return 0.5e18;
     }
 
-    function yieldShare(MarketState, NAV_UNIT, NAV_UNIT, uint256, uint256, NAV_UNIT) external pure returns (uint256) {
+    function yieldShare(MarketState, uint256) external pure returns (uint256) {
         return 0.5e18;
     }
 }

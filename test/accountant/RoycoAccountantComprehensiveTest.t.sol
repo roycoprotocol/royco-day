@@ -70,7 +70,7 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
 
         MOCK_KERNEL = makeAddr("MOCK_KERNEL");
         accessManager = new AccessManager(OWNER_ADDRESS);
-        adaptiveYDM = new AdaptiveCurveYDM_V1();
+        adaptiveYDM = new AdaptiveCurveYDM_V1(TARGET_COVERAGE_UTILIZATION_WAD);
         accountantImpl = new RoycoAccountant(MOCK_KERNEL);
 
         accountant = _deployAccountant(
@@ -1156,7 +1156,7 @@ contract RoycoAccountantRevertTest is BaseTest {
         MOCK_KERNEL = makeAddr("MOCK_KERNEL");
         NON_KERNEL = makeAddr("NON_KERNEL");
         accessManager = new AccessManager(OWNER_ADDRESS);
-        adaptiveYDM = new AdaptiveCurveYDM_V1();
+        adaptiveYDM = new AdaptiveCurveYDM_V1(TARGET_COVERAGE_UTILIZATION_WAD);
         accountantImpl = new RoycoAccountant(MOCK_KERNEL);
 
         accountant = _deployAccountant(
@@ -1596,7 +1596,7 @@ contract RoycoAccountantInvariantTest is BaseTest {
 
         MOCK_KERNEL = makeAddr("MOCK_KERNEL");
         accessManager = new AccessManager(OWNER_ADDRESS);
-        adaptiveYDM = new AdaptiveCurveYDM_V1();
+        adaptiveYDM = new AdaptiveCurveYDM_V1(TARGET_COVERAGE_UTILIZATION_WAD);
         accountantImpl = new RoycoAccountant(MOCK_KERNEL);
 
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
@@ -1892,7 +1892,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
 
         MOCK_KERNEL = makeAddr("MOCK_KERNEL");
         accessManager = new AccessManager(OWNER_ADDRESS);
-        adaptiveYDM = new AdaptiveCurveYDM_V1();
+        adaptiveYDM = new AdaptiveCurveYDM_V1(TARGET_COVERAGE_UTILIZATION_WAD);
         accountantImpl = new RoycoAccountant(MOCK_KERNEL);
 
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
@@ -2249,8 +2249,8 @@ contract RoycoAccountantAdminTest is BaseTest {
 
         mockKernel = new MockKernelForAdmin();
         accessManager = new AccessManager(OWNER_ADDRESS);
-        adaptiveYDM = new AdaptiveCurveYDM_V1();
-        newYDM = new AdaptiveCurveYDM_V1();
+        adaptiveYDM = new AdaptiveCurveYDM_V1(TARGET_COVERAGE_UTILIZATION_WAD);
+        newYDM = new AdaptiveCurveYDM_V1(TARGET_COVERAGE_UTILIZATION_WAD);
         accountantImpl = new RoycoAccountant(address(mockKernel));
 
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
@@ -2513,7 +2513,7 @@ contract RoycoAccountantEdgeCaseTest is BaseTest {
 
         MOCK_KERNEL = makeAddr("MOCK_KERNEL");
         accessManager = new AccessManager(OWNER_ADDRESS);
-        adaptiveYDM = new AdaptiveCurveYDM_V1();
+        adaptiveYDM = new AdaptiveCurveYDM_V1(TARGET_COVERAGE_UTILIZATION_WAD);
         accountantImpl = new RoycoAccountant(MOCK_KERNEL);
 
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
@@ -2851,7 +2851,7 @@ contract RoycoAccountantBranchCoverageTest is BaseTest {
 
         MOCK_KERNEL = makeAddr("MOCK_KERNEL");
         accessManager = new AccessManager(OWNER_ADDRESS);
-        adaptiveYDM = new AdaptiveCurveYDM_V1();
+        adaptiveYDM = new AdaptiveCurveYDM_V1(TARGET_COVERAGE_UTILIZATION_WAD);
         accountantImpl = new RoycoAccountant(MOCK_KERNEL);
         mockYDMOverWAD = new MockYDMOverWAD(2e18); // Return 200% yield share
         mockYDMWithInit = new MockYDMWithInit();
@@ -3241,7 +3241,7 @@ contract RoycoAccountantAdditionalBranchTests is BaseTest {
 
         mockKernel = new MockKernelForBranchTests();
         accessManager = new AccessManager(OWNER_ADDRESS);
-        adaptiveYDM = new AdaptiveCurveYDM_V1();
+        adaptiveYDM = new AdaptiveCurveYDM_V1(TARGET_COVERAGE_UTILIZATION_WAD);
         accountantImpl = new RoycoAccountant(address(mockKernel));
 
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));

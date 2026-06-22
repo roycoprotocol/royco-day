@@ -1,67 +1,42 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { MarketState, NAV_UNIT } from "../libraries/Types.sol";
+import { MarketState } from "../libraries/Types.sol";
 
 /**
  * @title IYDM - Yield Distribution Model Interface
- * @notice Interface for yield distribution models that determine how ST yield is distributed between tranches in Royco markets
+ * @notice Interface for yield distribution models that price the premium paid to a pool of capital for a service it provides to a tranche
+ * @dev A YDM is a general-purpose premium model: it maps a single utilization input to the share of a tranche's yield paid out to the capital pool as a premium
+ * @dev Utilization is the fraction of the pool's service capacity that is currently in use: the ratio of demand for the service the pool provides to the pool's capacity to supply it, scaled to WAD precision
+ * @dev At zero utilization the service is unused and the capital is abundant, so it earns the least
+ * @dev At WAD utilization demand equals the pool's full capacity; demand beyond capacity is reported above WAD and capped to WAD by the model
+ * @dev The premium rises with utilization so that scarcer service is paid more, pulling additional capital into the pool
+ * @dev The caller computes the relevant utilization and passes it in directly, so the model is agnostic to what the utilization measures
  */
 interface IYDM {
     /// @dev Thrown when the initialization parameters of the YDM for a market are invalid
     error INVALID_YDM_INITIALIZATION();
 
-    /// @dev Thrown when an accountant attempts to query the JT yield share without initializing the YDM
+    /// @dev Thrown when an accountant attempts to query the yield share without initializing the YDM
     error UNINITIALIZED_YDM();
 
     /**
-     * @notice Previews and returns a Royco market's percentage of ST yield that should be allocated to its JT
+     * @notice Previews and returns the share of a tranche's yield to pay the capital pool as a premium at the given utilization
      * @dev Does not mutate any state
-     * @param _marketState The state of this Royco market (perpetual or fixed term)
-     * @param _stRawNAV The raw net asset value of the senior tranche invested assets
-     * @param _jtRawNAV The raw net asset value of the junior tranche invested assets
-     * @param _betaWAD The JT's sensitivity to the same downside stress that affects ST scaled to WAD precision
-     *                 For example, beta is 0 when JT is in the RFR and 1 when JT is in the same opportunity as senior
-     * @param _minCoverageWAD The ratio of current exposure that is expected to be covered by the junior capital scaled to WAD precision
-     * @param _jtEffectiveNAV JT's net asset value after applying provided coverage, JT yield, ST yield distribution, and JT losses
-     *                        Equivalent to its remaining loss-absorption buffer to cover ST's and its own drawdowns
-     * @return yieldShareWAD The percentage of the ST's yield allocated to its JT, scaled to WAD precision
-     *                         It is implied that (WAD - yieldShareWAD) will be the percentage allocated to ST, excluding any protocol fees
+     * @param _marketState The state of this Royco market (perpetual or fixed term); the curve only adapts in PERPETUAL
+     * @param _utilizationWAD The utilization of the service the capital pool provides, scaled to WAD precision; the model caps it at WAD
+     * @return yieldShareWAD The share of the tranche's yield paid to the capital pool as a premium, scaled to WAD precision
+     *                       It is implied that (WAD - yieldShareWAD) is retained by the paying tranche, excluding any protocol fees
      */
-    function previewYieldShare(
-        MarketState _marketState,
-        NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV,
-        uint256 _betaWAD,
-        uint256 _minCoverageWAD,
-        NAV_UNIT _jtEffectiveNAV
-    )
-        external
-        view
-        returns (uint256 yieldShareWAD);
+    function previewYieldShare(MarketState _marketState, uint256 _utilizationWAD) external view returns (uint256 yieldShareWAD);
 
     /**
-     * @notice Returns a Royco market's percentage of ST yield that should be allocated to its JT
-     * @dev Can mutate state
-     * @param _marketState The state of this Royco market (perpetual or fixed term)
-     * @param _stRawNAV The raw net asset value of the senior tranche invested assets
-     * @param _jtRawNAV The raw net asset value of the junior tranche invested assets
-     * @param _betaWAD The JT's sensitivity to the same downside stress that affects ST scaled to WAD precision
-     *                 For example, beta is 0 when JT is in the RFR and 1 when JT is in the same opportunity as senior
-     * @param _minCoverageWAD The ratio of current exposure that is expected to be covered by the junior capital scaled to WAD precision
-     * @param _jtEffectiveNAV JT's net asset value after applying provided coverage, JT yield, ST yield distribution, and JT losses
-     *                        Equivalent to its remaining loss-absorption buffer to cover ST's and its own drawdowns
-     * @return yieldShareWAD The percentage of the ST's yield allocated to its JT, scaled to WAD precision
-     *                         It is implied that (WAD - yieldShareWAD) will be the percentage allocated to ST, excluding any protocol fees
+     * @notice Returns the share of a tranche's yield to pay the capital pool as a premium at the given utilization
+     * @dev Can mutate state: the adaptive models translate their curve based on the elapsed time and utilization
+     * @param _marketState The state of this Royco market (perpetual or fixed term); the curve only adapts in PERPETUAL
+     * @param _utilizationWAD The utilization of the service the capital pool provides, scaled to WAD precision; the model caps it at WAD
+     * @return yieldShareWAD The share of the tranche's yield paid to the capital pool as a premium, scaled to WAD precision
+     *                       It is implied that (WAD - yieldShareWAD) is retained by the paying tranche, excluding any protocol fees
      */
-    function yieldShare(
-        MarketState _marketState,
-        NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV,
-        uint256 _betaWAD,
-        uint256 _minCoverageWAD,
-        NAV_UNIT _jtEffectiveNAV
-    )
-        external
-        returns (uint256 yieldShareWAD);
+    function yieldShare(MarketState _marketState, uint256 _utilizationWAD) external returns (uint256 yieldShareWAD);
 }

@@ -839,14 +839,17 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         bytes memory creationCode;
         bytes32 salt;
 
+        // These YDMs drive the JT risk premium, so they target the market's coverage utilization (the JT coverage kink at 90%)
+        bytes memory constructorArgs = abi.encode(uint256(0.9e18));
+
         if (_ydmType == YDMType.StaticCurve) {
-            creationCode = type(StaticCurveYDM).creationCode;
+            creationCode = abi.encodePacked(type(StaticCurveYDM).creationCode, constructorArgs);
             salt = keccak256(abi.encodePacked(YDM_SALT, "STATIC_CURVE"));
         } else if (_ydmType == YDMType.AdaptiveCurve_V1) {
-            creationCode = type(AdaptiveCurveYDM_V1).creationCode;
+            creationCode = abi.encodePacked(type(AdaptiveCurveYDM_V1).creationCode, constructorArgs);
             salt = keccak256(abi.encodePacked(YDM_SALT, "ADAPTIVE_CURVE_V1"));
         } else if (_ydmType == YDMType.AdaptiveCurve_V2) {
-            creationCode = type(AdaptiveCurveYDM_V2).creationCode;
+            creationCode = abi.encodePacked(type(AdaptiveCurveYDM_V2).creationCode, constructorArgs);
             salt = keccak256(abi.encodePacked(YDM_SALT, "ADAPTIVE_CURVE_V2"));
         } else {
             revert UnsupportedYDMType(_ydmType);

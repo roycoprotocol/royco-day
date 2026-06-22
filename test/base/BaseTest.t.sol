@@ -24,6 +24,10 @@ import { Assertions } from "./Assertions.t.sol";
 abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
     uint256 internal constant BPS = 0.0001e18;
 
+    /// @dev The target coverage utilization (the YDM curve kink) used by the JT risk-premium YDMs in tests (90%)
+    uint256 internal constant TARGET_COVERAGE_UTILIZATION_WAD = 0.9e18;
+    int256 internal constant TARGET_COVERAGE_UTILIZATION_WAD_INT = 0.9e18;
+
     struct TrancheState {
         NAV_UNIT rawNAV;
         NAV_UNIT effectiveNAV;

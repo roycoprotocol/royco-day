@@ -40,10 +40,10 @@ library DawnUtilsLib {
         pure
         returns (uint256 coverageUtilizationWAD)
     {
-        // Compute the total exposure that the junior tranche is obligated to protect against a coverage sized drawdown
+        // If there is no exposure, there is nothing the junior buffer needs to protect, so the coverage utilization is 0
+        if ((_stRawNAV + _jtRawNAV) == ZERO_NAV_UNITS) return 0;
+        // Compute the total exposure that the junior tranche is obligated to protect against a coverage sized drawdown in the senior tranche's underlying asset
         NAV_UNIT totalCoveredExposure = _stRawNAV + _jtRawNAV.mulDiv(_betaWAD, WAD, Math.Rounding.Ceil);
-        // If there is no covered exposure, there is nothing the junior buffer needs to protect, so coverage utilization is 0
-        if (totalCoveredExposure == ZERO_NAV_UNITS) return 0;
         // If there is no remaining JT loss-absorption buffer but covered exposure exists, coverage utilization is effectively infinite
         if (_jtEffectiveNAV == ZERO_NAV_UNITS) return type(uint256).max;
         // Return the computed coverage utilization, rounding in favor of the senior tranche

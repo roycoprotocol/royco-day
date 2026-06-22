@@ -2,9 +2,9 @@
 pragma solidity ^0.8.28;
 
 import { WAD, ZERO_NAV_UNITS } from "./Constants.sol";
+import { DawnUtilsLib } from "./DawnUtilsLib.sol";
 import { AccountingCheckpoint, MarketState, MarketStateTransitionParams, PnLWaterfallParams, SyncedAccountingState } from "./Types.sol";
 import { Math, NAV_UNIT, UnitsMathLib, toNAVUnits } from "./Units.sol";
-import { DawnUtilsLib } from "./DawnUtilsLib.sol";
 
 /**
  * @title AccountingLib
@@ -18,19 +18,65 @@ library AccountingLib {
     /// @notice Thrown when a set of tranche NAVs violates the NAV conservation invariant: raw and effective NAVs must sum to the same total
     error NAV_CONSERVATION_VIOLATION();
 
+    function applyProfitAndLossAttribution(
+        NAV_UNIT _stRawNAV,
+        NAV_UNIT _jtRawNAV,
+        AccountingCheckpoint memory _prePnLWaterfallCheckpoint
+    )
+        internal
+        pure
+        returns (int256 deltaSTEffectiveNAV, int256 deltaJTEffectiveNAV)
+    {
+        // Cache the checkpointed effective NAV for each tranche
+        NAV_UNIT stEffectiveNAV = _prePnLWaterfallCheckpoint.stEffectiveNAV;
+        NAV_UNIT jtEffectiveNAV = _prePnLWaterfallCheckpoint.jtEffectiveNAV;
+        // Compute the deltas for each tranche's effective NAV based on their last checkpointed economic claims on each tranche's raw NAVs
+
+        {
+            // Cache the checkpointed raw NAV for each tranche
+            NAV_UNIT lastSTRawNAV = _prePnLWaterfallCheckpoint.stRawNAV;
+            NAV_UNIT lastJTRawNAV = _prePnLWaterfallCheckpoint.jtRawNAV;
+
+            // Last cross-tranche claims (the NAV that can't be funded by the tranche's own raw NAV)
+            NAV_UNIT stClaimOnJTRawNAV = UnitsMathLib.saturatingSub(stEffectiveNAV, lastSTRawNAV);
+            NAV_UNIT jtClaimOnSTRawNAV = UnitsMathLib.saturatingSub(jtEffectiveNAV, lastJTRawNAV);
+            // Last self-backed portion of the senior tranche's claim (the NAV funded by ST's own raw NAV)
+            // NOTE: NAV conservation guarantees that this cannot underflow
+            NAV_UNIT stClaimOnSTRawNAV = (lastSTRawNAV - jtClaimOnSTRawNAV);
+
+            // Compute the deltas in the raw NAVs of each tranche
+            // The deltas represent the unrealized PNL of the underlying investment since the last NAV checkpoints
+            int256 deltaSTRawNAV = UnitsMathLib.computeNAVDelta(_stRawNAV, lastSTRawNAV);
+            int256 deltaJTRawNAV = UnitsMathLib.computeNAVDelta(_jtRawNAV, lastJTRawNAV);
+
+            // Attribute each raw NAV's signed PNL to ST in proportion to its claim against that raw NAV
+            // The resulting deltas are rounded down: in favor of seniors on losses and juniors on gains
+            // When the last ST raw NAV is zero, conservation forces ST's claim on its raw NAV to zero: route the delta to ST if it has live effective claims, else leave it as residual to JT to avoid inflating NAV against zero ST shares outstanding
+            int256 deltaSTClaimOnSTRawNAV = lastSTRawNAV == ZERO_NAV_UNITS
+                ? (stEffectiveNAV > ZERO_NAV_UNITS ? deltaSTRawNAV : int256(0))
+                : _attributeDeltaToClaimOnRawNAV(deltaSTRawNAV, stClaimOnSTRawNAV, lastSTRawNAV);
+            int256 deltaSTClaimOnJTRawNAV = _attributeDeltaToClaimOnRawNAV(deltaJTRawNAV, stClaimOnJTRawNAV, lastJTRawNAV);
+
+            // ST's effective NAV delta is the sum of its claim-weighted shares of each pool's PNL and JT's effective NAV delta is computed as the residual
+            // NOTE: NAV conservation holds: positive and negative rounding drift is absorbed by juniors
+            deltaSTEffectiveNAV = deltaSTClaimOnSTRawNAV + deltaSTClaimOnJTRawNAV;
+            deltaJTEffectiveNAV = (deltaSTRawNAV + deltaJTRawNAV) - deltaSTEffectiveNAV;
+        }
+    }
+
     /**
      * @notice Synchronizes the tranche NAVs and the JT coverage impermanent loss based on the unrealized PNL of the underlying investment(s)
      * @dev Attributes each tranche's raw NAV delta across the checkpointed claims, then settles the deltas through the PnL waterfall (loss -> coverage IL recovery -> yield split)
      * @dev Pure by design: all inputs are passed in explicitly so that callers can evaluate the waterfall repeatedly at candidate raw NAVs without touching state
      * @dev Protocol fees are computed alongside the settlement but are never deducted from the effective NAVs: collecting them is the caller's responsibility
      * @dev The YDM outputs consumed by the yield split are pre-resolved by the caller: they depend only on the last committed sync, so they are valid for any raw NAV inputs measured against this checkpoint
-     * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
-     * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
+     * @param _stRawNAV The senior tranche's current raw NAV: the mark-to-market value of its invested assets
+     * @param _jtRawNAV The junior tranche's current raw NAV: the mark-to-market value of its invested assets
      * @param _params The fixed inputs of the waterfall: the checkpoint, pre-resolved YDM outputs, fee rates, and dust tolerance
      * @return postPnLWaterfallCheckpoint The post-waterfall checkpoint: the current raw NAVs alongside the settled effective NAVs and JT coverage impermanent loss
      * @return stProtocolFeeAccrued The protocol fee accrued on ST yield in this sync (gross: not netted out of the effective NAVs)
      * @return jtProtocolFeeAccrued The protocol fee accrued on JT yield and the JT yield share in this sync (gross: not netted out of the effective NAVs)
-     * @return yieldDistributed A boolean indicating whether ST yield was split between ST and JT
+     * @return riskPremiumPaid A boolean indicating whether ST yield was split between ST and JT
      */
     function applyProfitAndLossWaterfall(
         NAV_UNIT _stRawNAV,
@@ -39,7 +85,7 @@ library AccountingLib {
     )
         internal
         pure
-        returns (AccountingCheckpoint memory postPnLWaterfallCheckpoint, NAV_UNIT stProtocolFeeAccrued, NAV_UNIT jtProtocolFeeAccrued, bool yieldDistributed)
+        returns (AccountingCheckpoint memory postPnLWaterfallCheckpoint, NAV_UNIT stProtocolFeeAccrued, NAV_UNIT jtProtocolFeeAccrued, bool riskPremiumPaid)
     {
         // Cache the checkpointed effective NAV for each tranche
         NAV_UNIT stEffectiveNAV = _params.checkpoint.stEffectiveNAV;
@@ -134,25 +180,25 @@ library AccountingLib {
             /// @dev STEP_DISTRIBUTE_YIELD: There is no remaining JT coverage impermanent loss that ST yield is obligated to repay, the residual gains will be used to distribute yield to both tranches
             if (stGain != ZERO_NAV_UNITS) {
                 // Mark yield as distributed if the gain is not attributable to any rounding/dust
-                if (stGain > _params.effectiveNAVDustTolerance) yieldDistributed = true;
+                if (stGain > _params.effectiveNAVDustTolerance) riskPremiumPaid = true;
                 // If the last yield distribution happened in the same block, use the instantaneous JT yield share. Else, use the time-weighted average JT yield share since the last distribution
-                NAV_UNIT yieldShare;
+                NAV_UNIT riskPremium;
                 if (_params.elapsedSinceLastDistribution == 0) {
-                    yieldShare = stGain.mulDiv(_params.instantaneousJTYieldShareWAD, WAD, Math.Rounding.Floor);
+                    riskPremium = stGain.mulDiv(_params.instantaneousJTYieldShareWAD, WAD, Math.Rounding.Floor);
                 } else {
-                    yieldShare = stGain.mulDiv(_params.twJTYieldShareAccruedWAD, _params.elapsedSinceLastDistribution * WAD, Math.Rounding.Floor);
+                    riskPremium = stGain.mulDiv(_params.twJTYieldShareAccruedWAD, (_params.elapsedSinceLastDistribution * WAD), Math.Rounding.Floor);
                 }
                 // Apply the yield split to JT's effective NAV
-                if (yieldShare != ZERO_NAV_UNITS) {
+                if (riskPremium != ZERO_NAV_UNITS) {
                     // Compute the protocol fee taken on the yield share accrual if it is not attributable to any rounding/dust
-                    if (yieldDistributed) {
-                        jtProtocolFeeAccrued = (jtProtocolFeeAccrued + yieldShare.mulDiv(_params.yieldShareProtocolFeeWAD, WAD, Math.Rounding.Floor));
+                    if (riskPremiumPaid) {
+                        jtProtocolFeeAccrued = (jtProtocolFeeAccrued + riskPremium.mulDiv(_params.yieldShareProtocolFeeWAD, WAD, Math.Rounding.Floor));
                     }
-                    jtEffectiveNAV = (jtEffectiveNAV + yieldShare);
-                    stGain = (stGain - yieldShare);
+                    jtEffectiveNAV = (jtEffectiveNAV + riskPremium);
+                    stGain = (stGain - riskPremium);
                 }
                 // Compute the protocol fee taken on this ST yield accrual if it is not attributable to any rounding/dust
-                if (yieldDistributed) stProtocolFeeAccrued = stGain.mulDiv(_params.stProtocolFeeWAD, WAD, Math.Rounding.Floor);
+                if (riskPremiumPaid) stProtocolFeeAccrued = stGain.mulDiv(_params.stProtocolFeeWAD, WAD, Math.Rounding.Floor);
                 // Book the residual gain to the ST
                 stEffectiveNAV = (stEffectiveNAV + stGain);
             }
