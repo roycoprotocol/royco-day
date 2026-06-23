@@ -115,7 +115,7 @@ contract MfOne_Test is YieldBearingERC20Chainlink_TestBase {
         mfOneConfig.kernelSpecificParams = abi.encode(kernelParams);
 
         // Build role assignments
-        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        DeployScript.RoleAssignment[] memory roleAssignments = _generateRoleAssignments();
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
         return DEPLOY_SCRIPT.deploy(

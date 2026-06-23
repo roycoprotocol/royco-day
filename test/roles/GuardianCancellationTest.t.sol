@@ -5,6 +5,13 @@ import { Vm } from "../../lib/forge-std/src/Vm.sol";
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../script/config/MarketDeploymentConfig.sol";
+import {
+    ADMIN_ACCOUNTANT_ROLE,
+    ADMIN_KERNEL_ROLE,
+    ADMIN_PROTOCOL_FEE_SETTER_ROLE,
+    ADMIN_UPGRADER_ROLE,
+    GUARDIAN_ROLE
+} from "../../src/factory/RolesConfiguration.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
 import { BaseTest } from "../base/BaseTest.t.sol";
@@ -68,7 +75,7 @@ contract GuardianCancellationTest is BaseTest {
         });
 
         // Build role assignments using the centralized function
-        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        DeployScript.RoleAssignment[] memory roleAssignments = _generateRoleAssignments();
 
         // Build deployment config
         MarketDeploymentConfig.MarketConfig memory config = MarketDeploymentConfig.MarketConfig({
@@ -124,26 +131,26 @@ contract GuardianCancellationTest is BaseTest {
 
         // Schedule the operation as kernel admin
         vm.prank(KERNEL_ADMIN_ADDRESS);
-        FACTORY.schedule(address(KERNEL), data, 0);
+        ACCESS_MANAGER.schedule(address(KERNEL), data, 0);
 
         // Verify operation is scheduled
-        bytes32 operationId = FACTORY.hashOperation(KERNEL_ADMIN_ADDRESS, address(KERNEL), data);
-        uint48 scheduledTime = FACTORY.getSchedule(operationId);
+        bytes32 operationId = ACCESS_MANAGER.hashOperation(KERNEL_ADMIN_ADDRESS, address(KERNEL), data);
+        uint48 scheduledTime = ACCESS_MANAGER.getSchedule(operationId);
         assertTrue(scheduledTime > 0, "Operation should be scheduled");
 
         // Guardian cancels the operation
         vm.prank(ROLE_GUARDIAN_ADDRESS);
-        FACTORY.cancel(KERNEL_ADMIN_ADDRESS, address(KERNEL), data);
+        ACCESS_MANAGER.cancel(KERNEL_ADMIN_ADDRESS, address(KERNEL), data);
 
         // Verify operation is cancelled (schedule returns 0)
-        scheduledTime = FACTORY.getSchedule(operationId);
+        scheduledTime = ACCESS_MANAGER.getSchedule(operationId);
         assertEq(scheduledTime, 0, "Operation should be cancelled");
 
         // Verify the operation cannot be executed even after delay
         vm.warp(block.timestamp + 2 days + 1);
         vm.prank(KERNEL_ADMIN_ADDRESS);
         vm.expectRevert(); // Should revert - operation was cancelled
-        FACTORY.execute(address(KERNEL), data);
+        ACCESS_MANAGER.execute(address(KERNEL), data);
     }
 
     /// @notice Test that guardian can cancel a scheduled accountant admin operation (setCoverage)
@@ -153,19 +160,19 @@ contract GuardianCancellationTest is BaseTest {
 
         // Schedule the operation as accountant admin
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
 
         // Verify operation is scheduled
-        bytes32 operationId = FACTORY.hashOperation(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
-        uint48 scheduledTime = FACTORY.getSchedule(operationId);
+        bytes32 operationId = ACCESS_MANAGER.hashOperation(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
+        uint48 scheduledTime = ACCESS_MANAGER.getSchedule(operationId);
         assertTrue(scheduledTime > 0, "Operation should be scheduled");
 
         // Guardian cancels the operation
         vm.prank(ROLE_GUARDIAN_ADDRESS);
-        FACTORY.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
+        ACCESS_MANAGER.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
 
         // Verify operation is cancelled
-        scheduledTime = FACTORY.getSchedule(operationId);
+        scheduledTime = ACCESS_MANAGER.getSchedule(operationId);
         assertEq(scheduledTime, 0, "Operation should be cancelled");
     }
 
@@ -176,17 +183,17 @@ contract GuardianCancellationTest is BaseTest {
 
         // Schedule the operation as accountant admin
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
 
         // Guardian cancels the operation
         vm.prank(ROLE_GUARDIAN_ADDRESS);
-        FACTORY.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
+        ACCESS_MANAGER.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
 
         // Verify the operation cannot be executed
         vm.warp(block.timestamp + 2 days + 1);
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
         vm.expectRevert();
-        FACTORY.execute(address(ACCOUNTANT), data);
+        ACCESS_MANAGER.execute(address(ACCOUNTANT), data);
     }
 
     /// @notice Test that guardian can cancel a scheduled accountant admin operation (setLiquidationCoverageUtilization)
@@ -196,17 +203,17 @@ contract GuardianCancellationTest is BaseTest {
 
         // Schedule the operation as accountant admin
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
 
         // Guardian cancels the operation
         vm.prank(ROLE_GUARDIAN_ADDRESS);
-        FACTORY.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
+        ACCESS_MANAGER.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
 
         // Verify the operation cannot be executed
         vm.warp(block.timestamp + 2 days + 1);
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
         vm.expectRevert();
-        FACTORY.execute(address(ACCOUNTANT), data);
+        ACCESS_MANAGER.execute(address(ACCOUNTANT), data);
     }
 
     /// @notice Test that guardian can cancel a scheduled accountant admin operation (setFixedTermDuration)
@@ -216,17 +223,17 @@ contract GuardianCancellationTest is BaseTest {
 
         // Schedule the operation as accountant admin
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
 
         // Guardian cancels the operation
         vm.prank(ROLE_GUARDIAN_ADDRESS);
-        FACTORY.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
+        ACCESS_MANAGER.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
 
         // Verify the operation cannot be executed
         vm.warp(block.timestamp + 2 days + 1);
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
         vm.expectRevert();
-        FACTORY.execute(address(ACCOUNTANT), data);
+        ACCESS_MANAGER.execute(address(ACCOUNTANT), data);
     }
 
     /// @notice Test that guardian can cancel a scheduled accountant admin operation (setSeniorTrancheDustTolerance)
@@ -236,17 +243,17 @@ contract GuardianCancellationTest is BaseTest {
 
         // Schedule the operation as accountant admin
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
 
         // Guardian cancels the operation
         vm.prank(ROLE_GUARDIAN_ADDRESS);
-        FACTORY.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
+        ACCESS_MANAGER.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
 
         // Verify the operation cannot be executed
         vm.warp(block.timestamp + 2 days + 1);
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
         vm.expectRevert();
-        FACTORY.execute(address(ACCOUNTANT), data);
+        ACCESS_MANAGER.execute(address(ACCOUNTANT), data);
     }
 
     /// @notice Test that guardian can cancel a scheduled protocol fee setter operation (setSeniorTrancheProtocolFee)
@@ -256,19 +263,19 @@ contract GuardianCancellationTest is BaseTest {
 
         // Schedule the operation as protocol fee setter
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
-        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
 
         // Verify operation is scheduled
-        bytes32 operationId = FACTORY.hashOperation(PROTOCOL_FEE_SETTER_ADDRESS, address(ACCOUNTANT), data);
-        uint48 scheduledTime = FACTORY.getSchedule(operationId);
+        bytes32 operationId = ACCESS_MANAGER.hashOperation(PROTOCOL_FEE_SETTER_ADDRESS, address(ACCOUNTANT), data);
+        uint48 scheduledTime = ACCESS_MANAGER.getSchedule(operationId);
         assertTrue(scheduledTime > 0, "Operation should be scheduled");
 
         // Guardian cancels the operation
         vm.prank(ROLE_GUARDIAN_ADDRESS);
-        FACTORY.cancel(PROTOCOL_FEE_SETTER_ADDRESS, address(ACCOUNTANT), data);
+        ACCESS_MANAGER.cancel(PROTOCOL_FEE_SETTER_ADDRESS, address(ACCOUNTANT), data);
 
         // Verify operation is cancelled
-        scheduledTime = FACTORY.getSchedule(operationId);
+        scheduledTime = ACCESS_MANAGER.getSchedule(operationId);
         assertEq(scheduledTime, 0, "Operation should be cancelled");
     }
 
@@ -279,17 +286,17 @@ contract GuardianCancellationTest is BaseTest {
 
         // Schedule the operation as protocol fee setter
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
-        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
 
         // Guardian cancels the operation
         vm.prank(ROLE_GUARDIAN_ADDRESS);
-        FACTORY.cancel(PROTOCOL_FEE_SETTER_ADDRESS, address(ACCOUNTANT), data);
+        ACCESS_MANAGER.cancel(PROTOCOL_FEE_SETTER_ADDRESS, address(ACCOUNTANT), data);
 
         // Verify the operation cannot be executed
         vm.warp(block.timestamp + 2 days + 1);
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
         vm.expectRevert();
-        FACTORY.execute(address(ACCOUNTANT), data);
+        ACCESS_MANAGER.execute(address(ACCOUNTANT), data);
     }
 
     /// @notice Test that guardian can cancel a scheduled upgrader operation (upgradeToAndCall on kernel)
@@ -301,19 +308,19 @@ contract GuardianCancellationTest is BaseTest {
 
         // Schedule the operation as upgrader
         vm.prank(UPGRADER_ADDRESS);
-        FACTORY.schedule(address(KERNEL), data, 0);
+        ACCESS_MANAGER.schedule(address(KERNEL), data, 0);
 
         // Verify operation is scheduled
-        bytes32 operationId = FACTORY.hashOperation(UPGRADER_ADDRESS, address(KERNEL), data);
-        uint48 scheduledTime = FACTORY.getSchedule(operationId);
+        bytes32 operationId = ACCESS_MANAGER.hashOperation(UPGRADER_ADDRESS, address(KERNEL), data);
+        uint48 scheduledTime = ACCESS_MANAGER.getSchedule(operationId);
         assertTrue(scheduledTime > 0, "Operation should be scheduled");
 
         // Guardian cancels the operation
         vm.prank(ROLE_GUARDIAN_ADDRESS);
-        FACTORY.cancel(UPGRADER_ADDRESS, address(KERNEL), data);
+        ACCESS_MANAGER.cancel(UPGRADER_ADDRESS, address(KERNEL), data);
 
         // Verify operation is cancelled
-        scheduledTime = FACTORY.getSchedule(operationId);
+        scheduledTime = ACCESS_MANAGER.getSchedule(operationId);
         assertEq(scheduledTime, 0, "Operation should be cancelled");
     }
 
@@ -324,17 +331,17 @@ contract GuardianCancellationTest is BaseTest {
 
         // Schedule the operation as kernel admin
         vm.prank(KERNEL_ADMIN_ADDRESS);
-        FACTORY.schedule(address(KERNEL), data, 0);
+        ACCESS_MANAGER.schedule(address(KERNEL), data, 0);
 
         // Random address tries to cancel - should fail
         vm.prank(address(0xBAD));
         vm.expectRevert();
-        FACTORY.cancel(KERNEL_ADMIN_ADDRESS, address(KERNEL), data);
+        ACCESS_MANAGER.cancel(KERNEL_ADMIN_ADDRESS, address(KERNEL), data);
 
         // Even another role holder (not guardian) cannot cancel
         vm.prank(PAUSER_ADDRESS);
         vm.expectRevert();
-        FACTORY.cancel(KERNEL_ADMIN_ADDRESS, address(KERNEL), data);
+        ACCESS_MANAGER.cancel(KERNEL_ADMIN_ADDRESS, address(KERNEL), data);
     }
 
     /// @notice Test that guardian can cancel multiple operations in sequence
@@ -345,25 +352,25 @@ contract GuardianCancellationTest is BaseTest {
         bytes memory data3 = abi.encodeCall(ACCOUNTANT.setSeniorTrancheProtocolFee, (0.12e18));
 
         vm.prank(KERNEL_ADMIN_ADDRESS);
-        FACTORY.schedule(address(KERNEL), data1, 0);
+        ACCESS_MANAGER.schedule(address(KERNEL), data1, 0);
 
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        FACTORY.schedule(address(ACCOUNTANT), data2, 0);
+        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data2, 0);
 
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
-        FACTORY.schedule(address(ACCOUNTANT), data3, 0);
+        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data3, 0);
 
         // Guardian cancels all operations
         vm.startPrank(ROLE_GUARDIAN_ADDRESS);
-        FACTORY.cancel(KERNEL_ADMIN_ADDRESS, address(KERNEL), data1);
-        FACTORY.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data2);
-        FACTORY.cancel(PROTOCOL_FEE_SETTER_ADDRESS, address(ACCOUNTANT), data3);
+        ACCESS_MANAGER.cancel(KERNEL_ADMIN_ADDRESS, address(KERNEL), data1);
+        ACCESS_MANAGER.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data2);
+        ACCESS_MANAGER.cancel(PROTOCOL_FEE_SETTER_ADDRESS, address(ACCOUNTANT), data3);
         vm.stopPrank();
 
         // Verify all operations are cancelled
-        assertEq(FACTORY.getSchedule(FACTORY.hashOperation(KERNEL_ADMIN_ADDRESS, address(KERNEL), data1)), 0);
-        assertEq(FACTORY.getSchedule(FACTORY.hashOperation(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data2)), 0);
-        assertEq(FACTORY.getSchedule(FACTORY.hashOperation(PROTOCOL_FEE_SETTER_ADDRESS, address(ACCOUNTANT), data3)), 0);
+        assertEq(ACCESS_MANAGER.getSchedule(ACCESS_MANAGER.hashOperation(KERNEL_ADMIN_ADDRESS, address(KERNEL), data1)), 0);
+        assertEq(ACCESS_MANAGER.getSchedule(ACCESS_MANAGER.hashOperation(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data2)), 0);
+        assertEq(ACCESS_MANAGER.getSchedule(ACCESS_MANAGER.hashOperation(PROTOCOL_FEE_SETTER_ADDRESS, address(ACCOUNTANT), data3)), 0);
     }
 
     // ============================================
@@ -377,14 +384,14 @@ contract GuardianCancellationTest is BaseTest {
 
         // Schedule as kernel admin
         vm.prank(KERNEL_ADMIN_ADDRESS);
-        FACTORY.schedule(address(KERNEL), data, 0);
+        ACCESS_MANAGER.schedule(address(KERNEL), data, 0);
 
         // Advance past execution delay
         vm.warp(block.timestamp + 2 days + 1);
 
         // Execute
         vm.prank(KERNEL_ADMIN_ADDRESS);
-        FACTORY.execute(address(KERNEL), data);
+        ACCESS_MANAGER.execute(address(KERNEL), data);
     }
 
     /// @notice Test that non-kernel-admin cannot call setSeniorTrancheSelfLiquidationBonus
@@ -395,7 +402,7 @@ contract GuardianCancellationTest is BaseTest {
         // Random address tries to schedule — should fail
         vm.prank(address(0xBAD));
         vm.expectRevert();
-        FACTORY.schedule(address(KERNEL), data, 0);
+        ACCESS_MANAGER.schedule(address(KERNEL), data, 0);
     }
 
     /// @notice Test that ADMIN_PROTOCOL_FEE_SETTER_ROLE can call setYieldShareProtocolFee
@@ -405,14 +412,14 @@ contract GuardianCancellationTest is BaseTest {
 
         // Schedule as protocol fee setter
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
-        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
 
         // Advance past execution delay
         vm.warp(block.timestamp + 2 days + 1);
 
         // Execute
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
-        FACTORY.execute(address(ACCOUNTANT), data);
+        ACCESS_MANAGER.execute(address(ACCOUNTANT), data);
     }
 
     /// @notice Test that non-fee-setter cannot call setYieldShareProtocolFee
@@ -422,7 +429,7 @@ contract GuardianCancellationTest is BaseTest {
 
         vm.prank(address(0xBAD));
         vm.expectRevert();
-        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
     }
 
     /// @notice Test that ADMIN_ACCOUNTANT_ROLE can call setCoverageConfiguration
@@ -434,14 +441,14 @@ contract GuardianCancellationTest is BaseTest {
 
         // Schedule as accountant admin
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
 
         // Advance past execution delay
         vm.warp(block.timestamp + 2 days + 1);
 
         // Execute
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        FACTORY.execute(address(ACCOUNTANT), data);
+        ACCESS_MANAGER.execute(address(ACCOUNTANT), data);
     }
 
     /// @notice Test that non-accountant-admin cannot call setCoverageConfiguration
@@ -453,7 +460,7 @@ contract GuardianCancellationTest is BaseTest {
 
         vm.prank(address(0xBAD));
         vm.expectRevert();
-        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
     }
 
     /// @notice Test that ADMIN_ACCOUNTANT_ROLE can call setJuniorTrancheDustTolerance
@@ -463,14 +470,14 @@ contract GuardianCancellationTest is BaseTest {
 
         // Schedule as accountant admin
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
 
         // Advance past execution delay
         vm.warp(block.timestamp + 2 days + 1);
 
         // Execute
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        FACTORY.execute(address(ACCOUNTANT), data);
+        ACCESS_MANAGER.execute(address(ACCOUNTANT), data);
     }
 
     /// @notice Test that non-accountant-admin cannot call setJuniorTrancheDustTolerance
@@ -480,7 +487,7 @@ contract GuardianCancellationTest is BaseTest {
 
         vm.prank(address(0xBAD));
         vm.expectRevert();
-        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
     }
 
     /// @notice Test that guardian can cancel setSeniorTrancheSelfLiquidationBonus
@@ -489,15 +496,15 @@ contract GuardianCancellationTest is BaseTest {
         bytes memory data = abi.encodeCall(KERNEL.setSeniorTrancheSelfLiquidationBonus, (newBonus));
 
         vm.prank(KERNEL_ADMIN_ADDRESS);
-        FACTORY.schedule(address(KERNEL), data, 0);
+        ACCESS_MANAGER.schedule(address(KERNEL), data, 0);
 
         vm.prank(ROLE_GUARDIAN_ADDRESS);
-        FACTORY.cancel(KERNEL_ADMIN_ADDRESS, address(KERNEL), data);
+        ACCESS_MANAGER.cancel(KERNEL_ADMIN_ADDRESS, address(KERNEL), data);
 
         vm.warp(block.timestamp + 2 days + 1);
         vm.prank(KERNEL_ADMIN_ADDRESS);
         vm.expectRevert();
-        FACTORY.execute(address(KERNEL), data);
+        ACCESS_MANAGER.execute(address(KERNEL), data);
     }
 
     /// @notice Test that guardian can cancel setYieldShareProtocolFee
@@ -506,15 +513,15 @@ contract GuardianCancellationTest is BaseTest {
         bytes memory data = abi.encodeCall(ACCOUNTANT.setYieldShareProtocolFee, (newFee));
 
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
-        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
 
         vm.prank(ROLE_GUARDIAN_ADDRESS);
-        FACTORY.cancel(PROTOCOL_FEE_SETTER_ADDRESS, address(ACCOUNTANT), data);
+        ACCESS_MANAGER.cancel(PROTOCOL_FEE_SETTER_ADDRESS, address(ACCOUNTANT), data);
 
         vm.warp(block.timestamp + 2 days + 1);
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
         vm.expectRevert();
-        FACTORY.execute(address(ACCOUNTANT), data);
+        ACCESS_MANAGER.execute(address(ACCOUNTANT), data);
     }
 
     /// @notice Test that guardian can cancel setCoverageConfiguration
@@ -522,15 +529,15 @@ contract GuardianCancellationTest is BaseTest {
         bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverageConfiguration, (0.3e18, 0.5e18, 0.9e18));
 
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
 
         vm.prank(ROLE_GUARDIAN_ADDRESS);
-        FACTORY.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
+        ACCESS_MANAGER.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
 
         vm.warp(block.timestamp + 2 days + 1);
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
         vm.expectRevert();
-        FACTORY.execute(address(ACCOUNTANT), data);
+        ACCESS_MANAGER.execute(address(ACCOUNTANT), data);
     }
 
     /// @notice Test that guardian can cancel setJuniorTrancheDustTolerance
@@ -539,15 +546,15 @@ contract GuardianCancellationTest is BaseTest {
         bytes memory data = abi.encodeCall(ACCOUNTANT.setJuniorTrancheDustTolerance, (newDustTolerance));
 
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        FACTORY.schedule(address(ACCOUNTANT), data, 0);
+        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
 
         vm.prank(ROLE_GUARDIAN_ADDRESS);
-        FACTORY.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
+        ACCESS_MANAGER.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
 
         vm.warp(block.timestamp + 2 days + 1);
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
         vm.expectRevert();
-        FACTORY.execute(address(ACCOUNTANT), data);
+        ACCESS_MANAGER.execute(address(ACCOUNTANT), data);
     }
 
     /// @notice Test that the original caller can also cancel their own scheduled operation
@@ -557,14 +564,14 @@ contract GuardianCancellationTest is BaseTest {
 
         // Schedule the operation as kernel admin
         vm.prank(KERNEL_ADMIN_ADDRESS);
-        FACTORY.schedule(address(KERNEL), data, 0);
+        ACCESS_MANAGER.schedule(address(KERNEL), data, 0);
 
         // Kernel admin cancels their own operation
         vm.prank(KERNEL_ADMIN_ADDRESS);
-        FACTORY.cancel(KERNEL_ADMIN_ADDRESS, address(KERNEL), data);
+        ACCESS_MANAGER.cancel(KERNEL_ADMIN_ADDRESS, address(KERNEL), data);
 
         // Verify operation is cancelled
-        bytes32 operationId = FACTORY.hashOperation(KERNEL_ADMIN_ADDRESS, address(KERNEL), data);
-        assertEq(FACTORY.getSchedule(operationId), 0, "Operation should be cancelled");
+        bytes32 operationId = ACCESS_MANAGER.hashOperation(KERNEL_ADMIN_ADDRESS, address(KERNEL), data);
+        assertEq(ACCESS_MANAGER.getSchedule(operationId), 0, "Operation should be cancelled");
     }
 }

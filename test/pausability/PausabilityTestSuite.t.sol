@@ -7,6 +7,7 @@ import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/I
 import { Pausable } from "../../lib/openzeppelin-contracts/contracts/utils/Pausable.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../script/config/MarketDeploymentConfig.sol";
+import { ADMIN_PAUSER_ROLE } from "../../src/factory/RolesConfiguration.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
@@ -64,7 +65,7 @@ contract PausabilityTestSuite is BaseTest {
         });
 
         // Build role assignments using the centralized function
-        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        DeployScript.RoleAssignment[] memory roleAssignments = _generateRoleAssignments();
 
         MarketDeploymentConfig.MarketConfig memory config = MarketDeploymentConfig.MarketConfig({
             marketName: "sNUSD",
@@ -161,10 +162,10 @@ contract PausabilityTestSuite is BaseTest {
     function _scheduleAndExecuteUnpause(address _target) internal {
         bytes memory data = abi.encodeCall(IRoycoAuth.unpause, ());
         vm.prank(UNPAUSER_ADDRESS);
-        FACTORY.schedule(_target, data, 0);
+        ACCESS_MANAGER.schedule(_target, data, 0);
         vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(UNPAUSER_ADDRESS);
-        FACTORY.execute(_target, data);
+        ACCESS_MANAGER.execute(_target, data);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -552,12 +553,12 @@ contract PausabilityTestSuite is BaseTest {
 
         bytes memory data = abi.encodeCall(IRoycoAuth.unpause, ());
         vm.prank(UNPAUSER_ADDRESS);
-        FACTORY.schedule(address(JT), data, 0);
+        ACCESS_MANAGER.schedule(address(JT), data, 0);
         vm.warp(vm.getBlockTimestamp() + 1 days);
 
         vm.expectEmit(true, true, true, true, address(JT));
         emit Pausable.Unpaused(address(FACTORY));
         vm.prank(UNPAUSER_ADDRESS);
-        FACTORY.execute(address(JT), data);
+        ACCESS_MANAGER.execute(address(JT), data);
     }
 }

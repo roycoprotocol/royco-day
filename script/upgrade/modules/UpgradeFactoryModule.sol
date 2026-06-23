@@ -3,8 +3,25 @@ pragma solidity ^0.8.28;
 
 import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 
-import { RolesConfiguration } from "../../../src/factory/RolesConfiguration.sol";
+import {
+    ADMIN_ACCOUNTANT_ROLE,
+    ADMIN_KERNEL_ROLE,
+    ADMIN_ORACLE_QUOTER_ROLE,
+    ADMIN_PAUSER_ROLE,
+    ADMIN_PROTOCOL_FEE_SETTER_ROLE,
+    ADMIN_UPGRADER_ROLE,
+    BURNER_ROLE,
+    DEPLOYER_ROLE,
+    DEPLOYER_ROLE_ADMIN_ROLE,
+    GUARDIAN_ROLE,
+    JT_LP_ROLE,
+    LP_ROLE_ADMIN_ROLE,
+    ST_LP_ROLE,
+    SYNC_ROLE,
+    TRANSFER_AGENT_ROLE
+} from "../../../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
+import { RoleConfigUtils } from "../../config/RoleConfigUtils.sol";
 
 import { UpgradeModuleBase } from "./UpgradeModuleBase.sol";
 
@@ -36,7 +53,7 @@ import { UpgradeModuleBase } from "./UpgradeModuleBase.sol";
  *      Solidity does not support constant enumeration; treat this list as a checked invariant
  *      to update whenever `RolesConfiguration` changes.
  */
-contract UpgradeFactoryModule is UpgradeModuleBase, RolesConfiguration {
+contract UpgradeFactoryModule is UpgradeModuleBase, RoleConfigUtils {
     error UpgradeFactoryModule__NotAFactoryProxy(address proxy);
     error UpgradeFactoryModule__NewImplIdenticalToOld(address impl);
     error UpgradeFactoryModule__ExpirationChanged(uint32 expected, uint32 actual);

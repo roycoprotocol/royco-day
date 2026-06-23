@@ -6,6 +6,7 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
+import { JT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { IRoycoAccountant } from "../../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
@@ -1114,8 +1115,8 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         if (stFeeShares > 0) {
             // Grant LP roles to protocol fee recipient so they can redeem
             vm.startPrank(LP_ROLE_ADMIN_ADDRESS);
-            FACTORY.grantRole(ST_LP_ROLE, PROTOCOL_FEE_RECIPIENT_ADDRESS, 0);
-            FACTORY.grantRole(JT_LP_ROLE, PROTOCOL_FEE_RECIPIENT_ADDRESS, 0);
+            ACCESS_MANAGER.grantRole(ST_LP_ROLE, PROTOCOL_FEE_RECIPIENT_ADDRESS, 0);
+            ACCESS_MANAGER.grantRole(JT_LP_ROLE, PROTOCOL_FEE_RECIPIENT_ADDRESS, 0);
             vm.stopPrank();
 
             vm.prank(PROTOCOL_FEE_RECIPIENT_ADDRESS);
@@ -2835,7 +2836,13 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     /// @notice Verify the critical invariant: post-redemption coverageUtilization <= original coverageUtilization
     /// @dev This is the core protection against bank run dynamics
     /// @dev Formula: U' = ((ST_RAW' + JT_RAW' * β) * COV) / JT_EFFECTIVE_NAV' <= U
-    function testFuzz_selfLiquidationBonus_coverageUtilizationInvariant_doesNotIncrease(uint256 _jtAmount, uint256 _stPercentage, uint256 _redeemPercentage) external {
+    function testFuzz_selfLiquidationBonus_coverageUtilizationInvariant_doesNotIncrease(
+        uint256 _jtAmount,
+        uint256 _stPercentage,
+        uint256 _redeemPercentage
+    )
+        external
+    {
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 4);
         _stPercentage = bound(_stPercentage, 30, 80);
         _redeemPercentage = bound(_redeemPercentage, 10, 100);
@@ -2878,7 +2885,11 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // CRITICAL INVARIANT: U' <= U
         // Only check if there's still exposure in the market
         if (stateAfter.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(stateAfter.coverageUtilizationWAD, coverageUtilizationBefore, "INVARIANT VIOLATED: Post-redemption coverageUtilization must not exceed original coverageUtilization");
+            assertLe(
+                stateAfter.coverageUtilizationWAD,
+                coverageUtilizationBefore,
+                "INVARIANT VIOLATED: Post-redemption coverageUtilization must not exceed original coverageUtilization"
+            );
         }
 
         _assertNAVConservation();
@@ -2922,7 +2933,11 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Invariant must hold even under extreme conditions
         if (stateAfter.stRawNAV > ZERO_NAV_UNITS) {
-            assertLe(stateAfter.coverageUtilizationWAD, coverageUtilizationBefore, "INVARIANT VIOLATED: CoverageUtilization increased under extreme undercollateralization");
+            assertLe(
+                stateAfter.coverageUtilizationWAD,
+                coverageUtilizationBefore,
+                "INVARIANT VIOLATED: CoverageUtilization increased under extreme undercollateralization"
+            );
         }
 
         _assertNAVConservation();
@@ -3649,7 +3664,11 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
             (SyncedAccountingState memory stateAfter,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
             if (stateAfter.stRawNAV > ZERO_NAV_UNITS) {
-                assertLe(stateAfter.coverageUtilizationWAD, prevCoverageUtilization, string(abi.encodePacked("CoverageUtilization increased after redemption ", vm.toString(i))));
+                assertLe(
+                    stateAfter.coverageUtilizationWAD,
+                    prevCoverageUtilization,
+                    string(abi.encodePacked("CoverageUtilization increased after redemption ", vm.toString(i)))
+                );
                 prevCoverageUtilization = stateAfter.coverageUtilizationWAD;
             }
 

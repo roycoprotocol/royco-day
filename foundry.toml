@@ -2,6 +2,14 @@
 src = "src"
 out = "out"
 libs = ["lib"]
+remappings = [
+    "@balancer-labs/v3-interfaces/=lib/balancer-v3-monorepo/pkg/interfaces/",
+    "@balancer-labs/v3-solidity-utils/=lib/balancer-v3-monorepo/pkg/solidity-utils/",
+    "@balancer-labs/v3-vault/=lib/balancer-v3-monorepo/pkg/vault/",
+    "@balancer-labs/v3-pool-utils/=lib/balancer-v3-monorepo/pkg/pool-utils/",
+    "@balancer-labs/v3-pool-gyro/=lib/balancer-v3-monorepo/pkg/pool-gyro/",
+    "@balancer-labs/v3-standalone-utils/=lib/balancer-v3-monorepo/pkg/standalone-utils/",
+]
 optimizer = true
 optimizer_runs = 1666
 bytecode_hash = "none"
@@ -12,7 +20,7 @@ evm_version = "prague"
 via_ir = true
 deny = "never"
 fs_permissions = [{ access = "read", path = "./out" }, { access = "read-write", path = "./output" }]
-solc_version = "0.8.34"
+solc_version = "0.8.35"
 ignored_warnings_from = ["test/*", "lib/*"]
 show_progress = true
 

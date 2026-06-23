@@ -130,14 +130,7 @@ contract AdaptiveCurveYDM_V1 is BaseYDM {
      *                       It is implied that (WAD - yieldShareWAD) is retained by the paying tranche, excluding any protocol fees
      * @return newYieldShareAtTargetWAD The updated yield share at target utilization after adaptation, scaled to WAD precision
      */
-    function _yieldShare(
-        MarketState _marketState,
-        uint256 _utilizationWAD
-    )
-        internal
-        view
-        returns (uint256 yieldShareWAD, uint256 newYieldShareAtTargetWAD)
-    {
+    function _yieldShare(MarketState _marketState, uint256 _utilizationWAD) internal view returns (uint256 yieldShareWAD, uint256 newYieldShareAtTargetWAD) {
         // Bound the supplied utilization to 100%
         uint256 utilizationWAD = _utilizationWAD;
         if (utilizationWAD > WAD) utilizationWAD = WAD;
@@ -180,14 +173,7 @@ contract AdaptiveCurveYDM_V1 is BaseYDM {
      * @param _linearAdaptationWAD The linear adaptation to apply to the curve based on the normalized delta, time elapsed, and speed of adaptation
      * @return yieldShareAtTargetWAD The yield share at target utilization after applying the adaptation
      */
-    function _computeYieldShareAtTarget(
-        uint256 _lastYieldShareAtTargetWAD,
-        int256 _linearAdaptationWAD
-    )
-        internal
-        pure
-        returns (uint256 yieldShareAtTargetWAD)
-    {
+    function _computeYieldShareAtTarget(uint256 _lastYieldShareAtTargetWAD, int256 _linearAdaptationWAD) internal pure returns (uint256 yieldShareAtTargetWAD) {
         // Compute the new yield share at the target by applying the exponentiated linear adaptation to the previous yield share
         // Exponentiation ensures that the yield share is always non-negative
         // Clamp the linear adaptation to the maximum value to prevent overflows when applying expWAD

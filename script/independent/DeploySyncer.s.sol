@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
-import { RolesConfiguration } from "../../src/factory/RolesConfiguration.sol";
+import { ADMIN_PAUSER_ROLE, ADMIN_UPGRADER_ROLE, SYNC_ROLE } from "../../src/factory/RolesConfiguration.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { RoycoMarketSyncer } from "../../src/periphery/RoycoMarketSyncer.sol";
 import { ExtraRoles } from "../config/ExtraRoles.sol";
@@ -18,7 +18,7 @@ import { console2 } from "lib/forge-std/src/console2.sol";
  *      Also generates a Safe-compatible JSON file containing the factory configuration transactions
  *      needed to make the syncer operational.
  */
-contract DeploySyncerScript is SyncerDeploymentConfig, AccessManagerConfigUtils, Create2DeployUtils, RolesConfiguration, ExtraRoles {
+contract DeploySyncerScript is SyncerDeploymentConfig, AccessManagerConfigUtils, Create2DeployUtils, ExtraRoles {
     // ═══════════════════════════════════════════════════════════════════════════
     // DEPLOYMENT CONSTANTS
     // ═══════════════════════════════════════════════════════════════════════════

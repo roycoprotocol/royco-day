@@ -5,8 +5,8 @@ import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/I
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../script/config/MarketDeploymentConfig.sol";
 import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
-import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IRoycoDawnKernel } from "../../src/interfaces/IRoycoDawnKernel.sol";
+import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IdenticalAssetsOracleQuoter } from "../../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../src/libraries/Types.sol";
@@ -68,7 +68,7 @@ contract AccountantAttributionFuzzTest is BaseTest {
             maxAdaptationSpeedWAD: uint64(30e18 / uint256(365 days))
         });
 
-        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        DeployScript.RoleAssignment[] memory roleAssignments = _generateRoleAssignments();
 
         MarketDeploymentConfig.MarketConfig memory config = MarketDeploymentConfig.MarketConfig({
             marketName: "sNUSD_FUZZ",
@@ -236,7 +236,7 @@ contract AccountantAttributionFuzzTest is BaseTest {
         // ceiling under the post-drain coverage state.
         address EVE = makeAddr("EVE_FUZZ");
         vm.prank(LP_ROLE_ADMIN_ADDRESS);
-        FACTORY.grantRole(uint64(uint256(keccak256(abi.encode("ROYCO_ST_LP_ROLE")))), EVE, 0);
+        ACCESS_MANAGER.grantRole(uint64(uint256(keccak256(abi.encode("ROYCO_ST_LP_ROLE")))), EVE, 0);
 
         uint256 eveMaxNAV = toUint256(ST.maxDeposit(EVE));
         // Require EVE to be able to deposit at least MIN_DEPOSIT - sub-dust deposits round to

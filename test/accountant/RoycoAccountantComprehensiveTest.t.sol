@@ -8,9 +8,9 @@ import { RoycoAccountant } from "../../src/accountant/RoycoAccountant.sol";
 import { IRoycoAccountant, Operation } from "../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { MAX_PROTOCOL_FEE_WAD, MIN_COVERAGE_WAD, WAD, ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
+import { DawnUtilsLib } from "../../src/libraries/DawnUtilsLib.sol";
 import { MarketState, SyncedAccountingState } from "../../src/libraries/Types.sol";
 import { NAV_UNIT, UnitsMathLib, toUint256 } from "../../src/libraries/Units.sol";
-import { DawnUtilsLib } from "../../src/libraries/DawnUtilsLib.sol";
 import { AdaptiveCurveYDM_V1 } from "../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { BaseTest } from "../base/BaseTest.t.sol";
 import { MockYDMOverWAD, MockYDMWithInit } from "../mock/MockYDM.sol";
@@ -1123,8 +1123,9 @@ contract RoycoAccountantComprehensiveTest is BaseTest {
         IRoycoAccountant.RoycoAccountantState memory accountantState = accountant.getState();
 
         // Verify coverageUtilization is computed correctly
-        uint256 expectedUtil =
-            DawnUtilsLib.computeCoverageUtilization(state.stRawNAV, state.jtRawNAV, accountantState.betaWAD, accountantState.minCoverageWAD, state.jtEffectiveNAV);
+        uint256 expectedUtil = DawnUtilsLib.computeCoverageUtilization(
+            state.stRawNAV, state.jtRawNAV, accountantState.betaWAD, accountantState.minCoverageWAD, state.jtEffectiveNAV
+        );
         assertEq(state.coverageUtilizationWAD, expectedUtil, "coverageUtilizationWAD mismatch");
 
         // Verify fixed term end timestamp based on market state
@@ -1955,8 +1956,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
 
         // Get state after preOpSync
         IRoycoAccountant.RoycoAccountantState memory preOpState = accountant.getState();
-        uint256 preOpLTV =
-            _computeLTV(toUint256(preOpState.lastSTEffectiveNAV), toUint256(preOpState.lastJTEffectiveNAV));
+        uint256 preOpLTV = _computeLTV(toUint256(preOpState.lastSTEffectiveNAV), toUint256(preOpState.lastJTEffectiveNAV));
 
         // Verify preOp didn't breach LLTV
         if (preOpLTV >= LIQUIDATION_COVERAGE_UTILIZATION_WAD) {
@@ -1970,8 +1970,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
             SyncedAccountingState memory postOpState
         ) {
             // Calculate post-op LTV
-            uint256 postOpLTV =
-                _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.jtEffectiveNAV));
+            uint256 postOpLTV = _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.jtEffectiveNAV));
 
             // INVARIANT: Post-op LTV should not breach LLTV
             // Note: LTV may increase but should stay below LLTV
@@ -1990,8 +1989,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
         _initializeState(initialST, initialJT);
 
         IRoycoAccountant.RoycoAccountantState memory preOpState = accountant.getState();
-        uint256 preOpLTV =
-            _computeLTV(toUint256(preOpState.lastSTEffectiveNAV), toUint256(preOpState.lastJTEffectiveNAV));
+        uint256 preOpLTV = _computeLTV(toUint256(preOpState.lastSTEffectiveNAV), toUint256(preOpState.lastJTEffectiveNAV));
 
         // Execute JT deposit
         vm.prank(MOCK_KERNEL);
@@ -2014,8 +2012,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
         _initializeState(initialST, initialJT);
 
         IRoycoAccountant.RoycoAccountantState memory preOpState = accountant.getState();
-        uint256 preOpLTV =
-            _computeLTV(toUint256(preOpState.lastSTEffectiveNAV), toUint256(preOpState.lastJTEffectiveNAV));
+        uint256 preOpLTV = _computeLTV(toUint256(preOpState.lastSTEffectiveNAV), toUint256(preOpState.lastJTEffectiveNAV));
 
         if (preOpLTV >= LIQUIDATION_COVERAGE_UTILIZATION_WAD) {
             return; // Skip if already breached
@@ -2026,8 +2023,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
         try accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(initialST - withdrawAmount), _nav(initialJT), ZERO_NAV_UNITS) returns (
             SyncedAccountingState memory postOpState
         ) {
-            uint256 postOpLTV =
-                _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.jtEffectiveNAV));
+            uint256 postOpLTV = _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.jtEffectiveNAV));
 
             // INVARIANT: Post-op LTV should not breach LLTV
             assertLt(postOpLTV, LIQUIDATION_COVERAGE_UTILIZATION_WAD, "LLTV breached after ST withdrawal when preOp was safe");
@@ -2045,8 +2041,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
         _initializeState(initialST, initialJT);
 
         IRoycoAccountant.RoycoAccountantState memory preOpState = accountant.getState();
-        uint256 preOpLTV =
-            _computeLTV(toUint256(preOpState.lastSTEffectiveNAV), toUint256(preOpState.lastJTEffectiveNAV));
+        uint256 preOpLTV = _computeLTV(toUint256(preOpState.lastSTEffectiveNAV), toUint256(preOpState.lastJTEffectiveNAV));
 
         if (preOpLTV >= LIQUIDATION_COVERAGE_UTILIZATION_WAD) {
             return;
@@ -2057,8 +2052,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
         try accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.JT_REDEEM, _nav(initialST), _nav(initialJT - withdrawAmount)) returns (
             SyncedAccountingState memory postOpState
         ) {
-            uint256 postOpLTV =
-                _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.jtEffectiveNAV));
+            uint256 postOpLTV = _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.jtEffectiveNAV));
 
             // INVARIANT: If coverage passed, LTV should be below LLTV
             assertLt(postOpLTV, LIQUIDATION_COVERAGE_UTILIZATION_WAD, "LLTV breached after JT withdrawal with coverage enforcement");
@@ -2102,8 +2096,7 @@ contract RoycoAccountantLLTVInvariantTest is BaseTest {
             try accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(newSTRaw + depositAmount), _nav(newJTRaw)) returns (
                 SyncedAccountingState memory postOpState
             ) {
-                uint256 postOpLTV =
-                    _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.jtEffectiveNAV));
+                uint256 postOpLTV = _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.jtEffectiveNAV));
 
                 // INVARIANT: If both preOp and postOp succeeded without LLTV breach, LTV stays safe
                 assertLt(postOpLTV, LIQUIDATION_COVERAGE_UTILIZATION_WAD, "LLTV breached in post-op after safe pre-op");
