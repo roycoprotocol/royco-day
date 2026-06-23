@@ -5,10 +5,10 @@ import { MarketState, Operation, SyncedAccountingState } from "../libraries/Type
 import { NAV_UNIT } from "../libraries/Units.sol";
 
 /**
- * @title IRoycoAccountant
- * @notice Interface for the RoycoAccountant contract that manages tranche NAVs and coverage requirements
+ * @title IRoycoDawnAccountant
+ * @notice Interface for the RoycoDawnAccountant contract that manages tranche NAVs and coverage requirements
  */
-interface IRoycoAccountant {
+interface IRoycoDawnAccountant {
     /**
      * @notice Initialization parameters for the Royco Accountant
      * @custom:field stProtocolFeeWAD - The market's configured protocol fee percentage taken from yield earned by the senior tranche, scaled to WAD precision
@@ -24,7 +24,7 @@ interface IRoycoAccountant {
      * @custom:field stNAVDustTolerance - The worst case dust tolerance for stRawNAV from underlying NAV quoting/rounding
      * @custom:field jtNAVDustTolerance - The worst case dust tolerance for jtRawNAV from underlying NAV quoting/rounding
      */
-    struct RoycoAccountantInitParams {
+    struct RoycoDawnAccountantInitParams {
         uint64 stProtocolFeeWAD;
         uint64 jtProtocolFeeWAD;
         uint64 yieldShareProtocolFeeWAD;
@@ -40,6 +40,7 @@ interface IRoycoAccountant {
 
     /**
      * @notice Storage state for the Royco Accountant
+     * @dev The namespace preimage is intentionally retained from the original RoycoAccountant name so the storage slot is unchanged across the rename
      * @custom:storage-location erc7201:Royco.storage.RoycoAccountantState
      * @custom:field lastMarketState - The last recorded state of this market (perpetual or fixed term)
      * @custom:field fixedTermDurationSeconds - The duration of a fixed term for this market in seconds
@@ -60,12 +61,12 @@ interface IRoycoAccountant {
      *                                           This represents the claim on capital that the junior tranche has on future ST recoveries
      * @custom:field twJTYieldShareAccruedWAD - The time-weighted junior tranche yield share (YDM output) since the last yield distribution, scaled to WAD precision
      * @custom:field lastAccrualTimestamp - The timestamp at which the time-weighted JT yield share accumulator was last updated
-     * @custom:field lastDistributionTimestamp - The timestamp at which the last ST yield distribution occurred
+     * @custom:field lastRiskPremiumPaymentTimestamp - The timestamp at which the last JT risk premium payment occurred
      * @custom:field stNAVDustTolerance - The worst case dust tolerance for stRawNAV from underlying NAV quoting/rounding
      * @custom:field jtNAVDustTolerance - The worst case dust tolerance for jtRawNAV from underlying NAV quoting/rounding
      * @custom:field effectiveNAVDustTolerance - Effective NAV deltas are claim-weighted linear combinations of stRawNAV and jtRawNAV deltas, so the worst-case dust is bounded by the sum of the raw NAV dust tolerances
      */
-    struct RoycoAccountantState {
+    struct RoycoDawnAccountantState {
         MarketState lastMarketState;
         uint24 fixedTermDurationSeconds;
         uint32 fixedTermEndTimestamp;
@@ -83,7 +84,7 @@ interface IRoycoAccountant {
         NAV_UNIT lastJTCoverageImpermanentLoss;
         uint192 twJTYieldShareAccruedWAD;
         uint32 lastAccrualTimestamp;
-        uint32 lastDistributionTimestamp;
+        uint32 lastRiskPremiumPaymentTimestamp;
         NAV_UNIT stNAVDustTolerance;
         NAV_UNIT jtNAVDustTolerance;
         NAV_UNIT effectiveNAVDustTolerance;
@@ -181,7 +182,7 @@ interface IRoycoAccountant {
     event FixedTermEnded();
 
     /// @notice Thrown when the caller of the function is not the accountant's configured Royco Kernel
-    error ONLY_ROYCO_DAWN_KERNEL();
+    error ONLY_ROYCO_KERNEL();
 
     /// @notice Thrown when the accountant's coverage configuration is invalid (can be due to incorrect coverage, beta, or liquidation coverageUtilization values)
     error INVALID_COVERAGE_CONFIG();
@@ -388,5 +389,5 @@ interface IRoycoAccountant {
      * @notice Returns the state of the accountant
      * @return state The state of the accountant
      */
-    function getState() external pure returns (RoycoAccountantState memory state);
+    function getState() external pure returns (RoycoDawnAccountantState memory state);
 }

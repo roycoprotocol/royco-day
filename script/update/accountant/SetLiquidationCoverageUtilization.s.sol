@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoAccountant } from "../../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoDawnAccountant } from "../../../src/interfaces/IRoycoDawnAccountant.sol";
 import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
 
 /**
@@ -106,7 +106,7 @@ contract SetLiquidationCoverageUtilization is ParameterUpdateBase {
                 updates[idx] = UpdateParams({
                     marketName: cfg.marketName,
                     target: addrs.accountant,
-                    callData: abi.encodeCall(IRoycoAccountant.setLiquidationCoverageUtilization, (cfg.newLiquidationCoverageUtilizationWAD)),
+                    callData: abi.encodeCall(IRoycoDawnAccountant.setLiquidationCoverageUtilization, (cfg.newLiquidationCoverageUtilizationWAD)),
                     description: string.concat("Set liquidationCoverageUtilizationWAD for ", cfg.marketName, " to ", vm.toString(cfg.newLiquidationCoverageUtilizationWAD))
                 });
                 idx++;
@@ -121,7 +121,7 @@ contract SetLiquidationCoverageUtilization is ParameterUpdateBase {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _verify(UpdateParams memory _params) internal pure override {
-        IRoycoAccountant.RoycoAccountantState memory state = IRoycoAccountant(_params.target).getState();
+        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = IRoycoDawnAccountant(_params.target).getState();
 
         // Extract expected value from the calldata (skip 4-byte selector; uint256 is at offset 4)
         uint256 expected;

@@ -11,7 +11,7 @@ import { IUpgradeVerifier, UpgradeBase } from "../base/UpgradeBase.sol";
  *      before each execute it calls `snapshotState(...)` and right after it calls `verify(...)`.
  *
  *      `snapshotState` intentionally runs AFTER the 2-day warp so that any time-dependent view
- *      (e.g. `RoycoVaultTranche.totalAssets`, `RoycoAccountant.previewSyncTrancheAccounting`)
+ *      (e.g. `RoycoVaultTranche.totalAssets`, `RoycoDawnAccountant.previewSyncTrancheAccounting`)
  *      uses the same `block.timestamp` in both the pre- and post-upgrade reads — making the
  *      continuity checks time-invariant.
  */

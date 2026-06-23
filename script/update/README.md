@@ -143,7 +143,7 @@ contract SetMyParam is ParameterUpdateBase {
     }
 
     function _verify(UpdateParams memory _params) internal view override {
-        IRoycoAccountant.RoycoAccountantState memory state = IRoycoAccountant(_params.target).getState();
+        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = IRoycoDawnAccountant(_params.target).getState();
         // Assert the parameter matches expected value
     }
 }

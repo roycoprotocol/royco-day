@@ -6,7 +6,7 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
-import { IRoycoAccountant } from "../../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoDawnAccountant } from "../../../src/interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../../src/libraries/Constants.sol";
@@ -336,7 +336,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         vm.startPrank(BOB_ADDRESS);
         IERC20(config.stAsset).approve(address(ST), amount);
 
-        vm.expectRevert(abi.encodeWithSelector(IRoycoAccountant.COVERAGE_REQUIREMENT_UNSATISFIED.selector));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDawnAccountant.COVERAGE_REQUIREMENT_UNSATISFIED.selector));
         ST.deposit(toTrancheUnits(amount), BOB_ADDRESS);
         vm.stopPrank();
     }
@@ -507,7 +507,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         vm.startPrank(BOB_ADDRESS);
         IERC20(config.stAsset).approve(address(ST), excessAmount);
 
-        vm.expectRevert(abi.encodeWithSelector(IRoycoAccountant.COVERAGE_REQUIREMENT_UNSATISFIED.selector));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDawnAccountant.COVERAGE_REQUIREMENT_UNSATISFIED.selector));
         ST.deposit(toTrancheUnits(excessAmount), BOB_ADDRESS);
         vm.stopPrank();
     }
@@ -712,7 +712,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function test_marketState_initiallyPerpetual() external view {
-        IRoycoAccountant.RoycoAccountantState memory accountantState = ACCOUNTANT.getState();
+        IRoycoDawnAccountant.RoycoDawnAccountantState memory accountantState = ACCOUNTANT.getState();
         assertEq(uint256(accountantState.lastMarketState), uint256(MarketState.PERPETUAL), "Should start in PERPETUAL");
     }
 
@@ -740,7 +740,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         // Check state - may transition to FIXED_TERM depending on configuration
-        IRoycoAccountant.RoycoAccountantState memory accountantState = ACCOUNTANT.getState();
+        IRoycoDawnAccountant.RoycoDawnAccountantState memory accountantState = ACCOUNTANT.getState();
         // State could be PERPETUAL or FIXED_TERM depending on coverageUtilization and liquidation threshold
         assertTrue(
             accountantState.lastMarketState == MarketState.PERPETUAL || accountantState.lastMarketState == MarketState.FIXED_TERM,
@@ -969,7 +969,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     ///      WAD (e.g., pure-JT withdrawal with β=WAD), giving coverageRetentionWAD_min = WAD − minCoverageWAD.
     ///      Use this upper bound; actual reduction is ≤ this for any (kS, kJ) combination.
     function _maxRedeemNAVTolerance() internal view returns (uint256) {
-        IRoycoAccountant.RoycoAccountantState memory state = ACCOUNTANT.getState();
+        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = ACCOUNTANT.getState();
         // Mirror every NAV unit maxJTWithdrawalGivenCoverage reserves from surplusJTAssets: the dust tolerances plus the fixed 2 NAV-unit ceil-rounding margin
         uint256 slack = toUint256(state.stNAVDustTolerance) + toUint256(state.jtNAVDustTolerance).mulDiv(uint256(state.betaWAD), WAD, Math.Rounding.Ceil) + 2;
         uint256 coverageRetentionWAD = WAD - uint256(state.minCoverageWAD);
@@ -2213,7 +2213,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         // JT absorbs the loss as coverage, but the market is now in a fixed-term state
-        IRoycoAccountant.RoycoAccountantState memory accountantState = ACCOUNTANT.getState();
+        IRoycoDawnAccountant.RoycoDawnAccountantState memory accountantState = ACCOUNTANT.getState();
 
         // Permanently perpetual markets (fixed-term duration of 0) never enter a fixed-term state: the JT coverage IL is erased and all operations remain enabled
         if (accountantState.fixedTermDurationSeconds == 0) {

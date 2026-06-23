@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
-import { IRoycoAccountant } from "../../../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoDawnAccountant } from "../../../../src/interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoBlacklist } from "../../../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDawnKernel } from "../../../../src/interfaces/IRoycoDawnKernel.sol";
 import { IRoycoVaultTranche } from "../../../../src/interfaces/IRoycoVaultTranche.sol";
@@ -342,7 +342,7 @@ contract ACRED_ComplianceTest is Identical_ERC20_ST_JT_Chainlink_SBT_TestBase {
 
         // ALICE tries to redeem all JT normally — should revert due to coverage violation
         vm.startPrank(ALICE_ADDRESS);
-        vm.expectRevert(IRoycoAccountant.COVERAGE_REQUIREMENT_UNSATISFIED.selector);
+        vm.expectRevert(IRoycoDawnAccountant.COVERAGE_REQUIREMENT_UNSATISFIED.selector);
         JT.redeem(jtShares, ALICE_ADDRESS, ALICE_ADDRESS);
         vm.stopPrank();
     }

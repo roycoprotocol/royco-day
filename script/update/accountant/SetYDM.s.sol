@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoAccountant } from "../../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoDawnAccountant } from "../../../src/interfaces/IRoycoDawnAccountant.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
 
@@ -140,7 +140,7 @@ contract SetYDM is ParameterUpdateBase {
                     updates[idx] = UpdateParams({
                         marketName: cfg.marketName,
                         target: addrs.accountant,
-                        callData: abi.encodeCall(IRoycoAccountant.setYDM, (cfg.ydm, ydmInitData)),
+                        callData: abi.encodeCall(IRoycoDawnAccountant.setYDM, (cfg.ydm, ydmInitData)),
                         description: string.concat("Set YDM for ", cfg.marketName, " (maxAdaptationSpeedWAD=", vm.toString(cfg.maxAdaptationSpeedWAD), ")")
                     });
                     idx++;
@@ -168,7 +168,7 @@ contract SetYDM is ParameterUpdateBase {
             _decodeInitializeYDMForMarketCallData(initData);
 
         // Accountant must now point at the expected YDM
-        IRoycoAccountant.RoycoAccountantState memory state = IRoycoAccountant(_params.target).getState();
+        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = IRoycoDawnAccountant(_params.target).getState();
         require(state.ydm == expectedYDM, VerificationFailed("YDM address mismatch after execution"));
 
         // The YDM must have stored the new curve params for this accountant.

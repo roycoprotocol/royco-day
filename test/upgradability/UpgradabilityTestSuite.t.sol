@@ -8,9 +8,9 @@ import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts/contracts/prox
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../script/config/MarketDeploymentConfig.sol";
-import { RoycoAccountant } from "../../src/accountant/RoycoAccountant.sol";
+import { RoycoDawnAccountant } from "../../src/accountant/RoycoDawnAccountant.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
-import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoDawnAccountant } from "../../src/interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IRoycoDawnKernel } from "../../src/interfaces/IRoycoDawnKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
@@ -42,7 +42,7 @@ contract UpgradabilityTestSuite is BaseTest {
 
     RoycoSeniorTranche internal newSTImpl;
     RoycoJuniorTranche internal newJTImpl;
-    RoycoAccountant internal newAccountantImpl;
+    RoycoDawnAccountant internal newAccountantImpl;
     address internal newKernelImpl;
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -140,7 +140,7 @@ contract UpgradabilityTestSuite is BaseTest {
         newJTImpl = new RoycoJuniorTranche(SNUSD, address(KERNEL));
         vm.label(address(newJTImpl), "NewJTImpl");
 
-        newAccountantImpl = new RoycoAccountant(address(KERNEL));
+        newAccountantImpl = new RoycoDawnAccountant(address(KERNEL));
         vm.label(address(newAccountantImpl), "NewAccountantImpl");
 
         IRoycoDawnKernel.RoycoDawnKernelConstructionParams memory constructionParams = IRoycoDawnKernel.RoycoDawnKernelConstructionParams({
@@ -196,7 +196,7 @@ contract UpgradabilityTestSuite is BaseTest {
 
     /// @notice Test that Accountant implementation cannot be initialized
     function test_accountantImplementation_cannotBeInitialized() external {
-        IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
+        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,
@@ -247,7 +247,7 @@ contract UpgradabilityTestSuite is BaseTest {
 
     /// @notice Test that new Accountant implementation cannot be initialized
     function test_newAccountantImplementation_cannotBeInitialized() external {
-        IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
+        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             yieldShareProtocolFeeWAD: 0,

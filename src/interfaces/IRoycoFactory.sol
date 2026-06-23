@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoAccountant } from "./IRoycoAccountant.sol";
+import { IRoycoDawnAccountant } from "./IRoycoDawnAccountant.sol";
 import { IRoycoDawnKernel } from "./IRoycoDawnKernel.sol";
 import { IRoycoVaultTranche } from "./IRoycoVaultTranche.sol";
 
@@ -127,7 +127,7 @@ interface IRoycoFactory {
         IRoycoVaultTranche seniorTrancheImplementation;
         IRoycoVaultTranche juniorTrancheImplementation;
         IRoycoDawnKernel kernelImplementation;
-        IRoycoAccountant accountantImplementation;
+        IRoycoDawnAccountant accountantImplementation;
         // Proxy Initialization Data
         bytes seniorTrancheInitializationData;
         bytes juniorTrancheInitializationData;
@@ -165,7 +165,7 @@ interface IRoycoFactory {
         IRoycoVaultTranche seniorTranche;
         IRoycoVaultTranche juniorTranche;
         IRoycoDawnKernel kernel;
-        IRoycoAccountant accountant;
+        IRoycoDawnAccountant accountant;
     }
 
     /**

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoAccountant } from "../../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoDawnAccountant } from "../../../src/interfaces/IRoycoDawnAccountant.sol";
 import { NAV_UNIT, toNAVUnits } from "../../../src/libraries/Units.sol";
 import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
 
@@ -99,13 +99,13 @@ contract SetDustTolerance is ParameterUpdateBase {
                 updates[idx++] = UpdateParams({
                     marketName: cfg.marketName,
                     target: addrs.accountant,
-                    callData: abi.encodeCall(IRoycoAccountant.setSeniorTrancheDustTolerance, (stTol)),
+                    callData: abi.encodeCall(IRoycoDawnAccountant.setSeniorTrancheDustTolerance, (stTol)),
                     description: string.concat("Set ST dust tolerance for ", cfg.marketName, " to ", vm.toString(cfg.newSTDustTolerance))
                 });
                 updates[idx++] = UpdateParams({
                     marketName: cfg.marketName,
                     target: addrs.accountant,
-                    callData: abi.encodeCall(IRoycoAccountant.setJuniorTrancheDustTolerance, (jtTol)),
+                    callData: abi.encodeCall(IRoycoDawnAccountant.setJuniorTrancheDustTolerance, (jtTol)),
                     description: string.concat("Set JT dust tolerance for ", cfg.marketName, " to ", vm.toString(cfg.newJTDustTolerance))
                 });
             }
@@ -119,7 +119,7 @@ contract SetDustTolerance is ParameterUpdateBase {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _verify(UpdateParams memory _params) internal view override {
-        IRoycoAccountant.RoycoAccountantState memory state = IRoycoAccountant(_params.target).getState();
+        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = IRoycoDawnAccountant(_params.target).getState();
 
         // Decode the expected NAV_UNIT from the calldata (skip 4-byte selector)
         uint256 expected;
@@ -130,9 +130,9 @@ contract SetDustTolerance is ParameterUpdateBase {
 
         // Dispatch on selector to assert against the right field
         bytes4 selector = bytes4(cd);
-        if (selector == IRoycoAccountant.setSeniorTrancheDustTolerance.selector) {
+        if (selector == IRoycoDawnAccountant.setSeniorTrancheDustTolerance.selector) {
             require(NAV_UNIT.unwrap(state.stNAVDustTolerance) == expected, VerificationFailed("ST dust tolerance mismatch"));
-        } else if (selector == IRoycoAccountant.setJuniorTrancheDustTolerance.selector) {
+        } else if (selector == IRoycoDawnAccountant.setJuniorTrancheDustTolerance.selector) {
             require(NAV_UNIT.unwrap(state.jtNAVDustTolerance) == expected, VerificationFailed("JT dust tolerance mismatch"));
         } else {
             revert VerificationFailed("Unknown selector in dust tolerance update");

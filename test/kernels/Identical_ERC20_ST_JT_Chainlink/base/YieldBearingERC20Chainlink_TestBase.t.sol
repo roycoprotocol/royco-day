@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { Vm } from "../../../../lib/forge-std/src/Vm.sol";
-import { IRoycoAccountant } from "../../../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoDawnAccountant } from "../../../../src/interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoAuth } from "../../../../src/interfaces/IRoycoAuth.sol";
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel } from "../../../../src/kernels/Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel.sol";
@@ -389,7 +389,7 @@ abstract contract YieldBearingERC20Chainlink_TestBase is AbstractKernelTestSuite
 
     /// @notice Counts TrancheAccountingSynced events in recorded logs
     function _countSyncEvents(Vm.Log[] memory logs) internal pure returns (uint256 count) {
-        bytes32 syncSelector = IRoycoAccountant.TrancheAccountingSynced.selector;
+        bytes32 syncSelector = IRoycoDawnAccountant.TrancheAccountingSynced.selector;
         for (uint256 i = 0; i < logs.length; i++) {
             if (logs[i].topics.length > 0 && logs[i].topics[0] == syncSelector) {
                 count++;

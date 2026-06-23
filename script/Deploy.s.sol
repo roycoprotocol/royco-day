@@ -2,10 +2,10 @@
 pragma solidity ^0.8.28;
 
 import { UUPSUpgradeable } from "../lib/openzeppelin-contracts/contracts/proxy/utils/UUPSUpgradeable.sol";
-import { RoycoAccountant } from "../src/accountant/RoycoAccountant.sol";
+import { RoycoDawnAccountant } from "../src/accountant/RoycoDawnAccountant.sol";
 import { RoycoBlacklist } from "../src/auth/RoycoBlacklist.sol";
 import { RolesConfiguration, RoycoFactory } from "../src/factory/RoycoFactory.sol";
-import { IRoycoAccountant } from "../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoDawnAccountant } from "../src/interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoAuth } from "../src/interfaces/IRoycoAuth.sol";
 import { IRoycoBlacklist } from "../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoFactory } from "../src/interfaces/IRoycoFactory.sol";
@@ -167,14 +167,14 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
     /// @notice Complete deployment result containing all deployed contracts
     struct DeploymentResult {
         RoycoFactory factory;
-        RoycoAccountant accountantImplementation;
+        RoycoDawnAccountant accountantImplementation;
         RoycoSeniorTranche stTrancheImplementation;
         RoycoJuniorTranche jtTrancheImplementation;
         address kernelImplementation;
         IYDM ydm;
         IRoycoVaultTranche seniorTranche;
         IRoycoVaultTranche juniorTranche;
-        IRoycoAccountant accountant;
+        IRoycoDawnAccountant accountant;
         IRoycoDawnKernel kernel;
         address roycoBlacklist;
     }
@@ -367,7 +367,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
             RoycoSeniorTranche stTrancheImpl,
             RoycoJuniorTranche jtTrancheImpl,
             address kernelImpl,
-            RoycoAccountant accountantImpl
+            RoycoDawnAccountant accountantImpl
         ) = _deployMarket(factory, address(ydm), _config, _protocolFeeRecipient, roycoBlacklist);
 
         // Build deployment result
@@ -508,19 +508,19 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         bytes4[] memory selectors = new bytes4[](14);
         uint64[] memory roleValues = new uint64[](14);
 
-        selectors[0] = IRoycoAccountant.setYDM.selector;
+        selectors[0] = IRoycoDawnAccountant.setYDM.selector;
         roleValues[0] = ADMIN_ACCOUNTANT_ROLE;
-        selectors[1] = IRoycoAccountant.setSeniorTrancheProtocolFee.selector;
+        selectors[1] = IRoycoDawnAccountant.setSeniorTrancheProtocolFee.selector;
         roleValues[1] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        selectors[2] = IRoycoAccountant.setJuniorTrancheProtocolFee.selector;
+        selectors[2] = IRoycoDawnAccountant.setJuniorTrancheProtocolFee.selector;
         roleValues[2] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        selectors[3] = IRoycoAccountant.setCoverage.selector;
+        selectors[3] = IRoycoDawnAccountant.setCoverage.selector;
         roleValues[3] = ADMIN_ACCOUNTANT_ROLE;
-        selectors[4] = IRoycoAccountant.setBeta.selector;
+        selectors[4] = IRoycoDawnAccountant.setBeta.selector;
         roleValues[4] = ADMIN_ACCOUNTANT_ROLE;
-        selectors[5] = IRoycoAccountant.setLiquidationCoverageUtilization.selector;
+        selectors[5] = IRoycoDawnAccountant.setLiquidationCoverageUtilization.selector;
         roleValues[5] = ADMIN_ACCOUNTANT_ROLE;
-        selectors[6] = IRoycoAccountant.setFixedTermDuration.selector;
+        selectors[6] = IRoycoDawnAccountant.setFixedTermDuration.selector;
         roleValues[6] = ADMIN_ACCOUNTANT_ROLE;
         selectors[7] = IRoycoAuth.pause.selector;
         roleValues[7] = ADMIN_PAUSER_ROLE;
@@ -528,13 +528,13 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         roleValues[8] = ADMIN_UNPAUSER_ROLE;
         selectors[9] = UUPSUpgradeable.upgradeToAndCall.selector;
         roleValues[9] = ADMIN_UPGRADER_ROLE;
-        selectors[10] = IRoycoAccountant.setSeniorTrancheDustTolerance.selector;
+        selectors[10] = IRoycoDawnAccountant.setSeniorTrancheDustTolerance.selector;
         roleValues[10] = ADMIN_ACCOUNTANT_ROLE;
-        selectors[11] = IRoycoAccountant.setYieldShareProtocolFee.selector;
+        selectors[11] = IRoycoDawnAccountant.setYieldShareProtocolFee.selector;
         roleValues[11] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        selectors[12] = IRoycoAccountant.setCoverageConfiguration.selector;
+        selectors[12] = IRoycoDawnAccountant.setCoverageConfiguration.selector;
         roleValues[12] = ADMIN_ACCOUNTANT_ROLE;
-        selectors[13] = IRoycoAccountant.setJuniorTrancheDustTolerance.selector;
+        selectors[13] = IRoycoDawnAccountant.setJuniorTrancheDustTolerance.selector;
         roleValues[13] = ADMIN_ACCOUNTANT_ROLE;
 
         return IRoycoFactory.RolesTargetConfiguration({ target: _accountant, selectors: selectors, roles: roleValues });
@@ -685,7 +685,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
             RoycoSeniorTranche stImpl,
             RoycoJuniorTranche jtImpl,
             address kernelImpl,
-            RoycoAccountant accountantImpl
+            RoycoDawnAccountant accountantImpl
         )
     {
         // Precompute expected proxy addresses using salt derived from market ID
@@ -752,7 +752,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
             seniorTrancheImplementation: IRoycoVaultTranche(address(stImpl)),
             juniorTrancheImplementation: IRoycoVaultTranche(address(jtImpl)),
             kernelImplementation: IRoycoDawnKernel(address(kernelImpl)),
-            accountantImplementation: IRoycoAccountant(address(accountantImpl)),
+            accountantImplementation: IRoycoDawnAccountant(address(accountantImpl)),
             seniorTrancheInitializationData: seniorTrancheInitializationData,
             juniorTrancheInitializationData: juniorTrancheInitializationData,
             kernelInitializationData: kernelInitializationData,
@@ -782,8 +782,8 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
     /// @notice Deploys the accountant implementation via CREATE2.
     /// @param _kernel The (precomputed) kernel proxy address baked into the implementation as an immutable
     /// @return The deployed accountant implementation
-    function _deployAccountantImpl(address _kernel) internal returns (RoycoAccountant) {
-        bytes memory creationCode = abi.encodePacked(type(RoycoAccountant).creationCode, abi.encode(_kernel));
+    function _deployAccountantImpl(address _kernel) internal returns (RoycoDawnAccountant) {
+        bytes memory creationCode = abi.encodePacked(type(RoycoDawnAccountant).creationCode, abi.encode(_kernel));
 
         (address addr, bool alreadyDeployed) = deployWithSanityChecks(ACCOUNTANT_IMPL_SALT, creationCode, false);
         if (ENABLE_LOGGING) {
@@ -793,7 +793,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
                 console2.log("Accountant implementation deployed at:", addr);
             }
         }
-        return RoycoAccountant(addr);
+        return RoycoDawnAccountant(addr);
     }
 
     /// @notice Deploys the senior tranche implementation via CREATE2.
@@ -1214,7 +1214,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
     }
 
     /// @notice Builds ABI-encoded initialization calldata for the accountant proxy.
-    /// @dev Constructs `RoycoAccountantInitParams` from the market config and encodes `RoycoAccountant.initialize()`.
+    /// @dev Constructs `RoycoDawnAccountantInitParams` from the market config and encodes `RoycoDawnAccountant.initialize()`.
     /// @param _ydmAddress The address of the deployed YDM singleton
     /// @param _factoryAddress The address of the factory
     /// @param _config The market deployment configuration
@@ -1224,7 +1224,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         pure
         returns (bytes memory)
     {
-        IRoycoAccountant.RoycoAccountantInitParams memory accountantParams = IRoycoAccountant.RoycoAccountantInitParams({
+        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory accountantParams = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: _config.stProtocolFeeWAD,
             jtProtocolFeeWAD: _config.jtProtocolFeeWAD,
             yieldShareProtocolFeeWAD: _config.jtYieldShareProtocolFeeWAD,
@@ -1238,7 +1238,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
             jtNAVDustTolerance: toNAVUnits(_config.jtDustTolerance)
         });
 
-        return abi.encodeCall(RoycoAccountant.initialize, (accountantParams, _factoryAddress));
+        return abi.encodeCall(RoycoDawnAccountant.initialize, (accountantParams, _factoryAddress));
     }
 
     /// @notice Builds ABI-encoded initialization calldata for the senior tranche proxy.

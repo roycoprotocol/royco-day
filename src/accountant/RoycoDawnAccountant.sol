@@ -2,11 +2,11 @@
 pragma solidity ^0.8.28;
 
 import { RoycoBase } from "../base/RoycoBase.sol";
-import { IRoycoAccountant } from "../interfaces/IRoycoAccountant.sol";
+import { IRoycoDawnAccountant } from "../interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoDawnKernel } from "../interfaces/IRoycoDawnKernel.sol";
 import { IYDM } from "../interfaces/IYDM.sol";
-import { AccountingLib } from "../libraries/AccountingLib.sol";
 import { MAX_COVERAGE_WAD, MAX_PROTOCOL_FEE_WAD, MIN_COVERAGE_WAD, WAD, ZERO_NAV_UNITS } from "../libraries/Constants.sol";
+import { DawnAccountingLib } from "../libraries/DawnAccountingLib.sol";
 import { DawnUtilsLib, Math } from "../libraries/DawnUtilsLib.sol";
 import {
     AccountingCheckpoint,
@@ -20,27 +20,28 @@ import {
 import { UnitsMathLib, toNAVUnits } from "../libraries/Units.sol";
 
 /**
- * @title RoycoAccountant
+ * @title RoycoDawnAccountant
  * @author Shivaansh Kapoor, Ankur Dubey
  * @notice Performs and tracks the core accounting operations for a Royco market
  * @notice Responsible for marking tranche NAVs to market, tracking the JT coverage impermanent loss, distributing yield via the YDM, and computing protocol fees
  * @notice Responsible for tracking the operational and coverage state of the Royco market
  */
-contract RoycoAccountant is IRoycoAccountant, RoycoBase {
+contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
     using Math for uint256;
     using UnitsMathLib for NAV_UNIT;
 
-    /// @dev Storage slot for RoycoAccountantState using ERC-7201 pattern
+    /// @dev Storage slot for RoycoDawnAccountantState using ERC-7201 pattern
+    /// @dev The namespace preimage is intentionally retained from the original RoycoAccountant name so the storage slot is unchanged across the rename
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoAccountantState")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ROYCO_ACCOUNTANT_STORAGE_SLOT = 0xc8240830e1172c6f1489139d8edb11776c3d3b2f893e3f4ce0fb541305a63a00;
 
-    /// @inheritdoc IRoycoAccountant
-    address public immutable override(IRoycoAccountant) KERNEL;
+    /// @inheritdoc IRoycoDawnAccountant
+    address public immutable override(IRoycoDawnAccountant) KERNEL;
 
     /// @dev Permissions the function to only be callable by the market's kernel
     /// @dev Should be placed on all state mutating NAV synchronization functions
     modifier onlyRoycoKernel() {
-        require(msg.sender == KERNEL, ONLY_ROYCO_DAWN_KERNEL());
+        require(msg.sender == KERNEL, ONLY_ROYCO_KERNEL());
         _;
     }
 
@@ -67,7 +68,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
      * @param _params The initialization parameters for the Royco accountant
      * @param _initialAuthority The initial authority for the Royco accountant
      */
-    function initialize(RoycoAccountantInitParams calldata _params, address _initialAuthority) external initializer {
+    function initialize(RoycoDawnAccountantInitParams calldata _params, address _initialAuthority) external initializer {
         // Initialize the base state of the accountant
         __RoycoBase_init(_initialAuthority);
 
@@ -83,7 +84,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         _initializeYDM(_params.ydm, _params.ydmInitializationData);
 
         // Initialize the state of the accountant
-        RoycoAccountantState storage $ = _getRoycoAccountantStorage();
+        RoycoDawnAccountantState storage $ = _getRoycoDawnAccountantStorage();
         $.fixedTermDurationSeconds = _params.fixedTermDurationSeconds;
         emit FixedTermDurationUpdated(_params.fixedTermDurationSeconds);
         $.stProtocolFeeWAD = _params.stProtocolFeeWAD;
@@ -111,18 +112,18 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     // NAV Synchronization Functions
     // =============================
 
-    /// @inheritdoc IRoycoAccountant
+    /// @inheritdoc IRoycoDawnAccountant
     function preOpSyncTrancheAccounting(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV
     )
         public
-        override(IRoycoAccountant)
+        override(IRoycoDawnAccountant)
         onlyRoycoKernel
         returns (SyncedAccountingState memory state)
     {
         // Get the storage pointer to the accountant state
-        RoycoAccountantState storage $ = _getRoycoAccountantStorage();
+        RoycoDawnAccountantState storage $ = _getRoycoDawnAccountantStorage();
 
         // Preview synchronization of the tranche NAVs and the JT coverage impermanent loss
         MarketState initialMarketState;
@@ -131,11 +132,11 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         (state, initialMarketState, riskPremiumPaid, jtCoverageImpermanentLossErased) =
             _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _accrueJTYieldShare());
 
-        // ST yield was split between ST and JT
+        // The JT risk premium was paid out of ST yield
         if (riskPremiumPaid) {
-            // Reset the accumulator and update the last yield distribution timestamp
+            // Reset the accumulator and update the last risk premium payment timestamp
             delete $.twJTYieldShareAccruedWAD;
-            $.lastDistributionTimestamp = uint32(block.timestamp);
+            $.lastRiskPremiumPaymentTimestamp = uint32(block.timestamp);
         }
 
         // Checkpoint the resulting market state, mark-to-market NAVs, and the JT coverage impermanent loss
@@ -162,20 +163,20 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         emit TrancheAccountingSynced(state);
     }
 
-    /// @inheritdoc IRoycoAccountant
+    /// @inheritdoc IRoycoDawnAccountant
     function previewSyncTrancheAccounting(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV
     )
         public
         view
-        override(IRoycoAccountant)
+        override(IRoycoDawnAccountant)
         returns (SyncedAccountingState memory state)
     {
         (state,,,) = _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _previewJTYieldShareAccrual());
     }
 
-    /// @inheritdoc IRoycoAccountant
+    /// @inheritdoc IRoycoDawnAccountant
     function postOpSyncTrancheAccounting(
         Operation _op,
         NAV_UNIT _stRawNAV,
@@ -183,12 +184,12 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         NAV_UNIT _stSelfLiquidationBonusNAV
     )
         public
-        override(IRoycoAccountant)
+        override(IRoycoDawnAccountant)
         onlyRoycoKernel
         returns (SyncedAccountingState memory state)
     {
         // Get the storage pointer to the accountant state
-        RoycoAccountantState storage $ = _getRoycoAccountantStorage();
+        RoycoDawnAccountantState storage $ = _getRoycoDawnAccountantStorage();
 
         // Compute the deltas in the raw NAVs of each tranche
         int256 deltaSTRawNAV = UnitsMathLib.computeNAVDelta(_stRawNAV, $.lastSTRawNAV);
@@ -232,7 +233,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         }
 
         // Enforce the NAV conservation invariant
-        AccountingLib.enforceNAVConservation(_stRawNAV, _jtRawNAV, stEffectiveNAV, jtEffectiveNAV);
+        DawnAccountingLib.enforceNAVConservation(_stRawNAV, _jtRawNAV, stEffectiveNAV, jtEffectiveNAV);
 
         // Checkpoint the mark-to-market NAVs
         $.lastSTRawNAV = _stRawNAV;
@@ -262,14 +263,14 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         });
     }
 
-    /// @inheritdoc IRoycoAccountant
+    /// @inheritdoc IRoycoDawnAccountant
     function postOpSyncTrancheAccountingAndEnforceCoverage(
         Operation _op,
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV
     )
         external
-        override(IRoycoAccountant)
+        override(IRoycoDawnAccountant)
         returns (SyncedAccountingState memory state)
     {
         // Execute a post-op NAV synchronization
@@ -283,10 +284,10 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     // Coverage Checking Functions
     // =============================
 
-    /// @inheritdoc IRoycoAccountant
-    function isCoverageRequirementSatisfied() public view override(IRoycoAccountant) returns (bool) {
+    /// @inheritdoc IRoycoDawnAccountant
+    function isCoverageRequirementSatisfied() public view override(IRoycoDawnAccountant) returns (bool) {
         // Get the storage pointer to the accountant state
-        RoycoAccountantState storage $ = _getRoycoAccountantStorage();
+        RoycoDawnAccountantState storage $ = _getRoycoDawnAccountantStorage();
         // Compute the coverageUtilization and return whether or not the senior tranche is properly collateralized based on persisted NAVs
         uint256 coverageUtilizationWAD =
             DawnUtilsLib.computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV);
@@ -294,14 +295,14 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     }
 
     /**
-     * @inheritdoc IRoycoAccountant
+     * @inheritdoc IRoycoDawnAccountant
      * @dev Coverage Invariant: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * MIN_COVERAGE
      * @dev Max assets depositable into ST, x: JT_EFFECTIVE_NAV = ((ST_RAW_NAV + x) + (JT_RAW_NAV * β)) * MIN_COVERAGE
      *      Isolate x: x = (JT_EFFECTIVE_NAV / MIN_COVERAGE) - (JT_RAW_NAV * β) - ST_RAW_NAV
      */
-    function maxSTDepositGivenCoverage(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external view override(IRoycoAccountant) returns (NAV_UNIT maxSTDeposit) {
+    function maxSTDepositGivenCoverage(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external view override(IRoycoDawnAccountant) returns (NAV_UNIT maxSTDeposit) {
         // Get the storage pointer to the accountant state
-        RoycoAccountantState storage $ = _getRoycoAccountantStorage();
+        RoycoDawnAccountantState storage $ = _getRoycoDawnAccountantStorage();
         // Preview a NAV sync to get the market's current state
         (SyncedAccountingState memory state,,,) = _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _previewJTYieldShareAccrual());
         // Solve for x, rounding in favor of senior protection
@@ -316,7 +317,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     }
 
     /**
-     * @inheritdoc IRoycoAccountant
+     * @inheritdoc IRoycoDawnAccountant
      * @dev Coverage Invariant: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * MIN_COVERAGE
      * @dev When assets are claimed from the JT, they are always liquidated in the same proportion as the tranche's total claims on the ST and JT assets
      * @dev Let S be the JT's total claims on ST assets and J be the JT's total claims on JT assets, in NAV Units. The total claims on the ST and JT assets are S + J NAV Units
@@ -333,10 +334,10 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     )
         external
         view
-        override(IRoycoAccountant)
+        override(IRoycoDawnAccountant)
         returns (NAV_UNIT totalNAVClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable)
     {
-        RoycoAccountantState storage $ = _getRoycoAccountantStorage();
+        RoycoDawnAccountantState storage $ = _getRoycoDawnAccountantStorage();
 
         // Get the surplus JT assets in NAV units
         // Preview a NAV sync to get the market's current state
@@ -403,7 +404,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
      * @param _twJTYieldShareAccruedWAD The currently accrued time-weighted JT yield share YDM output since the last distribution, scaled to WAD precision
      * @return state A struct containing all mark-to-market NAV, JT coverage impermanent loss, and fee data after executing the sync
      * @return initialMarketState The initial state the market was in before the synchronization
-     * @return riskPremiumPaid A boolean indicating whether ST yield was split between ST and JT
+     * @return riskPremiumPaid A boolean indicating whether the JT risk premium was paid out of ST yield
      * @return jtCoverageImpermanentLossErased The amount of JT coverage loss erased (reset to 0)
      */
     function _previewSyncTrancheAccounting(
@@ -416,7 +417,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         returns (SyncedAccountingState memory state, MarketState initialMarketState, bool riskPremiumPaid, NAV_UNIT jtCoverageImpermanentLossErased)
     {
         // Get the storage pointer to the accountant state
-        RoycoAccountantState storage $ = _getRoycoAccountantStorage();
+        RoycoDawnAccountantState storage $ = _getRoycoDawnAccountantStorage();
 
         // The market state that this sync transitions from
         initialMarketState = $.lastMarketState;
@@ -431,11 +432,10 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         });
 
         // Resolve the YDM inputs consumed by the waterfall's yield split once per sync
-        // NOTE: They depend only on last-sync state, so they are constant for any raw NAV inputs measured against this checkpoint
-        uint256 elapsedSinceLastDistribution = block.timestamp - $.lastDistributionTimestamp;
+        uint256 elapsedSinceLastRiskPremiumPayment = block.timestamp - $.lastRiskPremiumPaymentTimestamp;
         // The instantaneous share is only consumed when the last distribution happened in the same block, so it is fetched lazily
         // The YDM is driven by the market's coverage utilization: the JT risk premium scales with how utilized the JT coverage buffer is
-        uint256 instantaneousJTYieldShareWAD = elapsedSinceLastDistribution == 0
+        uint256 instantaneousJTYieldShareWAD = elapsedSinceLastRiskPremiumPayment == 0
             ? IYDM($.ydm)
                 .previewYieldShare(
                     initialMarketState,
@@ -451,14 +451,14 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         // Execute the PnL attribution and settlement waterfall
         NAV_UNIT stProtocolFeeAccrued;
         NAV_UNIT jtProtocolFeeAccrued;
-        (checkpoint, stProtocolFeeAccrued, jtProtocolFeeAccrued, riskPremiumPaid) = AccountingLib.applyProfitAndLossWaterfall(
+        (checkpoint, stProtocolFeeAccrued, jtProtocolFeeAccrued, riskPremiumPaid) = DawnAccountingLib.applyProfitAndLossWaterfall(
             _stRawNAV,
             _jtRawNAV,
             PnLWaterfallParams({
                 checkpoint: checkpoint,
                 twJTYieldShareAccruedWAD: _twJTYieldShareAccruedWAD,
                 instantaneousJTYieldShareWAD: instantaneousJTYieldShareWAD,
-                elapsedSinceLastDistribution: elapsedSinceLastDistribution,
+                elapsedSinceLastRiskPremiumPayment: elapsedSinceLastRiskPremiumPayment,
                 stProtocolFeeWAD: $.stProtocolFeeWAD,
                 jtProtocolFeeWAD: $.jtProtocolFeeWAD,
                 yieldShareProtocolFeeWAD: $.yieldShareProtocolFeeWAD,
@@ -467,7 +467,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         );
 
         // Apply the market state transition resulting from this sync and marshal the post-sync state
-        (state, jtCoverageImpermanentLossErased) = AccountingLib.applyStateTransition(
+        (state, jtCoverageImpermanentLossErased) = DawnAccountingLib.applyStateTransition(
             initialMarketState,
             MarketStateTransitionParams({
                 postPnLWaterfallCheckpoint: checkpoint,
@@ -491,14 +491,14 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
      */
     function _accrueJTYieldShare() internal returns (uint192 twJTYieldShareAccruedWAD) {
         // Get the storage pointer to the accountant state
-        RoycoAccountantState storage $ = _getRoycoAccountantStorage();
+        RoycoDawnAccountantState storage $ = _getRoycoDawnAccountantStorage();
 
         // Get the last update timestamp
         uint256 lastUpdate = $.lastAccrualTimestamp;
         if (lastUpdate == 0) {
             // Initialize the checkpoint timestamps if this is the first accrual
             $.lastAccrualTimestamp = uint32(block.timestamp);
-            $.lastDistributionTimestamp = uint32(block.timestamp);
+            $.lastRiskPremiumPaymentTimestamp = uint32(block.timestamp);
             return 0;
         }
 
@@ -516,7 +516,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         require(jtYieldShareWAD <= WAD, INVALID_YDM_OUTPUT());
 
         // Accrue the time-weighted yield share accrued to JT since the last tranche interaction
-        twJTYieldShareAccruedWAD = $.twJTYieldShareAccruedWAD += uint192(jtYieldShareWAD * elapsed);
+        twJTYieldShareAccruedWAD = ($.twJTYieldShareAccruedWAD += uint192(jtYieldShareWAD * elapsed));
         $.lastAccrualTimestamp = uint32(block.timestamp);
 
         emit JuniorTrancheYieldShareAccrued(jtYieldShareWAD, twJTYieldShareAccruedWAD, uint32(block.timestamp));
@@ -529,7 +529,7 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
      */
     function _previewJTYieldShareAccrual() internal view returns (uint192) {
         // Get the storage pointer to the accountant state
-        RoycoAccountantState storage $ = _getRoycoAccountantStorage();
+        RoycoDawnAccountantState storage $ = _getRoycoDawnAccountantStorage();
 
         // Get the last update timestamp
         uint256 lastUpdate = $.lastAccrualTimestamp;
@@ -556,83 +556,88 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     // Administrative Functions
     // =============================
 
-    /// @inheritdoc IRoycoAccountant
-    function setYDM(address _ydm, bytes calldata _ydmInitializationData) external override(IRoycoAccountant) restricted {
+    /// @inheritdoc IRoycoDawnAccountant
+    function setYDM(address _ydm, bytes calldata _ydmInitializationData) external override(IRoycoDawnAccountant) restricted {
         // Best-effort sync to settle unrealized PNL under the outgoing YDM
         // NOTE: A reverting sync is tolerated since this setter is the only recovery path from a sync-bricking YDM
         KERNEL.call(abi.encodeCall(IRoycoDawnKernel.syncTrancheAccounting, ()));
         // Initialize and set the new YDM for this market
         _initializeYDM(_ydm, _ydmInitializationData);
-        _getRoycoAccountantStorage().ydm = _ydm;
+        _getRoycoDawnAccountantStorage().ydm = _ydm;
         emit YDMUpdated(_ydm);
     }
 
-    /// @inheritdoc IRoycoAccountant
-    function setSeniorTrancheProtocolFee(uint64 _stProtocolFeeWAD) external override(IRoycoAccountant) restricted withSyncedAccounting {
+    /// @inheritdoc IRoycoDawnAccountant
+    function setSeniorTrancheProtocolFee(uint64 _stProtocolFeeWAD) external override(IRoycoDawnAccountant) restricted withSyncedAccounting {
         // Ensure that the protocol fee percentage is valid
         require(_stProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD, MAX_PROTOCOL_FEE_EXCEEDED());
-        _getRoycoAccountantStorage().stProtocolFeeWAD = _stProtocolFeeWAD;
+        _getRoycoDawnAccountantStorage().stProtocolFeeWAD = _stProtocolFeeWAD;
         emit SeniorTrancheProtocolFeeUpdated(_stProtocolFeeWAD);
     }
 
-    /// @inheritdoc IRoycoAccountant
-    function setJuniorTrancheProtocolFee(uint64 _jtProtocolFeeWAD) external override(IRoycoAccountant) restricted withSyncedAccounting {
+    /// @inheritdoc IRoycoDawnAccountant
+    function setJuniorTrancheProtocolFee(uint64 _jtProtocolFeeWAD) external override(IRoycoDawnAccountant) restricted withSyncedAccounting {
         // Ensure that the protocol fee percentage is valid
         require(_jtProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD, MAX_PROTOCOL_FEE_EXCEEDED());
-        _getRoycoAccountantStorage().jtProtocolFeeWAD = _jtProtocolFeeWAD;
+        _getRoycoDawnAccountantStorage().jtProtocolFeeWAD = _jtProtocolFeeWAD;
         emit JuniorTrancheProtocolFeeUpdated(_jtProtocolFeeWAD);
     }
 
-    /// @inheritdoc IRoycoAccountant
-    function setYieldShareProtocolFee(uint64 _yieldShareProtocolFeeWAD) external override(IRoycoAccountant) restricted withSyncedAccounting {
+    /// @inheritdoc IRoycoDawnAccountant
+    function setYieldShareProtocolFee(uint64 _yieldShareProtocolFeeWAD) external override(IRoycoDawnAccountant) restricted withSyncedAccounting {
         // Ensure that the protocol fee percentage is valid
         require(_yieldShareProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD, MAX_PROTOCOL_FEE_EXCEEDED());
-        _getRoycoAccountantStorage().yieldShareProtocolFeeWAD = _yieldShareProtocolFeeWAD;
+        _getRoycoDawnAccountantStorage().yieldShareProtocolFeeWAD = _yieldShareProtocolFeeWAD;
         emit YieldShareProtocolFeeUpdated(_yieldShareProtocolFeeWAD);
     }
 
-    /// @inheritdoc IRoycoAccountant
-    function setCoverage(uint64 _minCoverageWAD) external override(IRoycoAccountant) restricted withSyncedAccounting {
-        RoycoAccountantState storage $ = _getRoycoAccountantStorage();
+    /// @inheritdoc IRoycoDawnAccountant
+    function setCoverage(uint64 _minCoverageWAD) external override(IRoycoDawnAccountant) restricted withSyncedAccounting {
+        RoycoDawnAccountantState storage $ = _getRoycoDawnAccountantStorage();
         // Validate the new coverage configuration
         _validateCoverageConfig(_minCoverageWAD, $.betaWAD, $.liquidationCoverageUtilizationWAD);
         $.minCoverageWAD = _minCoverageWAD;
         emit CoverageUpdated(_minCoverageWAD);
     }
 
-    /// @inheritdoc IRoycoAccountant
-    function setBeta(uint96 _betaWAD) external override(IRoycoAccountant) restricted withSyncedAccounting {
-        RoycoAccountantState storage $ = _getRoycoAccountantStorage();
+    /// @inheritdoc IRoycoDawnAccountant
+    function setBeta(uint96 _betaWAD) external override(IRoycoDawnAccountant) restricted withSyncedAccounting {
+        RoycoDawnAccountantState storage $ = _getRoycoDawnAccountantStorage();
         // Validate the new coverage configuration
         _validateCoverageConfig($.minCoverageWAD, _betaWAD, $.liquidationCoverageUtilizationWAD);
         $.betaWAD = _betaWAD;
         emit BetaUpdated(_betaWAD);
     }
 
-    /// @inheritdoc IRoycoAccountant
-    function setLiquidationCoverageUtilization(uint256 _liquidationCoverageUtilizationWAD) external override(IRoycoAccountant) restricted withSyncedAccounting {
-        RoycoAccountantState storage $ = _getRoycoAccountantStorage();
+    /// @inheritdoc IRoycoDawnAccountant
+    function setLiquidationCoverageUtilization(uint256 _liquidationCoverageUtilizationWAD)
+        external
+        override(IRoycoDawnAccountant)
+        restricted
+        withSyncedAccounting
+    {
+        RoycoDawnAccountantState storage $ = _getRoycoDawnAccountantStorage();
         // Validate the new coverage configuration
         _validateCoverageConfig($.minCoverageWAD, $.betaWAD, _liquidationCoverageUtilizationWAD);
         $.liquidationCoverageUtilizationWAD = _liquidationCoverageUtilizationWAD;
         emit LiquidationCoverageUtilizationUpdated(_liquidationCoverageUtilizationWAD);
     }
 
-    /// @inheritdoc IRoycoAccountant
+    /// @inheritdoc IRoycoDawnAccountant
     function setCoverageConfiguration(
         uint64 _minCoverageWAD,
         uint96 _betaWAD,
         uint256 _liquidationCoverageUtilizationWAD
     )
         external
-        override(IRoycoAccountant)
+        override(IRoycoDawnAccountant)
         restricted
         withSyncedAccounting
     {
         // Validate the new coverage configuration
         _validateCoverageConfig(_minCoverageWAD, _betaWAD, _liquidationCoverageUtilizationWAD);
         // Set the new config
-        RoycoAccountantState storage $ = _getRoycoAccountantStorage();
+        RoycoDawnAccountantState storage $ = _getRoycoDawnAccountantStorage();
         $.minCoverageWAD = _minCoverageWAD;
         emit CoverageUpdated(_minCoverageWAD);
         $.betaWAD = _betaWAD;
@@ -641,9 +646,9 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         emit LiquidationCoverageUtilizationUpdated(_liquidationCoverageUtilizationWAD);
     }
 
-    /// @inheritdoc IRoycoAccountant
-    function setFixedTermDuration(uint24 _fixedTermDurationSeconds) external override(IRoycoAccountant) restricted withSyncedAccounting {
-        RoycoAccountantState storage $ = _getRoycoAccountantStorage();
+    /// @inheritdoc IRoycoDawnAccountant
+    function setFixedTermDuration(uint24 _fixedTermDurationSeconds) external override(IRoycoDawnAccountant) restricted withSyncedAccounting {
+        RoycoDawnAccountantState storage $ = _getRoycoDawnAccountantStorage();
         $.fixedTermDurationSeconds = _fixedTermDurationSeconds;
         // If the specified duration is 0, the market will permanently be in a perpetual state
         if (_fixedTermDurationSeconds == 0) {
@@ -654,18 +659,18 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
         emit FixedTermDurationUpdated(_fixedTermDurationSeconds);
     }
 
-    /// @inheritdoc IRoycoAccountant
-    function setSeniorTrancheDustTolerance(NAV_UNIT _stNAVDustTolerance) external override(IRoycoAccountant) restricted withSyncedAccounting {
-        RoycoAccountantState storage $ = _getRoycoAccountantStorage();
+    /// @inheritdoc IRoycoDawnAccountant
+    function setSeniorTrancheDustTolerance(NAV_UNIT _stNAVDustTolerance) external override(IRoycoDawnAccountant) restricted withSyncedAccounting {
+        RoycoDawnAccountantState storage $ = _getRoycoDawnAccountantStorage();
         $.stNAVDustTolerance = _stNAVDustTolerance;
         // Update the cached effective NAV dust tolerance
         $.effectiveNAVDustTolerance = _stNAVDustTolerance + $.jtNAVDustTolerance;
         emit SeniorTrancheDustToleranceUpdated(_stNAVDustTolerance);
     }
 
-    /// @inheritdoc IRoycoAccountant
-    function setJuniorTrancheDustTolerance(NAV_UNIT _jtNAVDustTolerance) external override(IRoycoAccountant) restricted withSyncedAccounting {
-        RoycoAccountantState storage $ = _getRoycoAccountantStorage();
+    /// @inheritdoc IRoycoDawnAccountant
+    function setJuniorTrancheDustTolerance(NAV_UNIT _jtNAVDustTolerance) external override(IRoycoDawnAccountant) restricted withSyncedAccounting {
+        RoycoDawnAccountantState storage $ = _getRoycoDawnAccountantStorage();
         $.jtNAVDustTolerance = _jtNAVDustTolerance;
         // Update the cached effective NAV dust tolerance
         $.effectiveNAVDustTolerance = $.stNAVDustTolerance + _jtNAVDustTolerance;
@@ -716,17 +721,17 @@ contract RoycoAccountant is IRoycoAccountant, RoycoBase {
     // Accountant State Accessor Functions
     // =============================
 
-    /// @inheritdoc IRoycoAccountant
-    function getState() external pure override(IRoycoAccountant) returns (RoycoAccountantState memory) {
-        return _getRoycoAccountantStorage();
+    /// @inheritdoc IRoycoDawnAccountant
+    function getState() external pure override(IRoycoDawnAccountant) returns (RoycoDawnAccountantState memory) {
+        return _getRoycoDawnAccountantStorage();
     }
 
     /**
-     * @notice Returns a storage pointer to the RoycoAccountantState storage
+     * @notice Returns a storage pointer to the RoycoDawnAccountantState storage
      * @dev Uses ERC-7201 storage slot pattern for collision-resistant storage
      * @return $ Storage pointer to the accountant's state
      */
-    function _getRoycoAccountantStorage() private pure returns (RoycoAccountantState storage $) {
+    function _getRoycoDawnAccountantStorage() private pure returns (RoycoDawnAccountantState storage $) {
         assembly ("memory-safe") {
             $.slot := ROYCO_ACCOUNTANT_STORAGE_SLOT
         }

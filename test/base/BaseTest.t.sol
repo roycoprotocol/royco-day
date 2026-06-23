@@ -7,9 +7,9 @@ import { ERC20Mock } from "../../lib/openzeppelin-contracts/contracts/mocks/toke
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { ExtraRoles } from "../../script/config/ExtraRoles.sol";
-import { RoycoAccountant } from "../../src/accountant/RoycoAccountant.sol";
+import { RoycoDawnAccountant } from "../../src/accountant/RoycoDawnAccountant.sol";
 import { RolesConfiguration, RoycoFactory } from "../../src/factory/RoycoFactory.sol";
-import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoDawnAccountant } from "../../src/interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoBlacklist } from "../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IRoycoDawnKernel } from "../../src/interfaces/IRoycoDawnKernel.sol";
@@ -139,12 +139,12 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
     IYDM internal YDM;
     RoycoSeniorTranche public ST_IMPL;
     RoycoJuniorTranche internal JT_IMPL;
-    RoycoAccountant internal ACCOUNTANT_IMPL;
+    RoycoDawnAccountant internal ACCOUNTANT_IMPL;
     address internal KERNEL_IMPL;
     IRoycoVaultTranche internal ST;
     IRoycoVaultTranche internal JT;
     IRoycoDawnKernel internal KERNEL;
-    IRoycoAccountant internal ACCOUNTANT;
+    IRoycoDawnAccountant internal ACCOUNTANT;
     IRoycoBlacklist internal BLACKLIST;
 
     // -----------------------------------------
