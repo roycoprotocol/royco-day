@@ -47,7 +47,7 @@ library DawnUtilsLib {
         // If there is no remaining JT loss-absorption buffer but covered exposure exists, coverage utilization is effectively infinite
         if (_jtEffectiveNAV == ZERO_NAV_UNITS) return type(uint256).max;
         // Return the computed coverage utilization, rounding in favor of the senior tranche
-        coverageUtilizationWAD = _minCoverageWAD.mulDiv(totalCoveredExposure, _jtEffectiveNAV, Math.Rounding.Ceil);
+        coverageUtilizationWAD = totalCoveredExposure.mulDiv(_minCoverageWAD, _jtEffectiveNAV, Math.Rounding.Ceil);
     }
 
     /**
