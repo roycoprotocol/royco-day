@@ -23,8 +23,8 @@ import { UnitsMathLib, toNAVUnits } from "../libraries/Units.sol";
  * @title RoycoDawnAccountant
  * @author Shivaansh Kapoor, Ankur Dubey
  * @notice Performs and tracks the core accounting operations for a Royco market
- * @notice Responsible for marking tranche NAVs to market, tracking the JT coverage impermanent loss, distributing yield via the YDM, and computing protocol fees
- * @notice Responsible for tracking the operational and coverage state of the Royco market
+ * @notice Responsible for marking tranche NAVs to market, tracking the JT coverage impermanent loss, distributing yield via the JT YDM, and computing protocol fees
+ * @notice Responsible for tracking the accounting and coverage state of the Royco market
  */
 contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
     using Math for uint256;
@@ -56,7 +56,7 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
     // =============================
 
     /// @dev Constructs the accountant with the specified kernel
-    /// @param _kernel - The kernel that this accountant maintains mark-to-market NAV, JT coverage impermanent loss, and fee accounting for this Royco market
+    /// @param _kernel The kernel that this accountant maintains mark-to-market NAV, JT coverage impermanent loss, and fee accounting for
     constructor(address _kernel) {
         // Ensure the specified kernel is not null and immutably set it
         require(_kernel != address(0), NULL_ADDRESS());
@@ -68,20 +68,29 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
      * @param _params The initialization parameters for the Royco accountant
      * @param _initialAuthority The initial authority for the Royco accountant
      */
-    function initialize(RoycoDawnAccountantInitParams calldata _params, address _initialAuthority) external initializer {
+    function initialize(RoycoDawnAccountantInitParams calldata _params, address _initialAuthority) external virtual initializer {
+        __RoycoDawnAccountant_init(_params, _initialAuthority);
+    }
+
+    /**
+     * @notice Initializes the Royco base and accountant state
+     * @param _params The initialization parameters for the Royco accountant
+     * @param _initialAuthority The initial authority for the Royco accountant
+     */
+    function __RoycoDawnAccountant_init(RoycoDawnAccountantInitParams calldata _params, address _initialAuthority) internal onlyInitializing {
         // Initialize the base state of the accountant
         __RoycoBase_init(_initialAuthority);
 
         // Ensure that the protocol fee percentage is valid
         require(
             _params.stProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD && _params.jtProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD
-                && _params.yieldShareProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD,
+                && _params.jtYieldShareProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD,
             MAX_PROTOCOL_FEE_EXCEEDED()
         );
         // Validate the market's initial coverage configuration
         _validateCoverageConfig(_params.minCoverageWAD, _params.betaWAD, _params.liquidationCoverageUtilizationWAD);
-        // Initialize the YDM for this market
-        _initializeYDM(_params.ydm, _params.ydmInitializationData);
+        // Initialize the JT YDM for this market
+        _initializeYDM(_params.jtYDM, _params.jtYDMInitializationData);
 
         // Initialize the state of the accountant
         RoycoDawnAccountantState storage $ = _getRoycoDawnAccountantStorage();
@@ -91,16 +100,16 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
         emit SeniorTrancheProtocolFeeUpdated(_params.stProtocolFeeWAD);
         $.jtProtocolFeeWAD = _params.jtProtocolFeeWAD;
         emit JuniorTrancheProtocolFeeUpdated(_params.jtProtocolFeeWAD);
-        $.yieldShareProtocolFeeWAD = _params.yieldShareProtocolFeeWAD;
-        emit YieldShareProtocolFeeUpdated(_params.yieldShareProtocolFeeWAD);
+        $.jtYieldShareProtocolFeeWAD = _params.jtYieldShareProtocolFeeWAD;
+        emit JuniorTrancheYieldShareProtocolFeeUpdated(_params.jtYieldShareProtocolFeeWAD);
         $.minCoverageWAD = _params.minCoverageWAD;
         emit CoverageUpdated(_params.minCoverageWAD);
         $.betaWAD = _params.betaWAD;
         emit BetaUpdated(_params.betaWAD);
         $.liquidationCoverageUtilizationWAD = _params.liquidationCoverageUtilizationWAD;
         emit LiquidationCoverageUtilizationUpdated(_params.liquidationCoverageUtilizationWAD);
-        $.ydm = _params.ydm;
-        emit YDMUpdated(_params.ydm);
+        $.jtYDM = _params.jtYDM;
+        emit JuniorTrancheYDMUpdated(_params.jtYDM);
         $.stNAVDustTolerance = _params.stNAVDustTolerance;
         emit SeniorTrancheDustToleranceUpdated(_params.stNAVDustTolerance);
         $.jtNAVDustTolerance = _params.jtNAVDustTolerance;
@@ -157,7 +166,7 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
 
         // If the JT Coverage IL was erased, signal the resetting
         if (jtCoverageImpermanentLossErased != ZERO_NAV_UNITS) {
-            emit JTCoverageImpermanentLossReset(jtCoverageImpermanentLossErased);
+            emit JuniorTrancheCoverageImpermanentLossReset(jtCoverageImpermanentLossErased);
         }
 
         emit TrancheAccountingSynced(state);
@@ -401,7 +410,7 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
      * @notice Synchronizes all tranche NAVs and the JT coverage impermanent loss based on unrealized PNLs of the underlying investment(s)
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
-     * @param _twJTYieldShareAccruedWAD The currently accrued time-weighted JT yield share YDM output since the last distribution, scaled to WAD precision
+     * @param _twJTYieldShareAccruedWAD The currently accrued time-weighted JT yield share (JT YDM output) since the last distribution, scaled to WAD precision
      * @return state A struct containing all mark-to-market NAV, JT coverage impermanent loss, and fee data after executing the sync
      * @return initialMarketState The initial state the market was in before the synchronization
      * @return riskPremiumPaid A boolean indicating whether the JT risk premium was paid out of ST yield
@@ -431,18 +440,18 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
             jtCoverageImpermanentLoss: $.lastJTCoverageImpermanentLoss
         });
 
-        // Resolve the YDM inputs consumed by the waterfall's yield split once per sync
+        // Resolve the JT YDM inputs consumed by the waterfall's yield split once per sync
         uint256 elapsedSinceLastRiskPremiumPayment = block.timestamp - $.lastRiskPremiumPaymentTimestamp;
         // The instantaneous share is only consumed when the last distribution happened in the same block, so it is fetched lazily
-        // The YDM is driven by the market's coverage utilization: the JT risk premium scales with how utilized the JT coverage buffer is
+        // The JT YDM is driven by the market's coverage utilization: the JT risk premium scales with how utilized the JT coverage buffer is
         uint256 instantaneousJTYieldShareWAD = elapsedSinceLastRiskPremiumPayment == 0
-            ? IYDM($.ydm)
+            ? IYDM($.jtYDM)
                 .previewYieldShare(
                     initialMarketState,
                     DawnUtilsLib.computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV)
                 )
             : 0;
-        // The JT yield share can never exceed 100% of senior appreciation: a larger share means the YDM is buggy
+        // The JT yield share can never exceed 100% of senior appreciation: a larger share means the JT YDM is faulty
         require(instantaneousJTYieldShareWAD <= WAD, INVALID_YDM_OUTPUT());
 
         // Cache the effective NAV dust tolerance: the worst-case dust is bounded by the sum of the raw NAV dust tolerances
@@ -461,7 +470,7 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
                 elapsedSinceLastRiskPremiumPayment: elapsedSinceLastRiskPremiumPayment,
                 stProtocolFeeWAD: $.stProtocolFeeWAD,
                 jtProtocolFeeWAD: $.jtProtocolFeeWAD,
-                yieldShareProtocolFeeWAD: $.yieldShareProtocolFeeWAD,
+                jtYieldShareProtocolFeeWAD: $.jtYieldShareProtocolFeeWAD,
                 effectiveNAVDustTolerance: effectiveNAVDustTolerance
             })
         );
@@ -494,10 +503,10 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
         RoycoDawnAccountantState storage $ = _getRoycoDawnAccountantStorage();
 
         // Get the last update timestamp
-        uint256 lastUpdate = $.lastAccrualTimestamp;
+        uint256 lastUpdate = $.lastJTYieldShareAccrualTimestamp;
         if (lastUpdate == 0) {
             // Initialize the checkpoint timestamps if this is the first accrual
-            $.lastAccrualTimestamp = uint32(block.timestamp);
+            $.lastJTYieldShareAccrualTimestamp = uint32(block.timestamp);
             $.lastRiskPremiumPaymentTimestamp = uint32(block.timestamp);
             return 0;
         }
@@ -508,18 +517,18 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
         if (elapsed == 0) return $.twJTYieldShareAccruedWAD;
 
         // Get the instantaneous JT yield share, scaled to WAD precision, driven by the market's coverage utilization
-        uint256 jtYieldShareWAD = IYDM($.ydm)
+        uint256 jtYieldShareWAD = IYDM($.jtYDM)
             .yieldShare(
                 $.lastMarketState, DawnUtilsLib.computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV)
             );
-        // The JT yield share can never exceed 100% of senior appreciation: a larger share means the YDM is buggy
+        // The JT yield share can never exceed 100% of senior appreciation: a larger share means the JT YDM is faulty
         require(jtYieldShareWAD <= WAD, INVALID_YDM_OUTPUT());
 
         // Accrue the time-weighted yield share accrued to JT since the last tranche interaction
         twJTYieldShareAccruedWAD = ($.twJTYieldShareAccruedWAD += uint192(jtYieldShareWAD * elapsed));
-        $.lastAccrualTimestamp = uint32(block.timestamp);
+        $.lastJTYieldShareAccrualTimestamp = uint32(block.timestamp);
 
-        emit JuniorTrancheYieldShareAccrued(jtYieldShareWAD, twJTYieldShareAccruedWAD, uint32(block.timestamp));
+        emit JuniorTrancheYieldShareAccrued(jtYieldShareWAD, twJTYieldShareAccruedWAD);
     }
 
     /**
@@ -532,7 +541,7 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
         RoycoDawnAccountantState storage $ = _getRoycoDawnAccountantStorage();
 
         // Get the last update timestamp
-        uint256 lastUpdate = $.lastAccrualTimestamp;
+        uint256 lastUpdate = $.lastJTYieldShareAccrualTimestamp;
         if (lastUpdate == 0) return 0;
 
         // Compute the elapsed time since the last update
@@ -541,11 +550,11 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
         if (elapsed == 0) return $.twJTYieldShareAccruedWAD;
 
         // Get the instantaneous JT yield share, scaled to WAD precision, driven by the market's coverage utilization
-        uint256 jtYieldShareWAD = IYDM($.ydm)
+        uint256 jtYieldShareWAD = IYDM($.jtYDM)
             .previewYieldShare(
                 $.lastMarketState, DawnUtilsLib.computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV)
             );
-        // The JT yield share can never exceed 100% of senior appreciation: a larger share means the YDM is buggy
+        // The JT yield share can never exceed 100% of senior appreciation: a larger share means the JT YDM is faulty
         require(jtYieldShareWAD <= WAD, INVALID_YDM_OUTPUT());
 
         // Apply the accrual of JT yield share to the accumulator, weighted by the time elapsed
@@ -557,14 +566,14 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
     // =============================
 
     /// @inheritdoc IRoycoDawnAccountant
-    function setYDM(address _ydm, bytes calldata _ydmInitializationData) external override(IRoycoDawnAccountant) restricted {
-        // Best-effort sync to settle unrealized PNL under the outgoing YDM
-        // NOTE: A reverting sync is tolerated since this setter is the only recovery path from a sync-bricking YDM
+    function setJTYDM(address _jtYDM, bytes calldata _jtYDMInitializationData) external override(IRoycoDawnAccountant) restricted {
+        // Best-effort sync to settle unrealized PNL under the outgoing JT YDM
+        // NOTE: A reverting sync is tolerated since this setter is the only recovery path from a sync-bricking JT YDM
         KERNEL.call(abi.encodeCall(IRoycoDawnKernel.syncTrancheAccounting, ()));
-        // Initialize and set the new YDM for this market
-        _initializeYDM(_ydm, _ydmInitializationData);
-        _getRoycoDawnAccountantStorage().ydm = _ydm;
-        emit YDMUpdated(_ydm);
+        // Initialize and set the new JT YDM for this market
+        _initializeYDM(_jtYDM, _jtYDMInitializationData);
+        _getRoycoDawnAccountantStorage().jtYDM = _jtYDM;
+        emit JuniorTrancheYDMUpdated(_jtYDM);
     }
 
     /// @inheritdoc IRoycoDawnAccountant
@@ -584,11 +593,11 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
     }
 
     /// @inheritdoc IRoycoDawnAccountant
-    function setYieldShareProtocolFee(uint64 _yieldShareProtocolFeeWAD) external override(IRoycoDawnAccountant) restricted withSyncedAccounting {
+    function setJTYieldShareProtocolFee(uint64 _jtYieldShareProtocolFeeWAD) external override(IRoycoDawnAccountant) restricted withSyncedAccounting {
         // Ensure that the protocol fee percentage is valid
-        require(_yieldShareProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD, MAX_PROTOCOL_FEE_EXCEEDED());
-        _getRoycoDawnAccountantStorage().yieldShareProtocolFeeWAD = _yieldShareProtocolFeeWAD;
-        emit YieldShareProtocolFeeUpdated(_yieldShareProtocolFeeWAD);
+        require(_jtYieldShareProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD, MAX_PROTOCOL_FEE_EXCEEDED());
+        _getRoycoDawnAccountantStorage().jtYieldShareProtocolFeeWAD = _jtYieldShareProtocolFeeWAD;
+        emit JuniorTrancheYieldShareProtocolFeeUpdated(_jtYieldShareProtocolFeeWAD);
     }
 
     /// @inheritdoc IRoycoDawnAccountant
@@ -652,7 +661,7 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
         $.fixedTermDurationSeconds = _fixedTermDurationSeconds;
         // If the specified duration is 0, the market will permanently be in a perpetual state
         if (_fixedTermDurationSeconds == 0) {
-            emit JTCoverageImpermanentLossReset($.lastJTCoverageImpermanentLoss);
+            emit JuniorTrancheCoverageImpermanentLossReset($.lastJTCoverageImpermanentLoss);
             $.lastJTCoverageImpermanentLoss = ZERO_NAV_UNITS;
             $.lastMarketState = MarketState.PERPETUAL;
         }

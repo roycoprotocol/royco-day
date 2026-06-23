@@ -192,7 +192,7 @@ library DawnAccountingLib {
                 if (riskPremium != ZERO_NAV_UNITS) {
                     // Compute the protocol fee taken on the yield share accrual if it is not attributable to any rounding/dust
                     if (riskPremiumPaid) {
-                        jtProtocolFeeAccrued = (jtProtocolFeeAccrued + riskPremium.mulDiv(_params.yieldShareProtocolFeeWAD, WAD, Math.Rounding.Floor));
+                        jtProtocolFeeAccrued = (jtProtocolFeeAccrued + riskPremium.mulDiv(_params.jtYieldShareProtocolFeeWAD, WAD, Math.Rounding.Floor));
                     }
                     jtEffectiveNAV = (jtEffectiveNAV + riskPremium);
                     stGain = (stGain - riskPremium);

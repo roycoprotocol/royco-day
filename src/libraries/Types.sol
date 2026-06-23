@@ -104,7 +104,7 @@ struct AccountingCheckpoint {
  * @custom:field elapsedSinceLastRiskPremiumPayment - The seconds elapsed since the last risk premium payment
  * @custom:field stProtocolFeeWAD - The market's protocol fee percentage taken from ST yield, scaled to WAD precision
  * @custom:field jtProtocolFeeWAD - The market's protocol fee percentage taken from JT yield, scaled to WAD precision
- * @custom:field yieldShareProtocolFeeWAD - The market's protocol fee percentage taken from the yield share (risk premium), scaled to WAD precision
+ * @custom:field jtYieldShareProtocolFeeWAD - The market's protocol fee percentage taken from the yield share (risk premium), scaled to WAD precision
  * @custom:field effectiveNAVDustTolerance - The effective NAV dust tolerance: the worst-case dust bounded by the sum of the raw NAV dust tolerances
  */
 struct PnLWaterfallParams {
@@ -114,7 +114,7 @@ struct PnLWaterfallParams {
     uint256 elapsedSinceLastRiskPremiumPayment;
     uint64 stProtocolFeeWAD;
     uint64 jtProtocolFeeWAD;
-    uint64 yieldShareProtocolFeeWAD;
+    uint64 jtYieldShareProtocolFeeWAD;
     NAV_UNIT effectiveNAVDustTolerance;
 }
 

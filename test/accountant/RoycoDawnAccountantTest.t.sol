@@ -75,11 +75,11 @@ contract RoycoDawnAccountantTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: stProtocolFeeWAD,
             jtProtocolFeeWAD: jtProtocolFeeWAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: minCoverageWAD,
             betaWAD: betaWAD,
-            ydm: ydm,
-            ydmInitializationData: ydmInitData,
+            jtYDM: ydm,
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: fixedTermDuration,
             liquidationCoverageUtilizationWAD: liquidationCoverageUtilizationWAD,
             stNAVDustTolerance: stNAVDustTolerance,
@@ -105,7 +105,7 @@ contract RoycoDawnAccountantTest is BaseTest {
         assertEq(state.jtProtocolFeeWAD, JT_PROTOCOL_FEE_WAD, "jt fee mismatch");
         assertEq(state.liquidationCoverageUtilizationWAD, LIQUIDATION_COVERAGE_UTILIZATION_WAD, "liquidationCoverageUtilization mismatch");
         assertEq(state.fixedTermDurationSeconds, FIXED_TERM_DURATION_SECONDS, "fixed term duration mismatch");
-        assertEq(state.ydm, address(adaptiveYDM), "ydm mismatch");
+        assertEq(state.jtYDM, address(adaptiveYDM), "ydm mismatch");
         assertEq(uint8(state.lastMarketState), uint8(MarketState.PERPETUAL), "initial state should be perpetual");
     }
 
@@ -209,11 +209,11 @@ contract RoycoDawnAccountantTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            ydm: address(0),
-            ydmInitializationData: "",
+            jtYDM: address(0),
+            jtYDMInitializationData: "",
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,

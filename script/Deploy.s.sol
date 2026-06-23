@@ -499,7 +499,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
     }
 
     /// @notice Builds selector-to-role mappings for the accountant contract.
-    /// @dev Maps setYDM/setCoverage/setBeta/setLiquidationCoverageUtilization/setFixedTermDuration/dust tolerances/coverage config
+    /// @dev Maps setJTYDM/setCoverage/setBeta/setLiquidationCoverageUtilization/setFixedTermDuration/dust tolerances/coverage config
     ///      to ADMIN_ACCOUNTANT_ROLE, fee setters to ADMIN_PROTOCOL_FEE_SETTER_ROLE, and shared
     ///      pause/unpause/upgrade to their respective roles.
     /// @param _accountant The address of the accountant contract
@@ -508,7 +508,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         bytes4[] memory selectors = new bytes4[](14);
         uint64[] memory roleValues = new uint64[](14);
 
-        selectors[0] = IRoycoDawnAccountant.setYDM.selector;
+        selectors[0] = IRoycoDawnAccountant.setJTYDM.selector;
         roleValues[0] = ADMIN_ACCOUNTANT_ROLE;
         selectors[1] = IRoycoDawnAccountant.setSeniorTrancheProtocolFee.selector;
         roleValues[1] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
@@ -530,7 +530,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         roleValues[9] = ADMIN_UPGRADER_ROLE;
         selectors[10] = IRoycoDawnAccountant.setSeniorTrancheDustTolerance.selector;
         roleValues[10] = ADMIN_ACCOUNTANT_ROLE;
-        selectors[11] = IRoycoDawnAccountant.setYieldShareProtocolFee.selector;
+        selectors[11] = IRoycoDawnAccountant.setJTYieldShareProtocolFee.selector;
         roleValues[11] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
         selectors[12] = IRoycoDawnAccountant.setCoverageConfiguration.selector;
         roleValues[12] = ADMIN_ACCOUNTANT_ROLE;
@@ -1227,11 +1227,11 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory accountantParams = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: _config.stProtocolFeeWAD,
             jtProtocolFeeWAD: _config.jtProtocolFeeWAD,
-            yieldShareProtocolFeeWAD: _config.jtYieldShareProtocolFeeWAD,
+            jtYieldShareProtocolFeeWAD: _config.jtYieldShareProtocolFeeWAD,
             minCoverageWAD: _config.minCoverageWAD,
             betaWAD: _config.betaWAD,
-            ydm: _ydmAddress,
-            ydmInitializationData: _buildYDMInitializationData(_config.ydmType, _config.ydmSpecificParams),
+            jtYDM: _ydmAddress,
+            jtYDMInitializationData: _buildYDMInitializationData(_config.ydmType, _config.ydmSpecificParams),
             fixedTermDurationSeconds: _config.fixedTermDurationSeconds,
             liquidationCoverageUtilizationWAD: _config.liquidationCoverageUtilizationWAD,
             stNAVDustTolerance: toNAVUnits(_config.stDustTolerance),

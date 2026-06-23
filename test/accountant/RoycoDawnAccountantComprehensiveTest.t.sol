@@ -112,11 +112,11 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: stProtocolFeeWAD,
             jtProtocolFeeWAD: jtProtocolFeeWAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: minCoverageWAD,
             betaWAD: betaWAD,
-            ydm: ydm,
-            ydmInitializationData: ydmInitData,
+            jtYDM: ydm,
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: fixedTermDuration,
             liquidationCoverageUtilizationWAD: liquidationCoverageUtilizationWAD,
             stNAVDustTolerance: stNAVDustTolerance,
@@ -1194,11 +1194,11 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: stProtocolFeeWAD,
             jtProtocolFeeWAD: jtProtocolFeeWAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: minCoverageWAD,
             betaWAD: betaWAD,
-            ydm: ydm,
-            ydmInitializationData: ydmInitData,
+            jtYDM: ydm,
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: fixedTermDuration,
             liquidationCoverageUtilizationWAD: liquidationCoverageUtilizationWAD,
             stNAVDustTolerance: stNAVDustTolerance,
@@ -1349,11 +1349,11 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: uint64(MAX_PROTOCOL_FEE_WAD + 1), // Exceeds max
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            ydm: address(adaptiveYDM),
-            ydmInitializationData: ydmInitData,
+            jtYDM: address(adaptiveYDM),
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
@@ -1372,11 +1372,11 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: uint64(MAX_PROTOCOL_FEE_WAD + 1), // Exceeds max
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            ydm: address(adaptiveYDM),
-            ydmInitializationData: ydmInitData,
+            jtYDM: address(adaptiveYDM),
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
@@ -1395,11 +1395,11 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: uint64(MIN_COVERAGE_WAD - 1), // Below min
             betaWAD: BETA_WAD,
-            ydm: address(adaptiveYDM),
-            ydmInitializationData: ydmInitData,
+            jtYDM: address(adaptiveYDM),
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
@@ -1418,11 +1418,11 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: uint64(WAD), // >= WAD
             betaWAD: BETA_WAD,
-            ydm: address(adaptiveYDM),
-            ydmInitializationData: ydmInitData,
+            jtYDM: address(adaptiveYDM),
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
@@ -1441,11 +1441,11 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            ydm: address(0), // Null YDM
-            ydmInitializationData: ydmInitData,
+            jtYDM: address(0), // Null YDM
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
@@ -1470,11 +1470,11 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            ydm: address(adaptiveYDM),
-            ydmInitializationData: ydmInitData,
+            jtYDM: address(adaptiveYDM),
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: uint64(maxLTV), // LLTV <= maxLTV is invalid
             stNAVDustTolerance: DUST_TOLERANCE,
@@ -1493,11 +1493,11 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            ydm: address(adaptiveYDM),
-            ydmInitializationData: ydmInitData,
+            jtYDM: address(adaptiveYDM),
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: uint64(WAD), // LLTV >= WAD is invalid
             stNAVDustTolerance: DUST_TOLERANCE,
@@ -1517,11 +1517,11 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: 0.9e18,
             betaWAD: 1.2e18, // coverage * beta >= WAD
-            ydm: address(adaptiveYDM),
-            ydmInitializationData: ydmInitData,
+            jtYDM: address(adaptiveYDM),
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
@@ -1604,11 +1604,11 @@ contract RoycoDawnAccountantInvariantTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            ydm: address(adaptiveYDM),
-            ydmInitializationData: ydmInitData,
+            jtYDM: address(adaptiveYDM),
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
@@ -1900,11 +1900,11 @@ contract RoycoDawnAccountantLLTVInvariantTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            ydm: address(adaptiveYDM),
-            ydmInitializationData: ydmInitData,
+            jtYDM: address(adaptiveYDM),
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
@@ -2258,11 +2258,11 @@ contract RoycoDawnAccountantAdminTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            ydm: address(adaptiveYDM),
-            ydmInitializationData: ydmInitData,
+            jtYDM: address(adaptiveYDM),
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
@@ -2382,16 +2382,16 @@ contract RoycoDawnAccountantAdminTest is BaseTest {
     }
 
     // =========================================================================
-    // setYDM Tests
+    // setJTYDM Tests
     // =========================================================================
 
-    function test_setYDM_success() public {
+    function test_setJTYDM_success() public {
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.4e18, 0.8e18));
 
         vm.prank(OWNER_ADDRESS);
-        accountant.setYDM(address(newYDM), ydmInitData);
+        accountant.setJTYDM(address(newYDM), ydmInitData);
 
-        assertEq(accountant.getState().ydm, address(newYDM), "YDM not updated");
+        assertEq(accountant.getState().jtYDM, address(newYDM), "YDM not updated");
     }
 
     // =========================================================================
@@ -2521,11 +2521,11 @@ contract RoycoDawnAccountantEdgeCaseTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            ydm: address(adaptiveYDM),
-            ydmInitializationData: ydmInitData,
+            jtYDM: address(adaptiveYDM),
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
@@ -2895,11 +2895,11 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: stProtocolFeeWAD,
             jtProtocolFeeWAD: jtProtocolFeeWAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: minCoverageWAD,
             betaWAD: betaWAD,
-            ydm: ydm,
-            ydmInitializationData: ydmInitData,
+            jtYDM: ydm,
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: fixedTermDuration,
             liquidationCoverageUtilizationWAD: liquidationCoverageUtilizationWAD,
             stNAVDustTolerance: stNAVDustTolerance,
@@ -2915,11 +2915,11 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            ydm: ydm,
-            ydmInitializationData: ydmInitData,
+            jtYDM: ydm,
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
@@ -3046,11 +3046,11 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
     }
 
     // =========================================================================
-    // setYDM WITH INIT DATA (Additional coverage)
+    // setJTYDM WITH INIT DATA (Additional coverage)
     // =========================================================================
 
-    /// @notice Test setYDM with initialization data
-    function test_setYDM_withInitData() public {
+    /// @notice Test setJTYDM with initialization data
+    function test_setJTYDM_withInitData() public {
         // First need to grant access - this requires the mock kernel for admin
         MockKernelForBranchTests mockKernel = new MockKernelForBranchTests();
         mockKernel.setAccountant(address(accountant));
@@ -3086,7 +3086,7 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
         bytes memory initData = abi.encodeCall(MockYDMWithInit.initialize, (false));
 
         // Set new YDM with init data
-        accountantForAdmin.setYDM(address(newYDM), initData);
+        accountantForAdmin.setJTYDM(address(newYDM), initData);
 
         // Verify initialization happened
         assertTrue(newYDM.initialized(), "New YDM should be initialized");
@@ -3124,11 +3124,11 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            ydm: address(adaptiveYDM),
-            ydmInitializationData: ydmInitData,
+            jtYDM: address(adaptiveYDM),
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: invalidLiquidationCoverageUtilization,
             stNAVDustTolerance: DUST_TOLERANCE,
@@ -3148,11 +3148,11 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            ydm: address(adaptiveYDM),
-            ydmInitializationData: ydmInitData,
+            jtYDM: address(adaptiveYDM),
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: invalidLiquidationCoverageUtilization,
             stNAVDustTolerance: DUST_TOLERANCE,
@@ -3248,11 +3248,11 @@ contract RoycoDawnAccountantAdditionalBranchTests is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            ydm: address(adaptiveYDM),
-            ydmInitializationData: ydmInitData,
+            jtYDM: address(adaptiveYDM),
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
@@ -3286,11 +3286,11 @@ contract RoycoDawnAccountantAdditionalBranchTests is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: invalidCoverage,
             betaWAD: BETA_WAD,
-            ydm: address(adaptiveYDM),
-            ydmInitializationData: ydmInitData,
+            jtYDM: address(adaptiveYDM),
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
@@ -3310,11 +3310,11 @@ contract RoycoDawnAccountantAdditionalBranchTests is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: invalidCoverage,
             betaWAD: BETA_WAD,
-            ydm: address(adaptiveYDM),
-            ydmInitializationData: ydmInitData,
+            jtYDM: address(adaptiveYDM),
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
@@ -3337,11 +3337,11 @@ contract RoycoDawnAccountantAdditionalBranchTests is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: highCoverage,
             betaWAD: highBeta,
-            ydm: address(adaptiveYDM),
-            ydmInitializationData: ydmInitData,
+            jtYDM: address(adaptiveYDM),
+            jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: 0.99e18, // High LLTV to pass that check
             stNAVDustTolerance: DUST_TOLERANCE,

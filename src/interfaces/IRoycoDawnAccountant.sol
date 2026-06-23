@@ -13,12 +13,12 @@ interface IRoycoDawnAccountant {
      * @notice Initialization parameters for the Royco Accountant
      * @custom:field stProtocolFeeWAD - The market's configured protocol fee percentage taken from yield earned by the senior tranche, scaled to WAD precision
      * @custom:field jtProtocolFeeWAD - The market's configured protocol fee percentage taken from yield earned by the junior tranche, scaled to WAD precision
-     * @custom:field yieldShareProtocolFeeWAD - The market's configured protocol fee percentage taken from the yield share (risk premium) payed from the senior tranche yield to the junior tranche, scaled to WAD precision
+     * @custom:field jtYieldShareProtocolFeeWAD - The market's configured protocol fee percentage taken from the yield share (risk premium) payed from the senior tranche yield to the junior tranche, scaled to WAD precision
      * @custom:field minCoverageWAD - The coverage ratio that the senior tranche is expected to be protected by, scaled to WAD precision
      * @custom:field betaWAD - The junior tranche's sensitivity to the same downside stress that affects the senior tranche, scaled to WAD precision
      *                         For example, beta is 0 when JT is in the RFR and 1 when JT is in the same opportunity as senior
-     * @custom:field ydm - The market's Yield Distribution Model (YDM), responsible for determining the yield share (risk premium) payed from the senior tranche yield to the junior tranche
-     * @custom:field ydmInitializationData - The data used to initialize the YDM for this market
+     * @custom:field jtYDM - The junior tranche's Yield Distribution Model (JT YDM), responsible for determining the yield share (risk premium) payed from the senior tranche yield to the junior tranche
+     * @custom:field jtYDMInitializationData - The data used to initialize the JT YDM for this market
      * @custom:field fixedTermDurationSeconds - The duration of a fixed term for this market in seconds
      * @custom:field liquidationCoverageUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
      * @custom:field stNAVDustTolerance - The worst case dust tolerance for stRawNAV from underlying NAV quoting/rounding
@@ -27,11 +27,11 @@ interface IRoycoDawnAccountant {
     struct RoycoDawnAccountantInitParams {
         uint64 stProtocolFeeWAD;
         uint64 jtProtocolFeeWAD;
-        uint64 yieldShareProtocolFeeWAD;
+        uint64 jtYieldShareProtocolFeeWAD;
         uint64 minCoverageWAD;
         uint96 betaWAD;
-        address ydm;
-        bytes ydmInitializationData;
+        address jtYDM;
+        bytes jtYDMInitializationData;
         uint24 fixedTermDurationSeconds;
         uint256 liquidationCoverageUtilizationWAD;
         NAV_UNIT stNAVDustTolerance;
@@ -50,17 +50,17 @@ interface IRoycoDawnAccountant {
      *                         For example, beta is 0 when JT is in the RFR and 1e18 (100%) when JT is in the same opportunity as senior
      * @custom:field stProtocolFeeWAD - The market's configured protocol fee percentage charged from yield earned by the senior tranche, scaled to WAD precision
      * @custom:field jtProtocolFeeWAD - The market's configured protocol fee percentage charged from yield earned by the junior tranche, scaled to WAD precision
-     * @custom:field yieldShareProtocolFeeWAD - The market's configured protocol fee percentage charged from the yield share (risk premium) payed from the senior tranche yield to the junior tranche, scaled to WAD precision
+     * @custom:field jtYieldShareProtocolFeeWAD - The market's configured protocol fee percentage charged from the yield share (risk premium) payed from the senior tranche yield to the junior tranche, scaled to WAD precision
      * @custom:field liquidationCoverageUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
-     * @custom:field ydm - The market's Yield Distribution Model (YDM), responsible for determining the yield share (risk premium) payed from the senior tranche yield to the junior tranche
+     * @custom:field jtYDM - The junior tranche's Yield Distribution Model (JT YDM), responsible for determining the yield share (risk premium) payed from the senior tranche yield to the junior tranche
      * @custom:field lastSTRawNAV - The last recorded pure NAV (excluding any coverage taken and yield shared) of the senior tranche
      * @custom:field lastJTRawNAV - The last recorded pure NAV (excluding any coverage given and yield shared) of the junior tranche
      * @custom:field lastSTEffectiveNAV - The last recorded effective NAV (including any prior applied coverage, ST yield distribution, and uncovered losses) of the senior tranche
      * @custom:field lastJTEffectiveNAV - The last recorded effective NAV (including any prior provided coverage, JT yield, ST yield distribution, and JT losses) of the junior tranche
      * @custom:field lastJTCoverageImpermanentLoss - The impermanent loss that JT has suffered after providing coverage for ST losses
      *                                           This represents the claim on capital that the junior tranche has on future ST recoveries
-     * @custom:field twJTYieldShareAccruedWAD - The time-weighted junior tranche yield share (YDM output) since the last yield distribution, scaled to WAD precision
-     * @custom:field lastAccrualTimestamp - The timestamp at which the time-weighted JT yield share accumulator was last updated
+     * @custom:field twJTYieldShareAccruedWAD - The time-weighted junior tranche yield share (JT YDM output) since the last yield distribution, scaled to WAD precision
+     * @custom:field lastJTYieldShareAccrualTimestamp - The timestamp at which the time-weighted JT yield share accumulator was last updated
      * @custom:field lastRiskPremiumPaymentTimestamp - The timestamp at which the last JT risk premium payment occurred
      * @custom:field stNAVDustTolerance - The worst case dust tolerance for stRawNAV from underlying NAV quoting/rounding
      * @custom:field jtNAVDustTolerance - The worst case dust tolerance for jtRawNAV from underlying NAV quoting/rounding
@@ -74,16 +74,16 @@ interface IRoycoDawnAccountant {
         uint96 betaWAD;
         uint64 stProtocolFeeWAD;
         uint64 jtProtocolFeeWAD;
-        uint64 yieldShareProtocolFeeWAD;
+        uint64 jtYieldShareProtocolFeeWAD;
         uint256 liquidationCoverageUtilizationWAD;
-        address ydm;
+        address jtYDM;
         NAV_UNIT lastSTRawNAV;
         NAV_UNIT lastJTRawNAV;
         NAV_UNIT lastSTEffectiveNAV;
         NAV_UNIT lastJTEffectiveNAV;
         NAV_UNIT lastJTCoverageImpermanentLoss;
         uint192 twJTYieldShareAccruedWAD;
-        uint32 lastAccrualTimestamp;
+        uint32 lastJTYieldShareAccrualTimestamp;
         uint32 lastRiskPremiumPaymentTimestamp;
         NAV_UNIT stNAVDustTolerance;
         NAV_UNIT jtNAVDustTolerance;
@@ -92,93 +92,64 @@ interface IRoycoDawnAccountant {
 
     /**
      * @notice Emitted when JT's share of ST yield is accrued based on the market's coverageUtilization since the last accrual
-     * @param jtYieldShareWAD JT's instantaneous yield share (YDM output) based on coverageUtilization since the last accrual
+     * @param jtYieldShareWAD JT's instantaneous yield share (JT YDM output) based on coverageUtilization since the last accrual
      * @param twJTYieldShareAccruedWAD The time-weighted JT yield share accrued since the last yield distribution
-     * @param accrualTimestamp The timestamp of this JT yield share accrual
      */
-    event JuniorTrancheYieldShareAccrued(uint256 jtYieldShareWAD, uint256 twJTYieldShareAccruedWAD, uint32 accrualTimestamp);
+    event JuniorTrancheYieldShareAccrued(uint256 jtYieldShareWAD, uint256 twJTYieldShareAccruedWAD);
 
-    /**
-     * @notice Emitted when a fixed term regime is commenced by this market
-     * @param fixedTermEndTimestamp The end timestamp of the new fixed term regime
-     */
+    /// @notice Emitted when a fixed term regime is commenced by this market
+    /// @param fixedTermEndTimestamp The end timestamp of the new fixed term regime
     event FixedTermCommenced(uint32 fixedTermEndTimestamp);
 
-    /**
-     * @notice Emitted when a pre or post operation tranche accounting synchronization is executed
-     * @param resultingState The resulting market state after synchronizing the tranche accounting
-     */
+    /// @notice Emitted when a pre or post operation tranche accounting synchronization is executed
+    /// @param resultingState The resulting market state after synchronizing the tranche accounting
     event TrancheAccountingSynced(SyncedAccountingState resultingState);
 
-    /**
-     * @notice Emitted when the YDM (Yield Distribution Model) address is updated
-     * @param ydm The new YDM address
-     */
-    event YDMUpdated(address ydm);
+    /// @notice Emitted when the junior tranche yield distribution model is updated
+    /// @param jtYDM The new junior tranche's YDM address
+    event JuniorTrancheYDMUpdated(address jtYDM);
 
-    /**
-     * @notice Emitted when the senior tranche protocol fee percentage is updated
-     * @param stProtocolFeeWAD The new protocol fee percentage charged on senior tranche yield, scaled to WAD precision
-     */
+    /// @notice Emitted when the senior tranche protocol fee percentage is updated
+    /// @param stProtocolFeeWAD The new protocol fee percentage charged on senior tranche yield, scaled to WAD precision
     event SeniorTrancheProtocolFeeUpdated(uint64 stProtocolFeeWAD);
 
-    /**
-     * @notice Emitted when the junior tranche protocol fee percentage is updated
-     * @param jtProtocolFeeWAD The new protocol fee percentage charged on junior tranche yield, scaled to WAD precision
-     */
+    /// @notice Emitted when the junior tranche protocol fee percentage is updated
+    /// @param jtProtocolFeeWAD The new protocol fee percentage charged on junior tranche yield, scaled to WAD precision
     event JuniorTrancheProtocolFeeUpdated(uint64 jtProtocolFeeWAD);
 
-    /**
-     * @notice Emitted when the yield share (risk premium) protocol fee percentage is updated
-     * @param yieldShareProtocolFeeWAD The new protocol fee percentage charged from the yield share (risk premium) payed from the senior tranche yield to the junior tranche, scaled to WAD precision
-     */
-    event YieldShareProtocolFeeUpdated(uint64 yieldShareProtocolFeeWAD);
+    /// @notice Emitted when the junior tranche yield share (risk premium) protocol fee percentage is updated
+    /// @param jtYieldShareProtocolFeeWAD The new protocol fee percentage charged from the yield share (risk premium) payed from the senior tranche yield to the junior tranche, scaled to WAD precision
+    event JuniorTrancheYieldShareProtocolFeeUpdated(uint64 jtYieldShareProtocolFeeWAD);
 
-    /**
-     * @notice Emitted when the coverage percentage requirement is updated
-     * @param minCoverageWAD The new coverage percentage, scaled to WAD precision
-     */
+    /// @notice Emitted when the coverage percentage requirement is updated
+    /// @param minCoverageWAD The new coverage percentage, scaled to WAD precision
     event CoverageUpdated(uint64 minCoverageWAD);
 
-    /**
-     * @notice Emitted when the beta sensitivity parameter is updated
-     * @param betaWAD The new beta parameter representing JT's sensitivity to downside stress, scaled to WAD precision
-     */
+    /// @notice Emitted when the beta sensitivity parameter is updated
+    /// @param betaWAD The new beta parameter representing JT's sensitivity to downside stress, scaled to WAD precision
     event BetaUpdated(uint96 betaWAD);
 
-    /**
-     * @notice Emitted when the liquidation threshold parameter is updated
-     * @param liquidationCoverageUtilizationWAD The new liquidation coverageUtilization threshold for this market, scaled to WAD precision
-     */
+    /// @notice Emitted when the liquidation threshold parameter is updated
+    /// @param liquidationCoverageUtilizationWAD The new liquidation coverageUtilization threshold for this market, scaled to WAD precision
     event LiquidationCoverageUtilizationUpdated(uint256 liquidationCoverageUtilizationWAD);
 
-    /**
-     * @notice Emitted when the fixed term duration is updated
-     * @param fixedTermDurationSeconds The new fixed term duration for this market in seconds
-     */
+    /// @notice Emitted when the fixed term duration is updated
+    /// @param fixedTermDurationSeconds The new fixed term duration for this market in seconds
     event FixedTermDurationUpdated(uint24 fixedTermDurationSeconds);
 
-    /**
-     * @notice Emitted when ST's dust tolerance is updated
-     * @param stNAVDustTolerance The dust tolerance in NAV units to account for minuscule deltas in the ST's underlying NAV calculations
-     */
+    /// @notice Emitted when ST's dust tolerance is updated
+    /// @param stNAVDustTolerance The dust tolerance in NAV units to account for minuscule deltas in the ST's underlying NAV calculations
     event SeniorTrancheDustToleranceUpdated(NAV_UNIT stNAVDustTolerance);
 
-    /**
-     * @notice Emitted when JT's dust tolerance is updated
-     * @param jtNAVDustTolerance The dust tolerance in NAV units to account for minuscule deltas in the JT's underlying NAV calculations
-     */
+    /// @notice Emitted when JT's dust tolerance is updated
+    /// @param jtNAVDustTolerance The dust tolerance in NAV units to account for minuscule deltas in the JT's underlying NAV calculations
     event JuniorTrancheDustToleranceUpdated(NAV_UNIT jtNAVDustTolerance);
 
-    /**
-     * @notice Emitted when JT's coverage loss is realized and reset to zero when transitioning from a fixed term state to a perpetual state
-     * @param jtCoverageImpermanentLossErased The amount of JT coverage loss erased when transitioning from a fixed term state to a perpetual state
-     */
-    event JTCoverageImpermanentLossReset(NAV_UNIT jtCoverageImpermanentLossErased);
+    /// @notice Emitted when JT's coverage loss is realized and reset to zero when transitioning from a fixed term state to a perpetual state
+    /// @param jtCoverageImpermanentLossErased The amount of JT coverage loss erased when transitioning from a fixed term state to a perpetual state
+    event JuniorTrancheCoverageImpermanentLossReset(NAV_UNIT jtCoverageImpermanentLossErased);
 
-    /**
-     * @notice Emitted when a fixed term regime is ended by this market
-     */
+    /// @notice Emitted when a fixed term regime is ended by this market
     event FixedTermEnded();
 
     /// @notice Thrown when the caller of the function is not the accountant's configured Royco Kernel
@@ -191,9 +162,10 @@ interface IRoycoDawnAccountant {
     error MAX_PROTOCOL_FEE_EXCEEDED();
 
     /// @notice Thrown when the YDM failed to initialize
+    /// @param data The return data of the reverting YDM initialization
     error FAILED_TO_INITIALIZE_YDM(bytes data);
 
-    /// @notice Thrown when the YDM returns a JT yield share exceeding 100% of senior appreciation
+    /// @notice Thrown when a YDM returns a yield share exceeding 100% of senior appreciation
     error INVALID_YDM_OUTPUT();
 
     /// @notice Thrown when the sum of the raw NAVs don't equal the sum of the effective NAVs of both tranches
@@ -205,16 +177,14 @@ interface IRoycoDawnAccountant {
     /// @notice Thrown when the market's coverage requirement is unsatisfied
     error COVERAGE_REQUIREMENT_UNSATISFIED();
 
-    /**
-     * @notice Retrieves the address of the kernel tied to this accountant
-     * @return kernel The kernel that this accountant maintains mark-to-market NAV, impermanent loss, and fee accounting for
-     */
+    /// @notice Retrieves the address of the kernel tied to this accountant
+    /// @return kernel The kernel that this accountant maintains mark-to-market NAV, JT coverage impermanent loss, and fee accounting for
     function KERNEL() external view returns (address kernel);
 
     /**
      * @notice Synchronizes the effective NAVs and impermanent losses of both tranches by marking them to market
      * @dev Must be called before any NAV mutating operation
-     * @dev Accrues JT yield share over time based on the market's YDM output
+     * @dev Accrues JT yield share over time based on the market's JT YDM output
      * @dev Persists updated NAV and impermanent loss checkpoints for the next sync to use as reference
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
@@ -303,12 +273,12 @@ interface IRoycoDawnAccountant {
         returns (NAV_UNIT totalNAVClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable);
 
     /**
-     * @notice Updates the YDM (Yield Distribution Model) address for this market
+     * @notice Updates the JT YDM (Junior Tranche Yield Distribution Model) for this market
      * @dev Only callable by a designated admin
-     * @param _ydm The new YDM address to set
-     * @param _ydmInitializationData The data used to initialize the new YDM for this market
+     * @param _jtYDM The new JT YDM address to set
+     * @param _jtYDMInitializationData The data used to initialize the new JT YDM for this market
      */
-    function setYDM(address _ydm, bytes calldata _ydmInitializationData) external;
+    function setJTYDM(address _jtYDM, bytes calldata _jtYDMInitializationData) external;
 
     /**
      * @notice Updates the senior tranche protocol fee percentage for this market
@@ -327,9 +297,9 @@ interface IRoycoDawnAccountant {
     /**
      * @notice Updates the yield share (risk premium) protocol fee percentage for this market
      * @dev Only callable by a designated admin
-     * @param _yieldShareProtocolFeeWAD The new protocol fee percentage charged on the yield share (risk premium) payed from senior tranche yield to the junior tranche, scaled to WAD precision
+     * @param _jtYieldShareProtocolFeeWAD The new protocol fee percentage charged on the yield share (risk premium) payed from senior tranche yield to the junior tranche, scaled to WAD precision
      */
-    function setYieldShareProtocolFee(uint64 _yieldShareProtocolFeeWAD) external;
+    function setJTYieldShareProtocolFee(uint64 _jtYieldShareProtocolFeeWAD) external;
 
     /**
      * @notice Updates the coverage percentage requirement for this market

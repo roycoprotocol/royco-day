@@ -67,7 +67,7 @@ script/update/
 │   ├── SetCoverageConfiguration.s.sol # Combined: coverage + beta + liquidation
 │   ├── SetSeniorTrancheProtocolFee.s.sol
 │   ├── SetJuniorTrancheProtocolFee.s.sol
-│   ├── SetYieldShareProtocolFee.s.sol
+│   ├── SetJTYieldShareProtocolFee.s.sol
 │   ├── SetFixedTermDuration.s.sol
 │   ├── SetSeniorTrancheDustTolerance.s.sol
 │   ├── SetJuniorTrancheDustTolerance.s.sol

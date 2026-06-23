@@ -199,12 +199,12 @@ contract UpgradabilityTestSuite is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
-            ydm: address(YDM),
-            ydmInitializationData: "",
+            jtYDM: address(YDM),
+            jtYDMInitializationData: "",
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
@@ -250,12 +250,12 @@ contract UpgradabilityTestSuite is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
-            yieldShareProtocolFeeWAD: 0,
+            jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
-            ydm: address(YDM),
-            ydmInitializationData: "",
+            jtYDM: address(YDM),
+            jtYDMInitializationData: "",
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE
