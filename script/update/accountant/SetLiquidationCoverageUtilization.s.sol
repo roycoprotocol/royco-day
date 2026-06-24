@@ -107,7 +107,9 @@ contract SetLiquidationCoverageUtilization is ParameterUpdateBase {
                     marketName: cfg.marketName,
                     target: addrs.accountant,
                     callData: abi.encodeCall(IRoycoDawnAccountant.setLiquidationCoverageUtilization, (cfg.newLiquidationCoverageUtilizationWAD)),
-                    description: string.concat("Set liquidationCoverageUtilizationWAD for ", cfg.marketName, " to ", vm.toString(cfg.newLiquidationCoverageUtilizationWAD))
+                    description: string.concat(
+                        "Set liquidationCoverageUtilizationWAD for ", cfg.marketName, " to ", vm.toString(cfg.newLiquidationCoverageUtilizationWAD)
+                    )
                 });
                 idx++;
             }

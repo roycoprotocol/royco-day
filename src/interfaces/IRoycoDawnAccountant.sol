@@ -6,7 +6,7 @@ import { NAV_UNIT } from "../libraries/Units.sol";
 
 /**
  * @title IRoycoDawnAccountant
- * @notice Interface for the RoycoDawnAccountant contract that manages tranche NAVs and coverage requirements
+ * @notice Interface for the RoycoDawnAccountant contract that manages accounting and coverage requirements for a Royco market
  */
 interface IRoycoDawnAccountant {
     /**
@@ -40,7 +40,6 @@ interface IRoycoDawnAccountant {
 
     /**
      * @notice Storage state for the Royco Accountant
-     * @dev The namespace preimage is intentionally retained from the original RoycoAccountant name so the storage slot is unchanged across the rename
      * @custom:storage-location erc7201:Royco.storage.RoycoAccountantState
      * @custom:field lastMarketState - The last recorded state of this market (perpetual or fixed term)
      * @custom:field fixedTermDurationSeconds - The duration of a fixed term for this market in seconds

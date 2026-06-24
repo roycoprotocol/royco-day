@@ -4,9 +4,9 @@ pragma solidity ^0.8.28;
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
 import { WAD, ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
+import { DawnUtilsLib } from "../../src/libraries/DawnUtilsLib.sol";
 import { MarketState } from "../../src/libraries/Types.sol";
 import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
-import { DawnUtilsLib } from "../../src/libraries/DawnUtilsLib.sol";
 import { StaticCurveYDM } from "../../src/ydm/StaticCurveYDM.sol";
 import { BaseTest } from "../base/BaseTest.t.sol";
 
@@ -74,7 +74,13 @@ contract StaticCurveYDMTest is BaseTest {
     }
 
     /// @dev Computes the coverage utilization the YDM previously derived internally from the 5 NAV args
-    function _coverageUtilizationFromNAVs(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV, uint256 _betaWAD, uint256 _minCoverageWAD, NAV_UNIT _jtEffectiveNAV)
+    function _coverageUtilizationFromNAVs(
+        NAV_UNIT _stRawNAV,
+        NAV_UNIT _jtRawNAV,
+        uint256 _betaWAD,
+        uint256 _minCoverageWAD,
+        NAV_UNIT _jtEffectiveNAV
+    )
         internal
         pure
         returns (uint256)
@@ -550,7 +556,12 @@ contract StaticCurveYDMTest is BaseTest {
         _betaWAD = uint128(bound(_betaWAD, 0, WAD * 2));
         _minCoverageWAD = uint128(bound(_minCoverageWAD, 0, WAD * 2));
 
-        uint256 result = ydm.previewYieldShare(MarketState.PERPETUAL, _coverageUtilizationFromNAVs(toNAVUnits(uint256(_stRawNAV)), toNAVUnits(uint256(_jtRawNAV)), _betaWAD, _minCoverageWAD, toNAVUnits(uint256(_jtEffectiveNAV))));
+        uint256 result = ydm.previewYieldShare(
+            MarketState.PERPETUAL,
+            _coverageUtilizationFromNAVs(
+                toNAVUnits(uint256(_stRawNAV)), toNAVUnits(uint256(_jtRawNAV)), _betaWAD, _minCoverageWAD, toNAVUnits(uint256(_jtEffectiveNAV))
+            )
+        );
 
         assertGe(result, 0, "Result should be >= 0");
         assertLe(result, WAD, "Result should be <= WAD");

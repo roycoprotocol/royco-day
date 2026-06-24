@@ -3,8 +3,8 @@ pragma solidity ^0.8.28;
 
 import { EnumerableSet } from "../../lib/openzeppelin-contracts/contracts/utils/structs/EnumerableSet.sol";
 import { RoycoBase } from "../base/RoycoBase.sol";
-import { IRoycoFactory } from "../interfaces/IRoycoFactory.sol";
 import { IRoycoDawnKernel } from "../interfaces/IRoycoDawnKernel.sol";
+import { IRoycoFactory } from "../interfaces/IRoycoFactory.sol";
 import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 
 /**

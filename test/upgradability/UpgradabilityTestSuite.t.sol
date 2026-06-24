@@ -11,8 +11,8 @@ import { MarketDeploymentConfig } from "../../script/config/MarketDeploymentConf
 import { RoycoDawnAccountant } from "../../src/accountant/RoycoDawnAccountant.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoDawnAccountant } from "../../src/interfaces/IRoycoDawnAccountant.sol";
-import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IRoycoDawnKernel } from "../../src/interfaces/IRoycoDawnKernel.sol";
+import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel } from "../../src/kernels/Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
@@ -217,10 +217,7 @@ contract UpgradabilityTestSuite is BaseTest {
     /// @notice Test that Kernel implementation cannot be initialized
     function test_kernelImplementation_cannotBeInitialized() external {
         IRoycoDawnKernel.RoycoDawnKernelInitParams memory params = IRoycoDawnKernel.RoycoDawnKernelInitParams({
-            initialAuthority: address(FACTORY),
-            protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            stSelfLiquidationBonusWAD: 0,
-            roycoBlacklist: address(0)
+            initialAuthority: address(FACTORY), protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS, stSelfLiquidationBonusWAD: 0, roycoBlacklist: address(0)
         });
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);
@@ -268,10 +265,7 @@ contract UpgradabilityTestSuite is BaseTest {
     /// @notice Test that new Kernel implementation cannot be initialized
     function test_newKernelImplementation_cannotBeInitialized() external {
         IRoycoDawnKernel.RoycoDawnKernelInitParams memory params = IRoycoDawnKernel.RoycoDawnKernelInitParams({
-            initialAuthority: address(FACTORY),
-            protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            stSelfLiquidationBonusWAD: 0,
-            roycoBlacklist: address(0)
+            initialAuthority: address(FACTORY), protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT_ADDRESS, stSelfLiquidationBonusWAD: 0, roycoBlacklist: address(0)
         });
 
         vm.expectRevert(Initializable.InvalidInitialization.selector);

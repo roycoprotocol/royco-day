@@ -6,8 +6,8 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { ReentrancyGuardTransient } from "../../../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuardTransient.sol";
 import { RoycoBase } from "../../base/RoycoBase.sol";
-import { IRoycoDawnAccountant } from "../../interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoBlacklist } from "../../interfaces/IRoycoBlacklist.sol";
+import { IRoycoDawnAccountant } from "../../interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoDawnKernel } from "../../interfaces/IRoycoDawnKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../libraries/Constants.sol";
@@ -633,7 +633,8 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
      */
     function _postOpSyncTrancheAccounting(Operation _op, NAV_UNIT _stSelfLiquidationBonusNAV) internal virtual returns (SyncedAccountingState memory state) {
         // Execute the post-op sync on the accountant
-        state = IRoycoDawnAccountant(ACCOUNTANT).postOpSyncTrancheAccounting(_op, _getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV(), _stSelfLiquidationBonusNAV);
+        state =
+            IRoycoDawnAccountant(ACCOUNTANT).postOpSyncTrancheAccounting(_op, _getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV(), _stSelfLiquidationBonusNAV);
     }
 
     /**

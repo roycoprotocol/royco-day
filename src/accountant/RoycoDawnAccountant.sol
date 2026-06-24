@@ -5,7 +5,7 @@ import { RoycoBase } from "../base/RoycoBase.sol";
 import { IRoycoDawnAccountant } from "../interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoDawnKernel } from "../interfaces/IRoycoDawnKernel.sol";
 import { IYDM } from "../interfaces/IYDM.sol";
-import { MAX_COVERAGE_WAD, MAX_PROTOCOL_FEE_WAD, MIN_COVERAGE_WAD, WAD, ZERO_NAV_UNITS } from "../libraries/Constants.sol";
+import { MAX_PROTOCOL_FEE_WAD, MIN_COVERAGE_LOWER_BOUND_WAD, MIN_COVERAGE_UPPER_BOUND_WAD, WAD, ZERO_NAV_UNITS } from "../libraries/Constants.sol";
 import { DawnAccountingLib } from "../libraries/DawnAccountingLib.sol";
 import { DawnUtilsLib, Math } from "../libraries/DawnUtilsLib.sol";
 import {
@@ -65,22 +65,19 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
 
     /**
      * @notice Initializes the Royco accountant state
-     * @param _params The initialization parameters for the Royco accountant
+     * @param _params The initialization parameters for the Royco Dawn accountant
      * @param _initialAuthority The initial authority for the Royco accountant
      */
-    function initialize(RoycoDawnAccountantInitParams calldata _params, address _initialAuthority) external virtual initializer {
-        __RoycoDawnAccountant_init(_params, _initialAuthority);
-    }
-
-    /**
-     * @notice Initializes the Royco base and accountant state
-     * @param _params The initialization parameters for the Royco accountant
-     * @param _initialAuthority The initial authority for the Royco accountant
-     */
-    function __RoycoDawnAccountant_init(RoycoDawnAccountantInitParams calldata _params, address _initialAuthority) internal onlyInitializing {
+    function initialize(RoycoDawnAccountantInitParams calldata _params, address _initialAuthority) external initializer {
         // Initialize the base state of the accountant
         __RoycoBase_init(_initialAuthority);
+        // Initialize the Dawn accountant state
+        __RoycoDawnAccountant_init_unchained(_params);
+    }
 
+    /// @notice Initializes the Royco Dawn accountant state
+    /// @param _params The initialization parameters for the Royco Dawn accountant
+    function __RoycoDawnAccountant_init_unchained(RoycoDawnAccountantInitParams calldata _params) internal onlyInitializing {
         // Ensure that the protocol fee percentage is valid
         require(
             _params.stProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD && _params.jtProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD
@@ -286,7 +283,7 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
         // This is called during a ST Deposit or JT Withdrawal, so the self-liquidation bonus is not applicable
         state = postOpSyncTrancheAccounting(_op, _stRawNAV, _jtRawNAV, ZERO_NAV_UNITS);
         // Enforce the market's coverage requirement
-        require(_isCoverageRequirementSatisfied(state.coverageUtilizationWAD), COVERAGE_REQUIREMENT_UNSATISFIED());
+        require(_isDemandSatisfied(state.coverageUtilizationWAD), COVERAGE_REQUIREMENT_UNSATISFIED());
     }
 
     // =============================
@@ -297,10 +294,10 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
     function isCoverageRequirementSatisfied() public view override(IRoycoDawnAccountant) returns (bool) {
         // Get the storage pointer to the accountant state
         RoycoDawnAccountantState storage $ = _getRoycoDawnAccountantStorage();
-        // Compute the coverageUtilization and return whether or not the senior tranche is properly collateralized based on persisted NAVs
+        // Compute the coverage utilization and return whether or the minimum coverage demand is satisfied based on persisted NAVs
         uint256 coverageUtilizationWAD =
             DawnUtilsLib.computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV);
-        return _isCoverageRequirementSatisfied(coverageUtilizationWAD);
+        return _isDemandSatisfied(coverageUtilizationWAD);
     }
 
     /**
@@ -384,22 +381,14 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
     }
 
     /**
-     * @notice Returns whether the coverage requirement is satisfied given the coverageUtilization
-     * @dev Junior capital must be sufficient to absorb losses to the senior exposure up to the coverage ratio
-     * @dev Informally: junior loss absorption buffer >= total covered exposure
-     * @dev Formally: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * MIN_COVERAGE
-     *      JT_EFFECTIVE_NAV is JT's current loss absorption buffer after applying all prior JT yield accrual and coverage adjustments
-     *      ST_RAW_NAV and JT_RAW_NAV are the mark-to-market NAVs of the tranches
-     *      β is the JT's sensitivity to the same downside stress that affects ST (eg. 0 if JT is in RFR and 1 if JT and ST are in the same opportunity)
-     * @dev If we rearrange the coverage requirement, we get:
-     *      1 >= ((ST_RAW_NAV + (JT_RAW_NAV * β)) * MIN_COVERAGE) / JT_EFFECTIVE_NAV
-     *      Notice that the RHS is identical to how we define coverageUtilization
-     *      Hence, the coverage requirement can be written as 1 >= CoverageUtilization, or equivalently, CoverageUtilization <= 1
-     * @param _coverageUtilizationWAD The coverageUtilization of the market, scaled to WAD precision
-     * @return satisfied A boolean indicating whether the coverage requirement is satisfied
+     * @notice Returns whether the demand placed on a capital pool's service is satisfied given the service's utilization
+     * @dev Utilization is the ratio of demand for the service to the pool's capacity to supply it, scaled to WAD precision
+     * @dev Demand is satisfied when utilization does not exceed 100% (the pool's capacity meets or exceeds the minimum supply demanded from it)
+     * @param _utilizationWAD The utilization of the service, scaled to WAD precision
+     * @return satisfied A boolean indicating whether the demand placed on the service is satisfied
      */
-    function _isCoverageRequirementSatisfied(uint256 _coverageUtilizationWAD) internal pure returns (bool) {
-        return (_coverageUtilizationWAD <= WAD);
+    function _isDemandSatisfied(uint256 _utilizationWAD) internal pure returns (bool) {
+        return (_utilizationWAD <= WAD);
     }
 
     // =============================
@@ -699,7 +688,7 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
     function _validateCoverageConfig(uint64 _minCoverageWAD, uint96 _betaWAD, uint256 _liquidationCoverageUtilizationWAD) internal pure {
         require(
             // Ensure that the coverage requirement is valid
-            (_minCoverageWAD >= MIN_COVERAGE_WAD) && (_minCoverageWAD <= MAX_COVERAGE_WAD) && 
+            (_minCoverageWAD >= MIN_COVERAGE_LOWER_BOUND_WAD) && (_minCoverageWAD <= MIN_COVERAGE_UPPER_BOUND_WAD) && 
                 // Ensure that beta is valid
                 // NOTE: Beta cannot exceed 1 because the junior tranche should never be in a more loss-prone investment than the senior tranche
                 (_betaWAD <= WAD) && 
@@ -740,7 +729,7 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
      * @dev Uses ERC-7201 storage slot pattern for collision-resistant storage
      * @return $ Storage pointer to the accountant's state
      */
-    function _getRoycoDawnAccountantStorage() private pure returns (RoycoDawnAccountantState storage $) {
+    function _getRoycoDawnAccountantStorage() internal pure returns (RoycoDawnAccountantState storage $) {
         assembly ("memory-safe") {
             $.slot := ROYCO_ACCOUNTANT_STORAGE_SLOT
         }

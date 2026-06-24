@@ -24,11 +24,14 @@ int256 constant WAD_INT = int256(WAD);
 /// @dev Constant for the number of decimals of precision a WAD denominated quantity has
 uint256 constant WAD_DECIMALS = 18;
 
-/// @dev The minimum configurable coverage percentage (1%), scaled to WAD precision
-uint256 constant MIN_COVERAGE_WAD = 0.01e18;
+/// @dev The minimum configurable minimum coverage percentage (1%), scaled to WAD precision
+uint256 constant MIN_COVERAGE_LOWER_BOUND_WAD = 0.01e18;
+
+/// @dev The maximum configurable minimum coverage percentage (~100%), scaled to WAD precision
+uint256 constant MIN_COVERAGE_UPPER_BOUND_WAD = 1e18 - 1;
 
 /// @dev The maximum configurable coverage percentage (~100%), scaled to WAD precision
-uint256 constant MAX_COVERAGE_WAD = 1e18 - 1;
+uint256 constant MIN_LIQUIDITY_UPPER_BOUND_WAD = 1e18 - 1;
 
 /// @dev The max protocol fee percentage on tranche yields, scaled to WAD precision
 uint256 constant MAX_PROTOCOL_FEE_WAD = 1e18;

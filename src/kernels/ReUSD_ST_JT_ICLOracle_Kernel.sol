@@ -35,7 +35,14 @@ contract ReUSD_ST_JT_ICLOracle_Kernel is RoycoDawnKernel, IdenticalAssetsOracleQ
      * @param _reUSDQuoteToken The address of the token in which the NAV is expressed in
      * @param _insuranceCapitalLayer The address of the reUSD insurance capital layer
      */
-    constructor(RoycoDawnKernelConstructionParams memory _params, address _reUSD, address _reUSDQuoteToken, address _insuranceCapitalLayer) RoycoDawnKernel(_params) {
+    constructor(
+        RoycoDawnKernelConstructionParams memory _params,
+        address _reUSD,
+        address _reUSDQuoteToken,
+        address _insuranceCapitalLayer
+    )
+        RoycoDawnKernel(_params)
+    {
         // Set the reUSD specific state
         require(_reUSD != address(0) && _reUSDQuoteToken != address(0) && _insuranceCapitalLayer != address(0), NULL_ADDRESS());
         REUSD = _reUSD;

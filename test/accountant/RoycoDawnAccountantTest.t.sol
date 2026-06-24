@@ -5,12 +5,12 @@ import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoDawnAccountant } from "../../src/accountant/RoycoDawnAccountant.sol";
-import { IRoycoDawnAccountant, Operation } from "../../src/interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
-import { MAX_PROTOCOL_FEE_WAD, MIN_COVERAGE_WAD, WAD, ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
+import { IRoycoDawnAccountant, Operation } from "../../src/interfaces/IRoycoDawnAccountant.sol";
+import { MAX_PROTOCOL_FEE_WAD, MIN_COVERAGE_LOWER_BOUND_WAD, WAD, ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
+import { DawnUtilsLib } from "../../src/libraries/DawnUtilsLib.sol";
 import { MarketState, SyncedAccountingState } from "../../src/libraries/Types.sol";
 import { NAV_UNIT, UnitsMathLib, toUint256 } from "../../src/libraries/Units.sol";
-import { DawnUtilsLib } from "../../src/libraries/DawnUtilsLib.sol";
 import { AdaptiveCurveYDM_V1 } from "../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { BaseTest } from "../base/BaseTest.t.sol";
 
@@ -117,7 +117,7 @@ contract RoycoDawnAccountantTest is BaseTest {
     }
 
     function testFuzz_initialization_validCoverageRange(uint64 minCoverageWAD, uint256 liquidationCoverageUtilization) public {
-        minCoverageWAD = uint64(bound(minCoverageWAD, MIN_COVERAGE_WAD, WAD - 1));
+        minCoverageWAD = uint64(bound(minCoverageWAD, MIN_COVERAGE_LOWER_BOUND_WAD, WAD - 1));
         liquidationCoverageUtilization = bound(liquidationCoverageUtilization, WAD + 1, 100e18);
 
         IRoycoDawnAccountant newAccountant = _deployAccountant(
@@ -144,7 +144,7 @@ contract RoycoDawnAccountantTest is BaseTest {
             MOCK_KERNEL,
             ST_PROTOCOL_FEE_WAD,
             JT_PROTOCOL_FEE_WAD,
-            uint64(MIN_COVERAGE_WAD - 1),
+            uint64(MIN_COVERAGE_LOWER_BOUND_WAD - 1),
             BETA_WAD,
             address(adaptiveYDM),
             FIXED_TERM_DURATION_SECONDS,
@@ -1287,8 +1287,9 @@ contract RoycoDawnAccountantTest is BaseTest {
         IRoycoDawnAccountant.RoycoDawnAccountantState memory accountantState = accountant.getState();
 
         // Verify coverageUtilization is computed correctly
-        uint256 expectedUtil =
-            DawnUtilsLib.computeCoverageUtilization(state.stRawNAV, state.jtRawNAV, accountantState.betaWAD, accountantState.minCoverageWAD, state.jtEffectiveNAV);
+        uint256 expectedUtil = DawnUtilsLib.computeCoverageUtilization(
+            state.stRawNAV, state.jtRawNAV, accountantState.betaWAD, accountantState.minCoverageWAD, state.jtEffectiveNAV
+        );
         assertEq(state.coverageUtilizationWAD, expectedUtil, "coverageUtilizationWAD mismatch");
 
         // Verify fixed term end timestamp based on market state

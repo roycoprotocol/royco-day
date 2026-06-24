@@ -7,8 +7,8 @@ import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/co
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { CREATE3 } from "../../lib/solady/src/utils/CREATE3.sol";
 import { IRoycoDawnAccountant } from "../interfaces/IRoycoDawnAccountant.sol";
-import { IRoycoFactory } from "../interfaces/IRoycoFactory.sol";
 import { IRoycoDawnKernel } from "../interfaces/IRoycoDawnKernel.sol";
+import { IRoycoFactory } from "../interfaces/IRoycoFactory.sol";
 import { IRoycoVaultTranche, TrancheType } from "../interfaces/IRoycoVaultTranche.sol";
 import { RolesConfiguration } from "./RolesConfiguration.sol";
 

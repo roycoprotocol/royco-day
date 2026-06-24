@@ -3,8 +3,8 @@ pragma solidity ^0.8.28;
 
 import { Vm } from "../../../../lib/forge-std/src/Vm.sol";
 import { IERC20Metadata, IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
-import { IRoycoDawnAccountant } from "../../../../src/interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoAuth } from "../../../../src/interfaces/IRoycoAuth.sol";
+import { IRoycoDawnAccountant } from "../../../../src/interfaces/IRoycoDawnAccountant.sol";
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
 import {
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel
@@ -609,7 +609,13 @@ abstract contract YieldBearingERC4626_ChainlinkOracle_TestBase is AbstractKernel
     /// @dev ST IL no longer exists. A significant loss is covered by JT effective NAV and booked as
     ///      jtCoverageImpermanentLoss. ST deposits remain governed only by the coverage requirement,
     ///      not blocked by impermanent loss.
-    function testFuzz_vaultSharePrice_significantLoss_createsCoverageImpermanentLoss(uint256 _jtAmount, uint256 _stPercentage, uint256 _lossPercentage) external {
+    function testFuzz_vaultSharePrice_significantLoss_createsCoverageImpermanentLoss(
+        uint256 _jtAmount,
+        uint256 _stPercentage,
+        uint256 _lossPercentage
+    )
+        external
+    {
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 10, config.initialFunding / 100);
         _stPercentage = bound(_stPercentage, 50, 80);
         _lossPercentage = bound(_lossPercentage, 25, 35);

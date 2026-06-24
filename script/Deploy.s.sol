@@ -5,11 +5,11 @@ import { UUPSUpgradeable } from "../lib/openzeppelin-contracts/contracts/proxy/u
 import { RoycoDawnAccountant } from "../src/accountant/RoycoDawnAccountant.sol";
 import { RoycoBlacklist } from "../src/auth/RoycoBlacklist.sol";
 import { RolesConfiguration, RoycoFactory } from "../src/factory/RoycoFactory.sol";
-import { IRoycoDawnAccountant } from "../src/interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoAuth } from "../src/interfaces/IRoycoAuth.sol";
 import { IRoycoBlacklist } from "../src/interfaces/IRoycoBlacklist.sol";
-import { IRoycoFactory } from "../src/interfaces/IRoycoFactory.sol";
+import { IRoycoDawnAccountant } from "../src/interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoDawnKernel } from "../src/interfaces/IRoycoDawnKernel.sol";
+import { IRoycoFactory } from "../src/interfaces/IRoycoFactory.sol";
 import { IRoycoVaultTranche } from "../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../src/interfaces/IYDM.sol";
 import { Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel } from "../src/kernels/Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel.sol";
@@ -1201,12 +1201,7 @@ contract DeployScript is Script, Create2DeployUtils, RolesConfiguration, MarketD
             AdaptiveCurveYDM_V2_Params memory ydmParams = abi.decode(_ydmSpecificParams, (AdaptiveCurveYDM_V2_Params));
             ydmInitializationData = abi.encodeCall(
                 AdaptiveCurveYDM_V2.initializeYDMForMarket,
-                (
-                    ydmParams.yieldShareAtZeroUtilWAD,
-                    ydmParams.yieldShareAtTargetUtilWAD,
-                    ydmParams.yieldShareAtFullUtilWAD,
-                    ydmParams.maxAdaptationSpeedWAD
-                )
+                (ydmParams.yieldShareAtZeroUtilWAD, ydmParams.yieldShareAtTargetUtilWAD, ydmParams.yieldShareAtFullUtilWAD, ydmParams.maxAdaptationSpeedWAD)
             );
         } else {
             revert UnsupportedYDMType(_ydmType);
