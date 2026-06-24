@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../script/config/MarketDeploymentConfig.sol";
-import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoDawnAccountant } from "../../src/interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoDawnKernel } from "../../src/interfaces/IRoycoDawnKernel.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IdenticalAssetsOracleQuoter } from "../../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
@@ -15,7 +15,7 @@ import { BaseTest } from "../base/BaseTest.t.sol";
 
 /**
  * @title AccountantAttributionFuzzTest
- * @notice Fuzz suite that validates the claim-weighted attribution fix in `RoycoAccountant`
+ * @notice Fuzz suite that validates the claim-weighted attribution fix in `RoycoDawnAccountant`
  *         across a broad parameter space. Each test sets up a fresh sNUSD market on a mainnet
  *         fork, parameterizes the deposit amounts / yield magnitudes / YDM split / drain ratio,
  *         and asserts invariants that the OLD (buggy) accountant would violate but the NEW

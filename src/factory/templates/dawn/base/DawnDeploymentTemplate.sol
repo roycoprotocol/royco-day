@@ -3,8 +3,8 @@ pragma solidity ^0.8.28;
 
 import { AccessManagedUpgradeable } from "../../../../../lib/openzeppelin-contracts-upgradeable/contracts/access/manager/AccessManagedUpgradeable.sol";
 import { UUPSUpgradeable } from "../../../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
-import { IRoycoAccountant } from "../../../../interfaces/IRoycoAccountant.sol";
 import { IRoycoAuth } from "../../../../interfaces/IRoycoAuth.sol";
+import { IRoycoDawnAccountant } from "../../../../interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoDawnKernel } from "../../../../interfaces/IRoycoDawnKernel.sol";
 import { IRoycoEntryPoint } from "../../../../interfaces/IRoycoEntryPoint.sol";
 import { IRoycoVaultTranche } from "../../../../interfaces/IRoycoVaultTranche.sol";
@@ -227,7 +227,7 @@ abstract contract DawnDeploymentTemplate is BaseDeploymentTemplate {
         require(kernel.JT_ASSET() == IRoycoVaultTranche(_d.juniorTranche).asset(), INVALID_JT_ASSET_ON_KERNEL());
         require(kernel.ACCOUNTANT() == _d.accountant, INVALID_ACCOUNTANT_ON_KERNEL());
 
-        require(address(IRoycoAccountant(_d.accountant).KERNEL()) == _d.kernel, INVALID_KERNEL_ON_ACCOUNTANT());
+        require(address(IRoycoDawnAccountant(_d.accountant).KERNEL()) == _d.kernel, INVALID_KERNEL_ON_ACCOUNTANT());
 
         // Optional entry-point check.
         if (_d.extras.length > 0) {
@@ -358,19 +358,19 @@ abstract contract DawnDeploymentTemplate is BaseDeploymentTemplate {
     function _accountantBinding(address _accountant) private pure returns (TargetBinding memory) {
         bytes4[] memory s = new bytes4[](14);
         uint64[] memory r = new uint64[](14);
-        s[0] = IRoycoAccountant.setYDM.selector;
+        s[0] = IRoycoDawnAccountant.setJTYDM.selector;
         r[0] = ADMIN_ACCOUNTANT_ROLE;
-        s[1] = IRoycoAccountant.setSeniorTrancheProtocolFee.selector;
+        s[1] = IRoycoDawnAccountant.setSeniorTrancheProtocolFee.selector;
         r[1] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        s[2] = IRoycoAccountant.setJuniorTrancheProtocolFee.selector;
+        s[2] = IRoycoDawnAccountant.setJuniorTrancheProtocolFee.selector;
         r[2] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        s[3] = IRoycoAccountant.setCoverage.selector;
+        s[3] = IRoycoDawnAccountant.setCoverage.selector;
         r[3] = ADMIN_ACCOUNTANT_ROLE;
-        s[4] = IRoycoAccountant.setBeta.selector;
+        s[4] = IRoycoDawnAccountant.setBeta.selector;
         r[4] = ADMIN_ACCOUNTANT_ROLE;
-        s[5] = IRoycoAccountant.setLiquidationCoverageUtilization.selector;
+        s[5] = IRoycoDawnAccountant.setLiquidationCoverageUtilization.selector;
         r[5] = ADMIN_ACCOUNTANT_ROLE;
-        s[6] = IRoycoAccountant.setFixedTermDuration.selector;
+        s[6] = IRoycoDawnAccountant.setFixedTermDuration.selector;
         r[6] = ADMIN_ACCOUNTANT_ROLE;
         s[7] = IRoycoAuth.pause.selector;
         r[7] = ADMIN_PAUSER_ROLE;
@@ -378,13 +378,13 @@ abstract contract DawnDeploymentTemplate is BaseDeploymentTemplate {
         r[8] = ADMIN_UNPAUSER_ROLE;
         s[9] = UUPSUpgradeable.upgradeToAndCall.selector;
         r[9] = ADMIN_UPGRADER_ROLE;
-        s[10] = IRoycoAccountant.setSeniorTrancheDustTolerance.selector;
+        s[10] = IRoycoDawnAccountant.setSeniorTrancheDustTolerance.selector;
         r[10] = ADMIN_ACCOUNTANT_ROLE;
-        s[11] = IRoycoAccountant.setYieldShareProtocolFee.selector;
+        s[11] = IRoycoDawnAccountant.setJTYieldShareProtocolFee.selector;
         r[11] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        s[12] = IRoycoAccountant.setCoverageConfiguration.selector;
+        s[12] = IRoycoDawnAccountant.setCoverageConfiguration.selector;
         r[12] = ADMIN_ACCOUNTANT_ROLE;
-        s[13] = IRoycoAccountant.setJuniorTrancheDustTolerance.selector;
+        s[13] = IRoycoDawnAccountant.setJuniorTrancheDustTolerance.selector;
         r[13] = ADMIN_ACCOUNTANT_ROLE;
         return TargetBinding({ target: _accountant, selectors: s, roleIds: r });
     }

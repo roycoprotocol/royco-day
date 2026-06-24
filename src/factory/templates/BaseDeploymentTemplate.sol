@@ -3,8 +3,8 @@ pragma solidity ^0.8.28;
 
 import { Initializable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import { SSTORE2 } from "../../../lib/solady/src/utils/SSTORE2.sol";
-import { RoycoAccountant } from "../../accountant/RoycoAccountant.sol";
-import { IRoycoAccountant } from "../../interfaces/IRoycoAccountant.sol";
+import { RoycoDawnAccountant } from "../../accountant/RoycoDawnAccountant.sol";
+import { IRoycoDawnAccountant } from "../../interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { IBaseTemplate } from "../../interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../../interfaces/factory/IRoycoFactory.sol";
@@ -267,20 +267,20 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
 
     /// @notice Builds ABI-encoded `initialize(...)` calldata for an accountant proxy.
     function _encodeAccountantInitData(AccountantParams memory _p, address _ydm) internal view returns (bytes memory) {
-        IRoycoAccountant.RoycoAccountantInitParams memory params = IRoycoAccountant.RoycoAccountantInitParams({
+        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
             stProtocolFeeWAD: _p.stProtocolFeeWAD,
             jtProtocolFeeWAD: _p.jtProtocolFeeWAD,
-            yieldShareProtocolFeeWAD: _p.yieldShareProtocolFeeWAD,
+            jtYieldShareProtocolFeeWAD: _p.yieldShareProtocolFeeWAD,
             minCoverageWAD: _p.coverageWAD,
             betaWAD: _p.betaWAD,
-            ydm: _ydm,
-            ydmInitializationData: _p.ydmInitializationData,
+            jtYDM: _ydm,
+            jtYDMInitializationData: _p.ydmInitializationData,
             fixedTermDurationSeconds: _p.fixedTermDurationSeconds,
             liquidationCoverageUtilizationWAD: _p.liquidationUtilizationWAD,
             stNAVDustTolerance: _p.stNAVDustTolerance,
             jtNAVDustTolerance: _p.jtNAVDustTolerance
         });
-        return abi.encodeCall(RoycoAccountant.initialize, (params, ROYCO_FACTORY.ROYCO_AUTHORITY()));
+        return abi.encodeCall(RoycoDawnAccountant.initialize, (params, ROYCO_FACTORY.ROYCO_AUTHORITY()));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

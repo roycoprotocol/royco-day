@@ -7,14 +7,14 @@ import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access
 import { ERC20Mock } from "../../lib/openzeppelin-contracts/contracts/mocks/token/ERC20Mock.sol";
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
-import { ExtraRoles } from "../../script/config/ExtraRoles.sol";
-import { RoycoAccountant } from "../../src/accountant/RoycoAccountant.sol";
+import { RoycoDawnAccountant } from "../../src/accountant/RoycoDawnAccountant.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_ORACLE_QUOTER_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
+    ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     JT_LP_ROLE,
     LP_ROLE_ADMIN_ROLE,
@@ -23,8 +23,8 @@ import {
     TRANSFER_AGENT_ROLE
 } from "../../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
-import { IRoycoAccountant } from "../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoBlacklist } from "../../src/interfaces/IRoycoBlacklist.sol";
+import { IRoycoDawnAccountant } from "../../src/interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoDawnKernel } from "../../src/interfaces/IRoycoDawnKernel.sol";
 import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
@@ -35,7 +35,7 @@ import { RoycoJuniorTranche } from "../../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoSeniorTranche } from "../../src/tranches/RoycoSeniorTranche.sol";
 import { Assertions } from "./Assertions.t.sol";
 
-abstract contract BaseTest is Test, Assertions, ExtraRoles {
+abstract contract BaseTest is Test, Assertions {
     uint256 internal constant BPS = 0.0001e18;
 
     /// @dev The target coverage utilization (the YDM curve kink) used by the JT risk-premium YDMs in tests (90%)
@@ -154,12 +154,12 @@ abstract contract BaseTest is Test, Assertions, ExtraRoles {
     IYDM internal YDM;
     RoycoSeniorTranche public ST_IMPL;
     RoycoJuniorTranche internal JT_IMPL;
-    RoycoAccountant internal ACCOUNTANT_IMPL;
+    RoycoDawnAccountant internal ACCOUNTANT_IMPL;
     address internal KERNEL_IMPL;
     IRoycoVaultTranche internal ST;
     IRoycoVaultTranche internal JT;
     IRoycoDawnKernel internal KERNEL;
-    IRoycoAccountant internal ACCOUNTANT;
+    IRoycoDawnAccountant internal ACCOUNTANT;
     IRoycoBlacklist internal BLACKLIST;
 
     // -----------------------------------------

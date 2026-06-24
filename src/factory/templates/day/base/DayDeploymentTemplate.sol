@@ -16,8 +16,8 @@ import { BalancerPoolToken } from "../../../../../lib/balancer-v3-monorepo/pkg/v
 import { AccessManagedUpgradeable } from "../../../../../lib/openzeppelin-contracts-upgradeable/contracts/access/manager/AccessManagedUpgradeable.sol";
 import { UUPSUpgradeable } from "../../../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { IERC20 } from "../../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import { IRoycoAccountant } from "../../../../interfaces/IRoycoAccountant.sol";
 import { IRoycoAuth } from "../../../../interfaces/IRoycoAuth.sol";
+import { IRoycoDawnAccountant } from "../../../../interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoDawnKernel } from "../../../../interfaces/IRoycoDawnKernel.sol";
 import { IRoycoDayKernel } from "../../../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../../interfaces/IRoycoVaultTranche.sol";
@@ -315,7 +315,7 @@ abstract contract DayDeploymentTemplate is BaseDeploymentTemplate {
         require(kernel.LT_ASSET() == IRoycoVaultTranche(_d.liquidityTranche).asset(), INVALID_LT_ASSET_ON_KERNEL());
         require(kernel.ACCOUNTANT() == _d.accountant, INVALID_ACCOUNTANT_ON_KERNEL());
 
-        require(address(IRoycoAccountant(_d.accountant).KERNEL()) == _d.kernel, INVALID_KERNEL_ON_ACCOUNTANT());
+        require(address(IRoycoDawnAccountant(_d.accountant).KERNEL()) == _d.kernel, INVALID_KERNEL_ON_ACCOUNTANT());
 
         // The LT asset is the pool; the pool is wired with `{ST_share, quote}`.
         ExtraContractsDeployedResult memory extras = abi.decode(_d.extras, (ExtraContractsDeployedResult));
@@ -388,17 +388,17 @@ abstract contract DayDeploymentTemplate is BaseDeploymentTemplate {
     function _accountantBinding(address _accountant) private pure returns (TargetBinding memory) {
         bytes4[] memory s = new bytes4[](9);
         uint64[] memory r = new uint64[](9);
-        s[0] = IRoycoAccountant.setYDM.selector;
+        s[0] = IRoycoDawnAccountant.setJTYDM.selector;
         r[0] = ADMIN_ACCOUNTANT_ROLE;
-        s[1] = IRoycoAccountant.setSeniorTrancheProtocolFee.selector;
+        s[1] = IRoycoDawnAccountant.setSeniorTrancheProtocolFee.selector;
         r[1] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        s[2] = IRoycoAccountant.setJuniorTrancheProtocolFee.selector;
+        s[2] = IRoycoDawnAccountant.setJuniorTrancheProtocolFee.selector;
         r[2] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        s[3] = IRoycoAccountant.setYieldShareProtocolFee.selector;
+        s[3] = IRoycoDawnAccountant.setJTYieldShareProtocolFee.selector;
         r[3] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        s[4] = IRoycoAccountant.setCoverageConfiguration.selector;
+        s[4] = IRoycoDawnAccountant.setCoverageConfiguration.selector;
         r[4] = ADMIN_ACCOUNTANT_ROLE;
-        s[5] = IRoycoAccountant.setFixedTermDuration.selector;
+        s[5] = IRoycoDawnAccountant.setFixedTermDuration.selector;
         r[5] = ADMIN_ACCOUNTANT_ROLE;
         s[6] = IRoycoAuth.pause.selector;
         r[6] = ADMIN_PAUSER_ROLE;

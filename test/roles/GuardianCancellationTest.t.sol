@@ -405,10 +405,10 @@ contract GuardianCancellationTest is BaseTest {
         ACCESS_MANAGER.schedule(address(KERNEL), data, 0);
     }
 
-    /// @notice Test that ADMIN_PROTOCOL_FEE_SETTER_ROLE can call setYieldShareProtocolFee
-    function test_role_protocolFeeSetter_canSetYieldShareProtocolFee() public {
+    /// @notice Test that ADMIN_PROTOCOL_FEE_SETTER_ROLE can call setJTYieldShareProtocolFee
+    function test_role_protocolFeeSetter_canSetJTYieldShareProtocolFee() public {
         uint64 newFee = 0.1e18; // 10%
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setYieldShareProtocolFee, (newFee));
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setJTYieldShareProtocolFee, (newFee));
 
         // Schedule as protocol fee setter
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
@@ -422,10 +422,10 @@ contract GuardianCancellationTest is BaseTest {
         ACCESS_MANAGER.execute(address(ACCOUNTANT), data);
     }
 
-    /// @notice Test that non-fee-setter cannot call setYieldShareProtocolFee
-    function test_role_nonFeeSetter_cannotSetYieldShareProtocolFee() public {
+    /// @notice Test that non-fee-setter cannot call setJTYieldShareProtocolFee
+    function test_role_nonFeeSetter_cannotSetJTYieldShareProtocolFee() public {
         uint64 newFee = 0.1e18;
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setYieldShareProtocolFee, (newFee));
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setJTYieldShareProtocolFee, (newFee));
 
         vm.prank(address(0xBAD));
         vm.expectRevert();
@@ -507,10 +507,10 @@ contract GuardianCancellationTest is BaseTest {
         ACCESS_MANAGER.execute(address(KERNEL), data);
     }
 
-    /// @notice Test that guardian can cancel setYieldShareProtocolFee
-    function test_guardian_canCancelSetYieldShareProtocolFee() public {
+    /// @notice Test that guardian can cancel setJTYieldShareProtocolFee
+    function test_guardian_canCancelSetJTYieldShareProtocolFee() public {
         uint64 newFee = 0.1e18;
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setYieldShareProtocolFee, (newFee));
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setJTYieldShareProtocolFee, (newFee));
 
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
         ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { AccessManager } from "../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
-import { RoycoAccountant } from "../src/accountant/RoycoAccountant.sol";
+import { RoycoDawnAccountant } from "../src/accountant/RoycoDawnAccountant.sol";
 import { RoycoBlacklist } from "../src/auth/RoycoBlacklist.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
@@ -55,7 +55,7 @@ import { apyUSDDeploymentTemplate } from "../src/factory/templates/dawn/apyUSDDe
 import { DawnDeploymentTemplate } from "../src/factory/templates/dawn/base/DawnDeploymentTemplate.sol";
 import { sUSDaiDeploymentTemplate } from "../src/factory/templates/dawn/sUSDaiDeploymentTemplate.sol";
 import { sUSDatDeploymentTemplate } from "../src/factory/templates/dawn/sUSDatDeploymentTemplate.sol";
-import { IRoycoAccountant } from "../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoDawnAccountant } from "../src/interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoDawnKernel } from "../src/interfaces/IRoycoDawnKernel.sol";
 import { IRoycoVaultTranche } from "../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../src/interfaces/IYDM.sol";
@@ -81,7 +81,6 @@ import { RoycoSeniorTranche } from "../src/tranches/RoycoSeniorTranche.sol";
 import { AdaptiveCurveYDM_V1 } from "../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { StaticCurveYDM } from "../src/ydm/StaticCurveYDM.sol";
-import { ExtraRoles } from "./config/ExtraRoles.sol";
 import { MarketDeploymentConfig } from "./config/MarketDeploymentConfig.sol";
 import { Create2DeployUtils } from "./utils/Create2DeployUtils.sol";
 import { Script } from "lib/forge-std/src/Script.sol";
@@ -93,7 +92,7 @@ import { console2 } from "lib/forge-std/src/console2.sol";
 ///         the market via `executeMarketDeployment`.
 /// @dev The public surface (`deploy`, `deployFromConfig`, `generateRolesAssignments`, `DeploymentResult`,
 ///      `RoleAssignmentAddresses`, `KernelType`/`YDMType`) is preserved so existing tests need minimal changes.
-contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig, ExtraRoles {
+contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     error UnsupportedKernelType(KernelType kernelType);
     error UnsupportedYDMType(YDMType ydmType);
     error UNKNOWN_ROLE(uint64 role);
@@ -209,14 +208,14 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig, Ext
     struct DeploymentResult {
         RoycoFactory factory;
         AccessManager accessManager;
-        RoycoAccountant accountantImplementation;
+        RoycoDawnAccountant accountantImplementation;
         RoycoSeniorTranche stTrancheImplementation;
         RoycoJuniorTranche jtTrancheImplementation;
         address kernelImplementation;
         IYDM ydm;
         IRoycoVaultTranche seniorTranche;
         IRoycoVaultTranche juniorTranche;
-        IRoycoAccountant accountant;
+        IRoycoDawnAccountant accountant;
         IRoycoDawnKernel kernel;
         address roycoBlacklist;
     }
@@ -325,14 +324,14 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig, Ext
         return DeploymentResult({
             factory: factory,
             accessManager: accessManager,
-            accountantImplementation: RoycoAccountant(_predictImpl(factory, marketId, "ACCOUNTANT_IMPL")),
+            accountantImplementation: RoycoDawnAccountant(_predictImpl(factory, marketId, "ACCOUNTANT_IMPL")),
             stTrancheImplementation: RoycoSeniorTranche(_predictImpl(factory, marketId, "ST_IMPL")),
             jtTrancheImplementation: RoycoJuniorTranche(_predictImpl(factory, marketId, "JT_IMPL")),
             kernelImplementation: _predictImpl(factory, marketId, "KERNEL_IMPL"),
             ydm: IYDM(r.ydm),
             seniorTranche: IRoycoVaultTranche(r.seniorTranche),
             juniorTranche: IRoycoVaultTranche(r.juniorTranche),
-            accountant: IRoycoAccountant(r.accountant),
+            accountant: IRoycoDawnAccountant(r.accountant),
             kernel: IRoycoDawnKernel(r.kernel),
             roycoBlacklist: roycoBlacklist
         });
@@ -462,7 +461,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig, Ext
         ids[1] = COMPONENT_ID_JUNIOR_TRANCHE_IMPL;
         codes[1] = type(RoycoJuniorTranche).creationCode;
         ids[2] = COMPONENT_ID_ACCOUNTANT_IMPL;
-        codes[2] = type(RoycoAccountant).creationCode;
+        codes[2] = type(RoycoDawnAccountant).creationCode;
         ids[3] = COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2;
         // The template deploys the YDM singleton verbatim (no ctor args appended), so bake the target-utilization
         // (JT coverage kink at 90%) constructor arg into the registered creation code.

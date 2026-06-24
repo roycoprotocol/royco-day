@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoAccountant } from "../../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoDawnAccountant } from "../../../src/interfaces/IRoycoDawnAccountant.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
 
@@ -140,7 +140,7 @@ contract SetYDM is ParameterUpdateBase {
                     updates[idx] = UpdateParams({
                         marketName: cfg.marketName,
                         target: addrs.accountant,
-                        callData: abi.encodeCall(IRoycoAccountant.setYDM, (cfg.ydm, ydmInitData)),
+                        callData: abi.encodeCall(IRoycoDawnAccountant.setJTYDM, (cfg.ydm, ydmInitData)),
                         description: string.concat("Set YDM for ", cfg.marketName, " (maxAdaptationSpeedWAD=", vm.toString(cfg.maxAdaptationSpeedWAD), ")")
                     });
                     idx++;
@@ -160,7 +160,7 @@ contract SetYDM is ParameterUpdateBase {
      *         re-initialized with the expected params on that YDM.
      */
     function _verify(UpdateParams memory _params) internal view override {
-        // Decode `setYDM(address ydm, bytes initData)` from the outer calldata
+        // Decode `setJTYDM(address ydm, bytes initData)` from the outer calldata
         (address expectedYDM, bytes memory initData) = _decodeSetYDMCallData(_params.callData);
 
         // Decode `initializeYDMForMarket(uint64,uint64,uint64,uint64)` from initData
@@ -168,8 +168,8 @@ contract SetYDM is ParameterUpdateBase {
             _decodeInitializeYDMForMarketCallData(initData);
 
         // Accountant must now point at the expected YDM
-        IRoycoAccountant.RoycoAccountantState memory state = IRoycoAccountant(_params.target).getState();
-        require(state.ydm == expectedYDM, VerificationFailed("YDM address mismatch after execution"));
+        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = IRoycoDawnAccountant(_params.target).getState();
+        require(state.jtYDM == expectedYDM, VerificationFailed("YDM address mismatch after execution"));
 
         // The YDM must have stored the new curve params for this accountant.
         // Mirror the derivation from initializeYDMForMarket.
@@ -196,7 +196,7 @@ contract SetYDM is ParameterUpdateBase {
     // HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Strips the 4-byte selector and abi.decodes the `(address, bytes)` params of `setYDM`.
+    /// @dev Strips the 4-byte selector and abi.decodes the `(address, bytes)` params of `setJTYDM`.
     function _decodeSetYDMCallData(bytes memory _cd) internal pure returns (address ydm, bytes memory initData) {
         bytes memory args = new bytes(_cd.length - 4);
         for (uint256 i = 0; i < args.length; i++) {

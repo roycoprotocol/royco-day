@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoAccountant } from "./IRoycoAccountant.sol";
+import { IRoycoDawnAccountant } from "./IRoycoDawnAccountant.sol";
 import { IRoycoDawnKernel } from "./IRoycoDawnKernel.sol";
 import { IRoycoVaultTranche } from "./IRoycoVaultTranche.sol";
 
@@ -10,9 +10,6 @@ import { IRoycoVaultTranche } from "./IRoycoVaultTranche.sol";
 interface IRoycoFactory {
     /// @notice Thrown when an already deployed contract is predicted
     error ALREADY_DEPLOYED(address deployedAddress, bytes32 salt);
-
-    /// @notice Thrown when an invalid implementation is provided
-    error INVALID_IMPLEMENTATION();
 
     /// @notice Thrown when an invalid name is provided
     error INVALID_NAME();
@@ -127,7 +124,7 @@ interface IRoycoFactory {
         IRoycoVaultTranche seniorTrancheImplementation;
         IRoycoVaultTranche juniorTrancheImplementation;
         IRoycoDawnKernel kernelImplementation;
-        IRoycoAccountant accountantImplementation;
+        IRoycoDawnAccountant accountantImplementation;
         // Proxy Initialization Data
         bytes seniorTrancheInitializationData;
         bytes juniorTrancheInitializationData;
@@ -165,7 +162,7 @@ interface IRoycoFactory {
         IRoycoVaultTranche seniorTranche;
         IRoycoVaultTranche juniorTranche;
         IRoycoDawnKernel kernel;
-        IRoycoAccountant accountant;
+        IRoycoDawnAccountant accountant;
     }
 
     /**

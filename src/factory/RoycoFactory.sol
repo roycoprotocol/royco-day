@@ -7,6 +7,9 @@ import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { CREATE3 } from "../../lib/solady/src/utils/CREATE3.sol";
 import { RoycoBase } from "../base/RoycoBase.sol";
+import { IRoycoDawnAccountant } from "../interfaces/IRoycoDawnAccountant.sol";
+import { IRoycoDawnKernel } from "../interfaces/IRoycoDawnKernel.sol";
+import { IRoycoVaultTranche, TrancheType } from "../interfaces/IRoycoVaultTranche.sol";
 import { IBaseTemplate } from "../interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../interfaces/factory/IRoycoProtocolTemplate.sol";

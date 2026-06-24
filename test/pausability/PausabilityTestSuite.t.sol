@@ -556,8 +556,9 @@ contract PausabilityTestSuite is BaseTest {
         ACCESS_MANAGER.schedule(address(JT), data, 0);
         vm.warp(vm.getBlockTimestamp() + 1 days);
 
+        // unpause runs via AccessManager.execute, so the Pausable `account` is the AccessManager (the caller), not the factory.
         vm.expectEmit(true, true, true, true, address(JT));
-        emit Pausable.Unpaused(address(FACTORY));
+        emit Pausable.Unpaused(address(ACCESS_MANAGER));
         vm.prank(UNPAUSER_ADDRESS);
         ACCESS_MANAGER.execute(address(JT), data);
     }

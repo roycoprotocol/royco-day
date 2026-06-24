@@ -8,10 +8,9 @@ import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/acc
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import { ExtraRoles } from "../../../script/config/ExtraRoles.sol";
 import { DeploySyncerScript } from "../../../script/independent/DeploySyncer.s.sol";
 import { RoycoBase } from "../../../src/base/RoycoBase.sol";
-import { ADMIN_PAUSER_ROLE, ADMIN_ROLE, ADMIN_UPGRADER_ROLE, SYNC_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { ADMIN_PAUSER_ROLE, ADMIN_ROLE, ADMIN_UNPAUSER_ROLE, ADMIN_UPGRADER_ROLE, SYNC_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoFactory } from "../../../src/interfaces/IRoycoFactory.sol";
@@ -102,7 +101,7 @@ contract MockTranche {
  *      - ADMIN_PAUSER_ROLE: pause, unpause
  *      - ADMIN_UPGRADER_ROLE: upgradeToAndCall
  */
-contract RoycoMarketSyncerTest is Test, ExtraRoles {
+contract RoycoMarketSyncerTest is Test {
     // ═══════════════════════════════════════════════════════════════════════════
     // TEST STATE
     // ═══════════════════════════════════════════════════════════════════════════

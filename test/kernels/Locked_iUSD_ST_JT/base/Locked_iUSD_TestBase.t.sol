@@ -2,9 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { Vm } from "../../../../lib/forge-std/src/Vm.sol";
-import { ADMIN_ORACLE_QUOTER_ROLE } from "../../../../src/factory/RolesConfiguration.sol";
-import { IRoycoAccountant } from "../../../../src/interfaces/IRoycoAccountant.sol";
 import { IRoycoAuth } from "../../../../src/interfaces/IRoycoAuth.sol";
+import { IRoycoDawnAccountant } from "../../../../src/interfaces/IRoycoDawnAccountant.sol";
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { IInfiniFiGateway } from "../../../../src/interfaces/external/infinifi/IInfiniFiGateway.sol";
 import { ILockingController } from "../../../../src/interfaces/external/infinifi/ILockingController.sol";

@@ -67,7 +67,7 @@ script/update/
 │   ├── SetCoverageConfiguration.s.sol # Combined: coverage + beta + liquidation
 │   ├── SetSeniorTrancheProtocolFee.s.sol
 │   ├── SetJuniorTrancheProtocolFee.s.sol
-│   ├── SetYieldShareProtocolFee.s.sol
+│   ├── SetJTYieldShareProtocolFee.s.sol
 │   ├── SetFixedTermDuration.s.sol
 │   ├── SetSeniorTrancheDustTolerance.s.sol
 │   ├── SetJuniorTrancheDustTolerance.s.sol
@@ -143,7 +143,7 @@ contract SetMyParam is ParameterUpdateBase {
     }
 
     function _verify(UpdateParams memory _params) internal view override {
-        IRoycoAccountant.RoycoAccountantState memory state = IRoycoAccountant(_params.target).getState();
+        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = IRoycoDawnAccountant(_params.target).getState();
         // Assert the parameter matches expected value
     }
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoAccountant } from "../../../src/interfaces/IRoycoAccountant.sol";
+import { IRoycoDawnAccountant } from "../../../src/interfaces/IRoycoDawnAccountant.sol";
 import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
 
 /**
@@ -84,7 +84,7 @@ contract SetFixedTermDuration is ParameterUpdateBase {
                     updates[idx] = UpdateParams({
                         marketName: cfg.marketName,
                         target: addrs.accountant,
-                        callData: abi.encodeCall(IRoycoAccountant.setFixedTermDuration, (cfg.newFixedTermDurationSeconds)),
+                        callData: abi.encodeCall(IRoycoDawnAccountant.setFixedTermDuration, (cfg.newFixedTermDurationSeconds)),
                         description: string.concat(
                             "Set fixed term duration for ", cfg.marketName, " to ", vm.toString(uint256(cfg.newFixedTermDurationSeconds)), " seconds"
                         )
@@ -102,7 +102,7 @@ contract SetFixedTermDuration is ParameterUpdateBase {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _verify(UpdateParams memory _params) internal view override {
-        IRoycoAccountant.RoycoAccountantState memory state = IRoycoAccountant(_params.target).getState();
+        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = IRoycoDawnAccountant(_params.target).getState();
 
         // Extract expected duration from the calldata (skip 4-byte selector). uint24 lives in the
         // low-order bytes of the 32-byte word at offset 4, so a full mload + cast pulls it out.

@@ -101,20 +101,20 @@ struct AccountingCheckpoint {
  * @custom:field checkpoint - The accounting checkpoint the waterfall settles against (the last committed sync state)
  * @custom:field twJTYieldShareAccruedWAD - The time-weighted JT yield share (YDM output) accrued since the last distribution, scaled to WAD precision
  * @custom:field instantaneousJTYieldShareWAD - The instantaneous JT yield share (YDM output) consumed when the last distribution happened in the same block, scaled to WAD precision
- * @custom:field elapsedSinceLastDistribution - The seconds elapsed since the last yield distribution
+ * @custom:field elapsedSinceLastRiskPremiumPayment - The seconds elapsed since the last risk premium payment
  * @custom:field stProtocolFeeWAD - The market's protocol fee percentage taken from ST yield, scaled to WAD precision
  * @custom:field jtProtocolFeeWAD - The market's protocol fee percentage taken from JT yield, scaled to WAD precision
- * @custom:field yieldShareProtocolFeeWAD - The market's protocol fee percentage taken from the yield share (risk premium), scaled to WAD precision
+ * @custom:field jtYieldShareProtocolFeeWAD - The market's protocol fee percentage taken from the yield share (risk premium), scaled to WAD precision
  * @custom:field effectiveNAVDustTolerance - The effective NAV dust tolerance: the worst-case dust bounded by the sum of the raw NAV dust tolerances
  */
 struct PnLWaterfallParams {
     AccountingCheckpoint checkpoint;
     uint192 twJTYieldShareAccruedWAD;
     uint256 instantaneousJTYieldShareWAD;
-    uint256 elapsedSinceLastDistribution;
+    uint256 elapsedSinceLastRiskPremiumPayment;
     uint64 stProtocolFeeWAD;
     uint64 jtProtocolFeeWAD;
-    uint64 yieldShareProtocolFeeWAD;
+    uint64 jtYieldShareProtocolFeeWAD;
     NAV_UNIT effectiveNAVDustTolerance;
 }
 

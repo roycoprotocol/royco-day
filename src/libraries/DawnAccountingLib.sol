@@ -7,11 +7,11 @@ import { AccountingCheckpoint, MarketState, MarketStateTransitionParams, PnLWate
 import { Math, NAV_UNIT, UnitsMathLib, toNAVUnits } from "./Units.sol";
 
 /**
- * @title AccountingLib
+ * @title DawnAccountingLib
  * @author Waymont
  * @notice A library containing accounting functions for the Royco protocol
  */
-library AccountingLib {
+library DawnAccountingLib {
     using UnitsMathLib for NAV_UNIT;
     using UnitsMathLib for uint256;
 
@@ -76,7 +76,7 @@ library AccountingLib {
      * @return postPnLWaterfallCheckpoint The post-waterfall checkpoint: the current raw NAVs alongside the settled effective NAVs and JT coverage impermanent loss
      * @return stProtocolFeeAccrued The protocol fee accrued on ST yield in this sync (gross: not netted out of the effective NAVs)
      * @return jtProtocolFeeAccrued The protocol fee accrued on JT yield and the JT yield share in this sync (gross: not netted out of the effective NAVs)
-     * @return riskPremiumPaid A boolean indicating whether ST yield was split between ST and JT
+     * @return riskPremiumPaid A boolean indicating whether the JT risk premium was paid out of ST yield
      */
     function applyProfitAndLossWaterfall(
         NAV_UNIT _stRawNAV,
@@ -183,16 +183,16 @@ library AccountingLib {
                 if (stGain > _params.effectiveNAVDustTolerance) riskPremiumPaid = true;
                 // If the last yield distribution happened in the same block, use the instantaneous JT yield share. Else, use the time-weighted average JT yield share since the last distribution
                 NAV_UNIT riskPremium;
-                if (_params.elapsedSinceLastDistribution == 0) {
+                if (_params.elapsedSinceLastRiskPremiumPayment == 0) {
                     riskPremium = stGain.mulDiv(_params.instantaneousJTYieldShareWAD, WAD, Math.Rounding.Floor);
                 } else {
-                    riskPremium = stGain.mulDiv(_params.twJTYieldShareAccruedWAD, (_params.elapsedSinceLastDistribution * WAD), Math.Rounding.Floor);
+                    riskPremium = stGain.mulDiv(_params.twJTYieldShareAccruedWAD, (_params.elapsedSinceLastRiskPremiumPayment * WAD), Math.Rounding.Floor);
                 }
                 // Apply the yield split to JT's effective NAV
                 if (riskPremium != ZERO_NAV_UNITS) {
                     // Compute the protocol fee taken on the yield share accrual if it is not attributable to any rounding/dust
                     if (riskPremiumPaid) {
-                        jtProtocolFeeAccrued = (jtProtocolFeeAccrued + riskPremium.mulDiv(_params.yieldShareProtocolFeeWAD, WAD, Math.Rounding.Floor));
+                        jtProtocolFeeAccrued = (jtProtocolFeeAccrued + riskPremium.mulDiv(_params.jtYieldShareProtocolFeeWAD, WAD, Math.Rounding.Floor));
                     }
                     jtEffectiveNAV = (jtEffectiveNAV + riskPremium);
                     stGain = (stGain - riskPremium);
