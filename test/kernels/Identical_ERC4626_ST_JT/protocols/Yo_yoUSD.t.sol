@@ -5,7 +5,6 @@ import { IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/inter
 
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
-import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/libraries/Units.sol";
 
@@ -44,7 +43,7 @@ contract Yo_yoUSD_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         MarketDeploymentConfig.MarketConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("yoUSD");
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
-        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        DeployScript.RoleAssignment[] memory roleAssignments = _generateRoleAssignments();
 
         return DEPLOY_SCRIPT.deploy(
             marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roleAssignments, DEPLOYER.privateKey

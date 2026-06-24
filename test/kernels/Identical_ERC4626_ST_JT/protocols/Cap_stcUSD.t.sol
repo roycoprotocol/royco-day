@@ -7,7 +7,6 @@ import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { FundamentalStablecoinChainlinkOracleDeploymentConfig } from "../../../../script/config/FundamentalStablecoinChainlinkOracleDeploymentConfig.sol";
 import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
 import { DeployFundamentalStablecoinChainlinkOracleScript } from "../../../../script/independent/DeployFundamentalStablecoinChainlinkOracle.s.sol";
-import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import {
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel
 } from "../../../../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel.sol";
@@ -71,7 +70,7 @@ contract stcUSD_stcUSD_Test is FundamentalStablecoinPeg_ERC4626_ChainlinkOracle_
         MarketDeploymentConfig.MarketConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("stcUSD");
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
-        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        DeployScript.RoleAssignment[] memory roleAssignments = _generateRoleAssignments();
 
         DeployFundamentalStablecoinChainlinkOracleScript ORACLE_DEPLOY_SCRIPT = new DeployFundamentalStablecoinChainlinkOracleScript();
         FundamentalStablecoinChainlinkOracleDeploymentConfig.OracleConfig memory oracleConfig =

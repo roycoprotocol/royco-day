@@ -6,7 +6,6 @@ import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/interfa
 
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
-import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { IStakedUSDai } from "../../../../src/interfaces/external/usdai/IStakedUSDai.sol";
 import { IUSDai } from "../../../../src/interfaces/external/usdai/IUSDai.sol";
 import { IdenticalAssetsAdminOracleQuoter } from "../../../../src/kernels/base/quoter/base/IdenticalAssetsAdminOracleQuoter.sol";
@@ -77,7 +76,7 @@ contract Metastreet_sUSDai_Test is YieldBearingERC4626_TestBase {
             abi.encode(DeployScript.IdenticalAssetsAdminOracleQuoterKernelParams({ initialConversionRateWAD: _getInitialConversionRate() }));
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
-        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        DeployScript.RoleAssignment[] memory roleAssignments = _generateRoleAssignments();
 
         return DEPLOY_SCRIPT.deploy(
             marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roleAssignments, DEPLOYER.privateKey

@@ -162,12 +162,15 @@ enum Operation {
 
 /**
  * @title TrancheType
- * @dev Defines the two types of Royco tranches deployed per market.
+ * @dev Defines the types of Royco tranches deployed per market.
  * @custom:type SENIOR - The identifier for the senior tranche (protected capital)
  * @custom:type JUNIOR - The identifier for the junior tranche (first-loss capital)
+ * @custom:type LIQUIDITY - The identifier for the liquidity tranche (market-making capital; Royco Day markets only)
+ * @dev Appended to preserve existing ordinals (SENIOR=0, JUNIOR=1) for storage/ABI compatibility with live markets.
  */
 enum TrancheType {
     SENIOR,
-    JUNIOR
+    JUNIOR,
+    LIQUIDITY
 }
 

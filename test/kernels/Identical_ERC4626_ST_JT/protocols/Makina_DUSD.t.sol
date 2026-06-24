@@ -5,7 +5,6 @@ import { IERC20Metadata } from "../../../../lib/openzeppelin-contracts/contracts
 
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
-import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { IMachine } from "../../../../src/interfaces/external/makina/IMachine.sol";
 import { Identical_Makina_ST_JT_MachineToAdminOracle_Kernel } from "../../../../src/kernels/Identical_Makina_ST_JT_MachineToAdminOracle_Kernel.sol";
 import { WAD, WAD_DECIMALS } from "../../../../src/libraries/Constants.sol";
@@ -72,7 +71,7 @@ contract Makina_DUSD_Test is YieldBearingERC4626_TestBase {
         );
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
-        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        DeployScript.RoleAssignment[] memory roleAssignments = _generateRoleAssignments();
 
         return DEPLOY_SCRIPT.deploy(
             marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roleAssignments, DEPLOYER.privateKey

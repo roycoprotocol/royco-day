@@ -5,12 +5,21 @@ import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/co
 import { IAccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { CREATE3 } from "../../lib/solady/src/utils/CREATE3.sol";
-import { RolesConfiguration } from "../../src/factory/RolesConfiguration.sol";
+import {
+    ADMIN_ENTRY_POINT_ROLE,
+    ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE,
+    ADMIN_PAUSER_ROLE,
+    ADMIN_UNPAUSER_ROLE,
+    ADMIN_UPGRADER_ROLE,
+    BURNER_ROLE,
+    JT_LP_ROLE,
+    ST_LP_ROLE
+} from "../../src/factory/RolesConfiguration.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoEntryPoint } from "../../src/interfaces/IRoycoEntryPoint.sol";
 import { RoycoEntryPoint } from "../../src/periphery/RoycoEntryPoint.sol";
 import { EntryPointDeploymentConfig } from "../config/EntryPointDeploymentConfig.sol";
-import { ExtraRoles } from "../config/ExtraRoles.sol";
+import { RoleConfigUtils } from "../config/RoleConfigUtils.sol";
 import { AccessManagerConfigUtils } from "../utils/AccessManagerConfigUtils.sol";
 import { Create2DeployUtils } from "../utils/Create2DeployUtils.sol";
 import { console2 } from "lib/forge-std/src/console2.sol";
@@ -23,7 +32,7 @@ import { console2 } from "lib/forge-std/src/console2.sol";
  *      configuration is generated separately via `buildFactoryConfigTransactions` and applied
  *      through a Safe transaction batch.
  */
-contract DeployEntryPointScript is EntryPointDeploymentConfig, AccessManagerConfigUtils, Create2DeployUtils, RolesConfiguration, ExtraRoles {
+contract DeployEntryPointScript is EntryPointDeploymentConfig, AccessManagerConfigUtils, Create2DeployUtils, RoleConfigUtils {
     // ═══════════════════════════════════════════════════════════════════════════
     // DEPLOYMENT CONSTANTS
     // ═══════════════════════════════════════════════════════════════════════════

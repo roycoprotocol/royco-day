@@ -6,6 +6,7 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
+import { JT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { IRoycoDawnAccountant } from "../../../src/interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
@@ -1114,8 +1115,8 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         if (stFeeShares > 0) {
             // Grant LP roles to protocol fee recipient so they can redeem
             vm.startPrank(LP_ROLE_ADMIN_ADDRESS);
-            FACTORY.grantRole(ST_LP_ROLE, PROTOCOL_FEE_RECIPIENT_ADDRESS, 0);
-            FACTORY.grantRole(JT_LP_ROLE, PROTOCOL_FEE_RECIPIENT_ADDRESS, 0);
+            ACCESS_MANAGER.grantRole(ST_LP_ROLE, PROTOCOL_FEE_RECIPIENT_ADDRESS, 0);
+            ACCESS_MANAGER.grantRole(JT_LP_ROLE, PROTOCOL_FEE_RECIPIENT_ADDRESS, 0);
             vm.stopPrank();
 
             vm.prank(PROTOCOL_FEE_RECIPIENT_ADDRESS);

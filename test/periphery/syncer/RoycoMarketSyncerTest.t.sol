@@ -4,13 +4,13 @@ pragma solidity ^0.8.28;
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { Vm } from "../../../lib/forge-std/src/Vm.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
+import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import { ExtraRoles } from "../../../script/config/ExtraRoles.sol";
 import { DeploySyncerScript } from "../../../script/independent/DeploySyncer.s.sol";
 import { RoycoBase } from "../../../src/base/RoycoBase.sol";
-import { RolesConfiguration } from "../../../src/factory/RolesConfiguration.sol";
+import { ADMIN_PAUSER_ROLE, ADMIN_ROLE, ADMIN_UNPAUSER_ROLE, ADMIN_UPGRADER_ROLE, SYNC_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoFactory } from "../../../src/interfaces/IRoycoFactory.sol";
@@ -101,7 +101,7 @@ contract MockTranche {
  *      - ADMIN_PAUSER_ROLE: pause, unpause
  *      - ADMIN_UPGRADER_ROLE: upgradeToAndCall
  */
-contract RoycoMarketSyncerTest is Test, RolesConfiguration, ExtraRoles {
+contract RoycoMarketSyncerTest is Test {
     // ═══════════════════════════════════════════════════════════════════════════
     // TEST STATE
     // ═══════════════════════════════════════════════════════════════════════════
@@ -109,6 +109,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration, ExtraRoles {
     DeploySyncerScript internal deployScript;
     RoycoMarketSyncer internal syncer;
     RoycoFactory internal factory;
+    AccessManager internal accessManager;
 
     // Mock kernels and tranches
     MockKernel internal mockKernel1;
@@ -207,17 +208,21 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration, ExtraRoles {
     }
 
     function _deployFactory() internal {
+        // Deploy a standalone AccessManager with FACTORY_ADMIN as the initial admin (roles are
+        // configured against this AM after syncer deployment).
+        accessManager = new AccessManager(FACTORY_ADMIN_ADDRESS);
+
         // Deploy factory implementation
         RoycoFactory factoryImpl = new RoycoFactory();
 
-        // Create empty role assignments array (we'll configure roles after syncer deployment)
-        IRoycoFactory.RoleAssignmentConfiguration[] memory emptyRoles = new IRoycoFactory.RoleAssignmentConfiguration[](0);
-
-        // Deploy factory proxy with initialization
-        // _admin, _deployer, _scheduledOperationsExpirySeconds, _roles
-        bytes memory initData = abi.encodeCall(RoycoFactory.initialize, (FACTORY_ADMIN_ADDRESS, DEPLOYER_ADDRESS, 7 days, emptyRoles));
+        // The factory must hold ADMIN_ROLE on the AM before its proxy ctor runs `initialize`.
+        bytes memory initData = abi.encodeCall(RoycoFactory.initialize, (address(accessManager)));
+        address predictedFactory = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
+        vm.prank(FACTORY_ADMIN_ADDRESS);
+        accessManager.grantRole(ADMIN_ROLE, predictedFactory, 0);
         ERC1967Proxy factoryProxy = new ERC1967Proxy(address(factoryImpl), initData);
         factory = RoycoFactory(address(factoryProxy));
+        require(address(factory) == predictedFactory, "factory address mismatch");
     }
 
     function _deployMockKernelsAndTranches() internal {
@@ -254,7 +259,8 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration, ExtraRoles {
 
         // Get production role configuration transactions from the deployment script
         // This includes both setTargetFunctionRole AND grantRole for sync operators
-        DeploySyncerScript.SafeTransaction[] memory transactions = deployScript.buildSyncerConfigTransactions(address(factory), address(syncer), syncOperators);
+        DeploySyncerScript.SafeTransaction[] memory transactions =
+            deployScript.buildSyncerConfigTransactions(address(accessManager), address(syncer), syncOperators);
 
         // Execute each transaction as the factory admin to configure roles
         vm.startPrank(FACTORY_ADMIN_ADDRESS);
@@ -266,17 +272,17 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration, ExtraRoles {
 
         // Grant ADMIN_PAUSER_ROLE to PAUSER (not included in buildSyncerConfigTransactions)
         vm.prank(FACTORY_ADMIN_ADDRESS);
-        factory.grantRole(ADMIN_PAUSER_ROLE, PAUSER_ADDRESS, 0);
+        accessManager.grantRole(ADMIN_PAUSER_ROLE, PAUSER_ADDRESS, 0);
 
         // Grant ADMIN_UNPAUSER_ROLE to PAUSER as well, with delay 0 (test convenience).
         // In production this role is held by FNDN with a 1-day Standard delay; the
         // delay-enforcement tests live in `test/access/RoleDelaysTest.t.sol`.
         vm.prank(FACTORY_ADMIN_ADDRESS);
-        factory.grantRole(ADMIN_UNPAUSER_ROLE, PAUSER_ADDRESS, 0);
+        accessManager.grantRole(ADMIN_UNPAUSER_ROLE, PAUSER_ADDRESS, 0);
 
         // Grant ADMIN_UPGRADER_ROLE to DEPLOYER (not included in buildSyncerConfigTransactions)
         vm.prank(FACTORY_ADMIN_ADDRESS);
-        factory.grantRole(ADMIN_UPGRADER_ROLE, DEPLOYER_ADDRESS, 0);
+        accessManager.grantRole(ADMIN_UPGRADER_ROLE, DEPLOYER_ADDRESS, 0);
     }
 
     function _setupKernelValidation() internal {
@@ -343,9 +349,9 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration, ExtraRoles {
         assertEq(kernels.length, 0, "Should initialize with no kernels");
     }
 
-    /// @notice Test that syncer initializes with correct authority
+    /// @notice Test that syncer initializes with correct authority (the factory's AccessManager)
     function test_initialize_setsCorrectAuthority() external view {
-        assertEq(syncer.authority(), address(factory), "Authority should be factory");
+        assertEq(syncer.authority(), address(accessManager), "Authority should be the access manager");
     }
 
     /// @notice Test that syncer cannot be reinitialized
@@ -1325,7 +1331,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration, ExtraRoles {
 
         // Verify upgrade succeeded - implementation changed
         // The syncer should still work after upgrade
-        assertEq(syncer.authority(), address(factory), "Authority should remain after upgrade");
+        assertEq(syncer.authority(), address(accessManager), "Authority should remain after upgrade");
     }
 
     /// @notice Test that upgrade to EOA (no code) reverts
@@ -1451,18 +1457,18 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration, ExtraRoles {
         syncOperators[0] = address(0x1111);
         syncOperators[1] = address(0x2222);
 
-        DeploySyncerScript.SafeTransaction[] memory txs = deployScript.buildSyncerConfigTransactions(address(factory), address(syncer), syncOperators);
+        DeploySyncerScript.SafeTransaction[] memory txs = deployScript.buildSyncerConfigTransactions(address(accessManager), address(syncer), syncOperators);
         assertEq(txs.length, 7, "Should have 5 role config + 2 grantRole transactions");
     }
 
-    /// @notice Verify all transactions target the factory
-    function test_productionConfig_allTransactionsTargetFactory() external view {
+    /// @notice Verify all transactions target the AccessManager (which governs the syncer's restricted functions)
+    function test_productionConfig_allTransactionsTargetAccessManager() external view {
         address[] memory syncOperators = new address[](1);
         syncOperators[0] = SYNC_OPERATOR_ADDRESS;
 
-        DeploySyncerScript.SafeTransaction[] memory txs = deployScript.buildSyncerConfigTransactions(address(factory), address(syncer), syncOperators);
+        DeploySyncerScript.SafeTransaction[] memory txs = deployScript.buildSyncerConfigTransactions(address(accessManager), address(syncer), syncOperators);
         for (uint256 i = 0; i < txs.length; i++) {
-            assertEq(txs[i].to, address(factory), string.concat("Transaction ", vm.toString(i), " should target factory"));
+            assertEq(txs[i].to, address(accessManager), string.concat("Transaction ", vm.toString(i), " should target the access manager"));
             assertEq(txs[i].value, 0, string.concat("Transaction ", vm.toString(i), " should have zero value"));
         }
     }
@@ -1478,7 +1484,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration, ExtraRoles {
         ];
 
         for (uint256 i = 0; i < syncSelectors.length; i++) {
-            (bool canCall, uint32 delay) = factory.canCall(SYNC_OPERATOR_ADDRESS, address(syncer), syncSelectors[i]);
+            (bool canCall, uint32 delay) = accessManager.canCall(SYNC_OPERATOR_ADDRESS, address(syncer), syncSelectors[i]);
             assertTrue(canCall, string.concat("SYNC_ROLE should be able to call selector index ", vm.toString(i)));
             assertEq(delay, 0, string.concat("SYNC_ROLE should have no delay for selector index ", vm.toString(i)));
         }
@@ -1486,7 +1492,7 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration, ExtraRoles {
 
     /// @notice Verify ADMIN_PAUSER_ROLE is assigned to pause
     function test_productionConfig_pauserRoleFunctions() external view {
-        (bool canCall, uint32 delay) = factory.canCall(PAUSER_ADDRESS, address(syncer), IRoycoAuth.pause.selector);
+        (bool canCall, uint32 delay) = accessManager.canCall(PAUSER_ADDRESS, address(syncer), IRoycoAuth.pause.selector);
         assertTrue(canCall, "ADMIN_PAUSER_ROLE should be able to call pause");
         assertEq(delay, 0, "ADMIN_PAUSER_ROLE should have no delay for pause");
     }
@@ -1495,14 +1501,14 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration, ExtraRoles {
     /// @dev In `_configureProductionRoles` PAUSER_ADDRESS is also granted ADMIN_UNPAUSER_ROLE with delay 0
     ///      for test convenience; production grants this role with the Standard 24h delay.
     function test_productionConfig_unpauserRoleFunctions() external view {
-        (bool canCall, uint32 delay) = factory.canCall(PAUSER_ADDRESS, address(syncer), IRoycoAuth.unpause.selector);
+        (bool canCall, uint32 delay) = accessManager.canCall(PAUSER_ADDRESS, address(syncer), IRoycoAuth.unpause.selector);
         assertTrue(canCall, "ADMIN_UNPAUSER_ROLE should be able to call unpause");
         assertEq(delay, 0, "ADMIN_UNPAUSER_ROLE should have no delay for unpause (test config)");
     }
 
     /// @notice Verify ADMIN_UPGRADER_ROLE is assigned to upgradeToAndCall
     function test_productionConfig_upgraderRoleFunction() external view {
-        (bool canCall,) = factory.canCall(DEPLOYER_ADDRESS, address(syncer), syncer.upgradeToAndCall.selector);
+        (bool canCall,) = accessManager.canCall(DEPLOYER_ADDRESS, address(syncer), syncer.upgradeToAndCall.selector);
         assertTrue(canCall, "ADMIN_UPGRADER_ROLE should be able to call upgradeToAndCall");
     }
 
@@ -1519,45 +1525,45 @@ contract RoycoMarketSyncerTest is Test, RolesConfiguration, ExtraRoles {
         ];
 
         for (uint256 i = 0; i < allRestrictedSelectors.length; i++) {
-            (bool canCall,) = factory.canCall(UNAUTHORIZED_USER_ADDRESS, address(syncer), allRestrictedSelectors[i]);
+            (bool canCall,) = accessManager.canCall(UNAUTHORIZED_USER_ADDRESS, address(syncer), allRestrictedSelectors[i]);
             assertFalse(canCall, string.concat("Unauthorized user should NOT be able to call selector index ", vm.toString(i)));
         }
     }
 
     /// @notice Verify role separation - SYNC_ROLE cannot pause
     function test_productionConfig_roleSeparation_syncCannotPause() external view {
-        (bool canCall,) = factory.canCall(SYNC_OPERATOR_ADDRESS, address(syncer), IRoycoAuth.pause.selector);
+        (bool canCall,) = accessManager.canCall(SYNC_OPERATOR_ADDRESS, address(syncer), IRoycoAuth.pause.selector);
         assertFalse(canCall, "SYNC_ROLE should NOT be able to pause");
 
-        (canCall,) = factory.canCall(SYNC_OPERATOR_ADDRESS, address(syncer), IRoycoAuth.unpause.selector);
+        (canCall,) = accessManager.canCall(SYNC_OPERATOR_ADDRESS, address(syncer), IRoycoAuth.unpause.selector);
         assertFalse(canCall, "SYNC_ROLE should NOT be able to unpause");
     }
 
     /// @notice Verify role separation - PAUSER cannot sync
     function test_productionConfig_roleSeparation_pauserCannotSync() external view {
-        (bool canCall,) = factory.canCall(PAUSER_ADDRESS, address(syncer), RoycoMarketSyncer.executeBatchAccountingSync.selector);
+        (bool canCall,) = accessManager.canCall(PAUSER_ADDRESS, address(syncer), RoycoMarketSyncer.executeBatchAccountingSync.selector);
         assertFalse(canCall, "ADMIN_PAUSER_ROLE should NOT be able to sync");
 
-        (canCall,) = factory.canCall(PAUSER_ADDRESS, address(syncer), RoycoMarketSyncer.addMarketKernels.selector);
+        (canCall,) = accessManager.canCall(PAUSER_ADDRESS, address(syncer), RoycoMarketSyncer.addMarketKernels.selector);
         assertFalse(canCall, "ADMIN_PAUSER_ROLE should NOT be able to add kernels");
     }
 
     /// @notice Verify role separation - SYNC_ROLE cannot upgrade
     function test_productionConfig_roleSeparation_syncCannotUpgrade() external view {
-        (bool canCall,) = factory.canCall(SYNC_OPERATOR_ADDRESS, address(syncer), syncer.upgradeToAndCall.selector);
+        (bool canCall,) = accessManager.canCall(SYNC_OPERATOR_ADDRESS, address(syncer), syncer.upgradeToAndCall.selector);
         assertFalse(canCall, "SYNC_ROLE should NOT be able to upgrade");
     }
 
     /// @notice Verify the exact role IDs from RolesConfiguration are used
     function test_productionConfig_usesCorrectRoleIds() external view {
         // Get the role assigned to each function via getTargetFunctionRole
-        uint64 syncRole = factory.getTargetFunctionRole(address(syncer), RoycoMarketSyncer.executeBatchAccountingSync.selector);
-        uint64 addKernelsRole = factory.getTargetFunctionRole(address(syncer), RoycoMarketSyncer.addMarketKernels.selector);
-        uint64 removeKernelsRole = factory.getTargetFunctionRole(address(syncer), RoycoMarketSyncer.removeMarketKernels.selector);
-        uint64 syncForRole = factory.getTargetFunctionRole(address(syncer), RoycoMarketSyncer.executeBatchAccountingSyncFor.selector);
-        uint64 pauseRole = factory.getTargetFunctionRole(address(syncer), IRoycoAuth.pause.selector);
-        uint64 unpauseRole = factory.getTargetFunctionRole(address(syncer), IRoycoAuth.unpause.selector);
-        uint64 upgradeRole = factory.getTargetFunctionRole(address(syncer), syncer.upgradeToAndCall.selector);
+        uint64 syncRole = accessManager.getTargetFunctionRole(address(syncer), RoycoMarketSyncer.executeBatchAccountingSync.selector);
+        uint64 addKernelsRole = accessManager.getTargetFunctionRole(address(syncer), RoycoMarketSyncer.addMarketKernels.selector);
+        uint64 removeKernelsRole = accessManager.getTargetFunctionRole(address(syncer), RoycoMarketSyncer.removeMarketKernels.selector);
+        uint64 syncForRole = accessManager.getTargetFunctionRole(address(syncer), RoycoMarketSyncer.executeBatchAccountingSyncFor.selector);
+        uint64 pauseRole = accessManager.getTargetFunctionRole(address(syncer), IRoycoAuth.pause.selector);
+        uint64 unpauseRole = accessManager.getTargetFunctionRole(address(syncer), IRoycoAuth.unpause.selector);
+        uint64 upgradeRole = accessManager.getTargetFunctionRole(address(syncer), syncer.upgradeToAndCall.selector);
 
         // Verify SYNC_ROLE for all 4 sync-related functions
         assertEq(syncRole, SYNC_ROLE, "executeBatchAccountingSync should use SYNC_ROLE");

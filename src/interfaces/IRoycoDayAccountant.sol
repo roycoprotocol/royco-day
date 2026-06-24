@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { MarketState, Operation, SyncedAccountingState } from "../libraries/Types.sol";
 import { NAV_UNIT } from "../libraries/Units.sol";
 import { IRoycoDawnAccountant } from "./IRoycoDawnAccountant.sol";
 

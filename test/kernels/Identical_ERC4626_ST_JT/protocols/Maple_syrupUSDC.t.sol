@@ -9,11 +9,9 @@ import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/E
 
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
-import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { IMapleGlobals } from "../../../../src/interfaces/external/maple/IMapleGlobals.sol";
 import { IMaplePool } from "../../../../src/interfaces/external/maple/IMaplePool.sol";
 import { IMaplePoolManager } from "../../../../src/interfaces/external/maple/IMaplePoolManager.sol";
-import { IMaplePoolPermissionManager } from "../../../../src/interfaces/external/maple/IMaplePoolPermissionManager.sol";
 import { MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel } from "../../../../src/kernels/MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.sol";
 import { WAD_DECIMALS } from "../../../../src/libraries/Constants.sol";
 import { AssetClaims } from "../../../../src/libraries/Types.sol";
@@ -64,7 +62,7 @@ contract Maple_syrupUSDC_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         MarketDeploymentConfig.MarketConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("syrupUSDC");
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
-        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        DeployScript.RoleAssignment[] memory roleAssignments = _generateRoleAssignments();
 
         return DEPLOY_SCRIPT.deploy(
             marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roleAssignments, DEPLOYER.privateKey

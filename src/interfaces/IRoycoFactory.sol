@@ -11,9 +11,6 @@ interface IRoycoFactory {
     /// @notice Thrown when an already deployed contract is predicted
     error ALREADY_DEPLOYED(address deployedAddress, bytes32 salt);
 
-    /// @notice Thrown when an invalid implementation is provided
-    error INVALID_IMPLEMENTATION();
-
     /// @notice Thrown when an invalid name is provided
     error INVALID_NAME();
 

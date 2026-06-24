@@ -8,7 +8,6 @@ import { Pausable } from "../../lib/openzeppelin-contracts/contracts/utils/Pausa
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../script/config/MarketDeploymentConfig.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
-import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
 import { toTrancheUnits } from "../../src/libraries/Units.sol";
 import { BaseTest } from "../base/BaseTest.t.sol";
@@ -64,7 +63,7 @@ contract PausabilityTestSuite is BaseTest {
         });
 
         // Build role assignments using the centralized function
-        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        DeployScript.RoleAssignment[] memory roleAssignments = _generateRoleAssignments();
 
         MarketDeploymentConfig.MarketConfig memory config = MarketDeploymentConfig.MarketConfig({
             marketName: "sNUSD",
@@ -161,10 +160,10 @@ contract PausabilityTestSuite is BaseTest {
     function _scheduleAndExecuteUnpause(address _target) internal {
         bytes memory data = abi.encodeCall(IRoycoAuth.unpause, ());
         vm.prank(UNPAUSER_ADDRESS);
-        FACTORY.schedule(_target, data, 0);
+        ACCESS_MANAGER.schedule(_target, data, 0);
         vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(UNPAUSER_ADDRESS);
-        FACTORY.execute(_target, data);
+        ACCESS_MANAGER.execute(_target, data);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -552,12 +551,13 @@ contract PausabilityTestSuite is BaseTest {
 
         bytes memory data = abi.encodeCall(IRoycoAuth.unpause, ());
         vm.prank(UNPAUSER_ADDRESS);
-        FACTORY.schedule(address(JT), data, 0);
+        ACCESS_MANAGER.schedule(address(JT), data, 0);
         vm.warp(vm.getBlockTimestamp() + 1 days);
 
+        // unpause runs via AccessManager.execute, so the Pausable `account` is the AccessManager (the caller), not the factory.
         vm.expectEmit(true, true, true, true, address(JT));
-        emit Pausable.Unpaused(address(FACTORY));
+        emit Pausable.Unpaused(address(ACCESS_MANAGER));
         vm.prank(UNPAUSER_ADDRESS);
-        FACTORY.execute(address(JT), data);
+        ACCESS_MANAGER.execute(address(JT), data);
     }
 }

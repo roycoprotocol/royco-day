@@ -3,16 +3,29 @@ pragma solidity ^0.8.28;
 
 import { Test } from "../../lib/forge-std/src/Test.sol";
 import { Vm } from "../../lib/forge-std/src/Vm.sol";
+import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { ERC20Mock } from "../../lib/openzeppelin-contracts/contracts/mocks/token/ERC20Mock.sol";
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
-import { ExtraRoles } from "../../script/config/ExtraRoles.sol";
 import { RoycoDawnAccountant } from "../../src/accountant/RoycoDawnAccountant.sol";
-import { RolesConfiguration, RoycoFactory } from "../../src/factory/RoycoFactory.sol";
+import {
+    ADMIN_ACCOUNTANT_ROLE,
+    ADMIN_KERNEL_ROLE,
+    ADMIN_ORACLE_QUOTER_ROLE,
+    ADMIN_PAUSER_ROLE,
+    ADMIN_PROTOCOL_FEE_SETTER_ROLE,
+    ADMIN_UNPAUSER_ROLE,
+    ADMIN_UPGRADER_ROLE,
+    JT_LP_ROLE,
+    LP_ROLE_ADMIN_ROLE,
+    ST_LP_ROLE,
+    SYNC_ROLE,
+    TRANSFER_AGENT_ROLE
+} from "../../src/factory/RolesConfiguration.sol";
+import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoBlacklist } from "../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDawnAccountant } from "../../src/interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoDawnKernel } from "../../src/interfaces/IRoycoDawnKernel.sol";
-import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
 import { AssetClaims, TrancheType } from "../../src/libraries/Types.sol";
@@ -21,7 +34,7 @@ import { RoycoJuniorTranche } from "../../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoSeniorTranche } from "../../src/tranches/RoycoSeniorTranche.sol";
 import { Assertions } from "./Assertions.t.sol";
 
-abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
+abstract contract BaseTest is Test, Assertions {
     uint256 internal constant BPS = 0.0001e18;
 
     /// @dev The target coverage utilization (the YDM curve kink) used by the JT risk-premium YDMs in tests (90%)
@@ -136,6 +149,7 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
 
     // Deployments
     RoycoFactory internal FACTORY;
+    AccessManager internal ACCESS_MANAGER;
     IYDM internal YDM;
     RoycoSeniorTranche public ST_IMPL;
     RoycoJuniorTranche internal JT_IMPL;
@@ -353,6 +367,9 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
         FACTORY = _deploymentResult.factory;
         vm.label(address(FACTORY), "Factory");
 
+        ACCESS_MANAGER = _deploymentResult.accessManager;
+        vm.label(address(ACCESS_MANAGER), "AccessManager");
+
         _wireExtraRoles();
         _wireBlacklistRoles();
     }
@@ -365,7 +382,7 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
 
         // Resolve the factory admin (role 0): OWNER for a fresh in-memory deploy, ROOT_MULTISIG on a forked chain.
         address fndn;
-        (bool ownerIsAdmin,) = FACTORY.hasRole(0, OWNER_ADDRESS);
+        (bool ownerIsAdmin,) = ACCESS_MANAGER.hasRole(0, OWNER_ADDRESS);
         fndn = ownerIsAdmin ? OWNER_ADDRESS : 0x7c405bbD131e42af506d14e752f2e59B19D49997;
 
         // blacklistAccounts / unblacklistAccounts are gated by the transfer agent role
@@ -373,13 +390,13 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
         agentSelectors[0] = IRoycoBlacklist.blacklistAccounts.selector;
         agentSelectors[1] = IRoycoBlacklist.unblacklistAccounts.selector;
         vm.prank(fndn);
-        FACTORY.setTargetFunctionRole(address(BLACKLIST), agentSelectors, TRANSFER_AGENT_ROLE);
+        ACCESS_MANAGER.setTargetFunctionRole(address(BLACKLIST), agentSelectors, TRANSFER_AGENT_ROLE);
 
         // setSanctionsList is a kernel-admin configuration action
         bytes4[] memory adminSelectors = new bytes4[](1);
         adminSelectors[0] = IRoycoBlacklist.setSanctionsList.selector;
         vm.prank(fndn);
-        FACTORY.setTargetFunctionRole(address(BLACKLIST), adminSelectors, ADMIN_KERNEL_ROLE);
+        ACCESS_MANAGER.setTargetFunctionRole(address(BLACKLIST), adminSelectors, ADMIN_KERNEL_ROLE);
     }
 
     /// @dev Wires roles that live in `ExtraRoles` and are intentionally NOT passed through
@@ -390,7 +407,7 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
     function _wireExtraRoles() internal {
         // Live-chain factory admin (matches MarketDeploymentConfig.ROOT_MULTISIG).
         address fndn;
-        (bool ownerIsAdmin,) = FACTORY.hasRole(0, OWNER_ADDRESS);
+        (bool ownerIsAdmin,) = ACCESS_MANAGER.hasRole(0, OWNER_ADDRESS);
         if (ownerIsAdmin) {
             fndn = OWNER_ADDRESS;
         } else {
@@ -400,10 +417,10 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
         // Standard 24h delay matches the canonical UNPAUSER config (and what `ApplySecurityMigration`
         // applies in production). The `_scheduleAndExecuteUnpause` test helper relies on a non-zero
         // delay — OZ AccessManager.schedule reverts when the caller's `setback == 0`.
-        (bool unpauserHasRole,) = FACTORY.hasRole(ADMIN_UNPAUSER_ROLE, UNPAUSER_ADDRESS);
+        (bool unpauserHasRole,) = ACCESS_MANAGER.hasRole(ADMIN_UNPAUSER_ROLE, UNPAUSER_ADDRESS);
         if (!unpauserHasRole) {
             vm.prank(fndn);
-            FACTORY.grantRole(ADMIN_UNPAUSER_ROLE, UNPAUSER_ADDRESS, 1 days);
+            ACCESS_MANAGER.grantRole(ADMIN_UNPAUSER_ROLE, UNPAUSER_ADDRESS, 1 days);
         }
     }
 
@@ -421,7 +438,7 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
         provider = _initWallet(_name, 10_000_000e6);
 
         vm.prank(LP_ROLE_ADMIN_ADDRESS);
-        FACTORY.grantRole(_role, provider.addr, 0);
+        ACCESS_MANAGER.grantRole(_role, provider.addr, 0);
 
         return provider;
     }
@@ -434,8 +451,8 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
         provider = _initWallet(providerName, 10_000_000e6);
 
         vm.startPrank(LP_ROLE_ADMIN_ADDRESS);
-        FACTORY.grantRole(ST_LP_ROLE, provider.addr, 0);
-        FACTORY.grantRole(JT_LP_ROLE, provider.addr, 0);
+        ACCESS_MANAGER.grantRole(ST_LP_ROLE, provider.addr, 0);
+        ACCESS_MANAGER.grantRole(JT_LP_ROLE, provider.addr, 0);
         vm.stopPrank();
 
         return provider;
@@ -561,7 +578,7 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
 
     /// @notice Generates role assignments using the role-specific addresses
     /// @return roleAssignments Array of role assignment configurations
-    function _generateRoleAssignments() internal view returns (IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments) {
+    function _generateRoleAssignments() internal view returns (DeployScript.RoleAssignment[] memory roleAssignments) {
         return DEPLOY_SCRIPT.generateRolesAssignments(
             DeployScript.RoleAssignmentAddresses({
                 pauserAddress: PAUSER_ADDRESS,
@@ -586,38 +603,38 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
     /// @dev This should be called after the factory is deployed
     function _grantAllRoles() internal prankModifier(OWNER_ADDRESS) {
         // Grant ADMIN_PAUSER_ROLE
-        FACTORY.grantRole(ADMIN_PAUSER_ROLE, PAUSER_ADDRESS, 0);
+        ACCESS_MANAGER.grantRole(ADMIN_PAUSER_ROLE, PAUSER_ADDRESS, 0);
 
         // Grant ADMIN_UNPAUSER_ROLE
-        FACTORY.grantRole(ADMIN_UNPAUSER_ROLE, UNPAUSER_ADDRESS, 0);
+        ACCESS_MANAGER.grantRole(ADMIN_UNPAUSER_ROLE, UNPAUSER_ADDRESS, 0);
 
         // Grant ADMIN_UPGRADER_ROLE
-        FACTORY.grantRole(ADMIN_UPGRADER_ROLE, UPGRADER_ADDRESS, 0);
+        ACCESS_MANAGER.grantRole(ADMIN_UPGRADER_ROLE, UPGRADER_ADDRESS, 0);
 
         // Grant SYNC_ROLE
-        FACTORY.grantRole(SYNC_ROLE, SYNC_ROLE_ADDRESS, 0);
+        ACCESS_MANAGER.grantRole(SYNC_ROLE, SYNC_ROLE_ADDRESS, 0);
 
         // Grant ADMIN_KERNEL_ROLE
-        FACTORY.grantRole(ADMIN_KERNEL_ROLE, KERNEL_ADMIN_ADDRESS, 0);
+        ACCESS_MANAGER.grantRole(ADMIN_KERNEL_ROLE, KERNEL_ADMIN_ADDRESS, 0);
 
         // Grant ADMIN_ACCOUNTANT_ROLE
-        FACTORY.grantRole(ADMIN_ACCOUNTANT_ROLE, ACCOUNTANT_ADMIN_ADDRESS, 0);
+        ACCESS_MANAGER.grantRole(ADMIN_ACCOUNTANT_ROLE, ACCOUNTANT_ADMIN_ADDRESS, 0);
 
         // Grant ADMIN_PROTOCOL_FEE_SETTER_ROLE
-        FACTORY.grantRole(ADMIN_PROTOCOL_FEE_SETTER_ROLE, PROTOCOL_FEE_SETTER_ADDRESS, 0);
+        ACCESS_MANAGER.grantRole(ADMIN_PROTOCOL_FEE_SETTER_ROLE, PROTOCOL_FEE_SETTER_ADDRESS, 0);
 
         // Grant ADMIN_ORACLE_QUOTER_ROLE
-        FACTORY.grantRole(ADMIN_ORACLE_QUOTER_ROLE, ORACLE_QUOTER_ADMIN_ADDRESS, 0);
+        ACCESS_MANAGER.grantRole(ADMIN_ORACLE_QUOTER_ROLE, ORACLE_QUOTER_ADMIN_ADDRESS, 0);
 
         // Grant LP_ROLE_ADMIN_ROLE
-        FACTORY.grantRole(LP_ROLE_ADMIN_ROLE, LP_ROLE_ADMIN_ADDRESS, 0);
+        ACCESS_MANAGER.grantRole(LP_ROLE_ADMIN_ROLE, LP_ROLE_ADMIN_ADDRESS, 0);
 
         // Grant TRANSFER_AGENT_ROLE
-        FACTORY.grantRole(TRANSFER_AGENT_ROLE, TRANSFER_AGENT_ADDRESS, 0);
+        ACCESS_MANAGER.grantRole(TRANSFER_AGENT_ROLE, TRANSFER_AGENT_ADDRESS, 0);
 
         // Set ST_LP_ROLE and JT_LP_ROLE admin to LP_ROLE_ADMIN_ROLE
-        FACTORY.setRoleAdmin(ST_LP_ROLE, LP_ROLE_ADMIN_ROLE);
-        FACTORY.setRoleAdmin(JT_LP_ROLE, LP_ROLE_ADMIN_ROLE);
+        ACCESS_MANAGER.setRoleAdmin(ST_LP_ROLE, LP_ROLE_ADMIN_ROLE);
+        ACCESS_MANAGER.setRoleAdmin(JT_LP_ROLE, LP_ROLE_ADMIN_ROLE);
     }
 
     // -----------------------------------------
@@ -635,14 +652,14 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
     function _executeKernelAdminOperation(address _target, bytes memory _data) internal {
         // Schedule the operation
         vm.prank(KERNEL_ADMIN_ADDRESS);
-        FACTORY.schedule(_target, _data, 0);
+        ACCESS_MANAGER.schedule(_target, _data, 0);
 
         // Warp past the delay (2 days for ADMIN_KERNEL_ROLE)
         vm.warp(block.timestamp + 2 days + 1);
 
         // Execute the operation
         vm.prank(KERNEL_ADMIN_ADDRESS);
-        FACTORY.execute(_target, _data);
+        ACCESS_MANAGER.execute(_target, _data);
     }
 
     /// @notice Schedules and executes an accountant admin operation (handles delay)
@@ -651,14 +668,14 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
     function _executeAccountantAdminOperation(address _target, bytes memory _data) internal {
         // Schedule the operation
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        FACTORY.schedule(_target, _data, 0);
+        ACCESS_MANAGER.schedule(_target, _data, 0);
 
         // Warp past the delay (2 days for ADMIN_ACCOUNTANT_ROLE)
         vm.warp(block.timestamp + 2 days + 1);
 
         // Execute the operation
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        FACTORY.execute(_target, _data);
+        ACCESS_MANAGER.execute(_target, _data);
     }
 
     /// @notice Schedules and executes a protocol fee setter operation (handles delay)
@@ -667,14 +684,14 @@ abstract contract BaseTest is Test, RolesConfiguration, Assertions, ExtraRoles {
     function _executeProtocolFeeSetterOperation(address _target, bytes memory _data) internal {
         // Schedule the operation
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
-        FACTORY.schedule(_target, _data, 0);
+        ACCESS_MANAGER.schedule(_target, _data, 0);
 
         // Warp past the delay (2 days for ADMIN_PROTOCOL_FEE_SETTER_ROLE)
         vm.warp(block.timestamp + 2 days + 1);
 
         // Execute the operation
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
-        FACTORY.execute(_target, _data);
+        ACCESS_MANAGER.execute(_target, _data);
     }
 
     /// @notice Sets the protocol fee recipient via kernel admin (with scheduling)

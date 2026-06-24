@@ -12,7 +12,6 @@ import { RoycoDawnAccountant } from "../../src/accountant/RoycoDawnAccountant.so
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoDawnAccountant } from "../../src/interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoDawnKernel } from "../../src/interfaces/IRoycoDawnKernel.sol";
-import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel } from "../../src/kernels/Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
@@ -87,7 +86,7 @@ contract UpgradabilityTestSuite is BaseTest {
         });
 
         // Build role assignments using the centralized function
-        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        DeployScript.RoleAssignment[] memory roleAssignments = _generateRoleAssignments();
 
         MarketDeploymentConfig.MarketConfig memory config = MarketDeploymentConfig.MarketConfig({
             marketName: "sNUSD",
@@ -162,14 +161,14 @@ contract UpgradabilityTestSuite is BaseTest {
 
         // Schedule the upgrade
         vm.prank(UPGRADER_ADDRESS);
-        FACTORY.schedule(_proxy, upgradeData, 0);
+        ACCESS_MANAGER.schedule(_proxy, upgradeData, 0);
 
         // Wait for the delay to pass
         vm.warp(block.timestamp + 2 days + 1);
 
         // Execute the upgrade
         vm.prank(UPGRADER_ADDRESS);
-        FACTORY.execute(_proxy, upgradeData);
+        ACCESS_MANAGER.execute(_proxy, upgradeData);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -486,14 +485,14 @@ contract UpgradabilityTestSuite is BaseTest {
 
         // Schedule the upgrade
         vm.prank(UPGRADER_ADDRESS);
-        FACTORY.schedule(address(FACTORY), upgradeData, 0);
+        ACCESS_MANAGER.schedule(address(FACTORY), upgradeData, 0);
 
         // Warp past the 2-day delay
         vm.warp(block.timestamp + 2 days + 1);
 
         // Execute the upgrade — should succeed
         vm.prank(UPGRADER_ADDRESS);
-        FACTORY.execute(address(FACTORY), upgradeData);
+        ACCESS_MANAGER.execute(address(FACTORY), upgradeData);
     }
 
     /// @notice Test that factory upgrade reverts before the 2-day delay elapses
@@ -506,7 +505,7 @@ contract UpgradabilityTestSuite is BaseTest {
 
         // Schedule the upgrade
         vm.prank(UPGRADER_ADDRESS);
-        FACTORY.schedule(address(FACTORY), upgradeData, 0);
+        ACCESS_MANAGER.schedule(address(FACTORY), upgradeData, 0);
 
         // Warp to just before the delay expires
         vm.warp(block.timestamp + 2 days - 1);
@@ -514,6 +513,6 @@ contract UpgradabilityTestSuite is BaseTest {
         // Execute should revert — delay not yet elapsed
         vm.prank(UPGRADER_ADDRESS);
         vm.expectRevert();
-        FACTORY.execute(address(FACTORY), upgradeData);
+        ACCESS_MANAGER.execute(address(FACTORY), upgradeData);
     }
 }

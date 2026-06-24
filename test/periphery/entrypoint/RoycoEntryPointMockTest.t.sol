@@ -2,19 +2,18 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
-import { Vm } from "../../../lib/forge-std/src/Vm.sol";
 import { ERC20Mock } from "../../../lib/openzeppelin-contracts/contracts/mocks/token/ERC20Mock.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 
-import { RolesConfiguration, RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
+import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
+import { ADMIN_ROLE, JT_LP_ROLE, LP_ROLE_ADMIN_ROLE, ST_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { IRoycoEntryPoint } from "../../../src/interfaces/IRoycoEntryPoint.sol";
 import { IRoycoFactory } from "../../../src/interfaces/IRoycoFactory.sol";
-import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
-import { MAX_NAV_UNITS, MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../../src/libraries/Constants.sol";
+import { MAX_TRANCHE_UNITS, WAD, ZERO_TRANCHE_UNITS } from "../../../src/libraries/Constants.sol";
 import { AssetClaims, TrancheType } from "../../../src/libraries/Types.sol";
-import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { RoycoEntryPoint } from "../../../src/periphery/RoycoEntryPoint.sol";
 
 import { MockKernel } from "./mocks/MockKernel.sol";
@@ -22,7 +21,7 @@ import { MockTranche } from "./mocks/MockTranche.sol";
 
 /// @title RoycoEntryPointMockTest
 /// @notice Unit tests for RoycoEntryPoint using mocks
-contract RoycoEntryPointMockTest is Test, RolesConfiguration {
+contract RoycoEntryPointMockTest is Test {
     using Math for uint256;
     using UnitsMathLib for NAV_UNIT;
     using UnitsMathLib for TRANCHE_UNIT;
@@ -42,6 +41,7 @@ contract RoycoEntryPointMockTest is Test, RolesConfiguration {
     // ═══════════════════════════════════════════════════════════════════════════
 
     RoycoFactory internal factory;
+    AccessManager internal accessManager;
     RoycoEntryPoint internal entryPointImpl;
     IRoycoEntryPoint internal entryPoint;
 
@@ -72,9 +72,9 @@ contract RoycoEntryPointMockTest is Test, RolesConfiguration {
 
         // Setup LP role admin
         vm.startPrank(owner);
-        factory.grantRole(LP_ROLE_ADMIN_ROLE, lpRoleAdmin, 0);
-        factory.setRoleAdmin(ST_LP_ROLE, LP_ROLE_ADMIN_ROLE);
-        factory.setRoleAdmin(JT_LP_ROLE, LP_ROLE_ADMIN_ROLE);
+        accessManager.grantRole(LP_ROLE_ADMIN_ROLE, lpRoleAdmin, 0);
+        accessManager.setRoleAdmin(ST_LP_ROLE, LP_ROLE_ADMIN_ROLE);
+        accessManager.setRoleAdmin(JT_LP_ROLE, LP_ROLE_ADMIN_ROLE);
         vm.stopPrank();
 
         // Deploy mock asset
@@ -100,14 +100,14 @@ contract RoycoEntryPointMockTest is Test, RolesConfiguration {
 
         // Grant LP roles
         vm.startPrank(lpRoleAdmin);
-        factory.grantRole(ST_LP_ROLE, userA, 0);
-        factory.grantRole(JT_LP_ROLE, userA, 0);
-        factory.grantRole(ST_LP_ROLE, userB, 0);
-        factory.grantRole(JT_LP_ROLE, userB, 0);
-        factory.grantRole(ST_LP_ROLE, executor, 0);
-        factory.grantRole(JT_LP_ROLE, executor, 0);
-        factory.grantRole(ST_LP_ROLE, address(entryPoint), 0);
-        factory.grantRole(JT_LP_ROLE, address(entryPoint), 0);
+        accessManager.grantRole(ST_LP_ROLE, userA, 0);
+        accessManager.grantRole(JT_LP_ROLE, userA, 0);
+        accessManager.grantRole(ST_LP_ROLE, userB, 0);
+        accessManager.grantRole(JT_LP_ROLE, userB, 0);
+        accessManager.grantRole(ST_LP_ROLE, executor, 0);
+        accessManager.grantRole(JT_LP_ROLE, executor, 0);
+        accessManager.grantRole(ST_LP_ROLE, address(entryPoint), 0);
+        accessManager.grantRole(JT_LP_ROLE, address(entryPoint), 0);
         vm.stopPrank();
 
         // Mock the factory's canCall to always return true for entry point functions
@@ -122,16 +122,20 @@ contract RoycoEntryPointMockTest is Test, RolesConfiguration {
     }
 
     function _deployFactory() internal {
+        // Deploy a standalone AccessManager with `owner` as the initial admin.
+        accessManager = new AccessManager(owner);
+
         // Deploy factory implementation
         RoycoFactory factoryImpl = new RoycoFactory();
 
-        // Create empty role assignments array
-        IRoycoFactory.RoleAssignmentConfiguration[] memory emptyRoles = new IRoycoFactory.RoleAssignmentConfiguration[](0);
-
-        // Deploy factory proxy with initialization
-        bytes memory initData = abi.encodeCall(RoycoFactory.initialize, (owner, owner, 7 days, emptyRoles));
+        // The factory must hold ADMIN_ROLE on the AM before its proxy ctor runs `initialize`.
+        bytes memory initData = abi.encodeCall(RoycoFactory.initialize, (address(accessManager)));
+        address predictedFactory = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
+        vm.prank(owner);
+        accessManager.grantRole(ADMIN_ROLE, predictedFactory, 0);
         ERC1967Proxy factoryProxy = new ERC1967Proxy(address(factoryImpl), initData);
         factory = RoycoFactory(address(factoryProxy));
+        require(address(factory) == predictedFactory, "factory address mismatch");
     }
 
     function _deployEntryPoint() internal {
@@ -248,7 +252,7 @@ contract RoycoEntryPointMockTest is Test, RolesConfiguration {
 
         // Grant role to the new entry point
         vm.prank(lpRoleAdmin);
-        factory.grantRole(ST_LP_ROLE, address(disabledEntryPoint), 0);
+        accessManager.grantRole(ST_LP_ROLE, address(disabledEntryPoint), 0);
 
         vm.prank(userA);
         vm.expectRevert(IRoycoEntryPoint.TRANCHE_NOT_ENABLED.selector);
@@ -549,7 +553,7 @@ contract RoycoEntryPointMockTest is Test, RolesConfiguration {
         IRoycoEntryPoint disabledEntryPoint = IRoycoEntryPoint(address(new ERC1967Proxy(address(entryPointImpl), initData)));
 
         vm.prank(lpRoleAdmin);
-        factory.grantRole(ST_LP_ROLE, address(disabledEntryPoint), 0);
+        accessManager.grantRole(ST_LP_ROLE, address(disabledEntryPoint), 0);
 
         vm.prank(userA);
         vm.expectRevert(IRoycoEntryPoint.TRANCHE_NOT_ENABLED.selector);

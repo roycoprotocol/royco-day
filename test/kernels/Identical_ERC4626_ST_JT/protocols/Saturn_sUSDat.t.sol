@@ -6,7 +6,6 @@ import { IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/inter
 
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
-import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { IStakedUSDat } from "../../../../src/interfaces/external/usdat/IStakedUSDat.sol";
 import { sUSDat_ST_JT_SharePriceToChainlinkOracle_Kernel } from "../../../../src/kernels/sUSDat_ST_JT_SharePriceToChainlinkOracle_Kernel.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
@@ -59,7 +58,7 @@ contract Saturn_sUSDat_Test is DisabledChainlinkOracle_ERC4626_TestBase {
         MarketDeploymentConfig.MarketConfig memory marketConfig = DEPLOY_SCRIPT.getMarketConfig("sUSDat");
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
-        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        DeployScript.RoleAssignment[] memory roleAssignments = _generateRoleAssignments();
 
         return DEPLOY_SCRIPT.deploy(
             marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roleAssignments, DEPLOYER.privateKey

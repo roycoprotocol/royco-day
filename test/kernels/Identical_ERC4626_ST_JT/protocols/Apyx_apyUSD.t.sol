@@ -6,7 +6,6 @@ import { IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/inter
 
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
-import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { IAddressList } from "../../../../src/interfaces/external/apyx/IAddressList.sol";
 import { IApyUSD } from "../../../../src/interfaces/external/apyx/IApyUSD.sol";
 import {
@@ -78,7 +77,7 @@ contract apyUSD_apyUSD_Test is YieldBearingERC4626_ChainlinkOracle_TestBase {
         );
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
-        IRoycoFactory.RoleAssignmentConfiguration[] memory roleAssignments = _generateRoleAssignments();
+        DeployScript.RoleAssignment[] memory roleAssignments = _generateRoleAssignments();
 
         return DEPLOY_SCRIPT.deploy(
             marketConfig, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roleAssignments, DEPLOYER.privateKey

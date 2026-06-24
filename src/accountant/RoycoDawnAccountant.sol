@@ -31,8 +31,8 @@ contract RoycoDawnAccountant is IRoycoDawnAccountant, RoycoBase {
     using UnitsMathLib for NAV_UNIT;
 
     /// @dev Storage slot for RoycoDawnAccountantState using ERC-7201 pattern
-    /// @dev The namespace preimage is intentionally retained from the original RoycoAccountant name so the storage slot is unchanged across the rename
-    // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoAccountantState")) - 1)) & ~bytes32(uint256(0xff))
+    /// @dev The namespace preimage is intentionally retained from the original RoycoDawnAccountant name so the storage slot is unchanged across the rename
+    // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoDawnAccountantState")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ROYCO_ACCOUNTANT_STORAGE_SLOT = 0xc8240830e1172c6f1489139d8edb11776c3d3b2f893e3f4ce0fb541305a63a00;
 
     /// @inheritdoc IRoycoDawnAccountant

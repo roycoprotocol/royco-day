@@ -40,7 +40,7 @@ interface IRoycoDawnAccountant {
 
     /**
      * @notice Storage state for the Royco Accountant
-     * @custom:storage-location erc7201:Royco.storage.RoycoAccountantState
+     * @custom:storage-location erc7201:Royco.storage.RoycoDawnAccountantState
      * @custom:field lastMarketState - The last recorded state of this market (perpetual or fixed term)
      * @custom:field fixedTermDurationSeconds - The duration of a fixed term for this market in seconds
      * @custom:field fixedTermEndTimestamp - The end timestamp of the currently ongoing fixed term (set to 0 if the market is in a perpetual state)

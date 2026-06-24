@@ -2,8 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { WAD, ZERO_NAV_UNITS } from "./Constants.sol";
-import { AssetClaims } from "./Types.sol";
+import { ZERO_NAV_UNITS } from "./Constants.sol";
 import { NAV_UNIT, UnitsMathLib } from "./Units.sol";
 
 /**
