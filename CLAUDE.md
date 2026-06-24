@@ -1,8 +1,8 @@
 # Royco Day: Liquidity Tranche (LT)
 
-This branch is the next iteration of the Royco protocol. It adds a third tranche, the Liquidity Tranche (LT), on top of the Dawn senior/junior (ST/JT) system. The work is strictly additive. ST and JT behave exactly as they do in Dawn. The live ST/JT markets are never upgraded, never recompiled, and never touch any new code path or storage field.
+Royco Day is the next iteration of the Royco protocol. It is a standalone fork of Royco Dawn, in its own repository, that adds a third tranche, the Liquidity Tranche (LT), to the senior/junior (ST/JT) system. Day is a clean break: the ST/JT engine is copied in and owned here, not inherited from Dawn, not shared with Dawn, and not coupled to it across repos. There is no requirement that Day's ST/JT match Dawn byte-for-byte. The fork is deliberate, chosen for auditability and end-to-end traceability: every line that executes for a Day market lives in this one repo, in order, with nothing shared with another product and no inheritance indirection. The cost, accepted knowingly, is manual parity: a fix to the Dawn ST/JT engine does not propagate here automatically and must be ported by hand.
 
-If you are picking this up cold, read this file, then `src/libraries/AccountingLib.sol` (the waterfall) and `src/accountant/RoycoAccountant.sol` (`_previewSyncTrancheAccounting`, the sync orchestrator). The LT does not change either of those at the conservation level. That is the whole point of the design.
+If you are picking this up cold, read this file, then the waterfall library and the accountant's sync orchestrator. The LT is an overlay on the ST/JT senior-gain split; it does not change the loss waterfall or the conservation identity. That is the whole point of the design.
 
 ## Branch goal
 
@@ -36,7 +36,7 @@ The liquidity premium is a portion of senior yield set by the LDM. It is paid as
 
 3. The waterfall stays two-term. The premium shares are senior, so they live in `stEff`. The `liqShare` only decides how the senior appreciation of a sync is apportioned between plain ST and the LT. It does not add a third NAV leg. `AccountingLib` keeps `stRaw + jtRaw == stEff + jtEff` byte-for-byte. There is no 6-arg conservation, no LT leg in the checkpoint, and no change to `STEP_APPLY_JT_COVERAGE_TO_ST` or the attribution path.
 
-The `liqShare` mint happens as a post-sync step in `RoycoDayAccountant`, after the unchanged Dawn waterfall has computed the senior gain. It is NAV-neutral (a share mint against value already in the pool), so it sits outside the waterfall conservation entirely. The reinvestment that follows the mint is a kernel action, not an accounting one. It moves the minted shares into the BPT and is bounded by a min-BPT-out, but it does not touch the conservation identity.
+The `liqShare` mint happens as a post-sync step in `RoycoDayAccountant`, after the waterfall has computed the senior gain. It is NAV-neutral (a share mint against value already in the pool), so it sits outside the waterfall conservation entirely. The reinvestment that follows the mint is a kernel action, not an accounting one. It moves the minted shares into the BPT and is bounded by a min-BPT-out, but it does not touch the conservation identity.
 
 ## The yield split
 
@@ -70,7 +70,7 @@ The buffered supplier is the no-leak upgrade. The only way to add real quote dep
 coverageUtilization = (stRaw_total + jtRaw * beta) * minCoverage / jtEffectiveNAV
 ```
 
-`stRaw_total` is the vault mark of every ST share, including the LT's pooled base and its reinvested premium shares. No exclusion, no composition reads, swap-stable. `computeCoverageUtilization` is byte-for-byte Dawn, and at zero liquidity a Day market produces identical coverage to Dawn.
+`stRaw_total` is the vault mark of every ST share, including the LT's pooled base and its reinvested premium shares. No exclusion, no composition reads, swap-stable. The coverage utilization computation is the Dawn formula, carried over unchanged, and the LT never touches it. At zero liquidity a Day market's coverage is just the plain ST/JT coverage.
 
 ### Liquidity
 
@@ -116,21 +116,22 @@ The solvency metric prices the premium. The reserve cap gates the cash exit. The
 
 FIXED_TERM locks everyone, including the LT, so the drawdown run vector does not exist. The LT's principal is covered through the lock.
 
-## Accountant architecture: modular libraries, Dawn base, Day extends
+## Accountant architecture: standalone, forked
 
-The existing `RoycoAccountant` is the Dawn base. `RoycoDayAccountant` extends it as a separate implementation with its own deploy salt. ERC-7201 makes inheritance safe: LT config goes in a fresh namespaced storage slot, additive and collision-free. The base exposes a `virtual` post-sync seam. `RoycoDayAccountant` overrides it to resolve the LDM and signal the coverage-neutral premium-share mint. Coverage, the loss waterfall, and the state machine are inherited unchanged.
+`RoycoDayAccountant` is a standalone contract. It does not extend a Dawn base, and there is no inheritance from Dawn anywhere in the repo. It owns the full ST/JT engine directly: the loss waterfall, the coverage math, the state machine, the protocol fees, and the YDM resolution all live in this codebase and read top to bottom. The heavy math stays in libraries the accountant calls (the waterfall library, the coverage and utilization library) so it is not inlined twice, but the sync orchestration, the state, the setters, and the events are the accountant's own, with no shared base and no dead inherited surface.
 
-The shared `IRoycoAccountant` signatures the live markets use stay byte-for-byte, which keeps `Deploy.s.sol` and the upgrade ops modules compiling and the live upgrade path intact. Day is new-markets-only. A live Dawn accountant proxy is never upgraded into a Day accountant.
+The LT is added directly on top: a third set of config and state fields, an LDM resolved at sync time, and a post-sync overlay that computes the liquidity premium from the senior gain and signals the coverage-neutral premium-share mint. The accountant's sync entrypoints carry the LT pool mark (`ltRawNAV`) alongside the ST and JT marks, because the sync checkpoints all three.
 
-The anchor test for the whole branch: `RoycoDayAccountant` configured with zero minimum liquidity produces byte-for-byte identical state to `RoycoDawnAccountant`. This turns "ST and JT are unchanged" from a claim into a differential assertion.
+There is no cross-repo guarantee and no differential anchor test against Dawn. Day's ST/JT correctness is established by Day's own test suite, on its own terms. A Day market at zero minimum liquidity should behave like a plain ST/JT market, and that is verified here, not asserted against another repo.
 
-## Additive and non-invasive integration principle
+## Self-contained fork principle
 
-- ST and JT accounting is untouched, including `computeCoverageUtilization`, which is fed the same `stRaw_total` a Dawn market would feed it.
-- Shared interfaces stay byte-for-byte. LT entrypoints live on a new `IRoycoLiquidityKernel` and on `RoycoDayAccountant`, not on `IRoycoDawnKernel` or the shared `IRoycoAccountant`.
-- All new storage is appended in fresh trailing slots. ERC-7201 namespace strings and slot constants are byte-identical. The fully packed accountant slot is never touched.
-- Enum appends preserve existing ordinals. `TrancheType` gains `LIQUIDITY`, `Operation` gains `LT_DEPOSIT` and `LT_REDEEM`, at the end.
-- The liquidity gate is orthogonal to coverage. It never modifies coverage config, the coverage requirement check, `computeCoverageUtilization`, or the forced-perpetual conditions.
+- The repo is the unit of audit. Everything a Day market executes, deploy through redeem, lives here. There is no submodule on Dawn and no cross-repo source dependency, because that would re-introduce the coupling the fork exists to remove.
+- No inheritance. Contracts are flat or compose through explicit libraries, never through a shared base that also serves Dawn. There are no inherited functions a Day contract does not use.
+- Naming is flattened to Day. The senior/junior engine is the Day accountant's own. Carry over the good names from Dawn but drop the "this is the Dawn base" framing, since there is no base.
+- The liquidity gate is orthogonal to coverage. It never modifies coverage config, the coverage requirement check, the coverage utilization computation, or the forced-perpetual conditions. The LT is strictly additional capital structure on top of a self-contained ST/JT engine.
+- Parity is manual and intentional. Where Day's ST/JT logic mirrors Dawn's it does so by copy, and any later Dawn fix is ported deliberately. This is the trade made for end-to-end auditability.
+- Storage layout and enum ordinals are chosen cleanly. There is no deployed Day market to stay compatible with, so `TrancheType` carries `LIQUIDITY` and `Operation` carries `LT_DEPOSIT`/`LT_REDEEM` as first-class members, not appended-for-compatibility ordinals.
 
 ## LT tranche and kernel
 
@@ -144,28 +145,22 @@ The kernel custodies the BPT, performs the joins and exits, executes the coverag
 
 ## Contract map
 
-New:
-- `src/accountant/RoycoDayAccountant.sol`: extends the Dawn accountant. Resolves the LDM and signals the post-sync coverage-neutral premium-share mint. Computes the liquidity metric. Separate impl and deploy salt.
-- `src/interfaces/IRoycoLiquidityKernel.sol`, `src/kernels/base/RoycoLiquidityKernel.sol`, `src/kernels/liquidity/*`: the LT-aware kernel. Custodies and joins/exits the BPT, mints premium ST shares to the LT tranche, and reinvests them via the single-sided add.
-- `src/tranches/RoycoLiquidityTranche.sol`: the LT vault tranche, holding the BPT.
-- `src/interfaces/ILDM.sol`, `src/ldm/*`: the LDM, reusing the general-purpose YDM family driven by `liquidityUtilization`.
-- `src/oracles/venues/balancer-v3/*`: a thin adapter that reads Balancer's native E-CLP oracle for `ltRawNAV`, plus the rate provider and the pool hook. No valuation math is reimplemented. The abstraction lets any AMM or MM vault back the LT; Balancer E-CLP is first.
+This is a self-contained repo, so there is no "new versus modified" split against an upstream. The key pieces:
 
-Modified (additive):
-- `src/accountant/RoycoAccountant.sol`: a `virtual` post-sync seam. No behavior change on the Dawn path.
-- `src/libraries/Types.sol`: append-only enum and LT config fields. No LT NAV leg in the checkpoint.
-- `src/interfaces/IRoycoAccountant.sol`, `src/interfaces/IRoycoDawnKernel.sol`: appended state, errors, events. Shared signatures unchanged.
-- `src/kernels/base/RoycoDawnKernel.sol`: isolated edits only (`onlyTranche` widening, multi-asset withdraw for the LT's BPT or its constituents). ST/JT bodies unchanged.
-- `src/tranches/base/RoycoVaultTranche.sol`: explicit `SENIOR`/`JUNIOR`/`LIQUIDITY` dispatch with a revert default.
-- `src/factory/*`, `src/interfaces/IRoycoFactory.sol`: a `deployMarketWithLT` path adding the fifth CREATE3 proxy and `LT_LP_ROLE`. The existing 4-contract `deployMarket` is untouched.
-- `src/libraries/DayUtilsLib.sol`: wire in `computeLiquidityUtilization` with `ltRawNAV` as the BPT mark.
-- `script/Deploy.s.sol`, `script/config/MarketDeploymentConfig.sol`, `script/upgrade/modules/*`: the LT deploy path and lockstep init updates. Existing literals and the live upgrade path unchanged.
+- `RoycoDayAccountant`: the standalone accountant. Owns the ST/JT engine (waterfall, coverage, state machine, fees, YDM) and the LT overlay (LDM resolution, the post-sync coverage-neutral premium-share mint, the liquidity metric). Sync entrypoints carry `stRawNAV`, `jtRawNAV`, and `ltRawNAV`.
+- The accounting and utilization libraries: the two-term loss waterfall and the coverage and liquidity utilization math, called by the accountant. Pure and stateless, the heavy logic kept out of the contract body.
+- The LT-aware kernel: custodies the BPT, performs the joins and exits, executes the coverage-neutral premium-share mint, performs the single-sided reinvestment add, and drives the three-NAV sync. It owns the ST/JT kernel logic directly as well.
+- `RoycoLiquidityTranche`: the LT vault tranche, holding the BPT.
+- The LDM (`src/ldm/*`): the liquidity distribution model, the general-purpose YDM family driven by `liquidityUtilization`.
+- The Balancer E-CLP oracle adapter (`src/oracles/venues/balancer-v3/*`): reads Balancer's native E-CLP oracle for `ltRawNAV`, plus the rate provider and the pool hook. No valuation math is reimplemented. The abstraction lets any AMM or MM vault back the LT; Balancer E-CLP is first.
+- The factory, deploy scripts, and config: a single Day deployment path that wires the market's tranches (ST, JT, LT) plus the kernel and accountant. There is no second legacy path to keep compiling, because this repo only ships Day markets.
+- Reused as-is from the Dawn codebase: the blacklist batch screen (the LT picks it up through the existing hook) and the tranche Pendle SY wrapper (the LT share is a standard tranche token). These are copied in and owned here like everything else.
 
-Unchanged and reused: `src/libraries/AccountingLib.sol` (two-term, byte-for-byte Dawn), `src/auth/RoycoBlacklist.sol` (the LT inherits the batch screen through the existing hook), and the existing tranche Pendle SY wrapper (the LT share is a standard tranche token).
+The tranche dispatch handles `SENIOR`/`JUNIOR`/`LIQUIDITY` with a revert default. Since the repo is fresh, enum ordinals and storage layout are chosen cleanly rather than appended for compatibility.
 
 ## Invariants
 
-- Two-term NAV conservation holds, byte-for-byte Dawn: `stRaw + jtRaw == stEff + jtEff`. The premium is covered ST shares inside `stEff`, never a third leg.
+- Two-term NAV conservation holds at wei precision: `stRaw + jtRaw == stEff + jtEff`. The premium is covered ST shares inside `stEff`, never a third leg.
 - All senior is covered. `computeCoverageUtilization` uses `stRaw_total` with no exclusion and no composition reads. Reinvesting the premium into the pool does not change which shares are covered.
 - The premium mint is coverage-neutral: it adds no senior assets, only reassigns share ownership, so it does not move `coverageUtilization` or consume coverage capacity.
 - The reinvestment is bounded by a min-BPT-out and changes `ltRawNAV`, not the conservation identity.
@@ -174,18 +169,18 @@ Unchanged and reused: `src/libraries/AccountingLib.sol` (two-term, byte-for-byte
 - LDM and YDM outputs depend only on the last committed checkpoint, so the waterfall stays pure.
 - Coverage math and the PERPETUAL/FIXED_TERM machine remain ST/JT only.
 - The cash redemption cap is the only live pool-balance read, one-directional, never feeding coverage or the premium.
-- `RoycoDayAccountant` with zero minimum liquidity equals `RoycoDawnAccountant`, byte-for-byte.
+- A Day market at zero minimum liquidity behaves like a plain ST/JT market, verified by Day's own suite rather than asserted against another repo.
 
 ## Build sequence
 
-Each phase is independently testable. ST and JT stay untouched throughout.
+Each phase is independently testable.
 
-- P0, decisions gate. Settle the coverage-neutral premium-mint mechanism, the who-pays share math, the in-kind redemption and reserve-capped cash path, the LDM floor against the real (rate-staleness plus near-peg IL) cost, and acceptance that JT covers the LT base.
-- P1, additive data model (inert). Land the append-only enum and LT config changes with LT fields defaulting to zero. Prove the storage layout is byte-identical for every pre-existing field with a `forge inspect` snapshot. The full existing suite stays green.
-- P2, accountant premium and metric. Implement the LDM-driven `liqShare`, the post-sync coverage-neutral ST-share mint, and the liquidity metric, driven by a directly supplied `ltRawNAV` with no Balancer wiring. The anchor differential test (Day at zero liquidity equals Dawn) lands here.
+- P0, fork and decisions gate. Stand up the repo from the Dawn copy, strip what Day does not use, drop the inheritance seams, and flatten naming to Day. Settle the coverage-neutral premium-mint mechanism, the who-pays share math, the in-kind redemption and reserve-capped cash path, the LDM floor against the real (rate-staleness plus near-peg IL) cost, and acceptance that JT covers the LT base.
+- P1, data model. Land the tranche enum, the `Operation` members, and the LT config and state fields as first-class members, chosen cleanly. A Day market at zero minimum liquidity reduces to a plain ST/JT market; lock that in with a test.
+- P2, accountant premium and metric. Implement the LDM-driven `liqShare`, the post-sync coverage-neutral ST-share mint, and the liquidity metric, driven by a directly supplied `ltRawNAV` with no Balancer wiring. Verify the zero-liquidity reduction here.
 - P3, LT vault and kernel custody and reinvestment. Build `RoycoLiquidityTranche` holding the BPT, the deposit, redeem, max, and preview paths, the in-kind proportional redemption and the reserve-capped cash path, and the single-sided reinvestment add. Preview must match execution.
 - P4, Balancer oracle. Read `ltRawNAV` from Balancer's E-CLP oracle. Wire the rate provider (ST share NAV from the last committed sync) and the hook with the `router == kernel` carve-out.
-- P5, deploy, factory, roles. Add the `deployMarketWithLT` path and the LT kernel type and roles. Regression: redeploy existing markets through the unchanged path and assert identical addresses, wiring, and roles.
+- P5, deploy, factory, roles. Build the single Day market deployment path (tranches, kernel, accountant) and the LT kernel type and roles. Assert addresses, wiring, and roles for a freshly deployed Day market.
 - P6, economics and pre-mainnet hardening. Calibrate the LDM floor against rate-staleness LVR and near-peg IL. Set the reinvestment cadence and the directional fee. Stress the redemption dynamics. Decide whether to enable the buffered supplier for a given market.
 
 ## Open decisions and pre-mainnet guardrails
@@ -200,7 +195,7 @@ Each phase is independently testable. ST and JT stay untouched throughout.
 - Realizable depth versus the solvency mark. `ltRawNAV` from the Balancer oracle is a solvency value, not exit depth. The in-kind redemption and the reserve-capped cash path already insulate the run gate from this. Decide whether any additional composition-drift breaker is wanted, or accept and document the bound.
 - ST supply seed. Ensure `ltRawNAV` is never zero against a positive `minLiquidity`, which would make `liquidityUtilization` infinite.
 - Pool permissioning. Confirm the pool LP set equals the kernel, so external mint and burn cannot move the gate without the kernel knowing.
-- Factory and ABI migration. New factory versus UUPS upgrade of the shared pre-deployed factory, the new accountant impl salt, and the indexer migration for the appended state.
+- Factory and indexer. The repo ships its own Day factory and deploy path from scratch, with no shared pre-deployed factory to upgrade. Stand up a Day-specific indexer/subgraph for the LT events and the three-NAV sync.
 
 ## Resolved and removed
 
