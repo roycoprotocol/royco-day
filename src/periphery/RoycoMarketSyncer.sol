@@ -4,8 +4,8 @@ pragma solidity ^0.8.28;
 import { EnumerableSet } from "../../lib/openzeppelin-contracts/contracts/utils/structs/EnumerableSet.sol";
 import { RoycoBase } from "../base/RoycoBase.sol";
 import { IRoycoDawnKernel } from "../interfaces/IRoycoDawnKernel.sol";
-import { IRoycoFactory } from "../interfaces/IRoycoFactory.sol";
 import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
+import { IRoycoFactory } from "../interfaces/factory/IRoycoFactory.sol";
 
 /**
  * @title RoycoMarketSyncer
@@ -22,8 +22,11 @@ contract RoycoMarketSyncer is RoycoBase {
 
     /// @notice Storage state for the Royco market syncer
     /// @custom:field marketKernels An enumerable set of the configured market kernels
+    /// @custom:field roycoFactory The canonical Royco factory (used for kernel-authenticity queries); distinct from the
+    ///                            AccessManaged `authority()`, which is the factory's AccessManager
     struct RoycoMarketSyncerState {
         EnumerableSet.AddressSet marketKernels;
+        address roycoFactory;
     }
 
     /// @notice Emitted when a market kernel is added to the syncer
@@ -59,8 +62,10 @@ contract RoycoMarketSyncer is RoycoBase {
      * @param _marketKernels The initial kernels that this syncer will synchronize NAV accounting for
      */
     function initialize(address _roycoFactory, address[] calldata _marketKernels) external initializer {
-        // Initialize the base syncer state
-        __RoycoBase_init(_roycoFactory);
+        // The factory is the source of truth for market authenticity, but its AccessManager (a separate contract)
+        // governs this syncer's `restricted` functions. Store the factory for queries and bind `authority()` to the AM.
+        _getRoycoMarketSyncerStorage().roycoFactory = _roycoFactory;
+        __RoycoBase_init(IRoycoFactory(_roycoFactory).ROYCO_AUTHORITY());
         // Initialize the syncer state with the market kernels
         _modifyMarketKernels(true, _marketKernels);
     }
@@ -201,7 +206,7 @@ contract RoycoMarketSyncer is RoycoBase {
 
         // Get the senior tranche for this kernel from the kernel itself and the corresponding junior tranche from the canonical factory mapping
         address seniorTranche = IRoycoDawnKernel(_ostensibleMarketKernel).SENIOR_TRANCHE();
-        address juniorTranche = IRoycoFactory(authority()).seniorTrancheToJuniorTranche(seniorTranche);
+        address juniorTranche = IRoycoFactory(_getRoycoMarketSyncerStorage().roycoFactory).seniorTrancheToJuniorTranche(seniorTranche);
 
         // Ensure that the kernel was deployed by the Royco factory
         require(juniorTranche != address(0) && _ostensibleMarketKernel == IRoycoVaultTranche(seniorTranche).KERNEL(), INVALID_KERNEL(_ostensibleMarketKernel));

@@ -350,9 +350,9 @@ contract RoycoMarketSyncerTest is Test, ExtraRoles {
         assertEq(kernels.length, 0, "Should initialize with no kernels");
     }
 
-    /// @notice Test that syncer initializes with correct authority
+    /// @notice Test that syncer initializes with correct authority (the factory's AccessManager)
     function test_initialize_setsCorrectAuthority() external view {
-        assertEq(syncer.authority(), address(factory), "Authority should be factory");
+        assertEq(syncer.authority(), address(accessManager), "Authority should be the access manager");
     }
 
     /// @notice Test that syncer cannot be reinitialized
@@ -1332,7 +1332,7 @@ contract RoycoMarketSyncerTest is Test, ExtraRoles {
 
         // Verify upgrade succeeded - implementation changed
         // The syncer should still work after upgrade
-        assertEq(syncer.authority(), address(factory), "Authority should remain after upgrade");
+        assertEq(syncer.authority(), address(accessManager), "Authority should remain after upgrade");
     }
 
     /// @notice Test that upgrade to EOA (no code) reverts
@@ -1462,14 +1462,14 @@ contract RoycoMarketSyncerTest is Test, ExtraRoles {
         assertEq(txs.length, 7, "Should have 5 role config + 2 grantRole transactions");
     }
 
-    /// @notice Verify all transactions target the factory
-    function test_productionConfig_allTransactionsTargetFactory() external view {
+    /// @notice Verify all transactions target the AccessManager (which governs the syncer's restricted functions)
+    function test_productionConfig_allTransactionsTargetAccessManager() external view {
         address[] memory syncOperators = new address[](1);
         syncOperators[0] = SYNC_OPERATOR_ADDRESS;
 
         DeploySyncerScript.SafeTransaction[] memory txs = deployScript.buildSyncerConfigTransactions(address(accessManager), address(syncer), syncOperators);
         for (uint256 i = 0; i < txs.length; i++) {
-            assertEq(txs[i].to, address(factory), string.concat("Transaction ", vm.toString(i), " should target factory"));
+            assertEq(txs[i].to, address(accessManager), string.concat("Transaction ", vm.toString(i), " should target the access manager"));
             assertEq(txs[i].value, 0, string.concat("Transaction ", vm.toString(i), " should have zero value"));
         }
     }
