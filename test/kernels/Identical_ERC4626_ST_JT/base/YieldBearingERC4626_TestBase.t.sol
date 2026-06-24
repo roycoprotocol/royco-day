@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import { IERC20Metadata, IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
-import { ADMIN_ORACLE_QUOTER_ROLE } from "../../../../src/factory/RolesConfiguration.sol";
 import { Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel } from "../../../../src/kernels/Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel.sol";
 import { WAD, WAD_DECIMALS, ZERO_NAV_UNITS } from "../../../../src/libraries/Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../../../src/libraries/Types.sol";

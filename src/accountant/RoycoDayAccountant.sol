@@ -1,24 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { RoycoBase } from "../base/RoycoBase.sol";
-import { IRoycoDawnKernel } from "../interfaces/IRoycoDawnKernel.sol";
 import { IRoycoDayAccountant } from "../interfaces/IRoycoDayAccountant.sol";
-
-import { IYDM } from "../interfaces/IYDM.sol";
-import { MAX_PROTOCOL_FEE_WAD, MIN_COVERAGE_LOWER_BOUND_WAD, MIN_COVERAGE_UPPER_BOUND_WAD, WAD, ZERO_NAV_UNITS } from "../libraries/Constants.sol";
-import { DawnAccountingLib } from "../libraries/DawnAccountingLib.sol";
+import { MAX_PROTOCOL_FEE_WAD, WAD } from "../libraries/Constants.sol";
 import { DayUtilsLib } from "../libraries/DayUtilsLib.sol";
-import {
-    AccountingCheckpoint,
-    MarketState,
-    MarketStateTransitionParams,
-    NAV_UNIT,
-    Operation,
-    PnLWaterfallParams,
-    SyncedAccountingState
-} from "../libraries/Types.sol";
-import { UnitsMathLib, toNAVUnits } from "../libraries/Units.sol";
 import { RoycoDawnAccountant } from "./RoycoDawnAccountant.sol";
 
 /**

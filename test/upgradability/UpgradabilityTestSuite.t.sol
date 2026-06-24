@@ -12,7 +12,6 @@ import { RoycoDawnAccountant } from "../../src/accountant/RoycoDawnAccountant.so
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoDawnAccountant } from "../../src/interfaces/IRoycoDawnAccountant.sol";
 import { IRoycoDawnKernel } from "../../src/interfaces/IRoycoDawnKernel.sol";
-import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel } from "../../src/kernels/Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
@@ -20,7 +19,6 @@ import { toTrancheUnits } from "../../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoSeniorTranche } from "../../src/tranches/RoycoSeniorTranche.sol";
 
-import { ADMIN_UPGRADER_ROLE } from "../../src/factory/RolesConfiguration.sol";
 import { BaseTest } from "../base/BaseTest.t.sol";
 
 /// @title UpgradabilityTestSuite

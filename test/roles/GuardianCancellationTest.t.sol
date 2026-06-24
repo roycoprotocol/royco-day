@@ -5,14 +5,6 @@ import { Vm } from "../../lib/forge-std/src/Vm.sol";
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../script/config/MarketDeploymentConfig.sol";
-import {
-    ADMIN_ACCOUNTANT_ROLE,
-    ADMIN_KERNEL_ROLE,
-    ADMIN_PROTOCOL_FEE_SETTER_ROLE,
-    ADMIN_UPGRADER_ROLE,
-    GUARDIAN_ROLE
-} from "../../src/factory/RolesConfiguration.sol";
-import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
 import { BaseTest } from "../base/BaseTest.t.sol";
 import { ERC4626Mock } from "../mock/ERC4626Mock.sol";

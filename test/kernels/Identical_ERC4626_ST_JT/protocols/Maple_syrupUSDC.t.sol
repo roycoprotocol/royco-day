@@ -9,11 +9,9 @@ import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/E
 
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
-import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { IMapleGlobals } from "../../../../src/interfaces/external/maple/IMapleGlobals.sol";
 import { IMaplePool } from "../../../../src/interfaces/external/maple/IMaplePool.sol";
 import { IMaplePoolManager } from "../../../../src/interfaces/external/maple/IMaplePoolManager.sol";
-import { IMaplePoolPermissionManager } from "../../../../src/interfaces/external/maple/IMaplePoolPermissionManager.sol";
 import { MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel } from "../../../../src/kernels/MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.sol";
 import { WAD_DECIMALS } from "../../../../src/libraries/Constants.sol";
 import { AssetClaims } from "../../../../src/libraries/Types.sol";

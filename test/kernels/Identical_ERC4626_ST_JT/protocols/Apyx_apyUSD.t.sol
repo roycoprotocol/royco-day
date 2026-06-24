@@ -6,7 +6,6 @@ import { IERC4626 } from "../../../../lib/openzeppelin-contracts/contracts/inter
 
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
-import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { IAddressList } from "../../../../src/interfaces/external/apyx/IAddressList.sol";
 import { IApyUSD } from "../../../../src/interfaces/external/apyx/IApyUSD.sol";
 import {

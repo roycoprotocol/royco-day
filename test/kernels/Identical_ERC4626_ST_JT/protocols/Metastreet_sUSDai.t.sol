@@ -6,7 +6,6 @@ import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/interfa
 
 import { DeployScript } from "../../../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../../../script/config/MarketDeploymentConfig.sol";
-import { IRoycoFactory } from "../../../../src/interfaces/IRoycoFactory.sol";
 import { IStakedUSDai } from "../../../../src/interfaces/external/usdai/IStakedUSDai.sol";
 import { IUSDai } from "../../../../src/interfaces/external/usdai/IUSDai.sol";
 import { IdenticalAssetsAdminOracleQuoter } from "../../../../src/kernels/base/quoter/base/IdenticalAssetsAdminOracleQuoter.sol";
@@ -14,7 +13,6 @@ import { sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel } from "../../../
 import { WAD } from "../../../../src/libraries/Constants.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits } from "../../../../src/libraries/Units.sol";
 
-import { ADMIN_ORACLE_QUOTER_ROLE } from "../../../../src/factory/RolesConfiguration.sol";
 import { YieldBearingERC4626_TestBase } from "../base/YieldBearingERC4626_TestBase.t.sol";
 
 /// @title Metastreet_sUSDai_Test

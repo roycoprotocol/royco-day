@@ -7,9 +7,7 @@ import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/I
 import { Pausable } from "../../lib/openzeppelin-contracts/contracts/utils/Pausable.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../script/config/MarketDeploymentConfig.sol";
-import { ADMIN_PAUSER_ROLE } from "../../src/factory/RolesConfiguration.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
-import { IRoycoFactory } from "../../src/interfaces/IRoycoFactory.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
 import { toTrancheUnits } from "../../src/libraries/Units.sol";
 import { BaseTest } from "../base/BaseTest.t.sol";
