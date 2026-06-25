@@ -7,7 +7,7 @@ import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access
 import { ERC20Mock } from "../../lib/openzeppelin-contracts/contracts/mocks/token/ERC20Mock.sol";
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
-import { RoycoDawnAccountant } from "../../src/accountant/RoycoDawnAccountant.sol";
+import { RoycoDayAccountant } from "../../src/accountant/RoycoDayAccountant.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_KERNEL_ROLE,
@@ -24,8 +24,8 @@ import {
 } from "../../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoBlacklist } from "../../src/interfaces/IRoycoBlacklist.sol";
-import { IRoycoDawnAccountant } from "../../src/interfaces/IRoycoDawnAccountant.sol";
-import { IRoycoDawnKernel } from "../../src/interfaces/IRoycoDawnKernel.sol";
+import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
 import { AssetClaims, TrancheType } from "../../src/libraries/Types.sol";
@@ -153,12 +153,12 @@ abstract contract BaseTest is Test, Assertions {
     IYDM internal YDM;
     RoycoSeniorTranche public ST_IMPL;
     RoycoJuniorTranche internal JT_IMPL;
-    RoycoDawnAccountant internal ACCOUNTANT_IMPL;
+    RoycoDayAccountant internal ACCOUNTANT_IMPL;
     address internal KERNEL_IMPL;
     IRoycoVaultTranche internal ST;
     IRoycoVaultTranche internal JT;
-    IRoycoDawnKernel internal KERNEL;
-    IRoycoDawnAccountant internal ACCOUNTANT;
+    IRoycoDayKernel internal KERNEL;
+    IRoycoDayAccountant internal ACCOUNTANT;
     IRoycoBlacklist internal BLACKLIST;
 
     // -----------------------------------------

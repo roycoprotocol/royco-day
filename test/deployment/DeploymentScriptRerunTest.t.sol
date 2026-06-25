@@ -204,11 +204,13 @@ contract DeploymentScriptRerunTest is Test {
         config.seniorTrancheSymbol = _seniorTrancheSymbol;
         config.juniorTrancheName = _juniorTrancheName;
         config.juniorTrancheSymbol = _juniorTrancheSymbol;
+        config.liquidityTrancheName = "Royco Liquidity test";
+        config.liquidityTrancheSymbol = "ROY-LT-test";
         config.seniorAsset = _stVault;
         config.juniorAsset = _stVault;
         config.stDustTolerance = DUST_TOLERANCE_RAW;
         config.jtDustTolerance = DUST_TOLERANCE_RAW;
-        config.kernelType = DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel;
+        config.kernelType = DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel;
         config.stProtocolFeeWAD = ST_PROTOCOL_FEE_WAD;
         config.jtProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
         config.jtYieldShareProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
@@ -217,7 +219,18 @@ contract DeploymentScriptRerunTest is Test {
         config.liquidationCoverageUtilizationWAD = LIQUIDATION_COVERAGE_UTILIZATION_WAD;
         config.fixedTermDurationSeconds = FIXED_TERM_DURATION_SECONDS;
         config.ydmType = DeployScript.YDMType.AdaptiveCurve_V2;
-        config.kernelSpecificParams = abi.encode(DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: 1e18 }));
+        // A NON-ZERO `initialConversionRateWAD` makes the quoter use the admin-set rate (1:1 here) and
+        // never query the Chainlink feed, so this test does not depend on a live oracle. The oracle
+        // address must be non-zero (the quoter's initializer requires it) but is never read.
+        config.kernelSpecificParams = abi.encode(
+            DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
+                initialConversionRateWAD: 1e18,
+                baseAssetToNavAssetOracle: address(0xDA7A0FEED),
+                stalenessThresholdSeconds: 48 hours
+            })
+        );
+        // Pair the LT pool against USDC (the mock ST vault's underlying asset).
+        config.gyroECLPPoolParams = DEPLOY_SCRIPT.demoGyroECLPPoolParams("test", ETHEREUM_MAINNET_USDC_ADDRESS);
         config.ydmSpecificParams = abi.encode(
             DeployScript.AdaptiveCurveYDM_V2_Params({
                 yieldShareAtZeroUtilWAD: 0.225e18,
@@ -242,6 +255,7 @@ contract DeploymentScriptRerunTest is Test {
             _buildMarketDeploymentConfig("Royco Senior Tranche Alpha", "RST-A", "Royco Junior Tranche Alpha", "RJT-A", address(MOCK_UNDERLYING_ST_VAULT_1));
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
+        // TODO(day-fork): requires a Balancer Gyro pool factory + valid E-CLP params on a fork to run
         DeployScript.DeploymentResult memory result1 =
             DEPLOY_SCRIPT.deploy(config1, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roles1, DEPLOYER.privateKey);
 

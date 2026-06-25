@@ -5,9 +5,9 @@ import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math
 import { FixedPointMathLib } from "../../lib/solady/src/utils/FixedPointMathLib.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
 import { WAD, WAD_INT, ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
-import { DawnUtilsLib } from "../../src/libraries/DawnUtilsLib.sol";
 import { MarketState } from "../../src/libraries/Types.sol";
 import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
+import { UtilsLib } from "../../src/libraries/UtilsLib.sol";
 import { AdaptiveCurveYDM_V2 } from "../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { BaseTest } from "../base/BaseTest.t.sol";
 
@@ -103,7 +103,7 @@ contract AdaptiveCurveYDM_V2Test is BaseTest {
         pure
         returns (uint256)
     {
-        return DawnUtilsLib.computeCoverageUtilization(_stRawNAV, _jtRawNAV, _betaWAD, _minCoverageWAD, _jtEffectiveNAV);
+        return UtilsLib.computeCoverageUtilization(_stRawNAV, _jtRawNAV, _betaWAD, _minCoverageWAD, _jtEffectiveNAV);
     }
 
     // ============================================
@@ -727,7 +727,7 @@ contract AdaptiveCurveYDM_V2Test is BaseTest {
         uint256 minCoverageWAD = WAD;
 
         // A wiped senior raw NAV does NOT imply zero coverageUtilization. When the junior tranche carries beta-correlated exposure (beta > 0),
-        // the covered exposure (beta * jtRawNAV) is non-zero, so DawnUtilsLib.computeCoverageUtilization reports real coverageUtilization and the curve responds to it.
+        // the covered exposure (beta * jtRawNAV) is non-zero, so UtilsLib.computeCoverageUtilization reports real coverageUtilization and the curve responds to it.
         uint256 yieldShareCorrelated =
             ydm.previewYieldShare(MarketState.PERPETUAL, _coverageUtilizationFromNAVs(stRawNAV, jtRawNAV, WAD, minCoverageWAD, jtEffectiveNAV));
         assertGt(yieldShareCorrelated, DEFAULT_Y0, "Zero ST with beta-correlated JT exposure must produce non-zero coverageUtilization");

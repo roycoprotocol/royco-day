@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 /// @title MockKernel
-/// @notice A minimal mock implementation of IRoycoDawnKernel for testing dual-asset transfers
+/// @notice A minimal mock implementation of IRoycoDayKernel for testing dual-asset transfers
 contract MockKernel {
     address public stAsset;
     address public jtAsset;

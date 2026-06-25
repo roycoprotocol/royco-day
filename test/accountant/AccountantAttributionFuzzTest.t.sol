@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../script/config/MarketDeploymentConfig.sol";
-import { IRoycoDawnKernel } from "../../src/interfaces/IRoycoDawnKernel.sol";
+import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IdenticalAssetsOracleQuoter } from "../../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../src/libraries/Types.sol";
@@ -13,7 +13,7 @@ import { BaseTest } from "../base/BaseTest.t.sol";
 
 /**
  * @title AccountantAttributionFuzzTest
- * @notice Fuzz suite that validates the claim-weighted attribution fix in `RoycoDawnAccountant`
+ * @notice Fuzz suite that validates the claim-weighted attribution fix in `RoycoDayAccountant`
  *         across a broad parameter space. Each test sets up a fresh sNUSD market on a mainnet
  *         fork, parameterizes the deposit amounts / yield magnitudes / YDM split / drain ratio,
  *         and asserts invariants that the OLD (buggy) accountant would violate but the NEW
@@ -56,9 +56,6 @@ contract AccountantAttributionFuzzTest is BaseTest {
     }
 
     function _deployMarket(uint256 _yieldShareWAD) internal returns (DeployScript.DeploymentResult memory) {
-        DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams memory kernelParams =
-            DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: WAD });
-
         DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
             yieldShareAtZeroUtilWAD: uint64(_yieldShareWAD),
             yieldShareAtTargetUtilWAD: uint64(_yieldShareWAD),
@@ -75,12 +72,23 @@ contract AccountantAttributionFuzzTest is BaseTest {
             seniorTrancheSymbol: "RFS-sNUSD",
             juniorTrancheName: "Royco Fuzz Junior sNUSD",
             juniorTrancheSymbol: "RFJ-sNUSD",
+            liquidityTrancheName: "Royco Liquidity sNUSD_FUZZ",
+            liquidityTrancheSymbol: "ROY-LT-sNUSD_FUZZ",
             seniorAsset: SNUSD,
             juniorAsset: SNUSD,
             stDustTolerance: 1,
             jtDustTolerance: 1,
-            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel,
-            kernelSpecificParams: abi.encode(kernelParams),
+            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel,
+            // A NON-ZERO `initialConversionRateWAD` makes the quoter use the admin-set rate (1:1 here) and
+            // never query the Chainlink feed, so this test does not depend on a live oracle. The oracle
+            // address must be non-zero (the quoter's initializer requires it) but is never read.
+            kernelSpecificParams: abi.encode(
+                DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
+                    initialConversionRateWAD: 1e18,
+                    baseAssetToNavAssetOracle: address(0xDA7A0FEED),
+                    stalenessThresholdSeconds: 48 hours
+                })
+            ),
             stSelfLiquidationBonusWAD: 0,
             enforceVaultSharesTransferWhitelist: false,
             stProtocolFeeWAD: 0,
@@ -92,11 +100,13 @@ contract AccountantAttributionFuzzTest is BaseTest {
             // Always PERPETUAL so ST redeems aren't blocked by fixed-term gating in fuzz runs.
             fixedTermDurationSeconds: 0,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
-            transferAgentAddress: address(0),
-            ydmSpecificParams: abi.encode(ydmParams)
+            ydmSpecificParams: abi.encode(ydmParams),
+            gyroECLPPoolParams: DEPLOY_SCRIPT.demoGyroECLPPoolParams("sNUSD_FUZZ", 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48),
+            transferAgentAddress: address(0)
         });
 
         uint32 expiry = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
+        // TODO(day-fork): requires a Balancer Gyro pool factory + valid E-CLP params on a fork to run
         return DEPLOY_SCRIPT.deploy(config, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, expiry, roleAssignments, DEPLOYER.privateKey);
     }
 
@@ -152,14 +162,14 @@ contract AccountantAttributionFuzzTest is BaseTest {
         assertEq(ST.totalSupply(), 0, "ST total supply should be 0");
 
         SyncedAccountingState memory pre;
-        (pre,,) = IRoycoDawnKernel(address(KERNEL)).previewSyncTrancheAccounting(TrancheType.SENIOR);
+        (pre,,) = IRoycoDayKernel(address(KERNEL)).previewSyncTrancheAccounting(TrancheType.SENIOR);
         uint256 stEffPre = toUint256(pre.stEffectiveNAV);
 
         _bumpStoredConversionRate(WAD + _yield2WAD);
         _sync();
 
         SyncedAccountingState memory post;
-        (post,,) = IRoycoDawnKernel(address(KERNEL)).previewSyncTrancheAccounting(TrancheType.SENIOR);
+        (post,,) = IRoycoDayKernel(address(KERNEL)).previewSyncTrancheAccounting(TrancheType.SENIOR);
         uint256 stEffPost = toUint256(post.stEffectiveNAV);
 
         // INVARIANT — with zero ST supply, `stEffectiveNAV` must not absorb the next yield.

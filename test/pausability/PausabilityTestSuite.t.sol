@@ -52,9 +52,6 @@ contract PausabilityTestSuite is BaseTest {
     }
 
     function _deployMarket() internal returns (DeployScript.DeploymentResult memory) {
-        DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams memory kernelParams =
-            DeployScript.IdenticalERC4626SharesToAdminOracleQuoterKernelParams({ initialConversionRateWAD: WAD });
-
         DeployScript.AdaptiveCurveYDM_V2_Params memory ydmParams = DeployScript.AdaptiveCurveYDM_V2_Params({
             yieldShareAtZeroUtilWAD: 0.3e18, // Y_0 = Y_T (same as target)
             yieldShareAtTargetUtilWAD: 0.3e18,
@@ -72,12 +69,23 @@ contract PausabilityTestSuite is BaseTest {
             seniorTrancheSymbol: "RS-sNUSD",
             juniorTrancheName: "Royco Junior sNUSD",
             juniorTrancheSymbol: "RJ-sNUSD",
+            liquidityTrancheName: "Royco Liquidity sNUSD",
+            liquidityTrancheSymbol: "ROY-LT-sNUSD",
             seniorAsset: SNUSD,
             juniorAsset: SNUSD,
             stDustTolerance: 1,
             jtDustTolerance: 1,
-            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel,
-            kernelSpecificParams: abi.encode(kernelParams),
+            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel,
+            // A NON-ZERO `initialConversionRateWAD` makes the quoter use the admin-set rate (1:1 here) and
+            // never query the Chainlink feed, so this test does not depend on a live oracle. The oracle
+            // address must be non-zero (the quoter's initializer requires it) but is never read.
+            kernelSpecificParams: abi.encode(
+                DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
+                    initialConversionRateWAD: 1e18,
+                    baseAssetToNavAssetOracle: address(0xDA7A0FEED),
+                    stalenessThresholdSeconds: 48 hours
+                })
+            ),
             stSelfLiquidationBonusWAD: 0,
             enforceVaultSharesTransferWhitelist: false,
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
@@ -88,11 +96,13 @@ contract PausabilityTestSuite is BaseTest {
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
-            transferAgentAddress: address(0),
-            ydmSpecificParams: abi.encode(ydmParams)
+            ydmSpecificParams: abi.encode(ydmParams),
+            gyroECLPPoolParams: DEPLOY_SCRIPT.demoGyroECLPPoolParams("sNUSD", 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48),
+            transferAgentAddress: address(0)
         });
 
         uint32 scheduledOperationsExpirySeconds = DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds;
+        // TODO(day-fork): requires a Balancer Gyro pool factory + valid E-CLP params on a fork to run
         return
             DEPLOY_SCRIPT.deploy(config, OWNER_ADDRESS, PROTOCOL_FEE_RECIPIENT_ADDRESS, scheduledOperationsExpirySeconds, roleAssignments, DEPLOYER.privateKey);
     }

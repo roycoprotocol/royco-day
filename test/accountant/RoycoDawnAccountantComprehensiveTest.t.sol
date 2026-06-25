@@ -4,20 +4,26 @@ pragma solidity ^0.8.28;
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { RoycoDawnAccountant } from "../../src/accountant/RoycoDawnAccountant.sol";
+import { RoycoDayAccountant } from "../../src/accountant/RoycoDayAccountant.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
-import { IRoycoDawnAccountant, Operation } from "../../src/interfaces/IRoycoDawnAccountant.sol";
-import { MAX_PROTOCOL_FEE_WAD, MIN_COVERAGE_LOWER_BOUND_WAD, WAD, ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
-import { DawnUtilsLib } from "../../src/libraries/DawnUtilsLib.sol";
+import { IRoycoDayAccountant, Operation } from "../../src/interfaces/IRoycoDayAccountant.sol";
+import { MAX_PROTOCOL_FEE_WAD, WAD, ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
 import { MarketState, SyncedAccountingState } from "../../src/libraries/Types.sol";
-import { NAV_UNIT, UnitsMathLib, toUint256 } from "../../src/libraries/Units.sol";
+import { NAV_UNIT, UnitsMathLib, toNAVUnits, toUint256 } from "../../src/libraries/Units.sol";
+import { UtilsLib } from "../../src/libraries/UtilsLib.sol";
 import { AdaptiveCurveYDM_V1 } from "../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { BaseTest } from "../base/BaseTest.t.sol";
 import { MockYDMOverWAD, MockYDMWithInit } from "../mock/MockYDM.sol";
 
+// Day removed the minimum-coverage floor; file-level value pins fuzz coverage to [1%, 100%)
+uint256 constant MIN_COVERAGE_LOWER_BOUND_WAD = 0.01e18;
+// Placeholder LT YDM. Must be non-zero and never equal to any jtYDM used in these tests. These tests
+// run at minLiquidityWAD=0 with empty ltYDMInitializationData, so the LT YDM is never consulted.
+address constant LT_YDM_PLACEHOLDER = address(0x17d17d17D17D17d17d17D17d17D17D17D17d17D1);
+
 /**
- * @title RoycoDawnAccountantComprehensiveTest
- * @notice Comprehensive test suite for RoycoDawnAccountant achieving formal verification equivalence
+ * @title RoycoDayAccountantComprehensiveTest
+ * @notice Comprehensive test suite for RoycoDayAccountant achieving formal verification equivalence
  * @dev Tests all logic paths, state transitions, and invariants with fuzz testing
  *
  * Logic Path Coverage:
@@ -36,7 +42,7 @@ import { MockYDMOverWAD, MockYDMWithInit } from "../mock/MockYDM.sol";
  * - JT yield share capped at 100%
  * - Fee calculations bounded by MAX_PROTOCOL_FEE_WAD
  */
-contract RoycoDawnAccountantComprehensiveTest is BaseTest {
+contract RoycoDayAccountantComprehensiveTest is BaseTest {
     using Math for uint256;
     using UnitsMathLib for NAV_UNIT;
 
@@ -52,8 +58,8 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
     // STATE
     // =========================================================================
 
-    RoycoDawnAccountant internal accountantImpl;
-    IRoycoDawnAccountant internal accountant;
+    RoycoDayAccountant internal accountantImpl;
+    IRoycoDayAccountant internal accountant;
     AdaptiveCurveYDM_V1 internal adaptiveYDM;
     AccessManager internal accessManager;
 
@@ -71,7 +77,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         MOCK_KERNEL = makeAddr("MOCK_KERNEL");
         accessManager = new AccessManager(OWNER_ADDRESS);
         adaptiveYDM = new AdaptiveCurveYDM_V1(TARGET_COVERAGE_UTILIZATION_WAD);
-        accountantImpl = new RoycoDawnAccountant(MOCK_KERNEL);
+        accountantImpl = new RoycoDayAccountant(MOCK_KERNEL);
 
         accountant = _deployAccountant(
             MOCK_KERNEL,
@@ -105,11 +111,11 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         uint64 jtYieldAtFull
     )
         internal
-        returns (IRoycoDawnAccountant)
+        returns (IRoycoDayAccountant)
     {
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (jtYieldAtTarget, jtYieldAtFull));
 
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: stProtocolFeeWAD,
             jtProtocolFeeWAD: jtProtocolFeeWAD,
             jtYieldShareProtocolFeeWAD: 0,
@@ -120,12 +126,18 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
             fixedTermDurationSeconds: fixedTermDuration,
             liquidationCoverageUtilizationWAD: liquidationCoverageUtilizationWAD,
             stNAVDustTolerance: stNAVDustTolerance,
-            jtNAVDustTolerance: jtNAVDustTolerance
+            jtNAVDustTolerance: jtNAVDustTolerance,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
 
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
         address proxy = address(new ERC1967Proxy(address(accountantImpl), initData));
-        return IRoycoDawnAccountant(proxy);
+        return IRoycoDayAccountant(proxy);
     }
 
     // =========================================================================
@@ -136,10 +148,10 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
     /// @notice Test Case 1: deltaJT = 0, deltaST = 0 (no change)
     function test_deltaMatrix_noChange() public {
         _initializeAccountantState(100e18, 50e18);
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory before = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory before = accountant.getState();
 
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         assertEq(state.stEffectiveNAV, before.lastSTEffectiveNAV, "ST unchanged");
         assertEq(state.jtEffectiveNAV, before.lastJTEffectiveNAV, "JT unchanged");
@@ -151,13 +163,13 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
     /// @notice Test Case 2: deltaJT = 0, deltaST < 0 (ST loss, JT flat)
     function test_deltaMatrix_stLoss_jtFlat() public {
         _initializeAccountantState(100e18, 50e18);
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory before = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory before = accountant.getState();
         uint256 stEffBefore = toUint256(before.lastSTEffectiveNAV);
         uint256 jtEffBefore = toUint256(before.lastJTEffectiveNAV);
         uint256 stLoss = 20e18;
 
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 - stLoss), _nav(50e18));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 - stLoss), _nav(50e18), ZERO_NAV_UNITS);
 
         // JT provides coverage, ST stays protected
         assertEq(toUint256(state.jtCoverageImpermanentLoss), stLoss, "JT coverage IL equals loss");
@@ -169,14 +181,14 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
     /// @notice Test Case 3: deltaJT = 0, deltaST > 0 (ST gain, JT flat)
     function test_deltaMatrix_stGain_jtFlat() public {
         _initializeAccountantState(100e18, 50e18);
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory before = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory before = accountant.getState();
         uint256 stEffBefore = toUint256(before.lastSTEffectiveNAV);
         uint256 jtEffBefore = toUint256(before.lastJTEffectiveNAV);
         vm.warp(vm.getBlockTimestamp() + 1 days);
 
         uint256 stGain = 10e18;
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 + stGain), _nav(50e18));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 + stGain), _nav(50e18), ZERO_NAV_UNITS);
 
         // Yield distributed to both tranches
         assertGt(toUint256(state.jtEffectiveNAV), jtEffBefore, "JT receives yield share");
@@ -189,13 +201,13 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
     /// @notice Test Case 4: deltaJT < 0, deltaST = 0 (JT loss, ST flat)
     function test_deltaMatrix_jtLoss_stFlat() public {
         _initializeAccountantState(100e18, 50e18);
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory before = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory before = accountant.getState();
         uint256 stEffBefore = toUint256(before.lastSTEffectiveNAV);
         uint256 jtEffBefore = toUint256(before.lastJTEffectiveNAV);
         uint256 jtLoss = 10e18;
 
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18 - jtLoss));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18 - jtLoss), ZERO_NAV_UNITS);
 
         assertEq(toUint256(state.jtEffectiveNAV), jtEffBefore - jtLoss, "JT absorbs own loss");
         assertEq(toUint256(state.stEffectiveNAV), stEffBefore, "ST unchanged");
@@ -206,14 +218,14 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
     /// @notice Test Case 5: deltaJT < 0, deltaST < 0 (both lose)
     function test_deltaMatrix_bothLose() public {
         _initializeAccountantState(100e18, 50e18);
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory before = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory before = accountant.getState();
         uint256 stEffBefore = toUint256(before.lastSTEffectiveNAV);
         uint256 jtEffBefore = toUint256(before.lastJTEffectiveNAV);
         uint256 stLoss = 10e18;
         uint256 jtLoss = 5e18;
 
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 - stLoss), _nav(50e18 - jtLoss));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 - stLoss), _nav(50e18 - jtLoss), ZERO_NAV_UNITS);
 
         // JT absorbs own loss first, then provides coverage for ST
         assertEq(toUint256(state.jtCoverageImpermanentLoss), stLoss, "JT coverage IL");
@@ -232,7 +244,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         uint256 stGain = 15e18;
 
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 + stGain), _nav(50e18 - jtLoss));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 + stGain), _nav(50e18 - jtLoss), ZERO_NAV_UNITS);
 
         // JT absorbs own loss, then ST gain is distributed
         assertGt(toUint256(state.jtEffectiveNAV), 50e18 - jtLoss, "JT receives yield share after loss");
@@ -242,13 +254,13 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
     /// @notice Test Case 7: deltaJT > 0, deltaST = 0 (JT gain, ST flat)
     function test_deltaMatrix_jtGain_stFlat() public {
         _initializeAccountantState(100e18, 50e18);
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory before = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory before = accountant.getState();
         uint256 stEffBefore = toUint256(before.lastSTEffectiveNAV);
         uint256 jtEffBefore = toUint256(before.lastJTEffectiveNAV);
         uint256 jtGain = 10e18;
 
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18 + jtGain));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18 + jtGain), ZERO_NAV_UNITS);
 
         assertEq(toUint256(state.jtEffectiveNAV), jtEffBefore + jtGain, "JT accrues gain");
         assertEq(toUint256(state.stEffectiveNAV), stEffBefore, "ST unchanged");
@@ -260,13 +272,13 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
     /// @notice Test Case 8: deltaJT > 0, deltaST < 0 (JT gain, ST loss)
     function test_deltaMatrix_jtGain_stLoss() public {
         _initializeAccountantState(100e18, 50e18);
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory before = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory before = accountant.getState();
         uint256 stEffBefore = toUint256(before.lastSTEffectiveNAV);
         uint256 jtGain = 15e18;
         uint256 stLoss = 10e18;
 
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 - stLoss), _nav(50e18 + jtGain));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 - stLoss), _nav(50e18 + jtGain), ZERO_NAV_UNITS);
 
         // JT gain happens first, then ST loss causes coverage
         assertEq(toUint256(state.jtCoverageImpermanentLoss), stLoss, "JT coverage IL");
@@ -283,7 +295,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         uint256 stGain = 10e18;
 
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 + stGain), _nav(50e18 + jtGain));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 + stGain), _nav(50e18 + jtGain), ZERO_NAV_UNITS);
 
         // Both tranches gain, JT also gets share of ST yield
         uint256 totalGain = stGain + jtGain;
@@ -307,7 +319,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         uint256 newJT = uint256(int256(initialJT) + deltaJT);
 
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(newST), _nav(newJT));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(newST), _nav(newJT), ZERO_NAV_UNITS);
 
         _assertNAVConservation(state);
         _assertNonNegativity(state);
@@ -326,12 +338,12 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         // Create JT self IL
         uint256 jtLoss = 20e18;
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18 - jtLoss));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18 - jtLoss), ZERO_NAV_UNITS);
 
         // JT gains - JT self IL should be recovered
         uint256 jtGain = jtLoss + 5e18;
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18 - jtLoss + jtGain));
+        SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18 - jtLoss + jtGain), ZERO_NAV_UNITS);
 
         _assertNAVConservation(state2);
     }
@@ -343,7 +355,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         // Create JT coverage IL via ST loss
         uint256 stLoss = 20e18;
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state1 = accountant.preOpSyncTrancheAccounting(_nav(100e18 - stLoss), _nav(50e18));
+        SyncedAccountingState memory state1 = accountant.preOpSyncTrancheAccounting(_nav(100e18 - stLoss), _nav(50e18), ZERO_NAV_UNITS);
 
         assertEq(toUint256(state1.jtCoverageImpermanentLoss), stLoss, "JT coverage IL created");
 
@@ -351,7 +363,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         vm.warp(vm.getBlockTimestamp() + 1 days);
         uint256 stGain = stLoss + 10e18;
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(100e18 - stLoss + stGain), _nav(50e18));
+        SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(100e18 - stLoss + stGain), _nav(50e18), ZERO_NAV_UNITS);
 
         assertEq(toUint256(state2.jtCoverageImpermanentLoss), 0, "JT coverage IL fully recovered");
         _assertNAVConservation(state2);
@@ -364,13 +376,13 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         // Create JT coverage IL
         uint256 stLoss = 20e18;
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18 - stLoss), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18 - stLoss), _nav(50e18), ZERO_NAV_UNITS);
 
         // Partial ST gain - partial JT coverage IL recovery
         vm.warp(vm.getBlockTimestamp() + 1 days);
         uint256 partialGain = 5e18;
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 - stLoss + partialGain), _nav(50e18));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 - stLoss + partialGain), _nav(50e18), ZERO_NAV_UNITS);
 
         // Some IL should remain
         assertGt(toUint256(state.jtCoverageImpermanentLoss), 0, "partial IL remains");
@@ -385,10 +397,10 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
 
         // Step 1: JT loss reduces JT effective NAV
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(20e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(20e18), ZERO_NAV_UNITS);
         // Step 2: Massive ST loss exhausts JT effective NAV
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(50e18), _nav(20e18));
+        SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(50e18), _nav(20e18), ZERO_NAV_UNITS);
 
         // JT effective NAV should be fully consumed by absorbing its own loss and covering ST
         assertEq(toUint256(state2.jtEffectiveNAV), 0, "JT exhausted");
@@ -408,14 +420,14 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         // Create losses
         if (stLoss > 0 || jtLoss > 0) {
             vm.prank(MOCK_KERNEL);
-            SyncedAccountingState memory lossState = accountant.preOpSyncTrancheAccounting(_nav(initialST - stLoss), _nav(initialJT - jtLoss));
+            SyncedAccountingState memory lossState = accountant.preOpSyncTrancheAccounting(_nav(initialST - stLoss), _nav(initialJT - jtLoss), ZERO_NAV_UNITS);
             _assertNAVConservation(lossState);
         }
 
         // Recovery via JT gain
         if (recovery > 0) {
             vm.prank(MOCK_KERNEL);
-            SyncedAccountingState memory recoveryState = accountant.preOpSyncTrancheAccounting(_nav(initialST - stLoss), _nav(initialJT - jtLoss + recovery));
+            SyncedAccountingState memory recoveryState = accountant.preOpSyncTrancheAccounting(_nav(initialST - stLoss), _nav(initialJT - jtLoss + recovery), ZERO_NAV_UNITS);
 
             _assertNAVConservation(recoveryState);
         }
@@ -431,25 +443,25 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
 
         // PERPETUAL -> FIXED_TERM (via ST loss creating JT coverage IL)
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory s1 = accountant.preOpSyncTrancheAccounting(_nav(80e18), _nav(50e18));
+        SyncedAccountingState memory s1 = accountant.preOpSyncTrancheAccounting(_nav(80e18), _nav(50e18), ZERO_NAV_UNITS);
         assertEq(uint8(s1.marketState), uint8(MarketState.FIXED_TERM), "PERPETUAL -> FIXED_TERM");
 
         // FIXED_TERM -> PERPETUAL (via IL recovery before expiry)
         vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory s2 = accountant.preOpSyncTrancheAccounting(_nav(110e18), _nav(50e18));
+        SyncedAccountingState memory s2 = accountant.preOpSyncTrancheAccounting(_nav(110e18), _nav(50e18), ZERO_NAV_UNITS);
         assertEq(uint8(s2.marketState), uint8(MarketState.PERPETUAL), "FIXED_TERM -> PERPETUAL via recovery");
 
         // PERPETUAL -> FIXED_TERM again
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory s3 = accountant.preOpSyncTrancheAccounting(_nav(90e18), _nav(50e18));
+        SyncedAccountingState memory s3 = accountant.preOpSyncTrancheAccounting(_nav(90e18), _nav(50e18), ZERO_NAV_UNITS);
         assertEq(uint8(s3.marketState), uint8(MarketState.FIXED_TERM), "PERPETUAL -> FIXED_TERM again");
 
         // FIXED_TERM -> PERPETUAL (via expiry)
         uint32 termEnd = accountant.getState().fixedTermEndTimestamp;
         vm.warp(termEnd + 1);
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory s4 = accountant.preOpSyncTrancheAccounting(_nav(90e18), _nav(50e18));
+        SyncedAccountingState memory s4 = accountant.preOpSyncTrancheAccounting(_nav(90e18), _nav(50e18), ZERO_NAV_UNITS);
         assertEq(uint8(s4.marketState), uint8(MarketState.PERPETUAL), "FIXED_TERM -> PERPETUAL via expiry");
         assertEq(toUint256(s4.jtCoverageImpermanentLoss), 0, "IL cleared on expiry");
         _assertConfigFields(s4);
@@ -461,7 +473,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
 
         // Apply a large ST loss that fully exhausts JT effective NAV
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(50e18), _nav(20e18));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(50e18), _nav(20e18), ZERO_NAV_UNITS);
 
         // When JT effective is exhausted while ST effective remains, the market is forced perpetual (uncollateralized)
         if (toUint256(state.jtEffectiveNAV) == 0 && toUint256(state.stEffectiveNAV) > 0) {
@@ -472,7 +484,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
 
     /// @notice Test fixedTermDuration = 0 always stays perpetual
     function test_stateTransition_zeroDurationAlwaysPerpetual() public {
-        IRoycoDawnAccountant perpetualOnlyAccountant = _deployAccountant(
+        IRoycoDayAccountant perpetualOnlyAccountant = _deployAccountant(
             MOCK_KERNEL,
             ST_PROTOCOL_FEE_WAD,
             JT_PROTOCOL_FEE_WAD,
@@ -488,11 +500,11 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         );
 
         vm.prank(MOCK_KERNEL);
-        perpetualOnlyAccountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        perpetualOnlyAccountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // Even with ST loss, should stay PERPETUAL
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = perpetualOnlyAccountant.preOpSyncTrancheAccounting(_nav(80e18), _nav(50e18));
+        SyncedAccountingState memory state = perpetualOnlyAccountant.preOpSyncTrancheAccounting(_nav(80e18), _nav(50e18), ZERO_NAV_UNITS);
 
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "always PERPETUAL with zero duration");
     }
@@ -511,7 +523,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         uint256 stLoss = (initialST * lossPercent) / 100;
         uint256 newST = initialST - stLoss;
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(newST), _nav(initialJT));
+        accountant.preOpSyncTrancheAccounting(_nav(newST), _nav(initialJT), ZERO_NAV_UNITS);
 
         // Warp time
         vm.warp(vm.getBlockTimestamp() + timeElapsed);
@@ -519,7 +531,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         // Apply recovery
         uint256 stRecovery = (stLoss * recoveryPercent) / 100;
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory recoveryState = accountant.preOpSyncTrancheAccounting(_nav(newST + stRecovery), _nav(initialJT));
+        SyncedAccountingState memory recoveryState = accountant.preOpSyncTrancheAccounting(_nav(newST + stRecovery), _nav(initialJT), ZERO_NAV_UNITS);
 
         // Invariant: If JT coverage IL is 0, state must be PERPETUAL
         if (toUint256(recoveryState.jtCoverageImpermanentLoss) == 0) {
@@ -539,16 +551,16 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
 
         // Create JT coverage IL first
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(80e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(80e18), _nav(50e18), ZERO_NAV_UNITS);
 
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory before = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory before = accountant.getState();
         uint256 jtEffBefore = toUint256(before.lastJTEffectiveNAV);
         uint256 jtCoverageILBefore = toUint256(before.lastJTCoverageImpermanentLoss);
 
         // ST withdrawal - the JT raw NAV also decreases proportionally
         // This tests that the post-op correctly handles the coverage scaling
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(60e18), _nav(40e18), ZERO_NAV_UNITS);
+        SyncedAccountingState memory state = accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(60e18), _nav(40e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         // JT effective should decrease or stay same (coverage IL may be scaled)
         assertLe(toUint256(state.jtEffectiveNAV), jtEffBefore, "JT effective not increased");
@@ -564,17 +576,17 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
 
         // Create JT self IL
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(40e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(40e18), ZERO_NAV_UNITS);
 
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory before = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory before = accountant.getState();
         uint256 jtRawBefore = toUint256(before.lastJTRawNAV);
 
         // JT withdrawal
         uint256 newJTRaw = 30e18;
         vm.prank(MOCK_KERNEL);
-        accountant.postOpSyncTrancheAccounting(Operation.JT_REDEEM, _nav(100e18), _nav(newJTRaw), ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(Operation.JT_REDEEM, _nav(100e18), _nav(newJTRaw), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory after_ = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory after_ = accountant.getState();
         assertLe(toUint256(after_.lastJTRawNAV), jtRawBefore, "JT raw NAV decreased after redeem");
     }
 
@@ -591,9 +603,9 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         // Create JT coverage IL via ST loss
         uint256 stLoss = (initialST * lossPercent) / 100;
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(initialST - stLoss), _nav(initialJT));
+        accountant.preOpSyncTrancheAccounting(_nav(initialST - stLoss), _nav(initialJT), ZERO_NAV_UNITS);
 
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory before = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory before = accountant.getState();
 
         if (opType == 0) {
             // ST withdrawal
@@ -603,10 +615,10 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
 
             if (coverageILBefore > 0 && stEffBefore > stWithdraw) {
                 vm.prank(MOCK_KERNEL);
-                accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(initialST - stLoss - stWithdraw), _nav(initialJT), ZERO_NAV_UNITS);
+                accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(initialST - stLoss - stWithdraw), _nav(initialJT), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
                 // JT coverage IL should not increase on an ST withdrawal
-                IRoycoDawnAccountant.RoycoDawnAccountantState memory after_ = accountant.getState();
+                IRoycoDayAccountant.RoycoDayAccountantState memory after_ = accountant.getState();
                 assertLe(toUint256(after_.lastJTCoverageImpermanentLoss), coverageILBefore, "coverage IL scaled down");
 
                 uint256 rawSum = toUint256(after_.lastSTRawNAV) + toUint256(after_.lastJTRawNAV);
@@ -627,7 +639,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
 
         uint256 stGain = 20e18;
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 + stGain), _nav(50e18));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 + stGain), _nav(50e18), ZERO_NAV_UNITS);
 
         // Protocol fees should be accrued
         assertGt(toUint256(state.stProtocolFeeAccrued), 0, "ST protocol fee accrued");
@@ -643,7 +655,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
 
         uint256 jtGain = 10e18;
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18 + jtGain));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18 + jtGain), ZERO_NAV_UNITS);
 
         // JT protocol fees should be accrued on JT gains
         assertGt(toUint256(state.jtProtocolFeeAccrued), 0, "JT protocol fee accrued");
@@ -663,7 +675,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         vm.warp(vm.getBlockTimestamp() + timeElapsed);
 
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 + stGain), _nav(50e18 + jtGain));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 + stGain), _nav(50e18 + jtGain), ZERO_NAV_UNITS);
 
         // Protocol fees should never exceed the max fee on total gains
         uint256 maxPossibleSTFee = stGain.mulDiv(MAX_PROTOCOL_FEE_WAD, WAD, Math.Rounding.Ceil);
@@ -732,7 +744,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
 
     /// @notice Test beta = 0 (JT in RFR, no sensitivity to ST stress)
     function test_beta_zero() public {
-        IRoycoDawnAccountant zeroBetaAccountant = _deployAccountant(
+        IRoycoDayAccountant zeroBetaAccountant = _deployAccountant(
             MOCK_KERNEL,
             ST_PROTOCOL_FEE_WAD,
             JT_PROTOCOL_FEE_WAD,
@@ -748,7 +760,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         );
 
         vm.prank(MOCK_KERNEL);
-        zeroBetaAccountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        zeroBetaAccountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // With beta=0, more ST deposit is allowed given coverage
         NAV_UNIT maxDeposit = zeroBetaAccountant.maxSTDepositGivenCoverage(_nav(100e18), _nav(50e18));
@@ -761,7 +773,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         // Using 2e18 (200%) as a valid threshold
         uint256 liquidationCoverageUtilizationForBeta1 = 2e18;
 
-        IRoycoDawnAccountant oneBetaAccountant = _deployAccountant(
+        IRoycoDayAccountant oneBetaAccountant = _deployAccountant(
             MOCK_KERNEL,
             ST_PROTOCOL_FEE_WAD,
             JT_PROTOCOL_FEE_WAD,
@@ -777,7 +789,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         );
 
         vm.prank(MOCK_KERNEL);
-        oneBetaAccountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(200e18));
+        oneBetaAccountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(200e18), ZERO_NAV_UNITS);
 
         // With beta=1, coverage requirement is stricter
         NAV_UNIT maxDeposit = oneBetaAccountant.maxSTDepositGivenCoverage(_nav(100e18), _nav(200e18));
@@ -794,10 +806,10 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
 
         // Multiple syncs in same block
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(105e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(105e18), _nav(50e18), ZERO_NAV_UNITS);
 
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(110e18), _nav(50e18));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(110e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // Should still work without division by zero
         _assertNAVConservation(state);
@@ -811,13 +823,13 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         for (uint256 i = 0; i < 5; i++) {
             vm.warp(vm.getBlockTimestamp() + 1 days);
             vm.prank(MOCK_KERNEL);
-            accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+            accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
         }
 
         // Now apply a gain
         vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(120e18), _nav(50e18));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(120e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // JT should receive yield share
         assertGt(toUint256(state.jtEffectiveNAV), 50e18, "JT receives time-weighted yield");
@@ -859,7 +871,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
             currentJT = uint256(int256(currentJT) + deltaJT);
 
             vm.prank(MOCK_KERNEL);
-            SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(currentST), _nav(currentJT));
+            SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(currentST), _nav(currentJT), ZERO_NAV_UNITS);
 
             // INVARIANT: stRawNAV + jtRawNAV == stEffectiveNAV + jtEffectiveNAV
             _assertNAVConservation(state);
@@ -875,7 +887,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         _initializeAccountantState(initialST, initialJT);
 
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(initialST - stLoss), _nav(initialJT));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(initialST - stLoss), _nav(initialJT), ZERO_NAV_UNITS);
 
         // INVARIANT: If JT effective is exhausted while ST effective remains, the market must be perpetual
         if (toUint256(state.jtEffectiveNAV) == 0 && toUint256(state.stEffectiveNAV) > 0) {
@@ -895,7 +907,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
 
         vm.prank(MOCK_KERNEL);
         SyncedAccountingState memory state =
-            accountant.preOpSyncTrancheAccounting(_nav(uint256(int256(initialST) + deltaST)), _nav(uint256(int256(initialJT) + deltaJT)));
+            accountant.preOpSyncTrancheAccounting(_nav(uint256(int256(initialST) + deltaST)), _nav(uint256(int256(initialJT) + deltaJT)), ZERO_NAV_UNITS);
 
         _assertNonNegativity(state);
     }
@@ -910,7 +922,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
 
         // Create fixed term via loss
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state1 = accountant.preOpSyncTrancheAccounting(_nav(initialST - stLoss), _nav(initialJT));
+        SyncedAccountingState memory state1 = accountant.preOpSyncTrancheAccounting(_nav(initialST - stLoss), _nav(initialJT), ZERO_NAV_UNITS);
 
         if (uint8(state1.marketState) == uint8(MarketState.FIXED_TERM)) {
             // Warp past expiry
@@ -918,7 +930,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
             vm.warp(termEnd + 1);
 
             vm.prank(MOCK_KERNEL);
-            SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(initialST - stLoss), _nav(initialJT));
+            SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(initialST - stLoss), _nav(initialJT), ZERO_NAV_UNITS);
 
             // INVARIANT: Coverage IL cleared on perpetual transition
             assertEq(uint8(state2.marketState), uint8(MarketState.PERPETUAL));
@@ -937,7 +949,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         uint256 jtEffBefore = toUint256(accountant.getState().lastJTEffectiveNAV);
 
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(10e18 + stGain), _nav(200e18));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(10e18 + stGain), _nav(200e18), ZERO_NAV_UNITS);
 
         uint256 jtGainFromST = toUint256(state.jtEffectiveNAV) - jtEffBefore;
 
@@ -955,7 +967,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         vm.warp(vm.getBlockTimestamp() + 1 days);
 
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 + stGain), _nav(50e18 + jtGain));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 + stGain), _nav(50e18 + jtGain), ZERO_NAV_UNITS);
 
         // INVARIANT: Fees never exceed max percentage of gains
         assertLe(toUint256(state.stProtocolFeeAccrued), (stGain + jtGain).mulDiv(MAX_PROTOCOL_FEE_WAD, WAD, Math.Rounding.Ceil));
@@ -979,7 +991,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         if (satisfied && toUint256(maxDeposit) > 0) {
             // Depositing max should still satisfy coverage
             vm.prank(MOCK_KERNEL);
-            accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(stNav + toUint256(maxDeposit)), _nav(jtNav));
+            accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(stNav + toUint256(maxDeposit)), _nav(jtNav), ZERO_NAV_UNITS);
             // If we get here without revert, coverage is satisfied
             assertTrue(true);
         }
@@ -995,21 +1007,21 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
 
         // Day 1: ST deposit
         vm.prank(MOCK_KERNEL);
-        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(1100e18), _nav(500e18), ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(1100e18), _nav(500e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         // Day 2: Market gains
         vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(1150e18), _nav(520e18));
+        accountant.preOpSyncTrancheAccounting(_nav(1150e18), _nav(520e18), ZERO_NAV_UNITS);
 
         // Day 3: JT deposit
         vm.prank(MOCK_KERNEL);
-        accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(1150e18), _nav(620e18), ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(1150e18), _nav(620e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         // Day 4: Market crash
         vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state1 = accountant.preOpSyncTrancheAccounting(_nav(900e18), _nav(500e18));
+        SyncedAccountingState memory state1 = accountant.preOpSyncTrancheAccounting(_nav(900e18), _nav(500e18), ZERO_NAV_UNITS);
 
         // Should be in fixed term due to coverage provided
         assertEq(uint8(state1.marketState), uint8(MarketState.FIXED_TERM));
@@ -1018,12 +1030,12 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         // Day 5: Partial recovery
         vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(1000e18), _nav(520e18));
+        SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(1000e18), _nav(520e18), ZERO_NAV_UNITS);
         _assertNAVConservation(state2);
 
         // Day 6: ST withdrawal
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state3 = accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(900e18), _nav(520e18), ZERO_NAV_UNITS);
+        SyncedAccountingState memory state3 = accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(900e18), _nav(520e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         _assertNAVConservation(state3);
     }
 
@@ -1053,7 +1065,7 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
             jtNav = uint256(int256(jtNav) + jtDelta);
 
             vm.prank(MOCK_KERNEL);
-            SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(stNav), _nav(jtNav));
+            SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(stNav), _nav(jtNav), ZERO_NAV_UNITS);
 
             _assertNAVConservation(state);
             _assertNonNegativity(state);
@@ -1072,25 +1084,25 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
         vm.startPrank(MOCK_KERNEL);
 
         // First sync with zero state
-        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0));
+        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0), ZERO_NAV_UNITS);
 
         // Simulate JT deposit if jtNav > 0
         if (jtNav > 0) {
             accountant.postOpSyncTrancheAccounting(
                 Operation.JT_DEPOSIT,
                 _nav(0), // stPostOpRawNAV
-                _nav(jtNav), // jtPostOpRawNAV
+                _nav(jtNav), ZERO_NAV_UNITS, // jtPostOpRawNAV
                 ZERO_NAV_UNITS // stRedemptionBonusNAV
             );
         }
 
         // Simulate ST deposit if stNav > 0
         if (stNav > 0) {
-            accountant.preOpSyncTrancheAccounting(_nav(0), _nav(jtNav));
+            accountant.preOpSyncTrancheAccounting(_nav(0), _nav(jtNav), ZERO_NAV_UNITS);
             accountant.postOpSyncTrancheAccounting(
                 Operation.ST_DEPOSIT,
                 _nav(stNav), // stPostOpRawNAV
-                _nav(jtNav), // jtPostOpRawNAV
+                _nav(jtNav), ZERO_NAV_UNITS, // jtPostOpRawNAV
                 ZERO_NAV_UNITS // stRedemptionBonusNAV
             );
         }
@@ -1120,10 +1132,10 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
     }
 
     function _assertConfigFields(SyncedAccountingState memory state) internal view {
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory accountantState = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory accountantState = accountant.getState();
 
         // Verify coverageUtilization is computed correctly
-        uint256 expectedUtil = DawnUtilsLib.computeCoverageUtilization(
+        uint256 expectedUtil = UtilsLib.computeCoverageUtilization(
             state.stRawNAV, state.jtRawNAV, accountantState.betaWAD, accountantState.minCoverageWAD, state.jtEffectiveNAV
         );
         assertEq(state.coverageUtilizationWAD, expectedUtil, "coverageUtilizationWAD mismatch");
@@ -1139,12 +1151,12 @@ contract RoycoDawnAccountantComprehensiveTest is BaseTest {
 // REVERT TESTS CONTRACT
 // =============================================================================
 
-contract RoycoDawnAccountantRevertTest is BaseTest {
+contract RoycoDayAccountantRevertTest is BaseTest {
     using Math for uint256;
     using UnitsMathLib for NAV_UNIT;
 
-    RoycoDawnAccountant internal accountantImpl;
-    IRoycoDawnAccountant internal accountant;
+    RoycoDayAccountant internal accountantImpl;
+    IRoycoDayAccountant internal accountant;
     AdaptiveCurveYDM_V1 internal adaptiveYDM;
     AccessManager internal accessManager;
 
@@ -1158,7 +1170,7 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
         NON_KERNEL = makeAddr("NON_KERNEL");
         accessManager = new AccessManager(OWNER_ADDRESS);
         adaptiveYDM = new AdaptiveCurveYDM_V1(TARGET_COVERAGE_UTILIZATION_WAD);
-        accountantImpl = new RoycoDawnAccountant(MOCK_KERNEL);
+        accountantImpl = new RoycoDayAccountant(MOCK_KERNEL);
 
         accountant = _deployAccountant(
             MOCK_KERNEL,
@@ -1188,11 +1200,11 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
         uint256 liquidationCoverageUtilizationWAD
     )
         internal
-        returns (IRoycoDawnAccountant)
+        returns (IRoycoDayAccountant)
     {
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: stProtocolFeeWAD,
             jtProtocolFeeWAD: jtProtocolFeeWAD,
             jtYieldShareProtocolFeeWAD: 0,
@@ -1203,12 +1215,18 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
             fixedTermDurationSeconds: fixedTermDuration,
             liquidationCoverageUtilizationWAD: liquidationCoverageUtilizationWAD,
             stNAVDustTolerance: stNAVDustTolerance,
-            jtNAVDustTolerance: jtNAVDustTolerance
+            jtNAVDustTolerance: jtNAVDustTolerance,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
 
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
         address proxy = address(new ERC1967Proxy(address(accountantImpl), initData));
-        return IRoycoDawnAccountant(proxy);
+        return IRoycoDayAccountant(proxy);
     }
 
     function _nav(uint256 value) internal pure returns (NAV_UNIT) {
@@ -1222,30 +1240,30 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
     /// @notice Test syncTrancheAccounting reverts when called by non-kernel
     function test_revert_preOpSync_onlyKernel() public {
         vm.prank(NON_KERNEL);
-        vm.expectRevert(IRoycoDawnAccountant.ONLY_ROYCO_KERNEL.selector);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
     }
 
     /// @notice Test postOpSyncTrancheAccounting reverts when called by non-kernel
     function test_revert_postOpSync_onlyKernel() public {
         // First initialize with kernel
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // Then try to call postOpSync as non-kernel
         vm.prank(NON_KERNEL);
-        vm.expectRevert(IRoycoDawnAccountant.ONLY_ROYCO_KERNEL.selector);
-        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
+        vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
+        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(100e18), _nav(50e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
     }
 
     /// @notice Test postOpSyncTrancheAccountingAndEnforceCoverage reverts when called by non-kernel
     function test_revert_postOpSyncAndEnforceCoverage_onlyKernel() public {
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         vm.prank(NON_KERNEL);
-        vm.expectRevert(IRoycoDawnAccountant.ONLY_ROYCO_KERNEL.selector);
-        accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(100e18), _nav(50e18));
+        vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
+        accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
     }
 
     // =========================================================================
@@ -1255,67 +1273,67 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
     /// @notice Test ST_INCREASE_NAV reverts when deltaST < 0
     function test_revert_postOpSync_stIncreaseNAV_negativeDelta() public {
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // Try to do ST_INCREASE_NAV with decreasing ST
         vm.prank(MOCK_KERNEL);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDawnAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
-        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(90e18), _nav(50e18), ZERO_NAV_UNITS);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
+        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(90e18), _nav(50e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
     }
 
     /// @notice Test JT_DEPOSIT reverts when deltaJT < 0
     function test_revert_postOpSync_jtIncreaseNAV_negativeDelta() public {
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // Try to do JT_DEPOSIT with decreasing JT
         vm.prank(MOCK_KERNEL);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDawnAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
-        accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(100e18), _nav(40e18), ZERO_NAV_UNITS);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
+        accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(100e18), _nav(40e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
     }
 
     /// @notice Test ST_DECREASE_NAV reverts when deltaST > 0
     function test_revert_postOpSync_stDecreaseNAV_positiveDelta() public {
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // Try to do ST_DECREASE_NAV with increasing ST
         vm.prank(MOCK_KERNEL);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDawnAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_REDEEM));
-        accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(110e18), _nav(50e18), ZERO_NAV_UNITS);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_REDEEM));
+        accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(110e18), _nav(50e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
     }
 
     /// @notice Test ST_DECREASE_NAV reverts when deltaJT > 0
     function test_revert_postOpSync_stDecreaseNAV_jtPositiveDelta() public {
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // ST_DECREASE_NAV requires both deltas <= 0
         vm.prank(MOCK_KERNEL);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDawnAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_REDEEM));
-        accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(90e18), _nav(60e18), ZERO_NAV_UNITS);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_REDEEM));
+        accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(90e18), _nav(60e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
     }
 
     /// @notice Test JT_DECREASE_NAV reverts when deltaJT > 0
     function test_revert_postOpSync_jtDecreaseNAV_positiveDelta() public {
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // Try to do JT_DECREASE_NAV with increasing JT
         vm.prank(MOCK_KERNEL);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDawnAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_REDEEM));
-        accountant.postOpSyncTrancheAccounting(Operation.JT_REDEEM, _nav(100e18), _nav(60e18), ZERO_NAV_UNITS);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_REDEEM));
+        accountant.postOpSyncTrancheAccounting(Operation.JT_REDEEM, _nav(100e18), _nav(60e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
     }
 
     /// @notice Test JT_DECREASE_NAV reverts when deltaST > 0
     function test_revert_postOpSync_jtDecreaseNAV_stPositiveDelta() public {
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // JT_DECREASE_NAV requires both deltas <= 0
         vm.prank(MOCK_KERNEL);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDawnAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_REDEEM));
-        accountant.postOpSyncTrancheAccounting(Operation.JT_REDEEM, _nav(110e18), _nav(40e18), ZERO_NAV_UNITS);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_REDEEM));
+        accountant.postOpSyncTrancheAccounting(Operation.JT_REDEEM, _nav(110e18), _nav(40e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
     }
 
     // =========================================================================
@@ -1326,17 +1344,17 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
     function test_revert_postOpSyncAndEnforceCoverage_unsatisfied() public {
         // Initialize with high JT to satisfy coverage
         vm.startPrank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0));
-        accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(0), _nav(100e18), ZERO_NAV_UNITS);
-        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(100e18), _nav(100e18), ZERO_NAV_UNITS);
+        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0), ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(0), _nav(100e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(100e18), _nav(100e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         vm.stopPrank();
 
         // Try to add ST deposit that would violate coverage
         // With 20% coverage, 100 JT can cover up to 500 ST
         // Adding more ST would violate the requirement
         vm.prank(MOCK_KERNEL);
-        vm.expectRevert(IRoycoDawnAccountant.COVERAGE_REQUIREMENT_UNSATISFIED.selector);
-        accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(600e18), _nav(100e18));
+        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_UNSATISFIED.selector);
+        accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(600e18), _nav(100e18), ZERO_NAV_UNITS);
     }
 
     // =========================================================================
@@ -1347,7 +1365,7 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
     function test_revert_initialization_excessiveSTProtocolFee() public {
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: uint64(MAX_PROTOCOL_FEE_WAD + 1), // Exceeds max
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: 0,
@@ -1358,11 +1376,17 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE
+            jtNAVDustTolerance: DUST_TOLERANCE,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
 
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
-        vm.expectRevert(IRoycoDawnAccountant.MAX_PROTOCOL_FEE_EXCEEDED.selector);
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
+        vm.expectRevert(IRoycoDayAccountant.MAX_PROTOCOL_FEE_EXCEEDED.selector);
         new ERC1967Proxy(address(accountantImpl), initData);
     }
 
@@ -1370,7 +1394,7 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
     function test_revert_initialization_excessiveJTProtocolFee() public {
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: uint64(MAX_PROTOCOL_FEE_WAD + 1), // Exceeds max
             jtYieldShareProtocolFeeWAD: 0,
@@ -1381,42 +1405,55 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE
+            jtNAVDustTolerance: DUST_TOLERANCE,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
 
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
-        vm.expectRevert(IRoycoDawnAccountant.MAX_PROTOCOL_FEE_EXCEEDED.selector);
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
+        vm.expectRevert(IRoycoDayAccountant.MAX_PROTOCOL_FEE_EXCEEDED.selector);
         new ERC1967Proxy(address(accountantImpl), initData);
     }
 
-    /// @notice Test initialization reverts on coverage below minimum
+    /// @notice Day removed the minimum-coverage floor; sub-1% coverage is valid (initialization succeeds)
     function test_revert_initialization_coverageBelowMin() public {
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: 0,
-            minCoverageWAD: uint64(MIN_COVERAGE_LOWER_BOUND_WAD - 1), // Below min
+            minCoverageWAD: uint64(MIN_COVERAGE_LOWER_BOUND_WAD - 1), // Sub-1% coverage
             betaWAD: BETA_WAD,
             jtYDM: address(adaptiveYDM),
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE
+            jtNAVDustTolerance: DUST_TOLERANCE,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
 
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
-        vm.expectRevert(IRoycoDawnAccountant.INVALID_COVERAGE_CONFIG.selector);
-        new ERC1967Proxy(address(accountantImpl), initData);
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
+        // Day removed the minimum-coverage floor; sub-1% coverage is valid
+        IRoycoDayAccountant newAccountant = IRoycoDayAccountant(address(new ERC1967Proxy(address(accountantImpl), initData)));
+        assertEq(newAccountant.getState().minCoverageWAD, uint64(MIN_COVERAGE_LOWER_BOUND_WAD - 1));
     }
 
     /// @notice Test initialization reverts on coverage >= WAD
     function test_revert_initialization_coverageAboveMax() public {
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: 0,
@@ -1427,11 +1464,17 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE
+            jtNAVDustTolerance: DUST_TOLERANCE,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
 
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
-        vm.expectRevert(IRoycoDawnAccountant.INVALID_COVERAGE_CONFIG.selector);
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
+        vm.expectRevert(IRoycoDayAccountant.INVALID_COVERAGE_CONFIG.selector);
         new ERC1967Proxy(address(accountantImpl), initData);
     }
 
@@ -1439,7 +1482,7 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
     function test_revert_initialization_nullYDM() public {
         bytes memory ydmInitData = "";
 
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: 0,
@@ -1450,10 +1493,16 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE
+            jtNAVDustTolerance: DUST_TOLERANCE,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
 
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
         vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
         new ERC1967Proxy(address(accountantImpl), initData);
     }
@@ -1468,7 +1517,7 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
         uint256 denominator = WAD + COVERAGE_WAD - betaCov;
         uint256 maxLTV = numerator.mulDiv(WAD, denominator, Math.Rounding.Ceil);
 
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: 0,
@@ -1479,11 +1528,17 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: uint64(maxLTV), // LLTV <= maxLTV is invalid
             stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE
+            jtNAVDustTolerance: DUST_TOLERANCE,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
 
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
-        vm.expectRevert(IRoycoDawnAccountant.INVALID_COVERAGE_CONFIG.selector);
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
+        vm.expectRevert(IRoycoDayAccountant.INVALID_COVERAGE_CONFIG.selector);
         new ERC1967Proxy(address(accountantImpl), initData);
     }
 
@@ -1491,7 +1546,7 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
     function test_revert_initialization_lltvTooHigh() public {
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: 0,
@@ -1502,11 +1557,17 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: uint64(WAD), // LLTV >= WAD is invalid
             stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE
+            jtNAVDustTolerance: DUST_TOLERANCE,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
 
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
-        vm.expectRevert(IRoycoDawnAccountant.INVALID_COVERAGE_CONFIG.selector);
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
+        vm.expectRevert(IRoycoDayAccountant.INVALID_COVERAGE_CONFIG.selector);
         new ERC1967Proxy(address(accountantImpl), initData);
     }
 
@@ -1515,7 +1576,7 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
         // coverage = 0.9e18, beta = 1.2e18 => coverage * beta = 1.08e18 >= WAD
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: 0,
@@ -1526,11 +1587,17 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE
+            jtNAVDustTolerance: DUST_TOLERANCE,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
 
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
-        vm.expectRevert(IRoycoDawnAccountant.INVALID_COVERAGE_CONFIG.selector);
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
+        vm.expectRevert(IRoycoDayAccountant.INVALID_COVERAGE_CONFIG.selector);
         new ERC1967Proxy(address(accountantImpl), initData);
     }
 
@@ -1545,8 +1612,8 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
         jtNav = bound(jtNav, 1e6, 1e30);
 
         vm.prank(caller);
-        vm.expectRevert(IRoycoDawnAccountant.ONLY_ROYCO_KERNEL.selector);
-        accountant.preOpSyncTrancheAccounting(_nav(stNav), _nav(jtNav));
+        vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
+        accountant.preOpSyncTrancheAccounting(_nav(stNav), _nav(jtNav), ZERO_NAV_UNITS);
     }
 
     /// @notice Fuzz test post-op invalid state transitions
@@ -1558,7 +1625,7 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
         opType = uint8(bound(opType, 0, 3));
 
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(initialST), _nav(initialJT));
+        accountant.preOpSyncTrancheAccounting(_nav(initialST), _nav(initialJT), ZERO_NAV_UNITS);
 
         Operation op = Operation(opType);
         bool shouldRevert = false;
@@ -1570,8 +1637,8 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
 
         if (shouldRevert) {
             vm.prank(MOCK_KERNEL);
-            vm.expectRevert(abi.encodeWithSelector(IRoycoDawnAccountant.INVALID_POST_OP_STATE.selector, op));
-            accountant.postOpSyncTrancheAccounting(op, _nav(newST), _nav(newJT), ZERO_NAV_UNITS);
+            vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, op));
+            accountant.postOpSyncTrancheAccounting(op, _nav(newST), _nav(newJT), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         }
     }
 }
@@ -1580,12 +1647,12 @@ contract RoycoDawnAccountantRevertTest is BaseTest {
 // FOUNDRY INVARIANT TESTS CONTRACT
 // =============================================================================
 
-contract RoycoDawnAccountantInvariantTest is BaseTest {
+contract RoycoDayAccountantInvariantTest is BaseTest {
     using Math for uint256;
     using UnitsMathLib for NAV_UNIT;
 
-    RoycoDawnAccountant internal accountantImpl;
-    IRoycoDawnAccountant internal accountant;
+    RoycoDayAccountant internal accountantImpl;
+    IRoycoDayAccountant internal accountant;
     AdaptiveCurveYDM_V1 internal adaptiveYDM;
     AccessManager internal accessManager;
     AccountantHandler internal handler;
@@ -1598,11 +1665,11 @@ contract RoycoDawnAccountantInvariantTest is BaseTest {
         MOCK_KERNEL = makeAddr("MOCK_KERNEL");
         accessManager = new AccessManager(OWNER_ADDRESS);
         adaptiveYDM = new AdaptiveCurveYDM_V1(TARGET_COVERAGE_UTILIZATION_WAD);
-        accountantImpl = new RoycoDawnAccountant(MOCK_KERNEL);
+        accountantImpl = new RoycoDayAccountant(MOCK_KERNEL);
 
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: 0,
@@ -1613,16 +1680,22 @@ contract RoycoDawnAccountantInvariantTest is BaseTest {
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE
+            jtNAVDustTolerance: DUST_TOLERANCE,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
 
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
         address proxy = address(new ERC1967Proxy(address(accountantImpl), initData));
-        accountant = IRoycoDawnAccountant(proxy);
+        accountant = IRoycoDayAccountant(proxy);
 
         // Initialize accountant state
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(NAV_UNIT.wrap(100e18), NAV_UNIT.wrap(50e18));
+        accountant.preOpSyncTrancheAccounting(NAV_UNIT.wrap(100e18), NAV_UNIT.wrap(50e18), ZERO_NAV_UNITS);
 
         // Deploy handler
         handler = new AccountantHandler(accountant, MOCK_KERNEL);
@@ -1634,7 +1707,7 @@ contract RoycoDawnAccountantInvariantTest is BaseTest {
     /// @notice INVARIANT: NAV Conservation must always hold
     /// stRawNAV + jtRawNAV == stEffectiveNAV + jtEffectiveNAV
     function invariant_navConservation() public view {
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory state = accountant.getState();
         uint256 rawSum = toUint256(state.lastSTRawNAV) + toUint256(state.lastJTRawNAV);
         uint256 effectiveSum = toUint256(state.lastSTEffectiveNAV) + toUint256(state.lastJTEffectiveNAV);
         assertEq(rawSum, effectiveSum, "INVARIANT VIOLATED: NAV conservation");
@@ -1643,7 +1716,7 @@ contract RoycoDawnAccountantInvariantTest is BaseTest {
     /// @notice INVARIANT: Effective NAVs are within uint128 bounds (no overflow)
     /// This verifies the type system is working correctly
     function invariant_navBounds() public view {
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory state = accountant.getState();
         assertTrue(toUint256(state.lastSTEffectiveNAV) <= type(uint128).max, "INVARIANT VIOLATED: ST effective NAV overflow");
         assertTrue(toUint256(state.lastJTEffectiveNAV) <= type(uint128).max, "INVARIANT VIOLATED: JT effective NAV overflow");
         assertTrue(toUint256(state.lastSTRawNAV) <= type(uint128).max, "INVARIANT VIOLATED: ST raw NAV overflow");
@@ -1652,7 +1725,7 @@ contract RoycoDawnAccountantInvariantTest is BaseTest {
 
     /// @notice INVARIANT: All NAV values are non-negative
     function invariant_nonNegativity() public view {
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory state = accountant.getState();
         assertTrue(toUint256(state.lastSTRawNAV) >= 0, "INVARIANT VIOLATED: stRawNAV negative");
         assertTrue(toUint256(state.lastJTRawNAV) >= 0, "INVARIANT VIOLATED: jtRawNAV negative");
         assertTrue(toUint256(state.lastSTEffectiveNAV) >= 0, "INVARIANT VIOLATED: stEffectiveNAV negative");
@@ -1663,7 +1736,7 @@ contract RoycoDawnAccountantInvariantTest is BaseTest {
     /// @notice INVARIANT: In PERPETUAL state, coverage IL must be cleared
     /// When transitioning to PERPETUAL, jtCoverageImpermanentLoss should be 0
     function invariant_perpetualStateConsistency() public view {
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory state = accountant.getState();
         // In perpetual, any remaining JT coverage IL can only be dust-level: the forced-perpetual transition erases it,
         // and the dust transition only stays perpetual when the coverage IL is within the effective dust tolerance
         if (state.lastMarketState == MarketState.PERPETUAL) {
@@ -1678,7 +1751,7 @@ contract RoycoDawnAccountantInvariantTest is BaseTest {
     /// @notice INVARIANT: IL types are bounded by uint128 max
     /// Verifies no overflow in IL tracking
     function invariant_ilBounds() public view {
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory state = accountant.getState();
         assertTrue(toUint256(state.lastJTCoverageImpermanentLoss) <= type(uint128).max, "INVARIANT VIOLATED: JT coverage IL overflow");
     }
 
@@ -1691,7 +1764,7 @@ contract RoycoDawnAccountantInvariantTest is BaseTest {
             return;
         }
 
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory state = accountant.getState();
 
         uint256 stEffective = toUint256(state.lastSTEffectiveNAV);
         uint256 jtEffective = toUint256(state.lastJTEffectiveNAV);
@@ -1728,7 +1801,7 @@ contract RoycoDawnAccountantInvariantTest is BaseTest {
 contract AccountantHandler is BaseTest {
     using UnitsMathLib for NAV_UNIT;
 
-    IRoycoDawnAccountant public accountant;
+    IRoycoDayAccountant public accountant;
     address public kernel;
 
     uint256 public currentSTNav;
@@ -1741,11 +1814,11 @@ contract AccountantHandler is BaseTest {
     uint256 constant MIN_NAV = 1e6;
     uint256 constant MAX_NAV = 1e30;
 
-    constructor(IRoycoDawnAccountant _accountant, address _kernel) {
+    constructor(IRoycoDayAccountant _accountant, address _kernel) {
         accountant = _accountant;
         kernel = _kernel;
 
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory state = accountant.getState();
         currentSTNav = toUint256(state.lastSTRawNAV);
         currentJTNav = toUint256(state.lastJTRawNAV);
         _lastOpWasPreOp = true; // Initial state was set by preOpSync
@@ -1777,7 +1850,7 @@ contract AccountantHandler is BaseTest {
 
         // Execute sync
         vm.prank(kernel);
-        try accountant.preOpSyncTrancheAccounting(NAV_UNIT.wrap(uint128(newSTNav)), NAV_UNIT.wrap(uint128(newJTNav))) {
+        try accountant.preOpSyncTrancheAccounting(NAV_UNIT.wrap(uint128(newSTNav)), NAV_UNIT.wrap(uint128(newJTNav)), ZERO_NAV_UNITS) {
             currentSTNav = newSTNav;
             currentJTNav = newJTNav;
             _lastOpWasPreOp = true;
@@ -1795,7 +1868,7 @@ contract AccountantHandler is BaseTest {
 
         vm.prank(kernel);
         try accountant.postOpSyncTrancheAccounting(
-            Operation.ST_DEPOSIT, NAV_UNIT.wrap(uint128(newSTNav)), NAV_UNIT.wrap(uint128(currentJTNav)), ZERO_NAV_UNITS
+            Operation.ST_DEPOSIT, NAV_UNIT.wrap(uint128(newSTNav)), NAV_UNIT.wrap(uint128(currentJTNav)), ZERO_NAV_UNITS, ZERO_NAV_UNITS
         ) {
             currentSTNav = newSTNav;
             _lastOpWasPreOp = false;
@@ -1813,7 +1886,7 @@ contract AccountantHandler is BaseTest {
 
         vm.prank(kernel);
         try accountant.postOpSyncTrancheAccounting(
-            Operation.JT_DEPOSIT, NAV_UNIT.wrap(uint128(currentSTNav)), NAV_UNIT.wrap(uint128(newJTNav)), ZERO_NAV_UNITS
+            Operation.JT_DEPOSIT, NAV_UNIT.wrap(uint128(currentSTNav)), NAV_UNIT.wrap(uint128(newJTNav)), ZERO_NAV_UNITS, ZERO_NAV_UNITS
         ) {
             currentJTNav = newJTNav;
             _lastOpWasPreOp = false;
@@ -1833,7 +1906,7 @@ contract AccountantHandler is BaseTest {
         uint256 newJTNav = currentJTNav;
 
         vm.prank(kernel);
-        try accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, NAV_UNIT.wrap(uint128(newSTNav)), NAV_UNIT.wrap(uint128(newJTNav)), ZERO_NAV_UNITS) {
+        try accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, NAV_UNIT.wrap(uint128(newSTNav)), NAV_UNIT.wrap(uint128(newJTNav)), ZERO_NAV_UNITS, ZERO_NAV_UNITS) {
             currentSTNav = newSTNav;
             currentJTNav = newJTNav;
             _lastOpWasPreOp = false;
@@ -1851,7 +1924,7 @@ contract AccountantHandler is BaseTest {
 
         vm.prank(kernel);
         try accountant.postOpSyncTrancheAccounting(
-            Operation.JT_REDEEM, NAV_UNIT.wrap(uint128(currentSTNav)), NAV_UNIT.wrap(uint128(newJTNav)), ZERO_NAV_UNITS
+            Operation.JT_REDEEM, NAV_UNIT.wrap(uint128(currentSTNav)), NAV_UNIT.wrap(uint128(newJTNav)), ZERO_NAV_UNITS, ZERO_NAV_UNITS
         ) {
             currentJTNav = newJTNav;
             _lastOpWasPreOp = false;
@@ -1866,7 +1939,7 @@ contract AccountantHandler is BaseTest {
 // =============================================================================
 
 /**
- * @title RoycoDawnAccountantLLTVInvariantTest
+ * @title RoycoDayAccountantLLTVInvariantTest
  * @notice Tests that if LLTV wasn't breached in preOpSync, it cannot be breached in postOpSync
  * @dev Key invariant: PostOpSync cannot breach LLTV because:
  *      1. PostOpSync doesn't process PnL (no external gains/losses that could cause IL)
@@ -1875,12 +1948,12 @@ contract AccountantHandler is BaseTest {
  *      4. ST withdrawals decrease both numerator and denominator proportionally
  *      5. JT withdrawals enforce coverage
  */
-contract RoycoDawnAccountantLLTVInvariantTest is BaseTest {
+contract RoycoDayAccountantLLTVInvariantTest is BaseTest {
     using Math for uint256;
     using UnitsMathLib for NAV_UNIT;
 
-    RoycoDawnAccountant internal accountantImpl;
-    IRoycoDawnAccountant internal accountant;
+    RoycoDayAccountant internal accountantImpl;
+    IRoycoDayAccountant internal accountant;
     AdaptiveCurveYDM_V1 internal adaptiveYDM;
     AccessManager internal accessManager;
 
@@ -1894,11 +1967,11 @@ contract RoycoDawnAccountantLLTVInvariantTest is BaseTest {
         MOCK_KERNEL = makeAddr("MOCK_KERNEL");
         accessManager = new AccessManager(OWNER_ADDRESS);
         adaptiveYDM = new AdaptiveCurveYDM_V1(TARGET_COVERAGE_UTILIZATION_WAD);
-        accountantImpl = new RoycoDawnAccountant(MOCK_KERNEL);
+        accountantImpl = new RoycoDayAccountant(MOCK_KERNEL);
 
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: 0,
@@ -1909,12 +1982,18 @@ contract RoycoDawnAccountantLLTVInvariantTest is BaseTest {
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE
+            jtNAVDustTolerance: DUST_TOLERANCE,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
 
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
         address proxy = address(new ERC1967Proxy(address(accountantImpl), initData));
-        accountant = IRoycoDawnAccountant(proxy);
+        accountant = IRoycoDayAccountant(proxy);
     }
 
     function _nav(uint256 value) internal pure returns (NAV_UNIT) {
@@ -1929,13 +2008,13 @@ contract RoycoDawnAccountantLLTVInvariantTest is BaseTest {
     function _initializeState(uint256 stNav, uint256 jtNav) internal {
         vm.startPrank(MOCK_KERNEL);
         // Initialize timestamps and market state via no-op preOp sync from zero
-        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0));
+        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0), ZERO_NAV_UNITS);
         // JT must deposit first so coverage is satisfied when ST follows
         if (jtNav > 0) {
-            accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(0), _nav(jtNav), ZERO_NAV_UNITS);
+            accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(0), _nav(jtNav), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         }
         if (stNav > 0) {
-            accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(stNav), _nav(jtNav), ZERO_NAV_UNITS);
+            accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(stNav), _nav(jtNav), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         }
         vm.stopPrank();
     }
@@ -1955,7 +2034,7 @@ contract RoycoDawnAccountantLLTVInvariantTest is BaseTest {
         _initializeState(initialST, initialJT);
 
         // Get state after preOpSync
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory preOpState = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory preOpState = accountant.getState();
         uint256 preOpLTV = _computeLTV(toUint256(preOpState.lastSTEffectiveNAV), toUint256(preOpState.lastJTEffectiveNAV));
 
         // Verify preOp didn't breach LLTV
@@ -1966,7 +2045,7 @@ contract RoycoDawnAccountantLLTVInvariantTest is BaseTest {
 
         // Execute ST deposit via postOpSync
         vm.prank(MOCK_KERNEL);
-        try accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(initialST + depositAmount), _nav(initialJT), ZERO_NAV_UNITS) returns (
+        try accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(initialST + depositAmount), _nav(initialJT), ZERO_NAV_UNITS, ZERO_NAV_UNITS) returns (
             SyncedAccountingState memory postOpState
         ) {
             // Calculate post-op LTV
@@ -1988,13 +2067,13 @@ contract RoycoDawnAccountantLLTVInvariantTest is BaseTest {
 
         _initializeState(initialST, initialJT);
 
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory preOpState = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory preOpState = accountant.getState();
         uint256 preOpLTV = _computeLTV(toUint256(preOpState.lastSTEffectiveNAV), toUint256(preOpState.lastJTEffectiveNAV));
 
         // Execute JT deposit
         vm.prank(MOCK_KERNEL);
         SyncedAccountingState memory postOpState =
-            accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(initialST), _nav(initialJT + depositAmount), ZERO_NAV_UNITS);
+            accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(initialST), _nav(initialJT + depositAmount), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         uint256 postOpLTV = _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.jtEffectiveNAV));
 
@@ -2011,7 +2090,7 @@ contract RoycoDawnAccountantLLTVInvariantTest is BaseTest {
 
         _initializeState(initialST, initialJT);
 
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory preOpState = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory preOpState = accountant.getState();
         uint256 preOpLTV = _computeLTV(toUint256(preOpState.lastSTEffectiveNAV), toUint256(preOpState.lastJTEffectiveNAV));
 
         if (preOpLTV >= LIQUIDATION_COVERAGE_UTILIZATION_WAD) {
@@ -2020,7 +2099,7 @@ contract RoycoDawnAccountantLLTVInvariantTest is BaseTest {
 
         // Execute ST withdrawal
         vm.prank(MOCK_KERNEL);
-        try accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(initialST - withdrawAmount), _nav(initialJT), ZERO_NAV_UNITS) returns (
+        try accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(initialST - withdrawAmount), _nav(initialJT), ZERO_NAV_UNITS, ZERO_NAV_UNITS) returns (
             SyncedAccountingState memory postOpState
         ) {
             uint256 postOpLTV = _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.jtEffectiveNAV));
@@ -2040,7 +2119,7 @@ contract RoycoDawnAccountantLLTVInvariantTest is BaseTest {
 
         _initializeState(initialST, initialJT);
 
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory preOpState = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory preOpState = accountant.getState();
         uint256 preOpLTV = _computeLTV(toUint256(preOpState.lastSTEffectiveNAV), toUint256(preOpState.lastJTEffectiveNAV));
 
         if (preOpLTV >= LIQUIDATION_COVERAGE_UTILIZATION_WAD) {
@@ -2049,7 +2128,7 @@ contract RoycoDawnAccountantLLTVInvariantTest is BaseTest {
 
         // Execute JT withdrawal with coverage enforcement
         vm.prank(MOCK_KERNEL);
-        try accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.JT_REDEEM, _nav(initialST), _nav(initialJT - withdrawAmount)) returns (
+        try accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.JT_REDEEM, _nav(initialST), _nav(initialJT - withdrawAmount), ZERO_NAV_UNITS) returns (
             SyncedAccountingState memory postOpState
         ) {
             uint256 postOpLTV = _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.jtEffectiveNAV));
@@ -2082,7 +2161,7 @@ contract RoycoDawnAccountantLLTVInvariantTest is BaseTest {
         vm.warp(vm.getBlockTimestamp() + 1 days);
 
         vm.prank(MOCK_KERNEL);
-        try accountant.preOpSyncTrancheAccounting(_nav(newSTRaw), _nav(newJTRaw)) returns (SyncedAccountingState memory preOpState) {
+        try accountant.preOpSyncTrancheAccounting(_nav(newSTRaw), _nav(newJTRaw), ZERO_NAV_UNITS) returns (SyncedAccountingState memory preOpState) {
             uint256 preOpLTV = _computeLTV(toUint256(preOpState.stEffectiveNAV), toUint256(preOpState.jtEffectiveNAV));
 
             // If preOp already breached LLTV, market should be PERPETUAL
@@ -2093,7 +2172,7 @@ contract RoycoDawnAccountantLLTVInvariantTest is BaseTest {
 
             // Now execute ST deposit
             vm.prank(MOCK_KERNEL);
-            try accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(newSTRaw + depositAmount), _nav(newJTRaw)) returns (
+            try accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(newSTRaw + depositAmount), _nav(newJTRaw), ZERO_NAV_UNITS) returns (
                 SyncedAccountingState memory postOpState
             ) {
                 uint256 postOpLTV = _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.jtEffectiveNAV));
@@ -2119,17 +2198,17 @@ contract RoycoDawnAccountantLLTVInvariantTest is BaseTest {
 
         // Operation 1: ST deposit
         vm.prank(MOCK_KERNEL);
-        try accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(initialST + stDeposit), _nav(initialJT)) {
+        try accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(initialST + stDeposit), _nav(initialJT), ZERO_NAV_UNITS) {
             // Check LTV after ST deposit
-            IRoycoDawnAccountant.RoycoDawnAccountantState memory state1 = accountant.getState();
+            IRoycoDayAccountant.RoycoDayAccountantState memory state1 = accountant.getState();
             uint256 ltv1 = _computeLTV(toUint256(state1.lastSTEffectiveNAV), toUint256(state1.lastJTEffectiveNAV));
             assertLt(ltv1, LIQUIDATION_COVERAGE_UTILIZATION_WAD, "LLTV breached after ST deposit");
 
             // Operation 2: JT deposit (should improve LTV)
             vm.prank(MOCK_KERNEL);
-            accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(initialST + stDeposit), _nav(initialJT + jtDeposit), ZERO_NAV_UNITS);
+            accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(initialST + stDeposit), _nav(initialJT + jtDeposit), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
-            IRoycoDawnAccountant.RoycoDawnAccountantState memory state2 = accountant.getState();
+            IRoycoDayAccountant.RoycoDayAccountantState memory state2 = accountant.getState();
             uint256 ltv2 = _computeLTV(toUint256(state2.lastSTEffectiveNAV), toUint256(state2.lastJTEffectiveNAV));
 
             // LTV should be same or better after JT deposit
@@ -2152,7 +2231,7 @@ contract RoycoDawnAccountantLLTVInvariantTest is BaseTest {
 
         _initializeState(stNav, jtNav);
 
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory state = accountant.getState();
         uint256 initialLTV = _computeLTV(toUint256(state.lastSTEffectiveNAV), toUint256(state.lastJTEffectiveNAV));
 
         // If already at or above LLTV, this test doesn't apply
@@ -2162,7 +2241,7 @@ contract RoycoDawnAccountantLLTVInvariantTest is BaseTest {
 
         // Try a small JT deposit - should improve LTV
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory postState = accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(stNav), _nav(jtNav + 1e18), ZERO_NAV_UNITS);
+        SyncedAccountingState memory postState = accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(stNav), _nav(jtNav + 1e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         uint256 finalLTV = _computeLTV(toUint256(postState.stEffectiveNAV), toUint256(postState.jtEffectiveNAV));
 
@@ -2177,12 +2256,12 @@ contract RoycoDawnAccountantLLTVInvariantTest is BaseTest {
 
         _initializeState(stNav, jtNav);
 
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory state = accountant.getState();
         uint256 initialLTV = _computeLTV(toUint256(state.lastSTEffectiveNAV), toUint256(state.lastJTEffectiveNAV));
 
         // Deposit 0 should have no effect (or revert, which is fine)
         vm.prank(MOCK_KERNEL);
-        try accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(stNav), _nav(jtNav), ZERO_NAV_UNITS) returns (
+        try accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(stNav), _nav(jtNav), ZERO_NAV_UNITS, ZERO_NAV_UNITS) returns (
             SyncedAccountingState memory postState
         ) {
             uint256 finalLTV = _computeLTV(toUint256(postState.stEffectiveNAV), toUint256(postState.jtEffectiveNAV));
@@ -2199,7 +2278,7 @@ contract RoycoDawnAccountantLLTVInvariantTest is BaseTest {
 
 /// @notice Mock kernel contract that supports syncTrancheAccounting callback
 contract MockKernelForAdmin {
-    IRoycoDawnAccountant public accountant;
+    IRoycoDayAccountant public accountant;
     NAV_UNIT public stRawNAV;
     NAV_UNIT public jtRawNAV;
 
@@ -2209,7 +2288,7 @@ contract MockKernelForAdmin {
     }
 
     function setAccountant(address _accountant) external {
-        accountant = IRoycoDawnAccountant(_accountant);
+        accountant = IRoycoDayAccountant(_accountant);
     }
 
     function setNAVs(uint256 _stRawNAV, uint256 _jtRawNAV) external {
@@ -2218,7 +2297,7 @@ contract MockKernelForAdmin {
     }
 
     function syncTrancheAccounting() external returns (SyncedAccountingState memory) {
-        return accountant.preOpSyncTrancheAccounting(stRawNAV, jtRawNAV);
+        return accountant.preOpSyncTrancheAccounting(stRawNAV, jtRawNAV, ZERO_NAV_UNITS);
     }
 }
 
@@ -2226,12 +2305,12 @@ contract MockKernelForAdmin {
 // ADMIN FUNCTION TESTS
 // =============================================================================
 
-contract RoycoDawnAccountantAdminTest is BaseTest {
+contract RoycoDayAccountantAdminTest is BaseTest {
     using Math for uint256;
     using UnitsMathLib for NAV_UNIT;
 
-    RoycoDawnAccountant internal accountantImpl;
-    IRoycoDawnAccountant internal accountant;
+    RoycoDayAccountant internal accountantImpl;
+    IRoycoDayAccountant internal accountant;
     AdaptiveCurveYDM_V1 internal adaptiveYDM;
     AdaptiveCurveYDM_V1 internal newYDM;
     AccessManager internal accessManager;
@@ -2244,11 +2323,11 @@ contract RoycoDawnAccountantAdminTest is BaseTest {
         accessManager = new AccessManager(OWNER_ADDRESS);
         adaptiveYDM = new AdaptiveCurveYDM_V1(TARGET_COVERAGE_UTILIZATION_WAD);
         newYDM = new AdaptiveCurveYDM_V1(TARGET_COVERAGE_UTILIZATION_WAD);
-        accountantImpl = new RoycoDawnAccountant(address(mockKernel));
+        accountantImpl = new RoycoDayAccountant(address(mockKernel));
 
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: 0,
@@ -2259,12 +2338,18 @@ contract RoycoDawnAccountantAdminTest is BaseTest {
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE
+            jtNAVDustTolerance: DUST_TOLERANCE,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
 
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
         address proxy = address(new ERC1967Proxy(address(accountantImpl), initData));
-        accountant = IRoycoDawnAccountant(proxy);
+        accountant = IRoycoDayAccountant(proxy);
 
         mockKernel.setAccountant(address(accountant));
 
@@ -2299,7 +2384,7 @@ contract RoycoDawnAccountantAdminTest is BaseTest {
         accountant.setCoverage(0.15e18);
 
         // Sync should have been called
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory state = accountant.getState();
         assertEq(toUint256(state.lastSTRawNAV), 100e18, "Sync not triggered");
     }
 
@@ -2413,7 +2498,7 @@ contract RoycoDawnAccountantAdminTest is BaseTest {
         uint64 invalidFee = uint64(MAX_PROTOCOL_FEE_WAD + 1);
 
         vm.prank(OWNER_ADDRESS);
-        vm.expectRevert(IRoycoDawnAccountant.MAX_PROTOCOL_FEE_EXCEEDED.selector);
+        vm.expectRevert(IRoycoDayAccountant.MAX_PROTOCOL_FEE_EXCEEDED.selector);
         accountant.setSeniorTrancheProtocolFee(invalidFee);
     }
 
@@ -2443,7 +2528,7 @@ contract RoycoDawnAccountantAdminTest is BaseTest {
         uint64 invalidFee = uint64(MAX_PROTOCOL_FEE_WAD + 1);
 
         vm.prank(OWNER_ADDRESS);
-        vm.expectRevert(IRoycoDawnAccountant.MAX_PROTOCOL_FEE_EXCEEDED.selector);
+        vm.expectRevert(IRoycoDayAccountant.MAX_PROTOCOL_FEE_EXCEEDED.selector);
         accountant.setJuniorTrancheProtocolFee(invalidFee);
     }
 
@@ -2473,7 +2558,7 @@ contract RoycoDawnAccountantAdminTest is BaseTest {
         vm.prank(OWNER_ADDRESS);
         accountant.setFixedTermDuration(0);
 
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory state = accountant.getState();
         assertEq(toUint256(state.lastJTCoverageImpermanentLoss), 0, "Coverage IL not cleared");
         assertEq(uint8(state.lastMarketState), uint8(MarketState.PERPETUAL), "Not perpetual");
     }
@@ -2490,12 +2575,12 @@ contract RoycoDawnAccountantAdminTest is BaseTest {
 // EDGE CASE COVERAGE TESTS
 // =============================================================================
 
-contract RoycoDawnAccountantEdgeCaseTest is BaseTest {
+contract RoycoDayAccountantEdgeCaseTest is BaseTest {
     using Math for uint256;
     using UnitsMathLib for NAV_UNIT;
 
-    RoycoDawnAccountant internal accountantImpl;
-    IRoycoDawnAccountant internal accountant;
+    RoycoDayAccountant internal accountantImpl;
+    IRoycoDayAccountant internal accountant;
     AdaptiveCurveYDM_V1 internal adaptiveYDM;
     AccessManager internal accessManager;
 
@@ -2507,11 +2592,11 @@ contract RoycoDawnAccountantEdgeCaseTest is BaseTest {
         MOCK_KERNEL = makeAddr("MOCK_KERNEL");
         accessManager = new AccessManager(OWNER_ADDRESS);
         adaptiveYDM = new AdaptiveCurveYDM_V1(TARGET_COVERAGE_UTILIZATION_WAD);
-        accountantImpl = new RoycoDawnAccountant(MOCK_KERNEL);
+        accountantImpl = new RoycoDayAccountant(MOCK_KERNEL);
 
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
 
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: 0,
@@ -2522,12 +2607,18 @@ contract RoycoDawnAccountantEdgeCaseTest is BaseTest {
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE
+            jtNAVDustTolerance: DUST_TOLERANCE,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
 
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
         address proxy = address(new ERC1967Proxy(address(accountantImpl), initData));
-        accountant = IRoycoDawnAccountant(proxy);
+        accountant = IRoycoDayAccountant(proxy);
     }
 
     function _nav(uint256 value) internal pure returns (NAV_UNIT) {
@@ -2543,21 +2634,21 @@ contract RoycoDawnAccountantEdgeCaseTest is BaseTest {
     function test_stWithdrawal_withJTCoverageAndJTSelfIL() public {
         // Initialize via proper deposit bootstrap (JT first for coverage)
         vm.startPrank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0));
-        accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(0), _nav(50e18), ZERO_NAV_UNITS);
-        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
+        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0), ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(0), _nav(50e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(100e18), _nav(50e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         vm.stopPrank();
 
         vm.warp(vm.getBlockTimestamp() + 1 days);
 
         // Step 1: Create JT self IL via JT loss
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(30e18)); // JT loses 20e18
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(30e18), ZERO_NAV_UNITS); // JT loses 20e18
 
         // Step 2: Create ST loss (JT coverage)
         vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(80e18), _nav(30e18)); // ST loses 20e18
+        accountant.preOpSyncTrancheAccounting(_nav(80e18), _nav(30e18), ZERO_NAV_UNITS); // ST loses 20e18
 
         // Step 3: ST withdrawal that pulls JT coverage (deltaJT != 0)
         // When ST withdraws and claims from JT (coverage), line 176 should be hit
@@ -2565,9 +2656,9 @@ contract RoycoDawnAccountantEdgeCaseTest is BaseTest {
         uint256 jtCoverageAmount = 5e18; // JT provides coverage
 
         vm.prank(MOCK_KERNEL);
-        accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(80e18 - stWithdrawAmount), _nav(30e18 - jtCoverageAmount), ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(80e18 - stWithdrawAmount), _nav(30e18 - jtCoverageAmount), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory state3 = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory state3 = accountant.getState();
 
         // Verify NAV conservation holds after the operation
         uint256 rawSum = toUint256(state3.lastSTRawNAV) + toUint256(state3.lastJTRawNAV);
@@ -2595,26 +2686,26 @@ contract RoycoDawnAccountantEdgeCaseTest is BaseTest {
 
         // Initialize
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(initialST), _nav(initialJT));
+        accountant.preOpSyncTrancheAccounting(_nav(initialST), _nav(initialJT), ZERO_NAV_UNITS);
 
         vm.warp(vm.getBlockTimestamp() + 1 days);
 
         // Create JT self IL
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(initialST), _nav(initialJT - jtLoss));
+        accountant.preOpSyncTrancheAccounting(_nav(initialST), _nav(initialJT - jtLoss), ZERO_NAV_UNITS);
 
         // Create ST loss (JT coverage)
         vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(initialST - stLoss), _nav(initialJT - jtLoss));
+        accountant.preOpSyncTrancheAccounting(_nav(initialST - stLoss), _nav(initialJT - jtLoss), ZERO_NAV_UNITS);
 
         // ST withdrawal with JT coverage
         vm.prank(MOCK_KERNEL);
         try accountant.postOpSyncTrancheAccounting(
-            Operation.ST_REDEEM, _nav(initialST - stLoss - stWithdraw), _nav(initialJT - jtLoss - jtCoverage), ZERO_NAV_UNITS
+            Operation.ST_REDEEM, _nav(initialST - stLoss - stWithdraw), _nav(initialJT - jtLoss - jtCoverage), ZERO_NAV_UNITS, ZERO_NAV_UNITS
         ) {
             // Verify NAV conservation holds
-            IRoycoDawnAccountant.RoycoDawnAccountantState memory stateAfter = accountant.getState();
+            IRoycoDayAccountant.RoycoDayAccountantState memory stateAfter = accountant.getState();
             uint256 rawSum = toUint256(stateAfter.lastSTRawNAV) + toUint256(stateAfter.lastJTRawNAV);
             uint256 effSum = toUint256(stateAfter.lastSTEffectiveNAV) + toUint256(stateAfter.lastJTEffectiveNAV);
             assertEq(rawSum, effSum, "NAV conservation after ST withdrawal with JT coverage");
@@ -2630,7 +2721,7 @@ contract RoycoDawnAccountantEdgeCaseTest is BaseTest {
     function test_maxSTDepositGivenCoverage() public {
         // Initialize
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(100e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(100e18), ZERO_NAV_UNITS);
 
         // Get max ST deposit given coverage
         NAV_UNIT maxDeposit = accountant.maxSTDepositGivenCoverage(_nav(100e18), _nav(100e18));
@@ -2645,7 +2736,7 @@ contract RoycoDawnAccountantEdgeCaseTest is BaseTest {
 
         // Initialize
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(stRaw), _nav(jtRaw));
+        accountant.preOpSyncTrancheAccounting(_nav(stRaw), _nav(jtRaw), ZERO_NAV_UNITS);
 
         // Get max ST deposit given coverage
         NAV_UNIT maxDeposit = accountant.maxSTDepositGivenCoverage(_nav(stRaw), _nav(jtRaw));
@@ -2661,7 +2752,7 @@ contract RoycoDawnAccountantEdgeCaseTest is BaseTest {
     function test_maxJTWithdrawalGivenCoverage() public {
         // Initialize
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(100e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(100e18), ZERO_NAV_UNITS);
 
         // Get max JT withdrawal given coverage
         // JT claims on ST and JT (simplified - equal split for balanced market)
@@ -2688,9 +2779,9 @@ contract RoycoDawnAccountantEdgeCaseTest is BaseTest {
     function test_kSkJSumRounding_noDustAccumulation() public {
         // Initialize via proper deposit bootstrap (JT first for coverage)
         vm.startPrank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0));
-        accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(0), _nav(100e18), ZERO_NAV_UNITS);
-        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(100e18), _nav(100e18), ZERO_NAV_UNITS);
+        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0), ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(0), _nav(100e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(100e18), _nav(100e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         vm.stopPrank();
 
         // Use values that cause rounding: e.g., 1e18 / 3 causes precision loss
@@ -2724,9 +2815,9 @@ contract RoycoDawnAccountantEdgeCaseTest is BaseTest {
 
         // Initialize with healthy coverage via proper deposit bootstrap
         vm.startPrank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0));
-        accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(0), _nav(100e18), ZERO_NAV_UNITS);
-        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(100e18), _nav(100e18), ZERO_NAV_UNITS);
+        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0), ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(0), _nav(100e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(100e18), _nav(100e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         vm.stopPrank();
 
         // Get max JT withdrawal
@@ -2748,7 +2839,7 @@ contract RoycoDawnAccountantEdgeCaseTest is BaseTest {
     /// @notice Test edge case where claims are extremely imbalanced
     function test_kSkJRounding_extremeImbalance() public {
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(100e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(100e18), ZERO_NAV_UNITS);
 
         // Extreme imbalance: tiny ST claim, huge JT claim
         uint256 jtClaimOnST = 1; // 1 wei
@@ -2770,25 +2861,25 @@ contract RoycoDawnAccountantEdgeCaseTest is BaseTest {
     function test_ilRescalingConsistency() public {
         // Initialize
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         vm.warp(vm.getBlockTimestamp() + 1 days);
 
         // Create JT self IL
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(40e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(40e18), ZERO_NAV_UNITS);
 
         // Now JT gains back some value
         vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(45e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(45e18), ZERO_NAV_UNITS);
 
         // Full recovery should restore JT effective NAV
         vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory state3 = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory state3 = accountant.getState();
         uint256 rawSum = toUint256(state3.lastSTRawNAV) + toUint256(state3.lastJTRawNAV);
         uint256 effSum = toUint256(state3.lastSTEffectiveNAV) + toUint256(state3.lastJTEffectiveNAV);
         assertEq(rawSum, effSum, "NAV conservation after full IL recovery");
@@ -2797,7 +2888,7 @@ contract RoycoDawnAccountantEdgeCaseTest is BaseTest {
     /// @notice Test that repeated small operations don't accumulate rounding errors
     function test_repeatedOpsNoAccumulatedRoundingError() public {
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // Perform many small syncs with tiny changes
         for (uint256 i = 0; i < 100; i++) {
@@ -2808,11 +2899,11 @@ contract RoycoDawnAccountantEdgeCaseTest is BaseTest {
             uint256 jtNav = i % 2 == 0 ? 50e18 : 50e18 + 1;
 
             vm.prank(MOCK_KERNEL);
-            accountant.preOpSyncTrancheAccounting(_nav(stNav), _nav(jtNav));
+            accountant.preOpSyncTrancheAccounting(_nav(stNav), _nav(jtNav), ZERO_NAV_UNITS);
         }
 
         // Final state should have NAV conservation
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory finalState = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory finalState = accountant.getState();
         uint256 rawSum = toUint256(finalState.lastSTRawNAV) + toUint256(finalState.lastJTRawNAV);
         uint256 effSum = toUint256(finalState.lastSTEffectiveNAV) + toUint256(finalState.lastJTEffectiveNAV);
 
@@ -2824,14 +2915,14 @@ contract RoycoDawnAccountantEdgeCaseTest is BaseTest {
 // BRANCH COVERAGE TESTS
 // =========================================================================
 
-/// @title RoycoDawnAccountantBranchCoverageTest
+/// @title RoycoDayAccountantBranchCoverageTest
 /// @notice Tests specifically targeting uncovered branches for 100% branch coverage
-contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
+contract RoycoDayAccountantBranchCoverageTest is BaseTest {
     using Math for uint256;
     using UnitsMathLib for NAV_UNIT;
 
-    RoycoDawnAccountant internal accountantImpl;
-    IRoycoDawnAccountant internal accountant;
+    RoycoDayAccountant internal accountantImpl;
+    IRoycoDayAccountant internal accountant;
     AdaptiveCurveYDM_V1 internal adaptiveYDM;
     AccessManager internal accessManager;
     MockYDMOverWAD internal mockYDMOverWAD;
@@ -2845,7 +2936,7 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
         MOCK_KERNEL = makeAddr("MOCK_KERNEL");
         accessManager = new AccessManager(OWNER_ADDRESS);
         adaptiveYDM = new AdaptiveCurveYDM_V1(TARGET_COVERAGE_UTILIZATION_WAD);
-        accountantImpl = new RoycoDawnAccountant(MOCK_KERNEL);
+        accountantImpl = new RoycoDayAccountant(MOCK_KERNEL);
         mockYDMOverWAD = new MockYDMOverWAD(2e18); // Return 200% yield share
         mockYDMWithInit = new MockYDMWithInit();
 
@@ -2880,12 +2971,12 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
         uint64 jtYieldAtFull
     )
         internal
-        returns (IRoycoDawnAccountant)
+        returns (IRoycoDayAccountant)
     {
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (jtYieldAtTarget, jtYieldAtFull));
-        RoycoDawnAccountant newAccountantImpl = new RoycoDawnAccountant(kernel);
+        RoycoDayAccountant newAccountantImpl = new RoycoDayAccountant(kernel);
 
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: stProtocolFeeWAD,
             jtProtocolFeeWAD: jtProtocolFeeWAD,
             jtYieldShareProtocolFeeWAD: 0,
@@ -2896,16 +2987,22 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
             fixedTermDurationSeconds: fixedTermDuration,
             liquidationCoverageUtilizationWAD: liquidationCoverageUtilizationWAD,
             stNAVDustTolerance: stNAVDustTolerance,
-            jtNAVDustTolerance: jtNAVDustTolerance
+            jtNAVDustTolerance: jtNAVDustTolerance,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
 
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
         address proxy = address(new ERC1967Proxy(address(newAccountantImpl), initData));
-        return IRoycoDawnAccountant(proxy);
+        return IRoycoDayAccountant(proxy);
     }
 
-    function _deployAccountantWithYDM(address ydm, bytes memory ydmInitData) internal returns (IRoycoDawnAccountant) {
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+    function _deployAccountantWithYDM(address ydm, bytes memory ydmInitData) internal returns (IRoycoDayAccountant) {
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: 0,
@@ -2916,12 +3013,18 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE
+            jtNAVDustTolerance: DUST_TOLERANCE,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
 
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
         address proxy = address(new ERC1967Proxy(address(accountantImpl), initData));
-        return IRoycoDawnAccountant(proxy);
+        return IRoycoDayAccountant(proxy);
     }
 
     function _nav(uint256 value) internal pure returns (NAV_UNIT) {
@@ -2938,12 +3041,12 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
     ///      committed sync can never be established) — they share the same require on the same YDM output.
     function test_ydmOverWAD_revertsSync() public {
         // Deploy accountant with a mock YDM that returns > WAD
-        IRoycoDawnAccountant accountantWithMock = _deployAccountantWithYDM(address(mockYDMOverWAD), "");
+        IRoycoDayAccountant accountantWithMock = _deployAccountantWithYDM(address(mockYDMOverWAD), "");
 
         // The first sync consults the YDM and must revert rather than clamp the output
         vm.prank(MOCK_KERNEL);
-        vm.expectRevert(IRoycoDawnAccountant.INVALID_YDM_OUTPUT.selector);
-        accountantWithMock.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        vm.expectRevert(IRoycoDayAccountant.INVALID_YDM_OUTPUT.selector);
+        accountantWithMock.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
     }
 
     // =========================================================================
@@ -2954,15 +3057,15 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
     function test_stLoss_withZeroJTEffective() public {
         // Initialize with JT capital via proper deposit bootstrap
         vm.startPrank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0));
-        accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(0), _nav(10e18), ZERO_NAV_UNITS);
-        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(100e18), _nav(10e18), ZERO_NAV_UNITS);
+        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0), ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(0), _nav(10e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(100e18), _nav(10e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         vm.stopPrank();
 
         // First, exhaust JT by having large ST loss that wipes out JT
         vm.warp(vm.getBlockTimestamp() + 1);
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state1 = accountant.preOpSyncTrancheAccounting(_nav(80e18), _nav(10e18));
+        SyncedAccountingState memory state1 = accountant.preOpSyncTrancheAccounting(_nav(80e18), _nav(10e18), ZERO_NAV_UNITS);
 
         // JT should have absorbed some loss
         assertLt(toUint256(state1.jtEffectiveNAV), 10e18, "JT should have absorbed loss");
@@ -2970,14 +3073,14 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
         // Continue with more ST loss to fully exhaust JT
         vm.warp(vm.getBlockTimestamp() + 1);
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(60e18), _nav(10e18));
+        SyncedAccountingState memory state2 = accountant.preOpSyncTrancheAccounting(_nav(60e18), _nav(10e18), ZERO_NAV_UNITS);
 
         // Now JT effective should be 0 or very low
         // Continue with even more ST loss - this should hit line 439 branch where coverageApplied == 0
         if (toUint256(state2.jtEffectiveNAV) > 0) {
             vm.warp(vm.getBlockTimestamp() + 1);
             vm.prank(MOCK_KERNEL);
-            SyncedAccountingState memory state3 = accountant.preOpSyncTrancheAccounting(_nav(40e18), _nav(10e18));
+            SyncedAccountingState memory state3 = accountant.preOpSyncTrancheAccounting(_nav(40e18), _nav(10e18), ZERO_NAV_UNITS);
 
             // When JT effective is 0, residual ST loss reduces ST effective NAV directly
             if (toUint256(state3.jtEffectiveNAV) == 0) {
@@ -2990,15 +3093,15 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
     function test_stLoss_exhaustsJTAndReducesSTEffective() public {
         // Initialize with small JT via proper deposit bootstrap
         vm.startPrank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0));
-        accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(0), _nav(5e18), ZERO_NAV_UNITS);
-        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(100e18), _nav(5e18), ZERO_NAV_UNITS);
+        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0), ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(0), _nav(5e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(100e18), _nav(5e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         vm.stopPrank();
 
         // Large ST loss that exceeds JT buffer
         vm.warp(vm.getBlockTimestamp() + 1);
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(50e18), _nav(5e18));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(50e18), _nav(5e18), ZERO_NAV_UNITS);
 
         // Forced perpetual: JT buffer exhausted (jtEff == 0) while ST effective remains > 0
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "Should be perpetual");
@@ -3017,14 +3120,14 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
     function test_ydmInit_withInitData() public {
         // Deploy with MockYDMWithInit and proper init data
         bytes memory initData = abi.encodeWithSelector(MockYDMWithInit.initialize.selector, false);
-        IRoycoDawnAccountant accountantWithInit = _deployAccountantWithYDM(address(mockYDMWithInit), initData);
+        IRoycoDayAccountant accountantWithInit = _deployAccountantWithYDM(address(mockYDMWithInit), initData);
 
         // Verify it was initialized
         assertTrue(mockYDMWithInit.initialized(), "YDM should be initialized");
 
         // Verify accountant works
         vm.prank(MOCK_KERNEL);
-        accountantWithInit.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        accountantWithInit.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
     }
 
     /// @notice Test YDM initialization failure (line 733)
@@ -3050,7 +3153,7 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
         mockKernel.setNAVs(100e18, 50e18);
 
         // Deploy new accountant with mock kernel that can receive callbacks
-        IRoycoDawnAccountant accountantForAdmin = _deployAccountant(
+        IRoycoDayAccountant accountantForAdmin = _deployAccountant(
             address(mockKernel),
             ST_PROTOCOL_FEE_WAD,
             JT_PROTOCOL_FEE_WAD,
@@ -3068,7 +3171,7 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
 
         // Initialize
         vm.prank(address(mockKernel));
-        accountantForAdmin.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        accountantForAdmin.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // Grant admin role
         vm.prank(OWNER_ADDRESS);
@@ -3093,15 +3196,15 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
     function test_coverageEnforcement_unsatisfied() public {
         // Initialize with balanced market via proper deposit bootstrap
         vm.startPrank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0));
-        accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(0), _nav(100e18), ZERO_NAV_UNITS);
-        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(100e18), _nav(100e18), ZERO_NAV_UNITS);
+        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0), ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(0), _nav(100e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(100e18), _nav(100e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         vm.stopPrank();
 
         // Try to withdraw too much JT (violating coverage)
         vm.prank(MOCK_KERNEL);
-        vm.expectRevert(IRoycoDawnAccountant.COVERAGE_REQUIREMENT_UNSATISFIED.selector);
-        accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.JT_REDEEM, _nav(100e18), _nav(10e18));
+        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_UNSATISFIED.selector);
+        accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.JT_REDEEM, _nav(100e18), _nav(10e18), ZERO_NAV_UNITS);
     }
 
     // =========================================================================
@@ -3114,7 +3217,7 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
         uint256 invalidLiquidationCoverageUtilization = WAD / 2; // 50% - invalid
 
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: 0,
@@ -3125,11 +3228,17 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: invalidLiquidationCoverageUtilization,
             stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE
+            jtNAVDustTolerance: DUST_TOLERANCE,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
 
-        vm.expectRevert(IRoycoDawnAccountant.INVALID_COVERAGE_CONFIG.selector);
+        vm.expectRevert(IRoycoDayAccountant.INVALID_COVERAGE_CONFIG.selector);
         new ERC1967Proxy(address(accountantImpl), initData);
     }
 
@@ -3138,7 +3247,7 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
         uint256 invalidLiquidationCoverageUtilization = WAD; // exactly 100% - invalid
 
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: 0,
@@ -3149,11 +3258,17 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: invalidLiquidationCoverageUtilization,
             stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE
+            jtNAVDustTolerance: DUST_TOLERANCE,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
 
-        vm.expectRevert(IRoycoDawnAccountant.INVALID_COVERAGE_CONFIG.selector);
+        vm.expectRevert(IRoycoDayAccountant.INVALID_COVERAGE_CONFIG.selector);
         new ERC1967Proxy(address(accountantImpl), initData);
     }
 
@@ -3165,14 +3280,14 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
     function test_yieldDistribution_elapsedNonZero() public {
         // Initialize
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // Advance time by 1 second
         vm.warp(vm.getBlockTimestamp() + 1);
 
         // Sync with gain - should use time-weighted path
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(110e18), _nav(50e18));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(110e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // NAV conservation should hold
         assertEq(toUint256(state.stRawNAV) + toUint256(state.jtRawNAV), toUint256(state.stEffectiveNAV) + toUint256(state.jtEffectiveNAV), "NAV conservation");
@@ -3182,11 +3297,11 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
     function test_yieldDistribution_sameBlock() public {
         // Initialize
         vm.prank(MOCK_KERNEL);
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // Sync with gain in same block - should use instantaneous path
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(110e18), _nav(50e18));
+        SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(110e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // NAV conservation should hold
         assertEq(toUint256(state.stRawNAV) + toUint256(state.jtRawNAV), toUint256(state.stEffectiveNAV) + toUint256(state.jtEffectiveNAV), "NAV conservation");
@@ -3195,12 +3310,12 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
 
 /// @notice Mock kernel for branch coverage admin tests
 contract MockKernelForBranchTests {
-    IRoycoDawnAccountant public accountant;
+    IRoycoDayAccountant public accountant;
     NAV_UNIT public stRawNAV;
     NAV_UNIT public jtRawNAV;
 
     function setAccountant(address _accountant) external {
-        accountant = IRoycoDawnAccountant(_accountant);
+        accountant = IRoycoDayAccountant(_accountant);
     }
 
     function setNAVs(uint256 _stRawNAV, uint256 _jtRawNAV) external {
@@ -3209,7 +3324,7 @@ contract MockKernelForBranchTests {
     }
 
     function syncTrancheAccounting() external returns (SyncedAccountingState memory) {
-        return accountant.preOpSyncTrancheAccounting(stRawNAV, jtRawNAV);
+        return accountant.preOpSyncTrancheAccounting(stRawNAV, jtRawNAV, ZERO_NAV_UNITS);
     }
 }
 
@@ -3217,14 +3332,14 @@ contract MockKernelForBranchTests {
 // ADDITIONAL BRANCH COVERAGE TESTS
 // =========================================================================
 
-/// @title RoycoDawnAccountantAdditionalBranchTests
+/// @title RoycoDayAccountantAdditionalBranchTests
 /// @notice Additional tests for maximum branch coverage
-contract RoycoDawnAccountantAdditionalBranchTests is BaseTest {
+contract RoycoDayAccountantAdditionalBranchTests is BaseTest {
     using Math for uint256;
     using UnitsMathLib for NAV_UNIT;
 
-    RoycoDawnAccountant internal accountantImpl;
-    IRoycoDawnAccountant internal accountant;
+    RoycoDayAccountant internal accountantImpl;
+    IRoycoDayAccountant internal accountant;
     AdaptiveCurveYDM_V1 internal adaptiveYDM;
     AccessManager internal accessManager;
     MockKernelForBranchTests internal mockKernel;
@@ -3235,10 +3350,10 @@ contract RoycoDawnAccountantAdditionalBranchTests is BaseTest {
         mockKernel = new MockKernelForBranchTests();
         accessManager = new AccessManager(OWNER_ADDRESS);
         adaptiveYDM = new AdaptiveCurveYDM_V1(TARGET_COVERAGE_UTILIZATION_WAD);
-        accountantImpl = new RoycoDawnAccountant(address(mockKernel));
+        accountantImpl = new RoycoDayAccountant(address(mockKernel));
 
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: 0,
@@ -3249,12 +3364,18 @@ contract RoycoDawnAccountantAdditionalBranchTests is BaseTest {
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE
+            jtNAVDustTolerance: DUST_TOLERANCE,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
 
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
         address proxy = address(new ERC1967Proxy(address(accountantImpl), initData));
-        accountant = IRoycoDawnAccountant(proxy);
+        accountant = IRoycoDayAccountant(proxy);
 
         mockKernel.setAccountant(address(accountant));
 
@@ -3271,28 +3392,35 @@ contract RoycoDawnAccountantAdditionalBranchTests is BaseTest {
     // COVERAGE VALIDATION BRANCHES
     // =========================================================================
 
-    /// @notice Test coverage below min revert (line 681 failure path)
+    /// @notice Day removed the minimum-coverage floor; sub-1% coverage is valid (initialization succeeds)
     function test_coverageValidation_belowMin() public {
-        uint64 invalidCoverage = uint64(MIN_COVERAGE_LOWER_BOUND_WAD - 1);
+        uint64 subOnePercentCoverage = uint64(MIN_COVERAGE_LOWER_BOUND_WAD - 1);
 
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: 0,
-            minCoverageWAD: invalidCoverage,
+            minCoverageWAD: subOnePercentCoverage,
             betaWAD: BETA_WAD,
             jtYDM: address(adaptiveYDM),
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE
+            jtNAVDustTolerance: DUST_TOLERANCE,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
 
-        vm.expectRevert(IRoycoDawnAccountant.INVALID_COVERAGE_CONFIG.selector);
-        new ERC1967Proxy(address(accountantImpl), initData);
+        // Day removed the minimum-coverage floor; sub-1% coverage is valid
+        IRoycoDayAccountant newAccountant = IRoycoDayAccountant(address(new ERC1967Proxy(address(accountantImpl), initData)));
+        assertEq(newAccountant.getState().minCoverageWAD, subOnePercentCoverage);
     }
 
     /// @notice Test coverage at WAD revert (line 681 failure path)
@@ -3300,7 +3428,7 @@ contract RoycoDawnAccountantAdditionalBranchTests is BaseTest {
         uint64 invalidCoverage = uint64(WAD);
 
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: 0,
@@ -3311,11 +3439,17 @@ contract RoycoDawnAccountantAdditionalBranchTests is BaseTest {
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE
+            jtNAVDustTolerance: DUST_TOLERANCE,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
 
-        vm.expectRevert(IRoycoDawnAccountant.INVALID_COVERAGE_CONFIG.selector);
+        vm.expectRevert(IRoycoDayAccountant.INVALID_COVERAGE_CONFIG.selector);
         new ERC1967Proxy(address(accountantImpl), initData);
     }
 
@@ -3327,7 +3461,7 @@ contract RoycoDawnAccountantAdditionalBranchTests is BaseTest {
         uint96 highBeta = 1.2e18;
 
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.3e18, 0.9e18));
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: ST_PROTOCOL_FEE_WAD,
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: 0,
@@ -3338,11 +3472,17 @@ contract RoycoDawnAccountantAdditionalBranchTests is BaseTest {
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             liquidationCoverageUtilizationWAD: 0.99e18, // High LLTV to pass that check
             stNAVDustTolerance: DUST_TOLERANCE,
-            jtNAVDustTolerance: DUST_TOLERANCE
+            jtNAVDustTolerance: DUST_TOLERANCE,
+            minLiquidityWAD: 0,
+            ltYDM: LT_YDM_PLACEHOLDER,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: ZERO_NAV_UNITS,
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0
         });
-        bytes memory initData = abi.encodeCall(RoycoDawnAccountant.initialize, (params, address(accessManager)));
+        bytes memory initData = abi.encodeCall(RoycoDayAccountant.initialize, (params, address(accessManager)));
 
-        vm.expectRevert(IRoycoDawnAccountant.INVALID_COVERAGE_CONFIG.selector);
+        vm.expectRevert(IRoycoDayAccountant.INVALID_COVERAGE_CONFIG.selector);
         new ERC1967Proxy(address(accountantImpl), initData);
     }
 
@@ -3354,11 +3494,11 @@ contract RoycoDawnAccountantAdditionalBranchTests is BaseTest {
     function test_postOp_stIncreaseNAV_validDelta() public {
         // Initialize
         vm.prank(address(mockKernel));
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // ST_INCREASE_NAV with positive delta
         vm.prank(address(mockKernel));
-        SyncedAccountingState memory state = accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(110e18), _nav(50e18), ZERO_NAV_UNITS);
+        SyncedAccountingState memory state = accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(110e18), _nav(50e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         assertEq(toUint256(state.stRawNAV), 110e18, "ST NAV should increase");
     }
@@ -3367,11 +3507,11 @@ contract RoycoDawnAccountantAdditionalBranchTests is BaseTest {
     function test_postOp_jtIncreaseNAV_validDelta() public {
         // Initialize
         vm.prank(address(mockKernel));
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // JT_DEPOSIT with positive delta
         vm.prank(address(mockKernel));
-        SyncedAccountingState memory state = accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(100e18), _nav(60e18), ZERO_NAV_UNITS);
+        SyncedAccountingState memory state = accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(100e18), _nav(60e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         assertEq(toUint256(state.jtRawNAV), 60e18, "JT NAV should increase");
     }
@@ -3380,14 +3520,14 @@ contract RoycoDawnAccountantAdditionalBranchTests is BaseTest {
     function test_postOp_stDecreaseNAV_validDeltas() public {
         // Initialize via proper deposit bootstrap (JT first for coverage)
         vm.startPrank(address(mockKernel));
-        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0));
-        accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(0), _nav(50e18), ZERO_NAV_UNITS);
-        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
+        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0), ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(0), _nav(50e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(100e18), _nav(50e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         vm.stopPrank();
 
         // ST_DECREASE_NAV with negative ST delta
         vm.prank(address(mockKernel));
-        SyncedAccountingState memory state = accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(90e18), _nav(50e18), ZERO_NAV_UNITS);
+        SyncedAccountingState memory state = accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(90e18), _nav(50e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         assertEq(toUint256(state.stRawNAV), 90e18, "ST NAV should decrease");
     }
@@ -3396,11 +3536,11 @@ contract RoycoDawnAccountantAdditionalBranchTests is BaseTest {
     function test_postOp_jtDecreaseNAV_validDeltas() public {
         // Initialize
         vm.prank(address(mockKernel));
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // JT_DECREASE_NAV with negative JT delta
         vm.prank(address(mockKernel));
-        SyncedAccountingState memory state = accountant.postOpSyncTrancheAccounting(Operation.JT_REDEEM, _nav(100e18), _nav(40e18), ZERO_NAV_UNITS);
+        SyncedAccountingState memory state = accountant.postOpSyncTrancheAccounting(Operation.JT_REDEEM, _nav(100e18), _nav(40e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         assertEq(toUint256(state.jtRawNAV), 40e18, "JT NAV should decrease");
     }
@@ -3413,20 +3553,20 @@ contract RoycoDawnAccountantAdditionalBranchTests is BaseTest {
     function test_fixedTermDuration_zeroClearsCoverageIL() public {
         // Initialize with ST loss to create coverage IL
         vm.prank(address(mockKernel));
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         vm.warp(vm.getBlockTimestamp() + 1);
         mockKernel.setNAVs(80e18, 50e18);
 
         vm.prank(address(mockKernel));
-        accountant.preOpSyncTrancheAccounting(_nav(80e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(80e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // Set fixed term to 0
         vm.prank(OWNER_ADDRESS);
         accountant.setFixedTermDuration(0);
 
         // Check state is perpetual and coverage IL is cleared
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = accountant.getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory state = accountant.getState();
         assertEq(uint8(state.lastMarketState), uint8(MarketState.PERPETUAL), "Should be perpetual");
     }
 
@@ -3444,7 +3584,7 @@ contract RoycoDawnAccountantAdditionalBranchTests is BaseTest {
         // Initialize
         mockKernel.setNAVs(stNav, jtNav);
         vm.prank(address(mockKernel));
-        SyncedAccountingState memory state1 = accountant.preOpSyncTrancheAccounting(_nav(stNav), _nav(jtNav));
+        SyncedAccountingState memory state1 = accountant.preOpSyncTrancheAccounting(_nav(stNav), _nav(jtNav), ZERO_NAV_UNITS);
 
         // Verify NAV conservation
         assertEq(
@@ -3457,7 +3597,7 @@ contract RoycoDawnAccountantAdditionalBranchTests is BaseTest {
         if (stDelta == 0) return;
 
         vm.prank(address(mockKernel));
-        SyncedAccountingState memory state2 = accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(stNav + stDelta), _nav(jtNav), ZERO_NAV_UNITS);
+        SyncedAccountingState memory state2 = accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(stNav + stDelta), _nav(jtNav), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         assertEq(
             toUint256(state2.stRawNAV) + toUint256(state2.jtRawNAV),
@@ -3474,16 +3614,16 @@ contract RoycoDawnAccountantAdditionalBranchTests is BaseTest {
     function test_previewSync_returnsCorrectState() public {
         // Initialize
         vm.prank(address(mockKernel));
-        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
+        accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         vm.warp(vm.getBlockTimestamp() + 1 hours);
 
         // Preview should not modify state
-        SyncedAccountingState memory preview = accountant.previewSyncTrancheAccounting(_nav(110e18), _nav(50e18));
+        SyncedAccountingState memory preview = accountant.previewSyncTrancheAccounting(_nav(110e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // Actual sync
         vm.prank(address(mockKernel));
-        SyncedAccountingState memory actual = accountant.preOpSyncTrancheAccounting(_nav(110e18), _nav(50e18));
+        SyncedAccountingState memory actual = accountant.preOpSyncTrancheAccounting(_nav(110e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // Should match
         assertEq(toUint256(preview.stEffectiveNAV), toUint256(actual.stEffectiveNAV), "Preview != Actual");

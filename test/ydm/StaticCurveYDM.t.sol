@@ -4,9 +4,9 @@ pragma solidity ^0.8.28;
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
 import { WAD, ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
-import { DawnUtilsLib } from "../../src/libraries/DawnUtilsLib.sol";
 import { MarketState } from "../../src/libraries/Types.sol";
 import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
+import { UtilsLib } from "../../src/libraries/UtilsLib.sol";
 import { StaticCurveYDM } from "../../src/ydm/StaticCurveYDM.sol";
 import { BaseTest } from "../base/BaseTest.t.sol";
 
@@ -85,7 +85,7 @@ contract StaticCurveYDMTest is BaseTest {
         pure
         returns (uint256)
     {
-        return DawnUtilsLib.computeCoverageUtilization(_stRawNAV, _jtRawNAV, _betaWAD, _minCoverageWAD, _jtEffectiveNAV);
+        return UtilsLib.computeCoverageUtilization(_stRawNAV, _jtRawNAV, _betaWAD, _minCoverageWAD, _jtEffectiveNAV);
     }
 
     // ============================================
@@ -626,7 +626,7 @@ contract StaticCurveYDMTest is BaseTest {
         NAV_UNIT jtRaw = toNAVUnits(uint256(_jtRawNAV));
         NAV_UNIT jtEff = toNAVUnits(uint256(_jtEffectiveNAV));
 
-        uint256 coverageUtilizationWAD = DawnUtilsLib.computeCoverageUtilization(stRaw, jtRaw, _betaWAD, _minCoverageWAD, jtEff);
+        uint256 coverageUtilizationWAD = UtilsLib.computeCoverageUtilization(stRaw, jtRaw, _betaWAD, _minCoverageWAD, jtEff);
 
         if (coverageUtilizationWAD >= WAD) {
             uint256 result = ydm.previewYieldShare(MarketState.PERPETUAL, _coverageUtilizationFromNAVs(stRaw, jtRaw, _betaWAD, _minCoverageWAD, jtEff));
