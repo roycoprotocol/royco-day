@@ -45,3 +45,9 @@ bytes32 constant COMPONENT_ID_DUSK_KERNEL_CHAINLINK_ST_BPT_CHAINLINK_QUOTE = kec
 
 bytes32 constant COMPONENT_ID_DAY_BALANCER_HOOKS = keccak256("ROYCO_COMPONENT_DAY_BALANCER_HOOKS");
 bytes32 constant COMPONENT_ID_DAY_KERNEL_CHAINLINK_ST_CHAINLINK_QUOTE = keccak256("ROYCO_COMPONENT_DAY_KERNEL_CHAINLINK_ST_CHAINLINK_QUOTE");
+
+// ─── Day kernels ─────────────────────────────────────────────────────────────
+
+/// @dev Creation-code id for `Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel`
+///      (ST/JT share an ERC4626 vault share priced share->base via `convertToAssets`, base->NAV via Chainlink).
+bytes32 constant COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK = keccak256("ROYCO_COMPONENT_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK");

@@ -266,28 +266,32 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
     }
 
     /// @notice Builds ABI-encoded `initialize(...)` calldata for an accountant proxy.
-    /// @dev NOTE: The liquidity tranche overlay is wired with a zero-minimum-liquidity baseline (so a freshly deployed
-    ///      market reduces to a plain ST/JT market) and `ltYDM` is set to the JT YDM as a PLACEHOLDER. A distinct LT YDM
-    ///      (the LDM) and the LT premium/liquidity config must be wired before this market can be deployed: the
-    ///      accountant's `YDMS_CANNOT_BE_IDENTICAL` guard rejects identical JT and LT YDMs at `initialize()`.
-    function _encodeAccountantInitData(AccountantParams memory _p, address _ydm) internal view returns (bytes memory) {
+    /// @dev The liquidity tranche overlay is wired with a zero-minimum-liquidity baseline so a freshly deployed market
+    ///      reduces to a plain ST/JT market: `minLiquidityWAD = 0`, no LT fees, and an uninitialized LT YDM that is never
+    ///      consulted while `minLiquidityWAD == 0`. `_ltYdm` MUST be a distinct instance from `_jtYdm`: the accountant's
+    ///      `YDMS_CANNOT_BE_IDENTICAL` guard rejects identical JT and LT YDMs at `initialize()`. The full LDM wiring
+    ///      (premium model + LT liquidity/premium config) lands with the functional LT path (P2+).
+    /// @param _p The accountant parameters.
+    /// @param _jtYdm The JT YDM (risk-premium model) instance.
+    /// @param _ltYdm The LT YDM (liquidity-premium model) instance; a distinct placeholder until the LDM is wired.
+    function _encodeAccountantInitData(AccountantParams memory _p, address _jtYdm, address _ltYdm) internal view returns (bytes memory) {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: _p.stProtocolFeeWAD,
             jtProtocolFeeWAD: _p.jtProtocolFeeWAD,
             jtYieldShareProtocolFeeWAD: _p.yieldShareProtocolFeeWAD,
             minCoverageWAD: _p.coverageWAD,
             betaWAD: _p.betaWAD,
-            jtYDM: _ydm,
+            jtYDM: _jtYdm,
             jtYDMInitializationData: _p.ydmInitializationData,
             fixedTermDurationSeconds: _p.fixedTermDurationSeconds,
             liquidationCoverageUtilizationWAD: _p.liquidationUtilizationWAD,
             stNAVDustTolerance: _p.stNAVDustTolerance,
             jtNAVDustTolerance: _p.jtNAVDustTolerance,
-            // Liquidity tranche overlay: zero-liquidity baseline; LT YDM is a placeholder pending the LDM wiring (see @dev above)
+            // Liquidity tranche overlay: zero-liquidity baseline; LT YDM is a distinct, uninitialized placeholder pending the LDM (see @dev above)
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0,
             minLiquidityWAD: 0,
-            ltYDM: _ydm,
+            ltYDM: _ltYdm,
             ltYDMInitializationData: bytes(""),
             ltNAVDustTolerance: NAV_UNIT.wrap(0)
         });
