@@ -387,7 +387,7 @@ contract RoycoDayAccountantTest is BaseTest {
 
         assertEq(toUint256(state.jtEffectiveNAV), jtEffBefore + jtGain, "JT accrues gain");
         assertEq(toUint256(state.stEffectiveNAV), stEffBefore, "ST unchanged");
-        assertGt(toUint256(state.jtProtocolFeeAccrued), 0, "JT fee accrued");
+        assertGt(toUint256(state.jtProtocolFee), 0, "JT fee accrued");
         _assertNAVConservation(state);
     }
 
@@ -748,7 +748,7 @@ contract RoycoDayAccountantTest is BaseTest {
 
         assertEq(toUint256(state.stEffectiveNAV), stEffBefore + deposit, "ST effective increased");
         assertEq(toUint256(state.jtEffectiveNAV), jtEffBefore, "JT unchanged");
-        assertEq(toUint256(state.stProtocolFeeAccrued), 0, "no fee on post-op");
+        assertEq(toUint256(state.stProtocolFee), 0, "no fee on post-op");
         _assertNAVConservation(state);
         _assertConfigFields(state);
     }

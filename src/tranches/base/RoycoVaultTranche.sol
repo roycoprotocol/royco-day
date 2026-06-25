@@ -221,13 +221,13 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
                 : TRANCHE_TYPE() == TrancheType.JUNIOR ? IRoycoDayKernel(KERNEL).jtPreviewDeposit(_assets) : IRoycoDayKernel(KERNEL).ltPreviewDeposit(_assets));
 
         // Preview the total tranche shares after minting any protocol fee shares post-sync
-        NAV_UNIT feeAccrued = TRANCHE_TYPE() == TrancheType.SENIOR
-            ? stateBeforeDeposit.stProtocolFeeAccrued
-            : TRANCHE_TYPE() == TrancheType.JUNIOR ? stateBeforeDeposit.jtProtocolFeeAccrued : stateBeforeDeposit.ltProtocolFeeAccrued;
+        NAV_UNIT protocolFee = TRANCHE_TYPE() == TrancheType.SENIOR
+            ? stateBeforeDeposit.stProtocolFee
+            : TRANCHE_TYPE() == TrancheType.JUNIOR ? stateBeforeDeposit.jtProtocolFee : stateBeforeDeposit.ltProtocolFee;
         NAV_UNIT effectiveNAV = TRANCHE_TYPE() == TrancheType.SENIOR
             ? stateBeforeDeposit.stEffectiveNAV
             : TRANCHE_TYPE() == TrancheType.JUNIOR ? stateBeforeDeposit.jtEffectiveNAV : stateBeforeDeposit.ltRawNAV;
-        (uint256 feeSharesMinted,) = previewMintProtocolFeeShares(feeAccrued, effectiveNAV);
+        (uint256 feeSharesMinted,) = previewMintProtocolFeeShares(protocolFee, effectiveNAV);
 
         // Calculate the shares to be minted to the receiver, considering the protocol fee shares
         shares = _convertToShares(valueAllocated, feeSharesMinted + totalSupply(), effectiveNAV, Math.Rounding.Floor);

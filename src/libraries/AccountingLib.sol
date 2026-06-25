@@ -18,114 +18,98 @@ library AccountingLib {
     /// @notice Thrown when a set of tranche NAVs violates the NAV conservation invariant: raw and effective NAVs must sum to the same total
     error NAV_CONSERVATION_VIOLATION();
 
+    /// @notice Thrown when the combined risk and liquidity premiums exceed the senior gain they are drawn from: the JT and LT yield shares must sum to at most 100% of senior appreciation
+    error PREMIUMS_EXCEED_SENIOR_YIELD();
+
+    /**
+     * @notice Attributes each tranche's raw NAV delta across the checkpointed claims that each tranche holds on the raw NAVs, producing the signed effective NAV delta for each tranche
+     * @dev The first step of a sync's PnL waterfall: it converts the raw NAV deltas (the unrealized PNL of the underlying investment(s)) into effective NAV deltas, which the waterfall then settles (loss -> coverage IL recovery -> yield split)
+     * @param _stRawNAV The senior tranche's current raw NAV: the mark-to-market value of its invested assets
+     * @param _jtRawNAV The junior tranche's current raw NAV: the mark-to-market value of its invested assets
+     * @param _lastSTRawNAV The senior tranche's last recorded raw NAV (excluding any coverage taken and yield shared): the reference its raw NAV delta is measured against
+     * @param _lastJTRawNAV The junior tranche's last recorded raw NAV (excluding any coverage given and yield shared): the reference its raw NAV delta is measured against
+     * @param _lastSTEffectiveNAV The senior tranche's last recorded effective NAV (including any prior applied coverage, ST yield distribution, and uncovered losses)
+     * @param _lastJTEffectiveNAV The junior tranche's last recorded effective NAV (including any prior provided coverage, JT yield, ST yield distribution, and JT losses)
+     * @return deltaSTEffectiveNAV The signed delta to the senior tranche's effective NAV from this sync's PNL: the sum of ST's claim-weighted shares of each tranche's raw NAV PNL
+     * @return deltaJTEffectiveNAV The signed delta to the junior tranche's effective NAV from this sync's PNL: the residual of the total PNL after ST's attribution, which absorbs all rounding drift
+     */
     function applyProfitAndLossAttribution(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
-        AccountingCheckpoint memory _prePnLWaterfallCheckpoint
+        NAV_UNIT _lastSTRawNAV,
+        NAV_UNIT _lastJTRawNAV,
+        NAV_UNIT _lastSTEffectiveNAV,
+        NAV_UNIT _lastJTEffectiveNAV
     )
         internal
         pure
         returns (int256 deltaSTEffectiveNAV, int256 deltaJTEffectiveNAV)
     {
-        // Cache the checkpointed effective NAV for each tranche
-        NAV_UNIT stEffectiveNAV = _prePnLWaterfallCheckpoint.stEffectiveNAV;
-        NAV_UNIT jtEffectiveNAV = _prePnLWaterfallCheckpoint.jtEffectiveNAV;
         // Compute the deltas for each tranche's effective NAV based on their last checkpointed economic claims on each tranche's raw NAVs
+        // Last cross-tranche claims (the NAV that can't be funded by the tranche's own raw NAV)
+        NAV_UNIT stClaimOnJTRawNAV = UnitsMathLib.saturatingSub(_lastSTEffectiveNAV, _lastSTRawNAV);
+        NAV_UNIT jtClaimOnSTRawNAV = UnitsMathLib.saturatingSub(_lastJTEffectiveNAV, _lastJTRawNAV);
+        // Last self-backed portion of the senior tranche's claim (the NAV funded by ST's own raw NAV)
+        // NOTE: NAV conservation guarantees that this cannot underflow
+        NAV_UNIT stClaimOnSTRawNAV = (_lastSTRawNAV - jtClaimOnSTRawNAV);
 
-        {
-            // Cache the checkpointed raw NAV for each tranche
-            NAV_UNIT lastSTRawNAV = _prePnLWaterfallCheckpoint.stRawNAV;
-            NAV_UNIT lastJTRawNAV = _prePnLWaterfallCheckpoint.jtRawNAV;
+        // Compute the deltas in the raw NAVs of each tranche
+        // The deltas represent the unrealized PNL of the underlying investment since the last NAV checkpoints
+        int256 deltaSTRawNAV = UnitsMathLib.computeNAVDelta(_stRawNAV, _lastSTRawNAV);
+        int256 deltaJTRawNAV = UnitsMathLib.computeNAVDelta(_jtRawNAV, _lastJTRawNAV);
 
-            // Last cross-tranche claims (the NAV that can't be funded by the tranche's own raw NAV)
-            NAV_UNIT stClaimOnJTRawNAV = UnitsMathLib.saturatingSub(stEffectiveNAV, lastSTRawNAV);
-            NAV_UNIT jtClaimOnSTRawNAV = UnitsMathLib.saturatingSub(jtEffectiveNAV, lastJTRawNAV);
-            // Last self-backed portion of the senior tranche's claim (the NAV funded by ST's own raw NAV)
-            // NOTE: NAV conservation guarantees that this cannot underflow
-            NAV_UNIT stClaimOnSTRawNAV = (lastSTRawNAV - jtClaimOnSTRawNAV);
+        // Attribute each raw NAV's signed PNL to ST in proportion to its claim against that raw NAV
+        // The resulting deltas are rounded down: in favor of seniors on losses and juniors on gains
+        // When the last ST raw NAV is zero, conservation forces ST's claim on its raw NAV to zero: route the delta to ST if it has live effective claims, else leave it as residual to JT to avoid inflating NAV against zero ST shares outstanding
+        int256 deltaSTClaimOnSTRawNAV = _lastSTRawNAV == ZERO_NAV_UNITS
+            ? (_lastSTEffectiveNAV > ZERO_NAV_UNITS ? deltaSTRawNAV : int256(0))
+            : _attributeDeltaToClaimOnRawNAV(deltaSTRawNAV, stClaimOnSTRawNAV, _lastSTRawNAV);
+        int256 deltaSTClaimOnJTRawNAV = _attributeDeltaToClaimOnRawNAV(deltaJTRawNAV, stClaimOnJTRawNAV, _lastJTRawNAV);
 
-            // Compute the deltas in the raw NAVs of each tranche
-            // The deltas represent the unrealized PNL of the underlying investment since the last NAV checkpoints
-            int256 deltaSTRawNAV = UnitsMathLib.computeNAVDelta(_stRawNAV, lastSTRawNAV);
-            int256 deltaJTRawNAV = UnitsMathLib.computeNAVDelta(_jtRawNAV, lastJTRawNAV);
-
-            // Attribute each raw NAV's signed PNL to ST in proportion to its claim against that raw NAV
-            // The resulting deltas are rounded down: in favor of seniors on losses and juniors on gains
-            // When the last ST raw NAV is zero, conservation forces ST's claim on its raw NAV to zero: route the delta to ST if it has live effective claims, else leave it as residual to JT to avoid inflating NAV against zero ST shares outstanding
-            int256 deltaSTClaimOnSTRawNAV = lastSTRawNAV == ZERO_NAV_UNITS
-                ? (stEffectiveNAV > ZERO_NAV_UNITS ? deltaSTRawNAV : int256(0))
-                : _attributeDeltaToClaimOnRawNAV(deltaSTRawNAV, stClaimOnSTRawNAV, lastSTRawNAV);
-            int256 deltaSTClaimOnJTRawNAV = _attributeDeltaToClaimOnRawNAV(deltaJTRawNAV, stClaimOnJTRawNAV, lastJTRawNAV);
-
-            // ST's effective NAV delta is the sum of its claim-weighted shares of each pool's PNL and JT's effective NAV delta is computed as the residual
-            // NOTE: NAV conservation holds: positive and negative rounding drift is absorbed by juniors
-            deltaSTEffectiveNAV = deltaSTClaimOnSTRawNAV + deltaSTClaimOnJTRawNAV;
-            deltaJTEffectiveNAV = (deltaSTRawNAV + deltaJTRawNAV) - deltaSTEffectiveNAV;
-        }
+        // ST's effective NAV delta is the sum of its claim-weighted shares of each pool's PNL and JT's effective NAV delta is computed as the residual
+        // NOTE: NAV conservation holds: positive and negative rounding drift is absorbed by juniors
+        deltaSTEffectiveNAV = deltaSTClaimOnSTRawNAV + deltaSTClaimOnJTRawNAV;
+        deltaJTEffectiveNAV = (deltaSTRawNAV + deltaJTRawNAV) - deltaSTEffectiveNAV;
     }
 
     /**
      * @notice Synchronizes the tranche NAVs and the JT coverage impermanent loss based on the unrealized PNL of the underlying investment(s)
      * @dev Attributes each tranche's raw NAV delta across the checkpointed claims, then settles the deltas through the PnL waterfall (loss -> coverage IL recovery -> yield split)
-     * @dev Pure by design: all inputs are passed in explicitly so that callers can evaluate the waterfall repeatedly at candidate raw NAVs without touching state
-     * @dev Protocol fees are computed alongside the settlement but are never deducted from the effective NAVs: collecting them is the caller's responsibility
-     * @dev The YDM outputs consumed by the yield split are pre-resolved by the caller: they depend only on the last committed sync, so they are valid for any raw NAV inputs measured against this checkpoint
      * @param _stRawNAV The senior tranche's current raw NAV: the mark-to-market value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the mark-to-market value of its invested assets
+     * @param _ltRawNAV The liquidity tranche's current raw NAV: the mark-to-market value of its invested assets
      * @param _params The fixed inputs of the waterfall: the checkpoint, pre-resolved YDM outputs, fee rates, and dust tolerance
      * @return postPnLWaterfallCheckpoint The post-waterfall checkpoint: the current raw NAVs alongside the settled effective NAVs and JT coverage impermanent loss
-     * @return stProtocolFeeAccrued The protocol fee accrued on ST yield in this sync (gross: not netted out of the effective NAVs)
-     * @return jtProtocolFeeAccrued The protocol fee accrued on JT yield and the JT yield share in this sync (gross: not netted out of the effective NAVs)
-     * @return riskPremiumPaid A boolean indicating whether the JT risk premium was paid out of ST yield
+     * @return ltLiquidityPremium The liquidity premium paid to LT out of ST yield in this sync: minted as senior tranche shares to LT (coverage-neutral, so it remains within ST effective NAV)
+     * @return stProtocolFee The protocol fee accrued on ST yield in this sync (gross: not netted out of the effective NAVs)
+     * @return jtProtocolFee The protocol fee accrued on JT yield and the JT yield share in this sync (gross: not netted out of the effective NAVs)
+     * @return ltProtocolFee The protocol fee accrued on LT yield and the LT yield share in this sync (gross: not netted out of the effective NAVs)
+     * @return premiumsPaid A boolean indicating whether the JT risk and LT liquidity premiums were paid out of ST yield
      */
     function applyProfitAndLossWaterfall(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
+        NAV_UNIT _ltRawNAV,
         PnLWaterfallParams memory _params
     )
         internal
         pure
-        returns (AccountingCheckpoint memory postPnLWaterfallCheckpoint, NAV_UNIT stProtocolFeeAccrued, NAV_UNIT jtProtocolFeeAccrued, bool riskPremiumPaid)
+        returns (
+            AccountingCheckpoint memory postPnLWaterfallCheckpoint,
+            NAV_UNIT ltLiquidityPremium,
+            NAV_UNIT stProtocolFee,
+            NAV_UNIT jtProtocolFee,
+            NAV_UNIT ltProtocolFee,
+            bool premiumsPaid
+        )
     {
         // Cache the checkpointed effective NAV for each tranche
         NAV_UNIT stEffectiveNAV = _params.checkpoint.stEffectiveNAV;
         NAV_UNIT jtEffectiveNAV = _params.checkpoint.jtEffectiveNAV;
-        // Compute the deltas for each tranche's effective NAV based on their last checkpointed economic claims on each tranche's raw NAVs
-        int256 deltaSTEffectiveNAV;
-        int256 deltaJTEffectiveNAV;
-        {
-            // Cache the checkpointed raw NAV for each tranche
-            NAV_UNIT lastSTRawNAV = _params.checkpoint.stRawNAV;
-            NAV_UNIT lastJTRawNAV = _params.checkpoint.jtRawNAV;
 
-            // Last cross-tranche claims (the NAV that can't be funded by the tranche's own raw NAV)
-            NAV_UNIT stClaimOnJTRawNAV = UnitsMathLib.saturatingSub(stEffectiveNAV, lastSTRawNAV);
-            NAV_UNIT jtClaimOnSTRawNAV = UnitsMathLib.saturatingSub(jtEffectiveNAV, lastJTRawNAV);
-            // Last self-backed portion of the senior tranche's claim (the NAV funded by ST's own raw NAV)
-            // NOTE: NAV conservation guarantees that this cannot underflow
-            NAV_UNIT stClaimOnSTRawNAV = (lastSTRawNAV - jtClaimOnSTRawNAV);
-
-            // Compute the deltas in the raw NAVs of each tranche
-            // The deltas represent the unrealized PNL of the underlying investment since the last NAV checkpoints
-            int256 deltaSTRawNAV = UnitsMathLib.computeNAVDelta(_stRawNAV, lastSTRawNAV);
-            int256 deltaJTRawNAV = UnitsMathLib.computeNAVDelta(_jtRawNAV, lastJTRawNAV);
-
-            // Attribute each raw NAV's signed PNL to ST in proportion to its claim against that raw NAV
-            // The resulting deltas are rounded down: in favor of seniors on losses and juniors on gains
-            // When the last ST raw NAV is zero, conservation forces ST's claim on its raw NAV to zero: route the delta to ST if it has live effective claims, else leave it as residual to JT to avoid inflating NAV against zero ST shares outstanding
-            int256 deltaSTClaimOnSTRawNAV = lastSTRawNAV == ZERO_NAV_UNITS
-                ? (stEffectiveNAV > ZERO_NAV_UNITS ? deltaSTRawNAV : int256(0))
-                : _attributeDeltaToClaimOnRawNAV(deltaSTRawNAV, stClaimOnSTRawNAV, lastSTRawNAV);
-            int256 deltaSTClaimOnJTRawNAV = _attributeDeltaToClaimOnRawNAV(deltaJTRawNAV, stClaimOnJTRawNAV, lastJTRawNAV);
-
-            // ST's effective NAV delta is the sum of its claim-weighted shares of each pool's PNL and JT's effective NAV delta is computed as the residual
-            // NOTE: NAV conservation holds: positive and negative rounding drift is absorbed by juniors
-            deltaSTEffectiveNAV = deltaSTClaimOnSTRawNAV + deltaSTClaimOnJTRawNAV;
-            deltaJTEffectiveNAV = (deltaSTRawNAV + deltaJTRawNAV) - deltaSTEffectiveNAV;
-        }
-
-        // Cache the checkpointed JT coverage impermanent loss
-        NAV_UNIT jtCoverageImpermanentLoss = _params.checkpoint.jtCoverageImpermanentLoss;
+        // Apply the profit and loss attribution based on the current claims on NAVs that each tranche holds
+        (int256 deltaSTEffectiveNAV, int256 deltaJTEffectiveNAV) =
+            applyProfitAndLossAttribution(_stRawNAV, _jtRawNAV, _params.checkpoint.stRawNAV, _params.checkpoint.jtRawNAV, stEffectiveNAV, jtEffectiveNAV);
 
         // The net JT gains. The JT protocol fee accrued is calculated using this NAV.
         NAV_UNIT jtNetGain = ZERO_NAV_UNITS;
@@ -140,11 +124,13 @@ library AccountingLib {
         } else if (deltaJTEffectiveNAV > 0) {
             jtNetGain = toNAVUnits(deltaJTEffectiveNAV);
             // Compute the protocol fee taken on this JT yield accrual if it is not attributable to any rounding/dust
-            if (jtNetGain > _params.effectiveNAVDustTolerance) jtProtocolFeeAccrued = jtNetGain.mulDiv(_params.jtProtocolFeeWAD, WAD, Math.Rounding.Floor);
+            if (jtNetGain > _params.effectiveNAVDustTolerance) jtProtocolFee = jtNetGain.mulDiv(_params.jtProtocolFeeWAD, WAD, Math.Rounding.Floor);
             // Book the gains to the JT
             jtEffectiveNAV = (jtEffectiveNAV + jtNetGain);
         }
 
+        // Cache the checkpointed JT coverage impermanent loss
+        NAV_UNIT jtCoverageImpermanentLoss = _params.checkpoint.jtCoverageImpermanentLoss;
         /// @dev STEP_APPLY_ST_LOSS: The ST assets depreciated in value
         if (deltaSTEffectiveNAV < 0) {
             NAV_UNIT stLoss = toNAVUnits(-deltaSTEffectiveNAV);
@@ -152,9 +138,9 @@ library AccountingLib {
             NAV_UNIT coverageApplied = UnitsMathLib.min(stLoss, jtEffectiveNAV);
             if (coverageApplied != ZERO_NAV_UNITS) {
                 // If there was a JT protocol fee taken on their appreciation, recalculate it using the JT net gain after applying coverage applied
-                if (jtProtocolFeeAccrued != ZERO_NAV_UNITS) {
+                if (jtProtocolFee != ZERO_NAV_UNITS) {
                     jtNetGain = jtNetGain.saturatingSub(coverageApplied);
-                    jtProtocolFeeAccrued =
+                    jtProtocolFee =
                         (jtNetGain > _params.effectiveNAVDustTolerance) ? jtNetGain.mulDiv(_params.jtProtocolFeeWAD, WAD, Math.Rounding.Floor) : ZERO_NAV_UNITS;
                 }
                 // Apply the coverage to JT effective NAV
@@ -180,29 +166,54 @@ library AccountingLib {
             /// @dev STEP_DISTRIBUTE_YIELD: There is no remaining JT coverage impermanent loss that ST yield is obligated to repay, the residual gains will be used to distribute yield to both tranches
             if (stGain != ZERO_NAV_UNITS) {
                 // Mark yield as distributed if the gain is not attributable to any rounding/dust
-                if (stGain > _params.effectiveNAVDustTolerance) riskPremiumPaid = true;
-                // If the last yield distribution happened in the same block, use the instantaneous JT yield share. Else, use the time-weighted average JT yield share since the last distribution
-                NAV_UNIT riskPremium;
-                if (_params.elapsedSinceLastRiskPremiumPayment == 0) {
-                    riskPremium = stGain.mulDiv(_params.instantaneousJTYieldShareWAD, WAD, Math.Rounding.Floor);
+                if (stGain > _params.effectiveNAVDustTolerance) premiumsPaid = true;
+                // If the last premium payments happened in the same block, use the instantaneous yield shares
+                // Else, use the time-weighted average yield shares since the last premium payments
+                NAV_UNIT jtRiskPremium;
+                if (_params.elapsedSinceLastPremiumPayments == 0) {
+                    jtRiskPremium = stGain.mulDiv(_params.instantaneousJTYieldShareWAD, WAD, Math.Rounding.Floor);
+                    ltLiquidityPremium = stGain.mulDiv(_params.instantaneousLTYieldShareWAD, WAD, Math.Rounding.Floor);
                 } else {
-                    riskPremium = stGain.mulDiv(_params.twJTYieldShareAccruedWAD, (_params.elapsedSinceLastRiskPremiumPayment * WAD), Math.Rounding.Floor);
+                    jtRiskPremium = stGain.mulDiv(_params.twJTYieldShareAccruedWAD, (_params.elapsedSinceLastPremiumPayments * WAD), Math.Rounding.Floor);
+                    ltLiquidityPremium = stGain.mulDiv(_params.twLTYieldShareAccruedWAD, (_params.elapsedSinceLastPremiumPayments * WAD), Math.Rounding.Floor);
                 }
-                // Apply the yield split to JT's effective NAV
-                if (riskPremium != ZERO_NAV_UNITS) {
+                // The combined premiums can never exceed the senior gain: the JT and LT yield shares are each capped so that they sum to at most 100% of senior appreciation
+                require((jtRiskPremium + ltLiquidityPremium) <= stGain, PREMIUMS_EXCEED_SENIOR_YIELD());
+                // Apply the risk premium to JT's effective NAV
+                if (jtRiskPremium != ZERO_NAV_UNITS) {
                     // Compute the protocol fee taken on the yield share accrual if it is not attributable to any rounding/dust
-                    if (riskPremiumPaid) {
-                        jtProtocolFeeAccrued = (jtProtocolFeeAccrued + riskPremium.mulDiv(_params.jtYieldShareProtocolFeeWAD, WAD, Math.Rounding.Floor));
+                    if (premiumsPaid) {
+                        jtProtocolFee = (jtProtocolFee + jtRiskPremium.mulDiv(_params.jtYieldShareProtocolFeeWAD, WAD, Math.Rounding.Floor));
                     }
-                    jtEffectiveNAV = (jtEffectiveNAV + riskPremium);
-                    stGain = (stGain - riskPremium);
+                    jtEffectiveNAV = (jtEffectiveNAV + jtRiskPremium);
+                    stGain = (stGain - jtRiskPremium);
+                }
+                // Pay the liquidity premium to LT: it is minted as senior shares to LT, so it remains a senior claim within ST effective NAV (coverage-neutral) and is carved out of the residual only to size plain ST's retained yield and protocol fee
+                if (ltLiquidityPremium != ZERO_NAV_UNITS) {
+                    // Compute the protocol fee taken on the yield share accrual if it is not attributable to any rounding/dust
+                    if (premiumsPaid) {
+                        ltProtocolFee = ltLiquidityPremium.mulDiv(_params.ltYieldShareProtocolFeeWAD, WAD, Math.Rounding.Floor);
+                    }
+                    stGain = (stGain - ltLiquidityPremium);
                 }
                 // Compute the protocol fee taken on this ST yield accrual if it is not attributable to any rounding/dust
-                if (riskPremiumPaid) stProtocolFeeAccrued = stGain.mulDiv(_params.stProtocolFeeWAD, WAD, Math.Rounding.Floor);
-                // Book the residual gain to the ST
-                stEffectiveNAV = (stEffectiveNAV + stGain);
+                if (premiumsPaid) stProtocolFee = stGain.mulDiv(_params.stProtocolFeeWAD, WAD, Math.Rounding.Floor);
+                // Book the residual gain to the ST, including the liquidity premium that remains a senior claim now owned by LT (coverage-neutral, so the two-term NAV conservation holds)
+                stEffectiveNAV = (stEffectiveNAV + stGain + ltLiquidityPremium);
             }
         }
+
+        // Compute the delta in the LT's raw NAV since the last checkpoint
+        int256 deltaLTRawNAV = UnitsMathLib.computeNAVDelta(_ltRawNAV, _params.checkpoint.ltRawNAV);
+        /// @dev STEP_APPLY_LT_GAIN: The LT assets appreciated in value
+        if (deltaLTRawNAV > 0) {
+            NAV_UNIT ltGain = toNAVUnits(deltaLTRawNAV);
+            // Compute the protocol fee taken on this LT yield accrual if it is not attributable to any rounding/dust
+            if (ltGain > _params.ltNAVDustTolerance) {
+                ltProtocolFee = (ltProtocolFee + ltGain.mulDiv(_params.ltProtocolFeeWAD, WAD, Math.Rounding.Floor));
+            }
+        }
+        /// @dev STEP_NOP_LT_LOSS: The LT assets losing value is a NOP since these assets aren't use to fulfill any obligations, and they are always owned by the LT
 
         // Enforce the NAV conservation invariant
         enforceNAVConservation(_stRawNAV, _jtRawNAV, stEffectiveNAV, jtEffectiveNAV);
@@ -211,6 +222,7 @@ library AccountingLib {
         postPnLWaterfallCheckpoint = AccountingCheckpoint({
             stRawNAV: _stRawNAV,
             jtRawNAV: _jtRawNAV,
+            ltRawNAV: _ltRawNAV,
             stEffectiveNAV: stEffectiveNAV,
             jtEffectiveNAV: jtEffectiveNAV,
             jtCoverageImpermanentLoss: jtCoverageImpermanentLoss
@@ -220,10 +232,10 @@ library AccountingLib {
     /**
      * @notice Determines the market state resulting from a sync, applies its state-dependent bookkeeping, and marshals the post-sync accounting state
      * @dev Runs once per sync, after the PnL waterfall has settled the tranche NAVs; none of its effects feed back into the effective NAVs
-     * @dev Computes the market's utilization internally from the post-waterfall checkpoint and the coverage configuration
-     * @dev Erases the JT coverage IL and zeroes the protocol fees in the marshaled state where the transition demands it; all inputs are read-only
+     * @dev Computes the market's coverage and liquidity utilization internally from the post-waterfall checkpoint and the coverage and liquidity configuration
+     * @dev Erases the JT coverage IL and zeroes the liquidity premium and protocol fees in the marshaled state where the transition demands it; all inputs are read-only
      * @dev Resulting market state:
-     *      1. Forced Perpetual: The fixed-term duration is set to 0 (permanently perpetual), current fixed-term elapsed, or liquidation utilization threshold has been breached (undercollateralized)
+     *      1. Forced Perpetual: The fixed-term duration is set to 0 (permanently perpetual), current fixed-term elapsed, or liquidation utilization threshold has been breached (under/un-collateralized)
      *      2. Normal Perpetual: JT coverage IL is within dust tolerance (staying perpetual) or fully recovered (exiting fixed-term for perpetual)
      *      3. Fixed-term: The JT coverage IL is above the dust tolerance of the market, fixed-term duration hasn't elapsed, and liquidation utilization threshold hasn't been breached
      * @param _initialMarketState The market state persisted by the last committed sync (the transition's origin state)
@@ -239,7 +251,7 @@ library AccountingLib {
         pure
         returns (SyncedAccountingState memory state, NAV_UNIT jtCoverageImpermanentLossErased)
     {
-        // Compute the market's utilization against the post-waterfall JT effective NAV
+        // Compute the market's coverage utilization against the post-waterfall JT effective NAV
         uint256 coverageUtilizationWAD = UtilsLib.computeCoverageUtilization(
             _params.postPnLWaterfallCheckpoint.stRawNAV,
             _params.postPnLWaterfallCheckpoint.jtRawNAV,
@@ -248,9 +260,16 @@ library AccountingLib {
             _params.postPnLWaterfallCheckpoint.jtEffectiveNAV
         );
 
-        // Cache the fees accrued by the waterfall: zeroed below if the resulting market state does not take fees
-        NAV_UNIT stProtocolFeeAccrued = _params.stProtocolFeeAccrued;
-        NAV_UNIT jtProtocolFeeAccrued = _params.jtProtocolFeeAccrued;
+        // Compute the market's liquidity utilization against the post-waterfall ST effective NAV and the LT's market-making inventory
+        uint256 liquidityUtilizationWAD = UtilsLib.computeLiquidityUtilization(
+            _params.postPnLWaterfallCheckpoint.stEffectiveNAV, _params.minLiquidityWAD, _params.postPnLWaterfallCheckpoint.ltRawNAV
+        );
+
+        // Cache the premium and fees accrued by the waterfall: zeroed below if the resulting market state pays no premium and takes no fees
+        NAV_UNIT ltLiquidityPremium = _params.ltLiquidityPremium;
+        NAV_UNIT stProtocolFee = _params.stProtocolFee;
+        NAV_UNIT jtProtocolFee = _params.jtProtocolFee;
+        NAV_UNIT ltProtocolFee = _params.ltProtocolFee;
 
         MarketState resultingMarketState;
         uint32 fixedTermEndTimestamp = _params.fixedTermEndTimestamp;
@@ -282,35 +301,44 @@ library AccountingLib {
             } else {
                 // This ensures that we always have a buffer of at least the dust tolerance when entering a fresh perpetual state
                 resultingMarketState = MarketState.FIXED_TERM;
-                // Fees are not taken in a fixed-term state
-                stProtocolFeeAccrued = ZERO_NAV_UNITS; // Formality: Should naturally never be non-zero in a fixed-term state
-                jtProtocolFeeAccrued = ZERO_NAV_UNITS;
+                // The liquidity premium is not paid and fees are not taken in a fixed-term state
+                ltLiquidityPremium = ZERO_NAV_UNITS;
+                stProtocolFee = ZERO_NAV_UNITS; // Formality: Should naturally never be non-zero in a fixed-term state
+                jtProtocolFee = ZERO_NAV_UNITS;
+                ltProtocolFee = ZERO_NAV_UNITS;
             }
         } else {
             resultingMarketState = MarketState.FIXED_TERM;
-            // Fees are not taken in a fixed-term state
-            stProtocolFeeAccrued = ZERO_NAV_UNITS; // Formality: Should naturally never be non-zero in a fixed-term state
-            jtProtocolFeeAccrued = ZERO_NAV_UNITS;
+            // The liquidity premium is not paid and fees are not taken in a fixed-term state
+            ltLiquidityPremium = ZERO_NAV_UNITS;
+            stProtocolFee = ZERO_NAV_UNITS; // Formality: Should naturally never be non-zero in a fixed-term state
+            jtProtocolFee = ZERO_NAV_UNITS;
+            ltProtocolFee = ZERO_NAV_UNITS;
             // If the market was in a perpetual state, update the fixed-term end timestamp
             if (_initialMarketState == MarketState.PERPETUAL) fixedTermEndTimestamp = uint32(_params.currentTimestamp + _params.fixedTermDurationSeconds);
         }
 
         // Marshal the post-sync state and return it to the caller
-        state.marketState = resultingMarketState;
-        state.stRawNAV = _params.postPnLWaterfallCheckpoint.stRawNAV;
-        state.jtRawNAV = _params.postPnLWaterfallCheckpoint.jtRawNAV;
-        state.ltRawNAV = ZERO_NAV_UNITS; // TODO: Implement LT raw NAV
-        state.stEffectiveNAV = _params.postPnLWaterfallCheckpoint.stEffectiveNAV;
-        state.jtEffectiveNAV = _params.postPnLWaterfallCheckpoint.jtEffectiveNAV;
-        state.jtCoverageImpermanentLoss = jtCoverageImpermanentLoss;
-        state.stProtocolFeeAccrued = stProtocolFeeAccrued;
-        state.jtProtocolFeeAccrued = jtProtocolFeeAccrued;
-        state.ltProtocolFeeAccrued = ZERO_NAV_UNITS; // TODO: Implement LT protocol fee accrual
-        state.coverageUtilizationWAD = coverageUtilizationWAD;
-        state.fixedTermEndTimestamp = fixedTermEndTimestamp;
-        state.minCoverageWAD = _params.minCoverageWAD;
-        state.betaWAD = _params.betaWAD;
-        state.liquidationCoverageUtilizationWAD = _params.liquidationCoverageUtilizationWAD;
+        state = SyncedAccountingState({
+            marketState: resultingMarketState,
+            stRawNAV: _params.postPnLWaterfallCheckpoint.stRawNAV,
+            jtRawNAV: _params.postPnLWaterfallCheckpoint.jtRawNAV,
+            ltRawNAV: _params.postPnLWaterfallCheckpoint.ltRawNAV,
+            stEffectiveNAV: _params.postPnLWaterfallCheckpoint.stEffectiveNAV,
+            jtEffectiveNAV: _params.postPnLWaterfallCheckpoint.jtEffectiveNAV,
+            jtCoverageImpermanentLoss: jtCoverageImpermanentLoss,
+            ltLiquidityPremium: ltLiquidityPremium,
+            stProtocolFee: stProtocolFee,
+            jtProtocolFee: jtProtocolFee,
+            ltProtocolFee: ltProtocolFee,
+            coverageUtilizationWAD: coverageUtilizationWAD,
+            liquidityUtilizationWAD: liquidityUtilizationWAD,
+            fixedTermEndTimestamp: fixedTermEndTimestamp,
+            minCoverageWAD: _params.minCoverageWAD,
+            betaWAD: _params.betaWAD,
+            liquidationCoverageUtilizationWAD: _params.liquidationCoverageUtilizationWAD,
+            minLiquidityWAD: _params.minLiquidityWAD
+        });
     }
 
     /**

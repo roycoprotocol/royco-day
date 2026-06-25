@@ -58,7 +58,7 @@ library UtilsLib {
      * @dev Formally: LIQUIDITY_UTILIZATION = (ST_EFFECTIVE_NAV * MIN_LIQUIDITY) / LT_RAW_NAV
      * @dev Rounding favors ensuring senior tranche liquidity
      * @param _stEffectiveNAV The total net asset value that the senior tranche is entitled to
-     * @param _minLiquidityWAD The ratio of current value that the senior tranche is entitled to that is expected to be in the liquidity tranche's market making inventory, scaled to WAD precision
+     * @param _minLiquidityWAD The percentage of the senior tranche NAV that must be in the liquidity tranche's market making inventory, scaled to WAD precision
      * @param _ltRawNAV The raw net asset value of the liquidity tranche's market making inventory (the Balancer BPT)
      * @return liquidityUtilizationWAD The liquidity utilization of the Royco market, scaled to WAD precision
      */

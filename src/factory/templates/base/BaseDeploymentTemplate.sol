@@ -9,6 +9,7 @@ import { IRoycoVaultTranche } from "../../../interfaces/IRoycoVaultTranche.sol";
 import { IBaseTemplate } from "../../../interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../../../interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../interfaces/factory/IRoycoProtocolTemplate.sol";
+import { WAD } from "../../../libraries/Constants.sol";
 import { NAV_UNIT } from "../../../libraries/Units.sol";
 import { RoycoSeniorTranche } from "../../../tranches/RoycoSeniorTranche.sol";
 import {
@@ -283,6 +284,9 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
             betaWAD: _p.betaWAD,
             jtYDM: _jtYdm,
             jtYDMInitializationData: _p.ydmInitializationData,
+            // JT risk premium is uncapped at the WAD ceiling (its real cap comes from the JT YDM); the LT premium is disabled in the zero-liquidity baseline
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             fixedTermDurationSeconds: _p.fixedTermDurationSeconds,
             liquidationCoverageUtilizationWAD: _p.liquidationUtilizationWAD,
             stNAVDustTolerance: _p.stNAVDustTolerance,

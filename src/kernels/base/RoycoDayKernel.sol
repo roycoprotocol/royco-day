@@ -159,9 +159,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     function jtConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _jtAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
 
     /// @inheritdoc IRoycoDayKernel
-    function ltConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _ltAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
-
-    /// @inheritdoc IRoycoDayKernel
     function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
 
     /// @inheritdoc IRoycoDayKernel
@@ -169,6 +166,9 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @inheritdoc IRoycoDayKernel
     function ltConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
+
+    /// @inheritdoc IRoycoDayKernel
+    function ltConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _ltAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
 
     // =============================
     // Tranche Preview Functions
@@ -411,11 +411,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
         // Return the requested tranche claims and total shares
         if (_trancheType == TrancheType.SENIOR) {
-            (, totalTrancheShares) = IRoycoVaultTranche(SENIOR_TRANCHE).previewMintProtocolFeeShares(state.stProtocolFeeAccrued, state.stEffectiveNAV);
+            (, totalTrancheShares) = IRoycoVaultTranche(SENIOR_TRANCHE).previewMintProtocolFeeShares(state.stProtocolFee, state.stEffectiveNAV);
         } else if (_trancheType == TrancheType.JUNIOR) {
-            (, totalTrancheShares) = IRoycoVaultTranche(JUNIOR_TRANCHE).previewMintProtocolFeeShares(state.jtProtocolFeeAccrued, state.jtEffectiveNAV);
+            (, totalTrancheShares) = IRoycoVaultTranche(JUNIOR_TRANCHE).previewMintProtocolFeeShares(state.jtProtocolFee, state.jtEffectiveNAV);
         } else {
-            (, totalTrancheShares) = IRoycoVaultTranche(LIQUIDITY_TRANCHE).previewMintProtocolFeeShares(state.ltProtocolFeeAccrued, state.ltRawNAV);
+            (, totalTrancheShares) = IRoycoVaultTranche(LIQUIDITY_TRANCHE).previewMintProtocolFeeShares(state.ltProtocolFee, state.ltRawNAV);
         }
     }
 
@@ -737,9 +737,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         state = IRoycoDayAccountant(ACCOUNTANT).preOpSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV(), _getLiquidityTrancheRawNAV());
 
         // Collect any protocol fees accrued
-        _collectProtocolFees(
-            state.stProtocolFeeAccrued, state.jtProtocolFeeAccrued, state.ltProtocolFeeAccrued, state.stEffectiveNAV, state.jtEffectiveNAV, state.ltRawNAV
-        );
+        _collectProtocolFees(state.stProtocolFee, state.jtProtocolFee, state.ltProtocolFee, state.stEffectiveNAV, state.jtEffectiveNAV, state.ltRawNAV);
     }
 
     /**
@@ -766,19 +764,19 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         uint256 jtTotalTrancheSharesAfterMintingFees;
         uint256 ltTotalTrancheSharesAfterMintingFees;
         // If the call needs to get total supply or mint shares for fees accrued for the senior tranche
-        if (_trancheType == TrancheType.SENIOR || state.stProtocolFeeAccrued != ZERO_NAV_UNITS) {
+        if (_trancheType == TrancheType.SENIOR || state.stProtocolFee != ZERO_NAV_UNITS) {
             (, stTotalTrancheSharesAfterMintingFees) =
-                IRoycoVaultTranche(SENIOR_TRANCHE).mintProtocolFeeShares(state.stProtocolFeeAccrued, state.stEffectiveNAV, protocolFeeRecipient);
+                IRoycoVaultTranche(SENIOR_TRANCHE).mintProtocolFeeShares(state.stProtocolFee, state.stEffectiveNAV, protocolFeeRecipient);
         }
         // If the call needs to get total supply or mint shares for fees accrued for the junior tranche
-        else if (_trancheType == TrancheType.JUNIOR || state.jtProtocolFeeAccrued != ZERO_NAV_UNITS) {
+        if (_trancheType == TrancheType.JUNIOR || state.jtProtocolFee != ZERO_NAV_UNITS) {
             (, jtTotalTrancheSharesAfterMintingFees) =
-                IRoycoVaultTranche(JUNIOR_TRANCHE).mintProtocolFeeShares(state.jtProtocolFeeAccrued, state.jtEffectiveNAV, protocolFeeRecipient);
+                IRoycoVaultTranche(JUNIOR_TRANCHE).mintProtocolFeeShares(state.jtProtocolFee, state.jtEffectiveNAV, protocolFeeRecipient);
         }
         // If the call needs to get total supply or mint shares for fees accrued for the liquidity tranche
-        else if (_trancheType == TrancheType.LIQUIDITY || state.ltProtocolFeeAccrued != ZERO_NAV_UNITS) {
+        if (_trancheType == TrancheType.LIQUIDITY || state.ltProtocolFee != ZERO_NAV_UNITS) {
             (, ltTotalTrancheSharesAfterMintingFees) =
-                IRoycoVaultTranche(LIQUIDITY_TRANCHE).mintProtocolFeeShares(state.ltProtocolFeeAccrued, state.ltRawNAV, protocolFeeRecipient);
+                IRoycoVaultTranche(LIQUIDITY_TRANCHE).mintProtocolFeeShares(state.ltProtocolFee, state.ltRawNAV, protocolFeeRecipient);
         }
 
         // Assign the total supply of tranche shares for the specified tranche
@@ -820,37 +818,37 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @notice Mints protocol fee shares to the fee recipient based on fees accrued on an accounting sync
      * @dev Shares are minted at the current effective NAV per share ratio, diluting existing holders proportionally
      * @dev Only mints if non-zero fees were accrued
-     * @param _stProtocolFeeAccrued The NAV amount of protocol fees accrued from senior tranche yield
-     * @param _jtProtocolFeeAccrued The NAV amount of protocol fees accrued from junior tranche yield
-     * @param _ltProtocolFeeAccrued The NAV amount of protocol fees accrued from liquidity tranche yield
+     * @param _stProtocolFee The NAV amount of protocol fees accrued from senior tranche yield
+     * @param _jtProtocolFee The NAV amount of protocol fees accrued from junior tranche yield
+     * @param _ltProtocolFee The NAV amount of protocol fees accrued from liquidity tranche yield
      * @param _stEffectiveNAV The senior tranche's effective NAV used to calculate shares to mint
      * @param _jtEffectiveNAV The junior tranche's effective NAV used to calculate shares to mint
      * @param _ltEffectiveNAV The liquidity tranche's effective NAV used to calculate shares to mint
      */
     function _collectProtocolFees(
-        NAV_UNIT _stProtocolFeeAccrued,
-        NAV_UNIT _jtProtocolFeeAccrued,
-        NAV_UNIT _ltProtocolFeeAccrued,
+        NAV_UNIT _stProtocolFee,
+        NAV_UNIT _jtProtocolFee,
+        NAV_UNIT _ltProtocolFee,
         NAV_UNIT _stEffectiveNAV,
         NAV_UNIT _jtEffectiveNAV,
         NAV_UNIT _ltEffectiveNAV
     )
         internal
     {
-        if (_stProtocolFeeAccrued != ZERO_NAV_UNITS || _jtProtocolFeeAccrued != ZERO_NAV_UNITS || _ltProtocolFeeAccrued != ZERO_NAV_UNITS) {
+        if (_stProtocolFee != ZERO_NAV_UNITS || _jtProtocolFee != ZERO_NAV_UNITS || _ltProtocolFee != ZERO_NAV_UNITS) {
             RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
             address protocolFeeRecipient = $.protocolFeeRecipient;
             // If ST fees were accrued, mint ST protocol fee shares to the protocol fee recipient
-            if (_stProtocolFeeAccrued != ZERO_NAV_UNITS) {
-                IRoycoVaultTranche(SENIOR_TRANCHE).mintProtocolFeeShares(_stProtocolFeeAccrued, _stEffectiveNAV, protocolFeeRecipient);
+            if (_stProtocolFee != ZERO_NAV_UNITS) {
+                IRoycoVaultTranche(SENIOR_TRANCHE).mintProtocolFeeShares(_stProtocolFee, _stEffectiveNAV, protocolFeeRecipient);
             }
             // If JT fees were accrued, mint JT protocol fee shares to the protocol fee recipient
-            if (_jtProtocolFeeAccrued != ZERO_NAV_UNITS) {
-                IRoycoVaultTranche(JUNIOR_TRANCHE).mintProtocolFeeShares(_jtProtocolFeeAccrued, _jtEffectiveNAV, protocolFeeRecipient);
+            if (_jtProtocolFee != ZERO_NAV_UNITS) {
+                IRoycoVaultTranche(JUNIOR_TRANCHE).mintProtocolFeeShares(_jtProtocolFee, _jtEffectiveNAV, protocolFeeRecipient);
             }
             // If LT fees were accrued, mint LT protocol fee shares to the protocol fee recipient
-            if (_ltProtocolFeeAccrued != ZERO_NAV_UNITS) {
-                IRoycoVaultTranche(LIQUIDITY_TRANCHE).mintProtocolFeeShares(_ltProtocolFeeAccrued, _ltEffectiveNAV, protocolFeeRecipient);
+            if (_ltProtocolFee != ZERO_NAV_UNITS) {
+                IRoycoVaultTranche(LIQUIDITY_TRANCHE).mintProtocolFeeShares(_ltProtocolFee, _ltEffectiveNAV, protocolFeeRecipient);
             }
         }
     }

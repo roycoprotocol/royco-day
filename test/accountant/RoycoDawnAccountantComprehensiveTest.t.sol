@@ -264,7 +264,7 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
 
         assertEq(toUint256(state.jtEffectiveNAV), jtEffBefore + jtGain, "JT accrues gain");
         assertEq(toUint256(state.stEffectiveNAV), stEffBefore, "ST unchanged");
-        assertGt(toUint256(state.jtProtocolFeeAccrued), 0, "JT protocol fee accrued");
+        assertGt(toUint256(state.jtProtocolFee), 0, "JT protocol fee accrued");
         _assertNAVConservation(state);
         _assertConfigFields(state);
     }
@@ -642,10 +642,10 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
         SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 + stGain), _nav(50e18), ZERO_NAV_UNITS);
 
         // Protocol fees should be accrued
-        assertGt(toUint256(state.stProtocolFeeAccrued), 0, "ST protocol fee accrued");
+        assertGt(toUint256(state.stProtocolFee), 0, "ST protocol fee accrued");
 
         // Fee should be bounded
-        assertLe(toUint256(state.stProtocolFeeAccrued), stGain.mulDiv(MAX_PROTOCOL_FEE_WAD, WAD, Math.Rounding.Ceil));
+        assertLe(toUint256(state.stProtocolFee), stGain.mulDiv(MAX_PROTOCOL_FEE_WAD, WAD, Math.Rounding.Ceil));
         _assertNAVConservation(state);
     }
 
@@ -658,10 +658,10 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
         SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18 + jtGain), ZERO_NAV_UNITS);
 
         // JT protocol fees should be accrued on JT gains
-        assertGt(toUint256(state.jtProtocolFeeAccrued), 0, "JT protocol fee accrued");
+        assertGt(toUint256(state.jtProtocolFee), 0, "JT protocol fee accrued");
 
         // Fee should be bounded
-        assertLe(toUint256(state.jtProtocolFeeAccrued), jtGain.mulDiv(MAX_PROTOCOL_FEE_WAD, WAD, Math.Rounding.Ceil));
+        assertLe(toUint256(state.jtProtocolFee), jtGain.mulDiv(MAX_PROTOCOL_FEE_WAD, WAD, Math.Rounding.Ceil));
         _assertNAVConservation(state);
     }
 
@@ -681,8 +681,8 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
         uint256 maxPossibleSTFee = stGain.mulDiv(MAX_PROTOCOL_FEE_WAD, WAD, Math.Rounding.Ceil);
         uint256 maxPossibleJTFee = (stGain + jtGain).mulDiv(MAX_PROTOCOL_FEE_WAD, WAD, Math.Rounding.Ceil);
 
-        assertLe(toUint256(state.stProtocolFeeAccrued), maxPossibleSTFee, "ST fee bounded");
-        assertLe(toUint256(state.jtProtocolFeeAccrued), maxPossibleJTFee, "JT fee bounded");
+        assertLe(toUint256(state.stProtocolFee), maxPossibleSTFee, "ST fee bounded");
+        assertLe(toUint256(state.jtProtocolFee), maxPossibleJTFee, "JT fee bounded");
         _assertNAVConservation(state);
     }
 
@@ -970,8 +970,8 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
         SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18 + stGain), _nav(50e18 + jtGain), ZERO_NAV_UNITS);
 
         // INVARIANT: Fees never exceed max percentage of gains
-        assertLe(toUint256(state.stProtocolFeeAccrued), (stGain + jtGain).mulDiv(MAX_PROTOCOL_FEE_WAD, WAD, Math.Rounding.Ceil));
-        assertLe(toUint256(state.jtProtocolFeeAccrued), (stGain + jtGain).mulDiv(MAX_PROTOCOL_FEE_WAD, WAD, Math.Rounding.Ceil));
+        assertLe(toUint256(state.stProtocolFee), (stGain + jtGain).mulDiv(MAX_PROTOCOL_FEE_WAD, WAD, Math.Rounding.Ceil));
+        assertLe(toUint256(state.jtProtocolFee), (stGain + jtGain).mulDiv(MAX_PROTOCOL_FEE_WAD, WAD, Math.Rounding.Ceil));
     }
 
     /// @notice INVARIANT: Coverage requirement consistency
