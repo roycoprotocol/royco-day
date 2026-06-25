@@ -5,7 +5,7 @@ import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/ac
 import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { console2 } from "lib/forge-std/src/console2.sol";
 
-import { IRoycoDawnKernel } from "../../../src/interfaces/IRoycoDawnKernel.sol";
+import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { AccessManagerConfigUtils } from "../../utils/AccessManagerConfigUtils.sol";
 import { Create2DeployUtils } from "../../utils/Create2DeployUtils.sol";
 import { ChainlinkFreshness } from "./ChainlinkFreshness.sol";
@@ -215,7 +215,7 @@ abstract contract UpgradeBase is UpgradeConfig, AccessManagerConfigUtils, Create
     }
 
     function _buildSyncCallData() internal pure returns (bytes memory) {
-        return abi.encodeCall(IRoycoDawnKernel.syncTrancheAccounting, ());
+        return abi.encodeCall(IRoycoDayKernel.syncTrancheAccounting, ());
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoDawnAccountant } from "../../../src/interfaces/IRoycoDawnAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
 
 /**
@@ -89,7 +89,7 @@ contract SetCoverage is ParameterUpdateBase {
                     updates[idx] = UpdateParams({
                         marketName: cfg.marketName,
                         target: addrs.accountant,
-                        callData: abi.encodeCall(IRoycoDawnAccountant.setCoverage, (cfg.newMinCoverageWAD)),
+                        callData: abi.encodeCall(IRoycoDayAccountant.setCoverage, (cfg.newMinCoverageWAD)),
                         description: string.concat("Set coverage for ", cfg.marketName, " to ", vm.toString(cfg.newMinCoverageWAD))
                     });
                     idx++;
@@ -105,7 +105,7 @@ contract SetCoverage is ParameterUpdateBase {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _verify(UpdateParams memory _params) internal view override {
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = IRoycoDawnAccountant(_params.target).getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory state = IRoycoDayAccountant(_params.target).getState();
 
         // Extract expected coverage from the calldata (skip 4-byte selector)
         uint64 expected;

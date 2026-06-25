@@ -324,6 +324,7 @@ library AccountingLib {
             marketState: resultingMarketState,
             stRawNAV: _params.postPnLWaterfallCheckpoint.stRawNAV,
             jtRawNAV: _params.postPnLWaterfallCheckpoint.jtRawNAV,
+            ltRawNAV: _params.postPnLWaterfallCheckpoint.ltRawNAV,
             stEffectiveNAV: _params.postPnLWaterfallCheckpoint.stEffectiveNAV,
             jtEffectiveNAV: _params.postPnLWaterfallCheckpoint.jtEffectiveNAV,
             jtCoverageImpermanentLoss: jtCoverageImpermanentLoss,

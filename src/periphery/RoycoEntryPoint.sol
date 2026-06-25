@@ -10,9 +10,9 @@ import { IRoycoEntryPoint } from "../interfaces/IRoycoEntryPoint.sol";
 import { IRoycoFactory } from "../interfaces/IRoycoFactory.sol";
 import { IRoycoVaultTranche, TrancheType } from "../interfaces/IRoycoVaultTranche.sol";
 import { MAX_NAV_UNITS, MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../libraries/Constants.sol";
-import { UtilsLib } from "../libraries/UtilsLib.sol";
 import { AssetClaims } from "../libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toUint256 } from "../libraries/Units.sol";
+import { UtilsLib } from "../libraries/UtilsLib.sol";
 
 /**
  * @title RoycoEntryPoint
@@ -432,7 +432,7 @@ contract RoycoEntryPoint is RoycoBase, IRoycoEntryPoint {
         _sharesToRedeem =
             (_sharesToRedeem == type(uint256).max) ? Math.min(IRoycoVaultTranche(tranche).maxRedeem(address(this)), request.shares) : _sharesToRedeem;
         // Return early without reverting if maxRedeem is 0 due to market conditions
-        if (_sharesToRedeem == 0) return AssetClaims(ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, ZERO_NAV_UNITS);
+        if (_sharesToRedeem == 0) return AssetClaims(ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, ZERO_NAV_UNITS);
 
         // Mark the shares as redeemed
         uint256 sharesLeftToRedeem = request.shares - _sharesToRedeem;

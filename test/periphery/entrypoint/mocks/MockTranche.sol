@@ -83,6 +83,13 @@ contract MockTranche is IRoycoVaultTranche, ERC20 {
         sharePriceWAD = sharePriceWAD.mulDiv(1e18 - _lossPercentWAD, 1e18);
     }
 
+    /// @notice Mints shares to the specified account
+    /// @param _to Recipient of the minted shares
+    /// @param _shares Amount of shares to mint
+    function mint(address _to, uint256 _shares) external override {
+        _mint(_to, _shares);
+    }
+
     /// @notice Burns shares from the caller (used by entry point for yield forfeiture)
     /// @param _amount Amount of shares to burn
     function burn(uint256 _amount) external override {
@@ -120,6 +127,7 @@ contract MockTranche is IRoycoVaultTranche, ERC20 {
         claims = AssetClaims({
             stAssets: TRANCHE_TYPE_VALUE == TrancheType.SENIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
             jtAssets: TRANCHE_TYPE_VALUE == TrancheType.JUNIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
+            ltAssets: TRANCHE_TYPE_VALUE == TrancheType.LIQUIDITY ? toTrancheUnits(assets) : toTrancheUnits(0),
             nav: toNAVUnits(assets)
         });
     }
@@ -142,6 +150,7 @@ contract MockTranche is IRoycoVaultTranche, ERC20 {
         claims = AssetClaims({
             stAssets: TRANCHE_TYPE_VALUE == TrancheType.SENIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
             jtAssets: TRANCHE_TYPE_VALUE == TrancheType.JUNIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
+            ltAssets: TRANCHE_TYPE_VALUE == TrancheType.LIQUIDITY ? toTrancheUnits(assets) : toTrancheUnits(0),
             nav: toNAVUnits(assets)
         });
     }
@@ -155,6 +164,7 @@ contract MockTranche is IRoycoVaultTranche, ERC20 {
         claims = AssetClaims({
             stAssets: TRANCHE_TYPE_VALUE == TrancheType.SENIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
             jtAssets: TRANCHE_TYPE_VALUE == TrancheType.JUNIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
+            ltAssets: TRANCHE_TYPE_VALUE == TrancheType.LIQUIDITY ? toTrancheUnits(assets) : toTrancheUnits(0),
             nav: toNAVUnits(assets)
         });
     }
@@ -203,6 +213,7 @@ contract MockTranche is IRoycoVaultTranche, ERC20 {
         claims = AssetClaims({
             stAssets: TRANCHE_TYPE_VALUE == TrancheType.SENIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
             jtAssets: TRANCHE_TYPE_VALUE == TrancheType.JUNIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
+            ltAssets: TRANCHE_TYPE_VALUE == TrancheType.LIQUIDITY ? toTrancheUnits(assets) : toTrancheUnits(0),
             nav: toNAVUnits(assets)
         });
 
@@ -230,6 +241,7 @@ contract MockTranche is IRoycoVaultTranche, ERC20 {
         claims = AssetClaims({
             stAssets: TRANCHE_TYPE_VALUE == TrancheType.SENIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
             jtAssets: TRANCHE_TYPE_VALUE == TrancheType.JUNIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
+            ltAssets: TRANCHE_TYPE_VALUE == TrancheType.LIQUIDITY ? toTrancheUnits(assets) : toTrancheUnits(0),
             nav: toNAVUnits(assets)
         });
 

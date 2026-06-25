@@ -8,9 +8,6 @@ import { UpgradeAccountantModule } from "./modules/UpgradeAccountantModule.sol";
 import { UpgradeFactoryModule } from "./modules/UpgradeFactoryModule.sol";
 import { UpgradeModuleBase } from "./modules/UpgradeModuleBase.sol";
 import { UpgradeTrancheModule } from "./modules/UpgradeTrancheModule.sol";
-import { UpgradeIdenticalErc4626KernelModule } from "./modules/kernels/UpgradeIdenticalErc4626KernelModule.sol";
-import { UpgradeMaplePoolV2KernelModule } from "./modules/kernels/UpgradeMaplePoolV2KernelModule.sol";
-import { UpgradeSUSDaiKernelModule } from "./modules/kernels/UpgradeSUSDaiKernelModule.sol";
 
 /**
  * @title UpgradeBatch
@@ -45,9 +42,6 @@ contract UpgradeBatch is UpgradeBase {
     ///      `KERNEL_*` value when introducing a new kernel module.
     enum UpgradeKind {
         TRANCHE,
-        KERNEL_IDENTICAL_ERC4626_CHAINLINK,
-        KERNEL_MAPLE_POOL_V2_CHAINLINK,
-        KERNEL_SUSDAI_ADMIN_ORACLE,
         ACCOUNTANT,
         FACTORY
     }
@@ -69,9 +63,6 @@ contract UpgradeBatch is UpgradeBase {
     UpgradeTrancheModule internal _trancheModule;
     UpgradeAccountantModule internal _accountantModule;
     UpgradeFactoryModule internal _factoryModule;
-    UpgradeIdenticalErc4626KernelModule internal _kernelIdenticalErc4626Module;
-    UpgradeMaplePoolV2KernelModule internal _kernelMapleModule;
-    UpgradeSUSDaiKernelModule internal _kernelSUSDaiModule;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // ERRORS
@@ -88,17 +79,11 @@ contract UpgradeBatch is UpgradeBase {
         _trancheModule = new UpgradeTrancheModule();
         _accountantModule = new UpgradeAccountantModule();
         _factoryModule = new UpgradeFactoryModule();
-        _kernelIdenticalErc4626Module = new UpgradeIdenticalErc4626KernelModule();
-        _kernelMapleModule = new UpgradeMaplePoolV2KernelModule();
-        _kernelSUSDaiModule = new UpgradeSUSDaiKernelModule();
         // Modules must persist across `vm.createSelectFork` calls in `run()` — their bytecode is
         // deployed at setup time (before any fork is selected).
         vm.makePersistent(address(_trancheModule));
         vm.makePersistent(address(_accountantModule));
         vm.makePersistent(address(_factoryModule));
-        vm.makePersistent(address(_kernelIdenticalErc4626Module));
-        vm.makePersistent(address(_kernelMapleModule));
-        vm.makePersistent(address(_kernelSUSDaiModule));
         _initializeConfigs();
     }
 
@@ -215,9 +200,6 @@ contract UpgradeBatch is UpgradeBase {
         if (kind == UpgradeKind.TRANCHE) return _trancheModule;
         if (kind == UpgradeKind.ACCOUNTANT) return _accountantModule;
         if (kind == UpgradeKind.FACTORY) return _factoryModule;
-        if (kind == UpgradeKind.KERNEL_IDENTICAL_ERC4626_CHAINLINK) return _kernelIdenticalErc4626Module;
-        if (kind == UpgradeKind.KERNEL_MAPLE_POOL_V2_CHAINLINK) return _kernelMapleModule;
-        if (kind == UpgradeKind.KERNEL_SUSDAI_ADMIN_ORACLE) return _kernelSUSDaiModule;
         revert UpgradeBatch__ModuleNotImplemented(kind);
     }
 

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { RoycoDawnAccountant } from "../../../src/accountant/RoycoDawnAccountant.sol";
-import { IRoycoDawnAccountant } from "../../../src/interfaces/IRoycoDawnAccountant.sol";
-import { IRoycoDawnKernel } from "../../../src/interfaces/IRoycoDawnKernel.sol";
+import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT } from "../../../src/libraries/Units.sol";
@@ -12,7 +12,7 @@ import { UpgradeModuleBase } from "./UpgradeModuleBase.sol";
 
 /**
  * @title UpgradeAccountantModule
- * @notice Module for upgrading `RoycoDawnAccountant` proxies.
+ * @notice Module for upgrading `RoycoDayAccountant` proxies.
  *
  * @dev Payload schema (ABI-encoded by the orchestrator):
  *        abi.encode(string marketName)
@@ -45,19 +45,20 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
         MarketAddresses memory addrs = getMarketAddresses(_chainId, marketName);
         address proxy = addrs.accountant;
 
-        IRoycoDawnAccountant a = IRoycoDawnAccountant(proxy);
+        IRoycoDayAccountant a = IRoycoDayAccountant(proxy);
         address kernel = a.KERNEL();
         require(kernel != address(0), UpgradeAccountantModule__NotAnAccountantProxy(proxy));
 
         // Strong type check: call an accountant-specific view. Reverts if the proxy is not actually
-        // a `RoycoDawnAccountant` (e.g. if an address was mis-entered in `UpgradeConfig`).
-        NAV_UNIT stRawNAV = IRoycoVaultTranche(IRoycoDawnKernel(kernel).SENIOR_TRANCHE()).getRawNAV();
-        NAV_UNIT jtRawNAV = IRoycoVaultTranche(IRoycoDawnKernel(kernel).JUNIOR_TRANCHE()).getRawNAV();
-        a.previewSyncTrancheAccounting(stRawNAV, jtRawNAV);
+        // a `RoycoDayAccountant` (e.g. if an address was mis-entered in `UpgradeConfig`).
+        NAV_UNIT stRawNAV = IRoycoVaultTranche(IRoycoDayKernel(kernel).SENIOR_TRANCHE()).getRawNAV();
+        NAV_UNIT jtRawNAV = IRoycoVaultTranche(IRoycoDayKernel(kernel).JUNIOR_TRANCHE()).getRawNAV();
+        NAV_UNIT ltRawNAV = IRoycoVaultTranche(IRoycoDayKernel(kernel).LIQUIDITY_TRANCHE()).getRawNAV();
+        a.previewSyncTrancheAccounting(stRawNAV, jtRawNAV, ltRawNAV);
 
         address oldImpl = _readImplementation(proxy);
 
-        bytes memory creationCode = abi.encodePacked(type(RoycoDawnAccountant).creationCode, abi.encode(kernel));
+        bytes memory creationCode = abi.encodePacked(type(RoycoDayAccountant).creationCode, abi.encode(kernel));
         bytes32 salt = keccak256(abi.encodePacked("ROYCO_ACCOUNTANT_IMPLEMENTATION_", _saltVersion));
 
         address newImpl = _predictImpl(salt, creationCode);
@@ -83,14 +84,15 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
 
     /// @inheritdoc UpgradeModuleBase
     function snapshotState(address _proxy) external view override returns (bytes memory) {
-        IRoycoDawnAccountant a = IRoycoDawnAccountant(_proxy);
-        IRoycoDawnKernel kernel = IRoycoDawnKernel(a.KERNEL());
+        IRoycoDayAccountant a = IRoycoDayAccountant(_proxy);
+        IRoycoDayKernel kernel = IRoycoDayKernel(a.KERNEL());
 
         NAV_UNIT stRawNAV = IRoycoVaultTranche(kernel.SENIOR_TRANCHE()).getRawNAV();
         NAV_UNIT jtRawNAV = IRoycoVaultTranche(kernel.JUNIOR_TRANCHE()).getRawNAV();
+        NAV_UNIT ltRawNAV = IRoycoVaultTranche(kernel.LIQUIDITY_TRANCHE()).getRawNAV();
 
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = a.getState();
-        SyncedAccountingState memory sync = a.previewSyncTrancheAccounting(stRawNAV, jtRawNAV);
+        IRoycoDayAccountant.RoycoDayAccountantState memory state = a.getState();
+        SyncedAccountingState memory sync = a.previewSyncTrancheAccounting(stRawNAV, jtRawNAV, ltRawNAV);
 
         return abi.encode(address(kernel), state, sync, stRawNAV, jtRawNAV);
     }
@@ -99,20 +101,21 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
     function verify(address _proxy, bytes memory _preStateSnapshot) external view override {
         (
             address preKernel,
-            IRoycoDawnAccountant.RoycoDawnAccountantState memory preState,
+            IRoycoDayAccountant.RoycoDayAccountantState memory preState,
             SyncedAccountingState memory preSync,
             NAV_UNIT preStRawNAV,
-            NAV_UNIT preJtRawNAV
-        ) = abi.decode(_preStateSnapshot, (address, IRoycoDawnAccountant.RoycoDawnAccountantState, SyncedAccountingState, NAV_UNIT, NAV_UNIT));
+            NAV_UNIT preJtRawNAV,
+            NAV_UNIT preLtRawNAV
+        ) = abi.decode(_preStateSnapshot, (address, IRoycoDayAccountant.RoycoDayAccountantState, SyncedAccountingState, NAV_UNIT, NAV_UNIT, NAV_UNIT));
 
-        IRoycoDawnAccountant a = IRoycoDawnAccountant(_proxy);
+        IRoycoDayAccountant a = IRoycoDayAccountant(_proxy);
         require(a.KERNEL() == preKernel, UpgradeAccountantModule__KernelImmutableChanged(preKernel, a.KERNEL()));
 
         _assertStateEqual(a.getState(), preState);
 
         // Use the SAME raw NAVs captured pre-upgrade so the sync preview is a pure function of
         // (storage, block.timestamp, inputs) and comparable across the upgrade.
-        SyncedAccountingState memory postSync = a.previewSyncTrancheAccounting(preStRawNAV, preJtRawNAV);
+        SyncedAccountingState memory postSync = a.previewSyncTrancheAccounting(preStRawNAV, preJtRawNAV, preLtRawNAV);
         _assertSyncEqual(postSync, preSync);
     }
 
@@ -121,9 +124,9 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @dev Whole-struct hash comparison. Catches every field — including any field added later
-    ///      to `RoycoDawnAccountantState` without code changes here. The trade-off is the diagnostic
+    ///      to `RoycoDayAccountantState` without code changes here. The trade-off is the diagnostic
     ///      string is generic instead of naming the exact field that differs.
-    function _assertStateEqual(IRoycoDawnAccountant.RoycoDawnAccountantState memory a, IRoycoDawnAccountant.RoycoDawnAccountantState memory b) internal pure {
+    function _assertStateEqual(IRoycoDayAccountant.RoycoDayAccountantState memory a, IRoycoDayAccountant.RoycoDayAccountantState memory b) internal pure {
         require(keccak256(abi.encode(a)) == keccak256(abi.encode(b)), UpgradeAccountantModule__StateChanged());
     }
 

@@ -5,9 +5,9 @@ import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math
 import { FixedPointMathLib } from "../../lib/solady/src/utils/FixedPointMathLib.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
 import { WAD, WAD_INT, ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
-import { DawnUtilsLib } from "../../src/libraries/DawnUtilsLib.sol";
 import { MarketState } from "../../src/libraries/Types.sol";
 import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
+import { UtilsLib } from "../../src/libraries/UtilsLib.sol";
 import { AdaptiveCurveYDM_V1 } from "../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { BaseTest } from "../base/BaseTest.t.sol";
 
@@ -68,7 +68,7 @@ contract AdaptiveCurveYDM_V1_Test is BaseTest {
         pure
         returns (uint256)
     {
-        return DawnUtilsLib.computeCoverageUtilization(_stRawNAV, _jtRawNAV, _betaWAD, _minCoverageWAD, _jtEffectiveNAV);
+        return UtilsLib.computeCoverageUtilization(_stRawNAV, _jtRawNAV, _betaWAD, _minCoverageWAD, _jtEffectiveNAV);
     }
 
     /// @dev Computes expected normalized delta from target

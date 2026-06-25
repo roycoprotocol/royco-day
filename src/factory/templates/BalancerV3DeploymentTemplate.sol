@@ -23,6 +23,7 @@ import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { IRoycoFactory } from "../../interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../interfaces/factory/IRoycoProtocolTemplate.sol";
 import { TrancheType } from "../../libraries/Types.sol";
+import { RoycoLiquidityTranche } from "../../tranches/RoycoLiquidityTranche.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
@@ -34,6 +35,7 @@ import {
     BURNER_ROLE,
     JT_LP_ROLE,
     LT_LP_ROLE,
+    SHARE_MINTER_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE,
     TRANSFER_AGENT_ROLE
@@ -84,6 +86,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         AccountantParams accountant;
         GyroECLPPoolParams gyroECLPPoolParams;
         YDMParams ydm;
+        YDMParams ltYdm;
         address protocolFeeRecipient;
         uint64 stSelfLiquidationBonusWAD;
         address roycoBlacklist;
@@ -169,6 +172,10 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         require(p.gyroECLPPoolParams.quoteToken != address(0), INVALID_PARAMS());
         require(p.protocolFeeRecipient != address(0), INVALID_PARAMS());
         require(p.ydm.componentTag != bytes32(0) && p.ydm.version != bytes32(0), INVALID_PARAMS());
+        // The LT YDM must be a distinct instance from the JT YDM (accountant `YDMS_CANNOT_BE_IDENTICAL` guard); a
+        // differing version under the same component tag is sufficient since it resolves to a different CREATE3 address.
+        require(p.ltYdm.componentTag != bytes32(0) && p.ltYdm.version != bytes32(0), INVALID_PARAMS());
+        require(p.ydm.componentTag != p.ltYdm.componentTag || p.ydm.version != p.ltYdm.version, INVALID_PARAMS());
         require(p.accountant.ydmInitializationData.length > 0, INVALID_PARAMS());
     }
 
@@ -193,8 +200,12 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         result.kernel = ROYCO_FACTORY.predictDeterministicAddress(kernelProxySalt);
         result.accountant = ROYCO_FACTORY.predictDeterministicAddress(accountantProxySalt);
 
-        // 2. Deploy YDM (idempotent across templates).
+        // 2. Deploy the JT YDM (idempotent across templates) and a distinct LT YDM placeholder (the LDM slot). Both
+        //    resolve from the same registered YDM creation code; the differing `version` yields a distinct address so
+        //    the accountant's `YDMS_CANNOT_BE_IDENTICAL` guard is satisfied. The LT YDM is uninitialized and unused
+        //    while `minLiquidityWAD == 0`.
         (result.ydm,) = _deployYDM(p.ydm);
+        (address ltYdm,) = _deployYDM(p.ltYdm);
 
         // 3. Deploy ST impl + proxy first — the pool needs ST_PROXY as one of its tokens.
         address stImpl = _deploySeniorTrancheImpl(p.st.asset, result.kernel, _marketComponentSalt(p.marketId, "ST_IMPL"));
@@ -213,7 +224,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
 
         // 7. Deploy accountant impl + proxy (Day accountant bytecode registered under the accountant component ID).
         address accountantImpl = _deployAccountantImpl(result.kernel, _marketComponentSalt(p.marketId, "ACCOUNTANT_IMPL"));
-        _deployProxy(accountantImpl, _encodeAccountantInitData(p.accountant, result.ydm), accountantProxySalt);
+        _deployProxy(accountantImpl, _encodeAccountantInitData(p.accountant, result.ydm, ltYdm), accountantProxySalt);
 
         // 8. Deploy kernel impl + proxy.
         _deployKernelImplAndProxy(p, result, balancerPool, kernelProxySalt);
@@ -254,12 +265,19 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
 
     /// @notice Creates the Gyro E-CLP pool with tokens `{ST_share, quote}` registered `STANDARD` (no rate providers, no hooks).
     function _createBalancerV3Pool(GyroECLPPoolParams memory _p, address _seniorTranche, bytes32 _salt) internal returns (address balancerV3Pool) {
+        // Balancer V3 requires a pool's tokens registered in ascending address order — the vault reverts
+        // `TokensNotSorted` otherwise. Both legs are STANDARD with no rate provider, so they only differ by
+        // address; order them here.
+        // NOTE: the E-CLP curve params (`eclpParams`/`derivedEclpParams`) are defined relative to token0/token1,
+        //       so they MUST be computed for this sorted `{token0, token1}` ordering.
+        (address token0, address token1) = uint160(_seniorTranche) < uint160(_p.quoteToken) ? (_seniorTranche, _p.quoteToken) : (_p.quoteToken, _seniorTranche);
+
         BalancerV3TokenConfig[] memory tokens = new BalancerV3TokenConfig[](2);
         tokens[0] = BalancerV3TokenConfig({
-            token: IERC20(_seniorTranche), tokenType: BalancerV3TokenType.STANDARD, rateProvider: IRateProvider(address(0)), paysYieldFees: false
+            token: IERC20(token0), tokenType: BalancerV3TokenType.STANDARD, rateProvider: IRateProvider(address(0)), paysYieldFees: false
         });
         tokens[1] = BalancerV3TokenConfig({
-            token: IERC20(_p.quoteToken), tokenType: BalancerV3TokenType.STANDARD, rateProvider: IRateProvider(address(0)), paysYieldFees: false
+            token: IERC20(token1), tokenType: BalancerV3TokenType.STANDARD, rateProvider: IRateProvider(address(0)), paysYieldFees: false
         });
 
         address authority = ROYCO_FACTORY.ROYCO_AUTHORITY();
@@ -324,23 +342,28 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
 
     function _buildRoleBindings(DeploymentResult memory _r) internal view virtual returns (RoleBindings memory) {
         TargetBinding[] memory targets = new TargetBinding[](7);
-        targets[0] = _trancheBinding(_r.seniorTranche, ST_LP_ROLE);
-        targets[1] = _trancheBinding(_r.juniorTranche, JT_LP_ROLE);
-        targets[2] = _trancheBinding(_r.liquidityTranche, LT_LP_ROLE);
+        targets[0] = _trancheBinding(_r.seniorTranche, ST_LP_ROLE, false);
+        targets[1] = _trancheBinding(_r.juniorTranche, JT_LP_ROLE, false);
+        targets[2] = _trancheBinding(_r.liquidityTranche, LT_LP_ROLE, true);
         targets[3] = _kernelBinding(_r.kernel);
         targets[4] = _accountantBinding(_r.accountant);
         targets[5] = _balancerVaultBinding(address(BALANCER_V3_VAULT));
         targets[6] = _balancerProtocolFeeControllerBinding(address(BALANCER_V3_VAULT.getProtocolFeeController()));
 
-        RoleGrant[] memory grants = new RoleGrant[](1);
+        // The kernel mints senior shares (SHARE_MINTER_ROLE) and burns them (BURNER_ROLE) when seeding/unwinding the LT's Balancer pool
+        RoleGrant[] memory grants = new RoleGrant[](3);
         grants[0] = RoleGrant({ roleId: SYNC_ROLE, account: _r.accountant, executionDelay: 0 });
+        grants[1] = RoleGrant({ roleId: SHARE_MINTER_ROLE, account: _r.kernel, executionDelay: 0 });
+        grants[2] = RoleGrant({ roleId: BURNER_ROLE, account: _r.kernel, executionDelay: 0 });
 
         return RoleBindings({ targetBindings: targets, postInitGrants: grants });
     }
 
-    function _trancheBinding(address _tranche, uint64 _lpRole) private pure returns (TargetBinding memory) {
-        bytes4[] memory s = new bytes4[](9);
-        uint64[] memory r = new uint64[](9);
+    function _trancheBinding(address _tranche, uint64 _lpRole, bool _isLiquidity) private pure returns (TargetBinding memory) {
+        // Base tranche surface (10 selectors) + the two LT-only multi-asset selectors when binding the liquidity tranche
+        uint256 n = _isLiquidity ? 12 : 10;
+        bytes4[] memory s = new bytes4[](n);
+        uint64[] memory r = new uint64[](n);
         s[0] = IRoycoVaultTranche.deposit.selector;
         r[0] = _lpRole;
         s[1] = IRoycoVaultTranche.redeem.selector;
@@ -359,6 +382,15 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         r[7] = BURNER_ROLE;
         s[8] = IRoycoVaultTranche.burnFrom.selector;
         r[8] = BURNER_ROLE;
+        // The kernel is granted SHARE_MINTER_ROLE so it can mint senior shares to itself for pool seeding
+        s[9] = IRoycoVaultTranche.mint.selector;
+        r[9] = SHARE_MINTER_ROLE;
+        if (_isLiquidity) {
+            s[10] = RoycoLiquidityTranche.depositMultiAsset.selector;
+            r[10] = _lpRole;
+            s[11] = RoycoLiquidityTranche.redeemMultiAsset.selector;
+            r[11] = _lpRole;
+        }
         return TargetBinding({ target: _tranche, selectors: s, roleIds: r });
     }
 
