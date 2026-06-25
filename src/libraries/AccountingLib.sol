@@ -296,23 +296,21 @@ library AccountingLib {
         }
 
         // Marshal the post-sync state and return it to the caller
-        state = SyncedAccountingState({
-            marketState: resultingMarketState,
-            stRawNAV: _params.postPnLWaterfallCheckpoint.stRawNAV,
-            jtRawNAV: _params.postPnLWaterfallCheckpoint.jtRawNAV,
-            ltRawNAV: ZERO_NAV_UNITS, // TODO: Implement LT raw NAV
-            stEffectiveNAV: _params.postPnLWaterfallCheckpoint.stEffectiveNAV,
-            jtEffectiveNAV: _params.postPnLWaterfallCheckpoint.jtEffectiveNAV,
-            jtCoverageImpermanentLoss: jtCoverageImpermanentLoss,
-            stProtocolFeeAccrued: stProtocolFeeAccrued,
-            jtProtocolFeeAccrued: jtProtocolFeeAccrued,
-            ltProtocolFeeAccrued: ZERO_NAV_UNITS, // TODO: Implement LT protocol fee accrual
-            coverageUtilizationWAD: coverageUtilizationWAD,
-            fixedTermEndTimestamp: fixedTermEndTimestamp,
-            minCoverageWAD: _params.minCoverageWAD,
-            betaWAD: _params.betaWAD,
-            liquidationCoverageUtilizationWAD: _params.liquidationCoverageUtilizationWAD
-        });
+        state.marketState = resultingMarketState;
+        state.stRawNAV = _params.postPnLWaterfallCheckpoint.stRawNAV;
+        state.jtRawNAV = _params.postPnLWaterfallCheckpoint.jtRawNAV;
+        state.ltRawNAV = ZERO_NAV_UNITS; // TODO: Implement LT raw NAV
+        state.stEffectiveNAV = _params.postPnLWaterfallCheckpoint.stEffectiveNAV;
+        state.jtEffectiveNAV = _params.postPnLWaterfallCheckpoint.jtEffectiveNAV;
+        state.jtCoverageImpermanentLoss = jtCoverageImpermanentLoss;
+        state.stProtocolFeeAccrued = stProtocolFeeAccrued;
+        state.jtProtocolFeeAccrued = jtProtocolFeeAccrued;
+        state.ltProtocolFeeAccrued = ZERO_NAV_UNITS; // TODO: Implement LT protocol fee accrual
+        state.coverageUtilizationWAD = coverageUtilizationWAD;
+        state.fixedTermEndTimestamp = fixedTermEndTimestamp;
+        state.minCoverageWAD = _params.minCoverageWAD;
+        state.betaWAD = _params.betaWAD;
+        state.liquidationCoverageUtilizationWAD = _params.liquidationCoverageUtilizationWAD;
     }
 
     /**

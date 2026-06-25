@@ -351,9 +351,14 @@ interface IRoycoDayKernel {
     /**
      * @notice Returns the maximum amount of assets that can be withdrawn from the liquidity tranche
      * @param _owner The address that is withdrawing the assets
+     * @return claimOnLtNAV The notional claims on LT assets that the liquidity tranche has denominated in kernel's NAV units
      * @return ltMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the liquidity tranche, denominated in the kernel's NAV units
+     * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the liquidity tranche after minting any protocol fee shares post-sync
      */
-    function ltMaxWithdrawable(address _owner) external view returns (NAV_UNIT ltMaxWithdrawableNAV);
+    function ltMaxWithdrawable(address _owner)
+        external
+        view
+        returns (NAV_UNIT claimOnLtNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees);
 
     /**
      * @notice Previews the deposit of a specified amount of assets into the junior tranche

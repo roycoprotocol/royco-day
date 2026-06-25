@@ -188,7 +188,9 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         claims =
         (TRANCHE_TYPE() == TrancheType.SENIOR
                 ? IRoycoDayKernel(KERNEL).stRedeem(_shares, _receiver, true)
-                : IRoycoDayKernel(KERNEL).jtRedeem(_shares, _receiver, true));
+                : TRANCHE_TYPE() == TrancheType.JUNIOR
+                    ? IRoycoDayKernel(KERNEL).jtRedeem(_shares, _receiver, true)
+                    : IRoycoDayKernel(KERNEL).ltRedeem(_shares, _receiver, true));
 
         // Burn shares after kernel processes redemption
         // Bypass the balance update hook
@@ -300,30 +302,42 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     function maxRedeem(address _owner) public view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
         // TODO: Implement (LT max redeem);
 
-        //  We query the kernel for (a) N_s and N_j - the notional claim of the tranche on the ST and JT assets respectively in NAV units, and
-        //                          (b) L_s and L_j - the amount that can be withdrawn from the senior and junior tranches globally in NAV units, respectively
-        //  When shares are redeemed, assets from the senior and junior tranches are withdrawn proportionally to the notional claims of the tranche on the respective assets.
-        //  But, the global max withdrawable assets for each tranche are also considered. These are inclusive of any coverage requirements, as well as liquidity constraints.
-        //  If T respresents the total shares in the tranche, s the total shares owned by the owner, then the maximum amount of shares that can be redeemed s' is subject to:
-        //      (a) s' * N_s / T  <= min(s * N_s / T, L_s) => s' <= min(s, T * L_s / N_s)
-        //      (b) s' * N_j / T  <= min(s * N_j / T, L_j) => s' <= min(s, T * L_j / N_j)
-        //  Therefore, the maximum amount of shares that can be redeemed is:
-        //      s' = min(s, T * L_s / N_s, T * L_j / N_j)
         uint256 sharesOwned = balanceOf(_owner);
-        // Get the notional claims and the max withdrawable assets for the tranche
-        (NAV_UNIT claimOnStNAV, NAV_UNIT claimOnJtNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalSharesAfterMintingFees) =
-            (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoDayKernel(KERNEL).stMaxWithdrawable(_owner) : IRoycoDayKernel(KERNEL).jtMaxWithdrawable(_owner));
 
-        // We do not allow redemptions if the tranche has no claims on the assets
-        if (claimOnStNAV + claimOnJtNAV == ZERO_NAV_UNITS) return 0;
+        if (TRANCHE_TYPE() == TrancheType.SENIOR || TRANCHE_TYPE() == TrancheType.JUNIOR) {
+            //  We query the kernel for (a) N_s and N_j - the notional claim of the tranche on the ST and JT assets respectively in NAV units, and
+            //                          (b) L_s and L_j - the amount that can be withdrawn from the senior and junior tranches globally in NAV units, respectively
+            //  When shares are redeemed, assets from the senior and junior tranches are withdrawn proportionally to the notional claims of the tranche on the respective assets.
+            //  But, the global max withdrawable assets for each tranche are also considered. These are inclusive of any coverage requirements, as well as liquidity constraints.
+            //  If T respresents the total shares in the tranche, s the total shares owned by the owner, then the maximum amount of shares that can be redeemed s' is subject to:
+            //      (a) s' * N_s / T  <= min(s * N_s / T, L_s) => s' <= min(s, T * L_s / N_s)
+            //      (b) s' * N_j / T  <= min(s * N_j / T, L_j) => s' <= min(s, T * L_j / N_j)
+            //  Therefore, the maximum amount of shares that can be redeemed is:
+            //      s' = min(s, T * L_s / N_s, T * L_j / N_j)
+            // Get the notional claims and the max withdrawable assets for the tranche
+            (NAV_UNIT claimOnStNAV, NAV_UNIT claimOnJtNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalSharesAfterMintingFees) =
+                (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoDayKernel(KERNEL).stMaxWithdrawable(_owner) : IRoycoDayKernel(KERNEL).jtMaxWithdrawable(_owner));
 
-        // Calculate the maximum amount of shares that can be redeemed based on the senior and junior constraints
-        // If the notional claim of the tranche on the ST or JT assets is zero, ignore the constraints since the tranche has no claims on the assets
-        uint256 sharesWithdrawableBasedOnSeniorConstraints =
-            claimOnStNAV == ZERO_NAV_UNITS ? sharesOwned : totalSharesAfterMintingFees.mulDiv(stMaxWithdrawableNAV, claimOnStNAV, Math.Rounding.Floor);
-        uint256 sharesWithdrawableBasedOnJuniorConstraints =
-            claimOnJtNAV == ZERO_NAV_UNITS ? sharesOwned : totalSharesAfterMintingFees.mulDiv(jtMaxWithdrawableNAV, claimOnJtNAV, Math.Rounding.Floor);
-        shares = Math.min(sharesOwned, Math.min(sharesWithdrawableBasedOnSeniorConstraints, sharesWithdrawableBasedOnJuniorConstraints));
+            // We do not allow redemptions if the tranche has no claims on the assets
+            if (claimOnStNAV + claimOnJtNAV == ZERO_NAV_UNITS) return 0;
+
+            // Calculate the maximum amount of shares that can be redeemed based on the senior and junior constraints
+            // If the notional claim of the tranche on the ST or JT assets is zero, ignore the constraints since the tranche has no claims on the assets
+            uint256 sharesWithdrawableBasedOnSeniorConstraints =
+                claimOnStNAV == ZERO_NAV_UNITS ? sharesOwned : totalSharesAfterMintingFees.mulDiv(stMaxWithdrawableNAV, claimOnStNAV, Math.Rounding.Floor);
+            uint256 sharesWithdrawableBasedOnJuniorConstraints =
+                claimOnJtNAV == ZERO_NAV_UNITS ? sharesOwned : totalSharesAfterMintingFees.mulDiv(jtMaxWithdrawableNAV, claimOnJtNAV, Math.Rounding.Floor);
+            shares = Math.min(sharesOwned, Math.min(sharesWithdrawableBasedOnSeniorConstraints, sharesWithdrawableBasedOnJuniorConstraints));
+        } else {
+            // The liquidity tranche has claims only on its own RAW NAV
+            (NAV_UNIT claimOnLtNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees) =
+                IRoycoDayKernel(KERNEL).ltMaxWithdrawable(_owner);
+
+            // We do not allow redemptions if the tranche has no claims on the assets
+            if (claimOnLtNAV == ZERO_NAV_UNITS) return 0;
+
+            shares = Math.min(sharesOwned, totalTrancheSharesAfterMintingFees.mulDiv(ltMaxWithdrawableNAV, claimOnLtNAV, Math.Rounding.Floor));
+        }
     }
 
     /// =============================
@@ -338,7 +352,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     /// @inheritdoc IRoycoVaultTranche
     function getRawNAV() external view virtual override(IRoycoVaultTranche) returns (NAV_UNIT nav) {
         (SyncedAccountingState memory state,,) = IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
-        nav = TRANCHE_TYPE() == TrancheType.SENIOR ? state.stRawNAV : state.jtRawNAV;
+        nav = TRANCHE_TYPE() == TrancheType.SENIOR ? state.stRawNAV : TRANCHE_TYPE() == TrancheType.JUNIOR ? state.jtRawNAV : state.ltRawNAV;
     }
 
     /// @inheritdoc IERC20Metadata

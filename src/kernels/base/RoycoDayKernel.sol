@@ -351,7 +351,26 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     /// @inheritdoc IRoycoDayKernel
-    function ltMaxWithdrawable(address _owner) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT ltMaxWithdrawableNAV) {
+    function ltMaxWithdrawable(address _owner)
+        public
+        view
+        virtual
+        override(IRoycoDayKernel)
+        returns (NAV_UNIT claimOnLtNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees)
+    {
+        // If the owner is blacklisted or the kernel is currently paused, return zero claims
+        if (_isBlacklisted(_owner) || paused()) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+
+        // Get the total claims the liquidity tranche has on its own assets
+        SyncedAccountingState memory state;
+        (state,, totalTrancheSharesAfterMintingFees) = previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
+
+        // LT redemptions are disabled during a fixed-term market state
+        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+
+        // Use the precise NAV claims directly from the decomposition instead of round-tripping them through tranche units (NAV -> tranche -> NAV).
+        (,,,, claimOnLtNAV) = _decomposeNAVClaims(state);
+
         // TODO: Implement (LT max withdrawable); reverts until the LT withdrawal path lands .
         // Depends on maxLtWithdrawable implementation in the accountant
         revert("not implemented");
@@ -718,7 +737,9 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         state = IRoycoDayAccountant(ACCOUNTANT).preOpSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV(), _getLiquidityTrancheRawNAV());
 
         // Collect any protocol fees accrued
-        (state.stProtocolFeeAccrued, state.jtProtocolFeeAccrued, state.ltProtocolFeeAccrued, state.stEffectiveNAV, state.jtEffectiveNAV, state.ltRawNAV);
+        _collectProtocolFees(
+            state.stProtocolFeeAccrued, state.jtProtocolFeeAccrued, state.ltProtocolFeeAccrued, state.stEffectiveNAV, state.jtEffectiveNAV, state.ltRawNAV
+        );
     }
 
     /**
