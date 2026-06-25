@@ -198,7 +198,8 @@ library AccountingLib {
                 }
                 // Compute the protocol fee taken on this ST yield accrual if it is not attributable to any rounding/dust
                 if (premiumsPaid) stProtocolFee = stGain.mulDiv(_params.stProtocolFeeWAD, WAD, Math.Rounding.Floor);
-                // Book the residual gain to the ST, including the liquidity premium that remains a senior claim now owned by LT (coverage-neutral, so the two-term NAV conservation holds)
+                // Book the residual gain to the ST, including the liquidity premium that remains a senior claim now owned by LT (coverage neutral, so the two-term NAV conservation holds)
+                // The liquidity premium is used to mint ST shares to the LT
                 stEffectiveNAV = (stEffectiveNAV + stGain + ltLiquidityPremium);
             }
         }

@@ -383,26 +383,36 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     }
 
     function _accountantBinding(address _accountant) private pure returns (TargetBinding memory) {
-        bytes4[] memory s = new bytes4[](9);
-        uint64[] memory r = new uint64[](9);
+        bytes4[] memory s = new bytes4[](14);
+        uint64[] memory r = new uint64[](14);
         s[0] = IRoycoDayAccountant.setJuniorTrancheYDM.selector;
         r[0] = ADMIN_ACCOUNTANT_ROLE;
-        s[1] = IRoycoDayAccountant.setSeniorTrancheProtocolFee.selector;
-        r[1] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        s[2] = IRoycoDayAccountant.setJuniorTrancheProtocolFee.selector;
+        s[1] = IRoycoDayAccountant.setLiquidityTrancheYDM.selector;
+        r[1] = ADMIN_ACCOUNTANT_ROLE;
+        s[2] = IRoycoDayAccountant.setSeniorTrancheProtocolFee.selector;
         r[2] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        s[3] = IRoycoDayAccountant.setJTYieldShareProtocolFee.selector;
+        s[3] = IRoycoDayAccountant.setJuniorTrancheProtocolFee.selector;
         r[3] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        s[4] = IRoycoDayAccountant.setCoverageConfiguration.selector;
-        r[4] = ADMIN_ACCOUNTANT_ROLE;
-        s[5] = IRoycoDayAccountant.setFixedTermDuration.selector;
-        r[5] = ADMIN_ACCOUNTANT_ROLE;
-        s[6] = IRoycoAuth.pause.selector;
-        r[6] = ADMIN_PAUSER_ROLE;
-        s[7] = IRoycoAuth.unpause.selector;
-        r[7] = ADMIN_UNPAUSER_ROLE;
-        s[8] = UUPSUpgradeable.upgradeToAndCall.selector;
-        r[8] = ADMIN_UPGRADER_ROLE;
+        s[4] = IRoycoDayAccountant.setLiquidityTrancheProtocolFee.selector;
+        r[4] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
+        s[5] = IRoycoDayAccountant.setJTYieldShareProtocolFee.selector;
+        r[5] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
+        s[6] = IRoycoDayAccountant.setLTYieldShareProtocolFee.selector;
+        r[6] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
+        s[7] = IRoycoDayAccountant.setCoverageConfiguration.selector;
+        r[7] = ADMIN_ACCOUNTANT_ROLE;
+        s[8] = IRoycoDayAccountant.setLiquidityConfiguration.selector;
+        r[8] = ADMIN_ACCOUNTANT_ROLE;
+        s[9] = IRoycoDayAccountant.setMaxYieldShares.selector;
+        r[9] = ADMIN_ACCOUNTANT_ROLE;
+        s[10] = IRoycoDayAccountant.setFixedTermDuration.selector;
+        r[10] = ADMIN_ACCOUNTANT_ROLE;
+        s[11] = IRoycoAuth.pause.selector;
+        r[11] = ADMIN_PAUSER_ROLE;
+        s[12] = IRoycoAuth.unpause.selector;
+        r[12] = ADMIN_UNPAUSER_ROLE;
+        s[13] = UUPSUpgradeable.upgradeToAndCall.selector;
+        r[13] = ADMIN_UPGRADER_ROLE;
         return TargetBinding({ target: _accountant, selectors: s, roleIds: r });
     }
 

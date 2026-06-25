@@ -365,6 +365,14 @@ interface IRoycoDayAccountant {
     function setJuniorTrancheYDM(address _jtYDM, bytes calldata _jtYDMInitializationData) external;
 
     /**
+     * @notice Updates the LT YDM (Liquidity Tranche Yield Distribution Model) for this market
+     * @dev Only callable by a designated admin
+     * @param _ltYDM The new LT YDM address to set
+     * @param _ltYDMInitializationData The data used to initialize the new LT YDM for this market
+     */
+    function setLiquidityTrancheYDM(address _ltYDM, bytes calldata _ltYDMInitializationData) external;
+
+    /**
      * @notice Updates the senior tranche protocol fee percentage for this market
      * @dev Only callable by a designated admin
      * @param _stProtocolFeeWAD The new protocol fee percentage charged on senior tranche yield, scaled to WAD precision
@@ -379,11 +387,25 @@ interface IRoycoDayAccountant {
     function setJuniorTrancheProtocolFee(uint64 _jtProtocolFeeWAD) external;
 
     /**
+     * @notice Updates the liquidity tranche protocol fee percentage for this market
+     * @dev Only callable by a designated admin
+     * @param _ltProtocolFeeWAD The new protocol fee percentage charged on liquidity tranche yield, scaled to WAD precision
+     */
+    function setLiquidityTrancheProtocolFee(uint64 _ltProtocolFeeWAD) external;
+
+    /**
      * @notice Updates the yield share (risk premium) protocol fee percentage for this market
      * @dev Only callable by a designated admin
      * @param _jtYieldShareProtocolFeeWAD The new protocol fee percentage charged on the yield share (risk premium) payed from senior tranche yield to the junior tranche, scaled to WAD precision
      */
     function setJTYieldShareProtocolFee(uint64 _jtYieldShareProtocolFeeWAD) external;
+
+    /**
+     * @notice Updates the yield share (liquidity premium) protocol fee percentage for this market
+     * @dev Only callable by a designated admin
+     * @param _ltYieldShareProtocolFeeWAD The new protocol fee percentage charged on the yield share (liquidity premium) payed from senior tranche yield to the liquidity tranche, scaled to WAD precision
+     */
+    function setLTYieldShareProtocolFee(uint64 _ltYieldShareProtocolFeeWAD) external;
 
     /**
      * @notice Updates the coverage percentage requirement for this market
@@ -416,6 +438,21 @@ interface IRoycoDayAccountant {
     function setCoverageConfiguration(uint64 _minCoverageWAD, uint96 _betaWAD, uint256 _liquidationCoverageUtilizationWAD) external;
 
     /**
+     * @notice Updates the liquidity percentage requirement for this market
+     * @dev Only callable by a designated admin
+     * @param _minLiquidityWAD The new percentage of the senior tranche NAV that must be in the liquidity tranche's market making inventory, scaled to WAD precision
+     */
+    function setLiquidityConfiguration(uint64 _minLiquidityWAD) external;
+
+    /**
+     * @notice Updates the maximum JT and LT yield shares (premiums) for this market
+     * @dev Only callable by a designated admin
+     * @param _maxJTYieldShareWAD The new maximum JT yield share (risk premium) as a percentage of senior appreciation, scaled to WAD precision
+     * @param _maxLTYieldShareWAD The new maximum LT yield share (liquidity premium) as a percentage of senior appreciation, scaled to WAD precision
+     */
+    function setMaxYieldShares(uint64 _maxJTYieldShareWAD, uint64 _maxLTYieldShareWAD) external;
+
+    /**
      * @notice Updates the fixed term duration for this market
      * @dev Setting the fixed term duration to 0 will force the market into an eternally perpetual state
      * @dev Only callable by a designated admin
@@ -440,8 +477,16 @@ interface IRoycoDayAccountant {
     function setJuniorTrancheDustTolerance(NAV_UNIT _jtNAVDustTolerance) external;
 
     /**
+     * @notice Updates LT's dust tolerance in NAV units to account for minuscule deltas in the underlying protocol's NAV calculations, due to rounding
+     * @dev Can be safely set to 0 if the underlying investments do not exhibit rounding behavior
+     * @dev Only callable by a designated admin
+     * @param _ltNAVDustTolerance The LT NAV tolerance for rounding discrepancies
+     */
+    function setLiquidityTrancheDustTolerance(NAV_UNIT _ltNAVDustTolerance) external;
+
+    /**
      * @notice Returns the state of the accountant
      * @return state The state of the accountant
      */
-    function getState() external pure returns (RoycoDayAccountantState memory state);
+    function getState() external view returns (RoycoDayAccountantState memory state);
 }
