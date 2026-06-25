@@ -336,16 +336,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
      * @dev Max assets depositable into ST, x: JT_EFFECTIVE_NAV = ((ST_RAW_NAV + x) + (JT_RAW_NAV * β)) * MIN_COVERAGE
      *      Isolate x: x = (JT_EFFECTIVE_NAV / MIN_COVERAGE) - (JT_RAW_NAV * β) - ST_RAW_NAV
      */
-    function maxSTDepositGivenCoverage(
-        NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV,
-        NAV_UNIT _ltRawNAV
-    )
-        external
-        view
-        override(IRoycoDayAccountant)
-        returns (NAV_UNIT maxSTDeposit)
-    {
+    function maxSTDepositGivenCoverage(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external view override(IRoycoDayAccountant) returns (NAV_UNIT maxSTDeposit) {
         // Get the storage pointer to the accountant state
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
         // Preview a NAV sync to get the market's current state
@@ -378,7 +369,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     function maxJTWithdrawalGivenCoverage(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
-        NAV_UNIT _ltRawNAV,
         NAV_UNIT _jtClaimOnStUnits,
         NAV_UNIT _jtClaimOnJtUnits
     )

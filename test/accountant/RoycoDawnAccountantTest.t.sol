@@ -881,7 +881,7 @@ contract RoycoDayAccountantTest is BaseTest {
     function test_maxSTDepositGivenCoverage() public {
         _initializeAccountantState(100e18, 50e18);
 
-        NAV_UNIT maxDeposit = accountant.maxSTDepositGivenCoverage(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
+        NAV_UNIT maxDeposit = accountant.maxSTDepositGivenCoverage(_nav(100e18), _nav(50e18));
 
         SyncedAccountingState memory preview = accountant.previewSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
         uint256 jtEff = toUint256(preview.jtEffectiveNAV);
@@ -897,7 +897,7 @@ contract RoycoDayAccountantTest is BaseTest {
 
         _initializeAccountantState(stNav, jtNav);
 
-        NAV_UNIT maxDeposit = accountant.maxSTDepositGivenCoverage(_nav(stNav), _nav(jtNav), ZERO_NAV_UNITS);
+        NAV_UNIT maxDeposit = accountant.maxSTDepositGivenCoverage(_nav(stNav), _nav(jtNav));
         assertTrue(toUint256(maxDeposit) >= 0, "max deposit non-negative");
     }
 

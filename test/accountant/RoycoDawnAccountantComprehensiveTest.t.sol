@@ -701,7 +701,7 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
         _initializeAccountantState(100e18, 100e18);
 
         (NAV_UNIT totalClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable) =
-            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(100e18), ZERO_NAV_UNITS, _nav(50e18), _nav(50e18));
+            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(100e18), _nav(50e18), _nav(50e18));
 
         assertGt(toUint256(totalClaimable), 0, "some withdrawal allowed");
         // Allow 1 wei rounding tolerance due to mulDiv operations
@@ -715,7 +715,7 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
         _initializeAccountantState(100e18, 50e18);
 
         (NAV_UNIT totalClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable) =
-            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         assertEq(toUint256(totalClaimable), 0, "no claims = no withdrawal");
         assertEq(toUint256(stClaimable), 0);
@@ -731,7 +731,7 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
 
         _initializeAccountantState(stNav, jtNav);
 
-        (NAV_UNIT totalClaimable,,) = accountant.maxJTWithdrawalGivenCoverage(_nav(stNav), _nav(jtNav), ZERO_NAV_UNITS, _nav(stClaim), _nav(jtClaim));
+        (NAV_UNIT totalClaimable,,) = accountant.maxJTWithdrawalGivenCoverage(_nav(stNav), _nav(jtNav), _nav(stClaim), _nav(jtClaim));
 
         // Total claimable should be non-negative
         assertTrue(toUint256(totalClaimable) >= 0, "non-negative claimable");
@@ -769,7 +769,7 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
         zeroBetaAccountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // With beta=0, more ST deposit is allowed given coverage
-        NAV_UNIT maxDeposit = zeroBetaAccountant.maxSTDepositGivenCoverage(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
+        NAV_UNIT maxDeposit = zeroBetaAccountant.maxSTDepositGivenCoverage(_nav(100e18), _nav(50e18));
         assertGt(toUint256(maxDeposit), 0, "deposits allowed with beta=0");
     }
 
@@ -798,7 +798,7 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
         oneBetaAccountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(200e18), ZERO_NAV_UNITS);
 
         // With beta=1, coverage requirement is stricter
-        NAV_UNIT maxDeposit = oneBetaAccountant.maxSTDepositGivenCoverage(_nav(100e18), _nav(200e18), ZERO_NAV_UNITS);
+        NAV_UNIT maxDeposit = oneBetaAccountant.maxSTDepositGivenCoverage(_nav(100e18), _nav(200e18));
         assertTrue(toUint256(maxDeposit) >= 0, "valid max deposit");
     }
 
@@ -995,7 +995,7 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
         bool satisfied = coverageUtilizationWAD <= WAD;
 
         // Get max deposit
-        NAV_UNIT maxDeposit = accountant.maxSTDepositGivenCoverage(_nav(stNav), _nav(jtNav), ZERO_NAV_UNITS);
+        NAV_UNIT maxDeposit = accountant.maxSTDepositGivenCoverage(_nav(stNav), _nav(jtNav));
 
         // INVARIANT: If coverage satisfied and max deposit > 0, system is healthy
         if (satisfied && toUint256(maxDeposit) > 0) {
@@ -2778,7 +2778,7 @@ contract RoycoDayAccountantEdgeCaseTest is BaseTest {
         accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(100e18), ZERO_NAV_UNITS);
 
         // Get max ST deposit given coverage
-        NAV_UNIT maxDeposit = accountant.maxSTDepositGivenCoverage(_nav(100e18), _nav(100e18), ZERO_NAV_UNITS);
+        NAV_UNIT maxDeposit = accountant.maxSTDepositGivenCoverage(_nav(100e18), _nav(100e18));
 
         // Should return some positive value for healthy coverage
         assertGt(toUint256(maxDeposit), 0, "Max ST deposit should be positive");
@@ -2793,7 +2793,7 @@ contract RoycoDayAccountantEdgeCaseTest is BaseTest {
         accountant.preOpSyncTrancheAccounting(_nav(stRaw), _nav(jtRaw), ZERO_NAV_UNITS);
 
         // Get max ST deposit given coverage
-        NAV_UNIT maxDeposit = accountant.maxSTDepositGivenCoverage(_nav(stRaw), _nav(jtRaw), ZERO_NAV_UNITS);
+        NAV_UNIT maxDeposit = accountant.maxSTDepositGivenCoverage(_nav(stRaw), _nav(jtRaw));
 
         // Max deposit should be bounded
         assertLe(toUint256(maxDeposit), 1e40, "Max deposit unbounded");
@@ -2811,7 +2811,7 @@ contract RoycoDayAccountantEdgeCaseTest is BaseTest {
         // Get max JT withdrawal given coverage
         // JT claims on ST and JT (simplified - equal split for balanced market)
         (NAV_UNIT totalNAVClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable) =
-            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(100e18), ZERO_NAV_UNITS, _nav(50e18), _nav(50e18));
+            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(100e18), _nav(50e18), _nav(50e18));
 
         // Should return some positive value
         assertGt(toUint256(totalNAVClaimable), 0, "Max JT withdrawal should be positive");
@@ -2844,7 +2844,7 @@ contract RoycoDayAccountantEdgeCaseTest is BaseTest {
 
         // Get max JT withdrawal
         (NAV_UNIT totalNAVClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable) =
-            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(100e18), ZERO_NAV_UNITS, _nav(jtClaimOnST), _nav(jtClaimOnJT));
+            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(100e18), _nav(jtClaimOnST), _nav(jtClaimOnJT));
 
         // stClaimable + jtClaimable should equal totalNAVClaimable
         // This verifies no dust is lost due to K_S + K_J < WAD
@@ -2876,7 +2876,7 @@ contract RoycoDayAccountantEdgeCaseTest is BaseTest {
 
         // Get max JT withdrawal
         (NAV_UNIT totalNAVClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable) =
-            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(100e18), ZERO_NAV_UNITS, _nav(jtClaimOnST), _nav(jtClaimOnJT));
+            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(100e18), _nav(jtClaimOnST), _nav(jtClaimOnJT));
 
         uint256 componentSum = toUint256(stClaimable) + toUint256(jtClaimable);
         uint256 total = toUint256(totalNAVClaimable);
@@ -2900,7 +2900,7 @@ contract RoycoDayAccountantEdgeCaseTest is BaseTest {
         uint256 jtClaimOnJT = 1e18; // Huge
 
         (NAV_UNIT totalNAVClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable) =
-            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(100e18), ZERO_NAV_UNITS, _nav(jtClaimOnST), _nav(jtClaimOnJT));
+            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(100e18), _nav(jtClaimOnST), _nav(jtClaimOnJT));
 
         // Even with extreme imbalance, should not cause issues
         uint256 total = toUint256(totalNAVClaimable);

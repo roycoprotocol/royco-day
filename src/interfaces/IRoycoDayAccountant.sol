@@ -331,17 +331,15 @@ interface IRoycoDayAccountant {
      * @dev Always rounds in favor of senior tranche protection
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
-     * @param _ltRawNAV The liquidity tranche's current raw NAV: the pure value of its invested assets
      * @return maxSTDeposit The maximum assets depositable into the senior tranche without violating the market's coverage requirement
      */
-    function maxSTDepositGivenCoverage(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV, NAV_UNIT _ltRawNAV) external view returns (NAV_UNIT maxSTDeposit);
+    function maxSTDepositGivenCoverage(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external view returns (NAV_UNIT maxSTDeposit);
 
     /**
      * @notice Returns the maximum assets withdrawable from the junior tranche without violating the market's coverage requirement
      * @dev Always rounds in favor of senior tranche protection
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
-     * @param _ltRawNAV The liquidity tranche's current raw NAV: the pure value of its invested assets
      * @param _jtClaimOnStUnits The total claims on ST assets that the junior tranche has denominated in NAV units
      * @param _jtClaimOnJtUnits The total claims on JT assets that the junior tranche has denominated in NAV units
      * @return totalNAVClaimable The maximum NAV that can be claimed from the junior tranche without violating the market's coverage requirement
@@ -351,7 +349,6 @@ interface IRoycoDayAccountant {
     function maxJTWithdrawalGivenCoverage(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
-        NAV_UNIT _ltRawNAV,
         NAV_UNIT _jtClaimOnStUnits,
         NAV_UNIT _jtClaimOnJtUnits
     )

@@ -255,8 +255,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         if (state.marketState == MarketState.FIXED_TERM) return ZERO_TRANCHE_UNITS;
         // ST deposits are enabled as long as the market's coverage requirement is satisfied
         // No need to include ST liquidation proceeds in the raw NAV because those assets are not exposed to any volatility
-        NAV_UNIT stMaxDepositableNAV =
-            IRoycoDayAccountant(ACCOUNTANT).maxSTDepositGivenCoverage(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV(), _getLiquidityTrancheRawNAV());
+        NAV_UNIT stMaxDepositableNAV = IRoycoDayAccountant(ACCOUNTANT).maxSTDepositGivenCoverage(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
         return ((stMaxDepositableNAV == MAX_NAV_UNITS) ? MAX_TRANCHE_UNITS : stConvertNAVUnitsToTrancheUnits(stMaxDepositableNAV));
     }
 
@@ -334,7 +333,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
         // Get the max withdrawable ST and JT assets in NAV units from the accountant considering the coverage requirement
         (, NAV_UNIT stClaimableGivenCoverage, NAV_UNIT jtClaimableGivenCoverage) =
-            IRoycoDayAccountant(ACCOUNTANT).maxJTWithdrawalGivenCoverage(state.stRawNAV, state.jtRawNAV, state.ltRawNAV, claimOnStNAV, claimOnJtNAV);
+            IRoycoDayAccountant(ACCOUNTANT).maxJTWithdrawalGivenCoverage(state.stRawNAV, state.jtRawNAV, claimOnStNAV, claimOnJtNAV);
 
         // Bound the claims by the max withdrawable assets globally for each tranche and compute the cumulative NAV
         stMaxWithdrawableNAV = stClaimableGivenCoverage;
