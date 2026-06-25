@@ -837,7 +837,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
      */
     function _validateYieldShareConfig(uint64 _maxJTYieldShareWAD, uint64 _maxLTYieldShareWAD) internal pure {
         // The combined maximum yield shares cannot exceed 100% of senior appreciation, so the risk and liquidity premiums always fit within the senior gain
-        require((uint256(_maxJTYieldShareWAD) + _maxLTYieldShareWAD) <= WAD, INVALID_MAX_YIELD_SHARE_CONFIG());
+        require((_maxJTYieldShareWAD + _maxLTYieldShareWAD) <= WAD, INVALID_MAX_YIELD_SHARE_CONFIG());
     }
 
     /**
