@@ -55,6 +55,7 @@ interface IRoycoDayKernel {
      * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached, scaled to WAD precision
      * @custom:field stOwnedYieldBearingAssets - The yield bearing assets held by the ST, in ST's asset units
      * @custom:field jtOwnedYieldBearingAssets - The yield bearing assets held by the JT, in JT's asset units
+     * @custom:field ltOwnedYieldBearingAssets - The yield bearing assets held by the LT, in LT's asset units
      * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables blacklist screening)
      */
     struct RoycoDayKernelState {
@@ -62,6 +63,7 @@ interface IRoycoDayKernel {
         uint64 stSelfLiquidationBonusWAD;
         TRANCHE_UNIT stOwnedYieldBearingAssets;
         TRANCHE_UNIT jtOwnedYieldBearingAssets;
+        TRANCHE_UNIT ltOwnedYieldBearingAssets;
         address roycoBlacklist;
     }
 
@@ -106,9 +108,6 @@ interface IRoycoDayKernel {
 
     /// @notice Thrown when the to address is not whitelisted on the tranche
     error ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(address to);
-
-    /// @notice Thrown when an LT operation that is not yet implemented is invoked.
-    error LT_NOT_IMPLEMENTED();
 
     /**
      * @notice Retrieves the senior tranche address
@@ -213,6 +212,13 @@ interface IRoycoDayKernel {
     function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) external view returns (TRANCHE_UNIT jtAssets);
 
     /**
+     * @notice Converts the specified assets denominated in the kernel's NAV units to assets denominated in LT's tranche units
+     * @param _navAssets The NAV of the assets denominated in the kernel's NAV units to convert to assets denominated in LT's tranche units
+     * @return ltAssets The specified NAV of the assets denominated in the kernel's NAV units converted to assets denominated in LT's tranche units
+     */
+    function ltConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) external view returns (TRANCHE_UNIT ltAssets);
+
+    /**
      * @notice Synchronizes and persists the raw and effective NAVs of both tranches
      * @dev Only executes a pre-op sync because there is no operation being executed in the same call as this sync
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
@@ -261,8 +267,6 @@ interface IRoycoDayKernel {
 
     /**
      * @notice Previews the deposit of a specified amount of assets into the senior tranche
-     * @dev The kernel may decide to simulate the deposit and revert internally with the result
-     * @dev Should revert if deposits are asynchronous
      * @param _assets The amount of assets to deposit, denominated in the senior tranche's tranche units
      * @return stateBeforeDeposit The state of the senior tranche before the deposit, after applying the pre-op sync
      * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
@@ -270,13 +274,26 @@ interface IRoycoDayKernel {
     function stPreviewDeposit(TRANCHE_UNIT _assets) external view returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated);
 
     /**
+     * @notice Previews the deposit of a specified amount of assets into the liquidity tranche
+     * @param _assets The amount of assets to deposit, denominated in the liquidity tranche's tranche units
+     * @return stateBeforeDeposit The state of the liquidity tranche before the deposit, after applying the pre-op sync
+     * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
+     */
+    function ltPreviewDeposit(TRANCHE_UNIT _assets) external view returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated);
+
+    /**
      * @notice Previews the redemption of a specified number of shares from the senior tranche
-     * @dev The kernel may decide to simulate the redemption and revert internally with the result
-     * @dev Should revert if redemptions are asynchronous
      * @param _shares The number of shares to redeem
      * @return userClaim The distribution of assets that would be transferred to the receiver on redemption, denominated in the respective tranches' tranche units
      */
     function stPreviewRedeem(uint256 _shares) external view returns (AssetClaims memory userClaim);
+
+    /**
+     * @notice Previews the redemption of a specified number of shares from the liquidity tranche
+     * @param _shares The number of shares to redeem
+     * @return userClaim The distribution of assets that would be transferred to the receiver on redemption, denominated in the respective tranches' tranche units
+     */
+    function ltPreviewRedeem(uint256 _shares) external view returns (AssetClaims memory userClaim);
 
     /**
      * @notice Processes the deposit of a specified amount of assets into the senior tranche
@@ -325,6 +342,20 @@ interface IRoycoDayKernel {
         );
 
     /**
+     * @notice Returns the maximum amount of assets that can be deposited into the liquidity tranche
+     * @param _receiver The address that will receive the LT shares equating to the deposited assets
+     * @return assets The maximum amount of assets that can be deposited into the liquidity tranche, denominated in the liquidity tranche's tranche units
+     */
+    function ltMaxDeposit(address _receiver) external view returns (TRANCHE_UNIT assets);
+
+    /**
+     * @notice Returns the maximum amount of assets that can be withdrawn from the liquidity tranche
+     * @param _owner The address that is withdrawing the assets
+     * @return ltMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the liquidity tranche, denominated in the kernel's NAV units
+     */
+    function ltMaxWithdrawable(address _owner) external view returns (NAV_UNIT ltMaxWithdrawableNAV);
+
+    /**
      * @notice Previews the deposit of a specified amount of assets into the junior tranche
      * @dev The kernel may decide to simulate the deposit and revert internally with the result
      * @dev Should revert if deposits are asynchronous
@@ -364,7 +395,6 @@ interface IRoycoDayKernel {
 
     /**
      * @notice Processes the deposit of a specified amount of assets into the liquidity tranche.
-     * @dev STUB: reverts with `LT_NOT_IMPLEMENTED` until the LT flow is implemented.
      * @param _assets The amount of assets (BPT) to deposit, denominated in the liquidity tranche's tranche units.
      * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units.
      * @return navToMintSharesAt The NAV at which the shares will be minted, exclusive of valueAllocated.
@@ -373,7 +403,6 @@ interface IRoycoDayKernel {
 
     /**
      * @notice Processes the redemption of a specified number of shares from the liquidity tranche.
-     * @dev STUB: reverts with `LT_NOT_IMPLEMENTED` until the LT flow is implemented.
      * @param _shares The number of shares to redeem.
      * @param _receiver The address that is receiving the assets.
      * @param _bypassRedemptionRestrictions Whether to bypass the redemption restrictions.

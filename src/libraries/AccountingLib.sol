@@ -2,9 +2,9 @@
 pragma solidity ^0.8.28;
 
 import { WAD, ZERO_NAV_UNITS } from "./Constants.sol";
-import { UtilsLib } from "./UtilsLib.sol";
 import { AccountingCheckpoint, MarketState, MarketStateTransitionParams, PnLWaterfallParams, SyncedAccountingState } from "./Types.sol";
 import { Math, NAV_UNIT, UnitsMathLib, toNAVUnits } from "./Units.sol";
+import { UtilsLib } from "./UtilsLib.sol";
 
 /**
  * @title AccountingLib
@@ -300,11 +300,13 @@ library AccountingLib {
             marketState: resultingMarketState,
             stRawNAV: _params.postPnLWaterfallCheckpoint.stRawNAV,
             jtRawNAV: _params.postPnLWaterfallCheckpoint.jtRawNAV,
+            ltRawNAV: ZERO_NAV_UNITS, // TODO: Implement LT raw NAV
             stEffectiveNAV: _params.postPnLWaterfallCheckpoint.stEffectiveNAV,
             jtEffectiveNAV: _params.postPnLWaterfallCheckpoint.jtEffectiveNAV,
             jtCoverageImpermanentLoss: jtCoverageImpermanentLoss,
             stProtocolFeeAccrued: stProtocolFeeAccrued,
             jtProtocolFeeAccrued: jtProtocolFeeAccrued,
+            ltProtocolFeeAccrued: ZERO_NAV_UNITS, // TODO: Implement LT protocol fee accrual
             coverageUtilizationWAD: coverageUtilizationWAD,
             fixedTermEndTimestamp: fixedTermEndTimestamp,
             minCoverageWAD: _params.minCoverageWAD,

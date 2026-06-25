@@ -94,6 +94,7 @@ library UtilsLib {
         scaledClaims.nav = _claims.nav.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
         scaledClaims.stAssets = _claims.stAssets.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
         scaledClaims.jtAssets = _claims.jtAssets.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
+        scaledClaims.ltAssets = _claims.ltAssets.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
     }
 
     /**
@@ -115,5 +116,6 @@ library UtilsLib {
         scaledClaims.nav = _claims.nav.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
         scaledClaims.stAssets = _claims.stAssets.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
         scaledClaims.jtAssets = _claims.jtAssets.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
+        scaledClaims.ltAssets = _claims.ltAssets.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
     }
 }

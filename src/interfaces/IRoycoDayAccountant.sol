@@ -249,17 +249,19 @@ interface IRoycoDayAccountant {
      * @dev Persists updated NAV and impermanent loss checkpoints for the next sync to use as reference
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
+     * @param _ltRawNAV The liquidity tranche's current raw NAV: the pure value of its invested assets
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
-    function preOpSyncTrancheAccounting(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external returns (SyncedAccountingState memory state);
+    function preOpSyncTrancheAccounting(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV, NAV_UNIT _ltRawNAV) external returns (SyncedAccountingState memory state);
 
     /**
      * @notice Previews a synchronization of the effective NAVs and impermanent losses of both tranches by marking them to market
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
+     * @param _ltRawNAV The liquidity tranche's current raw NAV: the pure value of its invested assets
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
-    function previewSyncTrancheAccounting(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external view returns (SyncedAccountingState memory state);
+    function previewSyncTrancheAccounting(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV, NAV_UNIT _ltRawNAV) external view returns (SyncedAccountingState memory state);
 
     /**
      * @notice Applies post-operation (deposit or redemption) raw NAV deltas to effective NAV checkpoints
@@ -267,6 +269,7 @@ interface IRoycoDayAccountant {
      * @param _op The operation being executed in between the pre and post operation synchronizations
      * @param _stRawNAV The post-op senior tranche's raw NAV
      * @param _jtRawNAV The post-op junior tranche's raw NAV
+     * @param _ltRawNAV The post-op liquidity tranche's raw NAV
      * @param _stSelfLiquidationBonusNAV The self-liquidation bonus remitted to an ST LP on redemption after the liquidation coverageUtilization threshold has been breached, sourced from JT effective NAV
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
@@ -274,6 +277,7 @@ interface IRoycoDayAccountant {
         Operation _op,
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
+        NAV_UNIT _ltRawNAV,
         NAV_UNIT _stSelfLiquidationBonusNAV
     )
         external
@@ -291,7 +295,8 @@ interface IRoycoDayAccountant {
     function postOpSyncTrancheAccountingAndEnforceCoverage(
         Operation _op,
         NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV
+        NAV_UNIT _jtRawNAV,
+        NAV_UNIT _ltRawNAV
     )
         external
         returns (SyncedAccountingState memory state);
@@ -315,15 +320,17 @@ interface IRoycoDayAccountant {
      * @dev Always rounds in favor of senior tranche protection
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
+     * @param _ltRawNAV The liquidity tranche's current raw NAV: the pure value of its invested assets
      * @return maxSTDeposit The maximum assets depositable into the senior tranche without violating the market's coverage requirement
      */
-    function maxSTDepositGivenCoverage(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external view returns (NAV_UNIT maxSTDeposit);
+    function maxSTDepositGivenCoverage(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV, NAV_UNIT _ltRawNAV) external view returns (NAV_UNIT maxSTDeposit);
 
     /**
      * @notice Returns the maximum assets withdrawable from the junior tranche without violating the market's coverage requirement
      * @dev Always rounds in favor of senior tranche protection
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
+     * @param _ltRawNAV The liquidity tranche's current raw NAV: the pure value of its invested assets
      * @param _jtClaimOnStUnits The total claims on ST assets that the junior tranche has denominated in NAV units
      * @param _jtClaimOnJtUnits The total claims on JT assets that the junior tranche has denominated in NAV units
      * @return totalNAVClaimable The maximum NAV that can be claimed from the junior tranche without violating the market's coverage requirement
@@ -333,6 +340,7 @@ interface IRoycoDayAccountant {
     function maxJTWithdrawalGivenCoverage(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
+        NAV_UNIT _ltRawNAV,
         NAV_UNIT _jtClaimOnStUnits,
         NAV_UNIT _jtClaimOnJtUnits
     )
