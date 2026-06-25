@@ -268,8 +268,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         // address; order them here.
         // NOTE: the E-CLP curve params (`eclpParams`/`derivedEclpParams`) are defined relative to token0/token1,
         //       so they MUST be computed for this sorted `{token0, token1}` ordering.
-        (address token0, address token1) =
-            uint160(_seniorTranche) < uint160(_p.quoteToken) ? (_seniorTranche, _p.quoteToken) : (_p.quoteToken, _seniorTranche);
+        (address token0, address token1) = uint160(_seniorTranche) < uint160(_p.quoteToken) ? (_seniorTranche, _p.quoteToken) : (_p.quoteToken, _seniorTranche);
 
         BalancerV3TokenConfig[] memory tokens = new BalancerV3TokenConfig[](2);
         tokens[0] = BalancerV3TokenConfig({

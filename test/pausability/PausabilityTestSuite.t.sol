@@ -81,9 +81,7 @@ contract PausabilityTestSuite is BaseTest {
             // address must be non-zero (the quoter's initializer requires it) but is never read.
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
-                    initialConversionRateWAD: 1e18,
-                    baseAssetToNavAssetOracle: address(0xDA7A0FEED),
-                    stalenessThresholdSeconds: 48 hours
+                    initialConversionRateWAD: 1e18, baseAssetToNavAssetOracle: address(0xDA7A0FEED), stalenessThresholdSeconds: 48 hours
                 })
             ),
             stSelfLiquidationBonusWAD: 0,

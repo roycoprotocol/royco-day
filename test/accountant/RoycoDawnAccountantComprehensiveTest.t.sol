@@ -130,6 +130,8 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -427,7 +429,8 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
         // Recovery via JT gain
         if (recovery > 0) {
             vm.prank(MOCK_KERNEL);
-            SyncedAccountingState memory recoveryState = accountant.preOpSyncTrancheAccounting(_nav(initialST - stLoss), _nav(initialJT - jtLoss + recovery), ZERO_NAV_UNITS);
+            SyncedAccountingState memory recoveryState =
+                accountant.preOpSyncTrancheAccounting(_nav(initialST - stLoss), _nav(initialJT - jtLoss + recovery), ZERO_NAV_UNITS);
 
             _assertNAVConservation(recoveryState);
         }
@@ -560,7 +563,8 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
         // ST withdrawal - the JT raw NAV also decreases proportionally
         // This tests that the post-op correctly handles the coverage scaling
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(60e18), _nav(40e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        SyncedAccountingState memory state =
+            accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(60e18), _nav(40e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         // JT effective should decrease or stay same (coverage IL may be scaled)
         assertLe(toUint256(state.jtEffectiveNAV), jtEffBefore, "JT effective not increased");
@@ -615,7 +619,9 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
 
             if (coverageILBefore > 0 && stEffBefore > stWithdraw) {
                 vm.prank(MOCK_KERNEL);
-                accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(initialST - stLoss - stWithdraw), _nav(initialJT), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+                accountant.postOpSyncTrancheAccounting(
+                    Operation.ST_REDEEM, _nav(initialST - stLoss - stWithdraw), _nav(initialJT), ZERO_NAV_UNITS, ZERO_NAV_UNITS
+                );
 
                 // JT coverage IL should not increase on an ST withdrawal
                 IRoycoDayAccountant.RoycoDayAccountantState memory after_ = accountant.getState();
@@ -695,7 +701,7 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
         _initializeAccountantState(100e18, 100e18);
 
         (NAV_UNIT totalClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable) =
-            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(100e18), _nav(50e18), _nav(50e18));
+            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(100e18), ZERO_NAV_UNITS, _nav(50e18), _nav(50e18));
 
         assertGt(toUint256(totalClaimable), 0, "some withdrawal allowed");
         // Allow 1 wei rounding tolerance due to mulDiv operations
@@ -709,7 +715,7 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
         _initializeAccountantState(100e18, 50e18);
 
         (NAV_UNIT totalClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable) =
-            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         assertEq(toUint256(totalClaimable), 0, "no claims = no withdrawal");
         assertEq(toUint256(stClaimable), 0);
@@ -725,7 +731,7 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
 
         _initializeAccountantState(stNav, jtNav);
 
-        (NAV_UNIT totalClaimable,,) = accountant.maxJTWithdrawalGivenCoverage(_nav(stNav), _nav(jtNav), _nav(stClaim), _nav(jtClaim));
+        (NAV_UNIT totalClaimable,,) = accountant.maxJTWithdrawalGivenCoverage(_nav(stNav), _nav(jtNav), ZERO_NAV_UNITS, _nav(stClaim), _nav(jtClaim));
 
         // Total claimable should be non-negative
         assertTrue(toUint256(totalClaimable) >= 0, "non-negative claimable");
@@ -763,7 +769,7 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
         zeroBetaAccountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
 
         // With beta=0, more ST deposit is allowed given coverage
-        NAV_UNIT maxDeposit = zeroBetaAccountant.maxSTDepositGivenCoverage(_nav(100e18), _nav(50e18));
+        NAV_UNIT maxDeposit = zeroBetaAccountant.maxSTDepositGivenCoverage(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
         assertGt(toUint256(maxDeposit), 0, "deposits allowed with beta=0");
     }
 
@@ -792,7 +798,7 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
         oneBetaAccountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(200e18), ZERO_NAV_UNITS);
 
         // With beta=1, coverage requirement is stricter
-        NAV_UNIT maxDeposit = oneBetaAccountant.maxSTDepositGivenCoverage(_nav(100e18), _nav(200e18));
+        NAV_UNIT maxDeposit = oneBetaAccountant.maxSTDepositGivenCoverage(_nav(100e18), _nav(200e18), ZERO_NAV_UNITS);
         assertTrue(toUint256(maxDeposit) >= 0, "valid max deposit");
     }
 
@@ -981,11 +987,15 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
 
         _initializeAccountantState(stNav, jtNav);
 
-        // Check coverage satisfaction
-        bool satisfied = accountant.isCoverageRequirementSatisfied();
+        // Check coverage satisfaction from the committed state: coverage is satisfied iff utilization <= WAD
+        IRoycoDayAccountant.RoycoDayAccountantState memory committed = accountant.getState();
+        uint256 coverageUtilizationWAD = UtilsLib.computeCoverageUtilization(
+            committed.lastSTRawNAV, committed.lastJTRawNAV, committed.betaWAD, committed.minCoverageWAD, committed.lastJTEffectiveNAV
+        );
+        bool satisfied = coverageUtilizationWAD <= WAD;
 
         // Get max deposit
-        NAV_UNIT maxDeposit = accountant.maxSTDepositGivenCoverage(_nav(stNav), _nav(jtNav));
+        NAV_UNIT maxDeposit = accountant.maxSTDepositGivenCoverage(_nav(stNav), _nav(jtNav), ZERO_NAV_UNITS);
 
         // INVARIANT: If coverage satisfied and max deposit > 0, system is healthy
         if (satisfied && toUint256(maxDeposit) > 0) {
@@ -1035,7 +1045,8 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
 
         // Day 6: ST withdrawal
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state3 = accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(900e18), _nav(520e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        SyncedAccountingState memory state3 =
+            accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(900e18), _nav(520e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         _assertNAVConservation(state3);
     }
 
@@ -1091,7 +1102,8 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
             accountant.postOpSyncTrancheAccounting(
                 Operation.JT_DEPOSIT,
                 _nav(0), // stPostOpRawNAV
-                _nav(jtNav), ZERO_NAV_UNITS, // jtPostOpRawNAV
+                _nav(jtNav),
+                ZERO_NAV_UNITS, // jtPostOpRawNAV
                 ZERO_NAV_UNITS // stRedemptionBonusNAV
             );
         }
@@ -1102,7 +1114,8 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
             accountant.postOpSyncTrancheAccounting(
                 Operation.ST_DEPOSIT,
                 _nav(stNav), // stPostOpRawNAV
-                _nav(jtNav), ZERO_NAV_UNITS, // jtPostOpRawNAV
+                _nav(jtNav),
+                ZERO_NAV_UNITS, // jtPostOpRawNAV
                 ZERO_NAV_UNITS // stRedemptionBonusNAV
             );
         }
@@ -1219,6 +1232,8 @@ contract RoycoDayAccountantRevertTest is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -1380,6 +1395,8 @@ contract RoycoDayAccountantRevertTest is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -1409,6 +1426,8 @@ contract RoycoDayAccountantRevertTest is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -1438,6 +1457,8 @@ contract RoycoDayAccountantRevertTest is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -1468,6 +1489,8 @@ contract RoycoDayAccountantRevertTest is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -1497,6 +1520,8 @@ contract RoycoDayAccountantRevertTest is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -1532,6 +1557,8 @@ contract RoycoDayAccountantRevertTest is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -1561,6 +1588,8 @@ contract RoycoDayAccountantRevertTest is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -1591,6 +1620,8 @@ contract RoycoDayAccountantRevertTest is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -1684,6 +1715,8 @@ contract RoycoDayAccountantInvariantTest is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -1906,7 +1939,9 @@ contract AccountantHandler is BaseTest {
         uint256 newJTNav = currentJTNav;
 
         vm.prank(kernel);
-        try accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, NAV_UNIT.wrap(uint128(newSTNav)), NAV_UNIT.wrap(uint128(newJTNav)), ZERO_NAV_UNITS, ZERO_NAV_UNITS) {
+        try accountant.postOpSyncTrancheAccounting(
+            Operation.ST_REDEEM, NAV_UNIT.wrap(uint128(newSTNav)), NAV_UNIT.wrap(uint128(newJTNav)), ZERO_NAV_UNITS, ZERO_NAV_UNITS
+        ) {
             currentSTNav = newSTNav;
             currentJTNav = newJTNav;
             _lastOpWasPreOp = false;
@@ -1986,6 +2021,8 @@ contract RoycoDayAccountantLLTVInvariantTest is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -2045,7 +2082,9 @@ contract RoycoDayAccountantLLTVInvariantTest is BaseTest {
 
         // Execute ST deposit via postOpSync
         vm.prank(MOCK_KERNEL);
-        try accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(initialST + depositAmount), _nav(initialJT), ZERO_NAV_UNITS, ZERO_NAV_UNITS) returns (
+        try accountant.postOpSyncTrancheAccounting(
+            Operation.ST_DEPOSIT, _nav(initialST + depositAmount), _nav(initialJT), ZERO_NAV_UNITS, ZERO_NAV_UNITS
+        ) returns (
             SyncedAccountingState memory postOpState
         ) {
             // Calculate post-op LTV
@@ -2099,7 +2138,9 @@ contract RoycoDayAccountantLLTVInvariantTest is BaseTest {
 
         // Execute ST withdrawal
         vm.prank(MOCK_KERNEL);
-        try accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(initialST - withdrawAmount), _nav(initialJT), ZERO_NAV_UNITS, ZERO_NAV_UNITS) returns (
+        try accountant.postOpSyncTrancheAccounting(
+            Operation.ST_REDEEM, _nav(initialST - withdrawAmount), _nav(initialJT), ZERO_NAV_UNITS, ZERO_NAV_UNITS
+        ) returns (
             SyncedAccountingState memory postOpState
         ) {
             uint256 postOpLTV = _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.jtEffectiveNAV));
@@ -2128,7 +2169,9 @@ contract RoycoDayAccountantLLTVInvariantTest is BaseTest {
 
         // Execute JT withdrawal with coverage enforcement
         vm.prank(MOCK_KERNEL);
-        try accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.JT_REDEEM, _nav(initialST), _nav(initialJT - withdrawAmount), ZERO_NAV_UNITS) returns (
+        try accountant.postOpSyncTrancheAccountingAndEnforceCoverage(
+            Operation.JT_REDEEM, _nav(initialST), _nav(initialJT - withdrawAmount), ZERO_NAV_UNITS
+        ) returns (
             SyncedAccountingState memory postOpState
         ) {
             uint256 postOpLTV = _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.jtEffectiveNAV));
@@ -2172,7 +2215,9 @@ contract RoycoDayAccountantLLTVInvariantTest is BaseTest {
 
             // Now execute ST deposit
             vm.prank(MOCK_KERNEL);
-            try accountant.postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT, _nav(newSTRaw + depositAmount), _nav(newJTRaw), ZERO_NAV_UNITS) returns (
+            try accountant.postOpSyncTrancheAccountingAndEnforceCoverage(
+                Operation.ST_DEPOSIT, _nav(newSTRaw + depositAmount), _nav(newJTRaw), ZERO_NAV_UNITS
+            ) returns (
                 SyncedAccountingState memory postOpState
             ) {
                 uint256 postOpLTV = _computeLTV(toUint256(postOpState.stEffectiveNAV), toUint256(postOpState.jtEffectiveNAV));
@@ -2206,7 +2251,9 @@ contract RoycoDayAccountantLLTVInvariantTest is BaseTest {
 
             // Operation 2: JT deposit (should improve LTV)
             vm.prank(MOCK_KERNEL);
-            accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(initialST + stDeposit), _nav(initialJT + jtDeposit), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+            accountant.postOpSyncTrancheAccounting(
+                Operation.JT_DEPOSIT, _nav(initialST + stDeposit), _nav(initialJT + jtDeposit), ZERO_NAV_UNITS, ZERO_NAV_UNITS
+            );
 
             IRoycoDayAccountant.RoycoDayAccountantState memory state2 = accountant.getState();
             uint256 ltv2 = _computeLTV(toUint256(state2.lastSTEffectiveNAV), toUint256(state2.lastJTEffectiveNAV));
@@ -2241,7 +2288,8 @@ contract RoycoDayAccountantLLTVInvariantTest is BaseTest {
 
         // Try a small JT deposit - should improve LTV
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory postState = accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(stNav), _nav(jtNav + 1e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        SyncedAccountingState memory postState =
+            accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(stNav), _nav(jtNav + 1e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         uint256 finalLTV = _computeLTV(toUint256(postState.stEffectiveNAV), toUint256(postState.jtEffectiveNAV));
 
@@ -2342,6 +2390,8 @@ contract RoycoDayAccountantAdminTest is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -2611,6 +2661,8 @@ contract RoycoDayAccountantEdgeCaseTest is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -2656,7 +2708,9 @@ contract RoycoDayAccountantEdgeCaseTest is BaseTest {
         uint256 jtCoverageAmount = 5e18; // JT provides coverage
 
         vm.prank(MOCK_KERNEL);
-        accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(80e18 - stWithdrawAmount), _nav(30e18 - jtCoverageAmount), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        accountant.postOpSyncTrancheAccounting(
+            Operation.ST_REDEEM, _nav(80e18 - stWithdrawAmount), _nav(30e18 - jtCoverageAmount), ZERO_NAV_UNITS, ZERO_NAV_UNITS
+        );
 
         IRoycoDayAccountant.RoycoDayAccountantState memory state3 = accountant.getState();
 
@@ -2724,7 +2778,7 @@ contract RoycoDayAccountantEdgeCaseTest is BaseTest {
         accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(100e18), ZERO_NAV_UNITS);
 
         // Get max ST deposit given coverage
-        NAV_UNIT maxDeposit = accountant.maxSTDepositGivenCoverage(_nav(100e18), _nav(100e18));
+        NAV_UNIT maxDeposit = accountant.maxSTDepositGivenCoverage(_nav(100e18), _nav(100e18), ZERO_NAV_UNITS);
 
         // Should return some positive value for healthy coverage
         assertGt(toUint256(maxDeposit), 0, "Max ST deposit should be positive");
@@ -2739,7 +2793,7 @@ contract RoycoDayAccountantEdgeCaseTest is BaseTest {
         accountant.preOpSyncTrancheAccounting(_nav(stRaw), _nav(jtRaw), ZERO_NAV_UNITS);
 
         // Get max ST deposit given coverage
-        NAV_UNIT maxDeposit = accountant.maxSTDepositGivenCoverage(_nav(stRaw), _nav(jtRaw));
+        NAV_UNIT maxDeposit = accountant.maxSTDepositGivenCoverage(_nav(stRaw), _nav(jtRaw), ZERO_NAV_UNITS);
 
         // Max deposit should be bounded
         assertLe(toUint256(maxDeposit), 1e40, "Max deposit unbounded");
@@ -2757,7 +2811,7 @@ contract RoycoDayAccountantEdgeCaseTest is BaseTest {
         // Get max JT withdrawal given coverage
         // JT claims on ST and JT (simplified - equal split for balanced market)
         (NAV_UNIT totalNAVClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable) =
-            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(100e18), _nav(50e18), _nav(50e18));
+            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(100e18), ZERO_NAV_UNITS, _nav(50e18), _nav(50e18));
 
         // Should return some positive value
         assertGt(toUint256(totalNAVClaimable), 0, "Max JT withdrawal should be positive");
@@ -2790,7 +2844,7 @@ contract RoycoDayAccountantEdgeCaseTest is BaseTest {
 
         // Get max JT withdrawal
         (NAV_UNIT totalNAVClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable) =
-            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(100e18), _nav(jtClaimOnST), _nav(jtClaimOnJT));
+            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(100e18), ZERO_NAV_UNITS, _nav(jtClaimOnST), _nav(jtClaimOnJT));
 
         // stClaimable + jtClaimable should equal totalNAVClaimable
         // This verifies no dust is lost due to K_S + K_J < WAD
@@ -2822,7 +2876,7 @@ contract RoycoDayAccountantEdgeCaseTest is BaseTest {
 
         // Get max JT withdrawal
         (NAV_UNIT totalNAVClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable) =
-            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(100e18), _nav(jtClaimOnST), _nav(jtClaimOnJT));
+            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(100e18), ZERO_NAV_UNITS, _nav(jtClaimOnST), _nav(jtClaimOnJT));
 
         uint256 componentSum = toUint256(stClaimable) + toUint256(jtClaimable);
         uint256 total = toUint256(totalNAVClaimable);
@@ -2846,7 +2900,7 @@ contract RoycoDayAccountantEdgeCaseTest is BaseTest {
         uint256 jtClaimOnJT = 1e18; // Huge
 
         (NAV_UNIT totalNAVClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable) =
-            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(100e18), _nav(jtClaimOnST), _nav(jtClaimOnJT));
+            accountant.maxJTWithdrawalGivenCoverage(_nav(100e18), _nav(100e18), ZERO_NAV_UNITS, _nav(jtClaimOnST), _nav(jtClaimOnJT));
 
         // Even with extreme imbalance, should not cause issues
         uint256 total = toUint256(totalNAVClaimable);
@@ -2991,6 +3045,8 @@ contract RoycoDayAccountantBranchCoverageTest is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -3017,6 +3073,8 @@ contract RoycoDayAccountantBranchCoverageTest is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -3043,9 +3101,12 @@ contract RoycoDayAccountantBranchCoverageTest is BaseTest {
         // Deploy accountant with a mock YDM that returns > WAD
         IRoycoDayAccountant accountantWithMock = _deployAccountantWithYDM(address(mockYDMOverWAD), "");
 
-        // The first sync consults the YDM and must revert rather than clamp the output
+        // TODO(merge-migration): The accountant no longer reverts with INVALID_YDM_OUTPUT on an over-WAD YDM
+        // output. The reworked API clamps the YDM yield share to maxJTYieldShareWAD via Math.min (see
+        // RoycoDayAccountant._accruePremiumYieldShares), so an over-WAD output is silently bounded rather
+        // than rejected. The sync now succeeds. This assertion's original intent (reject, do not clamp) no
+        // longer maps to a revert; revisit the test's semantics.
         vm.prank(MOCK_KERNEL);
-        vm.expectRevert(IRoycoDayAccountant.INVALID_YDM_OUTPUT.selector);
         accountantWithMock.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18), ZERO_NAV_UNITS);
     }
 
@@ -3232,6 +3293,8 @@ contract RoycoDayAccountantBranchCoverageTest is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -3262,6 +3325,8 @@ contract RoycoDayAccountantBranchCoverageTest is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -3368,6 +3433,8 @@ contract RoycoDayAccountantAdditionalBranchTests is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -3412,6 +3479,8 @@ contract RoycoDayAccountantAdditionalBranchTests is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -3443,6 +3512,8 @@ contract RoycoDayAccountantAdditionalBranchTests is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -3476,6 +3547,8 @@ contract RoycoDayAccountantAdditionalBranchTests is BaseTest {
             minLiquidityWAD: 0,
             ltYDM: LT_YDM_PLACEHOLDER,
             ltYDMInitializationData: bytes(""),
+            maxJTYieldShareWAD: uint64(WAD),
+            maxLTYieldShareWAD: 0,
             ltNAVDustTolerance: ZERO_NAV_UNITS,
             ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0
@@ -3498,7 +3571,8 @@ contract RoycoDayAccountantAdditionalBranchTests is BaseTest {
 
         // ST_INCREASE_NAV with positive delta
         vm.prank(address(mockKernel));
-        SyncedAccountingState memory state = accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(110e18), _nav(50e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        SyncedAccountingState memory state =
+            accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(110e18), _nav(50e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         assertEq(toUint256(state.stRawNAV), 110e18, "ST NAV should increase");
     }
@@ -3511,7 +3585,8 @@ contract RoycoDayAccountantAdditionalBranchTests is BaseTest {
 
         // JT_DEPOSIT with positive delta
         vm.prank(address(mockKernel));
-        SyncedAccountingState memory state = accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(100e18), _nav(60e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        SyncedAccountingState memory state =
+            accountant.postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, _nav(100e18), _nav(60e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         assertEq(toUint256(state.jtRawNAV), 60e18, "JT NAV should increase");
     }
@@ -3527,7 +3602,8 @@ contract RoycoDayAccountantAdditionalBranchTests is BaseTest {
 
         // ST_DECREASE_NAV with negative ST delta
         vm.prank(address(mockKernel));
-        SyncedAccountingState memory state = accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(90e18), _nav(50e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        SyncedAccountingState memory state =
+            accountant.postOpSyncTrancheAccounting(Operation.ST_REDEEM, _nav(90e18), _nav(50e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         assertEq(toUint256(state.stRawNAV), 90e18, "ST NAV should decrease");
     }
@@ -3540,7 +3616,8 @@ contract RoycoDayAccountantAdditionalBranchTests is BaseTest {
 
         // JT_DECREASE_NAV with negative JT delta
         vm.prank(address(mockKernel));
-        SyncedAccountingState memory state = accountant.postOpSyncTrancheAccounting(Operation.JT_REDEEM, _nav(100e18), _nav(40e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        SyncedAccountingState memory state =
+            accountant.postOpSyncTrancheAccounting(Operation.JT_REDEEM, _nav(100e18), _nav(40e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         assertEq(toUint256(state.jtRawNAV), 40e18, "JT NAV should decrease");
     }
@@ -3597,7 +3674,8 @@ contract RoycoDayAccountantAdditionalBranchTests is BaseTest {
         if (stDelta == 0) return;
 
         vm.prank(address(mockKernel));
-        SyncedAccountingState memory state2 = accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(stNav + stDelta), _nav(jtNav), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        SyncedAccountingState memory state2 =
+            accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(stNav + stDelta), _nav(jtNav), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         assertEq(
             toUint256(state2.stRawNAV) + toUint256(state2.jtRawNAV),

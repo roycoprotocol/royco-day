@@ -224,9 +224,7 @@ contract DeploymentScriptRerunTest is Test {
         // address must be non-zero (the quoter's initializer requires it) but is never read.
         config.kernelSpecificParams = abi.encode(
             DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
-                initialConversionRateWAD: 1e18,
-                baseAssetToNavAssetOracle: address(0xDA7A0FEED),
-                stalenessThresholdSeconds: 48 hours
+                initialConversionRateWAD: 1e18, baseAssetToNavAssetOracle: address(0xDA7A0FEED), stalenessThresholdSeconds: 48 hours
             })
         );
         // Pair the LT pool against USDC (the mock ST vault's underlying asset).

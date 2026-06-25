@@ -120,6 +120,7 @@ contract MockTranche is IRoycoVaultTranche, ERC20 {
         claims = AssetClaims({
             stAssets: TRANCHE_TYPE_VALUE == TrancheType.SENIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
             jtAssets: TRANCHE_TYPE_VALUE == TrancheType.JUNIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
+            ltAssets: TRANCHE_TYPE_VALUE == TrancheType.LIQUIDITY ? toTrancheUnits(assets) : toTrancheUnits(0),
             nav: toNAVUnits(assets)
         });
     }
@@ -142,6 +143,7 @@ contract MockTranche is IRoycoVaultTranche, ERC20 {
         claims = AssetClaims({
             stAssets: TRANCHE_TYPE_VALUE == TrancheType.SENIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
             jtAssets: TRANCHE_TYPE_VALUE == TrancheType.JUNIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
+            ltAssets: TRANCHE_TYPE_VALUE == TrancheType.LIQUIDITY ? toTrancheUnits(assets) : toTrancheUnits(0),
             nav: toNAVUnits(assets)
         });
     }
@@ -155,6 +157,7 @@ contract MockTranche is IRoycoVaultTranche, ERC20 {
         claims = AssetClaims({
             stAssets: TRANCHE_TYPE_VALUE == TrancheType.SENIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
             jtAssets: TRANCHE_TYPE_VALUE == TrancheType.JUNIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
+            ltAssets: TRANCHE_TYPE_VALUE == TrancheType.LIQUIDITY ? toTrancheUnits(assets) : toTrancheUnits(0),
             nav: toNAVUnits(assets)
         });
     }
@@ -203,6 +206,7 @@ contract MockTranche is IRoycoVaultTranche, ERC20 {
         claims = AssetClaims({
             stAssets: TRANCHE_TYPE_VALUE == TrancheType.SENIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
             jtAssets: TRANCHE_TYPE_VALUE == TrancheType.JUNIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
+            ltAssets: TRANCHE_TYPE_VALUE == TrancheType.LIQUIDITY ? toTrancheUnits(assets) : toTrancheUnits(0),
             nav: toNAVUnits(assets)
         });
 
@@ -230,6 +234,7 @@ contract MockTranche is IRoycoVaultTranche, ERC20 {
         claims = AssetClaims({
             stAssets: TRANCHE_TYPE_VALUE == TrancheType.SENIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
             jtAssets: TRANCHE_TYPE_VALUE == TrancheType.JUNIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
+            ltAssets: TRANCHE_TYPE_VALUE == TrancheType.LIQUIDITY ? toTrancheUnits(assets) : toTrancheUnits(0),
             nav: toNAVUnits(assets)
         });
 
