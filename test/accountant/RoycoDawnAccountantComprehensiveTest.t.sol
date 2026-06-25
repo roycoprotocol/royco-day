@@ -42,7 +42,7 @@ address constant LT_YDM_PLACEHOLDER = address(0x17d17d17D17D17d17d17D17d17D17D17
  * - JT yield share capped at 100%
  * - Fee calculations bounded by MAX_PROTOCOL_FEE_WAD
  */
-contract RoycoDayAccountantComprehensiveTest is BaseTest {
+abstract contract RoycoDayAccountantComprehensiveTestBase is BaseTest {
     using Math for uint256;
     using UnitsMathLib for NAV_UNIT;
 
@@ -141,6 +141,87 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
         address proxy = address(new ERC1967Proxy(address(accountantImpl), initData));
         return IRoycoDayAccountant(proxy);
     }
+
+    // =========================================================================
+    // HELPERS
+    // =========================================================================
+
+    function _nav(uint256 value) internal pure returns (NAV_UNIT) {
+        return NAV_UNIT.wrap(uint128(value));
+    }
+
+    function _initializeAccountantState(uint256 stNav, uint256 jtNav) internal {
+        vm.startPrank(MOCK_KERNEL);
+
+        // First sync with zero state
+        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0), ZERO_NAV_UNITS);
+
+        // Simulate JT deposit if jtNav > 0
+        if (jtNav > 0) {
+            accountant.postOpSyncTrancheAccounting(
+                Operation.JT_DEPOSIT,
+                _nav(0), // stPostOpRawNAV
+                _nav(jtNav),
+                ZERO_NAV_UNITS, // jtPostOpRawNAV
+                ZERO_NAV_UNITS // stRedemptionBonusNAV
+            );
+        }
+
+        // Simulate ST deposit if stNav > 0
+        if (stNav > 0) {
+            accountant.preOpSyncTrancheAccounting(_nav(0), _nav(jtNav), ZERO_NAV_UNITS);
+            accountant.postOpSyncTrancheAccounting(
+                Operation.ST_DEPOSIT,
+                _nav(stNav), // stPostOpRawNAV
+                _nav(jtNav),
+                ZERO_NAV_UNITS, // jtPostOpRawNAV
+                ZERO_NAV_UNITS // stRedemptionBonusNAV
+            );
+        }
+
+        vm.stopPrank();
+    }
+
+    function _assertNAVConservation(SyncedAccountingState memory state) internal pure {
+        uint256 rawSum = toUint256(state.stRawNAV) + toUint256(state.jtRawNAV);
+        uint256 effectiveSum = toUint256(state.stEffectiveNAV) + toUint256(state.jtEffectiveNAV);
+        assertEq(rawSum, effectiveSum, "NAV conservation violated");
+    }
+
+    function _assertNonNegativity(SyncedAccountingState memory state) internal pure {
+        assertTrue(toUint256(state.stRawNAV) >= 0, "stRawNAV non-negative");
+        assertTrue(toUint256(state.jtRawNAV) >= 0, "jtRawNAV non-negative");
+        assertTrue(toUint256(state.stEffectiveNAV) >= 0, "stEffectiveNAV non-negative");
+        assertTrue(toUint256(state.jtEffectiveNAV) >= 0, "jtEffectiveNAV non-negative");
+        assertTrue(toUint256(state.jtCoverageImpermanentLoss) >= 0, "jtCoverageIL non-negative");
+    }
+
+    function _computeMaxInitialLTV(uint64 minCoverageWAD, uint96 betaWAD) internal pure returns (uint256) {
+        uint256 betaCov = uint256(minCoverageWAD).mulDiv(betaWAD, WAD, Math.Rounding.Floor);
+        uint256 numerator = WAD - betaCov;
+        uint256 denominator = WAD + minCoverageWAD - betaCov;
+        return numerator.mulDiv(WAD, denominator, Math.Rounding.Ceil);
+    }
+
+    function _assertConfigFields(SyncedAccountingState memory state) internal view {
+        IRoycoDayAccountant.RoycoDayAccountantState memory accountantState = accountant.getState();
+
+        // Verify coverageUtilization is computed correctly
+        uint256 expectedUtil = UtilsLib.computeCoverageUtilization(
+            state.stRawNAV, state.jtRawNAV, accountantState.betaWAD, accountantState.minCoverageWAD, state.jtEffectiveNAV
+        );
+        assertEq(state.coverageUtilizationWAD, expectedUtil, "coverageUtilizationWAD mismatch");
+
+        // Verify fixed term end timestamp based on market state
+        if (state.marketState == MarketState.PERPETUAL) {
+            assertEq(state.fixedTermEndTimestamp, 0, "fixedTermEndTimestamp should be 0 in perpetual state");
+        }
+    }
+}
+
+contract RoycoDayAccountantComprehensiveTestA is RoycoDayAccountantComprehensiveTestBase {
+    using Math for uint256;
+    using UnitsMathLib for NAV_UNIT;
 
     // =========================================================================
     // SYSTEMATIC 3x3 DELTA MATRIX TESTS
@@ -593,6 +674,11 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
         IRoycoDayAccountant.RoycoDayAccountantState memory after_ = accountant.getState();
         assertLe(toUint256(after_.lastJTRawNAV), jtRawBefore, "JT raw NAV decreased after redeem");
     }
+}
+
+contract RoycoDayAccountantComprehensiveTestB is RoycoDayAccountantComprehensiveTestBase {
+    using Math for uint256;
+    using UnitsMathLib for NAV_UNIT;
 
     /// @notice Fuzz test post-op coverage IL scaling on ST withdrawal
     function testFuzz_postOp_ilScaling(uint256 initialST, uint256 initialJT, uint256 lossPercent, uint256 withdrawPercent, uint8 opType) public {
@@ -1080,82 +1166,6 @@ contract RoycoDayAccountantComprehensiveTest is BaseTest {
 
             _assertNAVConservation(state);
             _assertNonNegativity(state);
-        }
-    }
-
-    // =========================================================================
-    // HELPERS
-    // =========================================================================
-
-    function _nav(uint256 value) internal pure returns (NAV_UNIT) {
-        return NAV_UNIT.wrap(uint128(value));
-    }
-
-    function _initializeAccountantState(uint256 stNav, uint256 jtNav) internal {
-        vm.startPrank(MOCK_KERNEL);
-
-        // First sync with zero state
-        accountant.preOpSyncTrancheAccounting(_nav(0), _nav(0), ZERO_NAV_UNITS);
-
-        // Simulate JT deposit if jtNav > 0
-        if (jtNav > 0) {
-            accountant.postOpSyncTrancheAccounting(
-                Operation.JT_DEPOSIT,
-                _nav(0), // stPostOpRawNAV
-                _nav(jtNav),
-                ZERO_NAV_UNITS, // jtPostOpRawNAV
-                ZERO_NAV_UNITS // stRedemptionBonusNAV
-            );
-        }
-
-        // Simulate ST deposit if stNav > 0
-        if (stNav > 0) {
-            accountant.preOpSyncTrancheAccounting(_nav(0), _nav(jtNav), ZERO_NAV_UNITS);
-            accountant.postOpSyncTrancheAccounting(
-                Operation.ST_DEPOSIT,
-                _nav(stNav), // stPostOpRawNAV
-                _nav(jtNav),
-                ZERO_NAV_UNITS, // jtPostOpRawNAV
-                ZERO_NAV_UNITS // stRedemptionBonusNAV
-            );
-        }
-
-        vm.stopPrank();
-    }
-
-    function _assertNAVConservation(SyncedAccountingState memory state) internal pure {
-        uint256 rawSum = toUint256(state.stRawNAV) + toUint256(state.jtRawNAV);
-        uint256 effectiveSum = toUint256(state.stEffectiveNAV) + toUint256(state.jtEffectiveNAV);
-        assertEq(rawSum, effectiveSum, "NAV conservation violated");
-    }
-
-    function _assertNonNegativity(SyncedAccountingState memory state) internal pure {
-        assertTrue(toUint256(state.stRawNAV) >= 0, "stRawNAV non-negative");
-        assertTrue(toUint256(state.jtRawNAV) >= 0, "jtRawNAV non-negative");
-        assertTrue(toUint256(state.stEffectiveNAV) >= 0, "stEffectiveNAV non-negative");
-        assertTrue(toUint256(state.jtEffectiveNAV) >= 0, "jtEffectiveNAV non-negative");
-        assertTrue(toUint256(state.jtCoverageImpermanentLoss) >= 0, "jtCoverageIL non-negative");
-    }
-
-    function _computeMaxInitialLTV(uint64 minCoverageWAD, uint96 betaWAD) internal pure returns (uint256) {
-        uint256 betaCov = uint256(minCoverageWAD).mulDiv(betaWAD, WAD, Math.Rounding.Floor);
-        uint256 numerator = WAD - betaCov;
-        uint256 denominator = WAD + minCoverageWAD - betaCov;
-        return numerator.mulDiv(WAD, denominator, Math.Rounding.Ceil);
-    }
-
-    function _assertConfigFields(SyncedAccountingState memory state) internal view {
-        IRoycoDayAccountant.RoycoDayAccountantState memory accountantState = accountant.getState();
-
-        // Verify coverageUtilization is computed correctly
-        uint256 expectedUtil = UtilsLib.computeCoverageUtilization(
-            state.stRawNAV, state.jtRawNAV, accountantState.betaWAD, accountantState.minCoverageWAD, state.jtEffectiveNAV
-        );
-        assertEq(state.coverageUtilizationWAD, expectedUtil, "coverageUtilizationWAD mismatch");
-
-        // Verify fixed term end timestamp based on market state
-        if (state.marketState == MarketState.PERPETUAL) {
-            assertEq(state.fixedTermEndTimestamp, 0, "fixedTermEndTimestamp should be 0 in perpetual state");
         }
     }
 }

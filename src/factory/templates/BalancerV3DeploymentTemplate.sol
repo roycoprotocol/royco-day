@@ -23,6 +23,7 @@ import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { IRoycoFactory } from "../../interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../interfaces/factory/IRoycoProtocolTemplate.sol";
 import { TrancheType } from "../../libraries/Types.sol";
+import { RoycoLiquidityTranche } from "../../tranches/RoycoLiquidityTranche.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
@@ -34,6 +35,7 @@ import {
     BURNER_ROLE,
     JT_LP_ROLE,
     LT_LP_ROLE,
+    SHARE_MINTER_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE,
     TRANSFER_AGENT_ROLE
@@ -340,23 +342,28 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
 
     function _buildRoleBindings(DeploymentResult memory _r) internal view virtual returns (RoleBindings memory) {
         TargetBinding[] memory targets = new TargetBinding[](7);
-        targets[0] = _trancheBinding(_r.seniorTranche, ST_LP_ROLE);
-        targets[1] = _trancheBinding(_r.juniorTranche, JT_LP_ROLE);
-        targets[2] = _trancheBinding(_r.liquidityTranche, LT_LP_ROLE);
+        targets[0] = _trancheBinding(_r.seniorTranche, ST_LP_ROLE, false);
+        targets[1] = _trancheBinding(_r.juniorTranche, JT_LP_ROLE, false);
+        targets[2] = _trancheBinding(_r.liquidityTranche, LT_LP_ROLE, true);
         targets[3] = _kernelBinding(_r.kernel);
         targets[4] = _accountantBinding(_r.accountant);
         targets[5] = _balancerVaultBinding(address(BALANCER_V3_VAULT));
         targets[6] = _balancerProtocolFeeControllerBinding(address(BALANCER_V3_VAULT.getProtocolFeeController()));
 
-        RoleGrant[] memory grants = new RoleGrant[](1);
+        // The kernel mints senior shares (SHARE_MINTER_ROLE) and burns them (BURNER_ROLE) when seeding/unwinding the LT's Balancer pool
+        RoleGrant[] memory grants = new RoleGrant[](3);
         grants[0] = RoleGrant({ roleId: SYNC_ROLE, account: _r.accountant, executionDelay: 0 });
+        grants[1] = RoleGrant({ roleId: SHARE_MINTER_ROLE, account: _r.kernel, executionDelay: 0 });
+        grants[2] = RoleGrant({ roleId: BURNER_ROLE, account: _r.kernel, executionDelay: 0 });
 
         return RoleBindings({ targetBindings: targets, postInitGrants: grants });
     }
 
-    function _trancheBinding(address _tranche, uint64 _lpRole) private pure returns (TargetBinding memory) {
-        bytes4[] memory s = new bytes4[](9);
-        uint64[] memory r = new uint64[](9);
+    function _trancheBinding(address _tranche, uint64 _lpRole, bool _isLiquidity) private pure returns (TargetBinding memory) {
+        // Base tranche surface (10 selectors) + the two LT-only multi-asset selectors when binding the liquidity tranche
+        uint256 n = _isLiquidity ? 12 : 10;
+        bytes4[] memory s = new bytes4[](n);
+        uint64[] memory r = new uint64[](n);
         s[0] = IRoycoVaultTranche.deposit.selector;
         r[0] = _lpRole;
         s[1] = IRoycoVaultTranche.redeem.selector;
@@ -375,6 +382,15 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         r[7] = BURNER_ROLE;
         s[8] = IRoycoVaultTranche.burnFrom.selector;
         r[8] = BURNER_ROLE;
+        // The kernel is granted SHARE_MINTER_ROLE so it can mint senior shares to itself for pool seeding
+        s[9] = IRoycoVaultTranche.mint.selector;
+        r[9] = SHARE_MINTER_ROLE;
+        if (_isLiquidity) {
+            s[10] = RoycoLiquidityTranche.depositMultiAsset.selector;
+            r[10] = _lpRole;
+            s[11] = RoycoLiquidityTranche.redeemMultiAsset.selector;
+            r[11] = _lpRole;
+        }
         return TargetBinding({ target: _tranche, selectors: s, roleIds: r });
     }
 

@@ -179,6 +179,16 @@ interface IRoycoVaultTranche is IERC20Metadata {
     function redeem(uint256 _shares, address _receiver, address _owner) external returns (AssetClaims memory claims);
 
     /**
+     * @notice Mints tranche shares to the specified account
+     * @dev Authorized via the AccessManager `restricted` modifier; the deploy template grants the market's kernel the role
+     *      for this selector so the kernel can mint senior shares to itself when seeding the LT's Balancer pool
+     * @dev Takes a raw share count: the caller (kernel) is responsible for computing a fair, non-diluting amount
+     * @param _to The account to mint the shares to
+     * @param _shares The number of shares to mint
+     */
+    function mint(address _to, uint256 _shares) external;
+
+    /**
      * @notice Burns shares from the caller
      * @dev Only callable by the kernel during accounting synchronization
      * @param _shares The number of shares to burn

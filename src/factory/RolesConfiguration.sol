@@ -31,6 +31,7 @@ uint64 constant TRANSFER_AGENT_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO
 
 uint64 constant SYNC_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_SYNC_ROLE"))));
 uint64 constant ADMIN_KERNEL_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_KERNEL_ROLE"))));
+uint64 constant SHARE_MINTER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_SHARE_MINTER_ROLE"))));
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ACCOUNTANT ROLES
