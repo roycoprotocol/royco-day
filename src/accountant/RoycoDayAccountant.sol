@@ -85,6 +85,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Validate the market's initial coverage and liquidity configuration
         _validateCoverageConfig(_params.minCoverageWAD, _params.betaWAD, _params.liquidationCoverageUtilizationWAD);
         _validateLiquidityConfig(_params.minLiquidityWAD);
+        _validateYieldShareConfig(_params.maxJTYieldShareWAD, _params.maxLTYieldShareWAD);
 
         // Initialize the JT and LT YDMs for this market
         _initializeYDM(_params.jtYDM, _params.jtYDMInitializationData);
@@ -123,6 +124,11 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         emit LiquidityTrancheYDMUpdated(_params.ltYDM);
         emit LiquidityUpdated(_params.minLiquidityWAD);
 
+        // Set the maximum yield shares in slot 4 and slot 5 of storage (their time-weighted accumulators are zero-initialized)
+        $.maxJTYieldShareWAD = _params.maxJTYieldShareWAD;
+        $.maxLTYieldShareWAD = _params.maxLTYieldShareWAD;
+        emit MaxYieldSharesUpdated(_params.maxJTYieldShareWAD, _params.maxLTYieldShareWAD);
+
         // Set the rest of the fields
         $.liquidationCoverageUtilizationWAD = _params.liquidationCoverageUtilizationWAD;
         $.stNAVDustTolerance = _params.stNAVDustTolerance;
@@ -142,7 +148,8 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     /// @inheritdoc IRoycoDayAccountant
     function preOpSyncTrancheAccounting(
         NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV
+        NAV_UNIT _jtRawNAV,
+        NAV_UNIT _ltRawNAV
     )
         public
         override(IRoycoDayAccountant)
@@ -152,24 +159,27 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Get the storage pointer to the accountant state
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
 
-        // Preview synchronization of the tranche NAVs and the JT coverage impermanent loss
+        // Accrue the JT and LT yield shares, then preview the synchronization of the tranche NAVs and the JT coverage impermanent loss
         MarketState initialMarketState;
-        bool riskPremiumPaid;
+        bool premiumsPaid;
         NAV_UNIT jtCoverageImpermanentLossErased;
-        (state, initialMarketState, riskPremiumPaid, jtCoverageImpermanentLossErased) =
-            _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _accrueJTYieldShare());
+        (uint192 twJTYieldShareAccruedWAD, uint192 twLTYieldShareAccruedWAD) = _accruePremiumYieldShares();
+        (state, initialMarketState, premiumsPaid, jtCoverageImpermanentLossErased) =
+            _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _ltRawNAV, twJTYieldShareAccruedWAD, twLTYieldShareAccruedWAD);
 
-        // The JT risk premium was paid out of ST yield
-        if (riskPremiumPaid) {
-            // Reset the accumulator and update the last risk premium payment timestamp
+        // The JT risk and LT liquidity premiums were paid out of ST yield
+        if (premiumsPaid) {
+            // Reset the accumulators and update the last premium payment timestamp
             delete $.twJTYieldShareAccruedWAD;
-            $.lastRiskPremiumPaymentTimestamp = uint32(block.timestamp);
+            delete $.twLTYieldShareAccruedWAD;
+            $.lastPremiumPaymentTimestamp = uint32(block.timestamp);
         }
 
         // Checkpoint the resulting market state, mark-to-market NAVs, and the JT coverage impermanent loss
         $.lastMarketState = state.marketState;
         $.lastSTRawNAV = _stRawNAV;
         $.lastJTRawNAV = _jtRawNAV;
+        $.lastLTRawNAV = _ltRawNAV;
         $.lastSTEffectiveNAV = state.stEffectiveNAV;
         $.lastJTEffectiveNAV = state.jtEffectiveNAV;
         $.lastJTCoverageImpermanentLoss = state.jtCoverageImpermanentLoss;
@@ -190,14 +200,16 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     /// @inheritdoc IRoycoDayAccountant
     function previewSyncTrancheAccounting(
         NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV
+        NAV_UNIT _jtRawNAV,
+        NAV_UNIT _ltRawNAV
     )
         public
         view
         override(IRoycoDayAccountant)
         returns (SyncedAccountingState memory state)
     {
-        (state,,,) = _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _previewJTYieldShareAccrual());
+        (uint192 twJTYieldShareAccruedWAD, uint192 twLTYieldShareAccruedWAD) = _previewPremiumYieldShareAccrual();
+        (state,,,) = _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _ltRawNAV, twJTYieldShareAccruedWAD, twLTYieldShareAccruedWAD);
     }
 
     /// @inheritdoc IRoycoDayAccountant
@@ -205,6 +217,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         Operation _op,
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
+        NAV_UNIT _ltRawNAV,
         NAV_UNIT _stSelfLiquidationBonusNAV
     )
         public
@@ -262,12 +275,14 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Checkpoint the mark-to-market NAVs
         $.lastSTRawNAV = _stRawNAV;
         $.lastJTRawNAV = _jtRawNAV;
+        $.lastLTRawNAV = _ltRawNAV;
         $.lastSTEffectiveNAV = stEffectiveNAV;
         $.lastJTEffectiveNAV = jtEffectiveNAV;
 
         // Marshal the post-sync state and return to the caller
         uint256 betaWAD = $.betaWAD;
         uint256 minCoverageWAD = $.minCoverageWAD;
+        uint256 minLiquidityWAD = $.minLiquidityWAD;
         state = SyncedAccountingState({
             // The market state is guaranteed to be identical to the persisted
             marketState: $.lastMarketState,
@@ -276,14 +291,19 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             stEffectiveNAV: stEffectiveNAV,
             jtEffectiveNAV: jtEffectiveNAV,
             jtCoverageImpermanentLoss: jtCoverageImpermanentLoss,
+            // No liquidity premium accrued on deposit or withdrawal: the premium is only paid on senior yield
+            ltLiquidityPremium: ZERO_NAV_UNITS,
             // No protocol fees taken on deposit or withdrawal
-            stProtocolFeeAccrued: ZERO_NAV_UNITS,
-            jtProtocolFeeAccrued: ZERO_NAV_UNITS,
+            stProtocolFee: ZERO_NAV_UNITS,
+            jtProtocolFee: ZERO_NAV_UNITS,
+            ltProtocolFee: ZERO_NAV_UNITS,
             coverageUtilizationWAD: UtilsLib.computeCoverageUtilization(_stRawNAV, _jtRawNAV, betaWAD, minCoverageWAD, jtEffectiveNAV),
+            liquidityUtilizationWAD: UtilsLib.computeLiquidityUtilization(stEffectiveNAV, minLiquidityWAD, _ltRawNAV),
             fixedTermEndTimestamp: $.fixedTermEndTimestamp,
             minCoverageWAD: minCoverageWAD,
             betaWAD: betaWAD,
-            liquidationCoverageUtilizationWAD: $.liquidationCoverageUtilizationWAD
+            liquidationCoverageUtilizationWAD: $.liquidationCoverageUtilizationWAD,
+            minLiquidityWAD: minLiquidityWAD
         });
     }
 
@@ -291,7 +311,8 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     function postOpSyncTrancheAccountingAndEnforceCoverage(
         Operation _op,
         NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV
+        NAV_UNIT _jtRawNAV,
+        NAV_UNIT _ltRawNAV
     )
         external
         override(IRoycoDayAccountant)
@@ -299,7 +320,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     {
         // Execute a post-op NAV synchronization
         // This is called during a ST Deposit or JT Withdrawal, so the self-liquidation bonus is not applicable
-        state = postOpSyncTrancheAccounting(_op, _stRawNAV, _jtRawNAV, ZERO_NAV_UNITS);
+        state = postOpSyncTrancheAccounting(_op, _stRawNAV, _jtRawNAV, _ltRawNAV, ZERO_NAV_UNITS);
         // Enforce the market's coverage requirement
         require(_isDemandSatisfied(state.coverageUtilizationWAD), COVERAGE_REQUIREMENT_UNSATISFIED());
     }
@@ -318,7 +339,9 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Get the storage pointer to the accountant state
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
         // Preview a NAV sync to get the market's current state
-        (SyncedAccountingState memory state,,,) = _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _previewJTYieldShareAccrual());
+        (uint192 twJTYieldShareAccruedWAD, uint192 twLTYieldShareAccruedWAD) = _previewPremiumYieldShareAccrual();
+        (SyncedAccountingState memory state,,,) =
+            _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, $.lastLTRawNAV, twJTYieldShareAccruedWAD, twLTYieldShareAccruedWAD);
         // If there is no minimum coverage requirement, there is no ST capacity restriction
         if (state.minCoverageWAD == 0) return MAX_NAV_UNITS;
         // Solve for x, rounding in favor of senior protection
@@ -357,7 +380,9 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
 
         // Get the surplus JT assets in NAV units
         // Preview a NAV sync to get the market's current state
-        (SyncedAccountingState memory state,,,) = _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, _previewJTYieldShareAccrual());
+        (uint192 twJTYieldShareAccruedWAD, uint192 twLTYieldShareAccruedWAD) = _previewPremiumYieldShareAccrual();
+        (SyncedAccountingState memory state,,,) =
+            _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, $.lastLTRawNAV, twJTYieldShareAccruedWAD, twLTYieldShareAccruedWAD);
         uint256 betaWAD = $.betaWAD;
         // Compute the total covered exposure of the underlying investment, rounding in favor of senior protection
         NAV_UNIT totalCoveredExposure = _stRawNAV + _jtRawNAV.mulDiv(betaWAD, WAD, Math.Rounding.Ceil);
@@ -409,20 +434,24 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
      * @notice Synchronizes all tranche NAVs and the JT coverage impermanent loss based on unrealized PNLs of the underlying investment(s)
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
-     * @param _twJTYieldShareAccruedWAD The currently accrued time-weighted JT yield share (JT YDM output) since the last distribution, scaled to WAD precision
-     * @return state A struct containing all mark-to-market NAV, JT coverage impermanent loss, and fee data after executing the sync
+     * @param _ltRawNAV The liquidity tranche's current raw NAV: the pure value of its invested assets
+     * @param _twJTYieldShareAccruedWAD The currently accrued time-weighted JT yield share (JT YDM output) since the last premium payment, scaled to WAD precision
+     * @param _twLTYieldShareAccruedWAD The currently accrued time-weighted LT yield share (LT YDM output) since the last premium payment, scaled to WAD precision
+     * @return state A struct containing all mark-to-market NAV, JT coverage impermanent loss, LT liquidity premium, and fee data after executing the sync
      * @return initialMarketState The initial state the market was in before the synchronization
-     * @return riskPremiumPaid A boolean indicating whether the JT risk premium was paid out of ST yield
+     * @return premiumsPaid A boolean indicating whether the JT risk and LT liquidity premiums were paid out of ST yield
      * @return jtCoverageImpermanentLossErased The amount of JT coverage loss erased (reset to 0)
      */
     function _previewSyncTrancheAccounting(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
-        uint192 _twJTYieldShareAccruedWAD
+        NAV_UNIT _ltRawNAV,
+        uint192 _twJTYieldShareAccruedWAD,
+        uint192 _twLTYieldShareAccruedWAD
     )
         internal
         view
-        returns (SyncedAccountingState memory state, MarketState initialMarketState, bool riskPremiumPaid, NAV_UNIT jtCoverageImpermanentLossErased)
+        returns (SyncedAccountingState memory state, MarketState initialMarketState, bool premiumsPaid, NAV_UNIT jtCoverageImpermanentLossErased)
     {
         // Get the storage pointer to the accountant state
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
@@ -440,37 +469,55 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             jtCoverageImpermanentLoss: $.lastJTCoverageImpermanentLoss
         });
 
-        // Resolve the JT YDM inputs consumed by the waterfall's yield split once per sync
-        uint256 elapsedSinceLastRiskPremiumPayment = block.timestamp - $.lastRiskPremiumPaymentTimestamp;
-        // The instantaneous share is only consumed when the last distribution happened in the same block, so it is fetched lazily
-        // The JT YDM is driven by the market's coverage utilization: the JT risk premium scales with how utilized the JT coverage buffer is
-        uint256 instantaneousJTYieldShareWAD = elapsedSinceLastRiskPremiumPayment == 0
-            ? IYDM($.jtYDM)
-                .previewYieldShare(
-                    initialMarketState, UtilsLib.computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV)
-                )
-            : 0;
-        // The JT yield share can never exceed 100% of senior appreciation: a larger share means the JT YDM is faulty
-        require(instantaneousJTYieldShareWAD <= WAD, INVALID_YDM_OUTPUT());
+        // The risk and liquidity premiums are always paid together, so they share a single elapsed window since the last premium payment
+        uint256 elapsedSinceLastPremiumPayments = block.timestamp - $.lastPremiumPaymentTimestamp;
+        // The instantaneous shares are only consumed when the last premium payment happened in the same block, so they are fetched lazily and each capped at its configured maximum
+        uint256 instantaneousJTYieldShareWAD;
+        uint256 instantaneousLTYieldShareWAD;
+        if (elapsedSinceLastPremiumPayments == 0) {
+            // The JT YDM is driven by the market's coverage utilization: the JT risk premium scales with how utilized the JT coverage buffer is
+            instantaneousJTYieldShareWAD = Math.min(
+                IYDM($.jtYDM)
+                    .previewYieldShare(
+                        initialMarketState,
+                        UtilsLib.computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV)
+                    ),
+                $.maxJTYieldShareWAD
+            );
+            // The LT YDM is driven by the market's liquidity utilization: the LT liquidity premium scales with how utilized the LT market-making inventory is
+            instantaneousLTYieldShareWAD = Math.min(
+                IYDM($.ltYDM)
+                    .previewYieldShare(initialMarketState, UtilsLib.computeLiquidityUtilization($.lastSTEffectiveNAV, $.minLiquidityWAD, $.lastLTRawNAV)),
+                $.maxLTYieldShareWAD
+            );
+        }
 
         // Cache the effective NAV dust tolerance: the worst-case dust is bounded by the sum of the raw NAV dust tolerances
         NAV_UNIT effectiveNAVDustTolerance = $.effectiveNAVDustTolerance;
 
         // Execute the PnL attribution and settlement waterfall
-        NAV_UNIT stProtocolFeeAccrued;
-        NAV_UNIT jtProtocolFeeAccrued;
-        (checkpoint, stProtocolFeeAccrued, jtProtocolFeeAccrued, riskPremiumPaid) = AccountingLib.applyProfitAndLossWaterfall(
+        NAV_UNIT ltLiquidityPremium;
+        NAV_UNIT stProtocolFee;
+        NAV_UNIT jtProtocolFee;
+        NAV_UNIT ltProtocolFee;
+        (checkpoint, ltLiquidityPremium, stProtocolFee, jtProtocolFee, ltProtocolFee, premiumsPaid) = AccountingLib.applyProfitAndLossWaterfall(
             _stRawNAV,
             _jtRawNAV,
+            _ltRawNAV,
             PnLWaterfallParams({
                 checkpoint: checkpoint,
                 twJTYieldShareAccruedWAD: _twJTYieldShareAccruedWAD,
+                twLTYieldShareAccruedWAD: _twLTYieldShareAccruedWAD,
                 instantaneousJTYieldShareWAD: instantaneousJTYieldShareWAD,
-                elapsedSinceLastRiskPremiumPayment: elapsedSinceLastRiskPremiumPayment,
+                instantaneousLTYieldShareWAD: instantaneousLTYieldShareWAD,
+                elapsedSinceLastPremiumPayments: elapsedSinceLastPremiumPayments,
                 stProtocolFeeWAD: $.stProtocolFeeWAD,
                 jtProtocolFeeWAD: $.jtProtocolFeeWAD,
                 jtYieldShareProtocolFeeWAD: $.jtYieldShareProtocolFeeWAD,
-                effectiveNAVDustTolerance: effectiveNAVDustTolerance
+                ltProtocolFeeWAD: $.ltProtocolFeeWAD,
+                ltYieldShareProtocolFeeWAD: $.ltYieldShareProtocolFeeWAD,
+                effectiveNAVDustTolerance: effectiveNAVDustTolerance,
+                ltNAVDustTolerance: $.ltNAVDustTolerance
             })
         );
 
@@ -479,10 +526,13 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             initialMarketState,
             MarketStateTransitionParams({
                 postPnLWaterfallCheckpoint: checkpoint,
-                stProtocolFeeAccrued: stProtocolFeeAccrued,
-                jtProtocolFeeAccrued: jtProtocolFeeAccrued,
+                ltLiquidityPremium: ltLiquidityPremium,
+                stProtocolFee: stProtocolFee,
+                jtProtocolFee: jtProtocolFee,
+                ltProtocolFee: ltProtocolFee,
                 betaWAD: $.betaWAD,
                 minCoverageWAD: $.minCoverageWAD,
+                minLiquidityWAD: $.minLiquidityWAD,
                 effectiveNAVDustTolerance: effectiveNAVDustTolerance,
                 fixedTermDurationSeconds: $.fixedTermDurationSeconds,
                 fixedTermEndTimestamp: $.fixedTermEndTimestamp,
@@ -493,71 +543,82 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     }
 
     /**
-     * @notice Accrues the JT yield share since the last yield distribution
-     * @dev Gets the instantaneous JT yield share and weights it by the time elapsed since the last accrual
-     * @return twJTYieldShareAccruedWAD The updated time-weighted JT yield share since the last yield distribution
+     * @notice Computes the utilizations that drive the JT and LT yield shares from the last committed checkpoint
+     * @return coverageUtilizationWAD The coverage utilization driving the JT risk premium, scaled to WAD precision
+     * @return liquidityUtilizationWAD The liquidity utilization driving the LT liquidity premium, scaled to WAD precision
      */
-    function _accrueJTYieldShare() internal returns (uint192 twJTYieldShareAccruedWAD) {
+    function _premiumYieldShareUtilizations() private view returns (uint256 coverageUtilizationWAD, uint256 liquidityUtilizationWAD) {
+        // Get the storage pointer to the accountant state
+        RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
+        coverageUtilizationWAD = UtilsLib.computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV);
+        liquidityUtilizationWAD = UtilsLib.computeLiquidityUtilization($.lastSTEffectiveNAV, $.minLiquidityWAD, $.lastLTRawNAV);
+    }
+
+    /**
+     * @notice Accrues the JT and LT yield shares since the last premium payment
+     * @dev Advances the adaptive YDMs and gets the instantaneous yield shares, each capped at its configured maximum, then weights them by the time elapsed since the last accrual
+     * @return twJTYieldShareAccruedWAD The updated time-weighted JT yield share since the last premium payment
+     * @return twLTYieldShareAccruedWAD The updated time-weighted LT yield share since the last premium payment
+     */
+    function _accruePremiumYieldShares() internal returns (uint192 twJTYieldShareAccruedWAD, uint192 twLTYieldShareAccruedWAD) {
         // Get the storage pointer to the accountant state
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
 
         // Get the last update timestamp
-        uint256 lastUpdate = $.lastJTYieldShareAccrualTimestamp;
+        uint256 lastUpdate = $.lastYieldShareAccrualTimestamp;
         if (lastUpdate == 0) {
             // Initialize the checkpoint timestamps if this is the first accrual
-            $.lastJTYieldShareAccrualTimestamp = uint32(block.timestamp);
-            $.lastRiskPremiumPaymentTimestamp = uint32(block.timestamp);
-            return 0;
+            $.lastYieldShareAccrualTimestamp = uint32(block.timestamp);
+            $.lastPremiumPaymentTimestamp = uint32(block.timestamp);
+            return (0, 0);
         }
 
         // Compute the elapsed time since the last update
         uint256 elapsed = block.timestamp - lastUpdate;
         // Preemptively return if last accrual was in the same block
-        if (elapsed == 0) return $.twJTYieldShareAccruedWAD;
+        if (elapsed == 0) return ($.twJTYieldShareAccruedWAD, $.twLTYieldShareAccruedWAD);
 
-        // Get the instantaneous JT yield share, scaled to WAD precision, driven by the market's coverage utilization
-        uint256 jtYieldShareWAD = IYDM($.jtYDM)
-            .yieldShare(
-                $.lastMarketState, UtilsLib.computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV)
-            );
-        // The JT yield share can never exceed 100% of senior appreciation: a larger share means the JT YDM is faulty
-        require(jtYieldShareWAD <= WAD, INVALID_YDM_OUTPUT());
+        // Advance the adaptive YDMs and read each instantaneous yield share, capped at its configured maximum
+        (uint256 coverageUtilizationWAD, uint256 liquidityUtilizationWAD) = _premiumYieldShareUtilizations();
+        uint256 jtYieldShareWAD = Math.min(IYDM($.jtYDM).yieldShare($.lastMarketState, coverageUtilizationWAD), $.maxJTYieldShareWAD);
+        uint256 ltYieldShareWAD = Math.min(IYDM($.ltYDM).yieldShare($.lastMarketState, liquidityUtilizationWAD), $.maxLTYieldShareWAD);
 
-        // Accrue the time-weighted yield share accrued to JT since the last tranche interaction
+        // Accrue the time-weighted yield shares since the last tranche interaction
         twJTYieldShareAccruedWAD = ($.twJTYieldShareAccruedWAD += uint192(jtYieldShareWAD * elapsed));
-        $.lastJTYieldShareAccrualTimestamp = uint32(block.timestamp);
+        twLTYieldShareAccruedWAD = ($.twLTYieldShareAccruedWAD += uint192(ltYieldShareWAD * elapsed));
+        $.lastYieldShareAccrualTimestamp = uint32(block.timestamp);
 
         emit JuniorTrancheYieldShareAccrued(jtYieldShareWAD, twJTYieldShareAccruedWAD);
+        emit LiquidityTrancheYieldShareAccrued(ltYieldShareWAD, twLTYieldShareAccruedWAD);
     }
 
     /**
-     * @notice Computes and returns the currently accrued JT yield share since the last yield distribution
-     * @dev Gets the instantaneous JT yield share and weights it by the time elapsed since the last accrual
-     * @return The updated time-weighted JT yield share since the last yield distribution
+     * @notice Computes and returns the currently accrued JT and LT yield shares since the last premium payment
+     * @dev Gets the instantaneous yield shares, each capped at its configured maximum, and weights them by the time elapsed since the last accrual
+     * @return twJTYieldShareAccruedWAD The updated time-weighted JT yield share since the last premium payment
+     * @return twLTYieldShareAccruedWAD The updated time-weighted LT yield share since the last premium payment
      */
-    function _previewJTYieldShareAccrual() internal view returns (uint192) {
+    function _previewPremiumYieldShareAccrual() internal view returns (uint192 twJTYieldShareAccruedWAD, uint192 twLTYieldShareAccruedWAD) {
         // Get the storage pointer to the accountant state
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
 
         // Get the last update timestamp
-        uint256 lastUpdate = $.lastJTYieldShareAccrualTimestamp;
-        if (lastUpdate == 0) return 0;
+        uint256 lastUpdate = $.lastYieldShareAccrualTimestamp;
+        if (lastUpdate == 0) return (0, 0);
 
         // Compute the elapsed time since the last update
         uint256 elapsed = block.timestamp - lastUpdate;
         // Preemptively return if last accrual was in the same block
-        if (elapsed == 0) return $.twJTYieldShareAccruedWAD;
+        if (elapsed == 0) return ($.twJTYieldShareAccruedWAD, $.twLTYieldShareAccruedWAD);
 
-        // Get the instantaneous JT yield share, scaled to WAD precision, driven by the market's coverage utilization
-        uint256 jtYieldShareWAD = IYDM($.jtYDM)
-            .previewYieldShare(
-                $.lastMarketState, UtilsLib.computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV)
-            );
-        // The JT yield share can never exceed 100% of senior appreciation: a larger share means the JT YDM is faulty
-        require(jtYieldShareWAD <= WAD, INVALID_YDM_OUTPUT());
+        // Read each instantaneous yield share, capped at its configured maximum
+        (uint256 coverageUtilizationWAD, uint256 liquidityUtilizationWAD) = _premiumYieldShareUtilizations();
+        uint256 jtYieldShareWAD = Math.min(IYDM($.jtYDM).previewYieldShare($.lastMarketState, coverageUtilizationWAD), $.maxJTYieldShareWAD);
+        uint256 ltYieldShareWAD = Math.min(IYDM($.ltYDM).previewYieldShare($.lastMarketState, liquidityUtilizationWAD), $.maxLTYieldShareWAD);
 
-        // Apply the accrual of JT yield share to the accumulator, weighted by the time elapsed
-        return ($.twJTYieldShareAccruedWAD + uint192(jtYieldShareWAD * elapsed));
+        // Apply the accrual of the yield shares to the accumulators, weighted by the time elapsed
+        twJTYieldShareAccruedWAD = ($.twJTYieldShareAccruedWAD + uint192(jtYieldShareWAD * elapsed));
+        twLTYieldShareAccruedWAD = ($.twLTYieldShareAccruedWAD + uint192(ltYieldShareWAD * elapsed));
     }
 
     // =============================
@@ -712,7 +773,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
 
     /**
      * @notice Validates the liquidity requirement parameters of the market
-     * @param _minLiquidityWAD The liquidity ratio that the senior tranche is expected to be provided liquidity by, scaled to WAD precision
+     * @param _minLiquidityWAD The percentage of the senior tranche NAV that must be in the liquidity tranche's market making inventory, scaled to WAD precision
      */
     function _validateLiquidityConfig(uint64 _minLiquidityWAD) internal pure {
         require(
@@ -720,6 +781,16 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             (_minLiquidityWAD < WAD),
             INVALID_LIQUIDITY_CONFIG()
         );
+    }
+
+    /**
+     * @notice Validates the yield share (premium) parameters of the market
+     * @param _maxJTYieldShareWAD The maximum JT yield share (risk premium) as a percentage of senior appreciation, scaled to WAD precision
+     * @param _maxLTYieldShareWAD The maximum LT yield share (liquidity premium) as a percentage of senior appreciation, scaled to WAD precision
+     */
+    function _validateYieldShareConfig(uint64 _maxJTYieldShareWAD, uint64 _maxLTYieldShareWAD) internal pure {
+        // The combined maximum yield shares cannot exceed 100% of senior appreciation, so the risk and liquidity premiums always fit within the senior gain
+        require((uint256(_maxJTYieldShareWAD) + _maxLTYieldShareWAD) <= WAD, INVALID_MAX_YIELD_SHARE_CONFIG());
     }
 
     /**

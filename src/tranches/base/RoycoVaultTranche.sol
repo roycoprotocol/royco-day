@@ -11,9 +11,9 @@ import { RoycoBase } from "../../base/RoycoBase.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { WAD_DECIMALS, ZERO_NAV_UNITS } from "../../libraries/Constants.sol";
-import { UtilsLib } from "../../libraries/UtilsLib.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toNAVUnits, toUint256 } from "../../libraries/Units.sol";
+import { UtilsLib } from "../../libraries/UtilsLib.sol";
 
 /**
  * @title RoycoVaultTranche
@@ -215,7 +215,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
             (TRANCHE_TYPE() == TrancheType.SENIOR ? IRoycoDayKernel(KERNEL).stPreviewDeposit(_assets) : IRoycoDayKernel(KERNEL).jtPreviewDeposit(_assets));
 
         // Preview the total tranche shares after minting any protocol fee shares post-sync
-        NAV_UNIT feeAccrued = TRANCHE_TYPE() == TrancheType.SENIOR ? stateBeforeDeposit.stProtocolFeeAccrued : stateBeforeDeposit.jtProtocolFeeAccrued;
+        NAV_UNIT feeAccrued = TRANCHE_TYPE() == TrancheType.SENIOR ? stateBeforeDeposit.stProtocolFee : stateBeforeDeposit.jtProtocolFee;
         NAV_UNIT effectiveNAV = TRANCHE_TYPE() == TrancheType.SENIOR ? stateBeforeDeposit.stEffectiveNAV : stateBeforeDeposit.jtEffectiveNAV;
         (uint256 feeSharesMinted,) = previewMintProtocolFeeShares(feeAccrued, effectiveNAV);
 
