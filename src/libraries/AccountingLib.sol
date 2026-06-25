@@ -74,20 +74,29 @@ library AccountingLib {
      * @dev Attributes each tranche's raw NAV delta across the checkpointed claims, then settles the deltas through the PnL waterfall (loss -> coverage IL recovery -> yield split)
      * @param _stRawNAV The senior tranche's current raw NAV: the mark-to-market value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the mark-to-market value of its invested assets
+     * @param _ltRawNAV The liquidity tranche's current raw NAV: the mark-to-market value of its invested assets
      * @param _params The fixed inputs of the waterfall: the checkpoint, pre-resolved YDM outputs, fee rates, and dust tolerance
      * @return postPnLWaterfallCheckpoint The post-waterfall checkpoint: the current raw NAVs alongside the settled effective NAVs and JT coverage impermanent loss
      * @return stProtocolFeeAccrued The protocol fee accrued on ST yield in this sync (gross: not netted out of the effective NAVs)
      * @return jtProtocolFeeAccrued The protocol fee accrued on JT yield and the JT yield share in this sync (gross: not netted out of the effective NAVs)
-     * @return riskPremiumPaid A boolean indicating whether the JT risk premium was paid out of ST yield
+     * @return premiumsPaid A boolean indicating whether the JT risk and LT liquidity premiums were paid out of ST yield
      */
     function applyProfitAndLossWaterfall(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
+        NAV_UNIT _ltRawNAV,
         PnLWaterfallParams memory _params
     )
         internal
         pure
-        returns (AccountingCheckpoint memory postPnLWaterfallCheckpoint, NAV_UNIT stProtocolFeeAccrued, NAV_UNIT jtProtocolFeeAccrued, bool riskPremiumPaid)
+        returns (
+            AccountingCheckpoint memory postPnLWaterfallCheckpoint,
+            NAV_UNIT ltLiquidityPremiumPaid,
+            NAV_UNIT stProtocolFeeAccrued,
+            NAV_UNIT jtProtocolFeeAccrued,
+            NAV_UNIT ltProtocolFeeAccrued,
+            bool premiumsPaid
+        )
     {
         // Cache the checkpointed effective NAV for each tranche
         NAV_UNIT stEffectiveNAV = _params.checkpoint.stEffectiveNAV;
@@ -96,9 +105,6 @@ library AccountingLib {
         // Apply the profit and loss attribution based on the current claims on NAVs that each tranche holds
         (int256 deltaSTEffectiveNAV, int256 deltaJTEffectiveNAV) =
             applyProfitAndLossAttribution(_stRawNAV, _jtRawNAV, _params.checkpoint.stRawNAV, _params.checkpoint.jtRawNAV, stEffectiveNAV, jtEffectiveNAV);
-
-        // Cache the checkpointed JT coverage impermanent loss
-        NAV_UNIT jtCoverageImpermanentLoss = _params.checkpoint.jtCoverageImpermanentLoss;
 
         // The net JT gains. The JT protocol fee accrued is calculated using this NAV.
         NAV_UNIT jtNetGain = ZERO_NAV_UNITS;
@@ -118,6 +124,8 @@ library AccountingLib {
             jtEffectiveNAV = (jtEffectiveNAV + jtNetGain);
         }
 
+        // Cache the checkpointed JT coverage impermanent loss
+        NAV_UNIT jtCoverageImpermanentLoss = _params.checkpoint.jtCoverageImpermanentLoss;
         /// @dev STEP_APPLY_ST_LOSS: The ST assets depreciated in value
         if (deltaSTEffectiveNAV < 0) {
             NAV_UNIT stLoss = toNAVUnits(-deltaSTEffectiveNAV);
@@ -153,28 +161,49 @@ library AccountingLib {
             /// @dev STEP_DISTRIBUTE_YIELD: There is no remaining JT coverage impermanent loss that ST yield is obligated to repay, the residual gains will be used to distribute yield to both tranches
             if (stGain != ZERO_NAV_UNITS) {
                 // Mark yield as distributed if the gain is not attributable to any rounding/dust
-                if (stGain > _params.effectiveNAVDustTolerance) riskPremiumPaid = true;
+                if () premiumsPaid = true;
                 // If the last yield distribution happened in the same block, use the instantaneous JT yield share. Else, use the time-weighted average JT yield share since the last distribution
                 NAV_UNIT riskPremium;
+                NAV_UNIT liquidityPremium;
                 if (_params.elapsedSinceLastRiskPremiumPayment == 0) {
                     riskPremium = stGain.mulDiv(_params.instantaneousJTYieldShareWAD, WAD, Math.Rounding.Floor);
+                    liquidityPremium = stGain.mulDiv(_params.instantaneousLTYieldShareWAD, WAD, Math.Rounding.Floor);
                 } else {
-                    riskPremium = stGain.mulDiv(_params.twJTYieldShareAccruedWAD, (_params.elapsedSinceLastRiskPremiumPayment * WAD), Math.Rounding.Floor);
+                    riskPremium = stGain.mulDiv(_params.twJTYieldShareAccruedWAD, (_params.elapsedSinceLastPremiumPayments * WAD), Math.Rounding.Floor);
+                    liquidityPremium = stGain.mulDiv(_params.twLTYieldShareAccruedWAD, (_params.elapsedSinceLastPremiumPayments * WAD), Math.Rounding.Floor);
                 }
-                // Apply the yield split to JT's effective NAV
-                if (riskPremium != ZERO_NAV_UNITS) {
+                // Apply the risk premium to JT's effective NAV
+                if (stGain > _params.effectiveNAVDustTolerance) {
                     // Compute the protocol fee taken on the yield share accrual if it is not attributable to any rounding/dust
-                    if (riskPremiumPaid) {
+                    if (premiumsPaid) {
                         jtProtocolFeeAccrued = (jtProtocolFeeAccrued + riskPremium.mulDiv(_params.jtYieldShareProtocolFeeWAD, WAD, Math.Rounding.Floor));
                     }
                     jtEffectiveNAV = (jtEffectiveNAV + riskPremium);
                     stGain = (stGain - riskPremium);
                 }
+                // Apply the risk premium to LT's effective NAV
+                if (liquidityPremium >= ZERO_NAV_UNITS) {
+                    // Compute the protocol fee taken on the yield share accrual if it is not attributable to any rounding/dust
+                    if (premiumsPaid) {
+                        jtProtocolFeeAccrued = (jtProtocolFeeAccrued + riskPremium.mulDiv(_params.ltYieldShareProtocolFeeWAD, WAD, Math.Rounding.Floor));
+                    }
+                    stGain = (stGain - liquidityPremium);
+                }
+
                 // Compute the protocol fee taken on this ST yield accrual if it is not attributable to any rounding/dust
-                if (riskPremiumPaid) stProtocolFeeAccrued = stGain.mulDiv(_params.stProtocolFeeWAD, WAD, Math.Rounding.Floor);
+                if (premiumsPaid) stProtocolFeeAccrued = stGain.mulDiv(_params.stProtocolFeeWAD, WAD, Math.Rounding.Floor);
                 // Book the residual gain to the ST
                 stEffectiveNAV = (stEffectiveNAV + stGain);
             }
+        }
+
+        // Compute the delta in the LT's raw NAV since the last checkpoint
+        int256 deltaLTRawNAV = UnitsMathLib.computeNAVDelta(_ltRawNAV, _params.checkpoint.ltRawNAV);
+        /// @dev STEP_APPLY_LT_GAIN: The LT assets appreciated in value
+        if (deltaLTRawNAV > 0) {
+            NAV_UNIT ltGain = toNAVUnits(deltaLTRawNAV);
+            // Compute the protocol fee taken on this LT yield accrual if it is not attributable to any rounding/dust
+            if (ltGain > _params.ltNAVDustTolerance) ltProtocolFeeAccrued = ltGain.mulDiv(_params.ltProtocolFeeWAD, WAD, Math.Rounding.Floor);
         }
 
         // Enforce the NAV conservation invariant
@@ -194,7 +223,7 @@ library AccountingLib {
     /**
      * @notice Determines the market state resulting from a sync, applies its state-dependent bookkeeping, and marshals the post-sync accounting state
      * @dev Runs once per sync, after the PnL waterfall has settled the tranche NAVs; none of its effects feed back into the effective NAVs
-     * @dev Computes the market's utilization internally from the post-waterfall checkpoint and the coverage configuration
+     * @dev Computes the market's coverage and liquidity utilization internally from the post-waterfall checkpoint and the coverage and liquidity configuration
      * @dev Erases the JT coverage IL and zeroes the protocol fees in the marshaled state where the transition demands it; all inputs are read-only
      * @dev Resulting market state:
      *      1. Forced Perpetual: The fixed-term duration is set to 0 (permanently perpetual), current fixed-term elapsed, or liquidation utilization threshold has been breached (under/un-collateralized)
@@ -213,13 +242,18 @@ library AccountingLib {
         pure
         returns (SyncedAccountingState memory state, NAV_UNIT jtCoverageImpermanentLossErased)
     {
-        // Compute the market's utilization against the post-waterfall JT effective NAV
+        // Compute the market's coverage utilization against the post-waterfall JT effective NAV
         uint256 coverageUtilizationWAD = UtilsLib.computeCoverageUtilization(
             _params.postPnLWaterfallCheckpoint.stRawNAV,
             _params.postPnLWaterfallCheckpoint.jtRawNAV,
             _params.betaWAD,
             _params.minCoverageWAD,
             _params.postPnLWaterfallCheckpoint.jtEffectiveNAV
+        );
+
+        // Compute the market's liquidity utilization against the post-waterfall ST effective NAV and the LT's market-making inventory
+        uint256 liquidityUtilizationWAD = UtilsLib.computeLiquidityUtilization(
+            _params.postPnLWaterfallCheckpoint.stEffectiveNAV, _params.minLiquidityWAD, _params.postPnLWaterfallCheckpoint.ltRawNAV
         );
 
         // Cache the fees accrued by the waterfall: zeroed below if the resulting market state does not take fees
@@ -277,13 +311,18 @@ library AccountingLib {
             stEffectiveNAV: _params.postPnLWaterfallCheckpoint.stEffectiveNAV,
             jtEffectiveNAV: _params.postPnLWaterfallCheckpoint.jtEffectiveNAV,
             jtCoverageImpermanentLoss: jtCoverageImpermanentLoss,
+            // The liquidity premium is a coverage-neutral overlay resolved post-sync by the accountant, so it is zero in the waterfall-settled state
+            ltLiquidityPremiumPaid: ZERO_NAV_UNITS,
             stProtocolFeeAccrued: stProtocolFeeAccrued,
             jtProtocolFeeAccrued: jtProtocolFeeAccrued,
+            ltProtocolFeeAccrued: ZERO_NAV_UNITS,
             coverageUtilizationWAD: coverageUtilizationWAD,
+            liquidityUtilizationWAD: liquidityUtilizationWAD,
             fixedTermEndTimestamp: fixedTermEndTimestamp,
             minCoverageWAD: _params.minCoverageWAD,
             betaWAD: _params.betaWAD,
-            liquidationCoverageUtilizationWAD: _params.liquidationCoverageUtilizationWAD
+            liquidationCoverageUtilizationWAD: _params.liquidationCoverageUtilizationWAD,
+            minLiquidityWAD: _params.minLiquidityWAD
         });
     }
 

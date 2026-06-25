@@ -15,7 +15,7 @@ interface IRoycoDayAccountant {
      * @custom:field betaWAD - The junior tranche's sensitivity to the same downside stress that affects the senior tranche, scaled to WAD precision
      *                         For example, beta is 0 when JT is in the RFR and 1 when JT is in the same opportunity as senior
      * @custom:field liquidationCoverageUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
-     * @custom:field minLiquidityWAD - The liquidity ratio that the senior tranche is expected to be provided liquidity by, scaled to WAD precision
+     * @custom:field minLiquidityWAD - The percentage of the senior tranche NAV that must be in the liquidity tranche's market making inventory, scaled to WAD precision
      * @custom:field jtYDM - The junior tranche's Yield Distribution Model (JT YDM), responsible for determining the yield share (risk premium) payed from the senior tranche yield to the junior tranche
      * @custom:field jtYDMInitializationData - The data used to initialize the JT YDM for this market
      * @custom:field ltYDM - The liquidity tranche's Yield Distribution Model (LT YDM), responsible for determining the yield share (liquidity premium) payed from the senior tranche yield to the liquidity tranche
@@ -72,10 +72,13 @@ interface IRoycoDayAccountant {
      * @custom:field betaWAD - JT's percentage sensitivity to the same downside stress that affects ST, scaled to WAD precision
      *                         For example, beta is 0 when JT is in the RFR and 1e18 (100%) when JT is in the same opportunity as senior
      * @custom:field ltYDM - The liquidity tranche's Yield Distribution Model (LT YDM), responsible for determining the yield share (liquidity premium) payed from the senior tranche yield to the liquidity tranche
-     * @custom:field minLiquidityWAD - The liquidity percentage that the senior tranche is expected to be provided liquidity by, scaled to WAD precision
+     * @custom:field minLiquidityWAD - The percentage of the senior tranche NAV that must be in the liquidity tranche's market making inventory, scaled to WAD precision
      * @custom:field twJTYieldShareAccruedWAD - The time-weighted junior tranche yield share (JT YDM output) since the last yield distribution, scaled to WAD precision
      * @custom:field lastJTYieldShareAccrualTimestamp - The timestamp at which the time-weighted JT yield share accumulator was last updated
      * @custom:field lastRiskPremiumPaymentTimestamp - The timestamp at which the last JT risk premium payment occurred
+     * @custom:field twLTYieldShareAccruedWAD - The time-weighted liquidity tranche yield share (LT YDM output) since the last liquidity premium payment, scaled to WAD precision
+     * @custom:field lastLTYieldShareAccrualTimestamp - The timestamp at which the time-weighted LT yield share accumulator was last updated
+     * @custom:field lastLiquidityPremiumPaymentTimestamp - The timestamp at which the last LT liquidity premium payment occurred
      * @custom:field liquidationCoverageUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
      * @custom:field lastSTRawNAV - The last recorded pure NAV (excluding any coverage taken and yield shared) of the senior tranche
      * @custom:field lastJTRawNAV - The last recorded pure NAV (excluding any coverage given and yield shared) of the junior tranche
@@ -111,7 +114,11 @@ interface IRoycoDayAccountant {
         uint192 twJTYieldShareAccruedWAD;
         uint32 lastJTYieldShareAccrualTimestamp;
         uint32 lastRiskPremiumPaymentTimestamp;
-        // Slot 5-15
+        // Slot 5
+        uint192 twLTYieldShareAccruedWAD;
+        uint32 lastLTYieldShareAccrualTimestamp;
+        uint32 lastLiquidityPremiumPaymentTimestamp;
+        // Slot 6-16
         uint256 liquidationCoverageUtilizationWAD;
         NAV_UNIT lastSTRawNAV;
         NAV_UNIT lastJTRawNAV;
@@ -131,6 +138,13 @@ interface IRoycoDayAccountant {
      * @param twJTYieldShareAccruedWAD The time-weighted JT yield share accrued since the last yield distribution
      */
     event JuniorTrancheYieldShareAccrued(uint256 jtYieldShareWAD, uint256 twJTYieldShareAccruedWAD);
+
+    /**
+     * @notice Emitted when LT's share of ST yield (the liquidity premium) is accrued based on the market's liquidityUtilization since the last accrual
+     * @param ltYieldShareWAD LT's instantaneous yield share (LT YDM output) based on liquidityUtilization since the last accrual
+     * @param twLTYieldShareAccruedWAD The time-weighted LT yield share accrued since the last liquidity premium payment
+     */
+    event LiquidityTrancheYieldShareAccrued(uint256 ltYieldShareWAD, uint256 twLTYieldShareAccruedWAD);
 
     /// @notice Emitted when a fixed term regime is commenced by this market
     /// @param fixedTermEndTimestamp The end timestamp of the new fixed term regime
@@ -200,7 +214,7 @@ interface IRoycoDayAccountant {
     event LiquidityTrancheYieldShareProtocolFeeUpdated(uint64 ltYieldShareProtocolFeeWAD);
 
     /// @notice Emitted when the liquidity percentage requirement is updated
-    /// @param minLiquidityWAD The new liquidity percentage, scaled to WAD precision
+    /// @param minLiquidityWAD The new percentage of the senior tranche NAV that must be in the liquidity tranche's market making inventory, scaled to WAD precision
     event LiquidityUpdated(uint64 minLiquidityWAD);
 
     /// @notice Emitted when LT's dust tolerance is updated
@@ -249,17 +263,19 @@ interface IRoycoDayAccountant {
      * @dev Persists updated NAV and impermanent loss checkpoints for the next sync to use as reference
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
+     * @param _ltRawNAV The liquidity tranche's current raw NAV: the pure value of its invested assets
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
-    function preOpSyncTrancheAccounting(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external returns (SyncedAccountingState memory state);
+    function preOpSyncTrancheAccounting(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV, NAV_UNIT _ltRawNAV) external returns (SyncedAccountingState memory state);
 
     /**
      * @notice Previews a synchronization of the effective NAVs and impermanent losses of both tranches by marking them to market
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
+     * @param _ltRawNAV The liquidity tranche's current raw NAV: the pure value of its invested assets
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
-    function previewSyncTrancheAccounting(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external view returns (SyncedAccountingState memory state);
+    function previewSyncTrancheAccounting(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV, NAV_UNIT _ltRawNAV) external view returns (SyncedAccountingState memory state);
 
     /**
      * @notice Applies post-operation (deposit or redemption) raw NAV deltas to effective NAV checkpoints
@@ -267,6 +283,7 @@ interface IRoycoDayAccountant {
      * @param _op The operation being executed in between the pre and post operation synchronizations
      * @param _stRawNAV The post-op senior tranche's raw NAV
      * @param _jtRawNAV The post-op junior tranche's raw NAV
+     * @param _ltRawNAV The post-op liquidity tranche's raw NAV
      * @param _stSelfLiquidationBonusNAV The self-liquidation bonus remitted to an ST LP on redemption after the liquidation coverageUtilization threshold has been breached, sourced from JT effective NAV
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
@@ -274,6 +291,7 @@ interface IRoycoDayAccountant {
         Operation _op,
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
+        NAV_UNIT _ltRawNAV,
         NAV_UNIT _stSelfLiquidationBonusNAV
     )
         external
@@ -286,12 +304,14 @@ interface IRoycoDayAccountant {
      * @param _op The operation being executed in between the pre and post operation synchronizations
      * @param _stRawNAV The post-op senior tranche's raw NAV
      * @param _jtRawNAV The post-op junior tranche's raw NAV
+     * @param _ltRawNAV The post-op liquidity tranche's raw NAV
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function postOpSyncTrancheAccountingAndEnforceCoverage(
         Operation _op,
         NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV
+        NAV_UNIT _jtRawNAV,
+        NAV_UNIT _ltRawNAV
     )
         external
         returns (SyncedAccountingState memory state);
