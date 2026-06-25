@@ -2,16 +2,16 @@
 pragma solidity ^0.8.28;
 
 import { WAD, ZERO_NAV_UNITS } from "./Constants.sol";
-import { DawnUtilsLib } from "./DawnUtilsLib.sol";
+import { UtilsLib } from "./UtilsLib.sol";
 import { AccountingCheckpoint, MarketState, MarketStateTransitionParams, PnLWaterfallParams, SyncedAccountingState } from "./Types.sol";
 import { Math, NAV_UNIT, UnitsMathLib, toNAVUnits } from "./Units.sol";
 
 /**
- * @title DawnAccountingLib
+ * @title AccountingLib
  * @author Waymont
  * @notice A library containing accounting functions for the Royco protocol
  */
-library DawnAccountingLib {
+library AccountingLib {
     using UnitsMathLib for NAV_UNIT;
     using UnitsMathLib for uint256;
 
@@ -240,7 +240,7 @@ library DawnAccountingLib {
         returns (SyncedAccountingState memory state, NAV_UNIT jtCoverageImpermanentLossErased)
     {
         // Compute the market's utilization against the post-waterfall JT effective NAV
-        uint256 coverageUtilizationWAD = DawnUtilsLib.computeCoverageUtilization(
+        uint256 coverageUtilizationWAD = UtilsLib.computeCoverageUtilization(
             _params.postPnLWaterfallCheckpoint.stRawNAV,
             _params.postPnLWaterfallCheckpoint.jtRawNAV,
             _params.betaWAD,

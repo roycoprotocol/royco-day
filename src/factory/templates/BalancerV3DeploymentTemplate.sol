@@ -1,29 +1,28 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IGyroECLPPool } from "../../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
-import { IRateProvider } from "../../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/solidity-utils/helpers/IRateProvider.sol";
-import { IProtocolFeeController } from "../../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IProtocolFeeController.sol";
-import { IVault } from "../../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
-import { IVaultAdmin } from "../../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultAdmin.sol";
+import { IGyroECLPPool } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
+import { IRateProvider } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/solidity-utils/helpers/IRateProvider.sol";
+import { IProtocolFeeController } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IProtocolFeeController.sol";
+import { IVault } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
+import { IVaultAdmin } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultAdmin.sol";
 import {
     PoolRoleAccounts as BalancerV3PoolRoleAccounts,
     TokenConfig as BalancerV3TokenConfig,
     TokenType as BalancerV3TokenType
-} from "../../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
-import { GyroECLPPoolFactory } from "../../../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
-import { BalancerPoolToken } from "../../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/BalancerPoolToken.sol";
-import { AccessManagedUpgradeable } from "../../../../../lib/openzeppelin-contracts-upgradeable/contracts/access/manager/AccessManagedUpgradeable.sol";
-import { UUPSUpgradeable } from "../../../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
-import { IERC20 } from "../../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import { IRoycoAuth } from "../../../../interfaces/IRoycoAuth.sol";
-import { IRoycoDawnAccountant } from "../../../../interfaces/IRoycoDawnAccountant.sol";
-import { IRoycoDawnKernel } from "../../../../interfaces/IRoycoDawnKernel.sol";
-import { IRoycoDayKernel } from "../../../../interfaces/IRoycoDayKernel.sol";
-import { IRoycoVaultTranche } from "../../../../interfaces/IRoycoVaultTranche.sol";
-import { IRoycoFactory } from "../../../../interfaces/factory/IRoycoFactory.sol";
-import { IRoycoProtocolTemplate } from "../../../../interfaces/factory/IRoycoProtocolTemplate.sol";
-import { TrancheType } from "../../../../libraries/Types.sol";
+} from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
+import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
+import { BalancerPoolToken } from "../../../lib/balancer-v3-monorepo/pkg/vault/contracts/BalancerPoolToken.sol";
+import { AccessManagedUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/access/manager/AccessManagedUpgradeable.sol";
+import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
+import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { IRoycoAuth } from "../../interfaces/IRoycoAuth.sol";
+import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
+import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
+import { IRoycoFactory } from "../../interfaces/factory/IRoycoFactory.sol";
+import { IRoycoProtocolTemplate } from "../../interfaces/factory/IRoycoProtocolTemplate.sol";
+import { TrancheType } from "../../libraries/Types.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
@@ -38,22 +37,22 @@ import {
     ST_LP_ROLE,
     SYNC_ROLE,
     TRANSFER_AGENT_ROLE
-} from "../../../RolesConfiguration.sol";
-import { BaseDeploymentTemplate } from "../../BaseDeploymentTemplate.sol";
+} from "../RolesConfiguration.sol";
+import { BaseDeploymentTemplate } from "./base/BaseDeploymentTemplate.sol";
 
 /**
- * @title DayDeploymentTemplate
+ * @title BalancerV3DeploymentTemplate
  * @author Ankur Dubey, Shivaansh Kapoor
  * @notice Abstract base for every Royco Day market deployment template (ST + JT + LT).
  *
  * @dev Derived structurally from the Dusk-Balancer template, but Day-shaped: the junior tranche is a plain
- *      first-loss tranche (like Dawn), and a third Liquidity Tranche (LT) holds the Balancer BPT `{ST_share, quote}`.
+ *      first-loss tranche, and a third Liquidity Tranche (LT) holds the Balancer BPT `{ST_share, quote}`.
  *      Dusk peripherals (rate providers + custom hooks) are intentionally omitted for now — pool tokens are
  *      registered `STANDARD` (no rate provider) and the pool runs without hooks. These are wired in later.
  *
  *      Concrete subclasses plug in their kernel by overriding `_kernelComponentId()` and `_kernelInitData(...)`.
  */
-abstract contract DayDeploymentTemplate is BaseDeploymentTemplate {
+abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     // ═══════════════════════════════════════════════════════════════════════════
     // PARAM STRUCTS
     // ═══════════════════════════════════════════════════════════════════════════
@@ -204,7 +203,7 @@ abstract contract DayDeploymentTemplate is BaseDeploymentTemplate {
         // 4. Create the Gyro E-CLP pool `{ST_share, quote}` (no rate providers, no hooks). LT asset = pool.
         address balancerPool = _createBalancerV3Pool(p.gyroECLPPoolParams, result.seniorTranche, _marketComponentSalt(p.marketId, "BALANCER_V3_POOL"));
 
-        // 5. Deploy JT impl + proxy (plain first-loss asset, like Dawn).
+        // 5. Deploy JT impl + proxy (plain first-loss asset).
         address jtImpl = _deployJuniorTrancheImpl(p.jt.asset, result.kernel, _marketComponentSalt(p.marketId, "JT_IMPL"));
         _deployProxy(jtImpl, _encodeTrancheInitData(p.jt.name, p.jt.symbol), jtProxySalt);
 
@@ -232,14 +231,12 @@ abstract contract DayDeploymentTemplate is BaseDeploymentTemplate {
     /// @notice Deploys the Day kernel impl + proxy.
     function _deployKernelImplAndProxy(DayParams memory _p, DeploymentResult memory _result, address _balancerPool, bytes32 _kernelProxySalt) internal {
         IRoycoDayKernel.RoycoDayKernelConstructionParams memory cp = IRoycoDayKernel.RoycoDayKernelConstructionParams({
-            dawnKernelParams: IRoycoDawnKernel.RoycoDawnKernelConstructionParams({
-                seniorTranche: _result.seniorTranche,
-                stAsset: _p.st.asset,
-                juniorTranche: _result.juniorTranche,
-                jtAsset: _p.jt.asset,
-                accountant: _result.accountant,
-                enforceVaultSharesTransferWhitelist: _p.enforceVaultSharesTransferWhitelist
-            }),
+            seniorTranche: _result.seniorTranche,
+            stAsset: _p.st.asset,
+            juniorTranche: _result.juniorTranche,
+            jtAsset: _p.jt.asset,
+            accountant: _result.accountant,
+            enforceVaultSharesTransferWhitelist: _p.enforceVaultSharesTransferWhitelist,
             liquidityTranche: _result.liquidityTranche,
             ltAsset: _balancerPool,
             quoteAsset: _p.gyroECLPPoolParams.quoteToken
@@ -247,12 +244,10 @@ abstract contract DayDeploymentTemplate is BaseDeploymentTemplate {
         address kernelImpl = _deployImpl(_kernelComponentId(), abi.encode(cp), _marketComponentSalt(_p.marketId, "KERNEL_IMPL"));
 
         IRoycoDayKernel.RoycoDayKernelInitParams memory kip = IRoycoDayKernel.RoycoDayKernelInitParams({
-            dawnKernelInitParams: IRoycoDawnKernel.RoycoDawnKernelInitParams({
-                initialAuthority: ROYCO_FACTORY.ROYCO_AUTHORITY(),
-                protocolFeeRecipient: _p.protocolFeeRecipient,
-                stSelfLiquidationBonusWAD: _p.stSelfLiquidationBonusWAD,
-                roycoBlacklist: _p.roycoBlacklist
-            })
+            initialAuthority: ROYCO_FACTORY.ROYCO_AUTHORITY(),
+            protocolFeeRecipient: _p.protocolFeeRecipient,
+            stSelfLiquidationBonusWAD: _p.stSelfLiquidationBonusWAD,
+            roycoBlacklist: _p.roycoBlacklist
         });
         _deployProxy(kernelImpl, _kernelInitData(kip, _p.kernelSpecificParams), _kernelProxySalt);
     }
@@ -315,7 +310,7 @@ abstract contract DayDeploymentTemplate is BaseDeploymentTemplate {
         require(kernel.LT_ASSET() == IRoycoVaultTranche(_d.liquidityTranche).asset(), INVALID_LT_ASSET_ON_KERNEL());
         require(kernel.ACCOUNTANT() == _d.accountant, INVALID_ACCOUNTANT_ON_KERNEL());
 
-        require(address(IRoycoDawnAccountant(_d.accountant).KERNEL()) == _d.kernel, INVALID_KERNEL_ON_ACCOUNTANT());
+        require(address(IRoycoDayAccountant(_d.accountant).KERNEL()) == _d.kernel, INVALID_KERNEL_ON_ACCOUNTANT());
 
         // The LT asset is the pool; the pool is wired with `{ST_share, quote}`.
         ExtraContractsDeployedResult memory extras = abi.decode(_d.extras, (ExtraContractsDeployedResult));
@@ -368,9 +363,9 @@ abstract contract DayDeploymentTemplate is BaseDeploymentTemplate {
     }
 
     function _kernelBinding(address _kernel) private pure returns (TargetBinding memory) {
-        bytes4[] memory s = new bytes4[](6);
-        uint64[] memory r = new uint64[](6);
-        s[0] = IRoycoDawnKernel.setProtocolFeeRecipient.selector;
+        bytes4[] memory s = new bytes4[](7);
+        uint64[] memory r = new uint64[](7);
+        s[0] = IRoycoDayKernel.setProtocolFeeRecipient.selector;
         r[0] = ADMIN_KERNEL_ROLE;
         s[1] = IRoycoAuth.pause.selector;
         r[1] = ADMIN_PAUSER_ROLE;
@@ -378,27 +373,29 @@ abstract contract DayDeploymentTemplate is BaseDeploymentTemplate {
         r[2] = ADMIN_UNPAUSER_ROLE;
         s[3] = UUPSUpgradeable.upgradeToAndCall.selector;
         r[3] = ADMIN_UPGRADER_ROLE;
-        s[4] = IRoycoDawnKernel.syncTrancheAccounting.selector;
+        s[4] = IRoycoDayKernel.syncTrancheAccounting.selector;
         r[4] = SYNC_ROLE;
-        s[5] = IRoycoDawnKernel.setRoycoBlacklist.selector;
+        s[5] = IRoycoDayKernel.setRoycoBlacklist.selector;
         r[5] = ADMIN_KERNEL_ROLE;
+        s[6] = IRoycoDayKernel.setSeniorTrancheSelfLiquidationBonus.selector;
+        r[6] = ADMIN_KERNEL_ROLE;
         return TargetBinding({ target: _kernel, selectors: s, roleIds: r });
     }
 
     function _accountantBinding(address _accountant) private pure returns (TargetBinding memory) {
         bytes4[] memory s = new bytes4[](9);
         uint64[] memory r = new uint64[](9);
-        s[0] = IRoycoDawnAccountant.setJTYDM.selector;
+        s[0] = IRoycoDayAccountant.setJuniorTrancheYDM.selector;
         r[0] = ADMIN_ACCOUNTANT_ROLE;
-        s[1] = IRoycoDawnAccountant.setSeniorTrancheProtocolFee.selector;
+        s[1] = IRoycoDayAccountant.setSeniorTrancheProtocolFee.selector;
         r[1] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        s[2] = IRoycoDawnAccountant.setJuniorTrancheProtocolFee.selector;
+        s[2] = IRoycoDayAccountant.setJuniorTrancheProtocolFee.selector;
         r[2] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        s[3] = IRoycoDawnAccountant.setJTYieldShareProtocolFee.selector;
+        s[3] = IRoycoDayAccountant.setJTYieldShareProtocolFee.selector;
         r[3] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        s[4] = IRoycoDawnAccountant.setCoverageConfiguration.selector;
+        s[4] = IRoycoDayAccountant.setCoverageConfiguration.selector;
         r[4] = ADMIN_ACCOUNTANT_ROLE;
-        s[5] = IRoycoDawnAccountant.setFixedTermDuration.selector;
+        s[5] = IRoycoDayAccountant.setFixedTermDuration.selector;
         r[5] = ADMIN_ACCOUNTANT_ROLE;
         s[6] = IRoycoAuth.pause.selector;
         r[6] = ADMIN_PAUSER_ROLE;

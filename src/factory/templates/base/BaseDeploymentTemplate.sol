@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { Initializable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
-import { SSTORE2 } from "../../../lib/solady/src/utils/SSTORE2.sol";
-import { RoycoDawnAccountant } from "../../accountant/RoycoDawnAccountant.sol";
-import { IRoycoDawnAccountant } from "../../interfaces/IRoycoDawnAccountant.sol";
-import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
-import { IBaseTemplate } from "../../interfaces/factory/IBaseTemplate.sol";
-import { IRoycoFactory } from "../../interfaces/factory/IRoycoFactory.sol";
-import { IRoycoProtocolTemplate } from "../../interfaces/factory/IRoycoProtocolTemplate.sol";
-import { NAV_UNIT } from "../../libraries/Units.sol";
-import { RoycoSeniorTranche } from "../../tranches/RoycoSeniorTranche.sol";
+import { Initializable } from "../../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
+import { SSTORE2 } from "../../../../lib/solady/src/utils/SSTORE2.sol";
+import { RoycoDayAccountant } from "../../../accountant/RoycoDayAccountant.sol";
+import { IRoycoDayAccountant } from "../../../interfaces/IRoycoDayAccountant.sol";
+import { IRoycoVaultTranche } from "../../../interfaces/IRoycoVaultTranche.sol";
+import { IBaseTemplate } from "../../../interfaces/factory/IBaseTemplate.sol";
+import { IRoycoFactory } from "../../../interfaces/factory/IRoycoFactory.sol";
+import { IRoycoProtocolTemplate } from "../../../interfaces/factory/IRoycoProtocolTemplate.sol";
+import { NAV_UNIT } from "../../../libraries/Units.sol";
+import { RoycoSeniorTranche } from "../../../tranches/RoycoSeniorTranche.sol";
 import {
     COMPONENT_ID_ACCOUNTANT_IMPL,
     COMPONENT_ID_JUNIOR_TRANCHE_IMPL,
@@ -79,8 +79,8 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
 
     /// @notice Shape every template uses for the YDM singleton.
     /// @dev YDM creation code lives in SSTORE2 keyed by `COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2`. Salt is derived
-    ///      from `_singletonSalt(componentTag, version)` so Dawn and Dusk templates passing
-    ///      the same `(componentTag, version)` land on the same address.
+    ///      from `_singletonSalt(componentTag, version)` so templates passing the same
+    ///      `(componentTag, version)` land on the same address.
     struct YDMParams {
         bytes32 componentTag; // e.g. bytes32("YDM_ADAPTIVE_CURVE_V2")
         bytes32 version; // e.g. bytes32("V1")
@@ -266,8 +266,12 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
     }
 
     /// @notice Builds ABI-encoded `initialize(...)` calldata for an accountant proxy.
+    /// @dev NOTE: The liquidity tranche overlay is wired with a zero-minimum-liquidity baseline (so a freshly deployed
+    ///      market reduces to a plain ST/JT market) and `ltYDM` is set to the JT YDM as a PLACEHOLDER. A distinct LT YDM
+    ///      (the LDM) and the LT premium/liquidity config must be wired before this market can be deployed: the
+    ///      accountant's `YDMS_CANNOT_BE_IDENTICAL` guard rejects identical JT and LT YDMs at `initialize()`.
     function _encodeAccountantInitData(AccountantParams memory _p, address _ydm) internal view returns (bytes memory) {
-        IRoycoDawnAccountant.RoycoDawnAccountantInitParams memory params = IRoycoDawnAccountant.RoycoDawnAccountantInitParams({
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: _p.stProtocolFeeWAD,
             jtProtocolFeeWAD: _p.jtProtocolFeeWAD,
             jtYieldShareProtocolFeeWAD: _p.yieldShareProtocolFeeWAD,
@@ -278,9 +282,16 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
             fixedTermDurationSeconds: _p.fixedTermDurationSeconds,
             liquidationCoverageUtilizationWAD: _p.liquidationUtilizationWAD,
             stNAVDustTolerance: _p.stNAVDustTolerance,
-            jtNAVDustTolerance: _p.jtNAVDustTolerance
+            jtNAVDustTolerance: _p.jtNAVDustTolerance,
+            // Liquidity tranche overlay: zero-liquidity baseline; LT YDM is a placeholder pending the LDM wiring (see @dev above)
+            ltProtocolFeeWAD: 0,
+            ltYieldShareProtocolFeeWAD: 0,
+            minLiquidityWAD: 0,
+            ltYDM: _ydm,
+            ltYDMInitializationData: bytes(""),
+            ltNAVDustTolerance: NAV_UNIT.wrap(0)
         });
-        return abi.encodeCall(RoycoDawnAccountant.initialize, (params, ROYCO_FACTORY.ROYCO_AUTHORITY()));
+        return abi.encodeCall(RoycoDayAccountant.initialize, (params, ROYCO_FACTORY.ROYCO_AUTHORITY()));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { EnumerableSet } from "../../lib/openzeppelin-contracts/contracts/utils/structs/EnumerableSet.sol";
 import { RoycoBase } from "../base/RoycoBase.sol";
-import { IRoycoDawnKernel } from "../interfaces/IRoycoDawnKernel.sol";
+import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 import { IRoycoFactory } from "../interfaces/factory/IRoycoFactory.sol";
 
@@ -205,7 +205,7 @@ contract RoycoMarketSyncer is RoycoBase {
         require(_ostensibleMarketKernel != address(0), NULL_ADDRESS());
 
         // Get the senior tranche for this kernel from the kernel itself and the corresponding junior tranche from the canonical factory mapping
-        address seniorTranche = IRoycoDawnKernel(_ostensibleMarketKernel).SENIOR_TRANCHE();
+        address seniorTranche = IRoycoDayKernel(_ostensibleMarketKernel).SENIOR_TRANCHE();
         address juniorTranche = IRoycoFactory(_getRoycoMarketSyncerStorage().roycoFactory).seniorTrancheToJuniorTranche(seniorTranche);
 
         // Ensure that the kernel was deployed by the Royco factory
@@ -218,7 +218,7 @@ contract RoycoMarketSyncer is RoycoBase {
      * @return syncSelectorPtr Memory pointer to the stored selector
      */
     function _allocateSyncSelector() internal pure returns (uint256 syncSelectorPtr) {
-        bytes4 syncSelector = IRoycoDawnKernel.syncTrancheAccounting.selector;
+        bytes4 syncSelector = IRoycoDayKernel.syncTrancheAccounting.selector;
         assembly ("memory-safe") {
             syncSelectorPtr := mload(0x40)
             mstore(0x40, add(syncSelectorPtr, 0x20))

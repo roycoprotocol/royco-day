@@ -7,11 +7,11 @@ import { AssetClaims } from "./Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib } from "./Units.sol";
 
 /**
- * @title DawnUtilsLib
+ * @title UtilsLib
  * @author Waymont
- * @notice A library providing utility functions for the Royco Dawn protocol
+ * @notice A library providing utility functions for the Royco protocol
  */
-library DawnUtilsLib {
+library UtilsLib {
     using UnitsMathLib for NAV_UNIT;
     using UnitsMathLib for TRANCHE_UNIT;
     using UnitsMathLib for uint256;
@@ -40,14 +40,43 @@ library DawnUtilsLib {
         pure
         returns (uint256 coverageUtilizationWAD)
     {
+        // If there is no minimum coverage requirement, the coverage utilization is 0
+        if (_minCoverageWAD == 0) return 0;
         // Compute the total exposure that the junior tranche is obligated to protect against a coverage sized drawdown in the senior tranche's underlying asset
-        NAV_UNIT totalCoveredExposure = _stRawNAV + _jtRawNAV.mulDiv(_betaWAD, WAD, Math.Rounding.Ceil);
+        NAV_UNIT totalCoveredExposure = (_stRawNAV + _jtRawNAV.mulDiv(_betaWAD, WAD, Math.Rounding.Ceil));
         // If there is no exposure to provide coverage for, there is nothing the junior buffer needs to protect, so the coverage utilization is 0
         if (totalCoveredExposure == ZERO_NAV_UNITS) return 0;
         // If there is no remaining JT loss-absorption buffer but covered exposure exists, coverage utilization is effectively infinite
         if (_jtEffectiveNAV == ZERO_NAV_UNITS) return type(uint256).max;
         // Return the computed coverage utilization, rounding in favor of the senior tranche
         coverageUtilizationWAD = totalCoveredExposure.mulDiv(_minCoverageWAD, _jtEffectiveNAV, Math.Rounding.Ceil);
+    }
+
+    /**
+     * @notice Computes the liquidity utilization of the Royco market given the market's state
+     * @dev Informally: (total required market making inventory) / (market making inventory)
+     * @dev Formally: LIQUIDITY_UTILIZATION = (ST_EFFECTIVE_NAV * MIN_LIQUIDITY) / LT_RAW_NAV
+     * @dev Rounding favors ensuring senior tranche liquidity
+     * @param _stEffectiveNAV The total net asset value that the senior tranche is entitled to
+     * @param _minLiquidityWAD The ratio of current value that the senior tranche is entitled to that is expected to be in the liquidity tranche's market making inventory, scaled to WAD precision
+     * @param _ltRawNAV The raw net asset value of the liquidity tranche's market making inventory (the Balancer BPT)
+     * @return liquidityUtilizationWAD The liquidity utilization of the Royco market, scaled to WAD precision
+     */
+    function computeLiquidityUtilization(
+        NAV_UNIT _stEffectiveNAV,
+        uint256 _minLiquidityWAD,
+        NAV_UNIT _ltRawNAV
+    )
+        internal
+        pure
+        returns (uint256 liquidityUtilizationWAD)
+    {
+        // If there is no senior tranche value to market make or no minimum liquidity requirement, the liquidity utilization is 0
+        if (_stEffectiveNAV == ZERO_NAV_UNITS || _minLiquidityWAD == 0) return 0;
+        // If there is no market making inventory in the liquidity tranche but there is a minimum required inventory value, the liquidity utilization is effectively infinite
+        if (_ltRawNAV == ZERO_NAV_UNITS) return type(uint256).max;
+        // Compute the liquidity utilization, rounding in favor of the senior tranche
+        liquidityUtilizationWAD = _stEffectiveNAV.mulDiv(_minLiquidityWAD, _ltRawNAV, Math.Rounding.Ceil);
     }
 
     /**

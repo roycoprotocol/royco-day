@@ -7,45 +7,53 @@ import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/E
 import { ReentrancyGuardTransient } from "../../../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuardTransient.sol";
 import { RoycoBase } from "../../base/RoycoBase.sol";
 import { IRoycoBlacklist } from "../../interfaces/IRoycoBlacklist.sol";
-import { IRoycoDawnAccountant } from "../../interfaces/IRoycoDawnAccountant.sol";
-import { IRoycoDawnKernel } from "../../interfaces/IRoycoDawnKernel.sol";
+import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
-import { MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../libraries/Constants.sol";
-import { DawnUtilsLib } from "../../libraries/DawnUtilsLib.sol";
+import { MAX_NAV_UNITS, MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../libraries/Constants.sol";
 import { AssetClaims, MarketState, Operation, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
 import { Math, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toUint256 } from "../../libraries/Units.sol";
+import { UtilsLib } from "../../libraries/UtilsLib.sol";
 
 /**
- * @title RoycoDawnKernel
+ * @title RoycoDayKernel
  * @author Ankur Dubey, Shivaansh Kapoor
  * @notice Abstract contract serving as the base for all Royco kernel implementations
  * @dev Provides the foundational logic for kernel contracts including pre and post operation NAV reconciliation, coverage enforcement logic,
  *      and base wiring for tranche synchronization. All concrete kernel implementations should inherit from the Royco Kernel.
  */
-abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuardTransient {
+abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
     using UnitsMathLib for NAV_UNIT;
     using UnitsMathLib for TRANCHE_UNIT;
 
-    /// @dev Storage slot for RoycoDawnKernelState using ERC-7201 pattern
-    /// @dev NOTE: The ERC-7201 namespace string is intentionally retained as "Royco.storage.RoycoKernelState" (pre-rename) so the storage slot is unchanged and upgrade/storage-layout compatibility is preserved
-    // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoKernelState")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant ROYCO_DAWN_KERNEL_STORAGE_SLOT = 0xf8fc0d016168fef0a165a086b5a5dc3ffa533689ceaf1369717758ae5224c600;
+    /// @dev Storage slot for RoycoDayKernelState using ERC-7201 pattern
+    // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoDayKernelState")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant ROYCO_DAY_KERNEL_STORAGE_SLOT = 0xc366ce7b07de4bd3f36c874874355fb088fd2057e716d8a9786c17b22e6fec00;
 
-    /// @inheritdoc IRoycoDawnKernel
-    address public immutable override(IRoycoDawnKernel) SENIOR_TRANCHE;
+    /// @inheritdoc IRoycoDayKernel
+    address public immutable override(IRoycoDayKernel) SENIOR_TRANCHE;
 
-    /// @inheritdoc IRoycoDawnKernel
-    address public immutable override(IRoycoDawnKernel) ST_ASSET;
+    /// @inheritdoc IRoycoDayKernel
+    address public immutable override(IRoycoDayKernel) ST_ASSET;
 
-    /// @inheritdoc IRoycoDawnKernel
-    address public immutable override(IRoycoDawnKernel) JUNIOR_TRANCHE;
+    /// @inheritdoc IRoycoDayKernel
+    address public immutable override(IRoycoDayKernel) JUNIOR_TRANCHE;
 
-    /// @inheritdoc IRoycoDawnKernel
-    address public immutable override(IRoycoDawnKernel) JT_ASSET;
+    /// @inheritdoc IRoycoDayKernel
+    address public immutable override(IRoycoDayKernel) JT_ASSET;
 
-    /// @inheritdoc IRoycoDawnKernel
-    address public immutable override(IRoycoDawnKernel) ACCOUNTANT;
+    /// @inheritdoc IRoycoDayKernel
+    address public immutable override(IRoycoDayKernel) LIQUIDITY_TRANCHE;
+
+    /// @inheritdoc IRoycoDayKernel
+    address public immutable override(IRoycoDayKernel) LT_ASSET;
+
+    /// @inheritdoc IRoycoDayKernel
+    address public immutable override(IRoycoDayKernel) QUOTE_ASSET;
+
+    /// @inheritdoc IRoycoDayKernel
+    address public immutable override(IRoycoDayKernel) ACCOUNTANT;
 
     /// @notice Whether to enforce the tranche shares transfer whitelist
     bool public immutable ENFORCE_TRANCHE_SHARES_TRANSFER_WHITELIST;
@@ -64,9 +72,16 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
         _;
     }
 
-    /// @dev Permissions the function to only be callable by the market's senior or junior tranche
+    /// @dev Permissions the function to only be callable by the market's junior tranche
+    /// @dev Should be placed on LT deposit and redeem functions
+    modifier onlyLiquidityTranche() {
+        require(msg.sender == LIQUIDITY_TRANCHE, ONLY_LIQUIDITY_TRANCHE());
+        _;
+    }
+
+    /// @dev Permissions the function to only be callable by the market's senior, junior, or liquidity tranche
     modifier onlyTranche() {
-        require(msg.sender == SENIOR_TRANCHE || msg.sender == JUNIOR_TRANCHE, ONLY_TRANCHE());
+        require(msg.sender == SENIOR_TRANCHE || msg.sender == JUNIOR_TRANCHE || msg.sender == LIQUIDITY_TRANCHE, ONLY_TRANCHE());
         _;
     }
 
@@ -84,11 +99,12 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
 
     /// @notice Constructs the base Royco kernel state
     /// @param _params The standard construction parameters for the Royco kernel
-    constructor(RoycoDawnKernelConstructionParams memory _params) {
+    constructor(RoycoDayKernelConstructionParams memory _params) {
         // Ensure that the tranche and accountant addresses are not null
         require(
             _params.seniorTranche != address(0) && _params.stAsset != address(0) && _params.juniorTranche != address(0) && _params.jtAsset != address(0)
-                && _params.accountant != address(0),
+                && _params.accountant != address(0) && _params.liquidityTranche != address(0) && _params.ltAsset != address(0)
+                && _params.quoteAsset != address(0),
             NULL_ADDRESS()
         );
 
@@ -99,6 +115,9 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
         JT_ASSET = _params.jtAsset;
         ACCOUNTANT = _params.accountant;
         ENFORCE_TRANCHE_SHARES_TRANSFER_WHITELIST = _params.enforceVaultSharesTransferWhitelist;
+        LIQUIDITY_TRANCHE = _params.liquidityTranche;
+        LT_ASSET = _params.ltAsset;
+        QUOTE_ASSET = _params.quoteAsset;
     }
 
     /**
@@ -106,24 +125,26 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
      * @dev Initializes any parent contracts and the base kernel state
      * @param _params The standard initialization parameters for the Royco kernel
      */
-    function __RoycoDawnKernel_init(RoycoDawnKernelInitParams memory _params) internal onlyInitializing {
+    function __RoycoDayKernel_init(RoycoDayKernelInitParams memory _params) internal onlyInitializing {
         // Ensure that the tranches and their corresponding assets in the kernel match
         require(
-            IRoycoVaultTranche(SENIOR_TRANCHE).asset() == ST_ASSET && IRoycoVaultTranche(JUNIOR_TRANCHE).asset() == JT_ASSET,
+            IRoycoVaultTranche(SENIOR_TRANCHE).asset() == ST_ASSET && IRoycoVaultTranche(JUNIOR_TRANCHE).asset() == JT_ASSET
+                && IRoycoVaultTranche(LIQUIDITY_TRANCHE).asset() == LT_ASSET,
             TRANCHE_AND_KERNEL_ASSETS_MISMATCH()
         );
         // Ensure that the initial authority and protocol fee recipient are not null
         require(_params.initialAuthority != address(0) && _params.protocolFeeRecipient != address(0), NULL_ADDRESS());
 
-        // Initialize the base Royco kernel state
+        // Initialize the base state
         __RoycoBase_init(_params.initialAuthority);
 
-        RoycoDawnKernelState storage $ = _getRoycoDawnKernelStorage();
+        // Initialize the kernel state
+        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
         $.protocolFeeRecipient = _params.protocolFeeRecipient;
         $.stSelfLiquidationBonusWAD = _params.stSelfLiquidationBonusWAD;
         $.roycoBlacklist = _params.roycoBlacklist;
-
         emit ProtocolFeeRecipientUpdated(_params.protocolFeeRecipient);
+        emit SeniorTrancheSelfLiquidationBonusUpdated(_params.stSelfLiquidationBonusWAD);
         emit RoycoBlacklistUpdated(_params.roycoBlacklist);
     }
 
@@ -131,27 +152,30 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
     // Tranche Asset Quoter Functions
     // =============================
 
-    /// @inheritdoc IRoycoDawnKernel
-    function stConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _stAssets) public view virtual override(IRoycoDawnKernel) returns (NAV_UNIT);
+    /// @inheritdoc IRoycoDayKernel
+    function stConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _stAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
 
-    /// @inheritdoc IRoycoDawnKernel
-    function jtConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _jtAssets) public view virtual override(IRoycoDawnKernel) returns (NAV_UNIT);
+    /// @inheritdoc IRoycoDayKernel
+    function jtConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _jtAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
 
-    /// @inheritdoc IRoycoDawnKernel
-    function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view virtual override(IRoycoDawnKernel) returns (TRANCHE_UNIT);
+    /// @inheritdoc IRoycoDayKernel
+    function ltConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _ltAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
 
-    /// @inheritdoc IRoycoDawnKernel
-    function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view virtual override(IRoycoDawnKernel) returns (TRANCHE_UNIT);
+    /// @inheritdoc IRoycoDayKernel
+    function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
+
+    /// @inheritdoc IRoycoDayKernel
+    function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
 
     // =============================
     // Tranche Preview Functions
     // =============================
 
-    /// @inheritdoc IRoycoDawnKernel
+    /// @inheritdoc IRoycoDayKernel
     function stPreviewDeposit(TRANCHE_UNIT _assets)
         public
         view
-        override(IRoycoDawnKernel)
+        override(IRoycoDayKernel)
         returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated)
     {
         // Preview the state of the senior tranche before the deposit
@@ -160,11 +184,11 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
         valueAllocated = stConvertTrancheUnitsToNAVUnits(_assets);
     }
 
-    /// @inheritdoc IRoycoDawnKernel
+    /// @inheritdoc IRoycoDayKernel
     function jtPreviewDeposit(TRANCHE_UNIT _assets)
         public
         view
-        override(IRoycoDawnKernel)
+        override(IRoycoDayKernel)
         returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated)
     {
         // Preview the state of the junior tranche before the deposit
@@ -173,32 +197,32 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
         valueAllocated = jtConvertTrancheUnitsToNAVUnits(_assets);
     }
 
-    /// @inheritdoc IRoycoDawnKernel
-    function stPreviewRedeem(uint256 _shares) public view override(IRoycoDawnKernel) returns (AssetClaims memory userClaim) {
+    /// @inheritdoc IRoycoDayKernel
+    function stPreviewRedeem(uint256 _shares) public view override(IRoycoDayKernel) returns (AssetClaims memory userClaim) {
         // Preview the total claims the senior tranche has on each tranche's assets and the total shares after minting any protocol fee shares post-sync
         (SyncedAccountingState memory state, AssetClaims memory stNotionalClaims, uint256 totalShares) = previewSyncTrancheAccounting(TrancheType.SENIOR);
 
         // Calculate the user's claims based on the shares redeemed
-        userClaim = DawnUtilsLib.scaleAssetClaims(stNotionalClaims, _shares, totalShares);
+        userClaim = UtilsLib.scaleAssetClaims(stNotionalClaims, _shares, totalShares);
         (userClaim,) = _applySeniorTrancheSelfLiquidationBonus(state, userClaim);
     }
 
-    /// @inheritdoc IRoycoDawnKernel
-    function jtPreviewRedeem(uint256 _shares) public view override(IRoycoDawnKernel) returns (AssetClaims memory userClaim) {
+    /// @inheritdoc IRoycoDayKernel
+    function jtPreviewRedeem(uint256 _shares) public view override(IRoycoDayKernel) returns (AssetClaims memory userClaim) {
         // Preview the total claims the junior tranche has on each tranche's assets and the total shares after minting any protocol fee shares post-sync
         (, AssetClaims memory jtNotionalClaims, uint256 totalShares) = previewSyncTrancheAccounting(TrancheType.JUNIOR);
 
         // Calculate the user's claims based on the shares redeemed
-        userClaim = DawnUtilsLib.scaleAssetClaims(jtNotionalClaims, _shares, totalShares);
+        userClaim = UtilsLib.scaleAssetClaims(jtNotionalClaims, _shares, totalShares);
     }
 
     // =============================
     // Tranche Max Deposit and Redeem Functions
     // =============================
 
-    /// @inheritdoc IRoycoDawnKernel
+    /// @inheritdoc IRoycoDayKernel
     /// @dev ST deposits are allowed only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-deposit
-    function stMaxDeposit(address _receiver) public view virtual override(IRoycoDawnKernel) returns (TRANCHE_UNIT) {
+    function stMaxDeposit(address _receiver) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT) {
         // If the receiver is blacklisted or the kernel is currently paused, return zero tranche units
         if (_isBlacklisted(_receiver) || paused()) return ZERO_TRANCHE_UNITS;
         SyncedAccountingState memory state = _previewSyncTrancheAccounting();
@@ -206,17 +230,17 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
         if (state.marketState == MarketState.FIXED_TERM) return ZERO_TRANCHE_UNITS;
         // ST deposits are enabled as long as the market's coverage requirement is satisfied
         // No need to include ST liquidation proceeds in the raw NAV because those assets are not exposed to any volatility
-        NAV_UNIT stMaxDepositableNAV = IRoycoDawnAccountant(ACCOUNTANT).maxSTDepositGivenCoverage(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
-        return stConvertNAVUnitsToTrancheUnits(stMaxDepositableNAV);
+        NAV_UNIT stMaxDepositableNAV = IRoycoDayAccountant(ACCOUNTANT).maxSTDepositGivenCoverage(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
+        return ((stMaxDepositableNAV == MAX_NAV_UNITS) ? MAX_TRANCHE_UNITS : stConvertNAVUnitsToTrancheUnits(stMaxDepositableNAV));
     }
 
-    /// @inheritdoc IRoycoDawnKernel
+    /// @inheritdoc IRoycoDayKernel
     /// @dev ST redemptions are allowed in PERPETUAL market states
     function stMaxWithdrawable(address _owner)
         public
         view
         virtual
-        override(IRoycoDawnKernel)
+        override(IRoycoDayKernel)
         returns (
             NAV_UNIT claimOnStNAV,
             NAV_UNIT claimOnJtNAV,
@@ -244,9 +268,9 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
         jtMaxWithdrawableNAV = _getJuniorTrancheRawNAV();
     }
 
-    /// @inheritdoc IRoycoDawnKernel
+    /// @inheritdoc IRoycoDayKernel
     /// @dev JT deposits are allowed if the market is in a PERPETUAL state
-    function jtMaxDeposit(address _receiver) public view virtual override(IRoycoDawnKernel) returns (TRANCHE_UNIT) {
+    function jtMaxDeposit(address _receiver) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT) {
         // If the receiver is blacklisted or the kernel is currently paused, return zero tranche units
         if (_isBlacklisted(_receiver) || paused()) return ZERO_TRANCHE_UNITS;
         // JT deposits are disabled during a fixed-term market state
@@ -254,13 +278,13 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
         return MAX_TRANCHE_UNITS;
     }
 
-    /// @inheritdoc IRoycoDawnKernel
+    /// @inheritdoc IRoycoDayKernel
     /// @dev JT redemptions are allowed only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-redemption
     function jtMaxWithdrawable(address _owner)
         public
         view
         virtual
-        override(IRoycoDawnKernel)
+        override(IRoycoDayKernel)
         returns (
             NAV_UNIT claimOnStNAV,
             NAV_UNIT claimOnJtNAV,
@@ -284,7 +308,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
 
         // Get the max withdrawable ST and JT assets in NAV units from the accountant considering the coverage requirement
         (, NAV_UNIT stClaimableGivenCoverage, NAV_UNIT jtClaimableGivenCoverage) =
-            IRoycoDawnAccountant(ACCOUNTANT).maxJTWithdrawalGivenCoverage(state.stRawNAV, state.jtRawNAV, claimOnStNAV, claimOnJtNAV);
+            IRoycoDayAccountant(ACCOUNTANT).maxJTWithdrawalGivenCoverage(state.stRawNAV, state.jtRawNAV, claimOnStNAV, claimOnJtNAV);
 
         // Bound the claims by the max withdrawable assets globally for each tranche and compute the cumulative NAV
         stMaxWithdrawableNAV = stClaimableGivenCoverage;
@@ -295,11 +319,11 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
     // External Tranche Accounting and Synchronization Functions
     // =============================
 
-    /// @inheritdoc IRoycoDawnKernel
+    /// @inheritdoc IRoycoDayKernel
     function syncTrancheAccounting()
         public
         virtual
-        override(IRoycoDawnKernel)
+        override(IRoycoDayKernel)
         whenNotPaused
         restricted
         nonReentrant
@@ -310,12 +334,12 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
         return _preOpSyncTrancheAccounting();
     }
 
-    /// @inheritdoc IRoycoDawnKernel
+    /// @inheritdoc IRoycoDayKernel
     function previewSyncTrancheAccounting(TrancheType _trancheType)
         public
         view
         virtual
-        override(IRoycoDawnKernel)
+        override(IRoycoDayKernel)
         returns (SyncedAccountingState memory state, AssetClaims memory claims, uint256 totalTrancheShares)
     {
         // Preview an accounting sync via the accountant
@@ -336,13 +360,13 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
     // Senior Tranche Deposit and Redeem Functions
     // =============================
 
-    /// @inheritdoc IRoycoDawnKernel
+    /// @inheritdoc IRoycoDayKernel
     /// @dev ST deposits are enabled only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-deposit
     /// @dev ST deposits are disabled if the senior tranche has incurred any impermanent loss to prevent dilution
     function stDeposit(TRANCHE_UNIT _assets)
         external
         virtual
-        override(IRoycoDawnKernel)
+        override(IRoycoDayKernel)
         whenNotPaused
         onlySeniorTranche
         nonReentrant
@@ -365,7 +389,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
         _postOpSyncTrancheAccountingAndEnforceCoverage(Operation.ST_DEPOSIT);
     }
 
-    /// @inheritdoc IRoycoDawnKernel
+    /// @inheritdoc IRoycoDayKernel
     /// @dev ST redemptions are enabled if the market is in a PERPETUAL state
     function stRedeem(
         uint256 _shares,
@@ -374,7 +398,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
     )
         external
         virtual
-        override(IRoycoDawnKernel)
+        override(IRoycoDayKernel)
         whenNotPaused
         onlySeniorTranche
         nonReentrant
@@ -390,7 +414,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
 
         // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
         // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
-        userAssetClaims = DawnUtilsLib.scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares);
+        userAssetClaims = UtilsLib.scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares);
 
         // Apply any ST self-liquidation bonus to the redeeming user's asset claims and retrieve the bonus NAV applied
         NAV_UNIT stSelfLiquidationBonusNAV;
@@ -407,12 +431,12 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
     // Junior Tranche Deposit and Redeem Functions
     // =============================
 
-    /// @inheritdoc IRoycoDawnKernel
+    /// @inheritdoc IRoycoDayKernel
     /// @dev JT deposits are enabled if the market is in a PERPETUAL state
     function jtDeposit(TRANCHE_UNIT _assets)
         external
         virtual
-        override(IRoycoDawnKernel)
+        override(IRoycoDayKernel)
         whenNotPaused
         onlyJuniorTranche
         nonReentrant
@@ -435,7 +459,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
         _postOpSyncTrancheAccounting(Operation.JT_DEPOSIT, ZERO_NAV_UNITS);
     }
 
-    /// @inheritdoc IRoycoDawnKernel
+    /// @inheritdoc IRoycoDayKernel
     /// @dev JT redemptions are enabled only in a PERPETUAL market state (unless restrictions are bypassed for a seizure), granted that the market's coverage requirement is satisfied post-redemption
     function jtRedeem(
         uint256 _shares,
@@ -444,7 +468,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
     )
         external
         virtual
-        override(IRoycoDawnKernel)
+        override(IRoycoDayKernel)
         whenNotPaused
         onlyJuniorTranche
         nonReentrant
@@ -460,7 +484,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
 
         // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
         // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
-        userAssetClaims = DawnUtilsLib.scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares);
+        userAssetClaims = UtilsLib.scaleAssetClaims(userAssetClaims, _shares, totalTrancheShares);
 
         // Withdraw the asset claims from each tranche and transfer them to the receiver
         _withdrawAssets(userAssetClaims, _receiver);
@@ -475,25 +499,41 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
     }
 
     // =============================
+    // Liquidity Tranche Deposit and Redeem Functions (stub — not yet implemented)
+    // =============================
+
+    /// @inheritdoc IRoycoDayKernel
+    /// @notice STUB: deposit into the liquidity tranche. Reverts until the LT flow is implemented.
+    function ltDeposit(TRANCHE_UNIT) external pure virtual override(IRoycoDayKernel) returns (NAV_UNIT, NAV_UNIT) {
+        revert LT_NOT_IMPLEMENTED();
+    }
+
+    /// @inheritdoc IRoycoDayKernel
+    /// @notice STUB: redeem from the liquidity tranche. Reverts until the LT flow is implemented.
+    function ltRedeem(uint256, address, bool) external pure virtual override(IRoycoDayKernel) returns (AssetClaims memory) {
+        revert LT_NOT_IMPLEMENTED();
+    }
+
+    // =============================
     // Admin Functions
     // =============================
 
-    /// @inheritdoc IRoycoDawnKernel
-    function setProtocolFeeRecipient(address _protocolFeeRecipient) external override(IRoycoDawnKernel) restricted {
+    /// @inheritdoc IRoycoDayKernel
+    function setProtocolFeeRecipient(address _protocolFeeRecipient) external override(IRoycoDayKernel) restricted {
         require(_protocolFeeRecipient != address(0), NULL_ADDRESS());
-        _getRoycoDawnKernelStorage().protocolFeeRecipient = _protocolFeeRecipient;
+        _getRoycoDayKernelStorage().protocolFeeRecipient = _protocolFeeRecipient;
         emit ProtocolFeeRecipientUpdated(_protocolFeeRecipient);
     }
 
-    /// @inheritdoc IRoycoDawnKernel
-    function setSeniorTrancheSelfLiquidationBonus(uint64 _stSelfLiquidationBonusWAD) external override(IRoycoDawnKernel) restricted {
-        _getRoycoDawnKernelStorage().stSelfLiquidationBonusWAD = _stSelfLiquidationBonusWAD;
+    /// @inheritdoc IRoycoDayKernel
+    function setSeniorTrancheSelfLiquidationBonus(uint64 _stSelfLiquidationBonusWAD) external override(IRoycoDayKernel) restricted {
+        _getRoycoDayKernelStorage().stSelfLiquidationBonusWAD = _stSelfLiquidationBonusWAD;
         emit SeniorTrancheSelfLiquidationBonusUpdated(_stSelfLiquidationBonusWAD);
     }
 
-    /// @inheritdoc IRoycoDawnKernel
-    function setRoycoBlacklist(address _roycoBlacklist) external override(IRoycoDawnKernel) restricted {
-        _getRoycoDawnKernelStorage().roycoBlacklist = _roycoBlacklist;
+    /// @inheritdoc IRoycoDayKernel
+    function setRoycoBlacklist(address _roycoBlacklist) external override(IRoycoDayKernel) restricted {
+        _getRoycoDayKernelStorage().roycoBlacklist = _roycoBlacklist;
         emit RoycoBlacklistUpdated(_roycoBlacklist);
     }
 
@@ -508,11 +548,11 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
      * @return Whether the account is blacklisted by the market's configured blacklist
      */
     function _isBlacklisted(address _account) internal view returns (bool) {
-        address roycoBlacklist = _getRoycoDawnKernelStorage().roycoBlacklist;
+        address roycoBlacklist = _getRoycoDayKernelStorage().roycoBlacklist;
         return (roycoBlacklist != address(0) && IRoycoBlacklist(roycoBlacklist).isBlacklisted(_account));
     }
 
-    /// @inheritdoc IRoycoDawnKernel
+    /// @inheritdoc IRoycoDayKernel
     function preTrancheBalanceUpdateHook(
         address _caller,
         address _from,
@@ -520,12 +560,12 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
         uint256 _value
     )
         external
-        override(IRoycoDawnKernel)
+        override(IRoycoDayKernel)
         onlyTranche
         whenNotPaused
     {
         // Batch screen the involved accounts against the market's blacklist if one is configured (the null address disables screening)
-        address roycoBlacklist = _getRoycoDawnKernelStorage().roycoBlacklist;
+        address roycoBlacklist = _getRoycoDayKernelStorage().roycoBlacklist;
         if (roycoBlacklist != address(0)) {
             address[] memory accountsToScreen = new address[](3);
             accountsToScreen[0] = _caller;
@@ -568,7 +608,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
      */
     function _previewSyncTrancheAccounting() internal view virtual whenNotPaused returns (SyncedAccountingState memory state) {
         // Preview an accounting sync via the accountant
-        state = IRoycoDawnAccountant(ACCOUNTANT).previewSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
+        state = IRoycoDayAccountant(ACCOUNTANT).previewSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
     }
 
     /**
@@ -578,7 +618,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
      */
     function _preOpSyncTrancheAccounting() internal virtual returns (SyncedAccountingState memory state) {
         // Execute the pre-op sync via the accountant
-        state = IRoycoDawnAccountant(ACCOUNTANT).preOpSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
+        state = IRoycoDayAccountant(ACCOUNTANT).preOpSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
 
         // Collect any protocol fees accrued
         _collectProtocolFees(state.stProtocolFeeAccrued, state.jtProtocolFeeAccrued, state.stEffectiveNAV, state.jtEffectiveNAV);
@@ -599,10 +639,10 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
         returns (SyncedAccountingState memory state, AssetClaims memory claims, uint256 totalTrancheShares)
     {
         // Execute the pre-op sync via the accountant
-        state = IRoycoDawnAccountant(ACCOUNTANT).preOpSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
+        state = IRoycoDayAccountant(ACCOUNTANT).preOpSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
 
         // Collect any protocol fees accrued from the sync to the fee recipient
-        RoycoDawnKernelState storage $ = _getRoycoDawnKernelStorage();
+        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
         address protocolFeeRecipient = $.protocolFeeRecipient;
         uint256 stTotalTrancheSharesAfterMintingFees;
         uint256 jtTotalTrancheSharesAfterMintingFees;
@@ -634,7 +674,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
     function _postOpSyncTrancheAccounting(Operation _op, NAV_UNIT _stSelfLiquidationBonusNAV) internal virtual returns (SyncedAccountingState memory state) {
         // Execute the post-op sync on the accountant
         state =
-            IRoycoDawnAccountant(ACCOUNTANT).postOpSyncTrancheAccounting(_op, _getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV(), _stSelfLiquidationBonusNAV);
+            IRoycoDayAccountant(ACCOUNTANT).postOpSyncTrancheAccounting(_op, _getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV(), _stSelfLiquidationBonusNAV);
     }
 
     /**
@@ -645,7 +685,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
      */
     function _postOpSyncTrancheAccountingAndEnforceCoverage(Operation _op) internal virtual returns (SyncedAccountingState memory state) {
         // Execute the post-op sync on the accountant
-        state = IRoycoDawnAccountant(ACCOUNTANT).postOpSyncTrancheAccountingAndEnforceCoverage(_op, _getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
+        state = IRoycoDayAccountant(ACCOUNTANT).postOpSyncTrancheAccountingAndEnforceCoverage(_op, _getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
     }
 
     /**
@@ -659,7 +699,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
      */
     function _collectProtocolFees(NAV_UNIT _stProtocolFeeAccrued, NAV_UNIT _jtProtocolFeeAccrued, NAV_UNIT _stEffectiveNAV, NAV_UNIT _jtEffectiveNAV) internal {
         if (_stProtocolFeeAccrued != ZERO_NAV_UNITS || _jtProtocolFeeAccrued != ZERO_NAV_UNITS) {
-            RoycoDawnKernelState storage $ = _getRoycoDawnKernelStorage();
+            RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
             address protocolFeeRecipient = $.protocolFeeRecipient;
             // If ST fees were accrued, mint ST protocol fee shares to the protocol fee recipient
             if (_stProtocolFeeAccrued != ZERO_NAV_UNITS) {
@@ -733,7 +773,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
      */
     function _getSeniorTrancheRawNAV() internal view virtual returns (NAV_UNIT stRawNAV) {
         // Get the yield bearing assets owned by ST and convert them to NAV units via the configured quoter
-        return stConvertTrancheUnitsToNAVUnits(_getRoycoDawnKernelStorage().stOwnedYieldBearingAssets);
+        return stConvertTrancheUnitsToNAVUnits(_getRoycoDayKernelStorage().stOwnedYieldBearingAssets);
     }
 
     /**
@@ -742,7 +782,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
      */
     function _getJuniorTrancheRawNAV() internal view virtual returns (NAV_UNIT jtRawNAV) {
         // Get the yield bearing assets owned by JT and convert them to NAV units via the configured quoter
-        return jtConvertTrancheUnitsToNAVUnits(_getRoycoDawnKernelStorage().jtOwnedYieldBearingAssets);
+        return jtConvertTrancheUnitsToNAVUnits(_getRoycoDayKernelStorage().jtOwnedYieldBearingAssets);
     }
 
     /**
@@ -752,7 +792,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
      */
     function _stDepositAssets(TRANCHE_UNIT _stAssets) internal virtual {
         // Credit the deposited assets to the senior tranche
-        RoycoDawnKernelState storage $ = _getRoycoDawnKernelStorage();
+        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
         $.stOwnedYieldBearingAssets = $.stOwnedYieldBearingAssets + _stAssets;
     }
 
@@ -763,7 +803,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
      */
     function _jtDepositAssets(TRANCHE_UNIT _jtAssets) internal virtual {
         // Credit the deposited assets to the junior tranche
-        RoycoDawnKernelState storage $ = _getRoycoDawnKernelStorage();
+        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
         $.jtOwnedYieldBearingAssets = $.jtOwnedYieldBearingAssets + _jtAssets;
     }
 
@@ -778,7 +818,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
         TRANCHE_UNIT jtAssetsToClaim = _claims.jtAssets;
 
         // Debit the ST and JT assets being withdrawn from each tranche if non-zero
-        RoycoDawnKernelState storage $ = _getRoycoDawnKernelStorage();
+        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
         if (stAssetsToClaim != ZERO_TRANCHE_UNITS) $.stOwnedYieldBearingAssets = $.stOwnedYieldBearingAssets - stAssetsToClaim;
         if (jtAssetsToClaim != ZERO_TRANCHE_UNITS) $.jtOwnedYieldBearingAssets = $.jtOwnedYieldBearingAssets - jtAssetsToClaim;
 
@@ -818,7 +858,7 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
         if (_state.coverageUtilizationWAD < _state.liquidationCoverageUtilizationWAD) return (_stUserClaims, ZERO_NAV_UNITS);
 
         // Compute the desired ST bonus based on the configured ST self-liquidation bonus rate
-        NAV_UNIT desiredBonusNAV = _stUserClaims.nav.mulDiv(_getRoycoDawnKernelStorage().stSelfLiquidationBonusWAD, WAD, Math.Rounding.Floor);
+        NAV_UNIT desiredBonusNAV = _stUserClaims.nav.mulDiv(_getRoycoDayKernelStorage().stSelfLiquidationBonusWAD, WAD, Math.Rounding.Floor);
 
         // Decompose the NAV claims for the Junior Tranche to get the NAV claims for sourcing the bonus
         (,, NAV_UNIT jtClaimOnSTRawNAV,) = _decomposeNAVClaims(_state);
@@ -927,19 +967,19 @@ abstract contract RoycoDawnKernel is IRoycoDawnKernel, RoycoBase, ReentrancyGuar
     // Kernel State Accessor Functions
     // =============================
 
-    /// @inheritdoc IRoycoDawnKernel
-    function getState() external view override(IRoycoDawnKernel) returns (RoycoDawnKernelState memory) {
-        return _getRoycoDawnKernelStorage();
+    /// @inheritdoc IRoycoDayKernel
+    function getState() external view override(IRoycoDayKernel) returns (RoycoDayKernelState memory) {
+        return _getRoycoDayKernelStorage();
     }
 
     /**
-     * @notice Returns a storage pointer to the RoycoDawnKernelState storage
+     * @notice Returns a storage pointer to the RoycoDayKernelState storage
      * @dev Uses ERC-7201 storage slot pattern for collision-resistant storage
      * @return $ Storage pointer to the kernel's state
      */
-    function _getRoycoDawnKernelStorage() internal pure returns (RoycoDawnKernelState storage $) {
+    function _getRoycoDayKernelStorage() internal pure returns (RoycoDayKernelState storage $) {
         assembly ("memory-safe") {
-            $.slot := ROYCO_DAWN_KERNEL_STORAGE_SLOT
+            $.slot := ROYCO_DAY_KERNEL_STORAGE_SLOT
         }
     }
 }

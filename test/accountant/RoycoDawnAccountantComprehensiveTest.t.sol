@@ -2375,14 +2375,14 @@ contract RoycoDawnAccountantAdminTest is BaseTest {
     }
 
     // =========================================================================
-    // setJTYDM Tests
+    // setJuniorTrancheYDM Tests
     // =========================================================================
 
-    function test_setJTYDM_success() public {
+    function test_setJuniorTrancheYDM_success() public {
         bytes memory ydmInitData = abi.encodeCall(AdaptiveCurveYDM_V1.initializeYDMForMarket, (0.4e18, 0.8e18));
 
         vm.prank(OWNER_ADDRESS);
-        accountant.setJTYDM(address(newYDM), ydmInitData);
+        accountant.setJuniorTrancheYDM(address(newYDM), ydmInitData);
 
         assertEq(accountant.getState().jtYDM, address(newYDM), "YDM not updated");
     }
@@ -3039,11 +3039,11 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
     }
 
     // =========================================================================
-    // setJTYDM WITH INIT DATA (Additional coverage)
+    // setJuniorTrancheYDM WITH INIT DATA (Additional coverage)
     // =========================================================================
 
-    /// @notice Test setJTYDM with initialization data
-    function test_setJTYDM_withInitData() public {
+    /// @notice Test setJuniorTrancheYDM with initialization data
+    function test_setJuniorTrancheYDM_withInitData() public {
         // First need to grant access - this requires the mock kernel for admin
         MockKernelForBranchTests mockKernel = new MockKernelForBranchTests();
         mockKernel.setAccountant(address(accountant));
@@ -3079,7 +3079,7 @@ contract RoycoDawnAccountantBranchCoverageTest is BaseTest {
         bytes memory initData = abi.encodeCall(MockYDMWithInit.initialize, (false));
 
         // Set new YDM with init data
-        accountantForAdmin.setJTYDM(address(newYDM), initData);
+        accountantForAdmin.setJuniorTrancheYDM(address(newYDM), initData);
 
         // Verify initialization happened
         assertTrue(newYDM.initialized(), "New YDM should be initialized");

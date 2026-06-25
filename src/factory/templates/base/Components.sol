@@ -19,7 +19,7 @@ bytes32 constant COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL = keccak256("ROYCO_COMPONEN
 bytes32 constant COMPONENT_ID_ACCOUNTANT_IMPL = keccak256("ROYCO_COMPONENT_ACCOUNTANT_IMPL");
 bytes32 constant COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2 = keccak256("ROYCO_COMPONENT_YDM_ADAPTIVE_CURVE_V2");
 
-// ─── Dawn kernel variants ────────────────────────────────────────────────────
+// ─── Senior/Junior kernel variants ──────────────────────────────────────────
 
 bytes32 constant COMPONENT_ID_KERNEL_REUSD = keccak256("ROYCO_COMPONENT_KERNEL_REUSD");
 bytes32 constant COMPONENT_ID_KERNEL_IDENTICAL_ERC20_CHAINLINK = keccak256("ROYCO_COMPONENT_KERNEL_IDENTICAL_ERC20_CHAINLINK");

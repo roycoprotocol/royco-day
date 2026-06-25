@@ -140,7 +140,7 @@ contract SetYDM is ParameterUpdateBase {
                     updates[idx] = UpdateParams({
                         marketName: cfg.marketName,
                         target: addrs.accountant,
-                        callData: abi.encodeCall(IRoycoDawnAccountant.setJTYDM, (cfg.ydm, ydmInitData)),
+                        callData: abi.encodeCall(IRoycoDawnAccountant.setJuniorTrancheYDM, (cfg.ydm, ydmInitData)),
                         description: string.concat("Set YDM for ", cfg.marketName, " (maxAdaptationSpeedWAD=", vm.toString(cfg.maxAdaptationSpeedWAD), ")")
                     });
                     idx++;
@@ -160,7 +160,7 @@ contract SetYDM is ParameterUpdateBase {
      *         re-initialized with the expected params on that YDM.
      */
     function _verify(UpdateParams memory _params) internal view override {
-        // Decode `setJTYDM(address ydm, bytes initData)` from the outer calldata
+        // Decode `setJuniorTrancheYDM(address ydm, bytes initData)` from the outer calldata
         (address expectedYDM, bytes memory initData) = _decodeSetYDMCallData(_params.callData);
 
         // Decode `initializeYDMForMarket(uint64,uint64,uint64,uint64)` from initData
@@ -196,7 +196,7 @@ contract SetYDM is ParameterUpdateBase {
     // HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Strips the 4-byte selector and abi.decodes the `(address, bytes)` params of `setJTYDM`.
+    /// @dev Strips the 4-byte selector and abi.decodes the `(address, bytes)` params of `setJuniorTrancheYDM`.
     function _decodeSetYDMCallData(bytes memory _cd) internal pure returns (address ydm, bytes memory initData) {
         bytes memory args = new bytes(_cd.length - 4);
         for (uint256 i = 0; i < args.length; i++) {

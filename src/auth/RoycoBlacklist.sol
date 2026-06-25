@@ -31,10 +31,7 @@ contract RoycoBlacklist is IRoycoBlacklist, RoycoBase {
         __RoycoBase_init(_initialAuthority);
 
         // Set the initial Chainalysis sanctions list
-        RoycoBlacklistState storage $ = _getRoycoBlacklistStorage();
-        $.chainalysisSanctionsList = _chainalysisSanctionsList;
-        emit SanctionsListUpdated(_chainalysisSanctionsList);
-
+        _setSanctionsList(_chainalysisSanctionsList);
         // Blacklist the initially specified accounts
         _blacklistAccounts(_accounts);
     }
@@ -89,8 +86,7 @@ contract RoycoBlacklist is IRoycoBlacklist, RoycoBase {
 
     /// @inheritdoc IRoycoBlacklist
     function setSanctionsList(address _chainalysisSanctionsList) external override(IRoycoBlacklist) restricted {
-        _getRoycoBlacklistStorage().chainalysisSanctionsList = _chainalysisSanctionsList;
-        emit SanctionsListUpdated(_chainalysisSanctionsList);
+        _setSanctionsList(_chainalysisSanctionsList);
     }
 
     /// @inheritdoc IRoycoBlacklist
@@ -115,6 +111,15 @@ contract RoycoBlacklist is IRoycoBlacklist, RoycoBase {
             $.accountToIsBlacklisted[account] = true;
             emit AccountBlacklisted(account);
         }
+    }
+
+    /**
+     * @notice Sets the Chainalysis sanctions list used to screen accounts
+     * @param _chainalysisSanctionsList The Chainalysis maintained sanctions list address (set to the null address to disable sanctions screening)
+     */
+    function _setSanctionsList(address _chainalysisSanctionsList) internal {
+        _getRoycoBlacklistStorage().chainalysisSanctionsList = _chainalysisSanctionsList;
+        emit SanctionsListUpdated(_chainalysisSanctionsList);
     }
 
     /**

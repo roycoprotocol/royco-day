@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoDawnAccountant } from "./IRoycoDawnAccountant.sol";
-import { IRoycoDawnKernel } from "./IRoycoDawnKernel.sol";
+import { IRoycoDayAccountant } from "./IRoycoDayAccountant.sol";
+import { IRoycoDayKernel } from "./IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "./IRoycoVaultTranche.sol";
 
 /// @title IRoycoFactory
@@ -123,8 +123,8 @@ interface IRoycoFactory {
         // Implementation Addresses
         IRoycoVaultTranche seniorTrancheImplementation;
         IRoycoVaultTranche juniorTrancheImplementation;
-        IRoycoDawnKernel kernelImplementation;
-        IRoycoDawnAccountant accountantImplementation;
+        IRoycoDayKernel kernelImplementation;
+        IRoycoDayAccountant accountantImplementation;
         // Proxy Initialization Data
         bytes seniorTrancheInitializationData;
         bytes juniorTrancheInitializationData;
@@ -161,8 +161,8 @@ interface IRoycoFactory {
     struct RoycoMarket {
         IRoycoVaultTranche seniorTranche;
         IRoycoVaultTranche juniorTranche;
-        IRoycoDawnKernel kernel;
-        IRoycoDawnAccountant accountant;
+        IRoycoDayKernel kernel;
+        IRoycoDayAccountant accountant;
     }
 
     /**
