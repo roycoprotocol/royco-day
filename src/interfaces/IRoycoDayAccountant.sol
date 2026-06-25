@@ -297,20 +297,6 @@ interface IRoycoDayAccountant {
         returns (SyncedAccountingState memory state);
 
     /**
-     * @notice Returns if the market's coverage requirement is satisfied
-     * @dev If this condition is unsatisfied, senior deposits and junior withdrawals must be blocked to prevent undercollateralized exposure
-     * @return satisfied A boolean indicating whether the market's coverage requirement is satisfied based on the persisted NAV checkpoints
-     */
-    function isCoverageRequirementSatisfied() external view returns (bool satisfied);
-
-    /**
-     * @notice Returns if the market's liquidity requirement is satisfied
-     * @dev If this condition is unsatisfied, liquidity tranche withdrawals must be gated to prevent the senior tranche's exit liquidity from falling below the configured minimum
-     * @return satisfied A boolean indicating whether the market's liquidity requirement is satisfied based on the persisted NAV checkpoints
-     */
-    function isLiquidityRequirementSatisfied() external view returns (bool satisfied);
-
-    /**
      * @notice Returns the maximum assets depositable into the senior tranche without violating the market's coverage requirement
      * @dev Always rounds in favor of senior tranche protection
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets

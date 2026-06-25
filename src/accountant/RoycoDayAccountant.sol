@@ -308,24 +308,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     // Coverage and Liquidity Checking Functions
     // =============================
 
-    /// @inheritdoc IRoycoDayAccountant
-    function isCoverageRequirementSatisfied() public view override(IRoycoDayAccountant) returns (bool) {
-        // Get the storage pointer to the accountant state
-        RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
-        // Compute the coverage utilization and return whether or the minimum coverage demand is satisfied based on persisted NAVs
-        uint256 coverageUtilizationWAD = UtilsLib.computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, $.betaWAD, $.minCoverageWAD, $.lastJTEffectiveNAV);
-        return _isDemandSatisfied(coverageUtilizationWAD);
-    }
-
-    /// @inheritdoc IRoycoDayAccountant
-    function isLiquidityRequirementSatisfied() public view override(IRoycoDayAccountant) returns (bool) {
-        // Get the storage pointer to the accountant state
-        RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
-        // Compute the liquidity utilization and return whether or the minimum liquidity demand is satisfied based on persisted NAVs
-        uint256 liquidityUtilizationWAD = UtilsLib.computeLiquidityUtilization($.lastSTEffectiveNAV, $.minLiquidityWAD, $.lastLTRawNAV);
-        return _isDemandSatisfied(liquidityUtilizationWAD);
-    }
-
     /**
      * @inheritdoc IRoycoDayAccountant
      * @dev Coverage Invariant: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * MIN_COVERAGE
@@ -452,6 +434,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         AccountingCheckpoint memory checkpoint = AccountingCheckpoint({
             stRawNAV: $.lastSTRawNAV,
             jtRawNAV: $.lastJTRawNAV,
+            ltRawNAV: $.lastLTRawNAV,
             stEffectiveNAV: $.lastSTEffectiveNAV,
             jtEffectiveNAV: $.lastJTEffectiveNAV,
             jtCoverageImpermanentLoss: $.lastJTCoverageImpermanentLoss

@@ -17,10 +17,10 @@ interface IRoycoDayKernel {
      * @custom:field juniorTranche - The address of the Royco junior tranche associated with this kernel
      * @custom:field jtAsset - The address of the base asset of the junior tranche
      * @custom:field accountant - The address of the accountant for the Royco market
-     * @custom:field enforceVaultSharesTransferWhitelist Whether to enforce the vault shares transfer whitelist
      * @custom:field liquidityTranche - The address of the Royco liquidity tranche associated with this kernel
      * @custom:field ltAsset - The base asset of the liquidity tranche (the Balancer BPT)
      * @custom:field quoteAsset - The quote asset paired against the senior share in the BPT
+     * @custom:field enforceVaultSharesTransferWhitelist Whether to enforce the vault shares transfer whitelist
      */
     struct RoycoDayKernelConstructionParams {
         address seniorTranche;
@@ -28,10 +28,10 @@ interface IRoycoDayKernel {
         address juniorTranche;
         address jtAsset;
         address accountant;
-        bool enforceVaultSharesTransferWhitelist;
         address liquidityTranche;
         address ltAsset;
         address quoteAsset;
+        bool enforceVaultSharesTransferWhitelist;
     }
 
     /**
@@ -53,8 +53,9 @@ interface IRoycoDayKernel {
      * @custom:storage-location erc7201:Royco.storage.RoycoDayKernelState
      * @custom:field protocolFeeRecipient - The market's configured protocol fee recipient
      * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached, scaled to WAD precision
-     * @custom:field stOwnedYieldBearingAssets - The yield bearing assets held by the ST, in ST's asset units
-     * @custom:field jtOwnedYieldBearingAssets - The yield bearing assets held by the JT, in JT's asset units
+     * @custom:field stOwnedYieldBearingAssets - The yield bearing assets held by the senior tranche, in ST's asset units
+     * @custom:field jtOwnedYieldBearingAssets - The yield bearing assets held by the junior tranche, in JT's asset units
+     * @custom:field ltOwnedYieldBearingAssets - The yield bearing assets held by the liquidity tranche, in LT's asset units
      * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables blacklist screening)
      */
     struct RoycoDayKernelState {
@@ -62,6 +63,7 @@ interface IRoycoDayKernel {
         uint64 stSelfLiquidationBonusWAD;
         TRANCHE_UNIT stOwnedYieldBearingAssets;
         TRANCHE_UNIT jtOwnedYieldBearingAssets;
+        TRANCHE_UNIT ltOwnedYieldBearingAssets;
         address roycoBlacklist;
     }
 

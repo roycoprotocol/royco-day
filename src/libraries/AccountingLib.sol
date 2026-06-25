@@ -2,9 +2,9 @@
 pragma solidity ^0.8.28;
 
 import { WAD, ZERO_NAV_UNITS } from "./Constants.sol";
-import { UtilsLib } from "./UtilsLib.sol";
 import { AccountingCheckpoint, MarketState, MarketStateTransitionParams, PnLWaterfallParams, SyncedAccountingState } from "./Types.sol";
 import { Math, NAV_UNIT, UnitsMathLib, toNAVUnits } from "./Units.sol";
+import { UtilsLib } from "./UtilsLib.sol";
 
 /**
  * @title AccountingLib
@@ -18,58 +18,60 @@ library AccountingLib {
     /// @notice Thrown when a set of tranche NAVs violates the NAV conservation invariant: raw and effective NAVs must sum to the same total
     error NAV_CONSERVATION_VIOLATION();
 
+    /**
+     * @notice Attributes each tranche's raw NAV delta across the checkpointed claims that each tranche holds on the raw NAVs, producing the signed effective NAV delta for each tranche
+     * @dev The first step of a sync's PnL waterfall: it converts the raw NAV deltas (the unrealized PNL of the underlying investment(s)) into effective NAV deltas, which the waterfall then settles (loss -> coverage IL recovery -> yield split)
+     * @param _stRawNAV The senior tranche's current raw NAV: the mark-to-market value of its invested assets
+     * @param _jtRawNAV The junior tranche's current raw NAV: the mark-to-market value of its invested assets
+     * @param _lastSTRawNAV The senior tranche's last recorded raw NAV (excluding any coverage taken and yield shared): the reference its raw NAV delta is measured against
+     * @param _lastJTRawNAV The junior tranche's last recorded raw NAV (excluding any coverage given and yield shared): the reference its raw NAV delta is measured against
+     * @param _lastSTEffectiveNAV The senior tranche's last recorded effective NAV (including any prior applied coverage, ST yield distribution, and uncovered losses)
+     * @param _lastJTEffectiveNAV The junior tranche's last recorded effective NAV (including any prior provided coverage, JT yield, ST yield distribution, and JT losses)
+     * @return deltaSTEffectiveNAV The signed delta to the senior tranche's effective NAV from this sync's PNL: the sum of ST's claim-weighted shares of each tranche's raw NAV PNL
+     * @return deltaJTEffectiveNAV The signed delta to the junior tranche's effective NAV from this sync's PNL: the residual of the total PNL after ST's attribution, which absorbs all rounding drift
+     */
     function applyProfitAndLossAttribution(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
-        AccountingCheckpoint memory _prePnLWaterfallCheckpoint
+        NAV_UNIT _lastSTRawNAV,
+        NAV_UNIT _lastJTRawNAV,
+        NAV_UNIT _lastSTEffectiveNAV,
+        NAV_UNIT _lastJTEffectiveNAV
     )
         internal
         pure
         returns (int256 deltaSTEffectiveNAV, int256 deltaJTEffectiveNAV)
     {
-        // Cache the checkpointed effective NAV for each tranche
-        NAV_UNIT stEffectiveNAV = _prePnLWaterfallCheckpoint.stEffectiveNAV;
-        NAV_UNIT jtEffectiveNAV = _prePnLWaterfallCheckpoint.jtEffectiveNAV;
         // Compute the deltas for each tranche's effective NAV based on their last checkpointed economic claims on each tranche's raw NAVs
+        // Last cross-tranche claims (the NAV that can't be funded by the tranche's own raw NAV)
+        NAV_UNIT stClaimOnJTRawNAV = UnitsMathLib.saturatingSub(_lastSTEffectiveNAV, _lastSTRawNAV);
+        NAV_UNIT jtClaimOnSTRawNAV = UnitsMathLib.saturatingSub(_lastJTEffectiveNAV, _lastJTRawNAV);
+        // Last self-backed portion of the senior tranche's claim (the NAV funded by ST's own raw NAV)
+        // NOTE: NAV conservation guarantees that this cannot underflow
+        NAV_UNIT stClaimOnSTRawNAV = (_lastSTRawNAV - jtClaimOnSTRawNAV);
 
-        {
-            // Cache the checkpointed raw NAV for each tranche
-            NAV_UNIT lastSTRawNAV = _prePnLWaterfallCheckpoint.stRawNAV;
-            NAV_UNIT lastJTRawNAV = _prePnLWaterfallCheckpoint.jtRawNAV;
+        // Compute the deltas in the raw NAVs of each tranche
+        // The deltas represent the unrealized PNL of the underlying investment since the last NAV checkpoints
+        int256 deltaSTRawNAV = UnitsMathLib.computeNAVDelta(_stRawNAV, _lastSTRawNAV);
+        int256 deltaJTRawNAV = UnitsMathLib.computeNAVDelta(_jtRawNAV, _lastJTRawNAV);
 
-            // Last cross-tranche claims (the NAV that can't be funded by the tranche's own raw NAV)
-            NAV_UNIT stClaimOnJTRawNAV = UnitsMathLib.saturatingSub(stEffectiveNAV, lastSTRawNAV);
-            NAV_UNIT jtClaimOnSTRawNAV = UnitsMathLib.saturatingSub(jtEffectiveNAV, lastJTRawNAV);
-            // Last self-backed portion of the senior tranche's claim (the NAV funded by ST's own raw NAV)
-            // NOTE: NAV conservation guarantees that this cannot underflow
-            NAV_UNIT stClaimOnSTRawNAV = (lastSTRawNAV - jtClaimOnSTRawNAV);
+        // Attribute each raw NAV's signed PNL to ST in proportion to its claim against that raw NAV
+        // The resulting deltas are rounded down: in favor of seniors on losses and juniors on gains
+        // When the last ST raw NAV is zero, conservation forces ST's claim on its raw NAV to zero: route the delta to ST if it has live effective claims, else leave it as residual to JT to avoid inflating NAV against zero ST shares outstanding
+        int256 deltaSTClaimOnSTRawNAV = _lastSTRawNAV == ZERO_NAV_UNITS
+            ? (_lastSTEffectiveNAV > ZERO_NAV_UNITS ? deltaSTRawNAV : int256(0))
+            : _attributeDeltaToClaimOnRawNAV(deltaSTRawNAV, stClaimOnSTRawNAV, _lastSTRawNAV);
+        int256 deltaSTClaimOnJTRawNAV = _attributeDeltaToClaimOnRawNAV(deltaJTRawNAV, stClaimOnJTRawNAV, _lastJTRawNAV);
 
-            // Compute the deltas in the raw NAVs of each tranche
-            // The deltas represent the unrealized PNL of the underlying investment since the last NAV checkpoints
-            int256 deltaSTRawNAV = UnitsMathLib.computeNAVDelta(_stRawNAV, lastSTRawNAV);
-            int256 deltaJTRawNAV = UnitsMathLib.computeNAVDelta(_jtRawNAV, lastJTRawNAV);
-
-            // Attribute each raw NAV's signed PNL to ST in proportion to its claim against that raw NAV
-            // The resulting deltas are rounded down: in favor of seniors on losses and juniors on gains
-            // When the last ST raw NAV is zero, conservation forces ST's claim on its raw NAV to zero: route the delta to ST if it has live effective claims, else leave it as residual to JT to avoid inflating NAV against zero ST shares outstanding
-            int256 deltaSTClaimOnSTRawNAV = lastSTRawNAV == ZERO_NAV_UNITS
-                ? (stEffectiveNAV > ZERO_NAV_UNITS ? deltaSTRawNAV : int256(0))
-                : _attributeDeltaToClaimOnRawNAV(deltaSTRawNAV, stClaimOnSTRawNAV, lastSTRawNAV);
-            int256 deltaSTClaimOnJTRawNAV = _attributeDeltaToClaimOnRawNAV(deltaJTRawNAV, stClaimOnJTRawNAV, lastJTRawNAV);
-
-            // ST's effective NAV delta is the sum of its claim-weighted shares of each pool's PNL and JT's effective NAV delta is computed as the residual
-            // NOTE: NAV conservation holds: positive and negative rounding drift is absorbed by juniors
-            deltaSTEffectiveNAV = deltaSTClaimOnSTRawNAV + deltaSTClaimOnJTRawNAV;
-            deltaJTEffectiveNAV = (deltaSTRawNAV + deltaJTRawNAV) - deltaSTEffectiveNAV;
-        }
+        // ST's effective NAV delta is the sum of its claim-weighted shares of each pool's PNL and JT's effective NAV delta is computed as the residual
+        // NOTE: NAV conservation holds: positive and negative rounding drift is absorbed by juniors
+        deltaSTEffectiveNAV = deltaSTClaimOnSTRawNAV + deltaSTClaimOnJTRawNAV;
+        deltaJTEffectiveNAV = (deltaSTRawNAV + deltaJTRawNAV) - deltaSTEffectiveNAV;
     }
 
     /**
      * @notice Synchronizes the tranche NAVs and the JT coverage impermanent loss based on the unrealized PNL of the underlying investment(s)
      * @dev Attributes each tranche's raw NAV delta across the checkpointed claims, then settles the deltas through the PnL waterfall (loss -> coverage IL recovery -> yield split)
-     * @dev Pure by design: all inputs are passed in explicitly so that callers can evaluate the waterfall repeatedly at candidate raw NAVs without touching state
-     * @dev Protocol fees are computed alongside the settlement but are never deducted from the effective NAVs: collecting them is the caller's responsibility
-     * @dev The YDM outputs consumed by the yield split are pre-resolved by the caller: they depend only on the last committed sync, so they are valid for any raw NAV inputs measured against this checkpoint
      * @param _stRawNAV The senior tranche's current raw NAV: the mark-to-market value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the mark-to-market value of its invested assets
      * @param _params The fixed inputs of the waterfall: the checkpoint, pre-resolved YDM outputs, fee rates, and dust tolerance
@@ -90,39 +92,10 @@ library AccountingLib {
         // Cache the checkpointed effective NAV for each tranche
         NAV_UNIT stEffectiveNAV = _params.checkpoint.stEffectiveNAV;
         NAV_UNIT jtEffectiveNAV = _params.checkpoint.jtEffectiveNAV;
-        // Compute the deltas for each tranche's effective NAV based on their last checkpointed economic claims on each tranche's raw NAVs
-        int256 deltaSTEffectiveNAV;
-        int256 deltaJTEffectiveNAV;
-        {
-            // Cache the checkpointed raw NAV for each tranche
-            NAV_UNIT lastSTRawNAV = _params.checkpoint.stRawNAV;
-            NAV_UNIT lastJTRawNAV = _params.checkpoint.jtRawNAV;
 
-            // Last cross-tranche claims (the NAV that can't be funded by the tranche's own raw NAV)
-            NAV_UNIT stClaimOnJTRawNAV = UnitsMathLib.saturatingSub(stEffectiveNAV, lastSTRawNAV);
-            NAV_UNIT jtClaimOnSTRawNAV = UnitsMathLib.saturatingSub(jtEffectiveNAV, lastJTRawNAV);
-            // Last self-backed portion of the senior tranche's claim (the NAV funded by ST's own raw NAV)
-            // NOTE: NAV conservation guarantees that this cannot underflow
-            NAV_UNIT stClaimOnSTRawNAV = (lastSTRawNAV - jtClaimOnSTRawNAV);
-
-            // Compute the deltas in the raw NAVs of each tranche
-            // The deltas represent the unrealized PNL of the underlying investment since the last NAV checkpoints
-            int256 deltaSTRawNAV = UnitsMathLib.computeNAVDelta(_stRawNAV, lastSTRawNAV);
-            int256 deltaJTRawNAV = UnitsMathLib.computeNAVDelta(_jtRawNAV, lastJTRawNAV);
-
-            // Attribute each raw NAV's signed PNL to ST in proportion to its claim against that raw NAV
-            // The resulting deltas are rounded down: in favor of seniors on losses and juniors on gains
-            // When the last ST raw NAV is zero, conservation forces ST's claim on its raw NAV to zero: route the delta to ST if it has live effective claims, else leave it as residual to JT to avoid inflating NAV against zero ST shares outstanding
-            int256 deltaSTClaimOnSTRawNAV = lastSTRawNAV == ZERO_NAV_UNITS
-                ? (stEffectiveNAV > ZERO_NAV_UNITS ? deltaSTRawNAV : int256(0))
-                : _attributeDeltaToClaimOnRawNAV(deltaSTRawNAV, stClaimOnSTRawNAV, lastSTRawNAV);
-            int256 deltaSTClaimOnJTRawNAV = _attributeDeltaToClaimOnRawNAV(deltaJTRawNAV, stClaimOnJTRawNAV, lastJTRawNAV);
-
-            // ST's effective NAV delta is the sum of its claim-weighted shares of each pool's PNL and JT's effective NAV delta is computed as the residual
-            // NOTE: NAV conservation holds: positive and negative rounding drift is absorbed by juniors
-            deltaSTEffectiveNAV = deltaSTClaimOnSTRawNAV + deltaSTClaimOnJTRawNAV;
-            deltaJTEffectiveNAV = (deltaSTRawNAV + deltaJTRawNAV) - deltaSTEffectiveNAV;
-        }
+        // Apply the profit and loss attribution based on the current claims on NAVs that each tranche holds
+        (int256 deltaSTEffectiveNAV, int256 deltaJTEffectiveNAV) =
+            applyProfitAndLossAttribution(_stRawNAV, _jtRawNAV, _params.checkpoint.stRawNAV, _params.checkpoint.jtRawNAV, stEffectiveNAV, jtEffectiveNAV);
 
         // Cache the checkpointed JT coverage impermanent loss
         NAV_UNIT jtCoverageImpermanentLoss = _params.checkpoint.jtCoverageImpermanentLoss;
@@ -211,6 +184,7 @@ library AccountingLib {
         postPnLWaterfallCheckpoint = AccountingCheckpoint({
             stRawNAV: _stRawNAV,
             jtRawNAV: _jtRawNAV,
+            ltRawNAV: _ltRawNAV,
             stEffectiveNAV: stEffectiveNAV,
             jtEffectiveNAV: jtEffectiveNAV,
             jtCoverageImpermanentLoss: jtCoverageImpermanentLoss
@@ -223,7 +197,7 @@ library AccountingLib {
      * @dev Computes the market's utilization internally from the post-waterfall checkpoint and the coverage configuration
      * @dev Erases the JT coverage IL and zeroes the protocol fees in the marshaled state where the transition demands it; all inputs are read-only
      * @dev Resulting market state:
-     *      1. Forced Perpetual: The fixed-term duration is set to 0 (permanently perpetual), current fixed-term elapsed, or liquidation utilization threshold has been breached (undercollateralized)
+     *      1. Forced Perpetual: The fixed-term duration is set to 0 (permanently perpetual), current fixed-term elapsed, or liquidation utilization threshold has been breached (under/un-collateralized)
      *      2. Normal Perpetual: JT coverage IL is within dust tolerance (staying perpetual) or fully recovered (exiting fixed-term for perpetual)
      *      3. Fixed-term: The JT coverage IL is above the dust tolerance of the market, fixed-term duration hasn't elapsed, and liquidation utilization threshold hasn't been breached
      * @param _initialMarketState The market state persisted by the last committed sync (the transition's origin state)

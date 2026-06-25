@@ -83,6 +83,7 @@ struct SyncedAccountingState {
  * @dev The raw and effective NAVs must satisfy the NAV conservation invariant: they must sum to the same total at wei precision
  * @custom:field stRawNAV - The senior tranche's raw NAV: the pure value of its invested assets
  * @custom:field jtRawNAV - The junior tranche's raw NAV: the pure value of its invested assets
+ * @custom:field ltRawNAV - The liquidity tranche's raw NAV: the pure value of its invested assets
  * @custom:field stEffectiveNAV - The senior tranche's effective NAV: includes applied coverage, its share of ST yield, and uncovered losses
  * @custom:field jtEffectiveNAV - The junior tranche's effective NAV: includes provided coverage, JT yield, its share of ST yield, and JT losses
  * @custom:field jtCoverageImpermanentLoss - The impermanent loss that JT has suffered after providing coverage for ST losses: its claim on future ST recoveries
@@ -90,6 +91,7 @@ struct SyncedAccountingState {
 struct AccountingCheckpoint {
     NAV_UNIT stRawNAV;
     NAV_UNIT jtRawNAV;
+    NAV_UNIT ltRawNAV;
     NAV_UNIT stEffectiveNAV;
     NAV_UNIT jtEffectiveNAV;
     NAV_UNIT jtCoverageImpermanentLoss;

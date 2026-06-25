@@ -159,13 +159,13 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     function jtConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _jtAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
 
     /// @inheritdoc IRoycoDayKernel
-    function ltConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _ltAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
-
-    /// @inheritdoc IRoycoDayKernel
     function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
 
     /// @inheritdoc IRoycoDayKernel
     function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
+
+    /// @inheritdoc IRoycoDayKernel
+    function ltConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _ltAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
 
     // =============================
     // Tranche Preview Functions
@@ -783,6 +783,15 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     function _getJuniorTrancheRawNAV() internal view virtual returns (NAV_UNIT jtRawNAV) {
         // Get the yield bearing assets owned by JT and convert them to NAV units via the configured quoter
         return jtConvertTrancheUnitsToNAVUnits(_getRoycoDayKernelStorage().jtOwnedYieldBearingAssets);
+    }
+
+    /**
+     * @notice Returns the raw net asset value of the liquidity tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
+     * @return ltRawNAV The pure net asset value of the liquidity tranche invested assets
+     */
+    function _getLiquidityTrancheRawNAV() internal view virtual returns (NAV_UNIT ltRawNAV) {
+        // Get the yield bearing assets owned by LT and convert them to NAV units via the configured quoter
+        return ltConvertTrancheUnitsToNAVUnits(_getRoycoDayKernelStorage().ltOwnedYieldBearingAssets);
     }
 
     /**
