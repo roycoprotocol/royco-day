@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoDawnAccountant } from "../../../src/interfaces/IRoycoDawnAccountant.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
 
 /**
@@ -125,7 +125,7 @@ contract SetProtocolFees is ParameterUpdateBase {
                 updates[idx++] = UpdateParams({
                     marketName: cfg.marketName,
                     target: addrs.accountant,
-                    callData: abi.encodeCall(IRoycoDawnAccountant.setSeniorTrancheProtocolFee, (cfg.stProtocolFeeWAD)),
+                    callData: abi.encodeCall(IRoycoDayAccountant.setSeniorTrancheProtocolFee, (cfg.stProtocolFeeWAD)),
                     description: string.concat("Set ST protocol fee for ", cfg.marketName, " to ", vm.toString(cfg.stProtocolFeeWAD))
                 });
             }
@@ -133,7 +133,7 @@ contract SetProtocolFees is ParameterUpdateBase {
                 updates[idx++] = UpdateParams({
                     marketName: cfg.marketName,
                     target: addrs.accountant,
-                    callData: abi.encodeCall(IRoycoDawnAccountant.setJuniorTrancheProtocolFee, (cfg.jtProtocolFeeWAD)),
+                    callData: abi.encodeCall(IRoycoDayAccountant.setJuniorTrancheProtocolFee, (cfg.jtProtocolFeeWAD)),
                     description: string.concat("Set JT protocol fee for ", cfg.marketName, " to ", vm.toString(cfg.jtProtocolFeeWAD))
                 });
             }
@@ -141,7 +141,7 @@ contract SetProtocolFees is ParameterUpdateBase {
                 updates[idx++] = UpdateParams({
                     marketName: cfg.marketName,
                     target: addrs.accountant,
-                    callData: abi.encodeCall(IRoycoDawnAccountant.setJTYieldShareProtocolFee, (cfg.jtYieldShareProtocolFeeWAD)),
+                    callData: abi.encodeCall(IRoycoDayAccountant.setJTYieldShareProtocolFee, (cfg.jtYieldShareProtocolFeeWAD)),
                     description: string.concat("Set yield-share protocol fee for ", cfg.marketName, " to ", vm.toString(cfg.jtYieldShareProtocolFeeWAD))
                 });
             }
@@ -153,7 +153,7 @@ contract SetProtocolFees is ParameterUpdateBase {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _verify(UpdateParams memory _params) internal view override {
-        IRoycoDawnAccountant.RoycoDawnAccountantState memory state = IRoycoDawnAccountant(_params.target).getState();
+        IRoycoDayAccountant.RoycoDayAccountantState memory state = IRoycoDayAccountant(_params.target).getState();
 
         bytes4 selector = bytes4(_params.callData);
         uint64 expected;
@@ -162,11 +162,11 @@ contract SetProtocolFees is ParameterUpdateBase {
             expected := mload(add(cd, 36))
         }
 
-        if (selector == IRoycoDawnAccountant.setSeniorTrancheProtocolFee.selector) {
+        if (selector == IRoycoDayAccountant.setSeniorTrancheProtocolFee.selector) {
             require(state.stProtocolFeeWAD == expected, VerificationFailed("stProtocolFeeWAD mismatch after execution"));
-        } else if (selector == IRoycoDawnAccountant.setJuniorTrancheProtocolFee.selector) {
+        } else if (selector == IRoycoDayAccountant.setJuniorTrancheProtocolFee.selector) {
             require(state.jtProtocolFeeWAD == expected, VerificationFailed("jtProtocolFeeWAD mismatch after execution"));
-        } else if (selector == IRoycoDawnAccountant.setJTYieldShareProtocolFee.selector) {
+        } else if (selector == IRoycoDayAccountant.setJTYieldShareProtocolFee.selector) {
             require(state.jtYieldShareProtocolFeeWAD == expected, VerificationFailed("jtYieldShareProtocolFeeWAD mismatch after execution"));
         } else {
             revert VerificationFailed("Unexpected selector in calldata");

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { GyroECLPPoolFactory } from "../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import { AccessManager } from "../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
-import { RoycoDawnAccountant } from "../src/accountant/RoycoDawnAccountant.sol";
+import { RoycoDayAccountant } from "../src/accountant/RoycoDayAccountant.sol";
 import { RoycoBlacklist } from "../src/auth/RoycoBlacklist.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
@@ -23,60 +24,29 @@ import {
     TRANSFER_AGENT_ROLE
 } from "../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../src/factory/RoycoFactory.sol";
-import { BaseDeploymentTemplate } from "../src/factory/templates/BaseDeploymentTemplate.sol";
+import { BalancerV3DeploymentTemplate } from "../src/factory/templates/BalancerV3DeploymentTemplate.sol";
+import { DayIdenticalERC4626ChainlinkDeploymentTemplate } from "../src/factory/templates/DayIdenticalERC4626ChainlinkDeploymentTemplate.sol";
+import { BaseDeploymentTemplate } from "../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import {
     COMPONENT_ID_ACCOUNTANT_IMPL,
+    COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK,
     COMPONENT_ID_JUNIOR_TRANCHE_IMPL,
-    COMPONENT_ID_KERNEL_APYUSD,
-    COMPONENT_ID_KERNEL_IDENTICAL_ERC20_CHAINLINK,
-    COMPONENT_ID_KERNEL_IDENTICAL_ERC20_CHAINLINK_SBT,
-    COMPONENT_ID_KERNEL_IDENTICAL_ERC4626_ADMIN_ORACLE,
-    COMPONENT_ID_KERNEL_IDENTICAL_ERC4626_CHAINLINK_ORACLE,
-    COMPONENT_ID_KERNEL_IDENTICAL_MAKINA,
-    COMPONENT_ID_KERNEL_IDLECDOAA,
-    COMPONENT_ID_KERNEL_LOCKED_IUSD,
-    COMPONENT_ID_KERNEL_MAPLE_V2,
-    COMPONENT_ID_KERNEL_REUSD,
-    COMPONENT_ID_KERNEL_SUSDAI,
-    COMPONENT_ID_KERNEL_SUSDAT,
+    COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL,
     COMPONENT_ID_SENIOR_TRANCHE_IMPL,
     COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2
-} from "../src/factory/templates/Components.sol";
-import { IdenticalERC20ChainlinkDeploymentTemplate } from "../src/factory/templates/dawn/IdenticalERC20ChainlinkDeploymentTemplate.sol";
-import { IdenticalERC20ChainlinkSBTDeploymentTemplate } from "../src/factory/templates/dawn/IdenticalERC20ChainlinkSBTDeploymentTemplate.sol";
-import { IdenticalERC4626AdminOracleDeploymentTemplate } from "../src/factory/templates/dawn/IdenticalERC4626AdminOracleDeploymentTemplate.sol";
-import { IdenticalERC4626ChainlinkOracleDeploymentTemplate } from "../src/factory/templates/dawn/IdenticalERC4626ChainlinkOracleDeploymentTemplate.sol";
-import { IdenticalMakinaDeploymentTemplate } from "../src/factory/templates/dawn/IdenticalMakinaDeploymentTemplate.sol";
-import { IdleCdoAADeploymentTemplate } from "../src/factory/templates/dawn/IdleCdoAADeploymentTemplate.sol";
-import { LockediUSDDeploymentTemplate } from "../src/factory/templates/dawn/LockediUSDDeploymentTemplate.sol";
-import { MapleV2DeploymentTemplate } from "../src/factory/templates/dawn/MapleV2DeploymentTemplate.sol";
-import { ReUSDDeploymentTemplate } from "../src/factory/templates/dawn/ReUSDDeploymentTemplate.sol";
-import { apyUSDDeploymentTemplate } from "../src/factory/templates/dawn/apyUSDDeploymentTemplate.sol";
-import { DawnDeploymentTemplate } from "../src/factory/templates/dawn/base/DawnDeploymentTemplate.sol";
-import { sUSDaiDeploymentTemplate } from "../src/factory/templates/dawn/sUSDaiDeploymentTemplate.sol";
-import { sUSDatDeploymentTemplate } from "../src/factory/templates/dawn/sUSDatDeploymentTemplate.sol";
-import { IRoycoDawnAccountant } from "../src/interfaces/IRoycoDawnAccountant.sol";
-import { IRoycoDawnKernel } from "../src/interfaces/IRoycoDawnKernel.sol";
+} from "../src/factory/templates/base/Components.sol";
+import { IRoycoDayAccountant } from "../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayKernel } from "../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../src/interfaces/IYDM.sol";
 import { IRoycoFactory } from "../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../src/interfaces/factory/IRoycoProtocolTemplate.sol";
-import { Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel } from "../src/kernels/Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel.sol";
-import { Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel } from "../src/kernels/Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel.sol";
 import {
-    Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel
-} from "../src/kernels/Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel.sol";
-import { Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel } from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel.sol";
-import { Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel } from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel.sol";
-import { Identical_Makina_ST_JT_MachineToAdminOracle_Kernel } from "../src/kernels/Identical_Makina_ST_JT_MachineToAdminOracle_Kernel.sol";
-import { Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle } from "../src/kernels/Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle.sol";
-import { MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel } from "../src/kernels/MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel.sol";
-import { ReUSD_ST_JT_ICLOracle_Kernel } from "../src/kernels/ReUSD_ST_JT_ICLOracle_Kernel.sol";
-import { apyUSD_ST_JT_SharePriceToChainlinkOracle_Kernel } from "../src/kernels/apyUSD_ST_JT_SharePriceToChainlinkOracle_Kernel.sol";
-import { sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel } from "../src/kernels/sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel.sol";
-import { sUSDat_ST_JT_SharePriceToChainlinkOracle_Kernel } from "../src/kernels/sUSDat_ST_JT_SharePriceToChainlinkOracle_Kernel.sol";
+    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel
+} from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel.sol";
 import { toNAVUnits } from "../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../src/tranches/RoycoJuniorTranche.sol";
+import { RoycoLiquidityTranche } from "../src/tranches/RoycoLiquidityTranche.sol";
 import { RoycoSeniorTranche } from "../src/tranches/RoycoSeniorTranche.sol";
 import { AdaptiveCurveYDM_V1 } from "../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../src/ydm/AdaptiveCurveYDM_V2.sol";
@@ -88,7 +58,7 @@ import { console2 } from "lib/forge-std/src/console2.sol";
 
 /// @title DeployScript
 /// @notice Template-driven deployment script for Royco markets. Stands up a standalone AccessManager + the
-///         template-driven RoycoFactory, registers the Dawn template for the requested kernel type, and deploys
+///         template-driven RoycoFactory, registers the Day template for the requested kernel type, and deploys
 ///         the market via `executeMarketDeployment`.
 /// @dev The public surface (`deploy`, `deployFromConfig`, `generateRolesAssignments`, `DeploymentResult`,
 ///      `RoleAssignmentAddresses`, `KernelType`/`YDMType`) is preserved so existing tests need minimal changes.
@@ -109,20 +79,10 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     /// @dev Per-DeployScript-instance cache of registered templates, keyed by kernel type.
     mapping(uint256 kernelType => address template) internal kernelTypeToTemplate;
 
-    /// @notice Enum for kernel types
+    /// @notice Enum for the Day kernel types this script can deploy.
+    /// @dev The Dawn-era kernel zoo was removed in the Day fork. New Day kernels are added here as they ship.
     enum KernelType {
-        ReUSD_ST_ReUSD_JT,
-        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel,
-        Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel,
-        Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel,
-        Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel,
-        IdleCdoAA_ST_IdleCdoAA_JT,
-        Identical_Makina_ST_JT_MachineToAdminOracle_Kernel,
-        sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel,
-        MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel,
-        apyUSD_ST_JT_SharePriceToChainlinkOracle_Kernel,
-        Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle_Kernel,
-        sUSDat_ST_JT_SharePriceToChainlinkOracle_Kernel
+        Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel
     }
 
     /// @notice Enum for YDM types
@@ -208,15 +168,15 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     struct DeploymentResult {
         RoycoFactory factory;
         AccessManager accessManager;
-        RoycoDawnAccountant accountantImplementation;
+        RoycoDayAccountant accountantImplementation;
         RoycoSeniorTranche stTrancheImplementation;
         RoycoJuniorTranche jtTrancheImplementation;
         address kernelImplementation;
         IYDM ydm;
         IRoycoVaultTranche seniorTranche;
         IRoycoVaultTranche juniorTranche;
-        IRoycoDawnAccountant accountant;
-        IRoycoDawnKernel kernel;
+        IRoycoDayAccountant accountant;
+        IRoycoDayKernel kernel;
         address roycoBlacklist;
     }
 
@@ -311,12 +271,12 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         // 2. Deploy (or reuse) the chain's shared blacklist (governed by the AccessManager, not the factory).
         address roycoBlacklist = _deployBlacklist(address(accessManager));
 
-        // 3. Register (or reuse) the Dawn template for this kernel type.
+        // 3. Register (or reuse) the Day template for this kernel type.
         address template = _getOrRegisterTemplate(factory, _config.kernelType);
 
         // 4. Deploy the market via the template.
         bytes32 marketId = keccak256(abi.encodePacked(_config.seniorTrancheName, _config.juniorTrancheName, block.timestamp, block.chainid));
-        DawnDeploymentTemplate.DawnParams memory params = _buildDawnParams(_config, marketId, _protocolFeeRecipient, roycoBlacklist);
+        BalancerV3DeploymentTemplate.DayParams memory params = _buildDayParams(_config, marketId, _protocolFeeRecipient, roycoBlacklist);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(template, abi.encode(params));
 
         vm.stopBroadcast();
@@ -324,15 +284,15 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         return DeploymentResult({
             factory: factory,
             accessManager: accessManager,
-            accountantImplementation: RoycoDawnAccountant(_predictImpl(factory, marketId, "ACCOUNTANT_IMPL")),
+            accountantImplementation: RoycoDayAccountant(_predictImpl(factory, marketId, "ACCOUNTANT_IMPL")),
             stTrancheImplementation: RoycoSeniorTranche(_predictImpl(factory, marketId, "ST_IMPL")),
             jtTrancheImplementation: RoycoJuniorTranche(_predictImpl(factory, marketId, "JT_IMPL")),
             kernelImplementation: _predictImpl(factory, marketId, "KERNEL_IMPL"),
             ydm: IYDM(r.ydm),
             seniorTranche: IRoycoVaultTranche(r.seniorTranche),
             juniorTranche: IRoycoVaultTranche(r.juniorTranche),
-            accountant: IRoycoDawnAccountant(r.accountant),
-            kernel: IRoycoDawnKernel(r.kernel),
+            accountant: IRoycoDayAccountant(r.accountant),
+            kernel: IRoycoDayKernel(r.kernel),
             roycoBlacklist: roycoBlacklist
         });
     }
@@ -444,7 +404,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     // INTERNAL: TEMPLATE REGISTRATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Deploys + registers (or returns the cached) Dawn template for a kernel type.
+    /// @notice Deploys + registers (or returns the cached) Day template for a kernel type.
     function _getOrRegisterTemplate(RoycoFactory _factory, KernelType _kernelType) internal returns (address template) {
         template = kernelTypeToTemplate[uint256(_kernelType)];
         if (template != address(0)) return template;
@@ -454,26 +414,28 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         bytes memory kernelCreationCode;
         (template, kernelComponentId, kernelCreationCode) = _deployTemplate(factoryIface, _kernelType);
 
-        bytes32[] memory ids = new bytes32[](5);
-        bytes[] memory codes = new bytes[](5);
+        bytes32[] memory ids = new bytes32[](6);
+        bytes[] memory codes = new bytes[](6);
         ids[0] = COMPONENT_ID_SENIOR_TRANCHE_IMPL;
         codes[0] = type(RoycoSeniorTranche).creationCode;
         ids[1] = COMPONENT_ID_JUNIOR_TRANCHE_IMPL;
         codes[1] = type(RoycoJuniorTranche).creationCode;
-        ids[2] = COMPONENT_ID_ACCOUNTANT_IMPL;
-        codes[2] = type(RoycoDawnAccountant).creationCode;
-        ids[3] = COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2;
+        ids[2] = COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL;
+        codes[2] = type(RoycoLiquidityTranche).creationCode;
+        ids[3] = COMPONENT_ID_ACCOUNTANT_IMPL;
+        codes[3] = type(RoycoDayAccountant).creationCode;
+        ids[4] = COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2;
         // The template deploys the YDM singleton verbatim (no ctor args appended), so bake the target-utilization
         // (JT coverage kink at 90%) constructor arg into the registered creation code.
-        codes[3] = abi.encodePacked(type(AdaptiveCurveYDM_V2).creationCode, abi.encode(uint256(0.9e18)));
-        ids[4] = kernelComponentId;
-        codes[4] = kernelCreationCode;
+        codes[4] = abi.encodePacked(type(AdaptiveCurveYDM_V2).creationCode, abi.encode(uint256(0.9e18)));
+        ids[5] = kernelComponentId;
+        codes[5] = kernelCreationCode;
 
         _factory.registerTemplate(template, ids, codes);
         kernelTypeToTemplate[uint256(_kernelType)] = template;
     }
 
-    /// @notice Deploys the concrete Dawn template for a kernel type and returns its kernel component id + creation code.
+    /// @notice Deploys the concrete Day template for a kernel type and returns its kernel component id + creation code.
     function _deployTemplate(
         IRoycoFactory _factory,
         KernelType _kernelType
@@ -481,87 +443,25 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         internal
         returns (address template, bytes32 kernelComponentId, bytes memory kernelCreationCode)
     {
-        if (_kernelType == KernelType.ReUSD_ST_ReUSD_JT) {
-            return (address(new ReUSDDeploymentTemplate(_factory)), COMPONENT_ID_KERNEL_REUSD, type(ReUSD_ST_JT_ICLOracle_Kernel).creationCode);
-        } else if (_kernelType == KernelType.Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel) {
+        // The concrete Balancer-V3 templates are constructed with the chain's Gyro E-CLP pool factory.
+        GyroECLPPoolFactory poolFactory = GyroECLPPoolFactory(getChainConfig(block.chainid).gyroECLPPoolFactory);
+
+        if (_kernelType == KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel) {
             return (
-                address(new IdenticalERC20ChainlinkSBTDeploymentTemplate(_factory)),
-                COMPONENT_ID_KERNEL_IDENTICAL_ERC20_CHAINLINK_SBT,
-                type(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_SoulBoundTrancheShares_Kernel).creationCode
+                address(new DayIdenticalERC4626ChainlinkDeploymentTemplate(_factory, poolFactory)),
+                COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK,
+                type(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel).creationCode
             );
-        } else if (_kernelType == KernelType.Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel) {
-            return (
-                address(new IdenticalERC20ChainlinkDeploymentTemplate(_factory)),
-                COMPONENT_ID_KERNEL_IDENTICAL_ERC20_CHAINLINK,
-                type(Identical_ERC20_ST_JT_ChainlinkToAdminOracle_Kernel).creationCode
-            );
-        } else if (_kernelType == KernelType.Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel) {
-            return (
-                address(new IdenticalERC4626AdminOracleDeploymentTemplate(_factory)),
-                COMPONENT_ID_KERNEL_IDENTICAL_ERC4626_ADMIN_ORACLE,
-                type(Identical_ERC4626_ST_JT_SharePriceToAdminOracle_Kernel).creationCode
-            );
-        } else if (_kernelType == KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel) {
-            return (
-                address(new IdenticalERC4626ChainlinkOracleDeploymentTemplate(_factory)),
-                COMPONENT_ID_KERNEL_IDENTICAL_ERC4626_CHAINLINK_ORACLE,
-                type(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Kernel).creationCode
-            );
-        } else if (_kernelType == KernelType.IdleCdoAA_ST_IdleCdoAA_JT) {
-            return (
-                address(new IdleCdoAADeploymentTemplate(_factory)),
-                COMPONENT_ID_KERNEL_IDLECDOAA,
-                type(Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_Kernel).creationCode
-            );
-        } else if (_kernelType == KernelType.Identical_Makina_ST_JT_MachineToAdminOracle_Kernel) {
-            return (
-                address(new IdenticalMakinaDeploymentTemplate(_factory)),
-                COMPONENT_ID_KERNEL_IDENTICAL_MAKINA,
-                type(Identical_Makina_ST_JT_MachineToAdminOracle_Kernel).creationCode
-            );
-        } else if (_kernelType == KernelType.sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel) {
-            return (
-                address(new sUSDaiDeploymentTemplate(_factory)),
-                COMPONENT_ID_KERNEL_SUSDAI,
-                type(sUSDai_ST_JT_RedemptionSharePriceToAdminOracle_Kernel).creationCode
-            );
-        } else if (_kernelType == KernelType.MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel) {
-            return (
-                address(new MapleV2DeploymentTemplate(_factory)),
-                COMPONENT_ID_KERNEL_MAPLE_V2,
-                type(MaplePoolV2_ST_JT_ExitSharePriceToChainlinkOracle_Kernel).creationCode
-            );
-        } else if (_kernelType == KernelType.apyUSD_ST_JT_SharePriceToChainlinkOracle_Kernel) {
-            return
-                (
-                    address(new apyUSDDeploymentTemplate(_factory)),
-                    COMPONENT_ID_KERNEL_APYUSD,
-                    type(apyUSD_ST_JT_SharePriceToChainlinkOracle_Kernel).creationCode
-                );
-        } else if (_kernelType == KernelType.Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle_Kernel) {
-            return (
-                address(new LockediUSDDeploymentTemplate(_factory)),
-                COMPONENT_ID_KERNEL_LOCKED_IUSD,
-                type(Locked_iUSD_ST_JT_ExchangeRateToChainlinkOracle).creationCode
-            );
-        } else if (_kernelType == KernelType.sUSDat_ST_JT_SharePriceToChainlinkOracle_Kernel) {
-            return
-                (
-                    address(new sUSDatDeploymentTemplate(_factory)),
-                    COMPONENT_ID_KERNEL_SUSDAT,
-                    type(sUSDat_ST_JT_SharePriceToChainlinkOracle_Kernel).creationCode
-                );
-        } else {
-            revert UnsupportedKernelType(_kernelType);
         }
+        revert UnsupportedKernelType(_kernelType);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // INTERNAL: PARAM BUILDING
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Builds the template `DawnParams` from a `MarketConfig`.
-    function _buildDawnParams(
+    /// @notice Builds the template `DayParams` from a `MarketConfig`.
+    function _buildDayParams(
         MarketConfig memory _config,
         bytes32 _marketId,
         address _protocolFeeRecipient,
@@ -569,7 +469,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     )
         internal
         pure
-        returns (DawnDeploymentTemplate.DawnParams memory params)
+        returns (BalancerV3DeploymentTemplate.DayParams memory params)
     {
         params.marketId = _marketId;
         params.st =
@@ -588,13 +488,18 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             jtNAVDustTolerance: toNAVUnits(_config.jtDustTolerance),
             ydmInitializationData: _buildYDMInitializationData(_config.ydmType, _config.ydmSpecificParams)
         });
+        // Liquidity tranche (holds the Gyro E-CLP BPT) and the pool params it is created against.
+        params.lt = BalancerV3DeploymentTemplate.LiquidityTrancheParams({ name: _config.liquidityTrancheName, symbol: _config.liquidityTrancheSymbol });
+        params.gyroECLPPoolParams = _config.gyroECLPPoolParams;
+        // The JT YDM and a distinct LT YDM (the LDM placeholder). Same registered creation code, distinct `version`
+        // so they resolve to different addresses and satisfy the accountant's `YDMS_CANNOT_BE_IDENTICAL` guard.
         params.ydm = BaseDeploymentTemplate.YDMParams({ componentTag: bytes32("YDM_ADAPTIVE_CURVE_V2"), version: bytes32("V1") });
+        params.ltYdm = BaseDeploymentTemplate.YDMParams({ componentTag: bytes32("YDM_ADAPTIVE_CURVE_V2"), version: bytes32("LT_V1") });
         params.kernelSpecificParams = _config.kernelSpecificParams; // template KernelParams are field-identical to the config blobs
         params.protocolFeeRecipient = _protocolFeeRecipient;
         params.stSelfLiquidationBonusWAD = _config.stSelfLiquidationBonusWAD;
         params.roycoBlacklist = _roycoBlacklist;
         params.enforceVaultSharesTransferWhitelist = _config.enforceVaultSharesTransferWhitelist;
-        // entryPoint left zero (no entry-point wiring from this path)
     }
 
     /// @notice Builds YDM initialization data based on YDM type.
