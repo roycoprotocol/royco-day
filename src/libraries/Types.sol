@@ -48,10 +48,10 @@ struct AssetClaims {
  * @custom:field jtEffectiveNAV - Junior tranche effective NAV: includes provided coverage, JT yield, its share of ST yield, and JT losses
  * @custom:field jtCoverageImpermanentLoss - The impermanent loss that JT has suffered after providing coverage for ST losses
  *                                   This represents the claim on capital that the junior tranche has on future ST recoveries
- * @custom:field ltLiquidityPremiumPaid - The liquidity premium accrued to the liquidity tranche on this sync: LT's share of senior yield, minted as senior tranche shares to LT (coverage-neutral)
- * @custom:field stProtocolFeeAccrued - Protocol fee taken on ST yield on this sync
- * @custom:field jtProtocolFeeAccrued - Protocol fee taken on JT yield on this sync
- * @custom:field ltProtocolFeeAccrued - Protocol fee taken on the liquidity premium (LT yield share) on this sync
+ * @custom:field ltLiquidityPremium - The liquidity premium accrued to the liquidity tranche on this sync: LT's share of senior yield, minted as senior tranche shares to LT (coverage-neutral)
+ * @custom:field stProtocolFee - Protocol fee taken on ST yield on this sync
+ * @custom:field jtProtocolFee - Protocol fee taken on JT yield on this sync
+ * @custom:field ltProtocolFee - Protocol fee taken on the liquidity premium (LT yield share) on this sync
  * @custom:field coverageUtilizationWAD - The current coverageUtilization of the market, scaled to WAD precision
  * @custom:field liquidityUtilizationWAD - The current liquidityUtilization of the market, scaled to WAD precision
  * @custom:field fixedTermEndTimestamp - The timestamp at which the fixed term ends. Set to 0 if the market is not in a fixed term state
@@ -70,10 +70,10 @@ struct SyncedAccountingState {
     NAV_UNIT stEffectiveNAV;
     NAV_UNIT jtEffectiveNAV;
     NAV_UNIT jtCoverageImpermanentLoss;
-    NAV_UNIT ltLiquidityPremiumPaid;
-    NAV_UNIT stProtocolFeeAccrued;
-    NAV_UNIT jtProtocolFeeAccrued;
-    NAV_UNIT ltProtocolFeeAccrued;
+    NAV_UNIT ltLiquidityPremium;
+    NAV_UNIT stProtocolFee;
+    NAV_UNIT jtProtocolFee;
+    NAV_UNIT ltProtocolFee;
     // The market's derived state metrics
     uint256 coverageUtilizationWAD;
     uint256 liquidityUtilizationWAD;
@@ -110,31 +110,43 @@ struct AccountingCheckpoint {
  * @title PnLWaterfallParams
  * @dev The fixed inputs of the PnL attribution and settlement waterfall, alongside the raw NAVs measured against the checkpoint
  * @custom:field checkpoint - The accounting checkpoint the waterfall settles against (the last committed sync state)
- * @custom:field twJTYieldShareAccruedWAD - The time-weighted JT yield share (YDM output) accrued since the last distribution, scaled to WAD precision
- * @custom:field instantaneousJTYieldShareWAD - The instantaneous JT yield share (YDM output) consumed when the last distribution happened in the same block, scaled to WAD precision
- * @custom:field elapsedSinceLastRiskPremiumPayment - The seconds elapsed since the last risk premium payment
+ * @custom:field twJTYieldShareAccruedWAD - The time-weighted JT yield share (JT YDM output) accrued since the last premium payment, scaled to WAD precision
+ * @custom:field twLTYieldShareAccruedWAD - The time-weighted LT yield share (LT YDM output) accrued since the last premium payment, scaled to WAD precision
+ * @custom:field instantaneousJTYieldShareWAD - The instantaneous JT yield share (JT YDM output) consumed when the last premium payment happened in the same block, scaled to WAD precision
+ * @custom:field instantaneousLTYieldShareWAD - The instantaneous LT yield share (LT YDM output) consumed when the last premium payment happened in the same block, scaled to WAD precision
+ * @custom:field elapsedSinceLastPremiumPayments - The seconds elapsed since the last premium payments (the risk and liquidity premiums are always paid together)
  * @custom:field stProtocolFeeWAD - The market's protocol fee percentage taken from ST yield, scaled to WAD precision
  * @custom:field jtProtocolFeeWAD - The market's protocol fee percentage taken from JT yield, scaled to WAD precision
- * @custom:field jtYieldShareProtocolFeeWAD - The market's protocol fee percentage taken from the yield share (risk premium), scaled to WAD precision
+ * @custom:field jtYieldShareProtocolFeeWAD - The market's protocol fee percentage taken from the JT yield share (risk premium), scaled to WAD precision
+ * @custom:field ltProtocolFeeWAD - The market's protocol fee percentage taken from LT yield, scaled to WAD precision
+ * @custom:field ltYieldShareProtocolFeeWAD - The market's protocol fee percentage taken from the LT yield share (liquidity premium), scaled to WAD precision
  * @custom:field effectiveNAVDustTolerance - The effective NAV dust tolerance: the worst-case dust bounded by the sum of the raw NAV dust tolerances
+ * @custom:field ltNAVDustTolerance - The worst-case dust tolerance for ltRawNAV from underlying NAV quoting/rounding
  */
 struct PnLWaterfallParams {
     AccountingCheckpoint checkpoint;
     uint192 twJTYieldShareAccruedWAD;
+    uint192 twLTYieldShareAccruedWAD;
     uint256 instantaneousJTYieldShareWAD;
-    uint256 elapsedSinceLastRiskPremiumPayment;
+    uint256 instantaneousLTYieldShareWAD;
+    uint256 elapsedSinceLastPremiumPayments;
     uint64 stProtocolFeeWAD;
     uint64 jtProtocolFeeWAD;
     uint64 jtYieldShareProtocolFeeWAD;
+    uint64 ltProtocolFeeWAD;
+    uint64 ltYieldShareProtocolFeeWAD;
     NAV_UNIT effectiveNAVDustTolerance;
+    NAV_UNIT ltNAVDustTolerance;
 }
 
 /**
  * @title MarketStateTransitionParams
  * @dev The inputs of the market state transition applied once per sync, after the PnL waterfall has settled the tranche NAVs
  * @custom:field postPnLWaterfallCheckpoint - The post-waterfall checkpoint: the synced raw and effective NAVs alongside the settled JT coverage impermanent loss
- * @custom:field stProtocolFeeAccrued - The protocol fee accrued on ST yield by the waterfall (zeroed in the marshaled state where the transition takes no fees)
- * @custom:field jtProtocolFeeAccrued - The protocol fee accrued on JT yield and the JT yield share by the waterfall (zeroed in the marshaled state where the transition takes no fees)
+ * @custom:field ltLiquidityPremium - The liquidity premium paid to LT by the waterfall (zeroed in the marshaled state where the transition pays no premium)
+ * @custom:field stProtocolFee - The protocol fee accrued on ST yield by the waterfall (zeroed in the marshaled state where the transition takes no fees)
+ * @custom:field jtProtocolFee - The protocol fee accrued on JT yield and the JT yield share by the waterfall (zeroed in the marshaled state where the transition takes no fees)
+ * @custom:field ltProtocolFee - The protocol fee accrued on LT yield and the LT yield share by the waterfall (zeroed in the marshaled state where the transition takes no fees)
  * @custom:field betaWAD - JT's sensitivity to the same downside stress that affects ST, scaled to WAD precision
  * @custom:field minCoverageWAD - The coverage percentage that the senior tranche is expected to be protected by, scaled to WAD precision
  * @custom:field minLiquidityWAD - The percentage of the senior tranche NAV that must be in the liquidity tranche's market making inventory, scaled to WAD precision
@@ -146,8 +158,10 @@ struct PnLWaterfallParams {
  */
 struct MarketStateTransitionParams {
     AccountingCheckpoint postPnLWaterfallCheckpoint;
-    NAV_UNIT stProtocolFeeAccrued;
-    NAV_UNIT jtProtocolFeeAccrued;
+    NAV_UNIT ltLiquidityPremium;
+    NAV_UNIT stProtocolFee;
+    NAV_UNIT jtProtocolFee;
+    NAV_UNIT ltProtocolFee;
     uint256 betaWAD;
     uint256 minCoverageWAD;
     uint256 minLiquidityWAD;
