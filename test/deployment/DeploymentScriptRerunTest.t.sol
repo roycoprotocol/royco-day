@@ -223,7 +223,7 @@ contract DeploymentScriptRerunTest is Test {
         // never query the Chainlink feed, so this test does not depend on a live oracle. The oracle
         // address must be non-zero (the quoter's initializer requires it) but is never read.
         config.kernelSpecificParams = abi.encode(
-            DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
+            DeployScript.IdenticalERC4626Shares_ST_JT_ToChainlinkOracleQuoterKernelParams({
                 initialConversionRateWAD: 1e18, baseAssetToNavAssetOracle: address(0xDA7A0FEED), stalenessThresholdSeconds: 48 hours
             })
         );

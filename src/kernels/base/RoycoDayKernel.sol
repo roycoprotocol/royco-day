@@ -114,10 +114,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         JUNIOR_TRANCHE = _params.juniorTranche;
         JT_ASSET = _params.jtAsset;
         ACCOUNTANT = _params.accountant;
-        ENFORCE_TRANCHE_SHARES_TRANSFER_WHITELIST = _params.enforceVaultSharesTransferWhitelist;
         LIQUIDITY_TRANCHE = _params.liquidityTranche;
         LT_ASSET = _params.ltAsset;
         QUOTE_ASSET = _params.quoteAsset;
+        ENFORCE_TRANCHE_SHARES_TRANSFER_WHITELIST = _params.enforceVaultSharesTransferWhitelist;
     }
 
     /**
@@ -332,8 +332,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         (,, claimOnStNAV, claimOnJtNAV) = UtilsLib.computeTrancheClaimsOnNAVs(state);
 
         // Get the max withdrawable ST and JT assets in NAV units from the accountant considering the coverage requirement
-        (, NAV_UNIT stClaimableGivenCoverage, NAV_UNIT jtClaimableGivenCoverage) =
-            IRoycoDayAccountant(ACCOUNTANT).maxJTWithdrawal(state);
+        (, NAV_UNIT stClaimableGivenCoverage, NAV_UNIT jtClaimableGivenCoverage) = IRoycoDayAccountant(ACCOUNTANT).maxJTWithdrawal(state);
 
         // Bound the claims by the max withdrawable assets globally for each tranche and compute the cumulative NAV
         stMaxWithdrawableNAV = stClaimableGivenCoverage;
@@ -1230,10 +1229,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @dev Prevents bank run dynamics by ensuring one LP's bonus doesn't reduce coverage for remaining LPs
      * @dev Derivation:
      *      Post-redemption coverageUtilization must not exceed original coverageUtilization:
-     *      U = Current coverageUtilization = ((ST_RAW_NAV + (JT_RAW_NAV * β)) * COV) / JT_EFFECTIVE_NAV
+     *      U = Current coverageUtilization = ((ST_RAW_NAV + (JT_RAW_NAV * β)) * MIN_COVERAGE) / JT_EFFECTIVE_NAV
      *      U' = Post-redemption coverageUtilization (including bonus)
      *      Post-redemption coverageUtilization:
-     *      U' = (((ST_RAW_NAV - ST_REDEMPTION_ST_RAW_NAV - BONUS_ST_RAW_NAV) + ((JT_RAW_NAV - ST_REDEMPTION_JT_RAW_NAV - BONUS_JT_RAW_NAV) * β)) * COV) / (JT_EFFECTIVE_NAV - BONUS_ST_RAW_NAV - BONUS_JT_RAW_NAV)
+     *      U' = (((ST_RAW_NAV - ST_REDEMPTION_ST_RAW_NAV - BONUS_ST_RAW_NAV) + ((JT_RAW_NAV - ST_REDEMPTION_JT_RAW_NAV - BONUS_JT_RAW_NAV) * β)) * MIN_COVERAGE) / (JT_EFFECTIVE_NAV - BONUS_ST_RAW_NAV - BONUS_JT_RAW_NAV)
      *
      *      NOTE: INVARIANT: U' <= U
      *      Resulting invariant after simplification:

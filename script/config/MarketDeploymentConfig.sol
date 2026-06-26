@@ -218,7 +218,7 @@ abstract contract MarketDeploymentConfig {
             jtDustTolerance: 1e16,
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel,
             kernelSpecificParams: abi.encode(
-                DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
+                DeployScript.IdenticalERC4626Shares_ST_JT_ToChainlinkOracleQuoterKernelParams({
                         // Enable the oracle leg by using the sentinel initial conversion rate
                         initialConversionRateWAD: 0,
                         baseAssetToNavAssetOracle: 0x9A5a3c3Ed0361505cC1D4e824B3854De5724434A, // TODO: real base-asset->NAV Chainlink feed

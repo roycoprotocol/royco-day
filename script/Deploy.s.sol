@@ -116,23 +116,23 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         uint256 initialConversionRateWAD;
     }
 
-    struct IdenticalAssetsChainlinkToAdminOracleQuoterKernelParams {
+    struct IdenticalAssets_ST_JT_ChainlinkToAdminOracleQuoterKernelParams {
         uint256 initialConversionRateWAD;
         address trancheAssetToReferenceAssetOracle;
         uint48 stalenessThresholdSeconds;
     }
 
-    struct IdenticalERC4626SharesToAdminOracleQuoterKernelParams {
+    struct IdenticalERC4626Shares_ST_JT_ToAdminOracleQuoterKernelParams {
         uint256 initialConversionRateWAD;
     }
 
-    struct IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams {
+    struct IdenticalERC4626Shares_ST_JT_ToChainlinkOracleQuoterKernelParams {
         uint256 initialConversionRateWAD;
         address baseAssetToNavAssetOracle;
         uint48 stalenessThresholdSeconds;
     }
 
-    struct IdenticalAssetsAdminOracleQuoterKernelParams {
+    struct IdenticalAssets_ST_JT_AdminOracleQuoterKernelParams {
         uint256 initialConversionRateWAD;
     }
 

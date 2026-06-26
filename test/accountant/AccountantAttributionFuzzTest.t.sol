@@ -5,7 +5,7 @@ import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/I
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../script/config/MarketDeploymentConfig.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
-import { IdenticalAssetsOracleQuoter } from "../../src/kernels/base/quoter/base/IdenticalAssetsOracleQuoter.sol";
+import { IdenticalAssets_ST_JT_OracleQuoter } from "../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_OracleQuoter.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../src/libraries/Units.sol";
@@ -83,7 +83,7 @@ contract AccountantAttributionFuzzTest is BaseTest {
             // never query the Chainlink feed, so this test does not depend on a live oracle. The oracle
             // address must be non-zero (the quoter's initializer requires it) but is never read.
             kernelSpecificParams: abi.encode(
-                DeployScript.IdenticalERC4626SharesToChainlinkOracleQuoterKernelParams({
+                DeployScript.IdenticalERC4626Shares_ST_JT_ToChainlinkOracleQuoterKernelParams({
                     initialConversionRateWAD: 1e18, baseAssetToNavAssetOracle: address(0xDA7A0FEED), stalenessThresholdSeconds: 48 hours
                 })
             ),
@@ -299,10 +299,10 @@ contract AccountantAttributionFuzzTest is BaseTest {
     }
 
     function _bumpStoredConversionRate(uint256 _factorWAD) internal {
-        uint256 current = IdenticalAssetsOracleQuoter(address(KERNEL)).getStoredConversionRateWAD();
+        uint256 current = IdenticalAssets_ST_JT_OracleQuoter(address(KERNEL)).getStoredConversionRateWAD();
         uint256 next = current * _factorWAD / WAD;
         vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        IdenticalAssetsOracleQuoter(address(KERNEL)).setConversionRate(next, false);
+        IdenticalAssets_ST_JT_OracleQuoter(address(KERNEL)).setConversionRate(next, false);
     }
 }
 

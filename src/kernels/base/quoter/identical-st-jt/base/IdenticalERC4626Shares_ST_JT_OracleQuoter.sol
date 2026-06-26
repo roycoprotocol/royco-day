@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IERC20Metadata, IERC4626 } from "../../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
-import { Math } from "../../../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { WAD, WAD_DECIMALS } from "../../../../libraries/Constants.sol";
-import { IdenticalAssetsOracleQuoter } from "./IdenticalAssetsOracleQuoter.sol";
+import { IERC20Metadata, IERC4626 } from "../../../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
+import { Math } from "../../../../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import { WAD, WAD_DECIMALS } from "../../../../../libraries/Constants.sol";
+import { IdenticalAssets_ST_JT_OracleQuoter } from "./IdenticalAssets_ST_JT_OracleQuoter.sol";
 
 /**
- * @title IdenticalERC4626SharesOracleQuoter
+ * @title IdenticalERC4626Shares_ST_JT_OracleQuoter
  * @notice Quoter to convert tranche units (ERC4626 vault shares) to/from NAV units by converting the shares to base assets and converting base assets to NAV units using an admin or oracle set rate
  * @dev The senior and junior tranches must have the same ERC4626 vault share as their tranche unit
  * @dev Use case: Convert sUSDE (Tranche unit) to USDE (base assets) using ERC4626's convertToAssets and convert USDE to USD (NAV unit) using an admin or oracle set rate
  */
-abstract contract IdenticalERC4626SharesOracleQuoter is IdenticalAssetsOracleQuoter {
+abstract contract IdenticalERC4626Shares_ST_JT_OracleQuoter is IdenticalAssets_ST_JT_OracleQuoter {
     using Math for uint256;
 
     /// @dev The share amount to pass to convertToAssets() such that the result is scaled to WAD precision
@@ -39,7 +39,7 @@ abstract contract IdenticalERC4626SharesOracleQuoter is IdenticalAssetsOracleQuo
         public
         view
         virtual
-        override(IdenticalAssetsOracleQuoter)
+        override(IdenticalAssets_ST_JT_OracleQuoter)
         returns (uint256 trancheToNAVUnitConversionRateWAD)
     {
         // Fetch the conversion rate from the tranche asset (ERC4626 share) to its underlying asset, scaled to WAD precision

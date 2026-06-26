@@ -332,7 +332,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
 
     /**
      * @inheritdoc IRoycoDayAccountant
-     * @dev ST deposits are bounded by the current coverage and liquidity requirements of the market
+     * @dev ST deposits are bounded by the coverage and liquidity requirements of the market
      *
      * @dev Coverage Requirement: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * MIN_COVERAGE
      * @dev Max assets depositable into ST, x: JT_EFFECTIVE_NAV = ((ST_RAW_NAV + x) + (JT_RAW_NAV * β)) * MIN_COVERAGE
@@ -382,6 +382,8 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
 
     /**
      * @inheritdoc IRoycoDayAccountant
+     * @dev JT withdrawals are bounded by the coverage and liquidity requirements of the market
+     *
      * @dev Coverage Requirement: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * MIN_COVERAGE
      * @dev When assets are claimed from the JT, they are always liquidated in the same proportion as the tranche's total claims on the ST and JT assets
      * @dev Let S be the JT's total claims on ST assets and J be the JT's total claims on JT assets, in NAV Units. The total claims on the ST and JT assets are S + J NAV Units

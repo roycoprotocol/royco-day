@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IdenticalAssetsChainlinkOracleQuoter } from "../../../src/kernels/base/quoter/base/IdenticalAssetsChainlinkOracleQuoter.sol";
+import { IdenticalAssets_ST_JT_ChainlinkOracleQuoter } from "../../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_ChainlinkOracleQuoter.sol";
 import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
 
 /**
@@ -118,7 +118,7 @@ contract SetChainlinkOracle is ParameterUpdateBase {
                     marketName: cfg.marketName,
                     target: addrs.kernel,
                     callData: abi.encodeCall(
-                        IdenticalAssetsChainlinkOracleQuoter.setChainlinkOracle, (cfg.newOracle, cfg.newStalenessThresholdSeconds, cfg.syncBeforeUpdate)
+                        IdenticalAssets_ST_JT_ChainlinkOracleQuoter.setChainlinkOracle, (cfg.newOracle, cfg.newStalenessThresholdSeconds, cfg.syncBeforeUpdate)
                     ),
                     description: string.concat(
                         "Set Chainlink oracle for ",
@@ -147,8 +147,8 @@ contract SetChainlinkOracle is ParameterUpdateBase {
     function _verify(UpdateParams memory _params) internal pure override {
         (address expectedOracle, uint48 expectedStaleness,) = _decodeCallData(_params.callData);
 
-        IdenticalAssetsChainlinkOracleQuoter.IdenticalAssetsChainlinkOracleQuoterState memory state =
-            IdenticalAssetsChainlinkOracleQuoter(_params.target).getChainlinkOracleConfiguration();
+        IdenticalAssets_ST_JT_ChainlinkOracleQuoter.IdenticalAssets_ST_JT_ChainlinkOracleQuoterState memory state =
+            IdenticalAssets_ST_JT_ChainlinkOracleQuoter(_params.target).getChainlinkOracleConfiguration();
 
         require(state.oracle == expectedOracle, VerificationFailed("Chainlink oracle address mismatch after execution"));
         require(state.stalenessThresholdSeconds == expectedStaleness, VerificationFailed("Chainlink staleness threshold mismatch after execution"));

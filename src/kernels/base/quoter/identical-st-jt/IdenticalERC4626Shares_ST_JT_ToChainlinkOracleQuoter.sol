@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IdenticalAssetsChainlinkOracleQuoter } from "./base/IdenticalAssetsChainlinkOracleQuoter.sol";
-import { IdenticalAssetsOracleQuoter } from "./base/IdenticalAssetsOracleQuoter.sol";
-import { IdenticalERC4626SharesOracleQuoter, Math, WAD } from "./base/IdenticalERC4626SharesOracleQuoter.sol";
+import { IdenticalAssets_ST_JT_ChainlinkOracleQuoter } from "./base/IdenticalAssets_ST_JT_ChainlinkOracleQuoter.sol";
+import { IdenticalAssets_ST_JT_OracleQuoter } from "./base/IdenticalAssets_ST_JT_OracleQuoter.sol";
+import { IdenticalERC4626Shares_ST_JT_OracleQuoter, Math, WAD } from "./base/IdenticalERC4626Shares_ST_JT_OracleQuoter.sol";
 
 /**
- * @title IdenticalERC4626SharesToChainlinkOracleQuoter
+ * @title IdenticalERC4626Shares_ST_JT_ToChainlinkOracleQuoter
  * @dev The senior and junior tranches must have the same ERC4626 vault share as its tranche unit
  * @dev Use case: Convert sNUSD (Tranche unit) to NUSD (base assets) using ERC4626's convertToAssets and convert NUSD to USD (NAV unit) using its Redstone fundamental price feed or an admin set rate
  */
-abstract contract IdenticalERC4626SharesToChainlinkOracleQuoter is IdenticalERC4626SharesOracleQuoter, IdenticalAssetsChainlinkOracleQuoter {
+abstract contract IdenticalERC4626Shares_ST_JT_ToChainlinkOracleQuoter is IdenticalERC4626Shares_ST_JT_OracleQuoter, IdenticalAssets_ST_JT_ChainlinkOracleQuoter {
     using Math for uint256;
 
     /**
@@ -19,7 +19,7 @@ abstract contract IdenticalERC4626SharesToChainlinkOracleQuoter is IdenticalERC4
      * @param _baseAssetToNavAssetOracle The ERC4626 base asset to NAV accounting asset oracle
      * @param _stalenessThresholdSeconds The staleness threshold in seconds
      */
-    function __IdenticalERC4626SharesToChainlinkOracleQuoter_init(
+    function __IdenticalERC4626Shares_ST_JT_ToChainlinkOracleQuoter_init(
         uint256 _initialConversionRateWAD,
         address _baseAssetToNavAssetOracle,
         uint48 _stalenessThresholdSeconds
@@ -27,8 +27,8 @@ abstract contract IdenticalERC4626SharesToChainlinkOracleQuoter is IdenticalERC4
         internal
         onlyInitializing
     {
-        __IdenticalAssetsOracleQuoter_init_unchained(_initialConversionRateWAD);
-        __IdenticalAssetsChainlinkOracleQuoter_init_unchained(_baseAssetToNavAssetOracle, _stalenessThresholdSeconds);
+        __IdenticalAssets_ST_JT_OracleQuoter_init_unchained(_initialConversionRateWAD);
+        __IdenticalAssets_ST_JT_ChainlinkOracleQuoter_init_unchained(_baseAssetToNavAssetOracle, _stalenessThresholdSeconds);
     }
 
     /**
@@ -41,17 +41,17 @@ abstract contract IdenticalERC4626SharesToChainlinkOracleQuoter is IdenticalERC4
         public
         view
         virtual
-        override(IdenticalERC4626SharesOracleQuoter, IdenticalAssetsChainlinkOracleQuoter)
+        override(IdenticalERC4626Shares_ST_JT_OracleQuoter, IdenticalAssets_ST_JT_ChainlinkOracleQuoter)
         returns (uint256 trancheToNAVUnitConversionRateWAD)
     {
-        return IdenticalERC4626SharesOracleQuoter.getTrancheUnitToNAVUnitConversionRateWAD();
+        return IdenticalERC4626Shares_ST_JT_OracleQuoter.getTrancheUnitToNAVUnitConversionRateWAD();
     }
 
     /**
      * @notice Returns the conversion rate from the ERC4626 base asset to NAV units, scaled to WAD precision
      * @return baseAssetToNAVUnitConversionRateWAD The conversion rate from the ERC4626 base asset to NAV units, scaled to WAD precision
      */
-    function _getConversionRateFromOracleWAD() internal view override(IdenticalAssetsOracleQuoter) returns (uint256 baseAssetToNAVUnitConversionRateWAD) {
+    function _getConversionRateFromOracleWAD() internal view override(IdenticalAssets_ST_JT_OracleQuoter) returns (uint256 baseAssetToNAVUnitConversionRateWAD) {
         // Fetch the ERC4626 base asset price in NAV accounting assets and its precision
         (uint256 baseAssetPriceInNavAssets, uint256 pricePrecision) = _queryChainlinkOracle();
         // Convert the price to be in WAD precision

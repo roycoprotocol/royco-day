@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IERC20Metadata } from "../../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
-import { Math, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../libraries/Units.sol";
-import { RoycoDayKernel } from "../../RoycoDayKernel.sol";
+import { IERC20Metadata } from "../../../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
+import { Math, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../../libraries/Units.sol";
+import { RoycoDayKernel } from "../../../RoycoDayKernel.sol";
 
 /**
- * @title IdenticalAssetsOracleQuoter
+ * @title IdenticalAssets_ST_JT_OracleQuoter
  * @notice Quoter to convert tranche units to/from NAV units using an oracle for markets where both tranches use the same tranche units
  * @dev NAV units always have WAD precision
  * @dev The quoter reads the conversion rate from the specified oracle in WAD precision.
@@ -14,13 +14,13 @@ import { RoycoDayKernel } from "../../RoycoDayKernel.sol";
  *      Supported use-cases include:
  *      - Identical Yield Bearing ERC20 for ST And JT: Yield Bearing ERC20 and Tranche Unit (FalconXUSDC, reUSD, etc.), NAV Unit (USD)
  */
-abstract contract IdenticalAssetsOracleQuoter is RoycoDayKernel {
+abstract contract IdenticalAssets_ST_JT_OracleQuoter is RoycoDayKernel {
     using UnitsMathLib for NAV_UNIT;
     using UnitsMathLib for TRANCHE_UNIT;
 
-    /// @dev Storage slot for IdenticalAssetsOracleQuoterState using ERC-7201 pattern
-    // keccak256(abi.encode(uint256(keccak256("Royco.storage.IdenticalAssetsOracleQuoterState")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant IDENTICAL_ASSETS_ORACLE_QUOTER_STORAGE_SLOT = 0xca94f7ca84d231255275e1b9f26a7020d13b86fcd22e881d1138f23eeb47cf00;
+    /// @dev Storage slot for IdenticalAssets_ST_JT_OracleQuoterState using ERC-7201 pattern
+    // keccak256(abi.encode(uint256(keccak256("Royco.storage.IdenticalAssets_ST_JT_OracleQuoterState")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant IDENTICAL_ASSETS_ST_JT_ORACLE_QUOTER_STORAGE_SLOT = 0x54cd05a2c27d5d9c9a9737f8c40012d3aaaf930bf3bd4a6472e48a5cd4447600;
 
     /// @notice A sentinel value for the conversion rate, indicating that the conversion rate should be queried in real time from the specified oracle
     uint256 internal constant SENTINEL_CONVERSION_RATE = 0;
@@ -35,8 +35,8 @@ abstract contract IdenticalAssetsOracleQuoter is RoycoDayKernel {
     uint256 internal transient cachedTrancheUnitToNAVUnitConversionRateWAD;
 
     /// @dev Storage state for the Royco identical assets overridable oracle quoter
-    /// @custom:storage-location erc7201:Royco.storage.IdenticalAssetsOracleQuoterState
-    struct IdenticalAssetsOracleQuoterState {
+    /// @custom:storage-location erc7201:Royco.storage.IdenticalAssets_ST_JT_OracleQuoterState
+    struct IdenticalAssets_ST_JT_OracleQuoterState {
         uint256 conversionRateWAD;
     }
 
@@ -60,10 +60,10 @@ abstract contract IdenticalAssetsOracleQuoter is RoycoDayKernel {
      * @notice Initializes the identical assets oracle quoter
      * @param _initialConversionRateWAD The initial conversion rate as defined by the oracle, scaled to WAD precision
      */
-    function __IdenticalAssetsOracleQuoter_init_unchained(uint256 _initialConversionRateWAD) internal onlyInitializing {
+    function __IdenticalAssets_ST_JT_OracleQuoter_init_unchained(uint256 _initialConversionRateWAD) internal onlyInitializing {
         // Preemptively return if this quoter is reliant on an oracle instead of an admin set conversion rate
         if (_initialConversionRateWAD == SENTINEL_CONVERSION_RATE) return;
-        _getIdenticalAssetsOracleQuoterStorage().conversionRateWAD = _initialConversionRateWAD;
+        _getIdenticalAssets_ST_JT_OracleQuoterStorage().conversionRateWAD = _initialConversionRateWAD;
         emit ConversionRateUpdated(_initialConversionRateWAD);
     }
 
@@ -99,7 +99,7 @@ abstract contract IdenticalAssetsOracleQuoter is RoycoDayKernel {
         // If specified, sync the tranche accounting to reflect the PNL up to this point in time
         if (_syncBeforeUpdate) _preOpSyncTrancheAccounting();
         // Set the new conversion rate
-        _getIdenticalAssetsOracleQuoterStorage().conversionRateWAD = _conversionRateWAD;
+        _getIdenticalAssets_ST_JT_OracleQuoterStorage().conversionRateWAD = _conversionRateWAD;
         emit ConversionRateUpdated(_conversionRateWAD);
         // Sync the tranche accounting to reflect the PNL from the updated conversion rate
         _preOpSyncTrancheAccounting();
@@ -120,7 +120,7 @@ abstract contract IdenticalAssetsOracleQuoter is RoycoDayKernel {
     /// @notice Returns the stored conversion rate, scaled to WAD precision
     /// @return conversionRateWAD The stored conversion rate, scaled to WAD precision
     function getStoredConversionRateWAD() public view returns (uint256) {
-        return _getIdenticalAssetsOracleQuoterStorage().conversionRateWAD;
+        return _getIdenticalAssets_ST_JT_OracleQuoterStorage().conversionRateWAD;
     }
 
     /**
@@ -177,13 +177,13 @@ abstract contract IdenticalAssetsOracleQuoter is RoycoDayKernel {
     function _getConversionRateFromOracleWAD() internal view virtual returns (uint256 conversionRateWAD);
 
     /**
-     * @notice Returns a storage pointer to the IdenticalAssetsOracleQuoterState storage
+     * @notice Returns a storage pointer to the IdenticalAssets_ST_JT_OracleQuoterState storage
      * @dev Uses ERC-7201 storage slot pattern for collision-resistant storage
      * @return $ Storage pointer
      */
-    function _getIdenticalAssetsOracleQuoterStorage() private pure returns (IdenticalAssetsOracleQuoterState storage $) {
+    function _getIdenticalAssets_ST_JT_OracleQuoterStorage() private pure returns (IdenticalAssets_ST_JT_OracleQuoterState storage $) {
         assembly ("memory-safe") {
-            $.slot := IDENTICAL_ASSETS_ORACLE_QUOTER_STORAGE_SLOT
+            $.slot := IDENTICAL_ASSETS_ST_JT_ORACLE_QUOTER_STORAGE_SLOT
         }
     }
 }

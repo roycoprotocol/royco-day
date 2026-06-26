@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IdenticalAssetsOracleQuoter } from "./IdenticalAssetsOracleQuoter.sol";
+import { IdenticalAssets_ST_JT_OracleQuoter } from "./IdenticalAssets_ST_JT_OracleQuoter.sol";
 
 /**
- * @title IdenticalAssetsAdminOracleQuoter
+ * @title IdenticalAssets_ST_JT_AdminOracleQuoter
  * @notice Quoter to convert tranche units to/from NAV units using an admin controlled oracle for markets where both tranches use the same tranche units
  * @dev The conversion rate is set purely by an admin
  */
-abstract contract IdenticalAssetsAdminOracleQuoter is IdenticalAssetsOracleQuoter {
+abstract contract IdenticalAssets_ST_JT_AdminOracleQuoter is IdenticalAssets_ST_JT_OracleQuoter {
     /// @notice Thrown when trying to call the oracle querying helper
     error MUST_USE_ADMIN_ORACLE_INPUT();
 
@@ -20,24 +20,24 @@ abstract contract IdenticalAssetsAdminOracleQuoter is IdenticalAssetsOracleQuote
      * @dev The conversion rate cannot be set to the sentinel value (0)
      * @param _initialConversionRateWAD The initial reference asset to NAV unit conversion rate, scaled to WAD precision
      */
-    function __IdenticalAssetsAdminOracleQuoter_init(uint256 _initialConversionRateWAD) internal onlyInitializing {
+    function __IdenticalAssets_ST_JT_AdminOracleQuoter_init(uint256 _initialConversionRateWAD) internal onlyInitializing {
         // Validate the conversion rate
         require(_initialConversionRateWAD != SENTINEL_CONVERSION_RATE, INVALID_CONVERSION_RATE());
         // Initialize the oracle quoter with the initial admin set rate
-        __IdenticalAssetsOracleQuoter_init_unchained(_initialConversionRateWAD);
+        __IdenticalAssets_ST_JT_OracleQuoter_init_unchained(_initialConversionRateWAD);
     }
 
-    /// @inheritdoc IdenticalAssetsOracleQuoter
+    /// @inheritdoc IdenticalAssets_ST_JT_OracleQuoter
     /// @dev The conversion rate cannot be set to the sentinel value (0)
-    function setConversionRate(uint256 _conversionRateWAD, bool _syncBeforeUpdate) public virtual override(IdenticalAssetsOracleQuoter) restricted {
+    function setConversionRate(uint256 _conversionRateWAD, bool _syncBeforeUpdate) public virtual override(IdenticalAssets_ST_JT_OracleQuoter) restricted {
         // Validate the conversion rate
         require(_conversionRateWAD != SENTINEL_CONVERSION_RATE, INVALID_CONVERSION_RATE());
         // Update the oracle quoter with the initial admin set rate
-        IdenticalAssetsOracleQuoter.setConversionRate(_conversionRateWAD, _syncBeforeUpdate);
+        IdenticalAssets_ST_JT_OracleQuoter.setConversionRate(_conversionRateWAD, _syncBeforeUpdate);
     }
 
-    /// @inheritdoc IdenticalAssetsOracleQuoter
-    function _getConversionRateFromOracleWAD() internal pure override(IdenticalAssetsOracleQuoter) returns (uint256) {
+    /// @inheritdoc IdenticalAssets_ST_JT_OracleQuoter
+    function _getConversionRateFromOracleWAD() internal pure override(IdenticalAssets_ST_JT_OracleQuoter) returns (uint256) {
         revert MUST_USE_ADMIN_ORACLE_INPUT();
     }
 }
