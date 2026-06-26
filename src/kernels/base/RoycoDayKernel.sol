@@ -329,7 +329,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
         // Use the precise NAV claims directly from the decomposition instead of round-tripping them through tranche units (NAV -> tranche -> NAV).
-        (,, claimOnStNAV, claimOnJtNAV) = UtilsLib.computeTrancheClaimsOnNAVs(state.stRawNAV, state.jtRawNAV, state.stEffectiveNAV, state.jtEffectiveNAV);
+        (,, claimOnStNAV, claimOnJtNAV) = UtilsLib.computeTrancheClaimsOnNAVs(state);
 
         // Get the max withdrawable ST and JT assets in NAV units from the accountant considering the coverage requirement
         (, NAV_UNIT stClaimableGivenCoverage, NAV_UNIT jtClaimableGivenCoverage) =
@@ -1051,7 +1051,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     {
         // Decompose the NAV claims for the tranches based on the synced accounting state
         (NAV_UNIT stClaimOnSTRawNAV, NAV_UNIT stClaimOnJTRawNAV, NAV_UNIT jtClaimOnSTRawNAV, NAV_UNIT jtClaimOnJTRawNAV) =
-            UtilsLib.computeTrancheClaimsOnNAVs(_state.stRawNAV, _state.jtRawNAV, _state.stEffectiveNAV, _state.jtEffectiveNAV);
+            UtilsLib.computeTrancheClaimsOnNAVs(_state);
 
         // Compute the cumulative asset claims for the specified tranche based on the NAV decomposition
         if (_trancheType == TrancheType.SENIOR) {
@@ -1203,7 +1203,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         NAV_UNIT desiredBonusNAV = _stUserClaims.nav.mulDiv(_getRoycoDayKernelStorage().stSelfLiquidationBonusWAD, WAD, Math.Rounding.Floor);
 
         // Decompose the NAV claims for the Junior Tranche to get the NAV claims for sourcing the bonus
-        (,, NAV_UNIT jtClaimOnSTRawNAV,) = UtilsLib.computeTrancheClaimsOnNAVs(_state.stRawNAV, _state.jtRawNAV, _state.stEffectiveNAV, _state.jtEffectiveNAV);
+        (,, NAV_UNIT jtClaimOnSTRawNAV,) = UtilsLib.computeTrancheClaimsOnNAVs(_state);
 
         // Compute the maximum bonus that doesn't increase coverageUtilization, preventing bank run dynamics
         NAV_UNIT maxCoverageUtilizationNeutralBonusNAV = _computeMaxCoverageUtilizationNeutralBonus(_state, _stUserClaims, jtClaimOnSTRawNAV);

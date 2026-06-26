@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { WAD, ZERO_NAV_UNITS } from "./Constants.sol";
-import { AssetClaims } from "./Types.sol";
+import { AssetClaims, SyncedAccountingState } from "./Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib } from "./Units.sol";
 
 /**
@@ -121,14 +121,30 @@ library UtilsLib {
 
     /**
      * @notice Decomposes the senior and junior tranche NAVs into self-backed and cross-tranche NAV claims
+     * @param _state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
+     * @return stClaimOnSTRawNAV The amount of ST's effective NAV that is backed by ST's own raw NAV
+     * @return stClaimOnJTRawNAV The amount of ST's effective NAV that is backed by JT's raw NAV
+     * @return jtClaimOnSTRawNAV The amount of JT's effective NAV that is backed by ST's raw NAV
+     * @return jtClaimOnJTRawNAV The amount of JT's effective NAV that is backed by JT's own raw NAV
+     */
+    function computeTrancheClaimsOnNAVs(SyncedAccountingState memory _state)
+        internal
+        pure
+        returns (NAV_UNIT stClaimOnSTRawNAV, NAV_UNIT stClaimOnJTRawNAV, NAV_UNIT jtClaimOnSTRawNAV, NAV_UNIT jtClaimOnJTRawNAV)
+    {
+        return computeTrancheClaimsOnNAVs(_state.stRawNAV, _state.jtRawNAV, _state.stEffectiveNAV, _state.jtEffectiveNAV);
+    }
+
+    /**
+     * @notice Decomposes the senior and junior tranche NAVs into self-backed and cross-tranche NAV claims
      * @param _stRawNAV The raw net asset value of the senior tranche invested assets
      * @param _jtRawNAV The raw net asset value of the junior tranche invested assets
      * @param _stEffectiveNAV The total net asset value that the senior tranche is entitled to
      * @param _jtEffectiveNAV The total net asset value that the junior tranche is entitled to
-     * @return stClaimOnSTRawNAV The portion of ST's effective NAV that is funded by ST’s raw NAV
-     * @return stClaimOnJTRawNAV The portion of ST's effective NAV that is funded by JT’s raw NAV
-     * @return jtClaimOnSTRawNAV The portion of JT's effective NAV that is funded by ST’s raw NAV
-     * @return jtClaimOnJTRawNAV The portion of JT's effective NAV that is funded by JT’s raw NAV
+     * @return stClaimOnSTRawNAV The amount of ST's effective NAV that is backed by ST's own raw NAV
+     * @return stClaimOnJTRawNAV The amount of ST's effective NAV that is backed by JT's raw NAV
+     * @return jtClaimOnSTRawNAV The amount of JT's effective NAV that is backed by ST's raw NAV
+     * @return jtClaimOnJTRawNAV The amount of JT's effective NAV that is backed by JT's own raw NAV
      */
     function computeTrancheClaimsOnNAVs(
         NAV_UNIT _stRawNAV,

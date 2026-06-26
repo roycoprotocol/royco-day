@@ -400,8 +400,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
 
         // Decompose the junior tranche's claims on the ST and JT raw NAVs from the synced accounting state
-        (,, NAV_UNIT jtClaimOnStUnits, NAV_UNIT jtClaimOnJtUnits) =
-            UtilsLib.computeTrancheClaimsOnNAVs(state.stRawNAV, state.jtRawNAV, state.stEffectiveNAV, state.jtEffectiveNAV);
+        (,, NAV_UNIT jtClaimOnStUnits, NAV_UNIT jtClaimOnJtUnits) = UtilsLib.computeTrancheClaimsOnNAVs(state);
 
         // Get the surplus JT assets in NAV units
         // Compute the total covered exposure of the underlying investment, rounding in favor of senior protection
