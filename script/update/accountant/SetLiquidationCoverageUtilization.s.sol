@@ -122,7 +122,7 @@ contract SetLiquidationCoverageUtilization is ParameterUpdateBase {
     // VERIFICATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function _verify(UpdateParams memory _params) internal pure override {
+    function _verify(UpdateParams memory _params) internal view override {
         IRoycoDayAccountant.RoycoDayAccountantState memory state = IRoycoDayAccountant(_params.target).getState();
 
         // Extract expected value from the calldata (skip 4-byte selector; uint256 is at offset 4)
