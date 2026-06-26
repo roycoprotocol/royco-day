@@ -45,18 +45,14 @@ library AccountingLib {
         pure
         returns (int256 deltaSTEffectiveNAV, int256 deltaJTEffectiveNAV)
     {
-        // Compute the deltas for each tranche's effective NAV based on their last checkpointed economic claims on each tranche's raw NAVs
-        // Last cross-tranche claims (the NAV that can't be funded by the tranche's own raw NAV)
-        NAV_UNIT stClaimOnJTRawNAV = UnitsMathLib.saturatingSub(_lastSTEffectiveNAV, _lastSTRawNAV);
-        NAV_UNIT jtClaimOnSTRawNAV = UnitsMathLib.saturatingSub(_lastJTEffectiveNAV, _lastJTRawNAV);
-        // Last self-backed portion of the senior tranche's claim (the NAV funded by ST's own raw NAV)
-        // NOTE: NAV conservation guarantees that this cannot underflow
-        NAV_UNIT stClaimOnSTRawNAV = (_lastSTRawNAV - jtClaimOnSTRawNAV);
-
         // Compute the deltas in the raw NAVs of each tranche
         // The deltas represent the unrealized PNL of the underlying investment since the last NAV checkpoints
         int256 deltaSTRawNAV = UnitsMathLib.computeNAVDelta(_stRawNAV, _lastSTRawNAV);
         int256 deltaJTRawNAV = UnitsMathLib.computeNAVDelta(_jtRawNAV, _lastJTRawNAV);
+
+        // Decompose the last checkpointed senior claim into its self-backed portion (funded by ST's own raw NAV) and its cross-tranche portion (funded by JT's raw NAV)
+        (NAV_UNIT stClaimOnSTRawNAV, NAV_UNIT stClaimOnJTRawNAV,,) =
+            UtilsLib.computeTrancheClaimsOnNAVs(_lastSTRawNAV, _lastJTRawNAV, _lastSTEffectiveNAV, _lastJTEffectiveNAV);
 
         // Attribute each raw NAV's signed PNL to ST in proportion to its claim against that raw NAV
         // The resulting deltas are rounded down: in favor of seniors on losses and juniors on gains

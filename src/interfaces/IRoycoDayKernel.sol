@@ -56,6 +56,7 @@ interface IRoycoDayKernel {
      * @custom:field stOwnedYieldBearingAssets - The yield bearing assets held by the senior tranche, in ST's asset units
      * @custom:field jtOwnedYieldBearingAssets - The yield bearing assets held by the junior tranche, in JT's asset units
      * @custom:field ltOwnedYieldBearingAssets - The yield bearing assets held by the liquidity tranche, in LT's asset units
+     * @custom:field ltOwnedSeniorTrancheShares - The senior tranche shares held by the liquidity tranche (accumulated liquidity premium payments)
      * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables blacklist screening)
      */
     struct RoycoDayKernelState {
@@ -64,6 +65,7 @@ interface IRoycoDayKernel {
         TRANCHE_UNIT stOwnedYieldBearingAssets;
         TRANCHE_UNIT jtOwnedYieldBearingAssets;
         TRANCHE_UNIT ltOwnedYieldBearingAssets;
+        uint256 ltOwnedSeniorTrancheShares;
         address roycoBlacklist;
     }
 
@@ -426,16 +428,16 @@ interface IRoycoDayKernel {
      *         shares), single-sided adds (senior shares + quote) into the liquidity venue to mint the LT tranche assets, then deposits them into the LT
      * @dev Assumes the ST underlying and quote have been transferred to the kernel before this call (by the LT tranche)
      * @dev The ST mint leg enforces the market's coverage requirement; reverts if coverage is unsatisfied
-     * @param _stUnderlying The amount of ST underlying (the senior tranche's base asset) to deposit, in ST tranche units
-     * @param _quoteAmount The amount of quote asset to add as the second pool leg
+     * @param _stAssets The amount of ST underlying (the senior tranche's base asset) to deposit, denominated in ST tranche units
+     * @param _quoteAssets The amount of quote asset to add as the second pool leg
      * @param _minStSharesMinted The minimum senior shares the deposited ST underlying must mint (slippage bound against an unfavorable ST share price)
      * @return valueAllocated The value of the minted LT tranche assets, denominated in the kernel's NAV units
      * @return navToMintSharesAt The LT raw NAV at which the LT shares will be minted (pre-deposit)
      * @return trancheAssetsOut The amount of LT tranche assets (LP token) minted and credited to the liquidity tranche
      */
     function ltDepositMultiAsset(
-        uint256 _stUnderlying,
-        uint256 _quoteAmount,
+        TRANCHE_UNIT _stAssets,
+        uint256 _quoteAssets,
         uint256 _minStSharesMinted
     )
         external

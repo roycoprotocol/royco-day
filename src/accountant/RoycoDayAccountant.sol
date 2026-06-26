@@ -332,60 +332,80 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
 
     /**
      * @inheritdoc IRoycoDayAccountant
-     * @dev Coverage Invariant: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * MIN_COVERAGE
+     * @dev ST deposits are bounded by the current coverage and liquidity requirements of the market
+     *
+     * @dev Coverage Requirement: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * MIN_COVERAGE
      * @dev Max assets depositable into ST, x: JT_EFFECTIVE_NAV = ((ST_RAW_NAV + x) + (JT_RAW_NAV * β)) * MIN_COVERAGE
      *      Isolate x: x = (JT_EFFECTIVE_NAV / MIN_COVERAGE) - (JT_RAW_NAV * β) - ST_RAW_NAV
+     *
+     * @dev Liquidity Requirement: LT_RAW_NAV >= (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)
+     * @dev Max assets depositable into ST, y: LT_RAW_NAV = (ST_EFFECTIVE_NAV + y) * MIN_LIQUIDITY
+     *      Isolate y: y = (LT_RAW_NAV / MIN_LIQUIDITY) - ST_EFFECTIVE_NAV
+     *
+     * @dev The maximum deposit is the minimum of x and y
      */
-    function maxSTDepositGivenCoverage(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external view override(IRoycoDayAccountant) returns (NAV_UNIT maxSTDeposit) {
+    function maxSTDeposit(SyncedAccountingState memory state) external view override(IRoycoDayAccountant) returns (NAV_UNIT) {
         // Get the storage pointer to the accountant state
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
-        // Preview a NAV sync to get the market's current state
-        (uint192 twJTYieldShareAccruedWAD, uint192 twLTYieldShareAccruedWAD) = _previewPremiumYieldShareAccrual();
-        (SyncedAccountingState memory state,,,) =
-            _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, $.lastLTRawNAV, twJTYieldShareAccruedWAD, twLTYieldShareAccruedWAD);
+
+        // Compute the max ST deposit given the coverage requirement
         // If there is no minimum coverage requirement, there is no ST capacity restriction
-        if (state.minCoverageWAD == 0) return MAX_NAV_UNITS;
-        // Solve for x, rounding in favor of senior protection
-        // Compute the total covered assets by the junior tranche loss absorption buffer
-        NAV_UNIT totalCoveredAssets = state.jtEffectiveNAV.mulDiv(WAD, state.minCoverageWAD, Math.Rounding.Floor);
-        // Compute the assets required to cover current junior tranche exposure
-        // Also account for JT's dust tolerance to preclude reverts due to rounding after ST deposit (if both are exposed to the same underlying rounding)
-        NAV_UNIT jtCoverageRequired = _jtRawNAV.mulDiv(state.betaWAD, WAD, Math.Rounding.Ceil) + $.jtNAVDustTolerance;
-        // Compute the amount of assets that can be deposited into senior while retaining full coverage
-        // Also account for ST's dust tolerance to preclude reverts due to rounding after ST deposit
-        maxSTDeposit = totalCoveredAssets.saturatingSub(jtCoverageRequired).saturatingSub(_stRawNAV).saturatingSub($.stNAVDustTolerance);
+        NAV_UNIT maxSTDepositGivenCoverage = MAX_NAV_UNITS;
+        if (state.minCoverageWAD != 0) {
+            // Solve for x, rounding in favor of senior protection
+            // Compute the total covered assets by the junior tranche loss absorption buffer
+            NAV_UNIT totalCoveredAssets = state.jtEffectiveNAV.mulDiv(WAD, state.minCoverageWAD, Math.Rounding.Floor);
+            // Compute the assets required to cover current junior tranche exposure
+            // Also account for JT's dust tolerance to preclude reverts due to rounding after ST deposit (if both are exposed to the same underlying rounding)
+            NAV_UNIT jtCoverageRequired = state.jtRawNAV.mulDiv(state.betaWAD, WAD, Math.Rounding.Ceil) + $.jtNAVDustTolerance;
+            // Compute the value of assets that can be deposited into senior while retaining minimum coverage
+            // Also account for ST's dust tolerance to preclude reverts due to rounding after ST deposit
+            maxSTDepositGivenCoverage = totalCoveredAssets.saturatingSub((jtCoverageRequired + state.stRawNAV + $.stNAVDustTolerance));
+        }
+
+        //  Compute the max ST deposit given the liquidity requirement
+        // If there is no minimum liquidity requirement, there is no ST capacity restriction
+        NAV_UNIT maxSTDepositGivenLiquidity = MAX_NAV_UNITS;
+        if (state.minLiquidityWAD != 0) {
+            // Solve for y, rounding in favor of senior protection
+            // Compute the maximum value ownable by the senior tranche given the current value of the market making inventory
+            // Also account for LT's dust tolerance to preclude reverts due to rounding after ST deposit
+            NAV_UNIT maxSTEffectiveNAV = (state.ltRawNAV.saturatingSub($.ltNAVDustTolerance)).mulDiv(WAD, state.minLiquidityWAD, Math.Rounding.Floor);
+            // Compute the value of assets that can be deposited into senior while retaining minimum liquidity
+            // Also account for ST's dust tolerance to preclude reverts due to rounding after ST deposit
+            maxSTDepositGivenLiquidity = maxSTEffectiveNAV.saturatingSub(state.stEffectiveNAV + $.stNAVDustTolerance);
+        }
+
+        // The maximum deposit is the minimum of x and y
+        return UnitsMathLib.min(maxSTDepositGivenCoverage, maxSTDepositGivenLiquidity);
     }
 
     /**
      * @inheritdoc IRoycoDayAccountant
-     * @dev Coverage Invariant: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * MIN_COVERAGE
+     * @dev Coverage Requirement: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * MIN_COVERAGE
      * @dev When assets are claimed from the JT, they are always liquidated in the same proportion as the tranche's total claims on the ST and JT assets
      * @dev Let S be the JT's total claims on ST assets and J be the JT's total claims on JT assets, in NAV Units. The total claims on the ST and JT assets are S + J NAV Units
      * @dev Let K_S be S / (S + J) and K_J be J / (S + J)
-     * @dev Therefore, if a total NAV of y is claimed from the JT, K_S * y will be claimed from the ST_RAW_NAV and K_J * y will be claimed from the JT_RAW_NAV
-     * @dev Max assets withdrawable from JT, y: (JT_EFFECTIVE_NAV - y) = ((ST_RAW_NAV - K_S * y) + ((JT_RAW_NAV - K_J * y) * β)) * COV
-     *      Isolate y: y = (JT_EFFECTIVE_NAV - (MIN_COVERAGE * (ST_RAW_NAV + (JT_RAW_NAV * β)))) / (1 - (MIN_COVERAGE * (K_S + β * K_J)))
+     * @dev Therefore, if a total NAV of z is claimed from the JT, K_S * z will be claimed from the ST_RAW_NAV and K_J * z will be claimed from the JT_RAW_NAV
+     * @dev Max assets withdrawable from JT, z: (JT_EFFECTIVE_NAV - z) = ((ST_RAW_NAV - K_S * z) + ((JT_RAW_NAV - K_J * z) * β)) * COV
+     *      Isolate z: z = (JT_EFFECTIVE_NAV - (MIN_COVERAGE * (ST_RAW_NAV + (JT_RAW_NAV * β)))) / (1 - (MIN_COVERAGE * (K_S + β * K_J)))
      */
-    function maxJTWithdrawalGivenCoverage(
-        NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV,
-        NAV_UNIT _jtClaimOnStUnits,
-        NAV_UNIT _jtClaimOnJtUnits
-    )
+    function maxJTWithdrawal(SyncedAccountingState memory state)
         external
         view
         override(IRoycoDayAccountant)
         returns (NAV_UNIT totalNAVClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable)
     {
+        // Get the storage pointer to the accountant state
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
 
+        // Decompose the junior tranche's claims on the ST and JT raw NAVs from the synced accounting state
+        (,, NAV_UNIT jtClaimOnStUnits, NAV_UNIT jtClaimOnJtUnits) =
+            UtilsLib.computeTrancheClaimsOnNAVs(state.stRawNAV, state.jtRawNAV, state.stEffectiveNAV, state.jtEffectiveNAV);
+
         // Get the surplus JT assets in NAV units
-        // Preview a NAV sync to get the market's current state
-        (uint192 twJTYieldShareAccruedWAD, uint192 twLTYieldShareAccruedWAD) = _previewPremiumYieldShareAccrual();
-        (SyncedAccountingState memory state,,,) =
-            _previewSyncTrancheAccounting(_stRawNAV, _jtRawNAV, $.lastLTRawNAV, twJTYieldShareAccruedWAD, twLTYieldShareAccruedWAD);
         // Compute the total covered exposure of the underlying investment, rounding in favor of senior protection
-        NAV_UNIT totalCoveredExposure = _stRawNAV + _jtRawNAV.mulDiv(state.betaWAD, WAD, Math.Rounding.Ceil);
+        NAV_UNIT totalCoveredExposure = state.stRawNAV + state.jtRawNAV.mulDiv(state.betaWAD, WAD, Math.Rounding.Ceil);
         // Compute the minimum junior tranche assets required to cover the exposure as per the market's coverage requirement
         NAV_UNIT requiredJTAssets = totalCoveredExposure.mulDiv(state.minCoverageWAD, WAD, Math.Rounding.Ceil);
         // Compute the surplus coverage currently provided by the junior tranche based on its currently remaining loss-absorption buffer
@@ -397,12 +417,12 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         if (surplusJTAssets == ZERO_NAV_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         // Compute the total JT claim on NAV and preemptively return if zero
-        NAV_UNIT totalJTClaims = _jtClaimOnStUnits + _jtClaimOnJtUnits;
+        NAV_UNIT totalJTClaims = jtClaimOnStUnits + jtClaimOnJtUnits;
         if (totalJTClaims == ZERO_NAV_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS);
         // Calculate K_S
-        uint256 kS_WAD = _jtClaimOnStUnits.mulDiv(WAD, totalJTClaims, Math.Rounding.Floor);
+        uint256 kS_WAD = jtClaimOnStUnits.mulDiv(WAD, totalJTClaims, Math.Rounding.Floor);
         // Calculate K_J
-        uint256 kJ_WAD = _jtClaimOnJtUnits.mulDiv(WAD, totalJTClaims, Math.Rounding.Floor);
+        uint256 kJ_WAD = jtClaimOnJtUnits.mulDiv(WAD, totalJTClaims, Math.Rounding.Floor);
         // Compute how much coverage the system retains per 1 nav unit of JT assets withdrawn scaled to WAD precision
         uint256 coverageRetentionWAD =
             (WAD - state.minCoverageWAD.mulDiv((kS_WAD + state.betaWAD.mulDiv(kJ_WAD, WAD, Math.Rounding.Floor)), WAD, Math.Rounding.Floor));

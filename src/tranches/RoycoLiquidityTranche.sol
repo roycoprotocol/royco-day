@@ -9,7 +9,7 @@ import { IRoycoLiquidityTranche } from "../interfaces/IRoycoLiquidityTranche.sol
 import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 import { ZERO_NAV_UNITS } from "../libraries/Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../libraries/Types.sol";
-import { NAV_UNIT } from "../libraries/Units.sol";
+import { NAV_UNIT, toTrancheUnits } from "../libraries/Units.sol";
 import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
 
 /**
@@ -76,7 +76,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
 
         // Orchestrate the multi-asset deposit in the kernel
         (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, uint256 trancheAssetsMinted) =
-            IRoycoDayKernel(kernel).ltDepositMultiAsset(_stUnderlying, _quoteAmount, _minStSharesMinted);
+            IRoycoDayKernel(kernel).ltDepositMultiAsset(toTrancheUnits(_stUnderlying), _quoteAmount, _minStSharesMinted);
 
         // navToMintSharesAt can be zero when the tranche is freshly deployed
         require(valueAllocated != ZERO_NAV_UNITS, INVALID_VALUE_ALLOCATED());

@@ -159,6 +159,9 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     function jtConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _jtAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
 
     /// @inheritdoc IRoycoDayKernel
+    function ltConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _ltAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
+
+    /// @inheritdoc IRoycoDayKernel
     function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
 
     /// @inheritdoc IRoycoDayKernel
@@ -166,9 +169,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @inheritdoc IRoycoDayKernel
     function ltConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
-
-    /// @inheritdoc IRoycoDayKernel
-    function ltConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _ltAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
 
     // =============================
     // Tranche Preview Functions
@@ -255,7 +255,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         if (state.marketState == MarketState.FIXED_TERM) return ZERO_TRANCHE_UNITS;
         // ST deposits are enabled as long as the market's coverage requirement is satisfied
         // No need to include ST liquidation proceeds in the raw NAV because those assets are not exposed to any volatility
-        NAV_UNIT stMaxDepositableNAV = IRoycoDayAccountant(ACCOUNTANT).maxSTDepositGivenCoverage(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
+        NAV_UNIT stMaxDepositableNAV = IRoycoDayAccountant(ACCOUNTANT).maxSTDeposit(state);
         return ((stMaxDepositableNAV == MAX_NAV_UNITS) ? MAX_TRANCHE_UNITS : stConvertNAVUnitsToTrancheUnits(stMaxDepositableNAV));
     }
 
@@ -329,11 +329,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
         // Use the precise NAV claims directly from the decomposition instead of round-tripping them through tranche units (NAV -> tranche -> NAV).
-        (,, claimOnStNAV, claimOnJtNAV,) = _decomposeNAVClaims(state);
+        (,, claimOnStNAV, claimOnJtNAV) = UtilsLib.computeTrancheClaimsOnNAVs(state.stRawNAV, state.jtRawNAV, state.stEffectiveNAV, state.jtEffectiveNAV);
 
         // Get the max withdrawable ST and JT assets in NAV units from the accountant considering the coverage requirement
         (, NAV_UNIT stClaimableGivenCoverage, NAV_UNIT jtClaimableGivenCoverage) =
-            IRoycoDayAccountant(ACCOUNTANT).maxJTWithdrawalGivenCoverage(state.stRawNAV, state.jtRawNAV, claimOnStNAV, claimOnJtNAV);
+            IRoycoDayAccountant(ACCOUNTANT).maxJTWithdrawal(state);
 
         // Bound the claims by the max withdrawable assets globally for each tranche and compute the cumulative NAV
         stMaxWithdrawableNAV = stClaimableGivenCoverage;
@@ -357,22 +357,22 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         override(IRoycoDayKernel)
         returns (NAV_UNIT claimOnLtNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees)
     {
-        // If the owner is blacklisted or the kernel is currently paused, return zero claims
-        if (_isBlacklisted(_owner) || paused()) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+        // // If the owner is blacklisted or the kernel is currently paused, return zero claims
+        // if (_isBlacklisted(_owner) || paused()) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
-        // Get the total claims the liquidity tranche has on its own assets
-        SyncedAccountingState memory state;
-        (state,, totalTrancheSharesAfterMintingFees) = previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
+        // // Get the total claims the liquidity tranche has on its own assets
+        // SyncedAccountingState memory state;
+        // (state,, totalTrancheSharesAfterMintingFees) = previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
 
-        // LT redemptions are disabled during a fixed-term market state
-        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+        // // LT redemptions are disabled during a fixed-term market state
+        // if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
-        // Use the precise NAV claims directly from the decomposition instead of round-tripping them through tranche units (NAV -> tranche -> NAV).
-        (,,,, claimOnLtNAV) = _decomposeNAVClaims(state);
+        // // Use the precise NAV claims directly from the decomposition instead of round-tripping them through tranche units (NAV -> tranche -> NAV).
+        // (,,,, claimOnLtNAV) = UtilsLib.computeTrancheClaimsOnNAVs(state);
 
-        // TODO: Implement (LT max withdrawable); reverts until the LT withdrawal path lands .
-        // Depends on maxLtWithdrawable implementation in the accountant
-        revert("not implemented");
+        // // TODO: Implement (LT max withdrawable); reverts until the LT withdrawal path lands .
+        // // Depends on maxLtWithdrawable implementation in the accountant
+        // revert("not implemented");
     }
 
     // =============================
@@ -635,8 +635,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @inheritdoc IRoycoDayKernel
     function ltDepositMultiAsset(
-        uint256 _stUnderlying,
-        uint256 _quoteAmount,
+        TRANCHE_UNIT _stAssets,
+        uint256 _quoteAssets,
         uint256 _minStSharesMinted
     )
         external
@@ -648,7 +648,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         withQuoterCache
         returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, uint256 trancheAssetsOut)
     {
-        require((_stUnderlying != 0 && _minStSharesMinted != 0) || _quoteAmount != 0, MUST_DEPOSIT_NON_ZERO_ASSETS());
+        require((_stAssets != ZERO_TRANCHE_UNITS && _minStSharesMinted != 0) || _quoteAssets != 0, MUST_DEPOSIT_NON_ZERO_ASSETS());
 
         // Sync and reconcile PnL
         SyncedAccountingState memory state = _preOpSyncTrancheAccounting();
@@ -657,16 +657,16 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
         // If the ST underlying is deposited, deposit it and mint the senior shares
         uint256 seniorSharesMinted;
-        if (_stUnderlying != 0) {
+        if (_stAssets != ZERO_TRANCHE_UNITS) {
             // Value the deposited ST underlying and compute the non-diluting senior share count to mint
-            NAV_UNIT stValueAllocated = stConvertTrancheUnitsToNAVUnits(toTrancheUnits(_stUnderlying));
+            NAV_UNIT stValueAllocated = stConvertTrancheUnitsToNAVUnits(_stAssets);
             seniorSharesMinted = _navToShares(stValueAllocated, state.stEffectiveNAV, IERC20(SENIOR_TRANCHE).totalSupply());
             // Enforce the caller's slippage bound on the senior shares minted from the underlying (guards against an unfavorable ST share price)
             require(seniorSharesMinted >= _minStSharesMinted, INSUFFICIENT_OUTPUT_AMOUNT());
 
             // Credit the ST underlying (already transferred to the kernel by the LT tranche).
             // We do not enforce coverage yet
-            _stDepositAssets(toTrancheUnits(_stUnderlying));
+            _stDepositAssets(_stAssets);
             state = _postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, ZERO_NAV_UNITS);
 
             // Mint the senior shares to the kernel then add them with the quote leg
@@ -674,7 +674,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         }
 
         // If the quote amount is deposited, add it to the liquidity venue
-        trancheAssetsOut = _addLiquidityUnbalanced(seniorSharesMinted, _quoteAmount);
+        trancheAssetsOut = _addLiquidityUnbalanced(seniorSharesMinted, _quoteAssets);
 
         // Deposit the freshly minted LT tranche assets (LP token) into the liquidity tranche
         navToMintSharesAt = state.ltRawNAV;
@@ -1050,12 +1050,12 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         returns (AssetClaims memory claims)
     {
         // Decompose the NAV claims for the tranches based on the synced accounting state
-        (NAV_UNIT stClaimOnSelfRawNAV, NAV_UNIT stClaimOnJTRawNAV, NAV_UNIT jtClaimOnSTRawNAV, NAV_UNIT jtClaimOnSelfRawNAV, NAV_UNIT ltClaimOnSelfRawNAV) =
-            _decomposeNAVClaims(_state);
+        (NAV_UNIT stClaimOnSTRawNAV, NAV_UNIT stClaimOnJTRawNAV, NAV_UNIT jtClaimOnSTRawNAV, NAV_UNIT jtClaimOnJTRawNAV) =
+            UtilsLib.computeTrancheClaimsOnNAVs(_state.stRawNAV, _state.jtRawNAV, _state.stEffectiveNAV, _state.jtEffectiveNAV);
 
         // Compute the cumulative asset claims for the specified tranche based on the NAV decomposition
         if (_trancheType == TrancheType.SENIOR) {
-            if (stClaimOnSelfRawNAV != ZERO_NAV_UNITS) claims.stAssets = stConvertNAVUnitsToTrancheUnits(stClaimOnSelfRawNAV);
+            if (stClaimOnSTRawNAV != ZERO_NAV_UNITS) claims.stAssets = stConvertNAVUnitsToTrancheUnits(stClaimOnSTRawNAV);
             if (stClaimOnJTRawNAV != ZERO_NAV_UNITS) claims.jtAssets = jtConvertNAVUnitsToTrancheUnits(stClaimOnJTRawNAV);
             // ST's Claim on LT NAV is always zero
             claims.ltAssets = ZERO_TRANCHE_UNITS;
@@ -1064,51 +1064,18 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
             if (jtClaimOnSTRawNAV != ZERO_NAV_UNITS) {
                 claims.stAssets = stConvertNAVUnitsToTrancheUnits(jtClaimOnSTRawNAV);
             }
-            if (jtClaimOnSelfRawNAV != ZERO_NAV_UNITS) claims.jtAssets = jtConvertNAVUnitsToTrancheUnits(jtClaimOnSelfRawNAV);
+            if (jtClaimOnJTRawNAV != ZERO_NAV_UNITS) claims.jtAssets = jtConvertNAVUnitsToTrancheUnits(jtClaimOnJTRawNAV);
             // JT's Claim on LT NAV is always zero
             claims.ltAssets = ZERO_TRANCHE_UNITS;
             claims.nav = _state.jtEffectiveNAV;
         } else {
-            if (ltClaimOnSelfRawNAV != ZERO_NAV_UNITS) claims.ltAssets = ltConvertNAVUnitsToTrancheUnits(ltClaimOnSelfRawNAV);
+            // LT's claim on its own raw NAV is simply the full LT raw NAV
+            if (_state.ltRawNAV != ZERO_NAV_UNITS) claims.ltAssets = ltConvertNAVUnitsToTrancheUnits(_state.ltRawNAV);
             // LT's Claim on ST and JT NAV is always zero
             claims.stAssets = ZERO_TRANCHE_UNITS;
             claims.jtAssets = ZERO_TRANCHE_UNITS;
             claims.nav = _state.ltRawNAV;
         }
-    }
-
-    /**
-     * @notice Decomposes the synced accounting state into self-backed and cross-tranche NAV claims
-     * @param _state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
-     * @return stClaimOnSelfRawNAV The portion of ST's effective NAV that is funded by ST’s raw NAV
-     * @return stClaimOnJTRawNAV The portion of ST's effective NAV that is funded by JT’s raw NAV
-     * @return jtClaimOnSTRawNAV The portion of JT's effective NAV that is funded by ST’s raw NAV
-     * @return jtClaimOnSelfRawNAV The portion of JT's effective NAV that is funded by JT’s raw NAV
-     * @return ltClaimOnSelfRawNAV The portion of LT's effective NAV that is funded by LT’s raw NAV
-     */
-    function _decomposeNAVClaims(SyncedAccountingState memory _state)
-        internal
-        pure
-        virtual
-        returns (
-            NAV_UNIT stClaimOnSelfRawNAV,
-            NAV_UNIT stClaimOnJTRawNAV,
-            NAV_UNIT jtClaimOnSTRawNAV,
-            NAV_UNIT jtClaimOnSelfRawNAV,
-            NAV_UNIT ltClaimOnSelfRawNAV
-        )
-    {
-        // Cross-tranche claims (the NAV that can't funded by the tranche's own raw NAV)
-        stClaimOnJTRawNAV = UnitsMathLib.saturatingSub(_state.stEffectiveNAV, _state.stRawNAV);
-        jtClaimOnSTRawNAV = UnitsMathLib.saturatingSub(_state.jtEffectiveNAV, _state.jtRawNAV);
-
-        // Self-backed portions (the NAV that can be funded by the tranche's own raw NAV)
-        // NOTE: Since NAV conservation is enforced in the accountant, these will never underflow
-        stClaimOnSelfRawNAV = (_state.stRawNAV - jtClaimOnSTRawNAV);
-        jtClaimOnSelfRawNAV = (_state.jtRawNAV - stClaimOnJTRawNAV);
-
-        // LT always has a full claim on its own effective NAV
-        ltClaimOnSelfRawNAV = _state.ltRawNAV;
     }
 
     // =============================
@@ -1236,7 +1203,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         NAV_UNIT desiredBonusNAV = _stUserClaims.nav.mulDiv(_getRoycoDayKernelStorage().stSelfLiquidationBonusWAD, WAD, Math.Rounding.Floor);
 
         // Decompose the NAV claims for the Junior Tranche to get the NAV claims for sourcing the bonus
-        (,, NAV_UNIT jtClaimOnSTRawNAV,,) = _decomposeNAVClaims(_state);
+        (,, NAV_UNIT jtClaimOnSTRawNAV,) = UtilsLib.computeTrancheClaimsOnNAVs(_state.stRawNAV, _state.jtRawNAV, _state.stEffectiveNAV, _state.jtEffectiveNAV);
 
         // Compute the maximum bonus that doesn't increase coverageUtilization, preventing bank run dynamics
         NAV_UNIT maxCoverageUtilizationNeutralBonusNAV = _computeMaxCoverageUtilizationNeutralBonus(_state, _stUserClaims, jtClaimOnSTRawNAV);

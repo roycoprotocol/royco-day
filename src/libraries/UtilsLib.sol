@@ -118,4 +118,35 @@ library UtilsLib {
         scaledClaims.jtAssets = _claims.jtAssets.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
         scaledClaims.ltAssets = _claims.ltAssets.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
     }
+
+    /**
+     * @notice Decomposes the senior and junior tranche NAVs into self-backed and cross-tranche NAV claims
+     * @param _stRawNAV The raw net asset value of the senior tranche invested assets
+     * @param _jtRawNAV The raw net asset value of the junior tranche invested assets
+     * @param _stEffectiveNAV The total net asset value that the senior tranche is entitled to
+     * @param _jtEffectiveNAV The total net asset value that the junior tranche is entitled to
+     * @return stClaimOnSTRawNAV The portion of ST's effective NAV that is funded by ST’s raw NAV
+     * @return stClaimOnJTRawNAV The portion of ST's effective NAV that is funded by JT’s raw NAV
+     * @return jtClaimOnSTRawNAV The portion of JT's effective NAV that is funded by ST’s raw NAV
+     * @return jtClaimOnJTRawNAV The portion of JT's effective NAV that is funded by JT’s raw NAV
+     */
+    function computeTrancheClaimsOnNAVs(
+        NAV_UNIT _stRawNAV,
+        NAV_UNIT _jtRawNAV,
+        NAV_UNIT _stEffectiveNAV,
+        NAV_UNIT _jtEffectiveNAV
+    )
+        internal
+        pure
+        returns (NAV_UNIT stClaimOnSTRawNAV, NAV_UNIT stClaimOnJTRawNAV, NAV_UNIT jtClaimOnSTRawNAV, NAV_UNIT jtClaimOnJTRawNAV)
+    {
+        // Cross-tranche claims (the NAV that can't funded by the tranche's own raw NAV)
+        stClaimOnJTRawNAV = UnitsMathLib.saturatingSub(_stEffectiveNAV, _stRawNAV);
+        jtClaimOnSTRawNAV = UnitsMathLib.saturatingSub(_jtEffectiveNAV, _jtRawNAV);
+
+        // Self-backed portions (the NAV that can be funded by the tranche's own raw NAV)
+        // NOTE: Since NAV conservation is enforced in the accountant, these will never underflow
+        stClaimOnSTRawNAV = (_stRawNAV - jtClaimOnSTRawNAV);
+        jtClaimOnJTRawNAV = (_jtRawNAV - stClaimOnJTRawNAV);
+    }
 }
