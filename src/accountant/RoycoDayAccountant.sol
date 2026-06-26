@@ -288,7 +288,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             marketState: $.lastMarketState,
             stRawNAV: _stRawNAV,
             jtRawNAV: _jtRawNAV,
-            ltRawNAV: ZERO_NAV_UNITS, // TODO: Implement LT raw NAV
+            ltRawNAV: _ltRawNAV,
             stEffectiveNAV: stEffectiveNAV,
             jtEffectiveNAV: jtEffectiveNAV,
             jtCoverageImpermanentLoss: jtCoverageImpermanentLoss,
