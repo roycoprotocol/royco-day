@@ -638,6 +638,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     // =============================
 
     /// @inheritdoc IRoycoDayKernel
+    /// @dev LT multi-asset deposits are enabled in all market states, granted that the market's coverage and liquidity requirements are satisfied against the new senior exposure
     function ltDepositMultiAsset(
         TRANCHE_UNIT _stAssets,
         uint256 _quoteAssets,
@@ -650,49 +651,43 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         onlyLiquidityTranche
         nonReentrant
         withQuoterCache
-        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, uint256 trancheAssetsOut)
+        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut)
     {
         // At least one constituent leg (ST underlying or quote) must be supplied
         require(_stAssets != ZERO_TRANCHE_UNITS || _quoteAssets != 0, MUST_DEPOSIT_NON_ZERO_ASSETS());
 
         // Execute an accounting sync to reconcile underlying PnL
         SyncedAccountingState memory state = _preOpSyncTrancheAccounting();
-        // The LT shares are priced at the pre-deposit LT EFFECTIVE NAV (S0): the value deployed into the AMM or another market-making venue plus the idle liquidity-premium senior
-        // shares the kernel holds for the LT, captured before the add moves the pool's per-LP-token mark and before this deposit mints its
-        // senior leg. The pre-op sync above committed this period's premium, so the storage-reading 2-arg overload sees the post-mint held count
+        // The NAV to mint tranche shares at is the pre-deposit liquidity tranche effective NAV (its MM depth plus the idle liquidity-premium senior shares the kernel holds), read before the add moves the pool mark
         navToMintSharesAt = _getLiquidityTrancheEffectiveNAV(state.stEffectiveNAV, IERC20(SENIOR_TRANCHE).totalSupply());
 
-        // If the ST underlying leg is supplied, credit it and mint the matching non-diluting senior shares to the kernel
+        // If the ST underlying leg is supplied, mint the matching non-diluting senior shares (priced at the pre-deposit senior effective NAV and pre-mint supply) to seed the add's senior leg
         uint256 seniorSharesMinted;
         if (_stAssets != ZERO_TRANCHE_UNITS) {
-            // The non-diluting senior share count against the pre-deposit senior effective NAV and pre-mint supply
             seniorSharesMinted = _navToShares(stConvertTrancheUnitsToNAVUnits(_stAssets), state.stEffectiveNAV, IERC20(SENIOR_TRANCHE).totalSupply());
 
-            // Credit the ST underlying (already transferred to the kernel by the LT tranche) and book it: ST_DEPOSIT is the only post-op
-            // admitting a positive senior raw-NAV delta, so the deposited senior exposure must commit here before the final LT_DEPOSIT sync.
-            // Coverage is not enforced here; it is enforced once on the combined exposure by the post-deposit sync below
+            // Credit the deposited ST underlying and commit it as an ST_DEPOSIT (the only post-op admitting a positive senior raw-NAV delta); coverage is enforced once on the combined exposure by the final sync
             _getRoycoDayKernelStorage().stOwnedYieldBearingAssets = _getRoycoDayKernelStorage().stOwnedYieldBearingAssets + _stAssets;
             _postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, ZERO_NAV_UNITS, false);
 
-            // Mint the senior shares to the kernel to seed the add's senior leg (raises supply only, leaving the senior raw NAV unchanged)
+            // Mint the senior shares to the kernel (raises supply only, leaving the senior raw NAV unchanged)
             IRoycoVaultTranche(SENIOR_TRANCHE).mint(address(this), seniorSharesMinted);
         }
 
         // Single-sided add the (senior shares + quote) into the liquidity venue, bounding the add's slippage by the caller's minimum LT assets out
-        TRANCHE_UNIT ltAssets = _addLiquidity(seniorSharesMinted, _quoteAssets, _minLTAssetsOut);
+        ltAssetsOut = _addLiquidity(seniorSharesMinted, _quoteAssets, _minLTAssetsOut);
+        // The precise value allocated is the freshly minted LP token valued at the live post-add mark
+        valueAllocated = ltConvertTrancheUnitsToNAVUnits(ltAssetsOut);
 
-        // Value the freshly minted LP token at the live post-add mark (S1); the LT shares price against navToMintSharesAt (S0)
-        valueAllocated = ltConvertTrancheUnitsToNAVUnits(ltAssets);
-        trancheAssetsOut = toUint256(ltAssets);
-
-        // Deposit the freshly minted LT tranche assets (LP token) into the liquidity tranche
-        _getRoycoDayKernelStorage().ltOwnedYieldBearingAssets = _getRoycoDayKernelStorage().ltOwnedYieldBearingAssets + ltAssets;
+        // Credit the minted LT tranche assets (LP token) to the liquidity tranche
+        _getRoycoDayKernelStorage().ltOwnedYieldBearingAssets = _getRoycoDayKernelStorage().ltOwnedYieldBearingAssets + ltAssetsOut;
 
         // Execute a post-deposit sync on accounting and enforce the market's coverage and liquidity requirements against the new senior exposure
         _postOpSyncTrancheAccounting(Operation.LT_DEPOSIT, ZERO_NAV_UNITS, true);
     }
 
     /// @inheritdoc IRoycoDayKernel
+    /// @dev LT multi-asset redemptions are enabled only in a PERPETUAL market state; the liquidity requirement gates the exit unless the liquidation coverageUtilization threshold is breached, where the delevering self-liquidation exit is permitted
     function ltRedeemMultiAsset(
         uint256 _ltShares,
         uint256 _minSTSharesOut,
@@ -708,23 +703,18 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         withQuoterCache
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
-        // Execute a pre-op sync; this sync mints this period's liquidity premium into the kernel's held senior shares, so the
-        // held-share pile and the LT supply are mutually consistent (post-mint) for sizing the redeemer's slice
+        // Execute a pre-op sync; it mints this period's liquidity premium into the kernel's held senior shares, so the held pile and the LT supply are mutually consistent for sizing the redeemer's slice
         (SyncedAccountingState memory state, AssetClaims memory ltClaims, uint256 totalLtShares) = _preOpSyncTrancheAccounting(TrancheType.LIQUIDITY);
         // Multi-asset redemptions are disabled during a fixed-term market state
         require(state.marketState == MarketState.PERPETUAL, DISABLED_IN_FIXED_TERM_STATE());
 
-        // An LT share is a claim on BOTH legs of the LT effective NAV: the deployed LP token (ltClaims.ltAssets, the sole LT claim,
-        // see _deriveTrancheAssetClaims) and the idle, not-yet-reinvested liquidity-premium senior shares ($.ltOwnedSeniorTrancheShares,
-        // the disjoint add-on term in _getLiquidityTrancheEffectiveNAV). Size the redeemer's proportional slice of each, rounding the idle
-        // slice down in the LT holder's disfavor so floor dust accrues to the remaining holders
+        // An LT share claims both LT effective-NAV legs: the deployed LP token and the idle, not-yet-reinvested liquidity-premium senior shares. Size the redeemer's proportional slice of each, flooring the idle slice in the LT holder's disfavor so floor dust accrues to the remaining holders
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
         TRANCHE_UNIT trancheAssetsToRemove = UtilsLib.scaleAssetClaims(ltClaims, _ltShares, totalLtShares).ltAssets;
         uint256 idlePremiumShares = Math.mulDiv($.ltOwnedSeniorTrancheShares, _ltShares, totalLtShares, Math.Rounding.Floor);
         require(trancheAssetsToRemove != ZERO_TRANCHE_UNITS || idlePremiumShares != 0, INSUFFICIENT_OUTPUT_AMOUNT());
 
-        // Derive the senior cumulative claims and supply from the already-synced state: neither the LP-token debit, the idle-share debit, nor
-        // the proportional removal moves the senior effective NAV or supply, so no separate senior sync is needed (the premium was minted above)
+        // Derive the senior cumulative claims and supply from the synced state: neither leg's debit moves the senior effective NAV or supply, so no separate senior sync is needed
         AssetClaims memory cumulativeStClaims = _deriveTrancheAssetClaims(TrancheType.SENIOR, state);
         uint256 totalStShares = IERC20(SENIOR_TRANCHE).totalSupply();
 
@@ -732,26 +722,26 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         $.ltOwnedYieldBearingAssets = $.ltOwnedYieldBearingAssets - trancheAssetsToRemove;
         $.ltOwnedSeniorTrancheShares -= idlePremiumShares;
 
-        // Remove the LP-token slice into its (pooled senior shares + quote) constituents. The removal is proportional (sandwich-safe and
-        // ratio-invariant), so the senior leg cannot be independently manipulated and an unbounded min senior shares out is safe; the quote
-        // leg is bounded by the caller's _minQuoteAssetsOut inside the venue op
+        // Proportionally remove the LP-token slice into its (pooled senior shares + quote) constituents, bounding the senior leg by _minSTSharesOut and the quote leg by _minQuoteAssetsOut
         uint256 pooledSeniorShares;
         if (trancheAssetsToRemove != ZERO_TRANCHE_UNITS) {
             (pooledSeniorShares, quoteAssets) = _removeLiquidity(trancheAssetsToRemove, _minSTSharesOut, _minQuoteAssetsOut, _receiver);
         }
 
-        // Unwind ALL of the redeemer's senior shares (pooled + idle premium) in a single ST redemption: scale once, burn once, withdraw once.
-        // No self-liquidation bonus is applied: this is an internal unwind, not a senior holder's stressed exit
+        // Unwind ALL of the redeemer's senior shares (pooled + idle premium) in a single ST redemption: scale once, burn once, withdraw once
         uint256 seniorSharesToRedeem = pooledSeniorShares + idlePremiumShares;
         stClaims = UtilsLib.scaleAssetClaims(cumulativeStClaims, seniorSharesToRedeem, totalStShares);
+
+        // Apply any ST self-liquidation bonus to the unwound senior claims (the same bonus a direct stRedeem earns once the liquidation coverageUtilization threshold is breached) and retrieve the bonus NAV applied
+        NAV_UNIT stSelfLiquidationBonusNAV;
+        (stClaims, stSelfLiquidationBonusNAV) = _applySeniorTrancheSelfLiquidationBonus(state, stClaims);
+
+        // Burn the redeemed senior shares and withdraw the bonus-adjusted ST claims to the receiver (the quote leg already left in the venue removal above)
         IRoycoVaultTranche(SENIOR_TRANCHE).burn(seniorSharesToRedeem);
         _withdrawAssets(stClaims, _receiver);
-        // The quote leg was sent straight to the receiver by removeBalancerV3Liquidity, so no transfer is owed here
 
-        // Execute a single post-redeem sync: it re-commits the reduced LP-token mark and books the withdrawn senior underlying as an ST
-        // redemption. No requirements are enforced because this proportional unwind removes senior shares alongside the pooled depth, delevering
-        // the market (mirrors stRedeem); the ST_REDEEM op never enforces the liquidity requirement even though it reduces ltRawNAV
-        _postOpSyncTrancheAccounting(Operation.LT_REDEEM, ZERO_NAV_UNITS, false);
+        // Execute a post-redeem sync booking the senior unwind and the reduced LP-token mark. This removal cuts pooled depth faster than senior exposure, raising liquidityUtilization, so the liquidity requirement is enforced in the normal regime; it is lifted once the liquidation coverageUtilization threshold is breached so the delevering self-liquidation exit is unconditionally permitted (mirrors stRedeem)
+        _postOpSyncTrancheAccounting(Operation.LT_REDEEM, stSelfLiquidationBonusNAV, state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD);
     }
 
     // =============================
@@ -993,21 +983,21 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
             $.ltOwnedSeniorTrancheShares += liquidityPremiumShares;
         }
 
-        // Mint the ST protocol fee shares to the protocol fee recipient at the same joint price as the premium
+        // Mint the ST protocol fee shares to the protocol fee recipient and LT liquidity premium fee shares to the kernel at an identical price
         if (stProtocolFeeShares != 0) {
             IRoycoVaultTranche(SENIOR_TRANCHE).mintProtocolFeeShares(protocolFeeRecipient, stProtocolFeeShares);
         }
 
-        // If JT fees were accrued, mint JT protocol fee shares to the protocol fee recipient (a single carve-out against JT effective NAV)
+        // If JT fees were accrued, mint JT protocol fee shares to the protocol fee recipient
         if (_state.jtProtocolFee != ZERO_NAV_UNITS) {
             IRoycoVaultTranche(JUNIOR_TRANCHE).mintProtocolFeeShares(_state.jtProtocolFee, _state.jtEffectiveNAV, protocolFeeRecipient);
         }
-        // If LT fees were accrued, mint LT protocol fee shares to the protocol fee recipient, valued against the liquidity
-        // tranche's effective NAV (its inventory plus the held senior-share premium) at the post-carve-out senior supply,
-        // which equals the live senior supply because the premium and ST fee shares were just minted
+        // If LT fees were accrued, mint LT protocol fee shares to the protocol fee recipient
         if (_state.ltProtocolFee != ZERO_NAV_UNITS) {
-            NAV_UNIT ltEffectiveNAV = _getLiquidityTrancheEffectiveNAV(_state.stEffectiveNAV, stTotalSupplyAfterMints);
-            IRoycoVaultTranche(LIQUIDITY_TRANCHE).mintProtocolFeeShares(_state.ltProtocolFee, ltEffectiveNAV, protocolFeeRecipient);
+            IRoycoVaultTranche(LIQUIDITY_TRANCHE)
+                .mintProtocolFeeShares(
+                    _state.ltProtocolFee, _getLiquidityTrancheEffectiveNAV(_state.stEffectiveNAV, stTotalSupplyAfterMints), protocolFeeRecipient
+                );
         }
     }
 

@@ -35,10 +35,13 @@ enum MarketState {
  * @custom:field nav - The net asset value of these claims in NAV units
  */
 struct AssetClaims {
+    // ST and JT claims
     TRANCHE_UNIT stAssets;
     TRANCHE_UNIT jtAssets;
+    // LT claims
     TRANCHE_UNIT ltAssets;
     uint256 stShares;
+    // Total net asset value of the claims
     NAV_UNIT nav;
 }
 

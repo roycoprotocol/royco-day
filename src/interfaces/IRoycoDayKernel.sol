@@ -440,13 +440,13 @@ interface IRoycoDayKernel {
      * @notice Atomically enters the liquidity tranche with the LP token's constituent assets: deposits ST underlying (minting senior
      *         shares), single-sided adds (senior shares + quote) into the liquidity venue to mint the LT tranche assets, then deposits them into the LT
      * @dev Assumes the ST underlying and quote have been transferred to the kernel before this call (by the LT tranche)
-     * @dev The ST mint leg enforces the market's coverage requirement; reverts if coverage is unsatisfied
+     * @dev The combined new senior exposure is gated by the market's coverage and liquidity requirements; reverts if either is unsatisfied
      * @param _stAssets The amount of ST underlying (the senior tranche's base asset) to deposit, denominated in ST tranche units
      * @param _quoteAssets The amount of quote asset to add as the second pool leg
      * @param _minLTAssetsOut The minimum LT tranche assets (LP token) the liquidity add must mint (slippage bound against an unfavorable pool state)
      * @return valueAllocated The value of the minted LT tranche assets, denominated in the kernel's NAV units
      * @return navToMintSharesAt The LT effective NAV at which the LT shares will be minted (pre-deposit)
-     * @return trancheAssetsOut The amount of LT tranche assets (LP token) minted and credited to the liquidity tranche
+     * @return ltAssetsOut The amount of LT tranche assets (LP token) minted and credited to the liquidity tranche
      */
     function ltDepositMultiAsset(
         TRANCHE_UNIT _stAssets,
@@ -454,7 +454,7 @@ interface IRoycoDayKernel {
         TRANCHE_UNIT _minLTAssetsOut
     )
         external
-        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, uint256 trancheAssetsOut);
+        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut);
 
     /**
      * @notice Atomically exits the liquidity tranche to the LP token's constituent assets: proportionally removes the LP-token slice,

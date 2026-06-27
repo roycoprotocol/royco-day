@@ -15,6 +15,7 @@ library UtilsLib {
     using UnitsMathLib for NAV_UNIT;
     using UnitsMathLib for TRANCHE_UNIT;
     using UnitsMathLib for uint256;
+    using Math for uint256;
 
     /**
      * @notice Computes the coverage utilization of the Royco market given the market's state
@@ -95,7 +96,7 @@ library UtilsLib {
         scaledClaims.stAssets = _claims.stAssets.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
         scaledClaims.jtAssets = _claims.jtAssets.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
         scaledClaims.ltAssets = _claims.ltAssets.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
-        scaledClaims.stShares = Math.mulDiv(_claims.stShares, _shares, _totalTrancheShares, Math.Rounding.Floor);
+        scaledClaims.stShares = _claims.stShares.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
     }
 
     /**

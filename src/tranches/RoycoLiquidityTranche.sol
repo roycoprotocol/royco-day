@@ -9,7 +9,7 @@ import { IRoycoLiquidityTranche } from "../interfaces/IRoycoLiquidityTranche.sol
 import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 import { ZERO_NAV_UNITS } from "../libraries/Constants.sol";
 import { AssetClaims, TrancheType } from "../libraries/Types.sol";
-import { NAV_UNIT, toTrancheUnits } from "../libraries/Units.sol";
+import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../libraries/Units.sol";
 import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
 
 /**
@@ -75,7 +75,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         if (_quoteAssets != 0) IERC20(IRoycoDayKernel(kernel).QUOTE_ASSET()).safeTransferFrom(msg.sender, kernel, _quoteAssets);
 
         // Orchestrate the multi-asset deposit in the kernel, bounding the liquidity add's slippage by the caller's minimum LT assets out
-        (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, uint256 trancheAssetsOut) =
+        (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut) =
             IRoycoDayKernel(kernel).ltDepositMultiAsset(toTrancheUnits(_stAssets), _quoteAssets, toTrancheUnits(_minLTAssetsOut));
 
         // navToMintSharesAt can be zero when the tranche is freshly deployed
@@ -86,7 +86,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         require(shares != 0, MUST_MINT_NON_ZERO_SHARES());
         _mint(_receiver, shares);
 
-        emit MultiAssetDeposit(msg.sender, _receiver, _stAssets, _quoteAssets, trancheAssetsOut, shares);
+        emit MultiAssetDeposit(msg.sender, _receiver, _stAssets, _quoteAssets, toUint256(ltAssetsOut), shares);
     }
 
     /// @inheritdoc IRoycoLiquidityTranche
