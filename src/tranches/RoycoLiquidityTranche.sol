@@ -8,7 +8,7 @@ import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
 import { IRoycoLiquidityTranche } from "../interfaces/IRoycoLiquidityTranche.sol";
 import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 import { ZERO_NAV_UNITS } from "../libraries/Constants.sol";
-import { AssetClaims, SyncedAccountingState, TrancheType } from "../libraries/Types.sol";
+import { AssetClaims, TrancheType } from "../libraries/Types.sol";
 import { NAV_UNIT, toTrancheUnits } from "../libraries/Units.sol";
 import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
 
@@ -58,6 +58,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         uint256 _stUnderlying,
         uint256 _quoteAmount,
         uint256 _minStSharesMinted,
+        uint256 _minLpTokenOut,
         address _receiver
     )
         external
@@ -74,9 +75,9 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         if (_stUnderlying != 0) IERC20(IRoycoDayKernel(kernel).ST_ASSET()).safeTransferFrom(msg.sender, kernel, _stUnderlying);
         if (_quoteAmount != 0) IERC20(IRoycoDayKernel(kernel).QUOTE_ASSET()).safeTransferFrom(msg.sender, kernel, _quoteAmount);
 
-        // Orchestrate the multi-asset deposit in the kernel
+        // Orchestrate the multi-asset deposit in the kernel, bounding the liquidity add's slippage by the caller's minimum LP token out
         (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, uint256 trancheAssetsMinted) =
-            IRoycoDayKernel(kernel).ltDepositMultiAsset(toTrancheUnits(_stUnderlying), _quoteAmount, _minStSharesMinted);
+            IRoycoDayKernel(kernel).ltDepositMultiAsset(toTrancheUnits(_stUnderlying), _quoteAmount, _minStSharesMinted, toTrancheUnits(_minLpTokenOut));
 
         // navToMintSharesAt can be zero when the tranche is freshly deployed
         require(valueAllocated != ZERO_NAV_UNITS, INVALID_VALUE_ALLOCATED());
@@ -138,11 +139,10 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         NAV_UNIT navToMintSharesAt;
         (valueAllocated, navToMintSharesAt, trancheAssetsMinted) = IRoycoDayKernel(KERNEL).previewLtDepositMultiAsset(_stUnderlying, _quoteAmount);
 
-        // Mirror previewDeposit: account for the LT protocol fee shares that would be minted on the pre-op sync
-        (SyncedAccountingState memory state,,) = IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
-        (uint256 feeSharesMinted,) = previewMintProtocolFeeShares(state.ltProtocolFee, state.ltRawNAV);
+        // Use the post-sync liquidity tranche supply (after the LT protocol fee shares) from the single source of truth
+        (,, uint256 totalTrancheSharesAfterSync) = IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
 
-        shares = _convertToShares(valueAllocated, feeSharesMinted + totalSupply(), navToMintSharesAt, Math.Rounding.Floor);
+        shares = _convertToShares(valueAllocated, totalTrancheSharesAfterSync, navToMintSharesAt, Math.Rounding.Floor);
     }
 
     /// @inheritdoc IRoycoLiquidityTranche

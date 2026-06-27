@@ -59,7 +59,7 @@ library UtilsLib {
      * @dev Rounding favors ensuring senior tranche liquidity
      * @param _stEffectiveNAV The total net asset value that the senior tranche is entitled to
      * @param _minLiquidityWAD The percentage of the senior tranche NAV that must be in the liquidity tranche's market making inventory, scaled to WAD precision
-     * @param _ltRawNAV The raw net asset value of the liquidity tranche's market making inventory (the Balancer BPT)
+     * @param _ltRawNAV The raw net asset value of the liquidity tranche's market making inventory
      * @return liquidityUtilizationWAD The liquidity utilization of the Royco market, scaled to WAD precision
      */
     function computeLiquidityUtilization(
@@ -95,6 +95,7 @@ library UtilsLib {
         scaledClaims.stAssets = _claims.stAssets.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
         scaledClaims.jtAssets = _claims.jtAssets.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
         scaledClaims.ltAssets = _claims.ltAssets.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
+        scaledClaims.stShares = Math.mulDiv(_claims.stShares, _shares, _totalTrancheShares, Math.Rounding.Floor);
     }
 
     /**
@@ -117,6 +118,7 @@ library UtilsLib {
         scaledClaims.stAssets = _claims.stAssets.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
         scaledClaims.jtAssets = _claims.jtAssets.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
         scaledClaims.ltAssets = _claims.ltAssets.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
+        scaledClaims.stShares = _claims.stShares.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
     }
 
     /**

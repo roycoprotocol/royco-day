@@ -287,6 +287,15 @@ contract MockTranche is IRoycoVaultTranche, ERC20 {
         emit ProtocolFeeSharesMinted(_protocolFeeRecipient, protocolFeeSharesMinted, totalTrancheShares);
     }
 
+    function mintProtocolFeeShares(address _protocolFeeRecipient, uint256 _protocolFeeShares) external override returns (uint256 totalTrancheShares) {
+        if (_protocolFeeShares > 0) {
+            _mint(_protocolFeeRecipient, _protocolFeeShares);
+        }
+
+        totalTrancheShares = totalSupply();
+        emit ProtocolFeeSharesMinted(_protocolFeeRecipient, _protocolFeeShares, totalTrancheShares);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // INTERNAL HELPERS
     // ═══════════════════════════════════════════════════════════════════════════

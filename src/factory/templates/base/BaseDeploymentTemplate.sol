@@ -292,12 +292,10 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
             stNAVDustTolerance: _p.stNAVDustTolerance,
             jtNAVDustTolerance: _p.jtNAVDustTolerance,
             // Liquidity tranche overlay: zero-liquidity baseline; LT YDM is a distinct, uninitialized placeholder pending the LDM (see @dev above)
-            ltProtocolFeeWAD: 0,
             ltYieldShareProtocolFeeWAD: 0,
             minLiquidityWAD: 0,
             ltYDM: _ltYdm,
-            ltYDMInitializationData: bytes(""),
-            ltNAVDustTolerance: NAV_UNIT.wrap(0)
+            ltYDMInitializationData: bytes("")
         });
         return abi.encodeCall(RoycoDayAccountant.initialize, (params, ROYCO_FACTORY.ROYCO_AUTHORITY()));
     }

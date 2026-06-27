@@ -133,7 +133,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         NAV_UNIT _totalTrancheNAV,
         address _protocolFeeRecipient
     )
-        external
+        public
         virtual
         override(IRoycoVaultTranche)
         returns (uint256 protocolFeeSharesMinted, uint256 totalTrancheShares)
@@ -147,6 +147,27 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
         emit ProtocolFeeSharesMinted(_protocolFeeRecipient, protocolFeeSharesMinted, totalTrancheShares);
     }
+
+    /// @inheritdoc IRoycoVaultTranche
+    function mintProtocolFeeShares(
+        address _protocolFeeRecipient,
+        uint256 _protocolFeeShares
+    )
+        external
+        virtual
+        override(IRoycoVaultTranche)
+        returns (uint256 totalTrancheShares)
+    {
+        // Only the kernel can mint protocol fee shares based on a sync
+        require(msg.sender == KERNEL, ONLY_KERNEL());
+
+        // Mint the precomputed protocol fee shares to the recipient (the kernel prices them jointly with the liquidity premium)
+        if (_protocolFeeShares != 0) _mint(_protocolFeeRecipient, _protocolFeeShares);
+
+        totalTrancheShares = totalSupply();
+        emit ProtocolFeeSharesMinted(_protocolFeeRecipient, _protocolFeeShares, totalTrancheShares);
+    }
+
 
     /// @inheritdoc IRoycoVaultTranche
     function mint(address _to, uint256 _shares) external virtual override(IRoycoVaultTranche) whenNotPaused restricted {
@@ -222,22 +243,27 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @inheritdoc IRoycoVaultTranche
     function previewDeposit(TRANCHE_UNIT _assets) external view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
-        // Get the state of the tranche before the deposit and the value allocated to the tranche
-        (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated) = (TRANCHE_TYPE() == TrancheType.SENIOR
-                ? IRoycoDayKernel(KERNEL).stPreviewDeposit(_assets)
-                : TRANCHE_TYPE() == TrancheType.JUNIOR ? IRoycoDayKernel(KERNEL).jtPreviewDeposit(_assets) : IRoycoDayKernel(KERNEL).ltPreviewDeposit(_assets));
+        // Get the value allocated, the NAV to mint shares at (the tranche's pre-deposit effective NAV), and the post-sync supply after the
+        // premium and protocol fee shares are minted (the kernel is the single source of truth for the post-sync supply)
+        NAV_UNIT valueAllocated;
+        NAV_UNIT effectiveNAV;
+        uint256 totalTrancheSharesAfterSync;
+        if (TRANCHE_TYPE() == TrancheType.SENIOR) {
+            SyncedAccountingState memory stateBeforeDeposit;
+            (stateBeforeDeposit, valueAllocated, totalTrancheSharesAfterSync) = IRoycoDayKernel(KERNEL).stPreviewDeposit(_assets);
+            effectiveNAV = stateBeforeDeposit.stEffectiveNAV;
+        } else if (TRANCHE_TYPE() == TrancheType.JUNIOR) {
+            SyncedAccountingState memory stateBeforeDeposit;
+            (stateBeforeDeposit, valueAllocated, totalTrancheSharesAfterSync) = IRoycoDayKernel(KERNEL).jtPreviewDeposit(_assets);
+            effectiveNAV = stateBeforeDeposit.jtEffectiveNAV;
+        } else {
+            // The LT prices its shares at the effective NAV (value deployed into the AMM or another market-making venue plus the idle liquidity-premium senior shares), which is not
+            // carried in SyncedAccountingState, so the kernel surfaces it directly as navToMintSharesAt
+            (, valueAllocated, totalTrancheSharesAfterSync, effectiveNAV) = IRoycoDayKernel(KERNEL).ltPreviewDeposit(_assets);
+        }
 
-        // Preview the total tranche shares after minting any protocol fee shares post-sync
-        NAV_UNIT protocolFee = TRANCHE_TYPE() == TrancheType.SENIOR
-            ? stateBeforeDeposit.stProtocolFee
-            : TRANCHE_TYPE() == TrancheType.JUNIOR ? stateBeforeDeposit.jtProtocolFee : stateBeforeDeposit.ltProtocolFee;
-        NAV_UNIT effectiveNAV = TRANCHE_TYPE() == TrancheType.SENIOR
-            ? stateBeforeDeposit.stEffectiveNAV
-            : TRANCHE_TYPE() == TrancheType.JUNIOR ? stateBeforeDeposit.jtEffectiveNAV : stateBeforeDeposit.ltRawNAV;
-        (uint256 feeSharesMinted,) = previewMintProtocolFeeShares(protocolFee, effectiveNAV);
-
-        // Calculate the shares to be minted to the receiver, considering the protocol fee shares
-        shares = _convertToShares(valueAllocated, feeSharesMinted + totalSupply(), effectiveNAV, Math.Rounding.Floor);
+        // Calculate the shares to be minted to the receiver against the post-sync supply, so the preview matches execution
+        shares = _convertToShares(valueAllocated, totalTrancheSharesAfterSync, effectiveNAV, Math.Rounding.Floor);
     }
 
     /// @inheritdoc IRoycoVaultTranche

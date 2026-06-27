@@ -73,19 +73,17 @@ library AccountingLib {
      * @dev Attributes each tranche's raw NAV delta across the checkpointed claims, then settles the deltas through the PnL waterfall (loss -> coverage IL recovery -> yield split)
      * @param _stRawNAV The senior tranche's current raw NAV: the mark-to-market value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the mark-to-market value of its invested assets
-     * @param _ltRawNAV The liquidity tranche's current raw NAV: the mark-to-market value of its invested assets
-     * @param _params The fixed inputs of the waterfall: the checkpoint, pre-resolved YDM outputs, fee rates, and dust tolerance
+     * @param _params The fixed inputs of the waterfall: the checkpoint, pre-resolved YDM outputs, and fee rates
      * @return postPnLWaterfallCheckpoint The post-waterfall checkpoint: the current raw NAVs alongside the settled effective NAVs and JT coverage impermanent loss
      * @return ltLiquidityPremium The liquidity premium paid to LT out of ST yield in this sync: minted as senior tranche shares to LT (coverage-neutral, so it remains within ST effective NAV)
      * @return stProtocolFee The protocol fee accrued on ST yield in this sync (gross: not netted out of the effective NAVs)
      * @return jtProtocolFee The protocol fee accrued on JT yield and the JT yield share in this sync (gross: not netted out of the effective NAVs)
-     * @return ltProtocolFee The protocol fee accrued on LT yield and the LT yield share in this sync (gross: not netted out of the effective NAVs)
+     * @return ltProtocolFee The protocol fee accrued on the LT yield share (liquidity premium) in this sync (gross: not netted out of the effective NAVs)
      * @return premiumsPaid A boolean indicating whether the JT risk and LT liquidity premiums were paid out of ST yield
      */
     function applyProfitAndLossWaterfall(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
-        NAV_UNIT _ltRawNAV,
         PnLWaterfallParams memory _params
     )
         internal
@@ -200,26 +198,15 @@ library AccountingLib {
             }
         }
 
-        // Compute the delta in the LT's raw NAV since the last checkpoint
-        int256 deltaLTRawNAV = UnitsMathLib.computeNAVDelta(_ltRawNAV, _params.checkpoint.ltRawNAV);
-        /// @dev STEP_APPLY_LT_GAIN: The LT assets appreciated in value
-        if (deltaLTRawNAV > 0) {
-            NAV_UNIT ltGain = toNAVUnits(deltaLTRawNAV);
-            // Compute the protocol fee taken on this LT yield accrual if it is not attributable to any rounding/dust
-            if (ltGain > _params.ltNAVDustTolerance) {
-                ltProtocolFee = (ltProtocolFee + ltGain.mulDiv(_params.ltProtocolFeeWAD, WAD, Math.Rounding.Floor));
-            }
-        }
-        /// @dev STEP_NOP_LT_LOSS: The LT assets losing value is a NOP since these assets aren't use to fulfill any obligations, and they are always owned by the LT
-
         // Enforce the NAV conservation invariant
         enforceNAVConservation(_stRawNAV, _jtRawNAV, stEffectiveNAV, jtEffectiveNAV);
 
         // Marshal the post-waterfall checkpoint and return it to the caller alongside the fees accrued
+        // The liquidity tranche raw NAV is carried forward unchanged from the committed checkpoint (the kernel commits the fresh mark)
         postPnLWaterfallCheckpoint = AccountingCheckpoint({
             stRawNAV: _stRawNAV,
             jtRawNAV: _jtRawNAV,
-            ltRawNAV: _ltRawNAV,
+            ltRawNAV: _params.checkpoint.ltRawNAV,
             stEffectiveNAV: stEffectiveNAV,
             jtEffectiveNAV: jtEffectiveNAV,
             jtCoverageImpermanentLoss: jtCoverageImpermanentLoss
@@ -257,10 +244,9 @@ library AccountingLib {
             _params.postPnLWaterfallCheckpoint.jtEffectiveNAV
         );
 
-        // Compute the market's liquidity utilization against the post-waterfall ST effective NAV and the LT's market-making inventory
-        uint256 liquidityUtilizationWAD = UtilsLib.computeLiquidityUtilization(
-            _params.postPnLWaterfallCheckpoint.stEffectiveNAV, _params.minLiquidityWAD, _params.postPnLWaterfallCheckpoint.ltRawNAV
-        );
+        // The liquidity tranche raw NAV and utilization are not settled here: the kernel marks and commits the fresh liquidity tranche
+        // raw NAV after this sync (once fee shares are minted and any pool mutation settles) and refreshes the returned state packet, so
+        // the senior/junior sync leaves them at zero placeholders
 
         // Cache the premium and fees accrued by the waterfall: zeroed below if the resulting market state pays no premium and takes no fees
         NAV_UNIT ltLiquidityPremium = _params.ltLiquidityPremium;
@@ -320,7 +306,8 @@ library AccountingLib {
             marketState: resultingMarketState,
             stRawNAV: _params.postPnLWaterfallCheckpoint.stRawNAV,
             jtRawNAV: _params.postPnLWaterfallCheckpoint.jtRawNAV,
-            ltRawNAV: _params.postPnLWaterfallCheckpoint.ltRawNAV,
+            // The liquidity tranche raw NAV and utilization are zero placeholders the kernel refreshes after committing the fresh mark
+            ltRawNAV: ZERO_NAV_UNITS,
             stEffectiveNAV: _params.postPnLWaterfallCheckpoint.stEffectiveNAV,
             jtEffectiveNAV: _params.postPnLWaterfallCheckpoint.jtEffectiveNAV,
             jtCoverageImpermanentLoss: jtCoverageImpermanentLoss,
@@ -329,7 +316,7 @@ library AccountingLib {
             jtProtocolFee: jtProtocolFee,
             ltProtocolFee: ltProtocolFee,
             coverageUtilizationWAD: coverageUtilizationWAD,
-            liquidityUtilizationWAD: liquidityUtilizationWAD,
+            liquidityUtilizationWAD: 0,
             fixedTermEndTimestamp: fixedTermEndTimestamp,
             minCoverageWAD: _params.minCoverageWAD,
             betaWAD: _params.betaWAD,

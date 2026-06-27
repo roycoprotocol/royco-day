@@ -13,7 +13,7 @@ import { COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK } from "./base/Comp
 /**
  * @title DayIdenticalERC4626ChainlinkDeploymentTemplate
  * @notice Concrete Royco Day deployment template for a market whose ST/JT kernel is
- *         `Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel` and whose LT holds a Gyro E-CLP BPT.
+ *         `Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel` and whose LT holds a Gyro E-CLP pool position.
  * @dev The Balancer pool creation, three-tranche + accountant + kernel deployment, role bindings, and `verify`
  *      are all inherited from `BalancerV3DeploymentTemplate`. This subclass only plugs in the concrete kernel
  *      via `_kernelComponentId()` (its registered creation-code id) and `_kernelInitData()` (its `initialize` calldata).

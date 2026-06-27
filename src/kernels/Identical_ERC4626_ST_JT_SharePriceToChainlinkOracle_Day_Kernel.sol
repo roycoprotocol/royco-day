@@ -11,7 +11,7 @@ import { IdenticalERC4626Shares_ST_JT_ToChainlinkOracleQuoter } from "./base/quo
  * @title Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel
  * @notice Concrete Royco Day kernel for a market whose senior and junior tranches share the same
  *         ERC4626 vault share (priced share->base via `convertToAssets`, base->NAV via a Chainlink
- *         oracle), and whose liquidity tranche holds the Balancer E-CLP BPT paired against a quote asset.
+ *         oracle), and whose liquidity tranche holds the Balancer E-CLP pool position paired against a quote asset.
  */
 contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel is IdenticalERC4626Shares_ST_JT_ToChainlinkOracleQuoter {
     /// @notice Kernel-specific (quoter) initialization parameters, decoded from the deployment template's `kernelSpecificParams`.
@@ -25,7 +25,7 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel is Ident
     }
 
     /// @notice Sets the immutable tranche/asset/accountant wiring on the base kernel.
-    /// @param _cp The standard kernel construction parameters (tranches, assets, accountant, quote asset, BPT).
+    /// @param _cp The standard kernel construction parameters (tranches, assets, accountant, quote asset, LT pool position).
     constructor(IRoycoDayKernel.RoycoDayKernelConstructionParams memory _cp) RoycoDayKernel(_cp) { }
 
     /// @notice Initializes the kernel and its ERC4626-shares-to-Chainlink quoter.
@@ -37,7 +37,7 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel is Ident
     }
 
     /// @inheritdoc IRoycoDayKernel
-    /// @dev The LT asset is the Balancer BPT, valued by the E-CLP oracle (P4). LT deposits/redeems are disabled until
+    /// @dev The LT asset is the Balancer E-CLP pool position, valued by the E-CLP oracle (P4). LT deposits/redeems are disabled until
     ///      then, so the sync never sources `ltRawNAV` through this path; return 0 as a coverage-neutral placeholder.
     function ltConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT) public view override(RoycoDayKernel) returns (NAV_UNIT) {
         return ZERO_NAV_UNITS;
@@ -48,5 +48,22 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel is Ident
     ///      (P4) is wired. LT deposits/redeems are disabled, so this conversion is never exercised by the engine yet.
     function ltConvertNAVUnitsToTrancheUnits(NAV_UNIT) public view override(RoycoDayKernel) returns (TRANCHE_UNIT) {
         return ZERO_TRANCHE_UNITS;
+    }
+
+    /// @notice Thrown when an LT liquidity-venue operation is invoked on a kernel that has no Balancer venue wired yet (P4)
+    error LIQUIDITY_VENUE_NOT_IMPLEMENTED();
+
+    /// @inheritdoc RoycoDayKernel
+    /// @dev No Balancer liquidity venue is wired on this kernel yet (P4): LT multi-asset deposits are disabled, so the venue
+    ///      add is unreachable. Revert defensively rather than silently minting zero LP tokens.
+    function _addLiquidity(uint256, uint256, TRANCHE_UNIT) internal override(RoycoDayKernel) returns (TRANCHE_UNIT) {
+        revert LIQUIDITY_VENUE_NOT_IMPLEMENTED();
+    }
+
+    /// @inheritdoc RoycoDayKernel
+    /// @dev No Balancer liquidity venue is wired on this kernel yet (P4): LT multi-asset redeems are disabled, so the venue
+    ///      removal is unreachable. Revert defensively.
+    function _removeLiquidity(TRANCHE_UNIT, uint256, uint256, address) internal override(RoycoDayKernel) returns (uint256, uint256) {
+        revert LIQUIDITY_VENUE_NOT_IMPLEMENTED();
     }
 }

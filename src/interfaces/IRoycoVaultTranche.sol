@@ -254,4 +254,16 @@ interface IRoycoVaultTranche is IERC20Metadata {
     )
         external
         returns (uint256 protocolFeeSharesMinted, uint256 totalTrancheShares);
+
+    /**
+     * @notice Mints a kernel-computed number of protocol fee shares to the specified fee recipient
+     * @dev Only callable by the kernel during accounting synchronization
+     * @dev Takes a precomputed share count rather than a NAV, used when the fee shares must be computed jointly with
+     *      another carve-out against a shared NAV pool (the senior leg, where the ST protocol fee and the liquidity
+     *      premium are priced at one joint denominator so neither dilutes the other); see the kernel's sync orchestrator
+     * @param _protocolFeeRecipient The address that will receive the minted protocol fee shares
+     * @param _protocolFeeShares The precomputed number of protocol fee shares to mint
+     * @return totalTrancheShares The total shares in the tranche after minting the protocol fee shares
+     */
+    function mintProtocolFeeShares(address _protocolFeeRecipient, uint256 _protocolFeeShares) external returns (uint256 totalTrancheShares);
 }

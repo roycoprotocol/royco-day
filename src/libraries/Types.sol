@@ -28,15 +28,17 @@ enum MarketState {
 /**
  * @title AssetClaims
  * @dev A struct representing claims on senior tranche assets, junior tranche assets, liquidity tranche assets, and NAV
- * @custom:field stAssets - The claim on senior tranche assets denominated in ST's tranche units
- * @custom:field jtAssets - The claim on junior tranche assets denominated in JT's tranche units
- * @custom:field ltAssets - The claim on liquidity tranche assets denominated in LT's tranche units
+ * @custom:field stAssets - The claim on senior tranche assets denominated in ST's tranche units (only applicable for the ST and JT)
+ * @custom:field jtAssets - The claim on junior tranche assets denominated in JT's tranche units (only applicable for the ST and JT)
+ * @custom:field ltAssets - The claim on liquidity tranche assets denominated in LT's tranche units (only applicable for the LT)
+ * @custom:field stShares - The claim on senior tranche shares (only applicable for the LT)
  * @custom:field nav - The net asset value of these claims in NAV units
  */
 struct AssetClaims {
     TRANCHE_UNIT stAssets;
     TRANCHE_UNIT jtAssets;
     TRANCHE_UNIT ltAssets;
+    uint256 stShares;
     NAV_UNIT nav;
 }
 
@@ -122,10 +124,8 @@ struct AccountingCheckpoint {
  * @custom:field stProtocolFeeWAD - The market's protocol fee percentage taken from ST yield, scaled to WAD precision
  * @custom:field jtProtocolFeeWAD - The market's protocol fee percentage taken from JT yield, scaled to WAD precision
  * @custom:field jtYieldShareProtocolFeeWAD - The market's protocol fee percentage taken from the JT yield share (risk premium), scaled to WAD precision
- * @custom:field ltProtocolFeeWAD - The market's protocol fee percentage taken from LT yield, scaled to WAD precision
  * @custom:field ltYieldShareProtocolFeeWAD - The market's protocol fee percentage taken from the LT yield share (liquidity premium), scaled to WAD precision
  * @custom:field effectiveNAVDustTolerance - The effective NAV dust tolerance: the worst-case dust bounded by the sum of the raw NAV dust tolerances
- * @custom:field ltNAVDustTolerance - The worst-case dust tolerance for ltRawNAV from underlying NAV quoting/rounding
  */
 struct PnLWaterfallParams {
     AccountingCheckpoint checkpoint;
@@ -137,10 +137,8 @@ struct PnLWaterfallParams {
     uint64 stProtocolFeeWAD;
     uint64 jtProtocolFeeWAD;
     uint64 jtYieldShareProtocolFeeWAD;
-    uint64 ltProtocolFeeWAD;
     uint64 ltYieldShareProtocolFeeWAD;
     NAV_UNIT effectiveNAVDustTolerance;
-    NAV_UNIT ltNAVDustTolerance;
 }
 
 /**
@@ -150,7 +148,7 @@ struct PnLWaterfallParams {
  * @custom:field ltLiquidityPremium - The liquidity premium paid to LT by the waterfall (zeroed in the marshaled state where the transition pays no premium)
  * @custom:field stProtocolFee - The protocol fee accrued on ST yield by the waterfall (zeroed in the marshaled state where the transition takes no fees)
  * @custom:field jtProtocolFee - The protocol fee accrued on JT yield and the JT yield share by the waterfall (zeroed in the marshaled state where the transition takes no fees)
- * @custom:field ltProtocolFee - The protocol fee accrued on LT yield and the LT yield share by the waterfall (zeroed in the marshaled state where the transition takes no fees)
+ * @custom:field ltProtocolFee - The protocol fee accrued on the LT yield share (liquidity premium) by the waterfall (zeroed in the marshaled state where the transition takes no fees)
  * @custom:field betaWAD - JT's sensitivity to the same downside stress that affects ST, scaled to WAD precision
  * @custom:field minCoverageWAD - The coverage percentage that the senior tranche is expected to be protected by, scaled to WAD precision
  * @custom:field minLiquidityWAD - The percentage of the senior tranche NAV that must be in the liquidity tranche's market making inventory, scaled to WAD precision

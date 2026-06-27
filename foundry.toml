@@ -9,6 +9,7 @@ remappings = [
     "@balancer-labs/v3-pool-utils/=lib/balancer-v3-monorepo/pkg/pool-utils/",
     "@balancer-labs/v3-pool-gyro/=lib/balancer-v3-monorepo/pkg/pool-gyro/",
     "@balancer-labs/v3-standalone-utils/=lib/balancer-v3-monorepo/pkg/standalone-utils/",
+    "@chainlink/contracts/=lib/chainlink-brownie-contracts/contracts/",
 ]
 optimizer = true
 optimizer_runs = 1666

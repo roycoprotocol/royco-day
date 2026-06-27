@@ -84,7 +84,7 @@ liquidityUtilization = stEffectiveNAV * minLiquidity / ltRawNAV
 
 Both inputs are manipulation-resistant: `stEffectiveNAV` is total senior NAV (swaps in the pool do not change it), and `ltRawNAV` is the Balancer oracle. There is no composition subtraction in the numerator.
 
-`liquidityUtilization` is allowed to drift above 100%. It has two restoring forces. The primary one is the deployed premium, which raises `ltRawNAV` directly as it lands (every sync when slippage permits a small add, or via the auction when it does not). The secondary one is external LT deposits, pulled in by a higher LDM premium when utilization is high, exactly as JT deposits clear coverage utilization in the YDM. Note the important limit: `liquidityUtilization` is a solvency mark, not realizable exit depth. It is the right input for pricing the premium. It is the wrong input for gating a redemption, because the BPT can mark healthy while the realizable quote leg is drained. The run gate is reserve-based and lives in the redemption logic, not on this metric. See redemption below.
+`liquidityUtilization` gates redemptions, not deposits. Deposits are enabled at all times: an LT deposit only raises `ltRawNAV` and a senior deposit keeps its own coverage gate, so no deposit is ever blocked on liquidity. Redemptions that reduce the pooled depth — the in-kind and the multi-asset LT redemptions — are valid only in a PERPETUAL market and only if `liquidityUtilization <= 100%` after the redemption settles, so an LT holder can exit down to the senior tranche's required liquidity floor but cannot pull depth below it. The single exception is a breached liquidation coverage utilization: once coverage is in liquidation, every withdrawal is allowed and the redemption bypasses this gate, because the senior tranche is being wound down and locking liquidity in protects no one. The gate is on the post-redemption market state, both of whose inputs (total senior NAV and the Balancer oracle mark) are single-block manipulation-resistant, so it cannot be gamed within a block. Between syncs `liquidityUtilization` can still drift above 100% from senior appreciation; the two restoring forces are the deployed premium, which raises `ltRawNAV` directly as it lands (every sync when slippage permits a small add, or via the auction when it does not), and external LT deposits pulled in by a higher LDM premium when utilization is high, exactly as JT deposits clear coverage utilization in the YDM.
 
 ### LDM
 
@@ -108,15 +108,13 @@ The conclusion: the LT's real holding cost is rate-staleness LVR plus minor near
 
 ## Redemption and the no-run guarantee
 
-Redemption is structured so there is no run, without relying on a hard utilization gate or a lockup.
+Redemption is gated on `liquidityUtilization`, the same metric that prices the premium. A redemption that reduces the pooled depth is valid only in a PERPETUAL market and only if `liquidityUtilization` stays at or below 100% after it settles. That is the no-run guarantee: an LT holder can always exit down to the senior tranche's required liquidity floor, but not past it, so the pool cannot be drained below the depth senior exits depend on. There is no lockup and no first-mover advantage to model, because the gate is on the post-redemption market state, not on queue position.
 
-The default redemption is in-kind and proportional. An LT holder burns LT shares for a proportional slice of the BPT, taken as a sandwich-safe proportional `removeLiquidity`. This is ratio-invariant. It reads no composition, it cannot drain one side of the pool, and it gives no first-mover advantage, so there is no run fixed point. This is the path that makes lockups unnecessary, which is what preserves Pendle and Morpho composability.
+Two redemption flows reduce depth and both are gated identically. The default is in-kind and proportional: an LT holder burns LT shares for a proportional slice of the BPT, taken as a sandwich-safe proportional `removeLiquidity`. The multi-asset flow additionally unwinds the senior leg of that slice (plus any idle, not-yet-reinvested premium senior shares) back to the senior tranche's yield-bearing asset, so the holder leaves in underlying rather than BPT. Both remove a whole LP token — senior leg and quote leg — from the pool while unwinding only the small senior leg, so both raise `liquidityUtilization`, and both must leave it at or below 100%. The proportional `removeLiquidity` reads no composition and cannot drain one side of the pool, so the gate is the only thing standing between a redemption and the senior liquidity floor.
 
-A cash redemption path, where the holder wants the quote stable rather than a BPT slice, is a bounded exception. It is capped at `min(requested, quote_balance - ST_reserved_quote_claim)`. That cap is the only live pool-balance read in the system. It is one-directional, and it never feeds coverage or the premium. This is the actual run gate, and it is reserve-based, so it cannot be gamed by marking the BPT healthy.
+The single exception is a breached liquidation coverage utilization. Once coverage is in liquidation, every withdrawal is allowed and the redemption bypasses the liquidity gate, because the senior tranche is being wound down and there is nothing left to protect. FIXED_TERM otherwise locks every tranche, including the LT, so the drawdown run vector does not exist and the LT's principal is covered through the lock.
 
-The solvency metric prices the premium. The reserve cap gates the cash exit. These are two different numbers for two different jobs, and conflating them is the bug the run analysis surfaced.
-
-FIXED_TERM locks everyone, including the LT, so the drawdown run vector does not exist. The LT's principal is covered through the lock.
+If a holder redeems while idle premium senior shares are still staged for the LT, those shares are sent directly to the redeemer as part of the redemption, so no premium is stranded.
 
 ## Accountant architecture: standalone, forked
 
@@ -141,7 +139,7 @@ The LT tranche is a Royco vault tranche that holds the BPT and nothing else. The
 
 Deposits: `ltDeposit` takes a pre-minted BPT. `ltDepositMultiAsset` is the atomic flow that pulls the ST asset and the quote stable, mints the ST share, performs the Balancer join, and mints the LT share inside `Vault.unlock`, bounded by `minBptOut`, a max-asset-in per token, and a deadline.
 
-Redemptions: the default is the in-kind proportional BPT slice described above. The cash path is the bounded, reserve-capped exception. There is no separate premium leg to compute on redemption: deployed premium is already in the BPT, and un-deployed premium is staged outside the LT share NAV, so it lands as BPT on deploy and is realized to whoever holds the share then.
+Redemptions: the in-kind proportional BPT slice and the multi-asset unwind described above, both gated on `liquidityUtilization <= 100%` after the redemption (bypassed only once liquidation coverage is breached). There is no separate premium leg to compute on redemption: deployed premium is already in the BPT, and un-deployed premium is staged outside the LT share NAV, so it lands as BPT on deploy and is realized to whoever holds the share then; any idle premium senior shares are sent directly to the redeemer.
 
 The kernel custodies the BPT, performs the joins and exits, executes the coverage-neutral premium-share mint, holds the staged premium buffer outside the marked NAV, and performs the gated single-sided add (or the auction-fallback deploy). The blacklist, seize, and zero-supply and zero-NAV boundaries carry over from the tranche base unchanged.
 
@@ -170,17 +168,17 @@ The tranche dispatch handles `SENIOR`/`JUNIOR`/`LIQUIDITY` with a revert default
 - `maxLiquidityPremiumWAD + maxRiskPremiumWAD <= WAD`.
 - LDM and YDM outputs depend only on the last committed checkpoint, so the waterfall stays pure.
 - Coverage math and the PERPETUAL/FIXED_TERM machine remain ST/JT only.
-- The cash redemption cap is the only live pool-balance read, one-directional, never feeding coverage or the premium.
+- Redemptions that reduce the pooled depth (the in-kind and multi-asset LT redemptions) are valid only if `liquidityUtilization` stays at or below 100% afterward, in a PERPETUAL market, and are bypassed once liquidation coverage is breached. Deposits are never liquidity-gated.
 - A Day market at zero minimum liquidity behaves like a plain ST/JT market, verified by Day's own suite rather than asserted against another repo.
 
 ## Build sequence
 
 Each phase is independently testable.
 
-- P0, fork and decisions gate. Stand up the repo from the Dawn copy, strip what Day does not use, drop the inheritance seams, and flatten naming to Day. Settle the coverage-neutral premium-mint mechanism, the who-pays share math, the in-kind redemption and reserve-capped cash path, the LDM floor against the real (rate-staleness plus near-peg IL) cost, and acceptance that JT covers the LT base.
+- P0, fork and decisions gate. Stand up the repo from the Dawn copy, strip what Day does not use, drop the inheritance seams, and flatten naming to Day. Settle the coverage-neutral premium-mint mechanism, the who-pays share math, the in-kind and multi-asset LT redemptions both gated on `liquidityUtilization <= 100%`, the LDM floor against the real (rate-staleness plus near-peg IL) cost, and acceptance that JT covers the LT base.
 - P1, data model. Land the tranche enum, the `Operation` members, and the LT config and state fields as first-class members, chosen cleanly. A Day market at zero minimum liquidity reduces to a plain ST/JT market; lock that in with a test.
 - P2, accountant premium and metric. Implement the LDM-driven `liqShare`, the post-sync coverage-neutral ST-share mint, and the liquidity metric, driven by a directly supplied `ltRawNAV` with no Balancer wiring. Verify the zero-liquidity reduction here.
-- P3, LT vault and kernel custody and deployment. Build `RoycoLiquidityTranche` holding the BPT, the deposit, redeem, max, and preview paths, the in-kind proportional redemption and the reserve-capped cash path, the gated single-sided add, the staged premium buffer, and the auction-fallback deploy. Preview must match execution.
+- P3, LT vault and kernel custody and deployment. Build `RoycoLiquidityTranche` holding the BPT, the deposit, redeem, max, and preview paths, the in-kind proportional redemption and the multi-asset unwind, both gated on `liquidityUtilization <= 100%` after the redemption, the gated single-sided add, the staged premium buffer, and the auction-fallback deploy. Preview must match execution.
 - P4, Balancer oracle. Read `ltRawNAV` from Balancer's E-CLP oracle. Wire the rate provider (ST share NAV from the last committed sync) and the hook with the `router == kernel` carve-out.
 - P5, deploy, factory, roles. Build the single Day market deployment path (tranches, kernel, accountant) and the LT kernel type and roles. Assert addresses, wiring, and roles for a freshly deployed Day market.
 - P6, economics and pre-mainnet hardening. Calibrate the LDM floor against rate-staleness LVR and near-peg IL. Set the deploy cadence, the slippage-gate threshold, the directional fee, and the staged-buffer bound. Decide whether to enable the auction fallback (the buffered supplier with a market-discovered incentive) for a given market. Stress the redemption dynamics.
@@ -196,7 +194,7 @@ Each phase is independently testable.
 - LDM floor. The premium must clear rate-staleness LVR plus near-peg IL. Confirm the floor clears it at a feasible `maxLiquidityPremium` for the target markets.
 - Auction fallback (buffered supplier). The Dutch auction from ST share NAV down to the TWAP one-sided-deposit quote is the buffered supplier with a market-discovered incentive `c`. Decide what the auction sells the staged senior for (quote vs BPT), the emergency force-deploy, and how to bootstrap the solver network — the primary open concern, since until solvers exist the auction will not clear.
 - JT sizing. JT now covers the LT base. Accept the capital-efficiency cost, which is the price paid for deleting the coverage-perimeter exclusion and its complexity.
-- Realizable depth versus the solvency mark. `ltRawNAV` from the Balancer oracle is a solvency value, not exit depth. The in-kind redemption and the reserve-capped cash path already insulate the run gate from this. Decide whether any additional composition-drift breaker is wanted, or accept and document the bound.
+- Realizable depth versus the solvency mark. `ltRawNAV` from the Balancer oracle is a solvency value, not exit depth, so the `liquidityUtilization <= 100%` redemption gate guarantees a solvency floor, not a realizable-exit floor: the BPT can mark healthy while the quote leg is drained. The proportional in-kind removal cannot itself drain one side. Decide whether any additional composition-drift breaker is wanted, or accept and document the bound.
 - ST supply seed. Ensure `ltRawNAV` is never zero against a positive `minLiquidity`, which would make `liquidityUtilization` infinite.
 - Pool permissioning. Confirm the pool LP set equals the kernel, so external mint and burn cannot move the gate without the kernel knowing.
 - Factory and indexer. The repo ships its own Day factory and deploy path from scratch, with no shared pre-deployed factory to upgrade. Stand up a Day-specific indexer/subgraph for the LT events and the three-NAV sync.
@@ -214,4 +212,4 @@ These earlier design problems are recorded here so they are not reopened.
 - The ported E-CLP valuation library, recursion, and bisection solver. Removed. `ltRawNAV` is Balancer's native oracle.
 - A MasterChef-style rewards contract. Removed. The premium reinvests into the BPT and the LT share stays a composable token for Pendle and Morpho.
 - The negative-EV capital framing on a generic LP cost stack. Rejected. The LT market-makes a covered asset, so adverse selection is bounded by coverage, and the real holding cost is rate-staleness LVR plus near-peg IL.
-- Using `liquidityUtilization` as the redemption gate. Removed. It is a solvency mark used for pricing the premium. The run gate is the reserve-capped cash path.
+- Using `liquidityUtilization` as the redemption gate. This is the gate. A redemption that reduces the pooled depth is valid only if `liquidityUtilization` stays at or below 100% afterward, in a PERPETUAL market, and is bypassed once liquidation coverage is breached. The earlier reserve-capped cash path is dropped: the solvency mark, computed from total senior NAV and the Balancer oracle (both single-block manipulation-resistant), is the gate. Deposits are never liquidity-gated.

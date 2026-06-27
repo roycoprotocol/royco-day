@@ -43,10 +43,19 @@ interface IRoycoLiquidityTranche is IRoycoVaultTranche {
      * @param _stUnderlying The amount of ST underlying (the senior tranche's base asset) to deposit, in ST tranche units
      * @param _quoteAmount The amount of quote asset to pair against the minted senior shares
      * @param _minStSharesMinted The minimum senior shares the deposited ST underlying must mint (slippage bound against an unfavorable ST share price)
+     * @param _minLpTokenOut The minimum LP token the liquidity add must mint (slippage bound against an unfavorable pool state)
      * @param _receiver The address that receives the minted LT shares
      * @return shares The number of LT shares minted to the receiver
      */
-    function depositMultiAsset(uint256 _stUnderlying, uint256 _quoteAmount, uint256 _minStSharesMinted, address _receiver) external returns (uint256 shares);
+    function depositMultiAsset(
+        uint256 _stUnderlying,
+        uint256 _quoteAmount,
+        uint256 _minStSharesMinted,
+        uint256 _minLpTokenOut,
+        address _receiver
+    )
+        external
+        returns (uint256 shares);
 
     /**
      * @notice Exits the LT to the LP token's constituent assets: ST underlying + quote

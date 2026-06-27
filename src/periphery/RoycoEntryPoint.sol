@@ -432,7 +432,7 @@ contract RoycoEntryPoint is RoycoBase, IRoycoEntryPoint {
         _sharesToRedeem =
             (_sharesToRedeem == type(uint256).max) ? Math.min(IRoycoVaultTranche(tranche).maxRedeem(address(this)), request.shares) : _sharesToRedeem;
         // Return early without reverting if maxRedeem is 0 due to market conditions
-        if (_sharesToRedeem == 0) return AssetClaims(ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, ZERO_NAV_UNITS);
+        if (_sharesToRedeem == 0) return AssetClaims(ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, 0, ZERO_NAV_UNITS);
 
         // Mark the shares as redeemed
         uint256 sharesLeftToRedeem = request.shares - _sharesToRedeem;
