@@ -443,16 +443,14 @@ interface IRoycoDayKernel {
      * @dev The ST mint leg enforces the market's coverage requirement; reverts if coverage is unsatisfied
      * @param _stAssets The amount of ST underlying (the senior tranche's base asset) to deposit, denominated in ST tranche units
      * @param _quoteAssets The amount of quote asset to add as the second pool leg
-     * @param _minStSharesMinted The minimum senior shares the deposited ST underlying must mint (slippage bound against an unfavorable ST share price)
      * @param _minLTAssetsOut The minimum LT tranche assets (LP token) the liquidity add must mint (slippage bound against an unfavorable pool state)
      * @return valueAllocated The value of the minted LT tranche assets, denominated in the kernel's NAV units
-     * @return navToMintSharesAt The LT raw NAV at which the LT shares will be minted (pre-deposit)
+     * @return navToMintSharesAt The LT effective NAV at which the LT shares will be minted (pre-deposit)
      * @return trancheAssetsOut The amount of LT tranche assets (LP token) minted and credited to the liquidity tranche
      */
     function ltDepositMultiAsset(
         TRANCHE_UNIT _stAssets,
         uint256 _quoteAssets,
-        uint256 _minStSharesMinted,
         TRANCHE_UNIT _minLTAssetsOut
     )
         external
@@ -462,37 +460,20 @@ interface IRoycoDayKernel {
      * @notice Atomically exits the liquidity tranche to the LP token's constituent assets: proportionally removes the LP-token slice,
      *         redeems the pooled senior shares to ST underlying, and returns (ST underlying + quote) to the receiver
      * @param _ltShares The number of LT shares being redeemed (used to size the proportional LP-token slice)
-     * @param _minQuoteOut The minimum quote to return (slippage bound)
+     * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must return (slippage bound)
+     * @param _minQuoteAssetsOut The minimum quote to return (slippage bound)
      * @param _receiver The address that receives the ST underlying and quote
      * @return stClaims The ST redemption asset claims transferred to the receiver (its ST/JT asset legs)
-     * @return quoteOut The quote returned to the receiver
+     * @return quoteAssets The quote assets returned to the receiver
      */
-    function ltRedeemMultiAsset(uint256 _ltShares, uint256 _minQuoteOut, address _receiver) external returns (AssetClaims memory stClaims, uint256 quoteOut);
-
-    /**
-     * @notice Previews an LT multi-asset deposit
-     * @dev NON-VIEW: it queries the liquidity venue, whose `query*` functions are not `view`. Intended for off-chain `eth_call`
-     * @param _stUnderlying The amount of ST underlying to deposit, in ST tranche units
-     * @param _quoteAmount The amount of quote asset to add as the second pool leg
-     * @return valueAllocated The value of the LT tranche assets that would be minted, in the kernel's NAV units
-     * @return navToMintSharesAt The LT raw NAV at which LT shares would be minted (pre-deposit)
-     * @return trancheAssetsOut The LT tranche assets (LP token) that would be minted from the liquidity add
-     */
-    function previewLtDepositMultiAsset(
-        uint256 _stUnderlying,
-        uint256 _quoteAmount
+    function ltRedeemMultiAsset(
+        uint256 _ltShares,
+        uint256 _minSTSharesOut,
+        uint256 _minQuoteAssetsOut,
+        address _receiver
     )
         external
-        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, uint256 trancheAssetsOut);
-
-    /**
-     * @notice Previews an LT multi-asset redemption
-     * @dev NON-VIEW: it queries the liquidity venue, whose `query*` functions are not `view`. Intended for off-chain `eth_call`
-     * @param _ltShares The number of LT shares being redeemed
-     * @return stClaims The ST redemption asset claims that would be transferred to the receiver (its ST/JT asset legs)
-     * @return quoteOut The quote that would be returned
-     */
-    function previewLtRedeemMultiAsset(uint256 _ltShares) external returns (AssetClaims memory stClaims, uint256 quoteOut);
+        returns (AssetClaims memory stClaims, uint256 quoteAssets);
 
     /**
      * @notice Pre-balance update hook for the tranche

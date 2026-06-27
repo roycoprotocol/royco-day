@@ -641,7 +641,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     function ltDepositMultiAsset(
         TRANCHE_UNIT _stAssets,
         uint256 _quoteAssets,
-        uint256 _minStSharesMinted,
         TRANCHE_UNIT _minLTAssetsOut
     )
         external
@@ -668,8 +667,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         if (_stAssets != ZERO_TRANCHE_UNITS) {
             // The non-diluting senior share count against the pre-deposit senior effective NAV and pre-mint supply
             seniorSharesMinted = _navToShares(stConvertTrancheUnitsToNAVUnits(_stAssets), state.stEffectiveNAV, IERC20(SENIOR_TRANCHE).totalSupply());
-            // Enforce the caller's slippage bound on the senior shares minted from the underlying (guards against an unfavorable ST share price)
-            require(seniorSharesMinted >= _minStSharesMinted, INSUFFICIENT_OUTPUT_AMOUNT());
 
             // Credit the ST underlying (already transferred to the kernel by the LT tranche) and book it: ST_DEPOSIT is the only post-op
             // admitting a positive senior raw-NAV delta, so the deposited senior exposure must commit here before the final LT_DEPOSIT sync.
@@ -698,7 +695,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     /// @inheritdoc IRoycoDayKernel
     function ltRedeemMultiAsset(
         uint256 _ltShares,
-        uint256 _minQuoteOut,
+        uint256 _minSTSharesOut,
+        uint256 _minQuoteAssetsOut,
         address _receiver
     )
         external
@@ -708,7 +706,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         onlyLiquidityTranche
         nonReentrant
         withQuoterCache
-        returns (AssetClaims memory stClaims, uint256 quoteOut)
+        returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
         // Execute a pre-op sync; this sync mints this period's liquidity premium into the kernel's held senior shares, so the
         // held-share pile and the LT supply are mutually consistent (post-mint) for sizing the redeemer's slice
@@ -736,9 +734,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
         // Remove the LP-token slice into its (pooled senior shares + quote) constituents. The removal is proportional (sandwich-safe and
         // ratio-invariant), so the senior leg cannot be independently manipulated and an unbounded min senior shares out is safe; the quote
-        // leg is bounded by the caller's _minQuoteOut inside the venue op
+        // leg is bounded by the caller's _minQuoteAssetsOut inside the venue op
         uint256 pooledSeniorShares;
-        if (trancheAssetsToRemove != ZERO_TRANCHE_UNITS) (pooledSeniorShares, quoteOut) = _removeLiquidity(trancheAssetsToRemove, 0, _minQuoteOut, _receiver);
+        if (trancheAssetsToRemove != ZERO_TRANCHE_UNITS) {
+            (pooledSeniorShares, quoteAssets) = _removeLiquidity(trancheAssetsToRemove, _minSTSharesOut, _minQuoteAssetsOut, _receiver);
+        }
 
         // Unwind ALL of the redeemer's senior shares (pooled + idle premium) in a single ST redemption: scale once, burn once, withdraw once.
         // No self-liquidation bonus is applied: this is an internal unwind, not a senior holder's stressed exit
@@ -752,56 +752,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         // redemption. No requirements are enforced because this proportional unwind removes senior shares alongside the pooled depth, delevering
         // the market (mirrors stRedeem); the ST_REDEEM op never enforces the liquidity requirement even though it reduces ltRawNAV
         _postOpSyncTrancheAccounting(Operation.LT_REDEEM, ZERO_NAV_UNITS, false);
-    }
-
-    /// @inheritdoc IRoycoDayKernel
-    function previewLtDepositMultiAsset(
-        uint256 _stUnderlying,
-        uint256 _quoteAmount
-    )
-        external
-        virtual
-        override(IRoycoDayKernel)
-        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, uint256 trancheAssetsOut)
-    {
-        // Preview the ST leg: value the underlying and compute the senior share count against the post-fee senior supply
-        (SyncedAccountingState memory state,, uint256 totalStShares) = previewSyncTrancheAccounting(TrancheType.SENIOR);
-        NAV_UNIT stValueAllocated = stConvertTrancheUnitsToNAVUnits(toTrancheUnits(_stUnderlying));
-        uint256 seniorShares = _navToShares(stValueAllocated, state.stEffectiveNAV, totalStShares);
-
-        // Query the liquidity venue add for the LT tranche assets (LP token) out (non-view query)
-        trancheAssetsOut = _queryAddLiquidityUnbalanced(seniorShares, _quoteAmount);
-
-        // Preview the LT leg: the LT shares are minted against the pre-deposit LT EFFECTIVE NAV (the value deployed into the AMM or another market-making venue plus the idle
-        // liquidity-premium senior shares). The preview does not commit the premium mint, so inject this period's post-mint held count
-        // (storage plus this sync's premium) and value it at the post-mint senior supply (totalStShares), mirroring execution
-        (uint256 liquidityPremiumShares,,) = _computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(SENIOR_TRANCHE).totalSupply());
-        navToMintSharesAt = _getLiquidityTrancheEffectiveNAV(
-            state.stEffectiveNAV, totalStShares, _getRoycoDayKernelStorage().ltOwnedSeniorTrancheShares + liquidityPremiumShares
-        );
-        valueAllocated = ltConvertTrancheUnitsToNAVUnits(toTrancheUnits(trancheAssetsOut));
-    }
-
-    /// @inheritdoc IRoycoDayKernel
-    function previewLtRedeemMultiAsset(uint256 _ltShares) external virtual override(IRoycoDayKernel) returns (AssetClaims memory stClaims, uint256 quoteOut) {
-        // Preview the LT leg: size the proportional LP-token slice against the post-fee LT supply
-        (SyncedAccountingState memory state, AssetClaims memory ltClaims, uint256 totalLtShares) = previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
-        uint256 trancheAssetsToRemove = toUint256(UtilsLib.scaleAssetClaims(ltClaims, _ltShares, totalLtShares).ltAssets);
-
-        // Mirror execution's premium mint: the preview does not commit it to storage, so add this period's premium shares to the held
-        // count to get the post-mint idle pile, and reuse the post-mint senior supply for the ST claim (parity with _processFeesAndLiquidityPremium)
-        (uint256 liquidityPremiumShares,, uint256 stTotalSupplyAfterMints) =
-            _computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(SENIOR_TRANCHE).totalSupply());
-        uint256 ltOwnedSeniorAfter = _getRoycoDayKernelStorage().ltOwnedSeniorTrancheShares + liquidityPremiumShares;
-        uint256 idlePremiumShares = Math.mulDiv(ltOwnedSeniorAfter, _ltShares, totalLtShares, Math.Rounding.Floor);
-
-        // Query the liquidity venue removal for the (pooled senior shares + quote) constituents (non-view query)
-        uint256 pooledSeniorShares;
-        if (trancheAssetsToRemove != 0) (pooledSeniorShares, quoteOut) = _queryRemoveLiquidityProportional(trancheAssetsToRemove);
-
-        // Preview the combined ST redemption (pooled + idle premium) against the post-mint senior supply, deriving claims from the same synced state
-        stClaims =
-            UtilsLib.scaleAssetClaims(_deriveTrancheAssetClaims(TrancheType.SENIOR, state), pooledSeniorShares + idlePremiumShares, stTotalSupplyAfterMints);
     }
 
     // =============================
@@ -837,18 +787,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         internal
         virtual
         returns (uint256 stShares, uint256 quoteAssets);
-
-    /// @notice Off-chain query for the single-sided add (non-view, like an AMM router's query functions). Overridden by the concrete venue kernel
-    function _queryAddLiquidityUnbalanced(uint256, uint256) internal virtual returns (uint256) {
-        // TODO: Implemented by the concrete venue kernel
-        revert("not implemented");
-    }
-
-    /// @notice Off-chain query for the proportional removal (non-view, like an AMM router's query functions). Overridden by the concrete venue kernel
-    function _queryRemoveLiquidityProportional(uint256) internal virtual returns (uint256, uint256) {
-        // TODO: Implemented by the concrete venue kernel
-        revert("not implemented");
-    }
 
     // =============================
     // Admin Functions
@@ -1148,7 +1086,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     {
         // The pre-existing senior shares retain the senior effective NAV net of the premium and fee
         // NOTE: The waterfall enforces that (premium + fee) <= senior effective NAV, so the subtraction never underflows
-        NAV_UNIT retainedSeniorNAV = _state.stEffectiveNAV - _state.ltLiquidityPremium - _state.stProtocolFee;
+        NAV_UNIT retainedSeniorNAV = (_state.stEffectiveNAV - _state.ltLiquidityPremium - _state.stProtocolFee);
 
         // Convert each carve-out into senior shares against the retained NAV over the pre-sync supply (the zero-NAV boundary is handled in _navToShares)
         liquidityPremiumShares = _navToShares(_state.ltLiquidityPremium, retainedSeniorNAV, _seniorTrancheTotalSupply);

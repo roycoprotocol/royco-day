@@ -55,10 +55,9 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
 
     /// @inheritdoc IRoycoLiquidityTranche
     function depositMultiAsset(
-        uint256 _stUnderlying,
-        uint256 _quoteAmount,
-        uint256 _minStSharesMinted,
-        uint256 _minLpTokenOut,
+        uint256 _stAssets,
+        uint256 _quoteAssets,
+        uint256 _minLTAssetsOut,
         address _receiver
     )
         external
@@ -70,30 +69,31 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
     {
         require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
 
-        // Pull the constituent assets to the kernel (it custodies them for the senior mint and the liquidity add)
+        // Pull the constituent assets to the kernel (it executes them for the senior mint and the liquidity add)
         address kernel = KERNEL;
-        if (_stUnderlying != 0) IERC20(IRoycoDayKernel(kernel).ST_ASSET()).safeTransferFrom(msg.sender, kernel, _stUnderlying);
-        if (_quoteAmount != 0) IERC20(IRoycoDayKernel(kernel).QUOTE_ASSET()).safeTransferFrom(msg.sender, kernel, _quoteAmount);
+        if (_stAssets != 0) IERC20(IRoycoDayKernel(kernel).ST_ASSET()).safeTransferFrom(msg.sender, kernel, _stAssets);
+        if (_quoteAssets != 0) IERC20(IRoycoDayKernel(kernel).QUOTE_ASSET()).safeTransferFrom(msg.sender, kernel, _quoteAssets);
 
-        // Orchestrate the multi-asset deposit in the kernel, bounding the liquidity add's slippage by the caller's minimum LP token out
-        (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, uint256 trancheAssetsMinted) =
-            IRoycoDayKernel(kernel).ltDepositMultiAsset(toTrancheUnits(_stUnderlying), _quoteAmount, _minStSharesMinted, toTrancheUnits(_minLpTokenOut));
+        // Orchestrate the multi-asset deposit in the kernel, bounding the liquidity add's slippage by the caller's minimum LT assets out
+        (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, uint256 trancheAssetsOut) =
+            IRoycoDayKernel(kernel).ltDepositMultiAsset(toTrancheUnits(_stAssets), _quoteAssets, toTrancheUnits(_minLTAssetsOut));
 
         // navToMintSharesAt can be zero when the tranche is freshly deployed
         require(valueAllocated != ZERO_NAV_UNITS, INVALID_VALUE_ALLOCATED());
 
-        // Mint the LT shares to the receiver at the pre-deposit LT raw NAV per share
+        // Mint the LT shares to the receiver at the pre-deposit LT effective NAV per share
         shares = _convertToShares(valueAllocated, totalSupply(), navToMintSharesAt, Math.Rounding.Floor);
         require(shares != 0, MUST_MINT_NON_ZERO_SHARES());
         _mint(_receiver, shares);
 
-        emit MultiAssetDeposit(msg.sender, _receiver, _stUnderlying, _quoteAmount, trancheAssetsMinted, shares);
+        emit MultiAssetDeposit(msg.sender, _receiver, _stAssets, _quoteAssets, trancheAssetsOut, shares);
     }
 
     /// @inheritdoc IRoycoLiquidityTranche
     function redeemMultiAsset(
         uint256 _shares,
-        uint256 _minQuoteOut,
+        uint256 _minSTSharesOut,
+        uint256 _minQuoteAssetsOut,
         address _receiver,
         address _owner
     )
@@ -102,7 +102,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         override(IRoycoLiquidityTranche)
         whenNotPaused
         restricted
-        returns (AssetClaims memory stClaims, uint256 quoteOut)
+        returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
         require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
         require(_shares != 0, MUST_REQUEST_NON_ZERO_SHARES());
@@ -112,46 +112,12 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
             _spendAllowance(_owner, msg.sender, _shares);
         }
 
-        // Orchestrate the multi-asset redemption in the kernel; it transfers the assets directly to the receiver
-        (stClaims, quoteOut) = IRoycoDayKernel(KERNEL).ltRedeemMultiAsset(_shares, _minQuoteOut, _receiver);
+        // Orchestrate the multi-asset redemption in the kernel, bounding the removal's slippage by the caller's minimum senior shares and quote out. It transfers the assets directly to the receiver
+        (stClaims, quoteAssets) = IRoycoDayKernel(KERNEL).ltRedeemMultiAsset(_shares, _minSTSharesOut, _minQuoteAssetsOut, _receiver);
 
         // Burn shares after the kernel processes the redemption (kernel depends on pre-burn total supply)
         _burn(_owner, _shares);
 
-        emit MultiAssetRedeem(msg.sender, _receiver, _owner, _shares, stClaims, quoteOut);
-    }
-
-    // =============================
-    // Multi-Asset Preview Functions
-    // =============================
-
-    /// @inheritdoc IRoycoLiquidityTranche
-    function previewDepositMultiAsset(
-        uint256 _stUnderlying,
-        uint256 _quoteAmount
-    )
-        external
-        virtual
-        override(IRoycoLiquidityTranche)
-        returns (uint256 shares, uint256 trancheAssetsMinted)
-    {
-        NAV_UNIT valueAllocated;
-        NAV_UNIT navToMintSharesAt;
-        (valueAllocated, navToMintSharesAt, trancheAssetsMinted) = IRoycoDayKernel(KERNEL).previewLtDepositMultiAsset(_stUnderlying, _quoteAmount);
-
-        // Use the post-sync liquidity tranche supply (after the LT protocol fee shares) from the single source of truth
-        (,, uint256 totalTrancheSharesAfterSync) = IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
-
-        shares = _convertToShares(valueAllocated, totalTrancheSharesAfterSync, navToMintSharesAt, Math.Rounding.Floor);
-    }
-
-    /// @inheritdoc IRoycoLiquidityTranche
-    function previewRedeemMultiAsset(uint256 _shares)
-        external
-        virtual
-        override(IRoycoLiquidityTranche)
-        returns (AssetClaims memory stClaims, uint256 quoteOut)
-    {
-        (stClaims, quoteOut) = IRoycoDayKernel(KERNEL).previewLtRedeemMultiAsset(_shares);
+        emit MultiAssetRedeem(msg.sender, _receiver, _owner, _shares, stClaims, quoteAssets);
     }
 }

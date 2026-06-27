@@ -110,37 +110,6 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     }
 
     // =============================
-    // BPT Oracle Configuration Functions
-    // =============================
-
-    /**
-     * @notice Sets the BPT oracle used to value the liquidity tranche
-     * @param _bptOracle The new manipulation-resistant balancer pool token (BPT) oracle
-     * @param _syncBeforeUpdate Whether to sync the tranche accounting against the outgoing oracle before updating the BPT oracle
-     */
-    function setBptOracle(address _bptOracle, bool _syncBeforeUpdate) external restricted {
-        // If specified, sync the tranche accounting against the outgoing oracle before updating it
-        if (_syncBeforeUpdate) _preOpSyncTrancheAccounting();
-        // Update the BPT oracle
-        _setBptOracle(_bptOracle);
-        // Sync the tranche accounting against the incoming oracle so the committed liquidity tranche raw NAV reflects it
-        _preOpSyncTrancheAccounting();
-    }
-
-    /// @notice Returns the BPT oracle configuration for this quoter
-    function getBptOracleConfiguration() external pure returns (BalancerV3_LT_QuoterState memory) {
-        return _getBalancerV3_LT_QuoterStorage();
-    }
-
-    /// @notice Sets the new BPT oracle
-    /// @param _bptOracle The new manipulation-resistant balancer pool token (BPT) oracle
-    function _setBptOracle(address _bptOracle) internal {
-        require(_bptOracle != address(0), NULL_ADDRESS());
-        _getBalancerV3_LT_QuoterStorage().bptOracle = _bptOracle;
-        emit BptOracleUpdated(_bptOracle);
-    }
-
-    // =============================
     // Senior Share Rate Provider Function
     // =============================
 
@@ -265,7 +234,7 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
         override(RoycoDayKernel)
         returns (TRANCHE_UNIT ltAssets)
     {
-        // Unlock the Balancer vault, execute the callback to mint the liquidity position from the specified senior tranche shares and quote assets, and return the LT assets minted in the process
+        // Unlock the Balancer vault, execute the callback to mint the liquidity position from the specified senior tranche shares and quote assets
         bytes memory callbackReturnData = _vault.unlock(abi.encodeCall(this.addBalancerV3Liquidity, (_seniorShares, _quoteAssets, _minLTAssetsOut)));
         assembly ("memory-safe") {
             ltAssets := mload(add(callbackReturnData, 0x20))
@@ -285,13 +254,44 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
         override(RoycoDayKernel)
         returns (uint256 stShares, uint256 quoteAssets)
     {
-        // Unlock the Balancer vault, execute the callback to unwrap the specified units of the liquidity position, and return the ST shares withdrawn in the process
+        // Unlock the Balancer vault, execute the callback to unwrap the specified units of the liquidity position
         bytes memory callbackReturnData =
             _vault.unlock(abi.encodeCall(this.removeBalancerV3Liquidity, (_ltAssets, _minSTSharesOut, _minQuoteAssetsOut, _quoteAssetsReceiver)));
         assembly ("memory-safe") {
             stShares := mload(add(callbackReturnData, 0x20))
             quoteAssets := mload(add(callbackReturnData, 0x40))
         }
+    }
+
+    // =============================
+    // BPT Oracle Configuration Functions
+    // =============================
+
+    /**
+     * @notice Sets the BPT oracle used to value the liquidity tranche
+     * @param _bptOracle The new manipulation-resistant balancer pool token (BPT) oracle
+     * @param _syncBeforeUpdate Whether to sync the tranche accounting against the outgoing oracle before updating the BPT oracle
+     */
+    function setBptOracle(address _bptOracle, bool _syncBeforeUpdate) external restricted {
+        // If specified, sync the tranche accounting against the outgoing oracle before updating it
+        if (_syncBeforeUpdate) _preOpSyncTrancheAccounting();
+        // Update the BPT oracle
+        _setBptOracle(_bptOracle);
+        // Sync the tranche accounting against the incoming oracle so the committed liquidity tranche raw NAV reflects it
+        _preOpSyncTrancheAccounting();
+    }
+
+    /// @notice Returns the BPT oracle configuration for this quoter
+    function getBptOracleConfiguration() external pure returns (BalancerV3_LT_QuoterState memory) {
+        return _getBalancerV3_LT_QuoterStorage();
+    }
+
+    /// @notice Sets the new BPT oracle
+    /// @param _bptOracle The new manipulation-resistant balancer pool token (BPT) oracle
+    function _setBptOracle(address _bptOracle) internal {
+        require(_bptOracle != address(0), NULL_ADDRESS());
+        _getBalancerV3_LT_QuoterStorage().bptOracle = _bptOracle;
+        emit BptOracleUpdated(_bptOracle);
     }
 
     /**
