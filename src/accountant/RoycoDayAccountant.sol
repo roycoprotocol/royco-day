@@ -314,8 +314,11 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         }
 
         // Enforce the liquidity requirement for operations that can violate it (raise the senior exposure or reduce the depth of the liquidity tranche). An LT
-        // redemption that pays a self-liquidation bonus is a liquidation-breach exit, where all withdrawals are allowed, so it is exempt from the liquidity gate
-        if (_op == Operation.ST_DEPOSIT || _op == Operation.LT_DEPOSIT || (_op == Operation.LT_REDEEM && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS)) {
+        // Redemption is exempt once coverage utilization reaches its liquidation threshold, the liquidation-breach state in which all LT withdrawals are allowed
+        if (
+            _op == Operation.ST_DEPOSIT || _op == Operation.LT_DEPOSIT
+                || (_op == Operation.LT_REDEEM && state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD)
+        ) {
             require(state.liquidityUtilizationWAD <= WAD, LIQUIDITY_REQUIREMENT_VIOLATED());
         }
     }
