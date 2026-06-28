@@ -1251,7 +1251,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         returns (AssetClaims memory stUserClaimsWithBonus, NAV_UNIT stSelfLiquidationBonusNAV)
     {
         // If the liquidation coverageUtilization threshold has not been breached, there is no ST self-liquidation bonus remitted
-        if (_state.coverageUtilizationWAD < _state.liquidationCoverageUtilizationWAD) return (_stUserClaims, ZERO_NAV_UNITS);
+        if (_state.coverageUtilizationWAD < _state.coverageLiquidationUtilizationWAD) return (_stUserClaims, ZERO_NAV_UNITS);
 
         // Compute the desired ST bonus based on the configured ST self-liquidation bonus rate
         NAV_UNIT desiredBonusNAV = _stUserClaims.nav.mulDiv(_getRoycoDayKernelStorage().stSelfLiquidationBonusWAD, WAD, Math.Rounding.Floor);

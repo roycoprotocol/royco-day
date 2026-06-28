@@ -6,7 +6,7 @@ import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
 
 /**
  * @title SetLiquidationCoverageUtilization
- * @notice Generates Safe transaction batches for updating `liquidationCoverageUtilizationWAD` on each
+ * @notice Generates Safe transaction batches for updating `coverageLiquidationUtilizationWAD` on each
  *         market's accountant across multiple markets and chains.
  *
  * @dev `setLiquidationCoverageUtilization` is `restricted` to `ADMIN_ACCOUNTANT_ROLE` (timelocked). The
@@ -108,7 +108,7 @@ contract SetLiquidationCoverageUtilization is ParameterUpdateBase {
                     target: addrs.accountant,
                     callData: abi.encodeCall(IRoycoDayAccountant.setLiquidationCoverageUtilization, (cfg.newLiquidationCoverageUtilizationWAD)),
                     description: string.concat(
-                        "Set liquidationCoverageUtilizationWAD for ", cfg.marketName, " to ", vm.toString(cfg.newLiquidationCoverageUtilizationWAD)
+                        "Set coverageLiquidationUtilizationWAD for ", cfg.marketName, " to ", vm.toString(cfg.newLiquidationCoverageUtilizationWAD)
                     )
                 });
                 idx++;
@@ -132,7 +132,7 @@ contract SetLiquidationCoverageUtilization is ParameterUpdateBase {
             expected := mload(add(cd, 36))
         }
 
-        require(state.liquidationCoverageUtilizationWAD == expected, VerificationFailed("liquidationCoverageUtilizationWAD mismatch after execution"));
+        require(state.coverageLiquidationUtilizationWAD == expected, VerificationFailed("coverageLiquidationUtilizationWAD mismatch after execution"));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

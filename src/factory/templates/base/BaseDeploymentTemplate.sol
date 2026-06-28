@@ -288,7 +288,7 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
             maxJTYieldShareWAD: uint64(WAD),
             maxLTYieldShareWAD: 0,
             fixedTermDurationSeconds: _p.fixedTermDurationSeconds,
-            liquidationCoverageUtilizationWAD: _p.liquidationUtilizationWAD,
+            coverageLiquidationUtilizationWAD: _p.liquidationUtilizationWAD,
             stNAVDustTolerance: _p.stNAVDustTolerance,
             jtNAVDustTolerance: _p.jtNAVDustTolerance,
             // Liquidity tranche overlay: zero-liquidity baseline; LT YDM is a distinct, uninitialized placeholder pending the LDM (see @dev above)

@@ -95,7 +95,7 @@ contract GuardianCancellationTest is BaseTest {
             jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             minCoverageWAD: COVERAGE_WAD,
             betaWAD: BETA_WAD,
-            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
+            coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(ydmParams),

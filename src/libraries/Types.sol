@@ -66,7 +66,7 @@ struct AssetClaims {
  * @custom:field minCoverageWAD - The coverage percentage that the senior tranche is expected to be protected by, scaled to WAD precision
  * @custom:field betaWAD - JT's percentage sensitivity to the same downside stress that affects ST, scaled to WAD precision
  *                         For example, beta is 0 when JT is in the RFR and 1e18 (100%) when JT is in the same opportunity as senior
- * @custom:field liquidationCoverageUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
+ * @custom:field coverageLiquidationUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
  * @custom:field minLiquidityWAD - The percentage of the senior tranche NAV that must be in the liquidity tranche's market making inventory, scaled to WAD precision
  */
 struct SyncedAccountingState {
@@ -90,7 +90,7 @@ struct SyncedAccountingState {
     // The market's coverage configuration
     uint256 minCoverageWAD;
     uint256 betaWAD;
-    uint256 liquidationCoverageUtilizationWAD;
+    uint256 coverageLiquidationUtilizationWAD;
     // The market's liquidity configuration
     uint256 minLiquidityWAD;
 }

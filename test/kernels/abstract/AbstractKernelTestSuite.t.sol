@@ -2264,7 +2264,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Verify coverageUtilization is below liquidation threshold
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        assertLt(state.coverageUtilizationWAD, state.liquidationCoverageUtilizationWAD, "CoverageUtilization should be below liquidation threshold");
+        assertLt(state.coverageUtilizationWAD, state.coverageLiquidationUtilizationWAD, "CoverageUtilization should be below liquidation threshold");
 
         // Get ST's claims without bonus (directly from NAV decomposition)
         NAV_UNIT stEffectiveNAV = state.stEffectiveNAV;
@@ -2306,7 +2306,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Record state before loss
         // Simulate severe loss to push coverageUtilization above liquidation threshold
-        // We need coverageUtilizationWAD >= liquidationCoverageUtilizationWAD
+        // We need coverageUtilizationWAD >= coverageLiquidationUtilizationWAD
         simulateJTLoss(0.8e18); // 80% loss to drastically reduce JT effective NAV
 
         // Sync accounting
@@ -2317,7 +2317,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
         // Skip if coverageUtilization is still below threshold (JT absorbed all losses)
-        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD) return;
 
         // Record coverageUtilization before redemption for invariant check
         uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
@@ -2417,7 +2417,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
         // Skip if coverageUtilization is still below threshold
-        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD) return;
 
         // Record coverageUtilization before redemption for invariant check
         uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
@@ -2497,7 +2497,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Check if coverageUtilization is above threshold
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD) return;
 
         // Record coverageUtilization before redemption for invariant check
         uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
@@ -2562,7 +2562,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Check if we're in liquidation state
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD) return;
 
         // Record coverageUtilization before redemption for invariant check
         uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
@@ -2620,7 +2620,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Check if we're in liquidation state
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD) return;
 
         // Record JT effective NAV and coverageUtilization before redemptions
         NAV_UNIT jtEffNAVBefore = state.jtEffectiveNAV;
@@ -2711,7 +2711,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Check if we're in liquidation state
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD) return;
 
         // Record coverageUtilization before redemption for invariant check
         uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
@@ -2792,7 +2792,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory stateAfterLoss,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (stateAfterLoss.coverageUtilizationWAD < stateAfterLoss.liquidationCoverageUtilizationWAD) return; // skip if liquidation can't be triggered
+        if (stateAfterLoss.coverageUtilizationWAD < stateAfterLoss.coverageLiquidationUtilizationWAD) return; // skip if liquidation can't be triggered
 
         vm.prank(BOB_ADDRESS);
         ST.redeem(bobStShares, BOB_ADDRESS, BOB_ADDRESS);
@@ -2865,7 +2865,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Get pre-redemption state
         (SyncedAccountingState memory stateBefore,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (stateBefore.coverageUtilizationWAD < stateBefore.liquidationCoverageUtilizationWAD) return;
+        if (stateBefore.coverageUtilizationWAD < stateBefore.coverageLiquidationUtilizationWAD) return;
 
         uint256 coverageUtilizationBefore = stateBefore.coverageUtilizationWAD;
 
@@ -2918,7 +2918,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory stateBefore,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (stateBefore.coverageUtilizationWAD < stateBefore.liquidationCoverageUtilizationWAD) return;
+        if (stateBefore.coverageUtilizationWAD < stateBefore.coverageLiquidationUtilizationWAD) return;
 
         uint256 coverageUtilizationBefore = stateBefore.coverageUtilizationWAD;
 
@@ -2971,7 +2971,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory state0,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state0.coverageUtilizationWAD < state0.liquidationCoverageUtilizationWAD) return;
+        if (state0.coverageUtilizationWAD < state0.coverageLiquidationUtilizationWAD) return;
 
         uint256 util0 = state0.coverageUtilizationWAD;
 
@@ -3047,7 +3047,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD) return;
 
         // Both redeem
         vm.prank(BOB_ADDRESS);
@@ -3104,7 +3104,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
         // If we're in liquidation, verify the invariant
-        if (state.coverageUtilizationWAD >= state.liquidationCoverageUtilizationWAD) {
+        if (state.coverageUtilizationWAD >= state.coverageLiquidationUtilizationWAD) {
             uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
 
             vm.prank(BOB_ADDRESS);
@@ -3147,7 +3147,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
-        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD) return;
 
         uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
         vm.prank(BOB_ADDRESS);
@@ -3194,7 +3194,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory state0,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state0.coverageUtilizationWAD < state0.liquidationCoverageUtilizationWAD) return;
+        if (state0.coverageUtilizationWAD < state0.coverageLiquidationUtilizationWAD) return;
 
         uint256 u0 = state0.coverageUtilizationWAD;
 
@@ -3253,7 +3253,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD) return;
 
         // Calculate jtClaimOnSTRawNAV (cross-tranche claim)
         NAV_UNIT jtClaimOnSTRawNAV = state.jtEffectiveNAV > state.jtRawNAV ? state.jtEffectiveNAV - state.jtRawNAV : ZERO_NAV_UNITS;
@@ -3317,7 +3317,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD) return;
 
         uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
 
@@ -3393,7 +3393,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD) return;
 
         uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
 
@@ -3493,7 +3493,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory state0,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state0.coverageUtilizationWAD < state0.liquidationCoverageUtilizationWAD) return;
+        if (state0.coverageUtilizationWAD < state0.coverageLiquidationUtilizationWAD) return;
 
         // Track coverageUtilization after each "attack"
         uint256[] memory coverageUtilizations = new uint256[](5);
@@ -3585,7 +3585,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
 
         // Skip if not in liquidation (shouldn't happen with 98% loss)
-        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD) return;
 
         uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
         uint256 jtEffectiveBefore = toUint256(state.jtEffectiveNAV);
@@ -3649,7 +3649,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory state0,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state0.coverageUtilizationWAD < state0.liquidationCoverageUtilizationWAD) return;
+        if (state0.coverageUtilizationWAD < state0.coverageLiquidationUtilizationWAD) return;
 
         uint256 prevCoverageUtilization = state0.coverageUtilizationWAD;
 
@@ -3745,7 +3745,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD) return;
 
         uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
 
@@ -3810,7 +3810,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         KERNEL.syncTrancheAccounting();
 
         (SyncedAccountingState memory state,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        if (state.coverageUtilizationWAD < state.liquidationCoverageUtilizationWAD) return;
+        if (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD) return;
 
         uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
 

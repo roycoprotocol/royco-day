@@ -76,7 +76,7 @@ contract RoycoDayAccountantTest is BaseTest {
         address ydm,
         uint24 fixedTermDuration,
         NAV_UNIT stNAVDustTolerance,
-        uint256 liquidationCoverageUtilizationWAD,
+        uint256 coverageLiquidationUtilizationWAD,
         uint64 jtYieldAtTarget,
         uint64 jtYieldAtFull
     )
@@ -94,7 +94,7 @@ contract RoycoDayAccountantTest is BaseTest {
             jtYDM: ydm,
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: fixedTermDuration,
-            liquidationCoverageUtilizationWAD: liquidationCoverageUtilizationWAD,
+            coverageLiquidationUtilizationWAD: coverageLiquidationUtilizationWAD,
             stNAVDustTolerance: stNAVDustTolerance,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
@@ -122,7 +122,7 @@ contract RoycoDayAccountantTest is BaseTest {
         assertEq(state.betaWAD, BETA_WAD, "beta mismatch");
         assertEq(state.stProtocolFeeWAD, ST_PROTOCOL_FEE_WAD, "st fee mismatch");
         assertEq(state.jtProtocolFeeWAD, JT_PROTOCOL_FEE_WAD, "jt fee mismatch");
-        assertEq(state.liquidationCoverageUtilizationWAD, LIQUIDATION_COVERAGE_UTILIZATION_WAD, "liquidationCoverageUtilization mismatch");
+        assertEq(state.coverageLiquidationUtilizationWAD, LIQUIDATION_COVERAGE_UTILIZATION_WAD, "liquidationCoverageUtilization mismatch");
         assertEq(state.fixedTermDurationSeconds, FIXED_TERM_DURATION_SECONDS, "fixed term duration mismatch");
         assertEq(state.jtYDM, address(adaptiveYDM), "ydm mismatch");
         assertEq(uint8(state.lastMarketState), uint8(MarketState.PERPETUAL), "initial state should be perpetual");
@@ -154,7 +154,7 @@ contract RoycoDayAccountantTest is BaseTest {
         );
 
         assertEq(newAccountant.getState().minCoverageWAD, minCoverageWAD);
-        assertEq(newAccountant.getState().liquidationCoverageUtilizationWAD, liquidationCoverageUtilization);
+        assertEq(newAccountant.getState().coverageLiquidationUtilizationWAD, liquidationCoverageUtilization);
     }
 
     function test_initialization_revertsOnInvalidCoverage() public {
@@ -234,7 +234,7 @@ contract RoycoDayAccountantTest is BaseTest {
             jtYDM: address(0),
             jtYDMInitializationData: "",
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
+            coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
@@ -1152,7 +1152,7 @@ contract RoycoDayAccountantTest is BaseTest {
         vm.prank(MOCK_KERNEL);
         SyncedAccountingState memory preOpState = accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
 
-        assertLt(preOpState.coverageUtilizationWAD, preOpState.liquidationCoverageUtilizationWAD, "Liquidation not triggered before");
+        assertLt(preOpState.coverageUtilizationWAD, preOpState.coverageLiquidationUtilizationWAD, "Liquidation not triggered before");
 
         vm.prank(MOCK_KERNEL);
         SyncedAccountingState memory postOpState =
@@ -1168,7 +1168,7 @@ contract RoycoDayAccountantTest is BaseTest {
         vm.prank(MOCK_KERNEL);
         SyncedAccountingState memory preOpState = accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(100e18));
 
-        assertLt(preOpState.coverageUtilizationWAD, preOpState.liquidationCoverageUtilizationWAD, "Liquidation not triggered before");
+        assertLt(preOpState.coverageUtilizationWAD, preOpState.coverageLiquidationUtilizationWAD, "Liquidation not triggered before");
 
         vm.prank(MOCK_KERNEL);
         SyncedAccountingState memory postOpState =
@@ -1217,7 +1217,7 @@ contract RoycoDayAccountantTest is BaseTest {
         SyncedAccountingState memory state = accountant.preOpSyncTrancheAccounting(_nav(100e18), _nav(50e18));
 
         // Without any loss, coverageUtilization should be below liquidation threshold
-        assertLt(state.coverageUtilizationWAD, state.liquidationCoverageUtilizationWAD, "Liquidation should not be triggered without loss");
+        assertLt(state.coverageUtilizationWAD, state.coverageLiquidationUtilizationWAD, "Liquidation should not be triggered without loss");
         assertEq(toUint256(state.jtCoverageImpermanentLoss), 0, "no JT coverage IL");
     }
 

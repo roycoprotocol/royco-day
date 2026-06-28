@@ -14,7 +14,7 @@ interface IRoycoDayAccountant {
      * @custom:field minCoverageWAD - The coverage ratio that the senior tranche is expected to be protected by, scaled to WAD precision
      * @custom:field betaWAD - The junior tranche's sensitivity to the same downside stress that affects the senior tranche, scaled to WAD precision
      *                         For example, beta is 0 when JT is in the RFR and 1 when JT is in the same opportunity as senior
-     * @custom:field liquidationCoverageUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
+     * @custom:field coverageLiquidationUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
      * @custom:field minLiquidityWAD - The percentage of the senior tranche NAV that must be in the liquidity tranche's market making inventory, scaled to WAD precision
      * @custom:field jtYDM - The junior tranche's Yield Distribution Model (JT YDM), responsible for determining the yield share (risk premium) payed from the senior tranche yield to the junior tranche
      * @custom:field jtYDMInitializationData - The data used to initialize the JT YDM for this market
@@ -34,7 +34,7 @@ interface IRoycoDayAccountant {
         // Coverage configuration
         uint64 minCoverageWAD;
         uint96 betaWAD;
-        uint256 liquidationCoverageUtilizationWAD;
+        uint256 coverageLiquidationUtilizationWAD;
         // Liquidity configuration
         uint64 minLiquidityWAD;
         // Yield Distribution Models
@@ -79,7 +79,7 @@ interface IRoycoDayAccountant {
      * @custom:field maxLTYieldShareWAD - The maximum LT yield share (liquidity premium) as a percentage of senior appreciation, scaled to WAD precision
      * @custom:field lastYieldShareAccrualTimestamp - The timestamp at which the time-weighted yield share accumulators were last updated
      * @custom:field lastPremiumPaymentTimestamp - The timestamp at which the last premium payments occurred (the risk and liquidity premiums are always paid together)
-     * @custom:field liquidationCoverageUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
+     * @custom:field coverageLiquidationUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
      * @custom:field lastSTRawNAV - The last recorded pure NAV (excluding any coverage taken and yield shared) of the senior tranche
      * @custom:field lastJTRawNAV - The last recorded pure NAV (excluding any coverage given and yield shared) of the junior tranche
      * @custom:field lastSTEffectiveNAV - The last recorded effective NAV (including any prior applied coverage, ST yield distribution, and uncovered losses) of the senior tranche
@@ -117,7 +117,7 @@ interface IRoycoDayAccountant {
         uint192 twLTYieldShareAccruedWAD;
         uint64 maxLTYieldShareWAD;
         // Slot 6-16
-        uint256 liquidationCoverageUtilizationWAD;
+        uint256 coverageLiquidationUtilizationWAD;
         NAV_UNIT lastSTRawNAV;
         NAV_UNIT lastJTRawNAV;
         NAV_UNIT lastSTEffectiveNAV;
@@ -244,6 +244,9 @@ interface IRoycoDayAccountant {
     /// @notice Thrown when the sum of the raw NAVs don't equal the sum of the effective NAVs of both tranches
     error NAV_CONSERVATION_VIOLATION();
 
+    /// @notice Thrown when the combined risk and liquidity premiums exceed the senior gain they are drawn from: the JT and LT yield shares must sum to at most 100% of senior appreciation
+    error PREMIUMS_EXCEED_SENIOR_YIELD();
+
     /// @notice Thrown when the operation and NAVs passed to post-op lead to an invalid state
     error INVALID_POST_OP_STATE(Operation _op);
 
@@ -286,10 +289,10 @@ interface IRoycoDayAccountant {
      * @dev Unlike the pre-op sync, the post-op sync runs no waterfall and pays no premium, so it can commit the liquidity tranche raw NAV
      *      directly (the kernel marks it after the operation's pool mutation has settled) and report the resulting liquidity utilization
      * @dev When enforcement is requested, fails fast on the coverage requirement for operations that can worsen coverage (add senior exposure or
-     *      remove the junior loss-absorption buffer: ST_DEPOSIT, LT_DEPOSIT, JT_REDEEM, LT_REDEEM) and on the liquidity requirement for operations
-     *      that can worsen liquidity (raise the senior effective NAV or reduce the depth of the AMM or another market-making venue: ST_DEPOSIT, the
-     *      multi-asset LT_DEPOSIT, LT_REDEEM). Bypass redemptions and intermediate multi-asset sub-syncs pass false, deferring enforcement to the
-     *      final post-op sync that books the combined exposure
+     *      remove the junior loss-absorption buffer: ST_DEPOSIT, LT_DEPOSIT, JT_REDEEM) and on the liquidity requirement for operations that can
+     *      worsen liquidity (raise the senior effective NAV or reduce the depth of the AMM or another market-making venue: ST_DEPOSIT, the multi-asset
+     *      LT_DEPOSIT, and an LT_REDEEM that pays no self-liquidation bonus). A bonus-paying LT_REDEEM is a liquidation-breach exit and is exempt; bypass
+     *      redemptions and intermediate multi-asset sub-syncs pass false, deferring enforcement to the final post-op sync that books the combined exposure
      * @param _op The operation being executed in between the pre and post operation synchronizations
      * @param _stRawNAV The post-op senior tranche's raw NAV
      * @param _jtRawNAV The post-op junior tranche's raw NAV

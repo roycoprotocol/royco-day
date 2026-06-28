@@ -216,7 +216,7 @@ contract DeploymentScriptRerunTest is Test {
         config.jtYieldShareProtocolFeeWAD = JT_PROTOCOL_FEE_WAD;
         config.minCoverageWAD = COVERAGE_WAD;
         config.betaWAD = BETA_WAD;
-        config.liquidationCoverageUtilizationWAD = LIQUIDATION_COVERAGE_UTILIZATION_WAD;
+        config.coverageLiquidationUtilizationWAD = LIQUIDATION_COVERAGE_UTILIZATION_WAD;
         config.fixedTermDurationSeconds = FIXED_TERM_DURATION_SECONDS;
         config.ydmType = DeployScript.YDMType.AdaptiveCurve_V2;
         // A NON-ZERO `initialConversionRateWAD` makes the quoter use the admin-set rate (1:1 here) and

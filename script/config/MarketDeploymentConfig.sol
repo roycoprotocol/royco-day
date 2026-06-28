@@ -99,7 +99,7 @@ abstract contract MarketDeploymentConfig {
         uint64 jtYieldShareProtocolFeeWAD;
         uint64 minCoverageWAD;
         uint96 betaWAD;
-        uint256 liquidationCoverageUtilizationWAD;
+        uint256 coverageLiquidationUtilizationWAD;
         uint24 fixedTermDurationSeconds;
         // YDM
         DeployScript.YDMType ydmType;
@@ -232,7 +232,7 @@ abstract contract MarketDeploymentConfig {
             jtYieldShareProtocolFeeWAD: 0.45e18,
             minCoverageWAD: 0.03e18,
             betaWAD: 1e18,
-            liquidationCoverageUtilizationWAD: 1.0032441e18,
+            coverageLiquidationUtilizationWAD: 1.0032441e18,
             fixedTermDurationSeconds: 0,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(

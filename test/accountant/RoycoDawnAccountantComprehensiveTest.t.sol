@@ -130,7 +130,7 @@ abstract contract RoycoDayAccountantComprehensiveTestBase is BaseTest {
         uint24 fixedTermDuration,
         NAV_UNIT stNAVDustTolerance,
         NAV_UNIT jtNAVDustTolerance,
-        uint256 liquidationCoverageUtilizationWAD,
+        uint256 coverageLiquidationUtilizationWAD,
         uint64 jtYieldAtTarget,
         uint64 jtYieldAtFull
     )
@@ -148,7 +148,7 @@ abstract contract RoycoDayAccountantComprehensiveTestBase is BaseTest {
             jtYDM: ydm,
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: fixedTermDuration,
-            liquidationCoverageUtilizationWAD: liquidationCoverageUtilizationWAD,
+            coverageLiquidationUtilizationWAD: coverageLiquidationUtilizationWAD,
             stNAVDustTolerance: stNAVDustTolerance,
             jtNAVDustTolerance: jtNAVDustTolerance,
             minLiquidityWAD: 0,
@@ -1241,7 +1241,7 @@ contract RoycoDayAccountantRevertTest is BaseTest {
         uint24 fixedTermDuration,
         NAV_UNIT stNAVDustTolerance,
         NAV_UNIT jtNAVDustTolerance,
-        uint256 liquidationCoverageUtilizationWAD
+        uint256 coverageLiquidationUtilizationWAD
     )
         internal
         returns (IRoycoDayAccountant)
@@ -1257,7 +1257,7 @@ contract RoycoDayAccountantRevertTest is BaseTest {
             jtYDM: ydm,
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: fixedTermDuration,
-            liquidationCoverageUtilizationWAD: liquidationCoverageUtilizationWAD,
+            coverageLiquidationUtilizationWAD: coverageLiquidationUtilizationWAD,
             stNAVDustTolerance: stNAVDustTolerance,
             jtNAVDustTolerance: jtNAVDustTolerance,
             minLiquidityWAD: 0,
@@ -1418,7 +1418,7 @@ contract RoycoDayAccountantRevertTest is BaseTest {
             jtYDM: address(adaptiveYDM),
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
+            coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
@@ -1447,7 +1447,7 @@ contract RoycoDayAccountantRevertTest is BaseTest {
             jtYDM: address(adaptiveYDM),
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
+            coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
@@ -1476,7 +1476,7 @@ contract RoycoDayAccountantRevertTest is BaseTest {
             jtYDM: address(adaptiveYDM),
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
+            coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
@@ -1506,7 +1506,7 @@ contract RoycoDayAccountantRevertTest is BaseTest {
             jtYDM: address(adaptiveYDM),
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
+            coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
@@ -1535,7 +1535,7 @@ contract RoycoDayAccountantRevertTest is BaseTest {
             jtYDM: address(0), // Null YDM
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
+            coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
@@ -1570,7 +1570,7 @@ contract RoycoDayAccountantRevertTest is BaseTest {
             jtYDM: address(adaptiveYDM),
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationCoverageUtilizationWAD: uint64(maxLTV), // LLTV <= maxLTV is invalid
+            coverageLiquidationUtilizationWAD: uint64(maxLTV), // LLTV <= maxLTV is invalid
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
@@ -1599,7 +1599,7 @@ contract RoycoDayAccountantRevertTest is BaseTest {
             jtYDM: address(adaptiveYDM),
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationCoverageUtilizationWAD: uint64(WAD), // LLTV >= WAD is invalid
+            coverageLiquidationUtilizationWAD: uint64(WAD), // LLTV >= WAD is invalid
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
@@ -1629,7 +1629,7 @@ contract RoycoDayAccountantRevertTest is BaseTest {
             jtYDM: address(adaptiveYDM),
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
+            coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
@@ -1722,7 +1722,7 @@ contract RoycoDayAccountantInvariantTest is BaseTest {
             jtYDM: address(adaptiveYDM),
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
+            coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
@@ -2026,7 +2026,7 @@ contract RoycoDayAccountantLLTVInvariantTest is BaseTest {
             jtYDM: address(adaptiveYDM),
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
+            coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
@@ -2389,7 +2389,7 @@ contract RoycoDayAccountantAdminTest is BaseTest {
             jtYDM: address(adaptiveYDM),
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
+            coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
@@ -2498,7 +2498,7 @@ contract RoycoDayAccountantAdminTest is BaseTest {
         vm.prank(OWNER_ADDRESS);
         accountant.setLiquidationCoverageUtilization(newLiquidationCoverageUtilization);
 
-        assertEq(accountant.getState().liquidationCoverageUtilizationWAD, newLiquidationCoverageUtilization, "liquidationCoverageUtilization not updated");
+        assertEq(accountant.getState().coverageLiquidationUtilizationWAD, newLiquidationCoverageUtilization, "liquidationCoverageUtilization not updated");
     }
 
     function testFuzz_setLiquidationCoverageUtilization(uint256 newLiquidationCoverageUtilization) public {
@@ -2506,7 +2506,7 @@ contract RoycoDayAccountantAdminTest is BaseTest {
 
         vm.prank(OWNER_ADDRESS);
         try accountant.setLiquidationCoverageUtilization(newLiquidationCoverageUtilization) {
-            assertEq(accountant.getState().liquidationCoverageUtilizationWAD, newLiquidationCoverageUtilization);
+            assertEq(accountant.getState().coverageLiquidationUtilizationWAD, newLiquidationCoverageUtilization);
         } catch {
             // Invalid config - acceptable
         }
@@ -2658,7 +2658,7 @@ contract RoycoDayAccountantEdgeCaseTest is BaseTest {
             jtYDM: address(adaptiveYDM),
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
+            coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
@@ -3021,7 +3021,7 @@ contract RoycoDayAccountantBranchCoverageTest is BaseTest {
         uint24 fixedTermDuration,
         NAV_UNIT stNAVDustTolerance,
         NAV_UNIT jtNAVDustTolerance,
-        uint256 liquidationCoverageUtilizationWAD,
+        uint256 coverageLiquidationUtilizationWAD,
         uint64 jtYieldAtTarget,
         uint64 jtYieldAtFull
     )
@@ -3040,7 +3040,7 @@ contract RoycoDayAccountantBranchCoverageTest is BaseTest {
             jtYDM: ydm,
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: fixedTermDuration,
-            liquidationCoverageUtilizationWAD: liquidationCoverageUtilizationWAD,
+            coverageLiquidationUtilizationWAD: coverageLiquidationUtilizationWAD,
             stNAVDustTolerance: stNAVDustTolerance,
             jtNAVDustTolerance: jtNAVDustTolerance,
             minLiquidityWAD: 0,
@@ -3066,7 +3066,7 @@ contract RoycoDayAccountantBranchCoverageTest is BaseTest {
             jtYDM: ydm,
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
+            coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
@@ -3284,7 +3284,7 @@ contract RoycoDayAccountantBranchCoverageTest is BaseTest {
             jtYDM: address(adaptiveYDM),
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationCoverageUtilizationWAD: invalidLiquidationCoverageUtilization,
+            coverageLiquidationUtilizationWAD: invalidLiquidationCoverageUtilization,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
@@ -3314,7 +3314,7 @@ contract RoycoDayAccountantBranchCoverageTest is BaseTest {
             jtYDM: address(adaptiveYDM),
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationCoverageUtilizationWAD: invalidLiquidationCoverageUtilization,
+            coverageLiquidationUtilizationWAD: invalidLiquidationCoverageUtilization,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
@@ -3420,7 +3420,7 @@ contract RoycoDayAccountantAdditionalBranchTests is BaseTest {
             jtYDM: address(adaptiveYDM),
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
+            coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
@@ -3464,7 +3464,7 @@ contract RoycoDayAccountantAdditionalBranchTests is BaseTest {
             jtYDM: address(adaptiveYDM),
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
+            coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
@@ -3495,7 +3495,7 @@ contract RoycoDayAccountantAdditionalBranchTests is BaseTest {
             jtYDM: address(adaptiveYDM),
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationCoverageUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
+            coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
@@ -3528,7 +3528,7 @@ contract RoycoDayAccountantAdditionalBranchTests is BaseTest {
             jtYDM: address(adaptiveYDM),
             jtYDMInitializationData: ydmInitData,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
-            liquidationCoverageUtilizationWAD: 0.99e18, // High LLTV to pass that check
+            coverageLiquidationUtilizationWAD: 0.99e18, // High LLTV to pass that check
             stNAVDustTolerance: DUST_TOLERANCE,
             jtNAVDustTolerance: DUST_TOLERANCE,
             minLiquidityWAD: 0,
