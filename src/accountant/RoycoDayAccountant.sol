@@ -406,10 +406,12 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Compute the minimum junior tranche assets required to cover the exposure as per the market's coverage requirement
         NAV_UNIT requiredJTAssets = totalCoveredExposure.mulDiv(state.minCoverageWAD, WAD, Math.Rounding.Ceil);
         // Compute the surplus coverage currently provided by the junior tranche based on its currently remaining loss-absorption buffer
-        NAV_UNIT surplusJTAssets = state.jtEffectiveNAV.saturatingSub(requiredJTAssets).
-            // Also account for the effective dust tolerance required to preclude reverts due to rounding after JT redemptions
-            // Additionally absorb the worst case inner-ceil rounding in the coverageUtilization computation
-            saturatingSub($.stNAVDustTolerance + $.jtNAVDustTolerance.mulDiv(state.betaWAD, WAD, Math.Rounding.Ceil) + toNAVUnits(uint256(2)));
+        // Also account for the effective dust tolerance required to preclude reverts due to rounding after JT redemptions
+        // Additionally absorb the worst case inner-ceil rounding in the coverageUtilization computation
+        NAV_UNIT surplusJTAssets = state.jtEffectiveNAV
+            .saturatingSub(
+                requiredJTAssets + $.stNAVDustTolerance + $.jtNAVDustTolerance.mulDiv(state.betaWAD, WAD, Math.Rounding.Ceil) + toNAVUnits(uint256(2))
+            );
         if (surplusJTAssets == ZERO_NAV_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         // Compute the total JT claim on NAV and preemptively return if zero
@@ -442,18 +444,13 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
      *      Isolate z: z = LT_RAW_NAV - (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)
      */
     function maxLTWithdrawal(SyncedAccountingState memory state) external view override(IRoycoDayAccountant) returns (NAV_UNIT ltClaimable) {
-        // Get the storage pointer to the accountant state
-        RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
-
-        // Compute the surplus market-making depth withdrawable from the liquidity tranche in NAV units
         // If there is no minimum liquidity requirement, there is no withdrawal restriction and the entire pool depth is withdrawable
         if (state.minLiquidityWAD == 0) return state.ltRawNAV;
-
         // Compute the minimum market-making depth required to satisfy the market's liquidity requirement, rounding in favor of senior protection
         NAV_UNIT requiredLTAssets = state.stEffectiveNAV.mulDiv(state.minLiquidityWAD, WAD, Math.Rounding.Ceil);
         // Compute the surplus depth that can be withdrawn while retaining minimum liquidity
         // Also account for ST's dust tolerance to preclude reverts due to rounding after LT redemptions
-        ltClaimable = state.ltRawNAV.saturatingSub(requiredLTAssets + $.stNAVDustTolerance);
+        ltClaimable = state.ltRawNAV.saturatingSub(requiredLTAssets + _getRoycoDayAccountantStorage().stNAVDustTolerance);
     }
 
     // =============================
