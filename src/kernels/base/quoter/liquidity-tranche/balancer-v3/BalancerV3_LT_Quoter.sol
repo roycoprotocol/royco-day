@@ -48,7 +48,7 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     }
 
     /// @notice Emitted when the BPT oracle used to value the liquidity tranche is updated
-    event BptOracleUpdated(address indexed bptOracle);
+    event BPTOracleUpdated(address indexed bptOracle);
 
     /// @notice Thrown when the Balancer pool is not registered with the Balancer V3 Vault
     error POOL_NOT_REGISTERED();
@@ -79,7 +79,7 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
      * @param _bptOracle The manipulation-resistant balancer pool token (BPT) oracle used to value the liquidity tranche
      */
     function __BalancerV3_LT_Quoter_init_unchained(address _bptOracle) internal onlyInitializing {
-        _setBptOracle(_bptOracle);
+        _setBPTOracle(_bptOracle);
     }
 
     // =============================
@@ -158,8 +158,8 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
                 pool: LT_ASSET, // The Balancer pool to add liquidity to is the liquidity tranche's asset (BPT)
                 to: address(this), // The kernel custodies the BPT balance of the entire liquidity tranche, so the minted BPT is credited to it
                 maxAmountsIn: exactAmountsIn, // For UNBALANCED adds the Vault treats these as the exact amounts in (not upper bounds)
-                minBptAmountOut: toUint256(_minLTAssetsOut), // The Vault reverts the add if it would mint fewer BPT than this, bounding the add's slippage
-                kind: AddLiquidityKind.UNBALANCED, // Single-sided/unbalanced add; the Vault charges the pool's swap fee on the imbalanced portion
+                minBPTAmountOut: toUint256(_minLTAssetsOut), // The Vault reverts the add if it would mint fewer BPT than this, bounding the add's slippage
+                kind: AddLiquidityKind.UNBALANCED, // Unbalanced add: the Vault charges the pool's swap fee on the imbalanced portion
                 userData: "" // UNBALANCED adds skip the pool's compute callback and this kernel's hooks do not consume userData
             })
         );
@@ -204,7 +204,7 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
             RemoveLiquidityParams({
                 pool: LT_ASSET, // The Balancer pool to remove liquidity from is the liquidity tranche's asset (BPT)
                 from: address(this), // The kernel custodies the BPT balance of the entire liquidity tranche, so the BPT constituents are debited from its claims
-                maxBptAmountIn: toUint256(_ltAssets), // For PROPORTIONAL removals the Vault treats this as the exact BPT amount to burn (not an upper bound)
+                maxBPTAmountIn: toUint256(_ltAssets), // For PROPORTIONAL removals the Vault treats this as the exact BPT amount to burn (not an upper bound)
                 minAmountsOut: minAmountsOut, // The Vault reverts the removal if any constituent comes out below these floors, bounding the removal's slippage
                 kind: RemoveLiquidityKind.PROPORTIONAL, // Proportional removals preserve the pool's composition, so the unwrap requires no pricing
                 userData: "" // PROPORTIONAL removals skip the pool's compute callback and this kernel's hooks do not consume userData
@@ -272,26 +272,26 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
      * @param _bptOracle The new manipulation-resistant balancer pool token (BPT) oracle
      * @param _syncBeforeUpdate Whether to sync the tranche accounting against the outgoing oracle before updating the BPT oracle
      */
-    function setBptOracle(address _bptOracle, bool _syncBeforeUpdate) external restricted {
+    function setBPTOracle(address _bptOracle, bool _syncBeforeUpdate) external restricted {
         // If specified, sync the tranche accounting against the outgoing oracle before updating it
         if (_syncBeforeUpdate) _preOpSyncTrancheAccounting();
         // Update the BPT oracle
-        _setBptOracle(_bptOracle);
+        _setBPTOracle(_bptOracle);
         // Sync the tranche accounting against the incoming oracle so the committed liquidity tranche raw NAV reflects it
         _preOpSyncTrancheAccounting();
     }
 
     /// @notice Returns the BPT oracle configuration for this quoter
-    function getBptOracleConfiguration() external pure returns (BalancerV3_LT_QuoterState memory) {
+    function getBPTOracleConfiguration() external pure returns (BalancerV3_LT_QuoterState memory) {
         return _getBalancerV3_LT_QuoterStorage();
     }
 
     /// @notice Sets the new BPT oracle
     /// @param _bptOracle The new manipulation-resistant balancer pool token (BPT) oracle
-    function _setBptOracle(address _bptOracle) internal {
+    function _setBPTOracle(address _bptOracle) internal {
         require(_bptOracle != address(0), NULL_ADDRESS());
         _getBalancerV3_LT_QuoterStorage().bptOracle = _bptOracle;
-        emit BptOracleUpdated(_bptOracle);
+        emit BPTOracleUpdated(_bptOracle);
     }
 
     /**

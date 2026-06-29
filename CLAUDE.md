@@ -10,13 +10,50 @@ Dawn guarantees a minimum coverage for senior shares. Royco Day adds a second se
 
 This separates two jobs that Dusk overloaded onto the junior tranche. In Dusk the JT was both first-loss coverage and pool liquidity, which forced one combined minimum tranche size. Here JT stays pure first-loss coverage exactly as Dawn, and the LT carries liquidity. Each issuer picks coverage and liquidity independently. The cost is more capital to raise.
 
+## Product requirements (canonical spec)
+
+This is the product spec Royco Day implements. Where the engineering detail elsewhere in this file predates it, this spec governs. The one material update it makes over the older detail below: the **idle liquidity premium is claimable, not forfeited** — while a tranche of premium is staged as ST shares it is part of the LT's effective NAV, and a holder who redeems receives its pro-rata slice of those ST shares directly.
+
+Product requirements:
+- Minimum coverage guaranteed for the senior tranche shares (Dawn already serves this).
+- Minimum secondary liquidity required for the senior tranche shares at all times (the new LT service).
+- Yields must economically make sense for all tranches.
+
+Capital structure:
+- Senior tranche: protected capital, deployed into a yield-bearing asset; pays the JT a risk premium and the LT a liquidity premium out of its yield.
+- Junior tranche: first-loss capital that covers senior losses until exhausted; deployed into the same yield-bearing asset as senior or the RFR; paid a risk premium from senior yield. Max risk premium set 0-100% of ST yield.
+- Liquidity tranche: market-making capital providing constant secondary liquidity for senior; deployed into a BPT in a pool between the senior tranche share and a stablecoin; the underlying pool is a rate-scaled AMM; works with any AMM or MM vault (e.g. Agra) but Balancer E-CLP to start; equivalent risk to the senior tranche (higher return, but less liquid); paid a liquidity premium from senior yield. Max liquidity premium set 0-100% of ST yield.
+
+The liquidity premium:
+- Comes from ST assets and is immediately used to mint ST shares to the LT. What is done with those ST shares:
+  - If they can be single-sided LP'd into the pool at or below a market-defined max slippage, do so immediately.
+  - Otherwise the ST shares are auctioned for BPT, starting at the effective NAV of the ST shares (maybe a premium) with a lower bound on the sale price. (Open: is an auction the best modality? auction for BPT or for quote assets?)
+  - If a user redeems LT shares while idle ST shares still sit in the LT, those ST shares are sent directly to them.
+
+The senior and junior tranches operate exactly as Dawn — no changes to the coverage utilization formula, the loss waterfall, or the deposit and redemption logic.
+
+The liquidity tranche specification:
+- `maxLiquidityPremium + maxRiskPremium <= 100%`.
+- Deposits and redemptions: deposit BPT, or use the multi-asset flow (takes ST assets and stables and does the ST-share mint -> BPT mint -> LT-share mint atomically). Redeem BPT and ST's yield-bearing asset (the liquidity premium); the multi-asset flow redeems the ST shares from the BPT plus any idle prior liquidity premium.
+- `LT_RAW_NAV` uses Balancer's manipulation-resistant oracle.
+- Each market sets a minimum percentage of liquidity required for senior tranche deposits.
+- `liquidityUtilization = (ST_EFF_NAV * MIN_LIQUIDITY_%) / LT_RAW_NAV`. Assumption: arbitrage keeps the pool near balance in a healthy state, so `LT_RAW_NAV` is a sufficient metric for guaranteeing secondary liquidity of some size.
+- An LDM (the same model family as the YDM) takes this `liquidityUtilization` and returns the portion of ST yield paid as the liquidity premium to the LT, in ST's underlying assets.
+- Valid operations based on the `liquidityUtilization` after an operation:
+  - Deposits are enabled at all times.
+  - Redemptions are enabled in a perpetual state only if `liquidityUtilization <= 100%` after the redemption — unless the liquidation utilization has been breached, in which case all withdrawals are allowed.
+
+Why this shape:
+- Pros: each issuer picks from a menu of coverage and liquidity options (curator/LP-advised); no combo-meal problem where the junior tranche serves as both coverage and liquidity under one enforced minimum tranche size; the junior tranche earns at least the base yield of the underlying investment; less complexity (more auditable, verifiable, and secure; faster time to market); the LT can be put in Pendle and money markets.
+- Cons: more capital to raise; two enforced minimums (coverage + liquidity) make for a questionable UX.
+
 ## What the LT actually is
 
 The LT is an ST holder that locks senior capital in a Balancer E-CLP BPT (ST shares paired against a quote stablecoin) to provide market-making liquidity, and earns extra senior yield (the liquidity premium) for doing so. It is fully covered senior, not self-insured. The premium compensates the illiquidity of the locked position and the impermanent loss of the LP, not waived coverage.
 
-The LT share is pure BPT. The liquidity premium is deployed into the pool as BPT — directly when it can be added without leaking, and otherwise from a kernel-staged buffer held outside the LT share NAV until it deploys — so it grows the BPT rather than sitting in the share as a second asset. A depositor brings BPT (or its constituents) and receives a claim on BPT, with nothing else in the basket. That keeps the LT share a clean, appreciating, transferable token: Pendle-wrappable through the existing tranche SY wrapper, and usable as Morpho collateral. There is no separate staking or rewards contract, because a staking contract would tie rewards to an address rather than to the token and break that composability.
+The LT share is BPT plus any transiently-staged liquidity-premium ST shares. The premium is minted as ST shares to the LT and turned into BPT — single-sided added directly when slippage is at or below the market threshold, otherwise auctioned for BPT — so the steady state is BPT and the share appreciates as real pool depth. Until a tranche of premium deploys, its ST shares sit in the LT as a claimable leg of the LT's effective NAV: a holder who redeems while premium is staged receives its pro-rata slice of those ST shares directly. Both legs are committed senior claims and up-only, so the LT share stays a clean, appreciating, transferable token: Pendle-wrappable through the existing tranche SY wrapper, and usable as Morpho collateral. There is no separate staking or rewards contract, because a staking contract would tie rewards to an address rather than to the token and break that composability.
 
-This is a deliberate reversal of an earlier idle-premium design. Parking the premium as idle ST shares beside the BPT was rejected for two reasons. It makes the LT share a two-asset basket, so a depositor who brings market-making capital is forced to also buy a slice of idle senior shares. And it makes the premium inert: idle shares do not grow `ltRawNAV`, so the premium that is supposed to fund liquidity does nothing for liquidity. For a tranche whose entire job is market-making, the premium has to be productive. Route A makes it productive.
+The idle ST shares are value in transit, not a permanent second asset: the steady state is pure BPT, and the staged shares exist only between premium accrual and deployment. They are claimable (a redeemer is made whole on its premium slice) but they do not count toward `ltRawNAV`, so the liquidity metric still reads under-provisioned and keeps the LDM paying until real depth lands — the premium stays a restoring force on `liquidityUtilization`. What stays rejected is the reward-token variant (distributing the premium as claimable tokens tied to an address): it breaks Pendle/Morpho composability and makes the premium inert against `ltRawNAV`.
 
 ## Capital structure
 
@@ -50,13 +87,13 @@ The joint cap `maxLiquidityPremiumWAD + maxRiskPremiumWAD <= WAD` is validated a
 
 ## Premium deployment: gated single-sided add, staged buffer, auction fallback
 
-The premium is deployed into the E-CLP BPT by single-sided adding the freshly minted ST shares, inside `Vault.unlock`, bounded by a min-BPT-out. This single-sided add is Route A, the default path for the regime this product targets: a near-peg pair with small, frequent adds. The deployed shares raise `ltRawNAV` directly, which delevers `liquidityUtilization` at the source rather than waiting for external deposits. The premium grows real depth, the share price stays up-only, and the LT share stays pure BPT.
+The premium is deployed into the E-CLP BPT by single-sided adding the freshly minted ST shares, inside `Vault.unlock`, bounded by a min-BPT-out. This single-sided add is Route A, the default path for the regime this product targets: a near-peg pair with small, frequent adds. The deployed shares raise `ltRawNAV` directly, which delevers `liquidityUtilization` at the source rather than waiting for external deposits. The premium grows real depth, the share price stays up-only, and the LT share trends to pure BPT as each staged tranche of premium deploys.
 
 Route A has a known, bounded cost. The kernel injects only senior into the pool, so the net pool delta is `(senior += V, quote += 0)`. The pool ends senior-heavy; an external arbitrageur rebalances it by injecting quote and lifting the senior overhang, capturing the rebalancing spread. The LT receives BPT worth roughly `V` minus that spread. The leak per add is approximately `V^2 / (2 * A * D)` in pool-curvature terms (with `A` the E-CLP near-peg amplification and `D` the senior-leg depth) plus a temporal term on the order of `sigma * V` from drift between the mint and the arb. For a near-peg pair done in small, frequent adds this is single-digit basis points of `V`, and it falls quadratically as `V` shrinks. So the first lever is cadence: the premium accrues every sync, and deploying it per sync rather than batching to infrequent oracle updates keeps `V` small and the leak negligible.
 
 The single-sided add is gated, not unconditional. The kernel only single-sided adds when the realized slippage is below a threshold (on the order of 10 bps); above the threshold the add is deferred to the auction fallback below. The slippage gate is the primary manipulation defense — it makes a large, sandwichable lump add impossible, and the mere existence of the auction fallback deters manipulation even when it is rarely triggered. Two further defenses harden the gate. Swaps are blocked in the same block as a P&L sync, so an attacker cannot atomically sync-then-swap and cannot guarantee the back-run; the rate refreshes between the sync and any swap. And the pool fee schedule is set to recapture the rate-staleness LVR — preferably as a directional fee that charges the yield-direction trade more, rather than a flat fee, which would tax the legitimate ST-exit flow the LT exists to serve.
 
-Un-deployed premium is held as a kernel-staged buffer of ST shares, outside every marked NAV. This is the load-bearing accounting decision for the deferred path. The staged shares are not in `ltRawNAV` (so the metric correctly still reads under-provisioned and keeps the LDM paying until real depth lands) and not in the LT share NAV (so the LT share stays pure BPT, the in-kind redemption stays a single-leg BPT slice, and the Pendle/Morpho composability is preserved). The premium therefore realizes to LT holders as BPT appreciation at deploy time, not at accrual: it is vesting-like, and an LT holder who redeems while a premium is staged forfeits its pro-rata slice to whoever is in the pool when it deploys. The staged shares remain senior claims inside `stEff`, so coverage still covers them and the mint stays NAV-neutral and coverage-neutral; they are value in transit, not value lost. The one invariant the staged buffer demands is a bound on its size: under sustained high slippage the buffer could grow while the metric never heals, so the staged pile is bounded either by its natural alignment with FIXED_TERM (where the LT is locked and unpaid, so nothing accrues to stage) or by an explicit LDM pause / forced deploy once the buffer exceeds a threshold of `ltRawNAV`.
+Un-deployed premium is held as a kernel-staged buffer of ST shares, outside every marked NAV. This is the load-bearing accounting decision for the deferred path. The staged shares are not in `ltRawNAV` (so the metric correctly still reads under-provisioned and keeps the LDM paying until real depth lands) but they ARE in the LT share's effective NAV as a claimable leg, so the in-kind redemption gives the redeemer its BPT slice plus its pro-rata slice of the idle ST shares directly. The premium is claimable, not forfeited: a holder who redeems while a premium is staged is made whole on its slice rather than leaving it to whoever is in the pool when it deploys. The staged shares remain senior claims inside `stEff`, so coverage still covers them and the mint stays NAV-neutral and coverage-neutral; they are value in transit, not value lost. The one invariant the staged buffer demands is a bound on its size: under sustained high slippage the buffer could grow while the metric never heals, so the staged pile is bounded either by its natural alignment with FIXED_TERM (where the LT is locked and unpaid, so nothing accrues to stage) or by an explicit LDM pause / forced deploy once the buffer exceeds a threshold of `ltRawNAV`.
 
 The auction fallback drains the staged buffer at a controlled cost. It is a Dutch auction that starts at the ST share NAV (the fair upper bound) and decreases to a floor set by the time-weighted average pool quote for the one-sided deposit, then restarts. A solver that meets the clearing price supplies the quote leg against the staged senior, so the add lands balanced and the protocol pays the auction discount (NAV minus clearing price) instead of donating the uncontrolled arb spread. The auction is therefore the buffered supplier mechanism with a market-discovered incentive `c`, rather than a fixed 5-to-30-bps `c`. If no bidder meets the quote the cycle retries with no forced loss; an emergency button can force the deposit at market price, accepting a minor yield delay, so the buffer can always be drained. The open problem is solver-network bootstrapping: until a solver network exists the auction will not clear, so early-life the operative path is the gated single-sided add plus the emergency force-deploy, and the auction becomes load-bearing only once solvers are present.
 
@@ -80,7 +117,7 @@ coverageUtilization = (stRaw_total + jtRaw * beta) * minCoverage / jtEffectiveNA
 liquidityUtilization = stEffectiveNAV * minLiquidity / ltRawNAV
 ```
 
-`ltRawNAV` is the BPT value from Balancer's E-CLP oracle, the actual pool depth that backs ST exits. It is the BPT only. It coincides with the LT share NAV, because the LT share NAV is pure BPT: any un-deployed premium is staged outside the marked NAV and lands as BPT on deploy, so neither `ltRawNAV` nor the LT share carries it until it is real depth.
+`ltRawNAV` is the BPT value from Balancer's E-CLP oracle, the actual pool depth that backs ST exits. It is the BPT only and excludes any idle, not-yet-deployed premium ST shares, which keeps the liquidity metric reading under-provisioned until real depth lands. The LT share's effective NAV (its deposit/redeem and oracle price) is `ltRawNAV` plus that claimable idle premium, so the two coincide only once all staged premium has deployed.
 
 Both inputs are manipulation-resistant: `stEffectiveNAV` is total senior NAV (swaps in the pool do not change it), and `ltRawNAV` is the Balancer oracle. There is no composition subtraction in the numerator.
 
@@ -135,7 +172,7 @@ There is no cross-repo guarantee and no differential anchor test against Dawn. D
 
 ## LT tranche and kernel
 
-The LT tranche is a Royco vault tranche that holds the BPT and nothing else. The premium is deployed into the BPT, or staged outside the LT share NAV until it deploys, so the LT share is a pure BPT claim and the LT share NAV equals `ltRawNAV`.
+The LT tranche is a Royco vault tranche that holds the BPT plus any idle, not-yet-deployed liquidity-premium ST shares. The premium is deployed into the BPT (gated single-sided add, else auction); while staged, the idle ST shares are a claimable leg of the LT's effective NAV, sent to a redeemer directly on redemption. `ltRawNAV` is the BPT only; the LT share's effective NAV is `ltRawNAV` plus the staged premium.
 
 Deposits: `ltDeposit` takes a pre-minted BPT. `ltDepositMultiAsset` is the atomic flow that pulls the ST asset and the quote stable, mints the ST share, performs the Balancer join, and mints the LT share inside `Vault.unlock`, bounded by `minBptOut`, a max-asset-in per token, and a deadline.
 
@@ -164,7 +201,7 @@ The tranche dispatch handles `SENIOR`/`JUNIOR`/`LIQUIDITY` with a revert default
 - All senior is covered. `computeCoverageUtilization` uses `stRaw_total` with no exclusion and no composition reads. Reinvesting the premium into the pool does not change which shares are covered.
 - The premium mint is coverage-neutral: it adds no senior assets, only reassigns share ownership, so it does not move `coverageUtilization` or consume coverage capacity.
 - The reinvestment is bounded by a min-BPT-out and changes `ltRawNAV`, not the conservation identity.
-- The LT share is pure BPT, so the LT share NAV equals `ltRawNAV`. Un-deployed premium is staged outside the marked NAV (neither in `ltRawNAV` nor in the LT share NAV) and lands as BPT on deploy, so the premium is realized to LT holders on deploy, not on accrual.
+- The LT share's effective NAV is the BPT depth plus any idle, not-yet-deployed liquidity-premium ST shares (a claimable leg). `ltRawNAV` is the BPT only: staged premium is excluded so the liquidity metric reads under-provisioned and keeps the LDM paying. The staged premium is claimable on redemption (sent to the redeemer directly), not forfeited.
 - `maxLiquidityPremiumWAD + maxRiskPremiumWAD <= WAD`.
 - LDM and YDM outputs depend only on the last committed checkpoint, so the waterfall stays pure.
 - Coverage math and the PERPETUAL/FIXED_TERM machine remain ST/JT only.
@@ -206,7 +243,7 @@ These earlier design problems are recorded here so they are not reopened.
 - Three-term conservation and the 6-arg `enforceNAVConservation`. Removed. The waterfall stays two-term because the premium is covered ST shares in `stEff`, not a third NAV leg.
 - The coverage-perimeter exclusion (`stRaw_covered = stRaw_total - ltPooledSeniorLeg`). Removed. Everything senior is covered.
 - The dual-mark problem and the swap-manipulability of the perimeter subtraction. Removed with the subtraction.
-- The idle-premium basket. Removed. Parking the premium as idle ST shares beside the BPT made the LT share a two-asset basket, forced depositors to buy idle shares, and made the premium inert against `ltRawNAV`. Route A reinvests the premium into the BPT instead, keeping the LT share pure BPT and the premium productive.
+- The idle-premium framing. Reconciled to the claimable model per the product spec. The premium is minted as ST shares to the LT and deployed into BPT (gated single-sided add, else auction); while staged, the idle ST shares are a claimable leg of the LT's effective NAV (a redeemer receives its slice directly) and stay outside `ltRawNAV` so the metric keeps the LDM paying. What stays rejected is the reward-token variant (premium tied to an address), which breaks composability and makes the premium inert.
 - Route B, the on-chain rebalance variant. Rejected with proof. It nets the same `(senior += V, quote += 0)` as Route A and adds a sandwichable internal swap, so it is strictly dominated.
 - The LT self-insured-leg loss attribution and the line-45 underflow re-proof. Removed. The LT base is covered like any senior.
 - The ported E-CLP valuation library, recursion, and bisection solver. Removed. `ltRawNAV` is Balancer's native oracle.
