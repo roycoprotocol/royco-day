@@ -223,44 +223,10 @@ interface IRoycoVaultTranche is IERC20Metadata {
     function seizeAndRedeemShares(address _from, address _receiver, uint256 _shares) external returns (AssetClaims memory claims);
 
     /**
-     * @notice Previews the protocol fee shares that would be minted for a given fee amount
-     * @dev Does not mutate any state
-     * @param _protocolFeeNAV The protocol fee amount to be minted as shares, denominated in the kernel's NAV units
-     * @param _totalTrancheNAV The total effective NAV of the tranche before minting fee shares
-     * @return protocolFeeSharesMinted The number of protocol fee shares that would be minted
-     * @return totalTrancheShares The total shares in the tranche after minting the protocol fee shares
-     */
-    function previewMintProtocolFeeShares(
-        NAV_UNIT _protocolFeeNAV,
-        NAV_UNIT _totalTrancheNAV
-    )
-        external
-        view
-        returns (uint256 protocolFeeSharesMinted, uint256 totalTrancheShares);
-
-    /**
-     * @notice Mints protocol fee shares to the specified fee recipient
-     * @dev Only callable by the kernel during accounting synchronization
-     * @param _protocolFeeNAV The protocol fee amount to be minted as shares, denominated in the kernel's NAV units
-     * @param _totalTrancheNAV The total effective NAV of the tranche before minting fee shares
-     * @param _protocolFeeRecipient The address that will receive the minted protocol fee shares
-     * @return protocolFeeSharesMinted The number of protocol fee shares minted
-     * @return totalTrancheShares The total shares in the tranche after minting the protocol fee shares
-     */
-    function mintProtocolFeeShares(
-        NAV_UNIT _protocolFeeNAV,
-        NAV_UNIT _totalTrancheNAV,
-        address _protocolFeeRecipient
-    )
-        external
-        returns (uint256 protocolFeeSharesMinted, uint256 totalTrancheShares);
-
-    /**
      * @notice Mints a kernel-computed number of protocol fee shares to the specified fee recipient
      * @dev Only callable by the kernel during accounting synchronization
-     * @dev Takes a precomputed share count rather than a NAV, used when the fee shares must be computed jointly with
-     *      another carve-out against a shared NAV pool (the senior leg, where the ST protocol fee and the liquidity
-     *      premium are priced at one joint denominator so neither dilutes the other); see the kernel's sync orchestrator
+     * @dev Takes a precomputed share count rather than a NAV: the kernel prices every tranche's protocol fee shares (and the
+     *      senior liquidity premium) against the post-carve-out NAV so neither dilutes the other and the tranche only mints the count
      * @param _protocolFeeRecipient The address that will receive the minted protocol fee shares
      * @param _protocolFeeShares The precomputed number of protocol fee shares to mint
      * @return totalTrancheShares The total shares in the tranche after minting the protocol fee shares

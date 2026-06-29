@@ -419,7 +419,9 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
             // The senior supply after both senior-share carve-outs: the liquidity premium and the ST protocol fee
             (,, totalTrancheShares) = _computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(SENIOR_TRANCHE).totalSupply());
         } else if (_trancheType == TrancheType.JUNIOR) {
-            (, totalTrancheShares) = IRoycoVaultTranche(JUNIOR_TRANCHE).previewMintProtocolFeeShares(state.jtProtocolFee, state.jtEffectiveNAV);
+            // The junior supply after the JT protocol fee shares, priced against the post-fee junior NAV (mirrors execution)
+            uint256 jtTotalSupply = IERC20(JUNIOR_TRANCHE).totalSupply();
+            totalTrancheShares = jtTotalSupply + _navToShares(state.jtProtocolFee, state.jtEffectiveNAV - state.jtProtocolFee, jtTotalSupply);
         } else {
             // Value the LT protocol fee against the liquidity tranche's effective NAV at the post-carve-out senior supply and
             // owned shares, mirroring execution so the previewed supply matches the supply that execution mints
@@ -430,7 +432,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
             // overwrite the idle-premium leg with the post-mint count so the previewed claims match what execution derives post-mint
             claims.stShares = ltOwnedSeniorTrancheSharesAfter;
             NAV_UNIT ltEffectiveNAV = _getLiquidityTrancheEffectiveNAV(state.stEffectiveNAV, stTotalSupplyAfterMints, ltOwnedSeniorTrancheSharesAfter);
-            (, totalTrancheShares) = IRoycoVaultTranche(LIQUIDITY_TRANCHE).previewMintProtocolFeeShares(state.ltProtocolFee, ltEffectiveNAV);
+            uint256 ltTotalSupply = IERC20(LIQUIDITY_TRANCHE).totalSupply();
+            totalTrancheShares = ltTotalSupply + _navToShares(state.ltProtocolFee, ltEffectiveNAV - state.ltProtocolFee, ltTotalSupply);
         }
     }
 
@@ -985,22 +988,20 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
             IRoycoSeniorTranche(SENIOR_TRANCHE).mintLiquidityPremiumShares(address(this), liquidityPremiumShares);
             $.ltOwnedSeniorTrancheShares += liquidityPremiumShares;
         }
-
         // Mint the ST protocol fee shares to the protocol fee recipient and LT liquidity premium fee shares to the kernel at an identical price
         if (stProtocolFeeShares != 0) {
             IRoycoVaultTranche(SENIOR_TRANCHE).mintProtocolFeeShares(protocolFeeRecipient, stProtocolFeeShares);
         }
-
-        // If JT fees were accrued, mint JT protocol fee shares to the protocol fee recipient
+        // If JT fees were accrued, price them against the post-fee junior NAV (the fee dilutes existing holders) and mint to the recipient
         if (_state.jtProtocolFee != ZERO_NAV_UNITS) {
-            IRoycoVaultTranche(JUNIOR_TRANCHE).mintProtocolFeeShares(_state.jtProtocolFee, _state.jtEffectiveNAV, protocolFeeRecipient);
+            uint256 jtProtocolFeeShares = _navToShares(_state.jtProtocolFee, _state.jtEffectiveNAV - _state.jtProtocolFee, IERC20(JUNIOR_TRANCHE).totalSupply());
+            IRoycoVaultTranche(JUNIOR_TRANCHE).mintProtocolFeeShares(protocolFeeRecipient, jtProtocolFeeShares);
         }
-        // If LT fees were accrued, mint LT protocol fee shares to the protocol fee recipient
+        // If LT fees were accrued, price them against the post-fee LT effective NAV (its pooled depth plus the idle premium) and mint to the recipient
         if (_state.ltProtocolFee != ZERO_NAV_UNITS) {
-            IRoycoVaultTranche(LIQUIDITY_TRANCHE)
-                .mintProtocolFeeShares(
-                    _state.ltProtocolFee, _getLiquidityTrancheEffectiveNAV(_state.stEffectiveNAV, stTotalSupplyAfterMints), protocolFeeRecipient
-                );
+            NAV_UNIT ltEffectiveNAV = _getLiquidityTrancheEffectiveNAV(_state.stEffectiveNAV, stTotalSupplyAfterMints);
+            uint256 ltProtocolFeeShares = _navToShares(_state.ltProtocolFee, ltEffectiveNAV - _state.ltProtocolFee, IERC20(LIQUIDITY_TRANCHE).totalSupply());
+            IRoycoVaultTranche(LIQUIDITY_TRANCHE).mintProtocolFeeShares(protocolFeeRecipient, ltProtocolFeeShares);
         }
     }
 

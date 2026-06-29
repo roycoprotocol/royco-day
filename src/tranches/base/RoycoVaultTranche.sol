@@ -129,27 +129,6 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @inheritdoc IRoycoVaultTranche
     function mintProtocolFeeShares(
-        NAV_UNIT _protocolFeeNAV,
-        NAV_UNIT _totalTrancheNAV,
-        address _protocolFeeRecipient
-    )
-        public
-        virtual
-        override(IRoycoVaultTranche)
-        returns (uint256 protocolFeeSharesMinted, uint256 totalTrancheShares)
-    {
-        // Only the kernel can mint protocol fee shares based on sync
-        require(msg.sender == KERNEL, ONLY_KERNEL());
-
-        // Mint any protocol fee shares accrued to the specified recipient
-        (protocolFeeSharesMinted, totalTrancheShares) = previewMintProtocolFeeShares(_protocolFeeNAV, _totalTrancheNAV);
-        if (protocolFeeSharesMinted != 0) _mint(_protocolFeeRecipient, protocolFeeSharesMinted);
-
-        emit ProtocolFeeSharesMinted(_protocolFeeRecipient, protocolFeeSharesMinted, totalTrancheShares);
-    }
-
-    /// @inheritdoc IRoycoVaultTranche
-    function mintProtocolFeeShares(
         address _protocolFeeRecipient,
         uint256 _protocolFeeShares
     )
@@ -292,31 +271,6 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
                     : IRoycoDayKernel(KERNEL).ltConvertTrancheUnitsToNAVUnits(_assets));
         (AssetClaims memory trancheClaims, uint256 trancheTotalShares) = _previewPostSyncTrancheState();
         shares = _convertToShares(navAssets, trancheTotalShares, trancheClaims.nav, Math.Rounding.Floor);
-    }
-
-    /// @inheritdoc IRoycoVaultTranche
-    function previewMintProtocolFeeShares(
-        NAV_UNIT _protocolFeeNAV,
-        NAV_UNIT _totalTrancheNAV
-    )
-        public
-        view
-        virtual
-        override(IRoycoVaultTranche)
-        returns (uint256 protocolFeeSharesMinted, uint256 totalTrancheShares)
-    {
-        // Compute the shares to be minted to the protocol fee recipient to satisfy the ratio of total assets that the fee represents
-        // Subtract fee assets from total tranche assets because fees are included in total tranche assets
-        // Round in favor of the tranche
-        totalTrancheShares = totalSupply();
-
-        // If the protocol fee NAV is zero, return zero shares
-        if (_protocolFeeNAV == ZERO_NAV_UNITS) return (0, totalTrancheShares);
-
-        // Calculate the shares to be minted to the protocol fee recipient and add it to the total tranche shares
-        totalTrancheShares += protocolFeeSharesMinted = _convertToShares(
-            _protocolFeeNAV, totalTrancheShares, (_totalTrancheNAV - _protocolFeeNAV), Math.Rounding.Floor
-        );
     }
 
     /// =============================
