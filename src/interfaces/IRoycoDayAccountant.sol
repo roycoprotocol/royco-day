@@ -338,18 +338,18 @@ interface IRoycoDayAccountant {
      * @notice Returns the maximum assets withdrawable from the junior tranche without violating the market's coverage requirement
      * @dev Always rounds in favor of senior tranche protection
      * @param state The synced accounting state that the maximum junior withdrawal is computed against
-     * @return stClaimable The maximum claims on ST assets that the junior tranche can withdraw, denominated in NAV units
-     * @return jtClaimable The maximum claims on JT assets that the junior tranche can withdraw, denominated in NAV units
+     * @return stWithdrawableNAV The maximum claims on ST assets that the junior tranche can withdraw, denominated in NAV units
+     * @return jtWithdrawableNAV The maximum claims on JT assets that the junior tranche can withdraw, denominated in NAV units
      */
-    function maxJTWithdrawal(SyncedAccountingState memory state) external view returns (NAV_UNIT stClaimable, NAV_UNIT jtClaimable);
+    function maxJTWithdrawal(SyncedAccountingState memory state) external view returns (NAV_UNIT stWithdrawableNAV, NAV_UNIT jtWithdrawableNAV);
 
     /**
      * @notice Returns the maximum assets withdrawable from the liquidity tranche without violating the market's liquidity requirement
      * @dev Always rounds in favor of senior tranche protection
      * @param state The synced accounting state that the maximum liquidity withdrawal is computed against
-     * @return ltClaimable The maximum market-making depth that the liquidity tranche can withdraw, denominated in NAV units
+     * @return ltWithdrawableNAV The maximum market-making depth that the liquidity tranche can withdraw, denominated in NAV units
      */
-    function maxLTWithdrawal(SyncedAccountingState memory state) external view returns (NAV_UNIT ltClaimable);
+    function maxLTWithdrawal(SyncedAccountingState memory state) external view returns (NAV_UNIT ltWithdrawableNAV);
 
     /**
      * @notice Updates the JT YDM (Junior Tranche Yield Distribution Model) for this market

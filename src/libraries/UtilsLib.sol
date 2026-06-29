@@ -130,12 +130,12 @@ library UtilsLib {
      * @return jtClaimOnSTRawNAV The amount of JT's effective NAV that is backed by ST's raw NAV
      * @return jtClaimOnJTRawNAV The amount of JT's effective NAV that is backed by JT's own raw NAV
      */
-    function computeTrancheClaimsOnNAVs(SyncedAccountingState memory _state)
+    function computeSTandJTClaimsOnNAV(SyncedAccountingState memory _state)
         internal
         pure
         returns (NAV_UNIT stClaimOnSTRawNAV, NAV_UNIT stClaimOnJTRawNAV, NAV_UNIT jtClaimOnSTRawNAV, NAV_UNIT jtClaimOnJTRawNAV)
     {
-        return computeTrancheClaimsOnNAVs(_state.stRawNAV, _state.jtRawNAV, _state.stEffectiveNAV, _state.jtEffectiveNAV);
+        return computeSTandJTClaimsOnNAV(_state.stRawNAV, _state.jtRawNAV, _state.stEffectiveNAV, _state.jtEffectiveNAV);
     }
 
     /**
@@ -149,7 +149,7 @@ library UtilsLib {
      * @return jtClaimOnSTRawNAV The amount of JT's effective NAV that is backed by ST's raw NAV
      * @return jtClaimOnJTRawNAV The amount of JT's effective NAV that is backed by JT's own raw NAV
      */
-    function computeTrancheClaimsOnNAVs(
+    function computeSTandJTClaimsOnNAV(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
         NAV_UNIT _stEffectiveNAV,

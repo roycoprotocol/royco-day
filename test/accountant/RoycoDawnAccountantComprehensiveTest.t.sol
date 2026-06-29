@@ -20,7 +20,7 @@ import { MockYDMOverWAD, MockYDMWithInit } from "../mock/MockYDM.sol";
 // original call sites by building the state from the supplied raw NAVs via the unauthenticated preview.
 // NOTE: maxJTWithdrawal no longer returns a standalone total (it was an unused intermediate), and the
 // JT adapter's trailing claim args are now intrinsic to the state, so the adapter accepts and ignores
-// them and reconstructs the total as stClaimable + jtClaimable for the legacy 3-tuple call sites.
+// them and reconstructs the total as stWithdrawableNAV + jtWithdrawableNAV for the legacy 3-tuple call sites.
 function _maxSTDepositGivenCoverage(IRoycoDayAccountant _acc, NAV_UNIT _stRaw, NAV_UNIT _jtRaw) view returns (NAV_UNIT) {
     return _acc.maxSTDeposit(_acc.previewSyncTrancheAccounting(_stRaw, _jtRaw));
 }
@@ -33,10 +33,10 @@ function _maxJTWithdrawalGivenCoverage(
     NAV_UNIT
 )
     view
-    returns (NAV_UNIT totalNAVClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable)
+    returns (NAV_UNIT totalNAVClaimable, NAV_UNIT stWithdrawableNAV, NAV_UNIT jtWithdrawableNAV)
 {
-    (stClaimable, jtClaimable) = _acc.maxJTWithdrawal(_acc.previewSyncTrancheAccounting(_stRaw, _jtRaw));
-    totalNAVClaimable = stClaimable + jtClaimable;
+    (stWithdrawableNAV, jtWithdrawableNAV) = _acc.maxJTWithdrawal(_acc.previewSyncTrancheAccounting(_stRaw, _jtRaw));
+    totalNAVClaimable = stWithdrawableNAV + jtWithdrawableNAV;
 }
 
 // Day removed the minimum-coverage floor; file-level value pins fuzz coverage to [1%, 100%)
@@ -807,13 +807,16 @@ contract RoycoDayAccountantComprehensiveTestB is RoycoDayAccountantComprehensive
     function test_maxJTWithdrawal_basic() public {
         _initializeAccountantState(100e18, 100e18);
 
-        (NAV_UNIT totalClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable) =
+        (NAV_UNIT totalClaimable, NAV_UNIT stWithdrawableNAV, NAV_UNIT jtWithdrawableNAV) =
             _maxJTWithdrawalGivenCoverage(accountant, _nav(100e18), _nav(100e18), _nav(50e18), _nav(50e18));
 
         assertGt(toUint256(totalClaimable), 0, "some withdrawal allowed");
         // Allow 1 wei rounding tolerance due to mulDiv operations
         assertApproxEqAbs(
-            toUint256(stClaimable) + toUint256(jtClaimable), toUint256(totalClaimable), toUint256(DUST_TOLERANCE + DUST_TOLERANCE), "claims sum to total"
+            toUint256(stWithdrawableNAV) + toUint256(jtWithdrawableNAV),
+            toUint256(totalClaimable),
+            toUint256(DUST_TOLERANCE + DUST_TOLERANCE),
+            "claims sum to total"
         );
     }
 
@@ -821,12 +824,12 @@ contract RoycoDayAccountantComprehensiveTestB is RoycoDayAccountantComprehensive
     function test_maxJTWithdrawal_zeroClaims() public {
         _initializeAccountantState(100e18, 50e18);
 
-        (NAV_UNIT totalClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable) =
+        (NAV_UNIT totalClaimable, NAV_UNIT stWithdrawableNAV, NAV_UNIT jtWithdrawableNAV) =
             _maxJTWithdrawalGivenCoverage(accountant, _nav(100e18), _nav(50e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         assertEq(toUint256(totalClaimable), 0, "no claims = no withdrawal");
-        assertEq(toUint256(stClaimable), 0);
-        assertEq(toUint256(jtClaimable), 0);
+        assertEq(toUint256(stWithdrawableNAV), 0);
+        assertEq(toUint256(jtWithdrawableNAV), 0);
     }
 
     /// @notice Fuzz test maxJTWithdrawalGivenCoverage
@@ -2811,14 +2814,14 @@ contract RoycoDayAccountantEdgeCaseTest is BaseTest {
 
         // Get max JT withdrawal given coverage
         // JT claims on ST and JT (simplified - equal split for balanced market)
-        (NAV_UNIT totalNAVClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable) =
+        (NAV_UNIT totalNAVClaimable, NAV_UNIT stWithdrawableNAV, NAV_UNIT jtWithdrawableNAV) =
             _maxJTWithdrawalGivenCoverage(accountant, _nav(100e18), _nav(100e18), _nav(50e18), _nav(50e18));
 
         // Should return some positive value
         assertGt(toUint256(totalNAVClaimable), 0, "Max JT withdrawal should be positive");
         // Components should sum correctly (allow 1 wei rounding tolerance due to mulDiv operations)
         assertApproxEqAbs(
-            toUint256(stClaimable) + toUint256(jtClaimable),
+            toUint256(stWithdrawableNAV) + toUint256(jtWithdrawableNAV),
             toUint256(totalNAVClaimable),
             toUint256(DUST_TOLERANCE + DUST_TOLERANCE),
             "Components should sum to total"
@@ -2844,12 +2847,12 @@ contract RoycoDayAccountantEdgeCaseTest is BaseTest {
         uint256 jtClaimOnJT = 2e18;
 
         // Get max JT withdrawal
-        (NAV_UNIT totalNAVClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable) =
+        (NAV_UNIT totalNAVClaimable, NAV_UNIT stWithdrawableNAV, NAV_UNIT jtWithdrawableNAV) =
             _maxJTWithdrawalGivenCoverage(accountant, _nav(100e18), _nav(100e18), _nav(jtClaimOnST), _nav(jtClaimOnJT));
 
-        // stClaimable + jtClaimable should equal totalNAVClaimable
+        // stWithdrawableNAV + jtWithdrawableNAV should equal totalNAVClaimable
         // This verifies no dust is lost due to K_S + K_J < WAD
-        uint256 componentSum = toUint256(stClaimable) + toUint256(jtClaimable);
+        uint256 componentSum = toUint256(stWithdrawableNAV) + toUint256(jtWithdrawableNAV);
         uint256 total = toUint256(totalNAVClaimable);
 
         // Allow for small rounding error (up to ~100 wei due to mulDiv floor operations)
@@ -2876,10 +2879,10 @@ contract RoycoDayAccountantEdgeCaseTest is BaseTest {
         vm.stopPrank();
 
         // Get max JT withdrawal
-        (NAV_UNIT totalNAVClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable) =
+        (NAV_UNIT totalNAVClaimable, NAV_UNIT stWithdrawableNAV, NAV_UNIT jtWithdrawableNAV) =
             _maxJTWithdrawalGivenCoverage(accountant, _nav(100e18), _nav(100e18), _nav(jtClaimOnST), _nav(jtClaimOnJT));
 
-        uint256 componentSum = toUint256(stClaimable) + toUint256(jtClaimable);
+        uint256 componentSum = toUint256(stWithdrawableNAV) + toUint256(jtWithdrawableNAV);
         uint256 total = toUint256(totalNAVClaimable);
 
         // Skip if total is zero (no withdrawable surplus)
@@ -2900,15 +2903,15 @@ contract RoycoDayAccountantEdgeCaseTest is BaseTest {
         uint256 jtClaimOnST = 1; // 1 wei
         uint256 jtClaimOnJT = 1e18; // Huge
 
-        (NAV_UNIT totalNAVClaimable, NAV_UNIT stClaimable, NAV_UNIT jtClaimable) =
+        (NAV_UNIT totalNAVClaimable, NAV_UNIT stWithdrawableNAV, NAV_UNIT jtWithdrawableNAV) =
             _maxJTWithdrawalGivenCoverage(accountant, _nav(100e18), _nav(100e18), _nav(jtClaimOnST), _nav(jtClaimOnJT));
 
         // Even with extreme imbalance, should not cause issues
         uint256 total = toUint256(totalNAVClaimable);
-        uint256 componentSum = toUint256(stClaimable) + toUint256(jtClaimable);
+        uint256 componentSum = toUint256(stWithdrawableNAV) + toUint256(jtWithdrawableNAV);
 
         // K_S would be ~0, K_J would be ~WAD
-        // stClaimable should be ~0, jtClaimable should be ~total
+        // stWithdrawableNAV should be ~0, jtWithdrawableNAV should be ~total
         assertLe(total - componentSum, total / 1e18 + 2, "Extreme imbalance caused large dust loss");
     }
 

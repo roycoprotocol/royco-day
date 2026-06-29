@@ -256,8 +256,8 @@ interface IRoycoDayKernel {
     /**
      * @notice Returns the maximum amount of assets that can be withdrawn from the senior tranche
      * @param _owner The address that is withdrawing the assets
-     * @return claimOnStNAV The notional claims on ST assets that the senior tranche has denominated in kernel's NAV units
-     * @return claimOnJtNAV The notional claims on JT assets that the senior tranche has denominated in kernel's NAV units
+     * @return claimOnSTNAV The notional claims on ST assets that the senior tranche has denominated in kernel's NAV units
+     * @return claimOnJTNAV The notional claims on JT assets that the senior tranche has denominated in kernel's NAV units
      * @return stMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the senior tranche, denominated in the kernel's NAV units
      * @return jtMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the junior tranche, denominated in the kernel's NAV units
      * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the senior tranche after the post-sync mint of its protocol fee shares and liquidity premium shares
@@ -266,8 +266,8 @@ interface IRoycoDayKernel {
         external
         view
         returns (
-            NAV_UNIT claimOnStNAV,
-            NAV_UNIT claimOnJtNAV,
+            NAV_UNIT claimOnSTNAV,
+            NAV_UNIT claimOnJTNAV,
             NAV_UNIT stMaxWithdrawableNAV,
             NAV_UNIT jtMaxWithdrawableNAV,
             uint256 totalTrancheSharesAfterMintingFees
@@ -341,8 +341,8 @@ interface IRoycoDayKernel {
     /**
      * @notice Returns the maximum amount of assets that can be withdrawn from the junior tranche
      * @param _owner The address that is withdrawing the assets
-     * @return claimOnStNAV The notional claims on ST assets that the junior tranche has denominated in kernel's NAV units
-     * @return claimOnJtNAV The notional claims on JT assets that the junior tranche has denominated in kernel's NAV units
+     * @return claimOnSTNAV The notional claims on ST assets that the junior tranche has denominated in kernel's NAV units
+     * @return claimOnJTNAV The notional claims on JT assets that the junior tranche has denominated in kernel's NAV units
      * @return stMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the senior tranche, denominated in the kernel's NAV units
      * @return jtMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the junior tranche, denominated in the kernel's NAV units
      * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the junior tranche after minting any protocol fee shares post-sync, including virtual shares
@@ -351,8 +351,8 @@ interface IRoycoDayKernel {
         external
         view
         returns (
-            NAV_UNIT claimOnStNAV,
-            NAV_UNIT claimOnJtNAV,
+            NAV_UNIT claimOnSTNAV,
+            NAV_UNIT claimOnJTNAV,
             NAV_UNIT stMaxWithdrawableNAV,
             NAV_UNIT jtMaxWithdrawableNAV,
             uint256 totalTrancheSharesAfterMintingFees
@@ -368,14 +368,14 @@ interface IRoycoDayKernel {
     /**
      * @notice Returns the maximum amount of assets that can be withdrawn from the liquidity tranche
      * @param _owner The address that is withdrawing the assets
-     * @return claimOnLtNAV The notional claims on LT assets that the liquidity tranche has denominated in kernel's NAV units
+     * @return claimOnLTNAV The notional claims on LT assets that the liquidity tranche has denominated in kernel's NAV units
      * @return ltMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the liquidity tranche, denominated in the kernel's NAV units
      * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the liquidity tranche after minting any protocol fee shares post-sync
      */
     function ltMaxWithdrawable(address _owner)
         external
         view
-        returns (NAV_UNIT claimOnLtNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees);
+        returns (NAV_UNIT claimOnLTNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees);
 
     /**
      * @notice Previews the deposit of a specified amount of assets into the junior tranche

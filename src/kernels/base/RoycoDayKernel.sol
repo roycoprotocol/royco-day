@@ -214,42 +214,40 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         (stateBeforeDeposit,, totalTrancheSharesAfterSync) = previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
         // Convert the assets to NAV units
         valueAllocated = ltConvertTrancheUnitsToNAVUnits(_assets);
-        // Surface the pre-deposit LT EFFECTIVE NAV (the value deployed into the AMM or another market-making venue plus the idle liquidity-premium senior shares) as the NAV to mint
-        // LT shares at: it is not carried in SyncedAccountingState, so the tranche cannot derive it locally. Inject this period's post-mint
-        // held count (the preview does not commit the premium mint), valued at the post-mint senior supply, mirroring execution
+        // Compute the LT effective NAV prior to the deposit as the NAV to mint shares at
         (uint256 liquidityPremiumShares,, uint256 stTotalSupplyAfterMints) =
             _computeSTFeeAndLiquidityPremiumSharesToMint(stateBeforeDeposit, IERC20(SENIOR_TRANCHE).totalSupply());
         navToMintSharesAt = _getLiquidityTrancheEffectiveNAV(
-            stateBeforeDeposit.stEffectiveNAV, stTotalSupplyAfterMints, _getRoycoDayKernelStorage().ltOwnedSeniorTrancheShares + liquidityPremiumShares
+            stateBeforeDeposit.stEffectiveNAV, stTotalSupplyAfterMints, (_getRoycoDayKernelStorage().ltOwnedSeniorTrancheShares + liquidityPremiumShares)
         );
     }
 
     /// @inheritdoc IRoycoDayKernel
     function stPreviewRedeem(uint256 _shares) public view override(IRoycoDayKernel) returns (AssetClaims memory userClaim) {
-        // Preview the total claims the senior tranche has on each tranche's assets and the total shares after minting any protocol fee shares post-sync
-        (SyncedAccountingState memory state, AssetClaims memory stNotionalClaims, uint256 totalShares) = previewSyncTrancheAccounting(TrancheType.SENIOR);
+        // Preview the total claims the senior tranche has on each tranche's assets and the total shares after minting any protocol fee and liquidity premium fee shares post-sync
+        (SyncedAccountingState memory state, AssetClaims memory stClaims, uint256 totalShares) = previewSyncTrancheAccounting(TrancheType.SENIOR);
 
         // Calculate the user's claims based on the shares redeemed
-        userClaim = UtilsLib.scaleAssetClaims(stNotionalClaims, _shares, totalShares);
+        userClaim = UtilsLib.scaleAssetClaims(stClaims, _shares, totalShares);
         (userClaim,) = _applySeniorTrancheSelfLiquidationBonus(state, userClaim);
     }
 
     /// @inheritdoc IRoycoDayKernel
     function jtPreviewRedeem(uint256 _shares) public view override(IRoycoDayKernel) returns (AssetClaims memory userClaim) {
         // Preview the total claims the junior tranche has on each tranche's assets and the total shares after minting any protocol fee shares post-sync
-        (, AssetClaims memory jtNotionalClaims, uint256 totalShares) = previewSyncTrancheAccounting(TrancheType.JUNIOR);
+        (, AssetClaims memory jtClaims, uint256 totalShares) = previewSyncTrancheAccounting(TrancheType.JUNIOR);
 
         // Calculate the user's claims based on the shares redeemed
-        userClaim = UtilsLib.scaleAssetClaims(jtNotionalClaims, _shares, totalShares);
+        userClaim = UtilsLib.scaleAssetClaims(jtClaims, _shares, totalShares);
     }
 
     /// @inheritdoc IRoycoDayKernel
     function ltPreviewRedeem(uint256 _shares) public view override(IRoycoDayKernel) returns (AssetClaims memory userClaim) {
         // Preview the total claims the liquidity tranche has on each tranche's assets and the total shares after minting any protocol fee shares post-sync
-        (, AssetClaims memory ltNotionalClaims, uint256 totalShares) = previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
+        (, AssetClaims memory ltClaims, uint256 totalShares) = previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
 
         // Calculate the user's claims based on the shares redeemed
-        userClaim = UtilsLib.scaleAssetClaims(ltNotionalClaims, _shares, totalShares);
+        userClaim = UtilsLib.scaleAssetClaims(ltClaims, _shares, totalShares);
     }
 
     // =============================
@@ -277,27 +275,21 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         view
         virtual
         override(IRoycoDayKernel)
-        returns (
-            NAV_UNIT claimOnStNAV,
-            NAV_UNIT claimOnJtNAV,
-            NAV_UNIT stMaxWithdrawableNAV,
-            NAV_UNIT jtMaxWithdrawableNAV,
-            uint256 totalTrancheSharesAfterMintingFees
-        )
+        returns (NAV_UNIT claimOnSTNAV, NAV_UNIT claimOnJTNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalTrancheShares)
     {
         // If the owner is blacklisted or the kernel is currently paused, return zero claims
         if (_isBlacklisted(_owner) || paused()) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
         SyncedAccountingState memory state;
-        AssetClaims memory stNotionalClaims;
-        (state, stNotionalClaims, totalTrancheSharesAfterMintingFees) = previewSyncTrancheAccounting(TrancheType.SENIOR);
+        AssetClaims memory stClaims;
+        (state, stClaims, totalTrancheShares) = previewSyncTrancheAccounting(TrancheType.SENIOR);
 
         // ST redemptions are disabled during a fixed-term market state
         if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
         // Get the total claims the senior tranche has on each tranche's assets
-        claimOnStNAV = stConvertTrancheUnitsToNAVUnits(stNotionalClaims.stAssets);
-        claimOnJtNAV = jtConvertTrancheUnitsToNAVUnits(stNotionalClaims.jtAssets);
+        claimOnSTNAV = stConvertTrancheUnitsToNAVUnits(stClaims.stAssets);
+        claimOnJTNAV = jtConvertTrancheUnitsToNAVUnits(stClaims.jtAssets);
 
         // Bound the claims by the max withdrawable assets globally for each tranche and compute the cumulative NAV
         stMaxWithdrawableNAV = _getSeniorTrancheRawNAV();
@@ -321,26 +313,20 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         view
         virtual
         override(IRoycoDayKernel)
-        returns (
-            NAV_UNIT claimOnStNAV,
-            NAV_UNIT claimOnJtNAV,
-            NAV_UNIT stMaxWithdrawableNAV,
-            NAV_UNIT jtMaxWithdrawableNAV,
-            uint256 totalTrancheSharesAfterMintingFees
-        )
+        returns (NAV_UNIT claimOnSTNAV, NAV_UNIT claimOnJTNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalTrancheShares)
     {
         // If the owner is blacklisted or the kernel is currently paused, return zero claims
         if (_isBlacklisted(_owner) || paused()) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
         // Get the total claims the junior tranche has on each tranche's assets
         SyncedAccountingState memory state;
-        (state,, totalTrancheSharesAfterMintingFees) = previewSyncTrancheAccounting(TrancheType.JUNIOR);
+        (state,, totalTrancheShares) = previewSyncTrancheAccounting(TrancheType.JUNIOR);
 
         // JT redemptions are disabled during a fixed-term market state
         if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
         // Use the precise NAV claims directly from the decomposition instead of round-tripping them through tranche units (NAV -> tranche -> NAV).
-        (,, claimOnStNAV, claimOnJtNAV) = UtilsLib.computeTrancheClaimsOnNAVs(state);
+        (,, claimOnSTNAV, claimOnJTNAV) = UtilsLib.computeSTandJTClaimsOnNAV(state);
 
         // Get the max withdrawable ST and JT assets in NAV units from the accountant considering the coverage requirement
         (stMaxWithdrawableNAV, jtMaxWithdrawableNAV) = IRoycoDayAccountant(ACCOUNTANT).maxJTWithdrawal(state);
@@ -350,8 +336,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     function ltMaxDeposit(address _receiver) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT) {
         // If the receiver is blacklisted or the kernel is currently paused, return zero tranche units
         if (_isBlacklisted(_receiver) || paused()) return ZERO_TRANCHE_UNITS;
-        // LT deposits remain enabled during a fixed-term market state: the in-kind deposit only adds market-making depth, and the multi-asset
-        // deposit's senior exposure is gated by the coverage requirement enforced on the post-op sync, so no separate fixed-term block is needed
+        // LT deposits are unbounded in every market regime
         return MAX_TRANCHE_UNITS;
     }
 
@@ -361,24 +346,23 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         view
         virtual
         override(IRoycoDayKernel)
-        returns (NAV_UNIT claimOnLtNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees)
+        returns (NAV_UNIT claimOnLTNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheShares)
     {
-        // // If the owner is blacklisted or the kernel is currently paused, return zero claims
-        // if (_isBlacklisted(_owner) || paused()) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+        // If the owner is blacklisted or the kernel is currently paused, return zero claims
+        if (_isBlacklisted(_owner) || paused()) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
-        // // Get the total claims the liquidity tranche has on its own assets
-        // SyncedAccountingState memory state;
-        // (state,, totalTrancheSharesAfterMintingFees) = previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
+        // Get the total claims the liquidity tranche has on its own assets
+        SyncedAccountingState memory state;
+        (state,, totalTrancheShares) = previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
 
-        // // LT redemptions are disabled during a fixed-term market state
-        // if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+        // LT redemptions are disabled during a fixed-term market state
+        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
-        // // Use the precise NAV claims directly from the decomposition instead of round-tripping them through tranche units (NAV -> tranche -> NAV).
-        // (,,,, claimOnLtNAV) = UtilsLib.computeTrancheClaimsOnNAVs(state);
+        // The liquidity tranche is the sole owner of the pool, so its entire claim is on the LT raw NAV (the market-making depth)
+        claimOnLTNAV = state.ltRawNAV;
 
-        // // TODO: Implement (LT max withdrawable); reverts until the LT withdrawal path lands .
-        // // Depends on maxLtWithdrawable implementation in the accountant
-        // revert("not implemented");
+        // Otherwise the withdrawal is bounded by the liquidity requirement of the market (z <= ltRawNAV, so no cap against claimOnLTNAV is needed)
+        ltMaxWithdrawableNAV = IRoycoDayAccountant(ACCOUNTANT).maxLTWithdrawal(state);
     }
 
     // =============================
@@ -416,24 +400,22 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
         // Return the requested tranche claims and total shares after the sync mints its premium and protocol fee shares
         if (_trancheType == TrancheType.SENIOR) {
-            // The senior supply after both senior-share carve-outs: the liquidity premium and the ST protocol fee
+            // Compute ST share supply after the liquidity premium and the ST protocol fee shares are minted
             (,, totalTrancheShares) = _computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(SENIOR_TRANCHE).totalSupply());
         } else if (_trancheType == TrancheType.JUNIOR) {
-            // The junior supply after the JT protocol fee shares, priced against the post-fee junior NAV (mirrors execution)
+            // Compute JT share supply after the JT protocol fee shares are minted
             uint256 jtTotalSupply = IERC20(JUNIOR_TRANCHE).totalSupply();
-            totalTrancheShares = jtTotalSupply + _navToShares(state.jtProtocolFee, state.jtEffectiveNAV - state.jtProtocolFee, jtTotalSupply);
+            totalTrancheShares = jtTotalSupply + _navToShares(state.jtProtocolFee, (state.jtEffectiveNAV - state.jtProtocolFee), jtTotalSupply);
         } else {
-            // Value the LT protocol fee against the liquidity tranche's effective NAV at the post-carve-out senior supply and
-            // owned shares, mirroring execution so the previewed supply matches the supply that execution mints
+            // Compute LT share supply after the LT protocol fee shares are minted
             (uint256 liquidityPremiumShares,, uint256 stTotalSupplyAfterMints) =
                 _computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(SENIOR_TRANCHE).totalSupply());
-            uint256 ltOwnedSeniorTrancheSharesAfter = _getRoycoDayKernelStorage().ltOwnedSeniorTrancheShares + liquidityPremiumShares;
-            // The preview does not commit the premium mint, so _deriveTrancheAssetClaims above read the pre-mint held count from storage;
-            // overwrite the idle-premium leg with the post-mint count so the previewed claims match what execution derives post-mint
-            claims.stShares = ltOwnedSeniorTrancheSharesAfter;
-            NAV_UNIT ltEffectiveNAV = _getLiquidityTrancheEffectiveNAV(state.stEffectiveNAV, stTotalSupplyAfterMints, ltOwnedSeniorTrancheSharesAfter);
+            // Update the simulated post-mint ST shares owned by LT
+            uint256 ltOwnedSeniorTrancheShares = _getRoycoDayKernelStorage().ltOwnedSeniorTrancheShares + liquidityPremiumShares;
+            claims.stShares = ltOwnedSeniorTrancheShares;
+            NAV_UNIT ltEffectiveNAV = _getLiquidityTrancheEffectiveNAV(state.stEffectiveNAV, stTotalSupplyAfterMints, ltOwnedSeniorTrancheShares);
             uint256 ltTotalSupply = IERC20(LIQUIDITY_TRANCHE).totalSupply();
-            totalTrancheShares = ltTotalSupply + _navToShares(state.ltProtocolFee, ltEffectiveNAV - state.ltProtocolFee, ltTotalSupply);
+            totalTrancheShares = ltTotalSupply + _navToShares(state.ltProtocolFee, (ltEffectiveNAV - state.ltProtocolFee), ltTotalSupply);
         }
     }
 
@@ -1037,7 +1019,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         if (_trancheType == TrancheType.SENIOR || _trancheType == TrancheType.JUNIOR) {
             // Decompose the NAV claims for the senior and junior tranches based on the synced accounting state
             (NAV_UNIT stClaimOnSTRawNAV, NAV_UNIT stClaimOnJTRawNAV, NAV_UNIT jtClaimOnSTRawNAV, NAV_UNIT jtClaimOnJTRawNAV) =
-                UtilsLib.computeTrancheClaimsOnNAVs(_state);
+                UtilsLib.computeSTandJTClaimsOnNAV(_state);
 
             // Compute the cumulative asset claims for the specified tranche based on the NAV decomposition
             if (_trancheType == TrancheType.SENIOR) {
@@ -1243,19 +1225,19 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         virtual
         returns (AssetClaims memory stUserClaimsWithBonus, NAV_UNIT stSelfLiquidationBonusNAV)
     {
-        // If the liquidation coverageUtilization threshold has not been breached, there is no ST self-liquidation bonus remitted
+        // If the liquidation coverage utilization threshold has not been breached, there is no ST self-liquidation bonus remitted
         if (_state.coverageUtilizationWAD < _state.coverageLiquidationUtilizationWAD) return (_stUserClaims, ZERO_NAV_UNITS);
 
         // Compute the desired ST bonus based on the configured ST self-liquidation bonus rate
         NAV_UNIT desiredBonusNAV = _stUserClaims.nav.mulDiv(_getRoycoDayKernelStorage().stSelfLiquidationBonusWAD, WAD, Math.Rounding.Floor);
 
         // Decompose the NAV claims for the Junior Tranche to get the NAV claims for sourcing the bonus
-        (,, NAV_UNIT jtClaimOnSTRawNAV,) = UtilsLib.computeTrancheClaimsOnNAVs(_state);
+        (,, NAV_UNIT jtClaimOnSTRawNAV,) = UtilsLib.computeSTandJTClaimsOnNAV(_state);
 
-        // Compute the maximum bonus that doesn't increase coverageUtilization, preventing bank run dynamics
+        // Compute the maximum bonus that doesn't increase coverage utilization, preventing bank run dynamics
         NAV_UNIT maxCoverageUtilizationNeutralBonusNAV = _computeMaxCoverageUtilizationNeutralBonus(_state, _stUserClaims, jtClaimOnSTRawNAV);
 
-        // Clamp the actual bonus by the remaining JT controlled NAV and the maximum coverageUtilization-neutral (leverage retaining or delevering) NAV
+        // Clamp the actual bonus by the remaining JT controlled NAV and the maximum coverage-utilization-neutral (leverage retaining or delevering) NAV
         stSelfLiquidationBonusNAV = UnitsMathLib.min(UnitsMathLib.min(desiredBonusNAV, _state.jtEffectiveNAV), maxCoverageUtilizationNeutralBonusNAV);
 
         // Preemptively return if there is no remaining bonus capital to remit
