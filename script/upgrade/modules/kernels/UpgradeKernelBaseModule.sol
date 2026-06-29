@@ -9,7 +9,7 @@ import { UpgradeModuleBase } from "../UpgradeModuleBase.sol";
 /// @notice Minimal interface to read the immutable bool that's exposed on the concrete `RoycoDayKernel`
 ///         but not on `IRoycoDayKernel`. Avoids importing the full `RoycoDayKernel` here.
 interface IKernelExtra {
-    function ENFORCE_TRANCHE_SHARES_TRANSFER_WHITELIST() external view returns (bool);
+    function ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER() external view returns (bool);
 }
 
 /**
@@ -105,7 +105,7 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
         cp.juniorTranche = k.JUNIOR_TRANCHE();
         cp.jtAsset = k.JT_ASSET();
         cp.accountant = k.ACCOUNTANT();
-        cp.enforceVaultSharesTransferWhitelist = IKernelExtra(_proxy).ENFORCE_TRANCHE_SHARES_TRANSFER_WHITELIST();
+        cp.enforceVaultSharesTransferWhitelist = IKernelExtra(_proxy).ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -138,7 +138,7 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
             k.JUNIOR_TRANCHE(),
             k.JT_ASSET(),
             k.ACCOUNTANT(),
-            IKernelExtra(_proxy).ENFORCE_TRANCHE_SHARES_TRANSFER_WHITELIST(),
+            IKernelExtra(_proxy).ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER(),
             state,
             stConv,
             jtConv
@@ -165,8 +165,8 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
         require(k.JT_ASSET() == jtAsset, UpgradeKernelBaseModule__ImmutableChanged("JT_ASSET"));
         require(k.ACCOUNTANT() == accountant, UpgradeKernelBaseModule__ImmutableChanged("ACCOUNTANT"));
         require(
-            IKernelExtra(_proxy).ENFORCE_TRANCHE_SHARES_TRANSFER_WHITELIST() == enforceWhitelist,
-            UpgradeKernelBaseModule__ImmutableChanged("ENFORCE_TRANCHE_SHARES_TRANSFER_WHITELIST")
+            IKernelExtra(_proxy).ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER() == enforceWhitelist,
+            UpgradeKernelBaseModule__ImmutableChanged("ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER")
         );
 
         IRoycoDayKernel.RoycoDayKernelState memory post = k.getState();
