@@ -690,7 +690,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     /// @inheritdoc IRoycoDayKernel
-    /// @dev LT multi-asset redemptions are enabled only in a PERPETUAL market state, granted the market's liquidity requirement is satisfied post-redemption unless the liquidation coverageUtilization threshold is breached
+    /// @dev LT multi-asset redemptions are enabled only in a PERPETUAL market state, granted the market's liquidity requirement is satisfied post-redemption unless the liquidation coverage utilization threshold is breached
     function ltRedeemMultiAsset(
         uint256 _ltShares,
         uint256 _minSTSharesOut,
@@ -730,7 +730,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
             (stSharesWithdrawn, quoteAssets) = _removeLiquidity(userAssetClaims.ltAssets, _minSTSharesOut, _minQuoteAssetsOut, _receiver);
         }
 
-        // Unwind ALL of the redeemer's senior shares (pooled + idle premium) in a single ST redemption: scale once, burn once, withdraw once
+        // Redeem all of the redeemer's senior shares from the venue and from the premium
         uint256 stSharesToRedeem = stSharesWithdrawn + userAssetClaims.stShares;
         stClaims = UtilsLib.scaleAssetClaims(stClaims, stSharesToRedeem, totalSTShares);
 
@@ -1032,28 +1032,25 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         virtual
         returns (AssetClaims memory claims)
     {
-        // Decompose the NAV claims for the tranches based on the synced accounting state
-        (NAV_UNIT stClaimOnSTRawNAV, NAV_UNIT stClaimOnJTRawNAV, NAV_UNIT jtClaimOnSTRawNAV, NAV_UNIT jtClaimOnJTRawNAV) =
-            UtilsLib.computeTrancheClaimsOnNAVs(_state);
+        if (_trancheType == TrancheType.SENIOR || _trancheType == TrancheType.JUNIOR) {
+            // Decompose the NAV claims for the senior and junior tranches based on the synced accounting state
+            (NAV_UNIT stClaimOnSTRawNAV, NAV_UNIT stClaimOnJTRawNAV, NAV_UNIT jtClaimOnSTRawNAV, NAV_UNIT jtClaimOnJTRawNAV) =
+                UtilsLib.computeTrancheClaimsOnNAVs(_state);
 
-        // Compute the cumulative asset claims for the specified tranche based on the NAV decomposition
-        if (_trancheType == TrancheType.SENIOR) {
-            if (stClaimOnSTRawNAV != ZERO_NAV_UNITS) claims.stAssets = stConvertNAVUnitsToTrancheUnits(stClaimOnSTRawNAV);
-            if (stClaimOnJTRawNAV != ZERO_NAV_UNITS) claims.jtAssets = jtConvertNAVUnitsToTrancheUnits(stClaimOnJTRawNAV);
-            claims.nav = _state.stEffectiveNAV;
-        } else if (_trancheType == TrancheType.JUNIOR) {
-            if (jtClaimOnSTRawNAV != ZERO_NAV_UNITS) {
-                claims.stAssets = stConvertNAVUnitsToTrancheUnits(jtClaimOnSTRawNAV);
+            // Compute the cumulative asset claims for the specified tranche based on the NAV decomposition
+            if (_trancheType == TrancheType.SENIOR) {
+                if (stClaimOnSTRawNAV != ZERO_NAV_UNITS) claims.stAssets = stConvertNAVUnitsToTrancheUnits(stClaimOnSTRawNAV);
+                if (stClaimOnJTRawNAV != ZERO_NAV_UNITS) claims.jtAssets = jtConvertNAVUnitsToTrancheUnits(stClaimOnJTRawNAV);
+                claims.nav = _state.stEffectiveNAV;
+            } else {
+                if (jtClaimOnSTRawNAV != ZERO_NAV_UNITS) claims.stAssets = stConvertNAVUnitsToTrancheUnits(jtClaimOnSTRawNAV);
+                if (jtClaimOnJTRawNAV != ZERO_NAV_UNITS) claims.jtAssets = jtConvertNAVUnitsToTrancheUnits(jtClaimOnJTRawNAV);
+                claims.nav = _state.jtEffectiveNAV;
             }
-            if (jtClaimOnJTRawNAV != ZERO_NAV_UNITS) claims.jtAssets = jtConvertNAVUnitsToTrancheUnits(jtClaimOnJTRawNAV);
-            claims.nav = _state.jtEffectiveNAV;
         } else {
-            // LT's claim on its own raw NAV is simply the full LT raw NAV (the value deployed into the AMM or another market-making venue)
             if (_state.ltRawNAV != ZERO_NAV_UNITS) claims.ltAssets = ltConvertNAVUnitsToTrancheUnits(_state.ltRawNAV);
-            // The idle, not-yet-reinvested liquidity-premium senior shares the kernel holds for the LT are a disjoint effective leg of an LT
             claims.stShares = _getRoycoDayKernelStorage().ltOwnedSeniorTrancheShares;
-            // TODO: fix for every flow but convert to assets The LT share PRICE stays the raw value deployed into the AMM or another market-making venue (up-only), so the idle premium never inflates the oracle-facing NAV per share
-            claims.nav = _state.ltRawNAV;
+            claims.nav = _getLiquidityTrancheEffectiveNAV(_state.stEffectiveNAV, IRoycoVaultTranche(SENIOR_TRANCHE).totalSupply(), claims.stShares);
         }
     }
 
