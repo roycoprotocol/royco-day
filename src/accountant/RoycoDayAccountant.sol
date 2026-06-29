@@ -314,7 +314,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         }
 
         // Enforce the liquidity requirement for operations that can violate it (raise the senior exposure or reduce the depth of the liquidity tranche). An LT
-        // Redemption is exempt once coverage utilization reaches its liquidation threshold, the liquidation-breach state in which all LT withdrawals are allowed
+        // LT redemption is exempt from satisfying the liquidity requirement once coverage utilization reaches its liquidation threshold
         if (
             _op == Operation.ST_DEPOSIT || _op == Operation.LT_DEPOSIT
                 || (_op == Operation.LT_REDEEM && state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD)
@@ -336,10 +336,10 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
      *      Isolate x: x = (JT_EFFECTIVE_NAV / MIN_COVERAGE) - (JT_RAW_NAV * β) - ST_RAW_NAV
      *
      * @dev Liquidity Requirement: LT_RAW_NAV >= (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)
-     * @dev Max assets depositable into ST, y: LT_RAW_NAV = (ST_EFFECTIVE_NAV + y) * MIN_LIQUIDITY
-     *      Isolate y: y = (LT_RAW_NAV / MIN_LIQUIDITY) - ST_EFFECTIVE_NAV
+     * @dev Max assets depositable into ST, x': LT_RAW_NAV = (ST_EFFECTIVE_NAV + x') * MIN_LIQUIDITY
+     *      Isolate x': x' = (LT_RAW_NAV / MIN_LIQUIDITY) - ST_EFFECTIVE_NAV
      *
-     * @dev The maximum ST deposit NAV is the minimum of x and y
+     * @dev The maximum ST deposit NAV is the minimum of x and x'
      */
     function maxSTDeposit(SyncedAccountingState memory state) external view override(IRoycoDayAccountant) returns (NAV_UNIT) {
         // Get the storage pointer to the accountant state
@@ -372,21 +372,21 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             maxSTDepositGivenLiquidity = maxSTEffectiveNAV.saturatingSub(state.stEffectiveNAV + $.stNAVDustTolerance);
         }
 
-        // The maximum deposit is the minimum of x and y
+        // The maximum deposit is the minimum of x and x'
         return UnitsMathLib.min(maxSTDepositGivenCoverage, maxSTDepositGivenLiquidity);
     }
 
     /**
      * @inheritdoc IRoycoDayAccountant
-     * @dev JT withdrawals are bounded by the coverage and liquidity requirements of the market
+     * @dev JT withdrawals are bounded by the coverage requirement of the market
      *
      * @dev Coverage Requirement: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_RAW_NAV * β)) * MIN_COVERAGE
      * @dev When assets are claimed from the JT, they are always liquidated in the same proportion as the tranche's total claims on the ST and JT assets
      * @dev Let S be the JT's total claims on ST assets and J be the JT's total claims on JT assets, in NAV Units. The total claims on the ST and JT assets are S + J NAV Units
      * @dev Let K_S be S / (S + J) and K_J be J / (S + J)
-     * @dev Therefore, if a total NAV of z is claimed from the JT, K_S * z will be claimed from the ST_RAW_NAV and K_J * z will be claimed from the JT_RAW_NAV
-     * @dev Max assets withdrawable from JT, z: (JT_EFFECTIVE_NAV - z) = ((ST_RAW_NAV - K_S * z) + ((JT_RAW_NAV - K_J * z) * β)) * COV
-     *      Isolate z: z = (JT_EFFECTIVE_NAV - (MIN_COVERAGE * (ST_RAW_NAV + (JT_RAW_NAV * β)))) / (1 - (MIN_COVERAGE * (K_S + β * K_J)))
+     * @dev Therefore, if a total NAV of y is claimed from the JT, K_S * y will be claimed from the ST_RAW_NAV and K_J * y will be claimed from the JT_RAW_NAV
+     * @dev Max assets withdrawable from JT, y: (JT_EFFECTIVE_NAV - y) = ((ST_RAW_NAV - K_S * y) + ((JT_RAW_NAV - K_J * y) * β)) * COV
+     *      Isolate y: y = (JT_EFFECTIVE_NAV - (MIN_COVERAGE * (ST_RAW_NAV + (JT_RAW_NAV * β)))) / (1 - (MIN_COVERAGE * (K_S + β * K_J)))
      */
     function maxJTWithdrawal(SyncedAccountingState memory state)
         external
@@ -429,6 +429,31 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Split it into individual tranche's claims
         stClaimable = totalNAVClaimable.mulDiv(kS_WAD, WAD, Math.Rounding.Floor);
         jtClaimable = totalNAVClaimable.mulDiv(kJ_WAD, WAD, Math.Rounding.Floor);
+    }
+
+    /**
+     * @inheritdoc IRoycoDayAccountant
+     * @dev LT withdrawals are bounded by the liquidity requirement of the market
+     *
+     * @dev Liquidity Requirement: LT_RAW_NAV >= (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)
+     * @dev An LT redemption removes pooled market-making depth (LT_RAW_NAV) directly and does not draw on the ST or JT raw NAVs, so the bound is a single value and is not split across the tranche claims
+     * @dev An in-kind LT redemption removes pooled depth without changing ST_EFFECTIVE_NAV, so the bound carries no feedback term unlike the junior tranche coverage solve
+     * @dev Max assets withdrawable from LT, z: (LT_RAW_NAV - z) = ST_EFFECTIVE_NAV * MIN_LIQUIDITY
+     *      Isolate z: z = LT_RAW_NAV - (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)
+     */
+    function maxLTWithdrawal(SyncedAccountingState memory state) external view override(IRoycoDayAccountant) returns (NAV_UNIT ltClaimable) {
+        // Get the storage pointer to the accountant state
+        RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
+
+        // Compute the surplus market-making depth withdrawable from the liquidity tranche in NAV units
+        // If there is no minimum liquidity requirement, there is no withdrawal restriction and the entire pool depth is withdrawable
+        if (state.minLiquidityWAD == 0) return state.ltRawNAV;
+
+        // Compute the minimum market-making depth required to satisfy the market's liquidity requirement, rounding in favor of senior protection
+        NAV_UNIT requiredLTAssets = state.stEffectiveNAV.mulDiv(state.minLiquidityWAD, WAD, Math.Rounding.Ceil);
+        // Compute the surplus depth that can be withdrawn while retaining minimum liquidity
+        // Also account for ST's dust tolerance to preclude reverts due to rounding after LT redemptions
+        ltClaimable = state.ltRawNAV.saturatingSub(requiredLTAssets + $.stNAVDustTolerance);
     }
 
     // =============================
@@ -503,11 +528,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             deltaJTEffectiveNAV = (deltaSTRawNAV + deltaJTRawNAV) - deltaSTEffectiveNAV;
         }
 
-        // The net JT gains. The JT protocol fee accrued is calculated using this NAV.
-        NAV_UNIT jtNetGain = ZERO_NAV_UNITS;
-        // Cache the JT protocol fee rate: it is read both when booking a JT gain and when recomputing that fee after coverage is applied to ST
-        uint256 jtProtocolFeeWAD = $.jtProtocolFeeWAD;
-
         // The liquidity premium and protocol fees accrued by this sync, settled by the waterfall below
         NAV_UNIT ltLiquidityPremium;
         NAV_UNIT stProtocolFee;
@@ -515,6 +535,9 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         NAV_UNIT ltProtocolFee;
 
         // Mark both the tranche NAVs to market
+        // The net JT gains. The JT protocol fee accrued is calculated using this NAV.
+        NAV_UNIT jtNetGain;
+
         /// @dev STEP_APPLY_JT_LOSS: The JT assets depreciated in value
         if (deltaJTEffectiveNAV < 0) {
             /// @dev STEP_JT_ABSORB_LOSS: JT's remaning loss-absorption buffer incurs its loss fully
@@ -525,7 +548,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         } else if (deltaJTEffectiveNAV > 0) {
             jtNetGain = toNAVUnits(deltaJTEffectiveNAV);
             // Compute the protocol fee taken on this JT yield accrual if it is not attributable to any rounding/dust
-            if (jtNetGain > effectiveNAVDustTolerance) jtProtocolFee = jtNetGain.mulDiv(jtProtocolFeeWAD, WAD, Math.Rounding.Floor);
+            if (jtNetGain > effectiveNAVDustTolerance) jtProtocolFee = jtNetGain.mulDiv($.jtProtocolFeeWAD, WAD, Math.Rounding.Floor);
             // Book the gains to the JT
             jtEffectiveNAV = (jtEffectiveNAV + jtNetGain);
         }
@@ -539,7 +562,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
                 // If there was a JT protocol fee taken on their appreciation, recalculate it using the JT net gain after applying coverage applied
                 if (jtProtocolFee != ZERO_NAV_UNITS) {
                     jtNetGain = jtNetGain.saturatingSub(coverageApplied);
-                    jtProtocolFee = (jtNetGain > effectiveNAVDustTolerance) ? jtNetGain.mulDiv(jtProtocolFeeWAD, WAD, Math.Rounding.Floor) : ZERO_NAV_UNITS;
+                    jtProtocolFee = (jtNetGain > effectiveNAVDustTolerance) ? jtNetGain.mulDiv($.jtProtocolFeeWAD, WAD, Math.Rounding.Floor) : ZERO_NAV_UNITS;
                 }
                 // Apply the coverage to JT effective NAV
                 jtEffectiveNAV = (jtEffectiveNAV - coverageApplied);
@@ -623,7 +646,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             }
         }
 
-        // Enforce the NAV conservation invariant: the raw NAVs and the post-waterfall effective NAVs must sum to the same total at wei precision
+        // Enforce the NAV conservation invariant
         require((_stRawNAV + _jtRawNAV) == (stEffectiveNAV + jtEffectiveNAV), NAV_CONSERVATION_VIOLATION());
 
         // Apply the market state transition resulting from this sync, then marshal the post-sync accounting state

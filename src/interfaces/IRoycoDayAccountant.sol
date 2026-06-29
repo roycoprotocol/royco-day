@@ -344,6 +344,14 @@ interface IRoycoDayAccountant {
     function maxJTWithdrawal(SyncedAccountingState memory state) external view returns (NAV_UNIT stClaimable, NAV_UNIT jtClaimable);
 
     /**
+     * @notice Returns the maximum assets withdrawable from the liquidity tranche without violating the market's liquidity requirement
+     * @dev Always rounds in favor of senior tranche protection
+     * @param state The synced accounting state that the maximum liquidity withdrawal is computed against
+     * @return ltClaimable The maximum market-making depth that the liquidity tranche can withdraw, denominated in NAV units
+     */
+    function maxLTWithdrawal(SyncedAccountingState memory state) external view returns (NAV_UNIT ltClaimable);
+
+    /**
      * @notice Updates the JT YDM (Junior Tranche Yield Distribution Model) for this market
      * @dev Only callable by a designated admin
      * @param _jtYDM The new JT YDM address to set
