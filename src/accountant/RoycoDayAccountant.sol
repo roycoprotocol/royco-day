@@ -469,8 +469,8 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     function _previewSyncTrancheAccounting(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
-        uint192 _twJTYieldShareAccruedWAD,
-        uint192 _twLTYieldShareAccruedWAD
+        uint256 _twJTYieldShareAccruedWAD,
+        uint256 _twLTYieldShareAccruedWAD
     )
         internal
         view
@@ -579,7 +579,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
                 jtEffectiveNAV = (jtEffectiveNAV + jtCoverageImpermanentLossRecovery);
                 stGain = (stGain - jtCoverageImpermanentLossRecovery);
             }
-            /// @dev STEP_DISTRIBUTE_YIELD: There is no remaining JT coverage impermanent loss that ST yield is obligated to repay, the residual gains will be used to distribute yield to both tranches
+            /// @dev STEP_PAY_PREMIUMS: There is no remaining JT coverage impermanent loss that ST yield is obligated to repay, the residual gains will be used to pay the risk and liquidity premium to the JT and LT respectively
             if (stGain != ZERO_NAV_UNITS) {
                 // Mark yield as distributed if the gain is not attributable to any rounding/dust
                 if (stGain > effectiveNAVDustTolerance) premiumsPaid = true;
@@ -588,11 +588,12 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
                 NAV_UNIT jtRiskPremium;
                 // The risk and liquidity premiums are always paid together, so they share a single elapsed window since the last premium payment
                 uint256 elapsedSinceLastPremiumPayments = block.timestamp - $.lastPremiumPaymentTimestamp;
+                // If the last premium payments occurred in the same block, we use instantaneous values for the yield shares
                 if (elapsedSinceLastPremiumPayments == 0) {
-                    // The instantaneous shares are only consumed when the last premium payment happened in the same block, so they are fetched lazily here and each capped at its configured maximum
-                    // They read only last-checkpoint state that the waterfall never mutates, so deferring the fetch to this branch is behaviorally identical and skips the YDM reads on loss or zero-gain syncs
-                    // The JT YDM is driven by the market's coverage utilization: the JT risk premium scales with how utilized the JT coverage buffer is
-                    uint256 instantaneousJTYieldShareWAD = Math.min(
+                    // Set the elapsed time to 1 second (instantaneous)
+                    elapsedSinceLastPremiumPayments = 1 seconds;
+                    // Query the instantaneous yield shares for the JT and LT
+                    _twJTYieldShareAccruedWAD = Math.min(
                         IYDM($.jtYDM)
                             .previewYieldShare(
                                 initialMarketState,
@@ -601,19 +602,17 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
                         $.maxJTYieldShareWAD
                     );
                     // The LT YDM is driven by the market's liquidity utilization: the LT liquidity premium scales with how utilized the LT market-making inventory is
-                    uint256 instantaneousLTYieldShareWAD = Math.min(
+                    _twLTYieldShareAccruedWAD = Math.min(
                         IYDM($.ltYDM)
                             .previewYieldShare(
                                 initialMarketState, UtilsLib.computeLiquidityUtilization($.lastSTEffectiveNAV, $.minLiquidityWAD, $.lastLTRawNAV)
                             ),
                         $.maxLTYieldShareWAD
                     );
-                    jtRiskPremium = stGain.mulDiv(instantaneousJTYieldShareWAD, WAD, Math.Rounding.Floor);
-                    ltLiquidityPremium = stGain.mulDiv(instantaneousLTYieldShareWAD, WAD, Math.Rounding.Floor);
-                } else {
-                    jtRiskPremium = stGain.mulDiv(_twJTYieldShareAccruedWAD, (elapsedSinceLastPremiumPayments * WAD), Math.Rounding.Floor);
-                    ltLiquidityPremium = stGain.mulDiv(_twLTYieldShareAccruedWAD, (elapsedSinceLastPremiumPayments * WAD), Math.Rounding.Floor);
                 }
+                // Compute the risk and liquidity premiums based on the yield shares and time elapsed since the last premium payments
+                jtRiskPremium = stGain.mulDiv(_twJTYieldShareAccruedWAD, (elapsedSinceLastPremiumPayments * WAD), Math.Rounding.Floor);
+                ltLiquidityPremium = stGain.mulDiv(_twLTYieldShareAccruedWAD, (elapsedSinceLastPremiumPayments * WAD), Math.Rounding.Floor);
                 // The combined premiums can never exceed the senior gain: the JT and LT yield shares are each capped so that they sum to at most 100% of senior appreciation
                 require((jtRiskPremium + ltLiquidityPremium) <= stGain, PREMIUMS_EXCEED_SENIOR_YIELD());
                 // Apply the risk premium to JT's effective NAV
