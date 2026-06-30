@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IRateProvider } from "../../../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/solidity-utils/helpers/IRateProvider.sol";
+import { IVault } from "../../../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
 import {
     AddLiquidityKind,
     AddLiquidityParams,
@@ -57,6 +58,11 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     /// @notice Emitted when the maximum reinvestment slippage tolerance is updated
     /// @param maxReinvestmentSlippageWAD The new maximum slippage tolerated when single-sided reinvesting the liquidity premium into the BPT, scaled to WAD precision
     event MaxReinvestmentSlippageUpdated(uint64 maxReinvestmentSlippageWAD);
+
+    /// @notice Emitted when the kernel's held liquidity-premium senior shares are deployed into the BPT via the gated single-sided add
+    /// @param stSharesDeployed The senior tranche shares drained from the kernel's held balance and added into the pool
+    /// @param ltAssetsMinted The BPT (LT assets) minted to the liquidity tranche by the add
+    event LiquidityPremiumReinvested(uint256 stSharesDeployed, TRANCHE_UNIT ltAssetsMinted);
 
     /// @notice Thrown when the Balancer pool is not registered with the Balancer V3 Vault
     error POOL_NOT_REGISTERED();
@@ -283,8 +289,46 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
         }
     }
 
-    /// @inheritdoc RoycoDayKernel
-    function _processSTSharesMintedForLiquidityPremium(uint256 _stSharesMinted) internal override(RoycoDayKernel) { }
+    /**
+     * @inheritdoc RoycoDayKernel
+     * @dev Deploys the idle liquidity-premium senior share balance the kernel holds into the BPT via a gated single-sided add
+     * @dev The min-BPT-out floors the add at the manipulation-resistant oracle's fair value (not the pool spot) less the max reinvestment slippage, so a manipulated pool cannot widen the tolerance
+     * @dev Tolerates reversions to ensure a tranche operation doesn't revert on a failing reinvestment
+     */
+    function _reinvestLiquidityPremium(uint256) internal override(RoycoDayKernel) {
+        // Deploy the LT's idle ST shares into its market making inventory
+        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
+        uint256 ltOwnedSeniorTrancheShares = $.ltOwnedSeniorTrancheShares;
+        if (ltOwnedSeniorTrancheShares == 0) return;
+
+        // Value the ST shares that need to be reinvested in NAV units
+        uint256 seniorTrancheTotalSupply = IERC20(SENIOR_TRANCHE).totalSupply();
+        NAV_UNIT ltOwnedSeniorTrancheSharesNAV = seniorTrancheTotalSupply == 0
+            ? ZERO_NAV_UNITS
+            : IRoycoDayAccountant(ACCOUNTANT).getLastSTEffectiveNAV().mulDiv(ltOwnedSeniorTrancheShares, seniorTrancheTotalSupply, Math.Rounding.Floor);
+        // Mark that senior NAV to its fair BPT at the manipulation-resistant oracle, then discount by the max tolerated slippage for the gate floor
+        TRANCHE_UNIT fairLTAssets = ltConvertNAVUnitsToTrancheUnits(ltOwnedSeniorTrancheSharesNAV);
+        TRANCHE_UNIT minLTAssetsOut = fairLTAssets.mulDiv((WAD - _getBalancerV3_LT_QuoterStorage().maxReinvestmentSlippageWAD), WAD, Math.Rounding.Ceil);
+
+        // Single-sided add the ST shares through a low-level call into the Vault's callback
+        // The inner unlock dispatches addBalancerV3Liquidity, which mints the BPT bounded by minLTAssetsOut and settles the shares in
+        (bool reinvestmentSucceeded, bytes memory returnData) = address(_vault)
+            .call(abi.encodeCall(_vault.unlock, (abi.encodeCall(this.addBalancerV3Liquidity, (ltOwnedSeniorTrancheShares, uint256(0), minLTAssetsOut)))));
+        // On a breached gate (or any add revert) the premium shares remain idle: no state mutated here, the inner frame rolled back
+        if (!reinvestmentSucceeded) return;
+
+        // Decode the BPT minted from the single-sided provision
+        TRANCHE_UNIT ltAssetsMinted;
+        assembly ("memory-safe") {
+            ltAssetsMinted := mload(add(returnData, 0x60))
+        }
+
+        // Debit the reinvested ST shares and credit the BPT minted from/to the LT
+        $.ltOwnedSeniorTrancheShares -= ltOwnedSeniorTrancheShares;
+        $.ltOwnedYieldBearingAssets = $.ltOwnedYieldBearingAssets + ltAssetsMinted;
+
+        emit LiquidityPremiumReinvested(ltOwnedSeniorTrancheShares, ltAssetsMinted);
+    }
 
     // =============================
     // Admin Functions

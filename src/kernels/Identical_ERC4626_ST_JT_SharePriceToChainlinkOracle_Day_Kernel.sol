@@ -75,8 +75,8 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel is Ident
 
     /// @inheritdoc RoycoDayKernel
     /// @dev No Balancer liquidity venue is wired on this kernel yet (P4): the LDM pays no liquidity premium while the LT is
-    ///      disabled, so no premium ST shares are ever minted and this reinvestment hook is unreachable. Revert defensively.
-    function _processSTSharesMintedForLiquidityPremium(uint256) internal override(RoycoDayKernel) {
-        revert LIQUIDITY_VENUE_NOT_IMPLEMENTED();
-    }
+    ///      disabled, so no premium ST shares are ever minted and this reinvestment hook is unreachable in practice. It is a
+    ///      no-op (never a revert) so that, even if reached, the surrounding accounting sync can never brick: the premium simply
+    ///      stays staged in the kernel until a venue is wired.
+    function _reinvestLiquidityPremium(uint256) internal override(RoycoDayKernel) { }
 }

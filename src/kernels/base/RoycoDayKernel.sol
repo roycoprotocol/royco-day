@@ -876,6 +876,9 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         if (liquidityPremiumShares != 0) {
             IRoycoSeniorTranche(SENIOR_TRANCHE).mintLiquidityPremiumShares(address(this), liquidityPremiumShares);
             $.ltOwnedSeniorTrancheShares += liquidityPremiumShares;
+            // Attempt to deploy the staged premium into the LT's market-making inventory (gated single-sided add into the venue)
+            // A failed deploy (e.g. the slippage gate tripping) leaves the premium staged for a later retry, never bricking the sync
+            _reinvestLiquidityPremium(liquidityPremiumShares);
         }
         // Mint the ST protocol fee shares to the protocol fee recipient and LT liquidity premium fee shares to the kernel at an identical price
         if (stProtocolFeeShares != 0) {
@@ -1258,12 +1261,12 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         returns (uint256 stShares, uint256 quoteAssets);
 
     /**
-     * @notice Processes the freshly minted ST shares for a liquidity premium payment
-     * @dev Intended to allow the LT to reinvest the ST shares minted into its market making inventory
+     * @notice Reinvests the freshly minted liquidity-premium ST shares into the LT's market-making inventory
+     * @dev Intended to allow the LT to deploy the staged premium ST shares into its venue (eg a gated single-sided add)
      * @dev Overridden by the LT venue quoter/kernel
-     * @param _stSharesMinted The ST shares minted for the liquidity premium payment
+     * @param _premiumShares The ST shares minted for this liquidity premium payment
      */
-    function _processSTSharesMintedForLiquidityPremium(uint256 _stSharesMinted) internal virtual;
+    function _reinvestLiquidityPremium(uint256 _premiumShares) internal virtual;
 
     // =============================
     // Tranche Compliance Methods
