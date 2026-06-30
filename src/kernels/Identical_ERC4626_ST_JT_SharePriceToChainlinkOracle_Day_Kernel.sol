@@ -60,12 +60,16 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel is Ident
     }
 
     /// @inheritdoc RoycoDayKernel
-    function _quoteAddLiquidity(uint256, uint256) internal override(RoycoDayKernel) returns (TRANCHE_UNIT) {
+    /// @dev No Balancer liquidity venue is wired on this kernel yet (P4): the multi-asset deposit preview's venue-add
+    ///      simulation is unreachable. Revert defensively.
+    function _previewAddLiquidity(uint256, uint256) internal override(RoycoDayKernel) returns (TRANCHE_UNIT) {
         revert LIQUIDITY_VENUE_NOT_IMPLEMENTED();
     }
 
     /// @inheritdoc RoycoDayKernel
-    function _quoteRemoveLiquidity(TRANCHE_UNIT) internal override(RoycoDayKernel) returns (uint256, uint256) {
+    /// @dev No Balancer liquidity venue is wired on this kernel yet (P4): the multi-asset redeem preview's venue-removal
+    ///      simulation is unreachable. Revert defensively.
+    function _previewRemoveLiquidity(TRANCHE_UNIT) internal override(RoycoDayKernel) returns (uint256, uint256) {
         revert LIQUIDITY_VENUE_NOT_IMPLEMENTED();
     }
 

@@ -249,7 +249,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         uint256 stSharesToAdd =
             _stAssets == ZERO_TRANCHE_UNITS ? 0 : _navToShares(stConvertTrancheUnitsToNAVUnits(_stAssets), state.stEffectiveNAV, totalSTShares);
         // Quote the venue add for the senior shares and quote assets (simulation only: no slippage gate, no settlement)
-        ltAssetsOut = _quoteAddLiquidity(stSharesToAdd, _quoteAssets);
+        ltAssetsOut = _previewAddLiquidity(stSharesToAdd, _quoteAssets);
         // The value allocated is the value of the LT assets the add would mint
         valueAllocated = ltConvertTrancheUnitsToNAVUnits(ltAssetsOut);
     }
@@ -276,7 +276,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
         // Quote the proportional venue removal for the LP-token slice (simulation only: no slippage gate, no settlement)
         uint256 stSharesWithdrawn;
-        if (userAssetClaims.ltAssets != ZERO_TRANCHE_UNITS) (stSharesWithdrawn, quoteAssets) = _quoteRemoveLiquidity(userAssetClaims.ltAssets);
+        if (userAssetClaims.ltAssets != ZERO_TRANCHE_UNITS) (stSharesWithdrawn, quoteAssets) = _previewRemoveLiquidity(userAssetClaims.ltAssets);
 
         // The redeemer's senior shares come from both the venue removal and the idle premium pile
         uint256 stSharesToRedeem = stSharesWithdrawn + userAssetClaims.stShares;
@@ -718,7 +718,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
         // Execute an accounting sync to reconcile underlying PNL
         (SyncedAccountingState memory state,, uint256 totalSTShares) = _preOpSyncTrancheAccounting(TrancheType.SENIOR);
-        // LT deposits are disabled during a fixed-term market state, except a quote-only deposit (no ST underlying => no senior shares minted => no new senior exposure)
+        // ST deposits are disabled during a fixed-term market state, so the market only accepts quote-only LT deposits
         require(state.marketState == MarketState.PERPETUAL || _stAssets == ZERO_TRANCHE_UNITS, DISABLED_IN_FIXED_TERM_STATE());
         // The NAV to mint tranche shares at is the pre-deposit liquidity tranche effective NAV (its MM depth plus the idle liquidity-premium senior shares the kernel holds), read before the add moves the pool mark
         navToMintSharesAt = _getLiquidityTrancheEffectiveNAV(state.stEffectiveNAV, totalSTShares);
@@ -1320,7 +1320,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @param _quoteAssets The quote assets the add would inject
      * @return ltAssets The LT tranche assets (LP token) the add would mint
      */
-    function _quoteAddLiquidity(uint256 _stShares, uint256 _quoteAssets) internal virtual returns (TRANCHE_UNIT ltAssets);
+    function _previewAddLiquidity(uint256 _stShares, uint256 _quoteAssets) internal virtual returns (TRANCHE_UNIT ltAssets);
 
     /**
      * @notice Proportional removal of the LP token into its (senior shares + quote) constituents; returns the constituents withdrawn
@@ -1349,7 +1349,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @return stShares The senior tranche shares the removal would withdraw
      * @return quoteAssets The quote assets the removal would withdraw
      */
-    function _quoteRemoveLiquidity(TRANCHE_UNIT _ltAssets) internal virtual returns (uint256 stShares, uint256 quoteAssets);
+    function _previewRemoveLiquidity(TRANCHE_UNIT _ltAssets) internal virtual returns (uint256 stShares, uint256 quoteAssets);
 
     /**
      * @notice Reinvests the freshly minted liquidity-premium ST shares into the LT's market-making inventory
