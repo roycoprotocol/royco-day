@@ -78,4 +78,13 @@ interface IRoycoLiquidityTranche is IRoycoVaultTranche {
     )
         external
         returns (AssetClaims memory stClaims, uint256 quoteAssets);
+
+    /**
+     * @notice Previews a multi-asset LT redemption of _shares: the ST underlying claims and quote it would yield
+     * @dev NON-VIEW: simulates the venue removal via its query mode, so callers must staticcall it (mirrors Balancer's `query*` convention)
+     * @param _shares The number of LT shares to redeem
+     * @return stClaims The ST redemption asset claims that would be transferred to the receiver
+     * @return quoteAssets The quote assets that would be transferred to the receiver
+     */
+    function previewRedeemMultiAsset(uint256 _shares) external returns (AssetClaims memory stClaims, uint256 quoteAssets);
 }

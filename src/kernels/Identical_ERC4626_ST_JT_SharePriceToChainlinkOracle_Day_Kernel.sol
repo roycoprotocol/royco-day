@@ -37,15 +37,11 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel is Ident
     }
 
     /// @inheritdoc IRoycoDayKernel
-    /// @dev The LT asset is the Balancer E-CLP pool position, valued by the E-CLP oracle (P4). LT deposits/redeems are disabled until
-    ///      then, so the sync never sources `ltRawNAV` through this path; return 0 as a coverage-neutral placeholder.
     function ltConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT) public view override(RoycoDayKernel) returns (NAV_UNIT) {
         return ZERO_NAV_UNITS;
     }
 
     /// @inheritdoc IRoycoDayKernel
-    /// @dev Placeholder mirroring `ltConvertTrancheUnitsToNAVUnits`: returns 0 until the Balancer E-CLP oracle adapter
-    ///      (P4) is wired. LT deposits/redeems are disabled, so this conversion is never exercised by the engine yet.
     function ltConvertNAVUnitsToTrancheUnits(NAV_UNIT) public view override(RoycoDayKernel) returns (TRANCHE_UNIT) {
         return ZERO_TRANCHE_UNITS;
     }
@@ -54,23 +50,22 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel is Ident
     error LIQUIDITY_VENUE_NOT_IMPLEMENTED();
 
     /// @inheritdoc RoycoDayKernel
-    /// @dev No Balancer liquidity venue is wired on this kernel yet (P4): LT multi-asset deposits are disabled, so the venue
-    ///      add is unreachable. Revert defensively rather than silently minting zero LP tokens.
     function _addLiquidity(uint256, uint256, TRANCHE_UNIT) internal override(RoycoDayKernel) returns (TRANCHE_UNIT) {
         revert LIQUIDITY_VENUE_NOT_IMPLEMENTED();
     }
 
     /// @inheritdoc RoycoDayKernel
-    /// @dev No Balancer liquidity venue is wired on this kernel yet (P4): LT multi-asset redeems are disabled, so the venue
-    ///      removal is unreachable. Revert defensively.
     function _removeLiquidity(TRANCHE_UNIT, uint256, uint256, address) internal override(RoycoDayKernel) returns (uint256, uint256) {
         revert LIQUIDITY_VENUE_NOT_IMPLEMENTED();
     }
 
     /// @inheritdoc RoycoDayKernel
-    /// @dev No Balancer liquidity venue is wired on this kernel yet (P4): the multi-asset deposit preview's venue-add
-    ///      simulation is unreachable. Revert defensively.
     function _quoteAddLiquidity(uint256, uint256) internal override(RoycoDayKernel) returns (TRANCHE_UNIT) {
+        revert LIQUIDITY_VENUE_NOT_IMPLEMENTED();
+    }
+
+    /// @inheritdoc RoycoDayKernel
+    function _quoteRemoveLiquidity(TRANCHE_UNIT) internal override(RoycoDayKernel) returns (uint256, uint256) {
         revert LIQUIDITY_VENUE_NOT_IMPLEMENTED();
     }
 

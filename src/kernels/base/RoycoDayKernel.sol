@@ -255,6 +255,38 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     /// @inheritdoc IRoycoDayKernel
+    function ltPreviewRedeemMultiAsset(uint256 _ltShares)
+        external
+        virtual
+        override(IRoycoDayKernel)
+        returns (AssetClaims memory stClaims, uint256 quoteAssets)
+    {
+        // Preview the liquidity tranche sync
+        (SyncedAccountingState memory state, AssetClaims memory ltClaims, uint256 totalLTShares) = previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
+        // Multi-asset redemptions are disabled during a fixed-term market state: return empty claims, matching the reverting redeem path
+        if (state.marketState == MarketState.FIXED_TERM) return (stClaims, 0);
+
+        // An LT share claims both LT effective-NAV legs: the deployed LP token and the idle liquidity-premium senior shares
+        AssetClaims memory userAssetClaims = UtilsLib.scaleAssetClaims(ltClaims, _ltShares, totalLTShares);
+
+        // Derive the ST total claims from the synced state, and the senior supply AFTER this sync mints the premium and ST protocol fee shares.
+        // The execution path reads totalSupply() after the pre-op sync has minted those shares, so the preview must use the same post-mint supply
+        stClaims = _deriveTrancheAssetClaims(TrancheType.SENIOR, state);
+        (,, uint256 totalSTShares) = _computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(SENIOR_TRANCHE).totalSupply());
+
+        // Quote the proportional venue removal for the LP-token slice (simulation only: no slippage gate, no settlement)
+        uint256 stSharesWithdrawn;
+        if (userAssetClaims.ltAssets != ZERO_TRANCHE_UNITS) (stSharesWithdrawn, quoteAssets) = _quoteRemoveLiquidity(userAssetClaims.ltAssets);
+
+        // The redeemer's senior shares come from both the venue removal and the idle premium pile
+        uint256 stSharesToRedeem = stSharesWithdrawn + userAssetClaims.stShares;
+        stClaims = UtilsLib.scaleAssetClaims(stClaims, stSharesToRedeem, totalSTShares);
+
+        // Apply any ST self-liquidation bonus to the redeeming user's ST shares claims, mirroring the execution path
+        (stClaims,) = _applySeniorTrancheSelfLiquidationBonus(state, stClaims);
+    }
+
+    /// @inheritdoc IRoycoDayKernel
     function stPreviewRedeem(uint256 _shares) public view override(IRoycoDayKernel) returns (AssetClaims memory userClaim) {
         // Preview the total claims the senior tranche has on each tranche's assets and the total shares after minting any protocol fee and liquidity premium fee shares post-sync
         (SyncedAccountingState memory state, AssetClaims memory stClaims, uint256 totalShares) = previewSyncTrancheAccounting(TrancheType.SENIOR);
@@ -1309,6 +1341,15 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         internal
         virtual
         returns (uint256 stShares, uint256 quoteAssets);
+
+    /**
+     * @notice Query-mode counterpart of `_removeLiquidity`: simulates the proportional removal and returns the constituents it would withdraw
+     * @dev Must not mutate state and performs no slippage gating
+     * @param _ltAssets The LT tranche assets (LP token) the removal would burn
+     * @return stShares The senior tranche shares the removal would withdraw
+     * @return quoteAssets The quote assets the removal would withdraw
+     */
+    function _quoteRemoveLiquidity(TRANCHE_UNIT _ltAssets) internal virtual returns (uint256 stShares, uint256 quoteAssets);
 
     /**
      * @notice Reinvests the freshly minted liquidity-premium ST shares into the LT's market-making inventory

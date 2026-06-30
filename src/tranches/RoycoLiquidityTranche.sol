@@ -128,4 +128,10 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
 
         emit MultiAssetRedeem(msg.sender, _receiver, _owner, _shares, stClaims, quoteAssets);
     }
+
+    /// @inheritdoc IRoycoLiquidityTranche
+    function previewRedeemMultiAsset(uint256 _shares) external virtual override(IRoycoLiquidityTranche) returns (AssetClaims memory stClaims, uint256 quoteAssets) {
+        // Simulate the kernel's multi-asset redemption for the ST claims and quote assets the receiver would get — identical to redeemMultiAsset's outputs
+        (stClaims, quoteAssets) = IRoycoDayKernel(KERNEL).ltPreviewRedeemMultiAsset(_shares);
+    }
 }

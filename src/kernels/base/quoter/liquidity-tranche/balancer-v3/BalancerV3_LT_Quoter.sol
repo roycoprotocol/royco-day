@@ -319,6 +319,37 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     }
 
     /**
+     * @notice Query-mode callback that simulates the proportional BPT unwrap inside the Vault's query context
+     * @dev Only callable by the Balancer V3 Vault (re-entered via `quote`). Performs no settlement and moves no tokens: query mode
+     *      computes the constituents the removal would withdraw without finalizing balances, so no slippage floors are needed
+     * @param _ltAssets The exact BPT amount (LT assets) the removal would burn
+     * @return stShares The senior tranche shares the removal would withdraw
+     * @return quoteAssets The quote assets the removal would withdraw
+     */
+    function quoteRemoveBalancerV3Liquidity(uint256 _ltAssets) external onlyVault returns (uint256 stShares, uint256 quoteAssets) {
+        // Compute the proportional constituents the unwrap would withdraw; in query mode no slippage gate and no credit/debt settlement is required
+        (, uint256[] memory amountsOut,) = _vault.removeLiquidity(
+            RemoveLiquidityParams({
+                pool: LT_ASSET,
+                from: address(this),
+                maxBptAmountIn: _ltAssets, // For PROPORTIONAL removals the Vault treats this as the exact BPT amount to burn (not an upper bound)
+                minAmountsOut: new uint256[](2), // Query mode needs no slippage floors
+                kind: RemoveLiquidityKind.PROPORTIONAL, // Proportional removals preserve the pool's composition, so the unwrap requires no pricing
+                userData: ""
+            })
+        );
+        stShares = amountsOut[ST_SHARE_POOL_INDEX];
+        quoteAssets = amountsOut[QUOTE_ASSET_POOL_INDEX];
+    }
+
+    /// @inheritdoc RoycoDayKernel
+    /// @dev Routes the removal through the Vault's query mode (`quote`) so it simulates the constituents withdrawn without settling balances or moving tokens
+    function _quoteRemoveLiquidity(TRANCHE_UNIT _ltAssets) internal override(RoycoDayKernel) returns (uint256 stShares, uint256 quoteAssets) {
+        bytes memory callbackReturnData = _vault.quote(abi.encodeCall(this.quoteRemoveBalancerV3Liquidity, (toUint256(_ltAssets))));
+        (stShares, quoteAssets) = abi.decode(callbackReturnData, (uint256, uint256));
+    }
+
+    /**
      * @inheritdoc RoycoDayKernel
      * @dev Deploys the idle liquidity-premium senior share balance the kernel holds into the BPT via a gated single-sided add
      * @dev The min-BPT-out floors the add at the manipulation-resistant oracle's fair value (not the pool spot) less the max reinvestment slippage, so a manipulated pool cannot widen the tolerance

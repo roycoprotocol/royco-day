@@ -316,6 +316,15 @@ interface IRoycoDayKernel {
         returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut);
 
     /**
+     * @notice Previews a multi-asset LT redemption of _ltShares by simulating the proportional venue removal and the senior unwind
+     * @dev NON-VIEW: routes the venue removal through its query mode (e.g. Balancer's `Vault.quote`), so callers must staticcall it
+     * @param _ltShares The number of LT shares to redeem
+     * @return stClaims The ST redemption asset claims that would be transferred to the receiver, denominated in the respective tranches' tranche units
+     * @return quoteAssets The quote assets the removal would withdraw to the receiver
+     */
+    function ltPreviewRedeemMultiAsset(uint256 _ltShares) external returns (AssetClaims memory stClaims, uint256 quoteAssets);
+
+    /**
      * @notice Previews the redemption of a specified number of shares from the senior tranche
      * @param _shares The number of shares to redeem
      * @return userClaim The distribution of assets that would be transferred to the receiver on redemption, denominated in the respective tranches' tranche units
