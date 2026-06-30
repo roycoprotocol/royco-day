@@ -551,7 +551,8 @@ contract AdaptiveCurveYDM_V2Test is BaseTest {
 
     function test_curveOutput_atMidpointBelowTarget() public view {
         // 45% coverageUtilization = halfway to target from 0
-        (NAV_UNIT stRawNAV, NAV_UNIT jtRawNAV, bool jtCoinvested, uint256 minCoverageWAD, NAV_UNIT jtEffectiveNAV) = _createInputsForCoverageUtilization(0.45e18);
+        (NAV_UNIT stRawNAV, NAV_UNIT jtRawNAV, bool jtCoinvested, uint256 minCoverageWAD, NAV_UNIT jtEffectiveNAV) =
+            _createInputsForCoverageUtilization(0.45e18);
 
         uint256 yieldShare =
             ydm.previewYieldShare(MarketState.PERPETUAL, _coverageUtilizationFromNAVs(stRawNAV, jtRawNAV, jtCoinvested, minCoverageWAD, jtEffectiveNAV));
@@ -563,7 +564,8 @@ contract AdaptiveCurveYDM_V2Test is BaseTest {
 
     function test_curveOutput_atMidpointAboveTarget() public view {
         // 95% coverageUtilization = halfway between target and full
-        (NAV_UNIT stRawNAV, NAV_UNIT jtRawNAV, bool jtCoinvested, uint256 minCoverageWAD, NAV_UNIT jtEffectiveNAV) = _createInputsForCoverageUtilization(0.95e18);
+        (NAV_UNIT stRawNAV, NAV_UNIT jtRawNAV, bool jtCoinvested, uint256 minCoverageWAD, NAV_UNIT jtEffectiveNAV) =
+            _createInputsForCoverageUtilization(0.95e18);
 
         uint256 yieldShare =
             ydm.previewYieldShare(MarketState.PERPETUAL, _coverageUtilizationFromNAVs(stRawNAV, jtRawNAV, jtCoinvested, minCoverageWAD, jtEffectiveNAV));
@@ -653,7 +655,8 @@ contract AdaptiveCurveYDM_V2Test is BaseTest {
             ydm.previewYieldShare(MarketState.PERPETUAL, _coverageUtilizationFromNAVs(stRawNAV, jtRawNAV, jtCoinvested, minCoverageWAD, jtEffectiveNAV));
 
         // Should return the same as full coverageUtilization
-        (NAV_UNIT stRawNAV2, NAV_UNIT jtRawNAV2, bool jtCoinvested2, uint256 minCoverageWAD2, NAV_UNIT jtEffectiveNAV2) = _createInputsForCoverageUtilization(WAD);
+        (NAV_UNIT stRawNAV2, NAV_UNIT jtRawNAV2, bool jtCoinvested2, uint256 minCoverageWAD2, NAV_UNIT jtEffectiveNAV2) =
+            _createInputsForCoverageUtilization(WAD);
         uint256 yieldShareAtFull =
             ydm.previewYieldShare(MarketState.PERPETUAL, _coverageUtilizationFromNAVs(stRawNAV2, jtRawNAV2, jtCoinvested2, minCoverageWAD2, jtEffectiveNAV2));
 
@@ -713,7 +716,8 @@ contract AdaptiveCurveYDM_V2Test is BaseTest {
             ydm.previewYieldShare(MarketState.PERPETUAL, _coverageUtilizationFromNAVs(stRawNAV, jtRawNAV, jtCoinvested, minCoverageWAD, jtEffectiveNAV));
 
         // Should return yield at full coverageUtilization
-        (NAV_UNIT stRawNAV2, NAV_UNIT jtRawNAV2, bool jtCoinvested2, uint256 minCoverageWAD2, NAV_UNIT jtEffectiveNAV2) = _createInputsForCoverageUtilization(WAD);
+        (NAV_UNIT stRawNAV2, NAV_UNIT jtRawNAV2, bool jtCoinvested2, uint256 minCoverageWAD2, NAV_UNIT jtEffectiveNAV2) =
+            _createInputsForCoverageUtilization(WAD);
         uint256 yieldShareAtFull =
             ydm.previewYieldShare(MarketState.PERPETUAL, _coverageUtilizationFromNAVs(stRawNAV2, jtRawNAV2, jtCoinvested2, minCoverageWAD2, jtEffectiveNAV2));
 
@@ -782,8 +786,9 @@ contract AdaptiveCurveYDM_V2Test is BaseTest {
             (NAV_UNIT stRawNAV, NAV_UNIT jtRawNAV, bool jtCoinvested, uint256 minCoverageWAD, NAV_UNIT jtEffectiveNAV) =
                 _createInputsForCoverageUtilization(coverageUtilizations[i]);
 
-            uint256 yieldShare =
-                flatYdm.previewYieldShare(MarketState.PERPETUAL, _coverageUtilizationFromNAVs(stRawNAV, jtRawNAV, jtCoinvested, minCoverageWAD, jtEffectiveNAV));
+            uint256 yieldShare = flatYdm.previewYieldShare(
+                MarketState.PERPETUAL, _coverageUtilizationFromNAVs(stRawNAV, jtRawNAV, jtCoinvested, minCoverageWAD, jtEffectiveNAV)
+            );
 
             assertEq(yieldShare, 0.5e18, "Flat curve should always return same value");
         }
@@ -866,7 +871,8 @@ contract AdaptiveCurveYDM_V2Test is BaseTest {
         // Swing between 0% and 100% coverageUtilization rapidly
         for (uint256 i = 0; i < 10; i++) {
             uint256 util = i % 2 == 0 ? 0 : WAD;
-            (NAV_UNIT stRawNAV, NAV_UNIT jtRawNAV, bool jtCoinvested, uint256 minCoverageWAD, NAV_UNIT jtEffectiveNAV) = _createInputsForCoverageUtilization(util);
+            (NAV_UNIT stRawNAV, NAV_UNIT jtRawNAV, bool jtCoinvested, uint256 minCoverageWAD, NAV_UNIT jtEffectiveNAV) =
+                _createInputsForCoverageUtilization(util);
 
             vm.warp(block.timestamp + 1 days);
             ydm.yieldShare(MarketState.PERPETUAL, _coverageUtilizationFromNAVs(stRawNAV, jtRawNAV, jtCoinvested, minCoverageWAD, jtEffectiveNAV));
@@ -1201,7 +1207,8 @@ contract AdaptiveCurveYDM_V2Test is BaseTest {
         assertEq(yieldT, DEFAULT_YT, "Y(target) = Y_T");
 
         // Y(100%) = Y_T + premium
-        (NAV_UNIT stRawNAVF, NAV_UNIT jtRawNAVF, bool jtCoinvestedF, uint256 minCoverageWADF, NAV_UNIT jtEffectiveNAVF) = _createInputsForCoverageUtilization(WAD);
+        (NAV_UNIT stRawNAVF, NAV_UNIT jtRawNAVF, bool jtCoinvestedF, uint256 minCoverageWADF, NAV_UNIT jtEffectiveNAVF) =
+            _createInputsForCoverageUtilization(WAD);
         uint256 yieldF =
             ydm.previewYieldShare(MarketState.PERPETUAL, _coverageUtilizationFromNAVs(stRawNAVF, jtRawNAVF, jtCoinvestedF, minCoverageWADF, jtEffectiveNAVF));
         assertEq(yieldF, DEFAULT_YT + DEFAULT_PREMIUM, "Y(100%) = Y_T + premium");

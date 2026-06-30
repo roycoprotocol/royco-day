@@ -90,6 +90,14 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
     }
 
     /// @inheritdoc IRoycoLiquidityTranche
+    function previewDepositMultiAsset(uint256 _stAssets, uint256 _quoteAssets) external virtual override(IRoycoLiquidityTranche) returns (uint256 shares) {
+        // Simulate the kernel's multi-asset deposit for the value allocated and the pre-deposit LT effective NAV per share
+        (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt,) = IRoycoDayKernel(KERNEL).ltPreviewDepositMultiAsset(toTrancheUnits(_stAssets), _quoteAssets);
+        // Mint LT shares at the pre-deposit LT effective NAV per share — identical to depositMultiAsset's share math
+        shares = _convertToShares(valueAllocated, totalSupply(), navToMintSharesAt, Math.Rounding.Floor);
+    }
+
+    /// @inheritdoc IRoycoLiquidityTranche
     function redeemMultiAsset(
         uint256 _shares,
         uint256 _minSTSharesOut,

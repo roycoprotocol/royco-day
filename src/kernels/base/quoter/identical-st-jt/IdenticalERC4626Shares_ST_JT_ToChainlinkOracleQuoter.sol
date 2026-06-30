@@ -10,7 +10,10 @@ import { IdenticalERC4626Shares_ST_JT_OracleQuoter, Math, WAD } from "./base/Ide
  * @dev The senior and junior tranches must have the same ERC4626 vault share as its tranche unit
  * @dev Use case: Convert sNUSD (Tranche unit) to NUSD (base assets) using ERC4626's convertToAssets and convert NUSD to USD (NAV unit) using its Redstone fundamental price feed or an admin set rate
  */
-abstract contract IdenticalERC4626Shares_ST_JT_ToChainlinkOracleQuoter is IdenticalERC4626Shares_ST_JT_OracleQuoter, IdenticalAssets_ST_JT_ChainlinkOracleQuoter {
+abstract contract IdenticalERC4626Shares_ST_JT_ToChainlinkOracleQuoter is
+    IdenticalERC4626Shares_ST_JT_OracleQuoter,
+    IdenticalAssets_ST_JT_ChainlinkOracleQuoter
+{
     using Math for uint256;
 
     /**
@@ -51,7 +54,12 @@ abstract contract IdenticalERC4626Shares_ST_JT_ToChainlinkOracleQuoter is Identi
      * @notice Returns the conversion rate from the ERC4626 base asset to NAV units, scaled to WAD precision
      * @return baseAssetToNAVUnitConversionRateWAD The conversion rate from the ERC4626 base asset to NAV units, scaled to WAD precision
      */
-    function _getConversionRateFromOracleWAD() internal view override(IdenticalAssets_ST_JT_OracleQuoter) returns (uint256 baseAssetToNAVUnitConversionRateWAD) {
+    function _getConversionRateFromOracleWAD()
+        internal
+        view
+        override(IdenticalAssets_ST_JT_OracleQuoter)
+        returns (uint256 baseAssetToNAVUnitConversionRateWAD)
+    {
         // Fetch the ERC4626 base asset price in NAV accounting assets and its precision
         (uint256 baseAssetPriceInNavAssets, uint256 pricePrecision) = _queryChainlinkOracle();
         // Convert the price to be in WAD precision

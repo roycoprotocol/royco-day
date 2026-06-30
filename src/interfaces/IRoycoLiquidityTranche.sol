@@ -49,6 +49,15 @@ interface IRoycoLiquidityTranche is IRoycoVaultTranche {
     function depositMultiAsset(uint256 _stAssets, uint256 _quoteAssets, uint256 _minLTAssetsOut, address _receiver) external returns (uint256 shares);
 
     /**
+     * @notice Previews a multi-asset LT deposit of (ST underlying + quote): the LT shares it would mint
+     * @dev NON-VIEW: simulates the venue add via its query mode, so callers must staticcall it (mirrors Balancer's `query*` convention)
+     * @param _stAssets The ST underlying leg, in the ST asset's native units
+     * @param _quoteAssets The quote asset leg
+     * @return shares The LT shares that would be minted to a receiver
+     */
+    function previewDepositMultiAsset(uint256 _stAssets, uint256 _quoteAssets) external returns (uint256 shares);
+
+    /**
      * @notice Exits the LT to the LP token's constituent assets: ST underlying + quote
      * @dev The kernel proportionally removes the LP-token slice, redeems the pooled senior shares to ST underlying, and
      *      transfers the ST underlying and quote directly to the receiver. The LT shares are burned afterwards

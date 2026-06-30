@@ -68,6 +68,13 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel is Ident
     }
 
     /// @inheritdoc RoycoDayKernel
+    /// @dev No Balancer liquidity venue is wired on this kernel yet (P4): the multi-asset deposit preview's venue-add
+    ///      simulation is unreachable. Revert defensively.
+    function _quoteAddLiquidity(uint256, uint256) internal override(RoycoDayKernel) returns (TRANCHE_UNIT) {
+        revert LIQUIDITY_VENUE_NOT_IMPLEMENTED();
+    }
+
+    /// @inheritdoc RoycoDayKernel
     /// @dev No Balancer liquidity venue is wired on this kernel yet (P4): this kernel will eventually inherit BalancerV3_LT_Quoter, which resolves the quote asset from its pool. Until then there is no quote asset to resolve
     function QUOTE_ASSET() external view override(RoycoDayKernel) returns (address) {
         revert("QUOTE_ASSET: no liquidity venue wired (pending BalancerV3_LT_Quoter, P4)");
