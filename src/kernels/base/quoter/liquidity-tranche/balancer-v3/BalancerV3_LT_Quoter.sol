@@ -17,7 +17,7 @@ import { SafeERC20 } from "../../../../../../lib/openzeppelin-contracts/contract
 import { IRoycoDayAccountant } from "../../../../../interfaces/IRoycoDayAccountant.sol";
 import { WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../../../../libraries/Constants.sol";
 import { Math, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../../libraries/Units.sol";
-import { RoycoDayKernel } from "../../../RoycoDayKernel.sol";
+import { RoycoDayKernel, SyncedAccountingState } from "../../../RoycoDayKernel.sol";
 
 /**
  * @title BalancerV3_LT_Quoter
@@ -142,13 +142,16 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
      * @dev Any pool liquidity operation will be fulfilled at the fresh rate because the pool executes an accounting synchronization prior
      */
     function getRate() external view virtual override(IRateProvider) returns (uint256 rate) {
-        // Before the senior tranche is seeded there are no shares to price: return a neutral 1.0 rate so the pool never divides by zero
-        uint256 seniorTrancheTotalSupply = IERC20(SENIOR_TRANCHE).totalSupply();
-        if (seniorTrancheTotalSupply == 0) return WAD;
+        // Preview a senior/junior accounting sync via the accountant, reconciling any PnL
+        SyncedAccountingState memory state = IRoycoDayAccountant(ACCOUNTANT).previewSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
+        // Compute ST share supply after the liquidity premium and the ST protocol fee shares are minted
+        (,, uint256 totalSTShares) = _computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(SENIOR_TRANCHE).totalSupply());
+        // Before the senior tranche is seeded, there are no shares to price: return a neutral 1.0 rate so the pool never divides by zero
+        if (totalSTShares == 0) return WAD;
 
-        // Compute the senior tranche share rate in NAV units using the last commited ST effective NAV and total supply
+        // Compute the senior tranche share rate in NAV units using the most up to date ST effective NAV and total supply
         // NOTE: Senior tranche shares always use WAD decimals of precision so WAD == 1 ST share
-        rate = toUint256((IRoycoDayAccountant(ACCOUNTANT).getLastSTEffectiveNAV()).mulDiv(WAD, seniorTrancheTotalSupply, Math.Rounding.Floor));
+        rate = toUint256(state.stEffectiveNAV.mulDiv(WAD, totalSTShares, Math.Rounding.Floor));
 
         // Floor the computed rate to 1 wei to prevent reversions in the underlying balancer pool
         if (rate == 0) rate = 1;
@@ -157,27 +160,6 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     // =============================
     // Balancer V3 Liquidity Position Callback Functions
     // =============================
-
-    /**
-     * @notice Query-mode callback that simulates the unbalanced BPT mint inside the Vault's query context
-     * @dev Only callable by the Balancer V3 Vault (re-entered via `quote`). Performs no settlement.
-     * @param _seniorShares The senior tranche shares the add would inject
-     * @param _quoteAssets The quote assets the add would inject
-     * @return ltAssets The BPT (LT assets) the add would mint
-     */
-    function previewAddBalancerV3Liquidity(uint256 _seniorShares, uint256 _quoteAssets) external onlyVault returns (uint256 ltAssets) {
-        // The senior tranche share and quote asset amounts to add, ordered by the pool's token registration
-        uint256[] memory exactAmountsIn = new uint256[](2);
-        exactAmountsIn[ST_SHARE_POOL_INDEX] = _seniorShares;
-        exactAmountsIn[QUOTE_ASSET_POOL_INDEX] = _quoteAssets;
-
-        // Compute the BPT the unbalanced add would mint: in query mode, no slippage gate and no credit/debt settlement is required
-        (, ltAssets,) = _vault.addLiquidity(
-            AddLiquidityParams({
-                pool: LT_ASSET, to: address(this), maxAmountsIn: exactAmountsIn, minBptAmountOut: 0, kind: AddLiquidityKind.UNBALANCED, userData: ""
-            })
-        );
-    }
 
     /**
      * @notice Callback that performs the unbalanced BPT mint inside the unlocked Balancer V3 Vault's context
@@ -189,7 +171,16 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
      * @param _minLTAssetsOut The minimum BPT (LT assets) that must be minted, bounding the add's slippage at the Vault
      * @return ltAssets The BPT (LT assets) minted to this kernel by the add
      */
-    function addBalancerV3Liquidity(uint256 _seniorShares, uint256 _quoteAssets, TRANCHE_UNIT _minLTAssetsOut) external onlyVault returns (uint256 ltAssets) {
+    function addBalancerV3Liquidity(
+        bool _isPreview,
+        uint256 _seniorShares,
+        uint256 _quoteAssets,
+        TRANCHE_UNIT _minLTAssetsOut
+    )
+        external
+        onlyVault
+        returns (uint256 ltAssets)
+    {
         // The exact senior tranche share and quote asset amounts to add, ordered by the pool's token registration
         uint256[] memory exactAmountsIn = new uint256[](2);
         exactAmountsIn[ST_SHARE_POOL_INDEX] = _seniorShares;
@@ -207,40 +198,19 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
             })
         );
 
-        // Settle the senior tranche shares and quote assets this kernel owes the Vault for the add by transferring them in and cancelling the debt
-        if (_seniorShares > 0) {
-            IERC20(SENIOR_TRANCHE).safeTransfer(address(_vault), _seniorShares);
-            _vault.settle(IERC20(SENIOR_TRANCHE), _seniorShares);
+        // If this is not a preview call, the credit and debt created must be settled with the vault
+        if (!_isPreview) {
+            // Settle the senior tranche shares and quote assets this kernel owes the Vault for the add by transferring them in and cancelling the debt
+            if (_seniorShares > 0) {
+                IERC20(SENIOR_TRANCHE).safeTransfer(address(_vault), _seniorShares);
+                _vault.settle(IERC20(SENIOR_TRANCHE), _seniorShares);
+            }
+            if (_quoteAssets > 0) {
+                IERC20(QUOTE_ASSET).safeTransfer(address(_vault), _quoteAssets);
+                _vault.settle(IERC20(QUOTE_ASSET), _quoteAssets);
+            }
+            /// @dev All credit and debt created during this callback has been settled
         }
-        if (_quoteAssets > 0) {
-            IERC20(QUOTE_ASSET).safeTransfer(address(_vault), _quoteAssets);
-            _vault.settle(IERC20(QUOTE_ASSET), _quoteAssets);
-        }
-        /// @dev All credit and debt created during this callback has been settled
-    }
-
-    /**
-     * @notice Query-mode callback that simulates the proportional BPT unwrap inside the Vault's query context
-     * @dev Only callable by the Balancer V3 Vault (re-entered via `quote`). Performs no settlement and moves no tokens: query mode
-     *      computes the constituents the removal would withdraw without finalizing balances, so no slippage floors are needed
-     * @param _ltAssets The exact BPT amount (LT assets) the removal would burn
-     * @return stShares The senior tranche shares the removal would withdraw
-     * @return quoteAssets The quote assets the removal would withdraw
-     */
-    function previewRemoveBalancerV3Liquidity(uint256 _ltAssets) external onlyVault returns (uint256 stShares, uint256 quoteAssets) {
-        // Compute the proportional constituents the unwrap would withdraw; in query mode no slippage gate and no credit/debt settlement is required
-        (, uint256[] memory amountsOut,) = _vault.removeLiquidity(
-            RemoveLiquidityParams({
-                pool: LT_ASSET,
-                from: address(this),
-                maxBptAmountIn: _ltAssets, // For PROPORTIONAL removals the Vault treats this as the exact BPT amount to burn (not an upper bound)
-                minAmountsOut: new uint256[](2), // Query mode needs no slippage floors
-                kind: RemoveLiquidityKind.PROPORTIONAL, // Proportional removals preserve the pool's composition, so the unwrap requires no pricing
-                userData: ""
-            })
-        );
-        stShares = amountsOut[ST_SHARE_POOL_INDEX];
-        quoteAssets = amountsOut[QUOTE_ASSET_POOL_INDEX];
     }
 
     /**
@@ -256,6 +226,7 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
      * @return quoteAssets The quote assets withdrawn directly to the specified receiver
      */
     function removeBalancerV3Liquidity(
+        bool _isPreview,
         TRANCHE_UNIT _ltAssets,
         uint256 _minSTSharesOut,
         uint256 _minQuoteAssetsOut,
@@ -282,11 +253,18 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
             })
         );
 
-        // Credit the ST shares withdrawn to the kernel for downstream redemption before remitting assets to the user
-        if ((stShares = amountsOut[ST_SHARE_POOL_INDEX]) > 0) _vault.sendTo(IERC20(SENIOR_TRANCHE), address(this), stShares);
-        // Credit the quote assets withdrawn to its specified receiver
-        if ((quoteAssets = amountsOut[QUOTE_ASSET_POOL_INDEX]) > 0) _vault.sendTo(IERC20(QUOTE_ASSET), _quoteAssetsReceiver, quoteAssets);
-        /// @dev All credit and debt created during this callback has been settled
+        // Set the amounts out to be returned to the caller
+        stShares = amountsOut[ST_SHARE_POOL_INDEX];
+        quoteAssets = amountsOut[QUOTE_ASSET_POOL_INDEX];
+
+        // If this is not a preview call, the credit and debt created must be settled with the vault
+        if (!_isPreview) {
+            // Credit the ST shares withdrawn to the kernel for downstream redemption before remitting assets to the user
+            if (stShares > 0) _vault.sendTo(IERC20(SENIOR_TRANCHE), address(this), stShares);
+            // Credit the quote assets withdrawn to its specified receiver
+            if (quoteAssets > 0) _vault.sendTo(IERC20(QUOTE_ASSET), _quoteAssetsReceiver, quoteAssets);
+            /// @dev All credit and debt created during this callback has been settled
+        }
     }
 
     // =============================
@@ -296,8 +274,10 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     /// @inheritdoc RoycoDayKernel
     /// @dev Routes the add through the Vault's query mode (`quote`) so it simulates the BPT minted without settling balances or moving tokens
     function _previewAddLiquidity(uint256 _seniorShares, uint256 _quoteAssets) internal override(RoycoDayKernel) returns (TRANCHE_UNIT ltAssets) {
-        bytes memory callbackReturnData = _vault.quote(abi.encodeCall(this.previewAddBalancerV3Liquidity, (_seniorShares, _quoteAssets)));
-        ltAssets = toTrancheUnits(abi.decode(callbackReturnData, (uint256)));
+        bytes memory callbackReturnData = _vault.quote(abi.encodeCall(this.addBalancerV3Liquidity, (true, _seniorShares, _quoteAssets, ZERO_TRANCHE_UNITS)));
+        assembly ("memory-safe") {
+            ltAssets := mload(add(callbackReturnData, 0x20))
+        }
     }
 
     /// @inheritdoc RoycoDayKernel
@@ -313,7 +293,7 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
         returns (TRANCHE_UNIT ltAssets)
     {
         // Unlock the Balancer vault, execute the callback to mint the liquidity position from the specified senior tranche shares and quote assets
-        bytes memory callbackReturnData = _vault.unlock(abi.encodeCall(this.addBalancerV3Liquidity, (_seniorShares, _quoteAssets, _minLTAssetsOut)));
+        bytes memory callbackReturnData = _vault.unlock(abi.encodeCall(this.addBalancerV3Liquidity, (false, _seniorShares, _quoteAssets, _minLTAssetsOut)));
         assembly ("memory-safe") {
             ltAssets := mload(add(callbackReturnData, 0x20))
         }
@@ -322,8 +302,11 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     /// @inheritdoc RoycoDayKernel
     /// @dev Routes the removal through the Vault's query mode (`quote`) so it simulates the constituents withdrawn without settling balances or moving tokens
     function _previewRemoveLiquidity(TRANCHE_UNIT _ltAssets) internal override(RoycoDayKernel) returns (uint256 stShares, uint256 quoteAssets) {
-        bytes memory callbackReturnData = _vault.quote(abi.encodeCall(this.previewRemoveBalancerV3Liquidity, (toUint256(_ltAssets))));
-        (stShares, quoteAssets) = abi.decode(callbackReturnData, (uint256, uint256));
+        bytes memory callbackReturnData = _vault.quote(abi.encodeCall(this.removeBalancerV3Liquidity, (true, _ltAssets, uint256(0), uint256(0), address(0))));
+        assembly ("memory-safe") {
+            stShares := mload(add(callbackReturnData, 0x20))
+            quoteAssets := mload(add(callbackReturnData, 0x40))
+        }
     }
 
     /// @inheritdoc RoycoDayKernel
@@ -341,7 +324,7 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     {
         // Unlock the Balancer vault, execute the callback to unwrap the specified units of the liquidity position
         bytes memory callbackReturnData =
-            _vault.unlock(abi.encodeCall(this.removeBalancerV3Liquidity, (_ltAssets, _minSTSharesOut, _minQuoteAssetsOut, _quoteAssetsReceiver)));
+            _vault.unlock(abi.encodeCall(this.removeBalancerV3Liquidity, (false, _ltAssets, _minSTSharesOut, _minQuoteAssetsOut, _quoteAssetsReceiver)));
         assembly ("memory-safe") {
             stShares := mload(add(callbackReturnData, 0x20))
             quoteAssets := mload(add(callbackReturnData, 0x40))
@@ -354,17 +337,15 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
      * @dev The min-BPT-out floors the add at the manipulation-resistant oracle's fair value (not the pool spot) less the max reinvestment slippage, so a manipulated pool cannot widen the tolerance
      * @dev Tolerates reversions to ensure a tranche operation doesn't revert on a failing reinvestment
      */
-    function _attemptLiquidityPremiumReinvestment(uint256) internal override(RoycoDayKernel) {
+    function _attemptLiquidityPremiumReinvestment(uint256, NAV_UNIT _stEffectiveNAV, uint256 _totalSTShares) internal override(RoycoDayKernel) {
         // Deploy the LT's idle ST shares into its market making inventory
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
         uint256 ltOwnedSeniorTrancheShares = $.ltOwnedSeniorTrancheShares;
         if (ltOwnedSeniorTrancheShares == 0) return;
 
-        // Value the ST shares that need to be reinvested in NAV units
-        uint256 seniorTrancheTotalSupply = IERC20(SENIOR_TRANCHE).totalSupply();
-        NAV_UNIT ltOwnedSeniorTrancheSharesNAV = seniorTrancheTotalSupply == 0
-            ? ZERO_NAV_UNITS
-            : IRoycoDayAccountant(ACCOUNTANT).getLastSTEffectiveNAV().mulDiv(ltOwnedSeniorTrancheShares, seniorTrancheTotalSupply, Math.Rounding.Floor);
+        // Value the ST shares that need to be reinvested in NAV units at the synced senior share rate (effective NAV over the post-mint supply)
+        NAV_UNIT ltOwnedSeniorTrancheSharesNAV =
+            _totalSTShares == 0 ? ZERO_NAV_UNITS : _stEffectiveNAV.mulDiv(ltOwnedSeniorTrancheShares, _totalSTShares, Math.Rounding.Floor);
         // Mark that senior NAV to its fair BPT at the manipulation-resistant oracle, then discount by the max tolerated slippage for the gate floor
         TRANCHE_UNIT fairLTAssets = ltConvertNAVUnitsToTrancheUnits(ltOwnedSeniorTrancheSharesNAV);
         TRANCHE_UNIT minLTAssetsOut = fairLTAssets.mulDiv((WAD - _getBalancerV3_LT_QuoterStorage().maxReinvestmentSlippageWAD), WAD, Math.Rounding.Ceil);
@@ -372,7 +353,7 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
         // Single-sided add the ST shares through a low-level call into the Vault's callback
         // The inner unlock dispatches addBalancerV3Liquidity, which mints the BPT bounded by minLTAssetsOut and settles the shares in
         (bool reinvestmentSucceeded, bytes memory callbackReturnData) = address(_vault)
-            .call(abi.encodeCall(_vault.unlock, (abi.encodeCall(this.addBalancerV3Liquidity, (ltOwnedSeniorTrancheShares, uint256(0), minLTAssetsOut)))));
+            .call(abi.encodeCall(_vault.unlock, (abi.encodeCall(this.addBalancerV3Liquidity, (false, ltOwnedSeniorTrancheShares, uint256(0), minLTAssetsOut)))));
         // On a breached gate (or any add revert) the premium shares remain idle: no state mutated here, the inner frame rolled back
         if (!reinvestmentSucceeded) return;
 

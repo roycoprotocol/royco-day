@@ -732,8 +732,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
             // Credit the deposited ST underlying to the senior raw NAV and mint the corresponding senior shares to the kernel (raises supply only)
             $.stOwnedYieldBearingAssets = $.stOwnedYieldBearingAssets + _stAssets;
             IRoycoVaultTranche(SENIOR_TRANCHE).mint(address(this), stSharesMinted);
-            // Commit the deposited ST underlying into the committed senior effective NAV before the pool add, so the rate provider
-            // during the _addLiquidity call stays consistent
+            // Commit the deposited ST underlying into the committed senior effective NAV before adding liquidity
+            // NOTE: Transiently exempt from satisfying the market's requirements: the final post-op sync checks that all requirements are satisfied
             _postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, ZERO_NAV_UNITS, false);
         }
 
@@ -949,8 +949,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         if (liquidityPremiumShares != 0) {
             IRoycoSeniorTranche(SENIOR_TRANCHE).mintLiquidityPremiumShares(address(this), liquidityPremiumShares);
             $.ltOwnedSeniorTrancheShares += liquidityPremiumShares;
-            // Attempt to deploy the staged premium into the LT's market-making inventory
-            _attemptLiquidityPremiumReinvestment(liquidityPremiumShares);
+            // Attempt to deploy the staged premium into the LT's market-making inventory, valuing the idle senior shares at the synced senior share rate (effective NAV over the post-mint supply)
+            _attemptLiquidityPremiumReinvestment(liquidityPremiumShares, _state.stEffectiveNAV, stTotalSupplyAfterMints);
         }
         // Mint the ST protocol fee shares to the protocol fee recipient and LT liquidity premium fee shares to the kernel at an identical price
         if (stProtocolFeeShares != 0) {
@@ -1355,9 +1355,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @dev Intended to allow the LT to deploy the staged premium ST shares into its venue
      * @dev Must tolerate reversions gracefully in order to be non-blocking for the tranche operation
      * @dev Overridden by the LT venue quoter/kernel
-     * @param _premiumShares The ST shares minted for this liquidity premium payment
+     * @param _stSharesMintedAsLiquidityPremium The senior tranche shares minted for this sync's liquidity premium payment
+     * @param _stEffectiveNAV The synced senior tranche effective NAV used to value the LT's idle premium senior shares
+     * @param _totalSTShares The senior tranche share supply after the liquidity premium and ST protocol fee shares are minted, the denominator of the senior share rate
      */
-    function _attemptLiquidityPremiumReinvestment(uint256 _premiumShares) internal virtual;
+    function _attemptLiquidityPremiumReinvestment(uint256 _stSharesMintedAsLiquidityPremium, NAV_UNIT _stEffectiveNAV, uint256 _totalSTShares) internal virtual;
 
     // =============================
     // Tranche Compliance Methods

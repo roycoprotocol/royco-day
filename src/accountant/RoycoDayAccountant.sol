@@ -1002,11 +1002,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         return _getRoycoDayAccountantStorage();
     }
 
-    /// @inheritdoc IRoycoDayAccountant
-    function getLastSTEffectiveNAV() external view override(IRoycoDayAccountant) returns (NAV_UNIT) {
-        return _getRoycoDayAccountantStorage().lastSTEffectiveNAV;
-    }
-
     /**
      * @notice Returns a storage pointer to the RoycoDayAccountantState storage
      * @dev Uses ERC-7201 storage slot pattern for collision-resistant storage
