@@ -12,8 +12,6 @@ interface IRoycoDayAccountant {
     /**
      * @notice Initialization parameters for the Royco Accountant
      * @custom:field minCoverageWAD - The coverage ratio that the senior tranche is expected to be protected by, scaled to WAD precision
-     * @custom:field betaWAD - The junior tranche's sensitivity to the same downside stress that affects the senior tranche, scaled to WAD precision
-     *                         For example, beta is 0 when JT is in the RFR and 1 when JT is in the same opportunity as senior
      * @custom:field coverageLiquidationUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
      * @custom:field minLiquidityWAD - The percentage of the senior tranche NAV that must be in the liquidity tranche's market making inventory, scaled to WAD precision
      * @custom:field jtYDM - The junior tranche's Yield Distribution Model (JT YDM), responsible for determining the yield share (risk premium) payed from the senior tranche yield to the junior tranche
@@ -33,7 +31,6 @@ interface IRoycoDayAccountant {
     struct RoycoDayAccountantInitParams {
         // Coverage configuration
         uint64 minCoverageWAD;
-        uint96 betaWAD;
         uint256 coverageLiquidationUtilizationWAD;
         // Liquidity configuration
         uint64 minLiquidityWAD;
@@ -69,8 +66,6 @@ interface IRoycoDayAccountant {
      * @custom:field lastMarketState - The last recorded state of this market (perpetual or fixed term)
      * @custom:field fixedTermEndTimestamp - The end timestamp of the currently ongoing fixed term (set to 0 if the market is in a perpetual state)
      * @custom:field jtYDM - The junior tranche's Yield Distribution Model (JT YDM), responsible for determining the yield share (risk premium) payed from the senior tranche yield to the junior tranche
-     * @custom:field betaWAD - JT's percentage sensitivity to the same downside stress that affects ST, scaled to WAD precision
-     *                         For example, beta is 0 when JT is in the RFR and 1e18 (100%) when JT is in the same opportunity as senior
      * @custom:field ltYDM - The liquidity tranche's Yield Distribution Model (LT YDM), responsible for determining the yield share (liquidity premium) payed from the senior tranche yield to the liquidity tranche
      * @custom:field minLiquidityWAD - The percentage of the senior tranche NAV that must be in the liquidity tranche's market making inventory, scaled to WAD precision
      * @custom:field twJTYieldShareAccruedWAD - The time-weighted junior tranche yield share (JT YDM output) since the last premium payment, scaled to WAD precision
@@ -106,7 +101,6 @@ interface IRoycoDayAccountant {
         uint32 lastPremiumPaymentTimestamp;
         // Slot 2
         address jtYDM;
-        uint96 betaWAD;
         // Slot 3
         address ltYDM;
         uint64 minLiquidityWAD;
@@ -175,10 +169,6 @@ interface IRoycoDayAccountant {
     /// @param minCoverageWAD The new coverage percentage, scaled to WAD precision
     event CoverageUpdated(uint64 minCoverageWAD);
 
-    /// @notice Emitted when the beta sensitivity parameter is updated
-    /// @param betaWAD The new beta parameter representing JT's sensitivity to downside stress, scaled to WAD precision
-    event BetaUpdated(uint96 betaWAD);
-
     /// @notice Emitted when the liquidation threshold parameter is updated
     /// @param liquidationCoverageUtilizationWAD The new liquidation coverageUtilization threshold for this market, scaled to WAD precision
     event LiquidationCoverageUtilizationUpdated(uint256 liquidationCoverageUtilizationWAD);
@@ -222,7 +212,7 @@ interface IRoycoDayAccountant {
     /// @notice Thrown when the caller of the function is not the accountant's configured Royco Kernel
     error ONLY_ROYCO_KERNEL();
 
-    /// @notice Thrown when the accountant's coverage configuration is invalid (can be due to incorrect coverage, beta, or liquidation coverageUtilization values)
+    /// @notice Thrown when the accountant's coverage configuration is invalid (can be due to incorrect coverage or liquidation coverageUtilization values)
     error INVALID_COVERAGE_CONFIG();
 
     /// @notice Thrown when the accountant's liquidity configuration is invalid (the minimum liquidity must be less than 100%)
@@ -259,6 +249,10 @@ interface IRoycoDayAccountant {
     /// @notice Retrieves the address of the kernel tied to this accountant
     /// @return kernel The kernel that this accountant maintains mark-to-market NAV, JT coverage impermanent loss, and fee accounting for
     function KERNEL() external view returns (address kernel);
+
+    /// @notice Whether the junior tranche is co-invested in the same yield-bearing opportunity as senior (shares senior's downside stress) or in a risk-free opportunity (cash, TBILLs, Aave Core, etc.) with respect to NAV units
+    /// @return jtCoinvested True if the junior tranche is co-invested with the senior tranche, false if it is in a risk-free opportunity
+    function JT_COINVESTED() external view returns (bool jtCoinvested);
 
     /**
      * @notice Synchronizes the effective NAVs and impermanent losses of both tranches by marking them to market
@@ -396,18 +390,11 @@ interface IRoycoDayAccountant {
     function setLTYieldShareProtocolFee(uint64 _ltYieldShareProtocolFeeWAD) external;
 
     /**
-     * @notice Updates the coverage percentage requirement for this market
+     * @notice Updates the minimum coverage requirement for this market
      * @dev Only callable by a designated admin
      * @param _minCoverageWAD The new coverage percentage, scaled to WAD precision
      */
-    function setCoverage(uint64 _minCoverageWAD) external;
-
-    /**
-     * @notice Updates the beta sensitivity parameter for this market
-     * @dev Only callable by a designated admin
-     * @param _betaWAD The new beta parameter representing JT's sensitivity to downside stress, scaled to WAD precision
-     */
-    function setBeta(uint96 _betaWAD) external;
+    function setMinCoverage(uint64 _minCoverageWAD) external;
 
     /**
      * @notice Updates the liquidation coverageUtilization threshold for this market
@@ -417,20 +404,11 @@ interface IRoycoDayAccountant {
     function setLiquidationCoverageUtilization(uint256 _liquidationCoverageUtilizationWAD) external;
 
     /**
-     * @notice Updates the coverage configuration (coverage, beta, and liquidation coverageUtilization) for this market
-     * @dev Only callable by a designated admin
-     * @param _minCoverageWAD The new coverage percentage, scaled to WAD precision
-     * @param _betaWAD The new beta parameter representing JT's sensitivity to downside stress, scaled to WAD precision
-     * @param _liquidationCoverageUtilizationWAD The new liquidation coverageUtilization threshold for this market, scaled to WAD precision
-     */
-    function setCoverageConfiguration(uint64 _minCoverageWAD, uint96 _betaWAD, uint256 _liquidationCoverageUtilizationWAD) external;
-
-    /**
-     * @notice Updates the liquidity percentage requirement for this market
+     * @notice Updates the minimum liquidity requirement for this market
      * @dev Only callable by a designated admin
      * @param _minLiquidityWAD The new percentage of the senior tranche NAV that must be in the liquidity tranche's market making inventory, scaled to WAD precision
      */
-    function setLiquidityConfiguration(uint64 _minLiquidityWAD) external;
+    function setMinLiquidity(uint64 _minLiquidityWAD) external;
 
     /**
      * @notice Updates the maximum JT and LT yield shares (premiums) for this market

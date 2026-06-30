@@ -481,7 +481,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             jtProtocolFeeWAD: _config.jtProtocolFeeWAD,
             yieldShareProtocolFeeWAD: _config.jtYieldShareProtocolFeeWAD,
             coverageWAD: _config.minCoverageWAD,
-            betaWAD: _config.betaWAD,
+            jtCoinvested: _config.jtCoinvested,
             liquidationUtilizationWAD: _config.coverageLiquidationUtilizationWAD,
             fixedTermDurationSeconds: _config.fixedTermDurationSeconds,
             stNAVDustTolerance: toNAVUnits(_config.stDustTolerance),

@@ -20,12 +20,7 @@ import { IRoycoDayKernel } from "../../../../../interfaces/IRoycoDayKernel.sol";
  * @title RoycoDayBalancerV3Hooks
  * @author Shivaansh Kapoor, Ankur Dubey
  * @notice Balancer V3 hook contract that synchronizes the kernel's tranche accounting before each operation on a Day market's liquidity tranche pool
- * @notice Externally-initiated operations (swaps and third-party liquidity provision) reconcile unrealized PNL on the kernel before they are fulfilled
- * @dev In a Day market the liquidity tranche, not the junior tranche, holds the Balancer V3 pool: it pairs the senior tranche share against the
- *      quote asset and is the secondary liquidity venue for the senior tranche, so this hook guards the kernel's `LT_ASSET` (the BPT)
- * @dev Kernel-initiated operations (the premium single-sided add, the multi-asset LT deposit join, and the LT redeem unwrap) bypass the sync via the
- *      `router == kernel` carve-out: the kernel's outer deposit and redeem flows already bracket them with their own pre and post syncs, and
- *      re-entering the sync mid-`Vault.unlock` would read the BPT oracle while the Vault is unlocked and corrupt the bracketed accounting checkpoint
+ * @notice Externally-initiated operations (swaps and third-party liquidity provision) reconcile unrealized PnL on the kernel before they are fulfilled
  */
 contract RoycoDayBalancerV3Hooks is RoycoBase, BaseHooks, VaultGuard {
     /// @notice The Royco Day kernel this hook contract bridges Balancer V3 pool operations into

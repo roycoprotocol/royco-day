@@ -66,4 +66,10 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel is Ident
     function _removeLiquidity(TRANCHE_UNIT, uint256, uint256, address) internal override(RoycoDayKernel) returns (uint256, uint256) {
         revert LIQUIDITY_VENUE_NOT_IMPLEMENTED();
     }
+
+    /// @inheritdoc RoycoDayKernel
+    /// @dev No Balancer liquidity venue is wired on this kernel yet (P4): this kernel will eventually inherit BalancerV3_LT_Quoter, which resolves the quote asset from its pool. Until then there is no quote asset to resolve
+    function QUOTE_ASSET() external view override(RoycoDayKernel) returns (address) {
+        revert("QUOTE_ASSET: no liquidity venue wired (pending BalancerV3_LT_Quoter, P4)");
+    }
 }

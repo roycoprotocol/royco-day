@@ -41,7 +41,7 @@ abstract contract ParameterUpdateBase is AccessManagerConfigUtils, UpdateConfig 
         string marketName;
         /// @dev The target contract to call (accountant, kernel, or factory)
         address target;
-        /// @dev ABI-encoded call to the setter function (e.g. abi.encodeCall(setCoverage, (newVal)))
+        /// @dev ABI-encoded call to the setter function (e.g. abi.encodeCall(setMinCoverage, (newVal)))
         bytes callData;
         /// @dev Human-readable description shown in the Safe UI
         string description;

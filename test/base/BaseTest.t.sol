@@ -703,8 +703,8 @@ abstract contract BaseTest is Test, Assertions {
 
     /// @notice Sets the coverage via accountant admin (with scheduling)
     /// @param _newMinCoverageWAD The new coverage in WAD
-    function _setCoverage(uint64 _newMinCoverageWAD) internal {
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverage, (_newMinCoverageWAD));
+    function _setMinCoverage(uint64 _newMinCoverageWAD) internal {
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setMinCoverage, (_newMinCoverageWAD));
         _executeAccountantAdminOperation(address(ACCOUNTANT), data);
     }
 

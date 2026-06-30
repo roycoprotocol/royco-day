@@ -20,12 +20,11 @@ library UtilsLib {
     /**
      * @notice Computes the coverage utilization of the Royco market given the market's state
      * @dev Informally: (total coverage required for exposure) / (loss absorption buffer)
-     * @dev Formally: COVERAGE_UTILIZATION = ((ST_RAW_NAV + (JT_RAW_NAV * β)) * MIN_COVERAGE) / JT_EFFECTIVE_NAV
+     * @dev Formally: COVERAGE_UTILIZATION = ((ST_RAW_NAV + (JT_COINVESTED ? JT_RAW_NAV : 0)) * MIN_COVERAGE) / JT_EFFECTIVE_NAV
      * @dev Rounding favors ensuring senior tranche protection
      * @param _stRawNAV The raw net asset value of the senior tranche invested assets
      * @param _jtRawNAV The raw net asset value of the junior tranche invested assets
-     * @param _betaWAD The JT's sensitivity to the same downside stress that affects ST, scaled to WAD precision
-     *                 For example, beta is 0 when JT is in the RFR and 1 when JT is in the same opportunity as senior
+     * @param _jtCoinvested Whether the junior tranche is co-invested in the same yield-bearing opportunity as senior (true means it shares senior's downside stress) or in the RFR (false)
      * @param _minCoverageWAD The ratio of current total exposure that is expected to be protected by the market's junior capital, scaled to WAD precision
      * @param _jtEffectiveNAV The junior tranche net asset value after absorbing JT losses, providing coverage to ST, and accruing JT yield and ST yield share (risk premium)
      * @return coverageUtilizationWAD The coverage utilization of the Royco market, scaled to WAD precision
@@ -33,7 +32,7 @@ library UtilsLib {
     function computeCoverageUtilization(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
-        uint256 _betaWAD,
+        bool _jtCoinvested,
         uint256 _minCoverageWAD,
         NAV_UNIT _jtEffectiveNAV
     )
@@ -44,7 +43,7 @@ library UtilsLib {
         // If there is no minimum coverage requirement, the coverage utilization is 0
         if (_minCoverageWAD == 0) return 0;
         // Compute the total exposure that the junior tranche is obligated to protect against a coverage sized drawdown in the senior tranche's underlying asset
-        NAV_UNIT totalCoveredExposure = (_stRawNAV + _jtRawNAV.mulDiv(_betaWAD, WAD, Math.Rounding.Ceil));
+        NAV_UNIT totalCoveredExposure = (_stRawNAV + (_jtCoinvested ? _jtRawNAV : ZERO_NAV_UNITS));
         // If there is no exposure to provide coverage for, there is nothing the junior buffer needs to protect, so the coverage utilization is 0
         if (totalCoveredExposure == ZERO_NAV_UNITS) return 0;
         // If there is no remaining JT loss-absorption buffer but covered exposure exists, coverage utilization is effectively infinite

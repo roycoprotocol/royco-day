@@ -53,7 +53,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     address public immutable override(IRoycoDayKernel) LT_ASSET;
 
     /// @inheritdoc IRoycoDayKernel
-    address public immutable override(IRoycoDayKernel) QUOTE_ASSET;
+    /// @dev Venue-agnostic getter: a concrete liquidity-tranche quoter overrides this with its quote asset
+    function QUOTE_ASSET() external view virtual override(IRoycoDayKernel) returns (address quoteAsset);
 
     /// @inheritdoc IRoycoDayKernel
     address public immutable override(IRoycoDayKernel) ACCOUNTANT;
@@ -106,8 +107,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         // Ensure that the tranche and accountant addresses are not null
         require(
             _params.seniorTranche != address(0) && _params.stAsset != address(0) && _params.juniorTranche != address(0) && _params.jtAsset != address(0)
-                && _params.accountant != address(0) && _params.liquidityTranche != address(0) && _params.ltAsset != address(0)
-                && _params.quoteAsset != address(0),
+                && _params.accountant != address(0) && _params.liquidityTranche != address(0) && _params.ltAsset != address(0),
             NULL_ADDRESS()
         );
 
@@ -119,8 +119,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         ACCOUNTANT = _params.accountant;
         LIQUIDITY_TRANCHE = _params.liquidityTranche;
         LT_ASSET = _params.ltAsset;
-        QUOTE_ASSET = _params.quoteAsset;
         ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER = _params.enforceVaultSharesTransferWhitelist;
+
+        // If the senior and junior tranches share the same yield-bearing asset they are structurally correlated, so the junior tranche must be configured as co-invested in the accountant
+        require((_params.stAsset != _params.jtAsset) || IRoycoDayAccountant(_params.accountant).JT_COINVESTED(), JT_MUST_BE_COINVESTED());
     }
 
     /**
@@ -790,67 +792,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     // =============================
-    // Tranche Compliance Methods
-    // =============================
-
-    /**
-     * @notice Returns whether the specified account is screened out by the market's blacklist
-     * @dev Returns false when no blacklist is configured (the null address disables screening)
-     * @param _account The address of the account to check
-     * @return Whether the account is blacklisted by the market's configured blacklist
-     */
-    function _isBlacklisted(address _account) internal view returns (bool) {
-        address roycoBlacklist = _getRoycoDayKernelStorage().roycoBlacklist;
-        return (roycoBlacklist != address(0) && IRoycoBlacklist(roycoBlacklist).isBlacklisted(_account));
-    }
-
-    /// @inheritdoc IRoycoDayKernel
-    function preTrancheBalanceUpdateHook(
-        address _caller,
-        address _from,
-        address _to,
-        uint256 _value
-    )
-        external
-        override(IRoycoDayKernel)
-        onlyTranche
-        whenNotPaused
-    {
-        // Batch screen the involved accounts against the market's blacklist if one is configured (the null address disables screening)
-        address roycoBlacklist = _getRoycoDayKernelStorage().roycoBlacklist;
-        if (roycoBlacklist != address(0)) {
-            address[] memory accountsToScreen = new address[](3);
-            accountsToScreen[0] = _caller;
-            accountsToScreen[1] = _from;
-            accountsToScreen[2] = _to;
-            IRoycoBlacklist(roycoBlacklist).enforceNotBlacklisted(accountsToScreen);
-        }
-        // If transferring shares, ensure that the recipient is a whitelisted LP for the tranche
-        if (_to != address(0) && ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER) {
-            // It is assumed that the sender is already a whitelisted LP
-            address authority = authority();
-            // Check if the to address can call the deposit function on the tranche
-            /// @dev msg.sender is the tranche address
-            (bool isWhitelistedTrancheLP,) = IAccessManager(authority).canCall(_to, msg.sender, IRoycoVaultTranche.deposit.selector);
-            require(_to != authority && isWhitelistedTrancheLP, ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(_to));
-        }
-
-        // Call the market specific pre-balance update hook
-        _preTrancheBalanceUpdate(_caller, _from, _to, _value);
-    }
-
-    /**
-     * @notice Pre-balance update hook for the kernel
-     * @dev Should be overridden by concrete kernel implementations to perform any additional checks or actions
-     * @dev The caller is the address that initiated the balance update
-     * @param _caller The address that initiated the balance update
-     * @param _from The address from which the balance is being updated
-     * @param _to The address to which the balance is being updated
-     * @param _value The amount of the balance being updated
-     */
-    function _preTrancheBalanceUpdate(address _caller, address _from, address _to, uint256 _value) internal virtual { }
-
-    // =============================
     // Internal Tranche Accounting Synchronization Functions
     // =============================
 
@@ -1259,22 +1200,22 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @dev Prevents bank run dynamics by ensuring one LP's bonus doesn't reduce coverage for remaining LPs
      * @dev Derivation:
      *      Post-redemption coverageUtilization must not exceed original coverageUtilization:
-     *      U = Current coverageUtilization = ((ST_RAW_NAV + (JT_RAW_NAV * β)) * MIN_COVERAGE) / JT_EFFECTIVE_NAV
+     *      U = Current coverageUtilization = ((ST_RAW_NAV + (JT_COINVESTED ? JT_RAW_NAV : 0)) * MIN_COVERAGE) / JT_EFFECTIVE_NAV
      *      U' = Post-redemption coverageUtilization (including bonus)
      *      Post-redemption coverageUtilization:
-     *      U' = (((ST_RAW_NAV - ST_REDEMPTION_ST_RAW_NAV - BONUS_ST_RAW_NAV) + ((JT_RAW_NAV - ST_REDEMPTION_JT_RAW_NAV - BONUS_JT_RAW_NAV) * β)) * MIN_COVERAGE) / (JT_EFFECTIVE_NAV - BONUS_ST_RAW_NAV - BONUS_JT_RAW_NAV)
+     *      U' = (((ST_RAW_NAV - ST_REDEMPTION_ST_RAW_NAV - BONUS_ST_RAW_NAV) + (JT_COINVESTED ? (JT_RAW_NAV - ST_REDEMPTION_JT_RAW_NAV - BONUS_JT_RAW_NAV) : 0)) * MIN_COVERAGE) / (JT_EFFECTIVE_NAV - BONUS_ST_RAW_NAV - BONUS_JT_RAW_NAV)
      *
      *      NOTE: INVARIANT: U' <= U
      *      Resulting invariant after simplification:
-     *      COVERED_EXPOSURE = ST_RAW_NAV + JT_RAW_NAV * β
-     *      BONUS_ST_RAW_NAV * (COVERED_EXPOSURE - JT_EFFECTIVE_NAV) + BONUS_JT_RAW_NAV * (COVERED_EXPOSURE - β * JT_EFFECTIVE_NAV) <= JT_EFFECTIVE_NAV * (ST_REDEMPTION_ST_RAW_NAV + ST_REDEMPTION_JT_RAW_NAV * β)
+     *      COVERED_EXPOSURE = ST_RAW_NAV + (JT_COINVESTED ? JT_RAW_NAV : 0)
+     *      BONUS_ST_RAW_NAV * (COVERED_EXPOSURE - JT_EFFECTIVE_NAV) + BONUS_JT_RAW_NAV * (COVERED_EXPOSURE - (JT_COINVESTED ? JT_EFFECTIVE_NAV : 0)) <= JT_EFFECTIVE_NAV * (ST_REDEMPTION_ST_RAW_NAV + (JT_COINVESTED ? ST_REDEMPTION_JT_RAW_NAV : 0))
      *
-     *      Since with β < 1 BONUS_ST_RAW_NAV is cheaper per unit, use the ST_RAW_NAV to source the bonus first:
+     *      Since when the junior tranche is not co-invested BONUS_ST_RAW_NAV is cheaper per unit, use the ST_RAW_NAV to source the bonus first:
      *      First Priority (BONUS_JT_RAW_NAV = 0):
-     *          BONUS_MAX = (ST_REDEMPTION_ST_RAW_NAV + ST_REDEMPTION_JT_RAW_NAV * β) * JT_EFFECTIVE_NAV / (COVERED_EXPOSURE - JT_EFFECTIVE_NAV)
+     *          BONUS_MAX = (ST_REDEMPTION_ST_RAW_NAV + (JT_COINVESTED ? ST_REDEMPTION_JT_RAW_NAV : 0)) * JT_EFFECTIVE_NAV / (COVERED_EXPOSURE - JT_EFFECTIVE_NAV)
      *
      *      Second Priority (BONUS_ST_RAW_NAV = JT_CLAIM_ON_ST_RAW_NAV, maxed out):
-     *          BONUS_MAX = (ST_REDEMPTION_ST_RAW_NAV + ST_REDEMPTION_JT_RAW_NAV * β + JT_CLAIM_ON_ST_RAW_NAV * (1 - β)) * JT_EFFECTIVE_NAV / (COVERED_EXPOSURE - β * JT_EFFECTIVE_NAV)
+     *          BONUS_MAX = (ST_REDEMPTION_ST_RAW_NAV + (JT_COINVESTED ? ST_REDEMPTION_JT_RAW_NAV : 0) + (JT_COINVESTED ? 0 : JT_CLAIM_ON_ST_RAW_NAV)) * JT_EFFECTIVE_NAV / (COVERED_EXPOSURE - (JT_COINVESTED ? JT_EFFECTIVE_NAV : 0))
      *
      * @param _state The synced accounting state
      * @param _stUserClaims The ST user's base claims before bonus
@@ -1295,11 +1236,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         if (jtEffectiveNAV == ZERO_NAV_UNITS) return ZERO_NAV_UNITS;
 
         // Compute the total covered exposure of the market, rounding up to be conservative
-        NAV_UNIT totalCoveredExposure = _state.stRawNAV + _state.jtRawNAV.mulDiv(_state.betaWAD, WAD, Math.Rounding.Ceil);
+        NAV_UNIT totalCoveredExposure = _state.stRawNAV + (_state.jtCoinvested ? _state.jtRawNAV : ZERO_NAV_UNITS);
 
-        // Compute the ST LP's NAV claim on real exposure (with beta factored in)
+        // Compute the ST LP's NAV claim on real exposure (including the junior leg only when the junior tranche is co-invested)
         NAV_UNIT stUserWeightedClaimNAV = stConvertTrancheUnitsToNAVUnits(_stUserClaims.stAssets)
-            + jtConvertTrancheUnitsToNAVUnits(_stUserClaims.jtAssets).mulDiv(_state.betaWAD, WAD, Math.Rounding.Floor);
+            + (_state.jtCoinvested ? jtConvertTrancheUnitsToNAVUnits(_stUserClaims.jtAssets) : ZERO_NAV_UNITS);
         // If the weighted claim is zero, there is no bonus to apply
         if (stUserWeightedClaimNAV == ZERO_NAV_UNITS) return ZERO_NAV_UNITS;
 
@@ -1309,11 +1250,74 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         if (stAssetSourcedMaxBonusNAV <= _jtClaimOnSTRawNAV) return stAssetSourcedMaxBonusNAV;
 
         // Case 2: Bonus sourced from both JT's claim on ST assets and JT's claim on JT assets
-        // maxBonus = (stUserWeightedClaimNAV + jtClaimOnSTRawNAV * (1 - β)) * jtEffectiveNAV / (totalCoveredExposure - β * jtEffectiveNAV)
-        NAV_UNIT weightedClaimWithSTSourceAdjustmentNAV = stUserWeightedClaimNAV + _jtClaimOnSTRawNAV.mulDiv((WAD - _state.betaWAD), WAD, Math.Rounding.Floor);
+        // maxBonus = (stUserWeightedClaimNAV + (jtCoinvested ? 0 : jtClaimOnSTRawNAV)) * jtEffectiveNAV / (totalCoveredExposure - (jtCoinvested ? jtEffectiveNAV : 0))
+        NAV_UNIT weightedClaimWithSTSourceAdjustmentNAV = stUserWeightedClaimNAV + (_state.jtCoinvested ? ZERO_NAV_UNITS : _jtClaimOnSTRawNAV);
         return weightedClaimWithSTSourceAdjustmentNAV.mulDiv(
-            jtEffectiveNAV, (totalCoveredExposure - jtEffectiveNAV.mulDiv(_state.betaWAD, WAD, Math.Rounding.Floor)), Math.Rounding.Floor
+            jtEffectiveNAV, (totalCoveredExposure - (_state.jtCoinvested ? jtEffectiveNAV : ZERO_NAV_UNITS)), Math.Rounding.Floor
         );
+    }
+
+    // =============================
+    // Tranche Compliance Methods
+    // =============================
+
+    /// @inheritdoc IRoycoDayKernel
+    function preTrancheBalanceUpdateHook(
+        address _caller,
+        address _from,
+        address _to,
+        uint256 _value
+    )
+        external
+        override(IRoycoDayKernel)
+        onlyTranche
+        whenNotPaused
+    {
+        // Batch screen the involved accounts against the market's blacklist if one is configured (the null address disables screening)
+        address roycoBlacklist = _getRoycoDayKernelStorage().roycoBlacklist;
+        if (roycoBlacklist != address(0)) {
+            address[] memory accountsToScreen = new address[](3);
+            accountsToScreen[0] = _caller;
+            accountsToScreen[1] = _from;
+            accountsToScreen[2] = _to;
+            IRoycoBlacklist(roycoBlacklist).enforceNotBlacklisted(accountsToScreen);
+        }
+
+        // If transferring shares, ensure that the recipient is a whitelisted LP for the tranche
+        if (_to != address(0) && ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER) {
+            // It is assumed that the sender is already a whitelisted LP
+            address authority = authority();
+            // Check if the to address can call the deposit function on the tranche
+            /// @dev msg.sender is the tranche address
+            (bool isWhitelistedTrancheLP,) = IAccessManager(authority).canCall(_to, msg.sender, IRoycoVaultTranche.deposit.selector);
+            require(_to != authority && isWhitelistedTrancheLP, ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(_to));
+        }
+
+        // Call the market specific pre-balance update hook
+        _preTrancheBalanceUpdate(_caller, _from, _to, _value);
+    }
+
+    /**
+     * @notice Pre-balance update hook for the kernel
+     * @dev Intentionally implemented with an empty body since inheritting contracts are not required to override this function
+     * @dev Should be overridden by concrete kernel implementations to perform any additional checks or actions
+     * @dev The caller is the address that initiated the balance update
+     * @param _caller The address that initiated the balance update
+     * @param _from The address from which the balance is being updated
+     * @param _to The address to which the balance is being updated
+     * @param _value The amount of the balance being updated
+     */
+    function _preTrancheBalanceUpdate(address _caller, address _from, address _to, uint256 _value) internal virtual { }
+
+    /**
+     * @notice Returns whether the specified account is screened out by the market's blacklist
+     * @dev Returns false when no blacklist is configured (the null address disables screening)
+     * @param _account The address of the account to check
+     * @return Whether the account is blacklisted by the market's configured blacklist
+     */
+    function _isBlacklisted(address _account) internal view returns (bool) {
+        address roycoBlacklist = _getRoycoDayKernelStorage().roycoBlacklist;
+        return (roycoBlacklist != address(0) && IRoycoBlacklist(roycoBlacklist).isBlacklisted(_account));
     }
 
     // =============================

@@ -116,7 +116,6 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     error INVALID_ST_ASSET_ON_KERNEL();
     error INVALID_JT_ASSET_ON_KERNEL();
     error INVALID_LT_ASSET_ON_KERNEL();
-    error INVALID_QUOTE_ASSET_ON_KERNEL();
     error INVALID_ACCOUNTANT_ON_KERNEL();
     error INVALID_KERNEL_ON_ACCOUNTANT();
     error POOL_NOT_REGISTERED_WITH_VAULT();
@@ -223,7 +222,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         _deployProxy(ltImpl, _encodeTrancheInitData(p.lt.name, p.lt.symbol), ltProxySalt);
 
         // 7. Deploy accountant impl + proxy (Day accountant bytecode registered under the accountant component ID).
-        address accountantImpl = _deployAccountantImpl(result.kernel, _marketComponentSalt(p.marketId, "ACCOUNTANT_IMPL"));
+        address accountantImpl = _deployAccountantImpl(result.kernel, p.accountant.jtCoinvested, _marketComponentSalt(p.marketId, "ACCOUNTANT_IMPL"));
         _deployProxy(accountantImpl, _encodeAccountantInitData(p.accountant, result.ydm, ltYdm), accountantProxySalt);
 
         // 8. Deploy kernel impl + proxy.
@@ -236,7 +235,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         result.extras = abi.encode(ExtraContractsDeployedResult({ balancerPool: balancerPool }));
 
         // 11. Sanity-check the pool wiring lines up with what we built.
-        _assertPoolWiredCorrectly(balancerPool, result.seniorTranche, p.gyroECLPPoolParams.quoteToken);
+        _assertPoolWiredCorrectly(balancerPool, result.seniorTranche);
     }
 
     /// @notice Deploys the Day kernel impl + proxy.
@@ -249,8 +248,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
             accountant: _result.accountant,
             enforceVaultSharesTransferWhitelist: _p.enforceVaultSharesTransferWhitelist,
             liquidityTranche: _result.liquidityTranche,
-            ltAsset: _balancerPool,
-            quoteAsset: _p.gyroECLPPoolParams.quoteToken
+            ltAsset: _balancerPool
         });
         address kernelImpl = _deployImpl(_kernelComponentId(), abi.encode(cp), _marketComponentSalt(_p.marketId, "KERNEL_IMPL"));
 
@@ -333,7 +331,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         // The LT asset is the pool; the pool is wired with `{ST_share, quote}`.
         ExtraContractsDeployedResult memory extras = abi.decode(_d.extras, (ExtraContractsDeployedResult));
         require(kernel.LT_ASSET() == extras.balancerPool, INVALID_LT_ASSET_ON_KERNEL());
-        _assertPoolWiredCorrectly(extras.balancerPool, _d.seniorTranche, kernel.QUOTE_ASSET());
+        _assertPoolWiredCorrectly(extras.balancerPool, _d.seniorTranche);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -415,8 +413,8 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     }
 
     function _accountantBinding(address _accountant) private pure returns (TargetBinding memory) {
-        bytes4[] memory s = new bytes4[](13);
-        uint64[] memory r = new uint64[](13);
+        bytes4[] memory s = new bytes4[](14);
+        uint64[] memory r = new uint64[](14);
         s[0] = IRoycoDayAccountant.setJuniorTrancheYDM.selector;
         r[0] = ADMIN_ACCOUNTANT_ROLE;
         s[1] = IRoycoDayAccountant.setLiquidityTrancheYDM.selector;
@@ -429,20 +427,22 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         r[4] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
         s[5] = IRoycoDayAccountant.setLTYieldShareProtocolFee.selector;
         r[5] = ADMIN_PROTOCOL_FEE_SETTER_ROLE;
-        s[6] = IRoycoDayAccountant.setCoverageConfiguration.selector;
+        s[6] = IRoycoDayAccountant.setMinCoverage.selector;
         r[6] = ADMIN_ACCOUNTANT_ROLE;
-        s[7] = IRoycoDayAccountant.setLiquidityConfiguration.selector;
+        s[7] = IRoycoDayAccountant.setLiquidationCoverageUtilization.selector;
         r[7] = ADMIN_ACCOUNTANT_ROLE;
-        s[8] = IRoycoDayAccountant.setMaxYieldShares.selector;
+        s[8] = IRoycoDayAccountant.setMinLiquidity.selector;
         r[8] = ADMIN_ACCOUNTANT_ROLE;
-        s[9] = IRoycoDayAccountant.setFixedTermDuration.selector;
+        s[9] = IRoycoDayAccountant.setMaxYieldShares.selector;
         r[9] = ADMIN_ACCOUNTANT_ROLE;
-        s[10] = IRoycoAuth.pause.selector;
-        r[10] = ADMIN_PAUSER_ROLE;
-        s[11] = IRoycoAuth.unpause.selector;
-        r[11] = ADMIN_UNPAUSER_ROLE;
-        s[12] = UUPSUpgradeable.upgradeToAndCall.selector;
-        r[12] = ADMIN_UPGRADER_ROLE;
+        s[10] = IRoycoDayAccountant.setFixedTermDuration.selector;
+        r[10] = ADMIN_ACCOUNTANT_ROLE;
+        s[11] = IRoycoAuth.pause.selector;
+        r[11] = ADMIN_PAUSER_ROLE;
+        s[12] = IRoycoAuth.unpause.selector;
+        r[12] = ADMIN_UNPAUSER_ROLE;
+        s[13] = UUPSUpgradeable.upgradeToAndCall.selector;
+        r[13] = ADMIN_UPGRADER_ROLE;
         return TargetBinding({ target: _accountant, selectors: s, roleIds: r });
     }
 
@@ -474,8 +474,8 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     // INTERNAL HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Asserts the pool is registered with the Vault and has tokens `{ST_PROXY, quoteAsset}` (any order).
-    function _assertPoolWiredCorrectly(address _pool, address _stProxy, address _quoteAsset) internal view {
+    /// @dev Asserts the pool is registered with the Vault and is a two-token pool that includes the senior tranche share (the other token is the quote asset by construction).
+    function _assertPoolWiredCorrectly(address _pool, address _stProxy) internal view {
         IVault vault = BalancerPoolToken(_pool).getVault();
         require(vault.isPoolRegistered(_pool), POOL_NOT_REGISTERED_WITH_VAULT());
 
@@ -483,8 +483,6 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         require(ierc20Tokens.length == 2, POOL_TOKEN_CONFIGURATION_MISMATCH());
         address t0 = address(ierc20Tokens[0]);
         address t1 = address(ierc20Tokens[1]);
-        bool match0 = t0 == _stProxy && t1 == _quoteAsset;
-        bool match1 = t0 == _quoteAsset && t1 == _stProxy;
-        require(match0 || match1, POOL_TOKEN_CONFIGURATION_MISMATCH());
+        require(t0 == _stProxy || t1 == _stProxy, POOL_TOKEN_CONFIGURATION_MISMATCH());
     }
 }

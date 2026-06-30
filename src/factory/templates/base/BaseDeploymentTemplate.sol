@@ -70,7 +70,7 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
         uint64 jtProtocolFeeWAD;
         uint64 yieldShareProtocolFeeWAD;
         uint64 coverageWAD;
-        uint96 betaWAD;
+        bool jtCoinvested;
         uint256 liquidationUtilizationWAD;
         uint24 fixedTermDurationSeconds;
         NAV_UNIT stNAVDustTolerance;
@@ -250,9 +250,9 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
         return _deployImpl(COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL, abi.encode(_asset, _kernel), _salt);
     }
 
-    /// @notice Deploys the accountant impl for a given kernel.
-    function _deployAccountantImpl(address _kernel, bytes32 _salt) internal returns (address impl) {
-        return _deployImpl(COMPONENT_ID_ACCOUNTANT_IMPL, abi.encode(_kernel), _salt);
+    /// @notice Deploys the accountant impl for a given kernel and the junior tranche's fixed co-investment configuration.
+    function _deployAccountantImpl(address _kernel, bool _jtCoinvested, bytes32 _salt) internal returns (address impl) {
+        return _deployImpl(COMPONENT_ID_ACCOUNTANT_IMPL, abi.encode(_kernel, _jtCoinvested), _salt);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -281,7 +281,6 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
             jtProtocolFeeWAD: _p.jtProtocolFeeWAD,
             jtYieldShareProtocolFeeWAD: _p.yieldShareProtocolFeeWAD,
             minCoverageWAD: _p.coverageWAD,
-            betaWAD: _p.betaWAD,
             jtYDM: _jtYdm,
             jtYDMInitializationData: _p.ydmInitializationData,
             // JT risk premium is uncapped at the WAD ceiling (its real cap comes from the JT YDM); the LT premium is disabled in the zero-liquidity baseline

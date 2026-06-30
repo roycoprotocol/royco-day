@@ -155,7 +155,7 @@ contract GuardianCancellationTest is BaseTest {
     /// @notice Test that guardian can cancel a scheduled accountant admin operation (setCoverage)
     function test_guardian_canCancelAccountantAdminSetCoverage() public {
         uint64 newCoverage = 0.3e18; // 30%
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverage, (newCoverage));
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setMinCoverage, (newCoverage));
 
         // Schedule the operation as accountant admin
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
@@ -347,7 +347,7 @@ contract GuardianCancellationTest is BaseTest {
     function test_guardian_canCancelMultipleOperations() public {
         // Schedule multiple operations
         bytes memory data1 = abi.encodeCall(KERNEL.setProtocolFeeRecipient, (address(0x1111)));
-        bytes memory data2 = abi.encodeCall(ACCOUNTANT.setCoverage, (0.25e18));
+        bytes memory data2 = abi.encodeCall(ACCOUNTANT.setMinCoverage, (0.25e18));
         bytes memory data3 = abi.encodeCall(ACCOUNTANT.setSeniorTrancheProtocolFee, (0.12e18));
 
         vm.prank(KERNEL_ADMIN_ADDRESS);
@@ -431,37 +431,6 @@ contract GuardianCancellationTest is BaseTest {
         ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
     }
 
-    /// @notice Test that ADMIN_ACCOUNTANT_ROLE can call setCoverageConfiguration
-    function test_role_accountantAdmin_canSetCoverageConfiguration() public {
-        uint64 newCoverage = 0.3e18;
-        uint96 newBeta = 0.5e18;
-        uint256 newLiquidationCoverageUtilization = 3e18;
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverageConfiguration, (newCoverage, newBeta, newLiquidationCoverageUtilization));
-
-        // Schedule as accountant admin
-        vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
-
-        // Advance past execution delay
-        vm.warp(block.timestamp + 2 days + 1);
-
-        // Execute
-        vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        ACCESS_MANAGER.execute(address(ACCOUNTANT), data);
-    }
-
-    /// @notice Test that non-accountant-admin cannot call setCoverageConfiguration
-    function test_role_nonAccountantAdmin_cannotSetCoverageConfiguration() public {
-        uint64 newCoverage = 0.3e18;
-        uint96 newBeta = 0.5e18;
-        uint256 newLiquidationCoverageUtilization = 3e18;
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverageConfiguration, (newCoverage, newBeta, newLiquidationCoverageUtilization));
-
-        vm.prank(address(0xBAD));
-        vm.expectRevert();
-        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
-    }
-
     /// @notice Test that ADMIN_ACCOUNTANT_ROLE can call setJuniorTrancheDustTolerance
     function test_role_accountantAdmin_canSetJuniorTrancheDustTolerance() public {
         NAV_UNIT newDustTolerance = toNAVUnits(uint256(200));
@@ -519,22 +488,6 @@ contract GuardianCancellationTest is BaseTest {
 
         vm.warp(block.timestamp + 2 days + 1);
         vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
-        vm.expectRevert();
-        ACCESS_MANAGER.execute(address(ACCOUNTANT), data);
-    }
-
-    /// @notice Test that guardian can cancel setCoverageConfiguration
-    function test_guardian_canCancelSetCoverageConfiguration() public {
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setCoverageConfiguration, (0.3e18, 0.5e18, 0.9e18));
-
-        vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
-
-        vm.prank(ROLE_GUARDIAN_ADDRESS);
-        ACCESS_MANAGER.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
-
-        vm.warp(block.timestamp + 2 days + 1);
-        vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
         vm.expectRevert();
         ACCESS_MANAGER.execute(address(ACCOUNTANT), data);
     }

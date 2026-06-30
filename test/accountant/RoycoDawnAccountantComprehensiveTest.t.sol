@@ -2427,7 +2427,7 @@ contract RoycoDayAccountantAdminTest is BaseTest {
         uint64 newCoverage = 0.15e18;
 
         vm.prank(OWNER_ADDRESS);
-        accountant.setCoverage(newCoverage);
+        accountant.setMinCoverage(newCoverage);
 
         assertEq(accountant.getState().minCoverageWAD, newCoverage, "Coverage not updated");
     }
@@ -2437,7 +2437,7 @@ contract RoycoDayAccountantAdminTest is BaseTest {
         mockKernel.setNAVs(100e18, 50e18);
 
         vm.prank(OWNER_ADDRESS);
-        accountant.setCoverage(0.15e18);
+        accountant.setMinCoverage(0.15e18);
 
         // Sync should have been called
         IRoycoDayAccountant.RoycoDayAccountantState memory state = accountant.getState();
@@ -2455,7 +2455,7 @@ contract RoycoDayAccountantAdminTest is BaseTest {
         }
 
         vm.prank(OWNER_ADDRESS);
-        try accountant.setCoverage(newCoverage) {
+        try accountant.setMinCoverage(newCoverage) {
             assertEq(accountant.getState().minCoverageWAD, newCoverage);
         } catch {
             // Invalid config - acceptable

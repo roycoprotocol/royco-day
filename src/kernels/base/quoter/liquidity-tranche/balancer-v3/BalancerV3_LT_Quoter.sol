@@ -39,10 +39,12 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     /// @notice Index of the quote asset in the pool's token registration order
     uint256 internal immutable QUOTE_ASSET_POOL_INDEX;
 
-    /**
-     * @notice The namespaced storage for the BalancerV3_LT_Quoter
-     * @custom:field bptOracle - The manipulation-resistant Balancer pool token (BPT) oracle used to value the liquidity tranche
-     */
+    /// @inheritdoc RoycoDayKernel
+    /// @dev Resolved from this kernel's BPT registration
+    address public immutable override(RoycoDayKernel) QUOTE_ASSET;
+
+    /// @notice The namespaced storage for the BalancerV3_LT_Quoter
+    /// @custom:field bptOracle - The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity tranche assets
     struct BalancerV3_LT_QuoterState {
         address bptOracle;
     }
@@ -56,7 +58,7 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     /// @notice Thrown when the Balancer pool is not configured with exactly two tokens (ST share and the kernel's quote asset)
     error POOL_MUST_HAVE_TWO_TOKENS();
 
-    /// @notice Thrown when the pool's tokens don't match the kernel's configured ST share and quote asset
+    /// @notice Thrown when neither of the pool's two tokens is the senior tranche share
     error INVALID_POOL_TOKEN_CONFIGURATION();
 
     constructor() VaultGuard(BalancerPoolToken(LT_ASSET).getVault()) {
@@ -67,17 +69,18 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
         IERC20[] memory tokens = _vault.getPoolTokens(LT_ASSET);
         require(tokens.length == 2, POOL_MUST_HAVE_TWO_TOKENS());
 
-        // Resolve and cache the indexes of the ST share and the kernel's quote asset in the pool configuration
-        // Revert if the pool is not configured with ST share and the kernel's quote asset as its constituents
-        if (address(tokens[0]) == SENIOR_TRANCHE && address(tokens[1]) == QUOTE_ASSET) QUOTE_ASSET_POOL_INDEX = 1;
-        else if (address(tokens[0]) == QUOTE_ASSET && address(tokens[1]) == SENIOR_TRANCHE) ST_SHARE_POOL_INDEX = 1;
+        // Resolve and cache the indexes of the ST share and the quote asset
+        // Revert if the pool is not configured with the senior tranche share as one of its two constituents
+        if (address(tokens[0]) == SENIOR_TRANCHE) QUOTE_ASSET_POOL_INDEX = 1;
+        else if (address(tokens[1]) == SENIOR_TRANCHE) ST_SHARE_POOL_INDEX = 1;
         else revert INVALID_POOL_TOKEN_CONFIGURATION();
+
+        // Immutable set the quote asset address from the pool registration
+        QUOTE_ASSET = address(tokens[QUOTE_ASSET_POOL_INDEX]);
     }
 
-    /**
-     * @notice Initializes the Balancer V3 liquidity tranche quoter
-     * @param _bptOracle The manipulation-resistant balancer pool token (BPT) oracle used to value the liquidity tranche
-     */
+    /// @notice Initializes the Balancer V3 liquidity tranche quoter
+    /// @param _bptOracle The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity tranche
     function __BalancerV3_LT_Quoter_init_unchained(address _bptOracle) internal onlyInitializing {
         _setBPTOracle(_bptOracle);
     }

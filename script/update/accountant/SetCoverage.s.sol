@@ -89,7 +89,7 @@ contract SetCoverage is ParameterUpdateBase {
                     updates[idx] = UpdateParams({
                         marketName: cfg.marketName,
                         target: addrs.accountant,
-                        callData: abi.encodeCall(IRoycoDayAccountant.setCoverage, (cfg.newMinCoverageWAD)),
+                        callData: abi.encodeCall(IRoycoDayAccountant.setMinCoverage, (cfg.newMinCoverageWAD)),
                         description: string.concat("Set coverage for ", cfg.marketName, " to ", vm.toString(cfg.newMinCoverageWAD))
                     });
                     idx++;

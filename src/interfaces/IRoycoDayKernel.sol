@@ -19,7 +19,6 @@ interface IRoycoDayKernel {
      * @custom:field accountant - The address of the accountant for the Royco market
      * @custom:field liquidityTranche - The address of the Royco liquidity tranche associated with this kernel
      * @custom:field ltAsset - The base asset of the liquidity tranche (the market-making LP token)
-     * @custom:field quoteAsset - The quote asset paired against the senior share in the LP token
      * @custom:field enforceVaultSharesTransferWhitelist Whether to enforce the vault shares transfer whitelist
      */
     struct RoycoDayKernelConstructionParams {
@@ -30,7 +29,6 @@ interface IRoycoDayKernel {
         address accountant;
         address liquidityTranche;
         address ltAsset;
-        address quoteAsset;
         bool enforceVaultSharesTransferWhitelist;
     }
 
@@ -89,6 +87,9 @@ interface IRoycoDayKernel {
 
     /// @notice Thrown when the tranche and the kernel's corresponding tranche assets don't match
     error TRANCHE_AND_KERNEL_ASSETS_MISMATCH();
+
+    /// @notice Thrown when the senior and junior tranches share the same asset (so are structurally correlated) but the accountant is not configured with the junior tranche co-invested
+    error JT_MUST_BE_COINVESTED();
 
     /// @notice Thrown when the caller of a permissioned function isn't the market's senior tranche
     error ONLY_SENIOR_TRANCHE();
