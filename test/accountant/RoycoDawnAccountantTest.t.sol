@@ -55,7 +55,8 @@ contract RoycoDayAccountantTest is BaseTest {
             MOCK_KERNEL,
             ST_PROTOCOL_FEE_WAD,
             JT_PROTOCOL_FEE_WAD,
-            COVERAGE_WAD,            address(adaptiveYDM),
+            COVERAGE_WAD,
+            address(adaptiveYDM),
             FIXED_TERM_DURATION_SECONDS,
             DUST_TOLERANCE,
             LIQUIDATION_COVERAGE_UTILIZATION_WAD,
@@ -158,7 +159,8 @@ contract RoycoDayAccountantTest is BaseTest {
             MOCK_KERNEL,
             ST_PROTOCOL_FEE_WAD,
             JT_PROTOCOL_FEE_WAD,
-            uint64(MIN_COVERAGE_LOWER_BOUND_WAD - 1),            address(adaptiveYDM),
+            uint64(MIN_COVERAGE_LOWER_BOUND_WAD - 1),
+            address(adaptiveYDM),
             FIXED_TERM_DURATION_SECONDS,
             DUST_TOLERANCE,
             LIQUIDATION_COVERAGE_UTILIZATION_WAD,
@@ -171,7 +173,8 @@ contract RoycoDayAccountantTest is BaseTest {
             MOCK_KERNEL,
             ST_PROTOCOL_FEE_WAD,
             JT_PROTOCOL_FEE_WAD,
-            uint64(WAD),            address(adaptiveYDM),
+            uint64(WAD),
+            address(adaptiveYDM),
             FIXED_TERM_DURATION_SECONDS,
             DUST_TOLERANCE,
             LIQUIDATION_COVERAGE_UTILIZATION_WAD,
@@ -188,7 +191,8 @@ contract RoycoDayAccountantTest is BaseTest {
             MOCK_KERNEL,
             ST_PROTOCOL_FEE_WAD,
             JT_PROTOCOL_FEE_WAD,
-            COVERAGE_WAD,            address(adaptiveYDM),
+            COVERAGE_WAD,
+            address(adaptiveYDM),
             FIXED_TERM_DURATION_SECONDS,
             DUST_TOLERANCE,
             WAD, // exactly 100% - should revert
@@ -202,7 +206,8 @@ contract RoycoDayAccountantTest is BaseTest {
             MOCK_KERNEL,
             ST_PROTOCOL_FEE_WAD,
             JT_PROTOCOL_FEE_WAD,
-            COVERAGE_WAD,            address(adaptiveYDM),
+            COVERAGE_WAD,
+            address(adaptiveYDM),
             FIXED_TERM_DURATION_SECONDS,
             DUST_TOLERANCE,
             WAD / 2, // 50% - should revert
@@ -242,7 +247,8 @@ contract RoycoDayAccountantTest is BaseTest {
             MOCK_KERNEL,
             uint64(MAX_PROTOCOL_FEE_WAD + 1),
             JT_PROTOCOL_FEE_WAD,
-            COVERAGE_WAD,            address(adaptiveYDM),
+            COVERAGE_WAD,
+            address(adaptiveYDM),
             FIXED_TERM_DURATION_SECONDS,
             DUST_TOLERANCE,
             LIQUIDATION_COVERAGE_UTILIZATION_WAD,
@@ -255,7 +261,8 @@ contract RoycoDayAccountantTest is BaseTest {
             MOCK_KERNEL,
             ST_PROTOCOL_FEE_WAD,
             uint64(MAX_PROTOCOL_FEE_WAD + 1),
-            COVERAGE_WAD,            address(adaptiveYDM),
+            COVERAGE_WAD,
+            address(adaptiveYDM),
             FIXED_TERM_DURATION_SECONDS,
             DUST_TOLERANCE,
             LIQUIDATION_COVERAGE_UTILIZATION_WAD,
@@ -556,7 +563,8 @@ contract RoycoDayAccountantTest is BaseTest {
             MOCK_KERNEL,
             ST_PROTOCOL_FEE_WAD,
             JT_PROTOCOL_FEE_WAD,
-            COVERAGE_WAD,            address(adaptiveYDM),
+            COVERAGE_WAD,
+            address(adaptiveYDM),
             0,
             DUST_TOLERANCE,
             LIQUIDATION_COVERAGE_UTILIZATION_WAD,
@@ -841,7 +849,8 @@ contract RoycoDayAccountantTest is BaseTest {
         _initializeAccountantState(100e18, 50e18);
 
         vm.prank(MOCK_KERNEL);
-        SyncedAccountingState memory state = accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(105e18), _nav(50e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS, true);
+        SyncedAccountingState memory state =
+            accountant.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, _nav(105e18), _nav(50e18), ZERO_NAV_UNITS, ZERO_NAV_UNITS, true);
 
         // Coverage is satisfied iff the committed-state coverage utilization is <= WAD
         IRoycoDayAccountant.RoycoDayAccountantState memory committed = accountant.getState();
@@ -1250,7 +1259,8 @@ contract RoycoDayAccountantTest is BaseTest {
             MOCK_KERNEL,
             ST_PROTOCOL_FEE_WAD,
             JT_PROTOCOL_FEE_WAD,
-            COVERAGE_WAD,            address(adaptiveYDM),
+            COVERAGE_WAD,
+            address(adaptiveYDM),
             FIXED_TERM_DURATION_SECONDS,
             DUST_TOLERANCE,
             LIQUIDATION_COVERAGE_UTILIZATION_WAD,
@@ -1302,9 +1312,8 @@ contract RoycoDayAccountantTest is BaseTest {
         IRoycoDayAccountant.RoycoDayAccountantState memory accountantState = accountant.getState();
 
         // Verify coverageUtilization is computed correctly
-        uint256 expectedUtil = UtilsLib.computeCoverageUtilization(
-            state.stRawNAV, state.jtRawNAV, state.jtCoinvested, accountantState.minCoverageWAD, state.jtEffectiveNAV
-        );
+        uint256 expectedUtil =
+            UtilsLib.computeCoverageUtilization(state.stRawNAV, state.jtRawNAV, state.jtCoinvested, accountantState.minCoverageWAD, state.jtEffectiveNAV);
         assertEq(state.coverageUtilizationWAD, expectedUtil, "coverageUtilizationWAD mismatch");
 
         // Verify fixed term end timestamp based on market state

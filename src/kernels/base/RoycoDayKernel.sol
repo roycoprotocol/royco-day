@@ -207,7 +207,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @inheritdoc IRoycoDayKernel
     function ltPreviewDeposit(TRANCHE_UNIT _assets)
-        public
+        external
         view
         override(IRoycoDayKernel)
         returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheSharesAfterSync, NAV_UNIT navToMintSharesAt)
@@ -222,6 +222,29 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         navToMintSharesAt = _getLiquidityTrancheEffectiveNAV(
             stateBeforeDeposit.stEffectiveNAV, stTotalSupplyAfterMints, (_getRoycoDayKernelStorage().ltOwnedSeniorTrancheShares + liquidityPremiumShares)
         );
+    }
+
+    /// @inheritdoc IRoycoDayKernel
+    function ltPreviewDepositMultiAsset(
+        TRANCHE_UNIT _stAssets,
+        uint256 _quoteAssets
+    )
+        external
+        virtual
+        override(IRoycoDayKernel)
+        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut)
+    {
+        // Preview the senior sync and its post-mint supply (after the liquidity premium and protocol fee shares), exactly as ltDepositMultiAsset reads them
+        (SyncedAccountingState memory state,, uint256 totalSTShares) = previewSyncTrancheAccounting(TrancheType.SENIOR);
+        // The NAV to mint LT shares at is the pre-deposit LT effective NAV (pooled depth plus the idle premium senior shares)
+        navToMintSharesAt = _getLiquidityTrancheEffectiveNAV(state.stEffectiveNAV, totalSTShares);
+        // Size the senior shares the ST leg would mint (zero if no ST underlying is supplied), priced like the execution path
+        uint256 stSharesToAdd =
+            _stAssets == ZERO_TRANCHE_UNITS ? 0 : _navToShares(stConvertTrancheUnitsToNAVUnits(_stAssets), state.stEffectiveNAV, totalSTShares);
+        // Quote the venue add for the senior shares and quote assets (simulation only: no slippage gate, no settlement)
+        ltAssetsOut = _quoteAddLiquidity(stSharesToAdd, _quoteAssets);
+        // The value allocated is the value of the LT assets the add would mint
+        valueAllocated = ltConvertTrancheUnitsToNAVUnits(ltAssetsOut);
     }
 
     /// @inheritdoc IRoycoDayKernel
@@ -1239,6 +1262,15 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @return ltAssets The LT tranche assets (LP token) minted by the add
      */
     function _addLiquidity(uint256 _stShares, uint256 _quoteAssets, TRANCHE_UNIT _minLTAssetsOut) internal virtual returns (TRANCHE_UNIT ltAssets);
+
+    /**
+     * @notice Query-mode counterpart of `_addLiquidity`: simulates the venue add and returns the LT assets it would mint
+     * @dev Must not mutate state
+     * @param _stShares The senior tranche shares the add would inject
+     * @param _quoteAssets The quote assets the add would inject
+     * @return ltAssets The LT tranche assets (LP token) the add would mint
+     */
+    function _quoteAddLiquidity(uint256 _stShares, uint256 _quoteAssets) internal virtual returns (TRANCHE_UNIT ltAssets);
 
     /**
      * @notice Proportional removal of the LP token into its (senior shares + quote) constituents; returns the constituents withdrawn

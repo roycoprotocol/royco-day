@@ -300,6 +300,22 @@ interface IRoycoDayKernel {
         returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheSharesAfterSync, NAV_UNIT navToMintSharesAt);
 
     /**
+     * @notice Previews a multi-asset LT deposit of (ST underlying + quote) by simulating the venue add
+     * @dev NON-VIEW: routes the venue add through its query mode (e.g. Balancer's `Vault.quote`), so callers must staticcall it
+     * @param _stAssets The ST underlying leg, in the ST asset's native units
+     * @param _quoteAssets The quote asset leg
+     * @return valueAllocated The NAV value of the LT assets the add would mint
+     * @return navToMintSharesAt The pre-deposit LT effective NAV that LT shares would be minted against
+     * @return ltAssetsOut The LT tranche assets (LP token) the add would mint
+     */
+    function ltPreviewDepositMultiAsset(
+        TRANCHE_UNIT _stAssets,
+        uint256 _quoteAssets
+    )
+        external
+        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut);
+
+    /**
      * @notice Previews the redemption of a specified number of shares from the senior tranche
      * @param _shares The number of shares to redeem
      * @return userClaim The distribution of assets that would be transferred to the receiver on redemption, denominated in the respective tranches' tranche units

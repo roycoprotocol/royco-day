@@ -467,7 +467,8 @@ contract StaticCurveYDMTest is BaseTest {
         uint256 expectedUtil = 0.5e18;
         uint256 expectedYield = _expectedYieldShare(expectedUtil);
 
-        uint256 result = ydm.previewYieldShare(MarketState.PERPETUAL, _coverageUtilizationFromNAVs(stRawNAV, jtRawNAV, jtCoinvested, minCoverageWAD, jtEffectiveNAV));
+        uint256 result =
+            ydm.previewYieldShare(MarketState.PERPETUAL, _coverageUtilizationFromNAVs(stRawNAV, jtRawNAV, jtCoinvested, minCoverageWAD, jtEffectiveNAV));
         assertEq(result, expectedYield, "Should handle coinvested junior tranche");
     }
 
@@ -483,7 +484,8 @@ contract StaticCurveYDMTest is BaseTest {
         uint256 expectedUtil = 0.5e18;
         uint256 expectedYield = _expectedYieldShare(expectedUtil);
 
-        uint256 result = ydm.previewYieldShare(MarketState.PERPETUAL, _coverageUtilizationFromNAVs(stRawNAV, jtRawNAV, jtCoinvested, minCoverageWAD, jtEffectiveNAV));
+        uint256 result =
+            ydm.previewYieldShare(MarketState.PERPETUAL, _coverageUtilizationFromNAVs(stRawNAV, jtRawNAV, jtCoinvested, minCoverageWAD, jtEffectiveNAV));
         assertEq(result, expectedYield, "Should handle different coverage values");
     }
 
@@ -499,7 +501,8 @@ contract StaticCurveYDMTest is BaseTest {
         uint256 expectedUtil = 0.5e18;
         uint256 expectedYield = _expectedYieldShare(expectedUtil);
 
-        uint256 result = ydm.previewYieldShare(MarketState.PERPETUAL, _coverageUtilizationFromNAVs(stRawNAV, jtRawNAV, jtCoinvested, minCoverageWAD, jtEffectiveNAV));
+        uint256 result =
+            ydm.previewYieldShare(MarketState.PERPETUAL, _coverageUtilizationFromNAVs(stRawNAV, jtRawNAV, jtCoinvested, minCoverageWAD, jtEffectiveNAV));
         assertEq(result, expectedYield, "Should handle non-coinvested junior tranche");
     }
 
