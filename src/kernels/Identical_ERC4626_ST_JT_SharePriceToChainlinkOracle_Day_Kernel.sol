@@ -70,7 +70,7 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel is Ident
     /// @inheritdoc RoycoDayKernel
     /// @dev No Balancer liquidity venue is wired on this kernel yet (P4): the multi-asset deposit preview's venue-add
     ///      simulation is unreachable. Revert defensively.
-    function _quoteAddLiquidity(uint256, uint256) internal override(RoycoDayKernel) returns (TRANCHE_UNIT) {
+    function _previewAddLiquidity(uint256, uint256) internal override(RoycoDayKernel) returns (TRANCHE_UNIT) {
         revert LIQUIDITY_VENUE_NOT_IMPLEMENTED();
     }
 

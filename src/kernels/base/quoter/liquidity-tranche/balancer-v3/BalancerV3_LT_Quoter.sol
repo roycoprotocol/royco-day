@@ -159,6 +159,27 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     // =============================
 
     /**
+     * @notice Query-mode callback that simulates the unbalanced BPT mint inside the Vault's query context
+     * @dev Only callable by the Balancer V3 Vault (re-entered via `quote`). Performs no settlement.
+     * @param _seniorShares The senior tranche shares the add would inject
+     * @param _quoteAssets The quote assets the add would inject
+     * @return ltAssets The BPT (LT assets) the add would mint
+     */
+    function previewAddBalancerV3Liquidity(uint256 _seniorShares, uint256 _quoteAssets) external onlyVault returns (uint256 ltAssets) {
+        // The senior tranche share and quote asset amounts to add, ordered by the pool's token registration
+        uint256[] memory exactAmountsIn = new uint256[](2);
+        exactAmountsIn[ST_SHARE_POOL_INDEX] = _seniorShares;
+        exactAmountsIn[QUOTE_ASSET_POOL_INDEX] = _quoteAssets;
+
+        // Compute the BPT the unbalanced add would mint: in query mode, no slippage gate and no credit/debt settlement is required
+        (, ltAssets,) = _vault.addLiquidity(
+            AddLiquidityParams({
+                pool: LT_ASSET, to: address(this), maxAmountsIn: exactAmountsIn, minBptAmountOut: 0, kind: AddLiquidityKind.UNBALANCED, userData: ""
+            })
+        );
+    }
+
+    /**
      * @notice Callback that performs the unbalanced BPT mint inside the unlocked Balancer V3 Vault's context
      * @dev Only callable by the Balancer V3 Vault
      * @dev This callback must settle all credit and debt created in the vault's accounting by the end of its execution
@@ -249,6 +270,13 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     // =============================
 
     /// @inheritdoc RoycoDayKernel
+    /// @dev Routes the add through the Vault's query mode (`quote`) so it simulates the BPT minted without settling balances or moving tokens
+    function _previewAddLiquidity(uint256 _seniorShares, uint256 _quoteAssets) internal override(RoycoDayKernel) returns (TRANCHE_UNIT ltAssets) {
+        bytes memory callbackReturnData = _vault.quote(abi.encodeCall(this.previewAddBalancerV3Liquidity, (_seniorShares, _quoteAssets)));
+        ltAssets = toTrancheUnits(abi.decode(callbackReturnData, (uint256)));
+    }
+
+    /// @inheritdoc RoycoDayKernel
     /// @dev Unlocks the Balancer V3 Vault and dispatches into the add liquidity callback above
     /// @dev The vault is required to be unlocked with a callback in order to transition into a transient accounting state, expecting the callback to settle all credit and debt before returning
     function _addLiquidity(
@@ -265,35 +293,6 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
         assembly ("memory-safe") {
             ltAssets := mload(add(callbackReturnData, 0x20))
         }
-    }
-
-    /**
-     * @notice Query-mode callback that simulates the unbalanced BPT mint inside the Vault's query context
-     * @dev Only callable by the Balancer V3 Vault (re-entered via `quote`). Performs no settlement: query mode computes the
-     *      result without finalizing balances or moving tokens, so the kernel need not hold the senior shares or quote assets
-     * @param _seniorShares The senior tranche shares the add would inject
-     * @param _quoteAssets The quote assets the add would inject
-     * @return ltAssets The BPT (LT assets) the add would mint
-     */
-    function quoteAddBalancerV3Liquidity(uint256 _seniorShares, uint256 _quoteAssets) external onlyVault returns (uint256 ltAssets) {
-        // The senior tranche share and quote asset amounts to add, ordered by the pool's token registration
-        uint256[] memory exactAmountsIn = new uint256[](2);
-        exactAmountsIn[ST_SHARE_POOL_INDEX] = _seniorShares;
-        exactAmountsIn[QUOTE_ASSET_POOL_INDEX] = _quoteAssets;
-
-        // Compute the BPT the unbalanced add would mint; in query mode no slippage gate and no credit/debt settlement is required
-        (, ltAssets,) = _vault.addLiquidity(
-            AddLiquidityParams({
-                pool: LT_ASSET, to: address(this), maxAmountsIn: exactAmountsIn, minBptAmountOut: 0, kind: AddLiquidityKind.UNBALANCED, userData: ""
-            })
-        );
-    }
-
-    /// @inheritdoc RoycoDayKernel
-    /// @dev Routes the add through the Vault's query mode (`quote`) so it simulates the BPT minted without settling balances or moving tokens
-    function _quoteAddLiquidity(uint256 _seniorShares, uint256 _quoteAssets) internal override(RoycoDayKernel) returns (TRANCHE_UNIT ltAssets) {
-        bytes memory callbackReturnData = _vault.quote(abi.encodeCall(this.quoteAddBalancerV3Liquidity, (_seniorShares, _quoteAssets)));
-        ltAssets = toTrancheUnits(abi.decode(callbackReturnData, (uint256)));
     }
 
     /// @inheritdoc RoycoDayKernel
