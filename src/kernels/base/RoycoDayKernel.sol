@@ -745,8 +745,9 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         // Credit the minted LT tranche assets (LP token) to the liquidity tranche
         $.ltOwnedYieldBearingAssets = $.ltOwnedYieldBearingAssets + ltAssetsOut;
 
-        // Execute a post-deposit sync on accounting and enforce the market's coverage and liquidity requirements against the new ST and LT exposure
-        _postOpSyncTrancheAccounting(Operation.LT_DEPOSIT, ZERO_NAV_UNITS, true);
+        // Execute a post-deposit sync on accounting, enforcing the market's coverage and liquidity requirements only when senior exposure was added
+        // A quote-only deposit mints no senior shares: it cannot worsen coverage and only deepens liquidity, so it is guaranteed to be at least coverage and liquidity neutral
+        _postOpSyncTrancheAccounting(Operation.LT_DEPOSIT, ZERO_NAV_UNITS, (_stAssets != ZERO_TRANCHE_UNITS));
     }
 
     /// @inheritdoc IRoycoDayKernel
