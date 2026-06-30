@@ -240,8 +240,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         (SyncedAccountingState memory state,, uint256 totalSTShares) = previewSyncTrancheAccounting(TrancheType.SENIOR);
         // During a fixed-term market state only a quote-only deposit is permitted; an ST-leg deposit reverts, so return zero before quoting the venue add to match it
         if (state.marketState == MarketState.FIXED_TERM && _stAssets != ZERO_TRANCHE_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS);
-        // The NAV to mint LT shares at is the pre-deposit LT effective NAV (pooled depth plus the idle premium senior shares)
-        navToMintSharesAt = _getLiquidityTrancheEffectiveNAV(state.stEffectiveNAV, totalSTShares);
+        // The NAV to mint LT shares at is the pre-deposit LT effective NAV (pooled depth plus the idle premium senior shares),
+        (uint256 liquidityPremiumShares,,) = _computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(SENIOR_TRANCHE).totalSupply());
+        navToMintSharesAt = _getLiquidityTrancheEffectiveNAV(
+            state.stEffectiveNAV, totalSTShares, (_getRoycoDayKernelStorage().ltOwnedSeniorTrancheShares + liquidityPremiumShares)
+        );
         // Size the senior shares the ST leg would mint (zero if no ST underlying is supplied), priced like the execution path
         uint256 stSharesToAdd =
             _stAssets == ZERO_TRANCHE_UNITS ? 0 : _navToShares(stConvertTrancheUnitsToNAVUnits(_stAssets), state.stEffectiveNAV, totalSTShares);
