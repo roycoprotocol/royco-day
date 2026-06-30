@@ -438,6 +438,7 @@ interface IRoycoDayKernel {
 
     /**
      * @notice Processes the deposit of a specified amount of assets into the liquidity tranche.
+     * @dev Enabled only in a PERPETUAL market state; reverts in a fixed-term market, where the LT is locked alongside every tranche.
      * @param _assets The amount of assets (the LP token) to deposit, denominated in the liquidity tranche's tranche units.
      * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units.
      * @return navToMintSharesAt The NAV at which the shares will be minted, exclusive of valueAllocated.
@@ -457,6 +458,7 @@ interface IRoycoDayKernel {
      * @notice Atomically enters the liquidity tranche with the LP token's constituent assets: deposits ST underlying (minting senior
      *         shares), single-sided adds (senior shares + quote) into the liquidity venue to mint the LT tranche assets, then deposits them into the LT
      * @dev Assumes the ST underlying and quote have been transferred to the kernel before this call (by the LT tranche)
+     * @dev Enabled only in a PERPETUAL market state; reverts in a fixed-term market, where the LT is locked alongside every tranche
      * @dev The combined new senior exposure is gated by the market's coverage and liquidity requirements; reverts if either is unsatisfied
      * @param _stAssets The amount of ST underlying (the senior tranche's base asset) to deposit, denominated in ST tranche units
      * @param _quoteAssets The amount of quote asset to add as the second pool leg
