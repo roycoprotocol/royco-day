@@ -337,7 +337,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         vm.startPrank(BOB_ADDRESS);
         IERC20(config.stAsset).approve(address(ST), amount);
 
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.COVERAGE_REQUIREMENT_UNSATISFIED.selector));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector));
         ST.deposit(toTrancheUnits(amount), BOB_ADDRESS);
         vm.stopPrank();
     }
@@ -508,7 +508,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         vm.startPrank(BOB_ADDRESS);
         IERC20(config.stAsset).approve(address(ST), excessAmount);
 
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.COVERAGE_REQUIREMENT_UNSATISFIED.selector));
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector));
         ST.deposit(toTrancheUnits(excessAmount), BOB_ADDRESS);
         vm.stopPrank();
     }
@@ -963,16 +963,16 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
     /// @notice Worst-case NAV reduction in JT.maxRedeem(owner) attributable to the operational
     ///         slack reserved by maxJTWithdrawalGivenCoverage, plus a small rounding margin.
-    /// @dev maxJTWithdrawalGivenCoverage reserves stNAVDustTolerance + jtNAVDustTolerance·β/WAD AND a fixed 2 NAV-unit
+    /// @dev maxJTWithdrawalGivenCoverage reserves stNAVDustTolerance + (JT_COINVESTED ? jtNAVDustTolerance : 0) AND a fixed 2 NAV-unit
     ///      margin (the L-04 fix that keeps redeem(maxRedeem) from reverting on the coverageUtilization ceil) from surplusJTAssets.
     ///      This translates to a totalNAVClaimable reduction of slack · WAD / coverageRetentionWAD where
-    ///      coverageRetentionWAD = WAD − COV·(kS + β·kJ). Worst-case amplification occurs when (kS + β·kJ) saturates at
-    ///      WAD (e.g., pure-JT withdrawal with β=WAD), giving coverageRetentionWAD_min = WAD − minCoverageWAD.
+    ///      coverageRetentionWAD = WAD − COV·(kS + (JT_COINVESTED ? kJ : 0)). Worst-case amplification occurs when (kS + (JT_COINVESTED ? kJ : 0)) saturates at
+    ///      WAD (e.g., pure-JT withdrawal with JT_COINVESTED true), giving coverageRetentionWAD_min = WAD − minCoverageWAD.
     ///      Use this upper bound; actual reduction is ≤ this for any (kS, kJ) combination.
     function _maxRedeemNAVTolerance() internal view returns (uint256) {
         IRoycoDayAccountant.RoycoDayAccountantState memory state = ACCOUNTANT.getState();
         // Mirror every NAV unit maxJTWithdrawalGivenCoverage reserves from surplusJTAssets: the dust tolerances plus the fixed 2 NAV-unit ceil-rounding margin
-        uint256 slack = toUint256(state.stNAVDustTolerance) + toUint256(state.jtNAVDustTolerance).mulDiv(uint256(state.betaWAD), WAD, Math.Rounding.Ceil) + 2;
+        uint256 slack = toUint256(state.stNAVDustTolerance) + (ACCOUNTANT.JT_COINVESTED() ? toUint256(state.jtNAVDustTolerance) : uint256(0)) + 2;
         uint256 coverageRetentionWAD = WAD - uint256(state.minCoverageWAD);
         if (coverageRetentionWAD == 0) return type(uint256).max;
         return slack.mulDiv(WAD, coverageRetentionWAD, Math.Rounding.Ceil) + 3;
@@ -1996,7 +1996,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // Try to call mintProtocolFeeShares from a random address
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(IRoycoVaultTranche.ONLY_KERNEL.selector));
-        ST.mintProtocolFeeShares(toNAVUnits(uint256(1e18)), toNAVUnits(uint256(1e18)), ALICE_ADDRESS);
+        ST.mintProtocolFeeShares(ALICE_ADDRESS, 1e18);
     }
 
     /// @notice Test that mintProtocolFeeShares reverts when called by non-kernel for JT
@@ -2004,7 +2004,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // Try to call mintProtocolFeeShares from a random address
         vm.prank(ALICE_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(IRoycoVaultTranche.ONLY_KERNEL.selector));
-        JT.mintProtocolFeeShares(toNAVUnits(uint256(1e18)), toNAVUnits(uint256(1e18)), ALICE_ADDRESS);
+        JT.mintProtocolFeeShares(ALICE_ADDRESS, 1e18);
     }
 
     /// @notice Test that mintProtocolFeeShares reverts when called by owner (not kernel)
@@ -2012,11 +2012,11 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // Even the owner should not be able to call this directly
         vm.prank(OWNER_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(IRoycoVaultTranche.ONLY_KERNEL.selector));
-        ST.mintProtocolFeeShares(toNAVUnits(uint256(1e18)), toNAVUnits(uint256(1e18)), OWNER_ADDRESS);
+        ST.mintProtocolFeeShares(OWNER_ADDRESS, 1e18);
 
         vm.prank(OWNER_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(IRoycoVaultTranche.ONLY_KERNEL.selector));
-        JT.mintProtocolFeeShares(toNAVUnits(uint256(1e18)), toNAVUnits(uint256(1e18)), OWNER_ADDRESS);
+        JT.mintProtocolFeeShares(OWNER_ADDRESS, 1e18);
     }
 
     /// @notice Test that mintProtocolFeeShares reverts when called by protocol fee recipient
@@ -2024,11 +2024,11 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // Even the protocol fee recipient should not be able to call this directly
         vm.prank(PROTOCOL_FEE_RECIPIENT_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(IRoycoVaultTranche.ONLY_KERNEL.selector));
-        ST.mintProtocolFeeShares(toNAVUnits(uint256(1e18)), toNAVUnits(uint256(1e18)), PROTOCOL_FEE_RECIPIENT_ADDRESS);
+        ST.mintProtocolFeeShares(PROTOCOL_FEE_RECIPIENT_ADDRESS, 1e18);
 
         vm.prank(PROTOCOL_FEE_RECIPIENT_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(IRoycoVaultTranche.ONLY_KERNEL.selector));
-        JT.mintProtocolFeeShares(toNAVUnits(uint256(1e18)), toNAVUnits(uint256(1e18)), PROTOCOL_FEE_RECIPIENT_ADDRESS);
+        JT.mintProtocolFeeShares(PROTOCOL_FEE_RECIPIENT_ADDRESS, 1e18);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -2338,10 +2338,10 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         NAV_UNIT desiredBonus = toNAVUnits(toUint256(stClaimsNAV) * bonusWAD / WAD);
 
         // 2. Compute maxCoverageUtilizationNeutralBonus using the formula:
-        //    totalCoveredExposure = stRawNAV + jtRawNAV * β
-        //    stUserWeightedClaimNAV = userSTClaim + userJTClaim * β (for full redeem, this equals stEffectiveNAV adjusted)
+        //    totalCoveredExposure = stRawNAV + (JT_COINVESTED ? jtRawNAV : 0)
+        //    stUserWeightedClaimNAV = userSTClaim + (JT_COINVESTED ? userJTClaim : 0) (for full redeem, this equals stEffectiveNAV adjusted)
         //    Case 1: maxBonus = stUserWeightedClaimNAV * jtEffectiveNAV / (totalCoveredExposure - jtEffectiveNAV)
-        uint256 totalCoveredExposure = toUint256(state.stRawNAV) + toUint256(state.jtRawNAV) * state.betaWAD / WAD;
+        uint256 totalCoveredExposure = toUint256(state.stRawNAV) + (state.jtCoinvested ? toUint256(state.jtRawNAV) : uint256(0));
         uint256 jtEffNAV = toUint256(state.jtEffectiveNAV);
 
         // For full redemption, user's weighted claim ≈ stEffectiveNAV (simplified for this test)
@@ -2434,7 +2434,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         NAV_UNIT desiredBonus = toNAVUnits(toUint256(stClaimsNAV) * bonusWAD / WAD);
 
         // 2. Compute maxCoverageUtilizationNeutralBonus
-        uint256 totalCoveredExposure = toUint256(state.stRawNAV) + toUint256(state.jtRawNAV) * state.betaWAD / WAD;
+        uint256 totalCoveredExposure = toUint256(state.stRawNAV) + (state.jtCoinvested ? toUint256(state.jtRawNAV) : uint256(0));
         uint256 stUserWeightedClaimNAV = toUint256(stClaimsNAV);
 
         NAV_UNIT maxCoverageUtilizationNeutralBonus;
@@ -2835,7 +2835,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
     /// @notice Verify the critical invariant: post-redemption coverageUtilization <= original coverageUtilization
     /// @dev This is the core protection against bank run dynamics
-    /// @dev Formula: U' = ((ST_RAW' + JT_RAW' * β) * COV) / JT_EFFECTIVE_NAV' <= U
+    /// @dev Formula: U' = ((ST_RAW' + (JT_COINVESTED ? JT_RAW' : 0)) * COV) / JT_EFFECTIVE_NAV' <= U
     function testFuzz_selfLiquidationBonus_coverageUtilizationInvariant_doesNotIncrease(
         uint256 _jtAmount,
         uint256 _stPercentage,
@@ -3259,7 +3259,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         NAV_UNIT jtClaimOnSTRawNAV = state.jtEffectiveNAV > state.jtRawNAV ? state.jtEffectiveNAV - state.jtRawNAV : ZERO_NAV_UNITS;
 
         // Calculate Case 1 max bonus to verify we'll trigger Case 2
-        uint256 totalCoveredExposure = toUint256(state.stRawNAV) + toUint256(state.jtRawNAV) * state.betaWAD / WAD;
+        uint256 totalCoveredExposure = toUint256(state.stRawNAV) + (state.jtCoinvested ? toUint256(state.jtRawNAV) : uint256(0));
         uint256 jtEffNAV = toUint256(state.jtEffectiveNAV);
 
         // Skip if we can't trigger Case 2 (jtClaimOnSTRawNAV is sufficient)
@@ -3333,7 +3333,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         uint256 jtCap = jtEffNAV;
 
         // 3. maxCoverageUtilizationNeutralBonus (Case 1 formula for simplicity)
-        uint256 totalCoveredExposure = toUint256(state.stRawNAV) + toUint256(state.jtRawNAV) * state.betaWAD / WAD;
+        uint256 totalCoveredExposure = toUint256(state.stRawNAV) + (state.jtCoinvested ? toUint256(state.jtRawNAV) : uint256(0));
         uint256 maxUtilNeutralBonus = 0;
         if (totalCoveredExposure > jtEffNAV && jtEffNAV > 0) {
             uint256 stUserWeightedClaimNAV = toUint256(stClaimsNAV);
@@ -3371,7 +3371,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         _assertNAVConservation();
     }
 
-    /// @notice Verify precise Case 2 formula: BONUS = (w + C*(1-β)) * E / (T - β*E)
+    /// @notice Verify precise Case 2 formula: BONUS = (w + (JT_COINVESTED ? 0 : C)) * E / (T - (JT_COINVESTED ? E : 0))
     /// @dev Manually computes expected bonus and compares with actual
     function testFuzz_selfLiquidationBonus_case2_preciseFormulaVerification(uint256 _jtAmount) external {
         _jtAmount = bound(_jtAmount, _minDepositAmount() * 5, config.initialFunding / 15);
@@ -3398,9 +3398,8 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         uint256 coverageUtilizationBefore = state.coverageUtilizationWAD;
 
         // Get all values needed for Case 2 formula
-        uint256 T = toUint256(state.stRawNAV) + toUint256(state.jtRawNAV) * state.betaWAD / WAD;
+        uint256 T = toUint256(state.stRawNAV) + (state.jtCoinvested ? toUint256(state.jtRawNAV) : uint256(0));
         uint256 E = toUint256(state.jtEffectiveNAV);
-        uint256 beta = state.betaWAD;
 
         if (T <= E || E == 0) return;
 
@@ -3421,12 +3420,11 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
             // Case 1: bonus from ST assets only
             expectedMaxBonus = case1MaxBonus;
         } else {
-            // Case 2 formula: (w + C*(1-β)) * E / (T - β*E)
-            uint256 betaE = E * beta / WAD;
+            // Case 2 formula: (w + (JT_COINVESTED ? 0 : C)) * E / (T - (JT_COINVESTED ? E : 0))
+            uint256 betaE = state.jtCoinvested ? E : 0;
             if (T <= betaE) return;
 
-            uint256 oneMinusBeta = WAD > beta ? WAD - beta : 0;
-            uint256 adjustedW = w + (C * oneMinusBeta / WAD);
+            uint256 adjustedW = w + (state.jtCoinvested ? 0 : C);
             expectedMaxBonus = adjustedW * E / (T - betaE);
         }
 
@@ -3826,7 +3824,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         uint256 cap2_jtEffective = jtEffNAV;
 
         // Cap 3: Max coverageUtilization neutral (simplified Case 1 formula)
-        uint256 T = toUint256(state.stRawNAV) + toUint256(state.jtRawNAV) * state.betaWAD / WAD;
+        uint256 T = toUint256(state.stRawNAV) + (state.jtCoinvested ? toUint256(state.jtRawNAV) : uint256(0));
         uint256 cap3_utilNeutral = type(uint256).max;
         if (T > jtEffNAV && jtEffNAV > 0) {
             cap3_utilNeutral = userBaseClaim * jtEffNAV / (T - jtEffNAV);

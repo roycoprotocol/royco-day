@@ -90,7 +90,7 @@ contract PausabilityTestSuite is BaseTest {
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             minCoverageWAD: COVERAGE_WAD,
-            betaWAD: 1e18,
+            jtCoinvested: true,
             coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,

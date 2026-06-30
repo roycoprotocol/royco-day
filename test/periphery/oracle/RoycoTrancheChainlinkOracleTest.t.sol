@@ -197,7 +197,7 @@ contract RoycoTrancheChainlinkOracleTest is Test {
         // At exactly int256.max, the cast is lossless and the oracle returns the max signed value.
         uint256 boundary = uint256(type(int256).max);
         AssetClaims memory boundaryClaims =
-            AssetClaims({ stAssets: toTrancheUnits(0), jtAssets: toTrancheUnits(0), ltAssets: toTrancheUnits(0), nav: toNAVUnits(boundary) });
+            AssetClaims({ stAssets: toTrancheUnits(0), jtAssets: toTrancheUnits(0), ltAssets: toTrancheUnits(0), stShares: 0, nav: toNAVUnits(boundary) });
         vm.mockCall(address(seniorTranche), abi.encodeWithSelector(IRoycoVaultTranche.convertToAssets.selector, WAD), abi.encode(boundaryClaims));
 
         (, int256 answer,,,) = stOracle.latestRoundData();

@@ -93,7 +93,7 @@ contract AccountantAttributionFuzzTest is BaseTest {
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0,
             minCoverageWAD: COVERAGE_WAD,
-            betaWAD: 1e18,
+            jtCoinvested: true,
             coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             // Always PERPETUAL so ST redeems aren't blocked by fixed-term gating in fuzz runs.
             fixedTermDurationSeconds: 0,

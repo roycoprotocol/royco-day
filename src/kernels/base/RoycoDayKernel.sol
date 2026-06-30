@@ -735,40 +735,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     // =============================
-    // Liquidity Tranche Venue Hooks
-    // =============================
-
-    /**
-     * @notice Single-sided/unbalanced add of (senior shares + quote) into the liquidity venue; returns the LT tranche assets (LP token) minted
-     * @dev Overridden by the concrete venue kernel
-     * @param _stShares The exact amount of senior tranche shares to add into the liquidity venue
-     * @param _quoteAssets The exact amount of quote assets to add into the liquidity venue
-     * @param _minLTAssetsOut The minimum LT tranche assets (LP token) that must be minted, bounding the add's slippage
-     * @return ltAssets The LT tranche assets (LP token) minted by the add
-     */
-    function _addLiquidity(uint256 _stShares, uint256 _quoteAssets, TRANCHE_UNIT _minLTAssetsOut) internal virtual returns (TRANCHE_UNIT ltAssets);
-
-    /**
-     * @notice Proportional removal of the LP token into its (senior shares + quote) constituents; returns the constituents withdrawn
-     * @dev Overridden by the concrete venue kernel
-     * @param _ltAssets The exact LT tranche assets (LP token) to burn
-     * @param _minSTSharesOut The minimum senior tranche shares that must be withdrawn, bounding the removal's slippage
-     * @param _minQuoteAssetsOut The minimum quote assets that must be withdrawn, bounding the removal's slippage
-     * @param _quoteAssetsReceiver The recipient of the withdrawn quote assets; the withdrawn senior shares always return to the kernel for the combined ST unwind
-     * @return stShares The senior tranche shares withdrawn by the removal
-     * @return quoteAssets The quote assets withdrawn by the removal
-     */
-    function _removeLiquidity(
-        TRANCHE_UNIT _ltAssets,
-        uint256 _minSTSharesOut,
-        uint256 _minQuoteAssetsOut,
-        address _quoteAssetsReceiver
-    )
-        internal
-        virtual
-        returns (uint256 stShares, uint256 quoteAssets);
-
-    // =============================
     // Admin Functions
     // =============================
 
@@ -1258,6 +1224,48 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     // =============================
+    // Liquidity Tranche Venue Hooks
+    // =============================
+
+    /**
+     * @notice Single-sided/unbalanced add of (senior shares + quote) into the liquidity venue; returns the LT tranche assets (LP token) minted
+     * @dev Overridden by the LT venue quoter/kernel
+     * @param _stShares The exact amount of senior tranche shares to add into the liquidity venue
+     * @param _quoteAssets The exact amount of quote assets to add into the liquidity venue
+     * @param _minLTAssetsOut The minimum LT tranche assets (LP token) that must be minted, bounding the add's slippage
+     * @return ltAssets The LT tranche assets (LP token) minted by the add
+     */
+    function _addLiquidity(uint256 _stShares, uint256 _quoteAssets, TRANCHE_UNIT _minLTAssetsOut) internal virtual returns (TRANCHE_UNIT ltAssets);
+
+    /**
+     * @notice Proportional removal of the LP token into its (senior shares + quote) constituents; returns the constituents withdrawn
+     * @dev Overridden by the LT venue quoter/kernel
+     * @param _ltAssets The exact LT tranche assets (LP token) to burn
+     * @param _minSTSharesOut The minimum senior tranche shares that must be withdrawn, bounding the removal's slippage
+     * @param _minQuoteAssetsOut The minimum quote assets that must be withdrawn, bounding the removal's slippage
+     * @param _quoteAssetsReceiver The recipient of the withdrawn quote assets; the withdrawn senior shares always return to the kernel for the combined ST unwind
+     * @return stShares The senior tranche shares withdrawn by the removal
+     * @return quoteAssets The quote assets withdrawn by the removal
+     */
+    function _removeLiquidity(
+        TRANCHE_UNIT _ltAssets,
+        uint256 _minSTSharesOut,
+        uint256 _minQuoteAssetsOut,
+        address _quoteAssetsReceiver
+    )
+        internal
+        virtual
+        returns (uint256 stShares, uint256 quoteAssets);
+
+    /**
+     * @notice Processes the freshly minted ST shares for a liquidity premium payment
+     * @dev Intended to allow the LT to reinvest the ST shares minted into its market making inventory
+     * @dev Overridden by the LT venue quoter/kernel
+     * @param _stSharesMinted The ST shares minted for the liquidity premium payment
+     */
+    function _processSTSharesMintedForLiquidityPremium(uint256 _stSharesMinted) internal virtual;
+
+    // =============================
     // Tranche Compliance Methods
     // =============================
 
@@ -1299,7 +1307,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /**
      * @notice Pre-balance update hook for the kernel
-     * @dev Intentionally implemented with an empty body since inheritting contracts are not required to override this function
+     * @dev Intentionally implemented with an empty body since inheriting contracts are not required to override this function
      * @dev Should be overridden by concrete kernel implementations to perform any additional checks or actions
      * @dev The caller is the address that initiated the balance update
      * @param _caller The address that initiated the balance update

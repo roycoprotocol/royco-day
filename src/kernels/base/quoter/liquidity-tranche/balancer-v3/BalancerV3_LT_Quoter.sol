@@ -45,12 +45,18 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
 
     /// @notice The namespaced storage for the BalancerV3_LT_Quoter
     /// @custom:field bptOracle - The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity tranche assets
+    /// @custom:field maxReinvestmentSlippageWAD - The maximum slippage tolerated when single-sided reinvesting the liquidity premium ST shares into the BPT, scaled to WAD precision. Above this threshold the reinvestment defers to the auction fallback
     struct BalancerV3_LT_QuoterState {
         address bptOracle;
+        uint64 maxReinvestmentSlippageWAD;
     }
 
     /// @notice Emitted when the BPT oracle used to value the liquidity tranche is updated
     event BPTOracleUpdated(address indexed bptOracle);
+
+    /// @notice Emitted when the maximum reinvestment slippage tolerance is updated
+    /// @param maxReinvestmentSlippageWAD The new maximum slippage tolerated when single-sided reinvesting the liquidity premium into the BPT, scaled to WAD precision
+    event MaxReinvestmentSlippageUpdated(uint64 maxReinvestmentSlippageWAD);
 
     /// @notice Thrown when the Balancer pool is not registered with the Balancer V3 Vault
     error POOL_NOT_REGISTERED();
@@ -60,6 +66,9 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
 
     /// @notice Thrown when neither of the pool's two tokens is the senior tranche share
     error INVALID_POOL_TOKEN_CONFIGURATION();
+
+    /// @notice Thrown when the configured maximum reinvestment slippage is not strictly less than WAD (100%)
+    error INVALID_MAX_REINVESTMENT_SLIPPAGE();
 
     constructor() VaultGuard(BalancerPoolToken(LT_ASSET).getVault()) {
         // Ensure that the Balancer V3 Pool is registered with the vault
@@ -79,10 +88,14 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
         QUOTE_ASSET = address(tokens[QUOTE_ASSET_POOL_INDEX]);
     }
 
-    /// @notice Initializes the Balancer V3 liquidity tranche quoter
-    /// @param _bptOracle The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity tranche
-    function __BalancerV3_LT_Quoter_init_unchained(address _bptOracle) internal onlyInitializing {
+    /**
+     * @notice Initializes the Balancer V3 liquidity tranche quoter
+     * @param _bptOracle The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity tranche
+     * @param _maxReinvestmentSlippageWAD The maximum slippage tolerated when single-sided reinvesting the ST shares minted as a liquidity premium into the Balancer V3 Pool, scaled to WAD precision
+     */
+    function __BalancerV3_LT_Quoter_init_unchained(address _bptOracle, uint64 _maxReinvestmentSlippageWAD) internal onlyInitializing {
         _setBPTOracle(_bptOracle);
+        _setMaxReinvestmentSlippage(_maxReinvestmentSlippageWAD);
     }
 
     // =============================
@@ -168,10 +181,14 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
         );
 
         // Settle the senior tranche shares and quote assets this kernel owes the Vault for the add by transferring them in and cancelling the debt
-        IERC20(SENIOR_TRANCHE).safeTransfer(address(_vault), _seniorShares);
-        _vault.settle(IERC20(SENIOR_TRANCHE), _seniorShares);
-        IERC20(QUOTE_ASSET).safeTransfer(address(_vault), _quoteAssets);
-        _vault.settle(IERC20(QUOTE_ASSET), _quoteAssets);
+        if (_seniorShares > 0) {
+            IERC20(SENIOR_TRANCHE).safeTransfer(address(_vault), _seniorShares);
+            _vault.settle(IERC20(SENIOR_TRANCHE), _seniorShares);
+        }
+        if (_quoteAssets > 0) {
+            IERC20(QUOTE_ASSET).safeTransfer(address(_vault), _quoteAssets);
+            _vault.settle(IERC20(QUOTE_ASSET), _quoteAssets);
+        }
         /// @dev All credit and debt created during this callback has been settled
     }
 
@@ -215,9 +232,9 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
         );
 
         // Credit the ST shares withdrawn to the kernel for downstream redemption before remitting assets to the user
-        _vault.sendTo(IERC20(SENIOR_TRANCHE), address(this), (stShares = amountsOut[ST_SHARE_POOL_INDEX]));
+        if ((stShares = amountsOut[ST_SHARE_POOL_INDEX]) > 0) _vault.sendTo(IERC20(SENIOR_TRANCHE), address(this), stShares);
         // Credit the quote assets withdrawn to its specified receiver
-        _vault.sendTo(IERC20(QUOTE_ASSET), _quoteAssetsReceiver, (quoteAssets = amountsOut[QUOTE_ASSET_POOL_INDEX]));
+        if ((quoteAssets = amountsOut[QUOTE_ASSET_POOL_INDEX]) > 0) _vault.sendTo(IERC20(QUOTE_ASSET), _quoteAssetsReceiver, quoteAssets);
         /// @dev All credit and debt created during this callback has been settled
     }
 
@@ -266,8 +283,11 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
         }
     }
 
+    /// @inheritdoc RoycoDayKernel
+    function _processSTSharesMintedForLiquidityPremium(uint256 _stSharesMinted) internal override(RoycoDayKernel) { }
+
     // =============================
-    // BPT Oracle Configuration Functions
+    // Admin Functions
     // =============================
 
     /**
@@ -284,8 +304,14 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
         _preOpSyncTrancheAccounting();
     }
 
-    /// @notice Returns the BPT oracle configuration for this quoter
-    function getBPTOracleConfiguration() external pure returns (BalancerV3_LT_QuoterState memory) {
+    /// @notice Sets the maximum slippage tolerated when single-sided reinvesting the liquidity premium into the BPT
+    /// @param _maxReinvestmentSlippageWAD The new maximum reinvestment slippage tolerance, scaled to WAD precision
+    function setMaxReinvestmentSlippage(uint64 _maxReinvestmentSlippageWAD) external restricted {
+        _setMaxReinvestmentSlippage(_maxReinvestmentSlippageWAD);
+    }
+
+    /// @notice Returns the Balancer V3 quoter configuration (the BPT oracle and the maximum reinvestment slippage tolerance)
+    function getBalancerQuoterConfiguration() external pure returns (BalancerV3_LT_QuoterState memory) {
         return _getBalancerV3_LT_QuoterStorage();
     }
 
@@ -295,6 +321,14 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
         require(_bptOracle != address(0), NULL_ADDRESS());
         _getBalancerV3_LT_QuoterStorage().bptOracle = _bptOracle;
         emit BPTOracleUpdated(_bptOracle);
+    }
+
+    /// @notice Sets the new maximum reinvestment slippage tolerance
+    /// @param _maxReinvestmentSlippageWAD The new maximum reinvestment slippage tolerance, scaled to WAD precision
+    function _setMaxReinvestmentSlippage(uint64 _maxReinvestmentSlippageWAD) internal {
+        require(_maxReinvestmentSlippageWAD < WAD, INVALID_MAX_REINVESTMENT_SLIPPAGE());
+        _getBalancerV3_LT_QuoterStorage().maxReinvestmentSlippageWAD = _maxReinvestmentSlippageWAD;
+        emit MaxReinvestmentSlippageUpdated(_maxReinvestmentSlippageWAD);
     }
 
     /**

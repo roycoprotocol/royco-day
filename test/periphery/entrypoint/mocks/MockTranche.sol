@@ -128,6 +128,7 @@ contract MockTranche is IRoycoVaultTranche, ERC20 {
             stAssets: TRANCHE_TYPE_VALUE == TrancheType.SENIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
             jtAssets: TRANCHE_TYPE_VALUE == TrancheType.JUNIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
             ltAssets: TRANCHE_TYPE_VALUE == TrancheType.LIQUIDITY ? toTrancheUnits(assets) : toTrancheUnits(0),
+            stShares: 0,
             nav: toNAVUnits(assets)
         });
     }
@@ -151,6 +152,7 @@ contract MockTranche is IRoycoVaultTranche, ERC20 {
             stAssets: TRANCHE_TYPE_VALUE == TrancheType.SENIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
             jtAssets: TRANCHE_TYPE_VALUE == TrancheType.JUNIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
             ltAssets: TRANCHE_TYPE_VALUE == TrancheType.LIQUIDITY ? toTrancheUnits(assets) : toTrancheUnits(0),
+            stShares: 0,
             nav: toNAVUnits(assets)
         });
     }
@@ -165,6 +167,7 @@ contract MockTranche is IRoycoVaultTranche, ERC20 {
             stAssets: TRANCHE_TYPE_VALUE == TrancheType.SENIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
             jtAssets: TRANCHE_TYPE_VALUE == TrancheType.JUNIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
             ltAssets: TRANCHE_TYPE_VALUE == TrancheType.LIQUIDITY ? toTrancheUnits(assets) : toTrancheUnits(0),
+            stShares: 0,
             nav: toNAVUnits(assets)
         });
     }
@@ -214,6 +217,7 @@ contract MockTranche is IRoycoVaultTranche, ERC20 {
             stAssets: TRANCHE_TYPE_VALUE == TrancheType.SENIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
             jtAssets: TRANCHE_TYPE_VALUE == TrancheType.JUNIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
             ltAssets: TRANCHE_TYPE_VALUE == TrancheType.LIQUIDITY ? toTrancheUnits(assets) : toTrancheUnits(0),
+            stShares: 0,
             nav: toNAVUnits(assets)
         });
 
@@ -242,49 +246,11 @@ contract MockTranche is IRoycoVaultTranche, ERC20 {
             stAssets: TRANCHE_TYPE_VALUE == TrancheType.SENIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
             jtAssets: TRANCHE_TYPE_VALUE == TrancheType.JUNIOR ? toTrancheUnits(assets) : toTrancheUnits(0),
             ltAssets: TRANCHE_TYPE_VALUE == TrancheType.LIQUIDITY ? toTrancheUnits(assets) : toTrancheUnits(0),
+            stShares: 0,
             nav: toNAVUnits(assets)
         });
 
         emit SharesSeizedAndRedeemed(msg.sender, _from, _receiver, claims, _shares);
-    }
-
-    function previewMintProtocolFeeShares(
-        NAV_UNIT _protocolFeeNAV,
-        NAV_UNIT _totalTrancheNAV
-    )
-        external
-        view
-        override
-        returns (uint256 protocolFeeSharesMinted, uint256 totalTrancheShares)
-    {
-        // Simplified implementation for testing
-        uint256 feeNAV = toUint256(_protocolFeeNAV);
-        uint256 totalNAV = toUint256(_totalTrancheNAV);
-
-        if (totalNAV == 0) {
-            protocolFeeSharesMinted = feeNAV;
-        } else {
-            protocolFeeSharesMinted = totalSupply().mulDiv(feeNAV, totalNAV);
-        }
-        totalTrancheShares = totalSupply() + protocolFeeSharesMinted;
-    }
-
-    function mintProtocolFeeShares(
-        NAV_UNIT _protocolFeeNAV,
-        NAV_UNIT _totalTrancheNAV,
-        address _protocolFeeRecipient
-    )
-        external
-        override
-        returns (uint256 protocolFeeSharesMinted, uint256 totalTrancheShares)
-    {
-        (protocolFeeSharesMinted, totalTrancheShares) = this.previewMintProtocolFeeShares(_protocolFeeNAV, _totalTrancheNAV);
-
-        if (protocolFeeSharesMinted > 0) {
-            _mint(_protocolFeeRecipient, protocolFeeSharesMinted);
-        }
-
-        emit ProtocolFeeSharesMinted(_protocolFeeRecipient, protocolFeeSharesMinted, totalTrancheShares);
     }
 
     function mintProtocolFeeShares(address _protocolFeeRecipient, uint256 _protocolFeeShares) external override returns (uint256 totalTrancheShares) {

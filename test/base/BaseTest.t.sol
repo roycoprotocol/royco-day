@@ -171,7 +171,7 @@ abstract contract BaseTest is Test, Assertions {
     string internal JUNIOR_TRANCHE_NAME = "Royco Junior Tranche";
     string internal JUNIOR_TRANCHE_SYMBOL = "RJT";
     uint64 internal COVERAGE_WAD = 0.2e18; // 20% coverage
-    uint96 internal BETA_WAD = 0; // Different opportunities
+    bool internal JT_COINVESTED = false; // JT in a different opportunity (RFR), uncorrelated downside
     uint64 internal ST_PROTOCOL_FEE_WAD = 0.1e18; // 10% protocol fee
     uint64 internal JT_PROTOCOL_FEE_WAD = 0.1e18; // 10% protocol fee
     uint256 internal LIQUIDATION_COVERAGE_UTILIZATION_WAD = 6.4667e18; // Liquidation coverageUtilization threshold
@@ -705,13 +705,6 @@ abstract contract BaseTest is Test, Assertions {
     /// @param _newMinCoverageWAD The new coverage in WAD
     function _setMinCoverage(uint64 _newMinCoverageWAD) internal {
         bytes memory data = abi.encodeCall(ACCOUNTANT.setMinCoverage, (_newMinCoverageWAD));
-        _executeAccountantAdminOperation(address(ACCOUNTANT), data);
-    }
-
-    /// @notice Sets the beta via accountant admin (with scheduling)
-    /// @param _newBetaWAD The new beta in WAD
-    function _setBeta(uint96 _newBetaWAD) internal {
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setBeta, (_newBetaWAD));
         _executeAccountantAdminOperation(address(ACCOUNTANT), data);
     }
 

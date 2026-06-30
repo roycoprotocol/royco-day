@@ -72,4 +72,11 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel is Ident
     function QUOTE_ASSET() external view override(RoycoDayKernel) returns (address) {
         revert("QUOTE_ASSET: no liquidity venue wired (pending BalancerV3_LT_Quoter, P4)");
     }
+
+    /// @inheritdoc RoycoDayKernel
+    /// @dev No Balancer liquidity venue is wired on this kernel yet (P4): the LDM pays no liquidity premium while the LT is
+    ///      disabled, so no premium ST shares are ever minted and this reinvestment hook is unreachable. Revert defensively.
+    function _processSTSharesMintedForLiquidityPremium(uint256) internal override(RoycoDayKernel) {
+        revert LIQUIDITY_VENUE_NOT_IMPLEMENTED();
+    }
 }

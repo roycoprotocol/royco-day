@@ -94,7 +94,9 @@ contract GuardianCancellationTest is BaseTest {
             jtProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             jtYieldShareProtocolFeeWAD: JT_PROTOCOL_FEE_WAD,
             minCoverageWAD: COVERAGE_WAD,
-            betaWAD: BETA_WAD,
+            // Same asset for ST and JT (both MOCK_UNDERLYING_ST_VAULT), so the kernel's
+            // `(stAsset != jtAsset) || JT_COINVESTED()` invariant requires the JT to be co-invested.
+            jtCoinvested: true,
             coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_UTILIZATION_WAD,
             fixedTermDurationSeconds: FIXED_TERM_DURATION_SECONDS,
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
@@ -173,26 +175,6 @@ contract GuardianCancellationTest is BaseTest {
         // Verify operation is cancelled
         scheduledTime = ACCESS_MANAGER.getSchedule(operationId);
         assertEq(scheduledTime, 0, "Operation should be cancelled");
-    }
-
-    /// @notice Test that guardian can cancel a scheduled accountant admin operation (setBeta)
-    function test_guardian_canCancelAccountantAdminSetBeta() public {
-        uint96 newBeta = 0.5e18;
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setBeta, (newBeta));
-
-        // Schedule the operation as accountant admin
-        vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        ACCESS_MANAGER.schedule(address(ACCOUNTANT), data, 0);
-
-        // Guardian cancels the operation
-        vm.prank(ROLE_GUARDIAN_ADDRESS);
-        ACCESS_MANAGER.cancel(ACCOUNTANT_ADMIN_ADDRESS, address(ACCOUNTANT), data);
-
-        // Verify the operation cannot be executed
-        vm.warp(block.timestamp + 2 days + 1);
-        vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        vm.expectRevert();
-        ACCESS_MANAGER.execute(address(ACCOUNTANT), data);
     }
 
     /// @notice Test that guardian can cancel a scheduled accountant admin operation (setLiquidationCoverageUtilization)
