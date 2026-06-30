@@ -312,7 +312,7 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
 
         // Single-sided add the ST shares through a low-level call into the Vault's callback
         // The inner unlock dispatches addBalancerV3Liquidity, which mints the BPT bounded by minLTAssetsOut and settles the shares in
-        (bool reinvestmentSucceeded, bytes memory returnData) = address(_vault)
+        (bool reinvestmentSucceeded, bytes memory callbackReturnData) = address(_vault)
             .call(abi.encodeCall(_vault.unlock, (abi.encodeCall(this.addBalancerV3Liquidity, (ltOwnedSeniorTrancheShares, uint256(0), minLTAssetsOut)))));
         // On a breached gate (or any add revert) the premium shares remain idle: no state mutated here, the inner frame rolled back
         if (!reinvestmentSucceeded) return;
@@ -320,7 +320,7 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
         // Decode the BPT minted from the single-sided provision
         TRANCHE_UNIT ltAssetsMinted;
         assembly ("memory-safe") {
-            ltAssetsMinted := mload(add(returnData, 0x60))
+            ltAssetsMinted := mload(add(callbackReturnData, 0x60))
         }
 
         // Debit the reinvested ST shares and credit the BPT minted from/to the LT
