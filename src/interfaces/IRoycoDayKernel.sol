@@ -458,7 +458,7 @@ interface IRoycoDayKernel {
      * @notice Atomically enters the liquidity tranche with the LP token's constituent assets: deposits ST underlying (minting senior
      *         shares), single-sided adds (senior shares + quote) into the liquidity venue to mint the LT tranche assets, then deposits them into the LT
      * @dev Assumes the ST underlying and quote have been transferred to the kernel before this call (by the LT tranche)
-     * @dev Enabled only in a PERPETUAL market state; reverts in a fixed-term market, where the LT is locked alongside every tranche
+     * @dev Enabled in a PERPETUAL market state, and in a fixed-term market only for a quote-only deposit (_stAssets == 0) that mints no senior shares; an ST-leg deposit reverts in a fixed-term market
      * @dev The combined new senior exposure is gated by the market's coverage and liquidity requirements; reverts if either is unsatisfied
      * @param _stAssets The amount of ST underlying (the senior tranche's base asset) to deposit, denominated in ST tranche units
      * @param _quoteAssets The amount of quote asset to add as the second pool leg

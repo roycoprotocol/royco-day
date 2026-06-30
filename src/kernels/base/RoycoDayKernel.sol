@@ -238,8 +238,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     {
         // Preview the senior sync and its post-mint supply (after the liquidity premium and protocol fee shares), exactly as ltDepositMultiAsset reads them
         (SyncedAccountingState memory state,, uint256 totalSTShares) = previewSyncTrancheAccounting(TrancheType.SENIOR);
-        // LT deposits are disabled during a fixed-term market state: return zero before quoting the venue add, matching the reverting deposit path
-        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS);
+        // During a fixed-term market state only a quote-only deposit is permitted; an ST-leg deposit reverts, so return zero before quoting the venue add to match it
+        if (state.marketState == MarketState.FIXED_TERM && _stAssets != ZERO_TRANCHE_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS);
         // The NAV to mint LT shares at is the pre-deposit LT effective NAV (pooled depth plus the idle premium senior shares)
         navToMintSharesAt = _getLiquidityTrancheEffectiveNAV(state.stEffectiveNAV, totalSTShares);
         // Size the senior shares the ST leg would mint (zero if no ST underlying is supplied), priced like the execution path
@@ -663,7 +663,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     // =============================
 
     /// @inheritdoc IRoycoDayKernel
-    /// @dev LT multi-asset deposits are enabled only in a PERPETUAL market state, granted that the market's coverage and liquidity requirements are satisfied against the new senior exposure
+    /// @dev LT multi-asset deposits are enabled in a PERPETUAL market state (granted the market's coverage and liquidity requirements are satisfied against the new senior exposure), and in a fixed-term market only for a quote-only deposit that mints no senior shares
     function ltDepositMultiAsset(
         TRANCHE_UNIT _stAssets,
         uint256 _quoteAssets,
@@ -683,8 +683,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
         // Execute an accounting sync to reconcile underlying PNL
         (SyncedAccountingState memory state,, uint256 totalSTShares) = _preOpSyncTrancheAccounting(TrancheType.SENIOR);
-        // LT deposits are disabled during a fixed-term market state
-        require(state.marketState == MarketState.PERPETUAL, DISABLED_IN_FIXED_TERM_STATE());
+        // LT deposits are disabled during a fixed-term market state, except a quote-only deposit (no ST underlying => no senior shares minted => no new senior exposure)
+        require(state.marketState == MarketState.PERPETUAL || _stAssets == ZERO_TRANCHE_UNITS, DISABLED_IN_FIXED_TERM_STATE());
         // The NAV to mint tranche shares at is the pre-deposit liquidity tranche effective NAV (its MM depth plus the idle liquidity-premium senior shares the kernel holds), read before the add moves the pool mark
         navToMintSharesAt = _getLiquidityTrancheEffectiveNAV(state.stEffectiveNAV, totalSTShares);
 
