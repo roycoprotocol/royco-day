@@ -84,5 +84,5 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel is Ident
     ///      disabled, so no premium ST shares are ever minted and this reinvestment hook is unreachable in practice. It is a
     ///      no-op (never a revert) so that, even if reached, the surrounding accounting sync can never brick: the premium simply
     ///      stays staged in the kernel until a venue is wired.
-    function _reinvestLiquidityPremium(uint256) internal override(RoycoDayKernel) { }
+    function _attemptLiquidityPremiumReinvestment(uint256) internal override(RoycoDayKernel) { }
 }

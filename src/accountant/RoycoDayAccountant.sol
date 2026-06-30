@@ -47,9 +47,11 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     // Construction and Initialization Functions
     // =============================
 
-    /// @dev Constructs the accountant with the specified kernel and the junior tranche's fixed co-investment configuration
-    /// @param _kernel The kernel that this accountant maintains mark-to-market NAV, JT coverage impermanent loss, and fee accounting for
-    /// @param _jtCoinvested Whether the junior tranche is co-invested in the same yield-bearing opportunity as senior (shares senior's downside stress) or in a risk-free opportunity (cash, TBILLs, Aave Core, etc.) with respect to NAV units
+    /**
+     * @dev Constructs the accountant with the specified kernel and the junior tranche's fixed co-investment configuration
+     * @param _kernel The kernel that this accountant maintains mark-to-market NAV, JT coverage impermanent loss, and fee accounting for
+     * @param _jtCoinvested Whether the junior tranche is co-invested in the same yield-bearing opportunity as senior (shares senior's downside stress) or is in a risk-free opportunity (cash, TBILLs, Aave Core, etc.) with respect to NAV units
+     */
     constructor(address _kernel, bool _jtCoinvested) {
         // Ensure the specified kernel is not null and immutably set it
         require(_kernel != address(0), NULL_ADDRESS());
@@ -78,9 +80,9 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         require(_params.jtYDM != _params.ltYDM, YDMS_CANNOT_BE_IDENTICAL());
 
         // Validate the market's initial coverage, liquidity, and yield share configuration
-        // The coverage requirement must leave headroom (minCoverage < WAD) and the liquidation coverageUtilization threshold can only be breachable once the NAVs have experienced losses (> WAD)
+        // Validate that the coverage requirement must require less coverage than the entire senior exposure and the liquidation coverage utilization threshold can only be breached once the NAVs have experienced losses
         require(_params.minCoverageWAD < WAD && _params.coverageLiquidationUtilizationWAD > WAD, INVALID_COVERAGE_CONFIG());
-        // The liquidity requirement must leave headroom (minLiquidity < WAD)
+        // The liquidity requirement must require less coverage than the entire senior exposure
         require(_params.minLiquidityWAD < WAD, INVALID_LIQUIDITY_CONFIG());
         _validateYieldShareConfig(_params.maxJTYieldShareWAD, _params.maxLTYieldShareWAD);
 

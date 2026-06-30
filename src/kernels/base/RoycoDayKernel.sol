@@ -949,9 +949,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         if (liquidityPremiumShares != 0) {
             IRoycoSeniorTranche(SENIOR_TRANCHE).mintLiquidityPremiumShares(address(this), liquidityPremiumShares);
             $.ltOwnedSeniorTrancheShares += liquidityPremiumShares;
-            // Attempt to deploy the staged premium into the LT's market-making inventory (gated single-sided add into the venue)
-            // A failed deploy (e.g. the slippage gate tripping) leaves the premium staged for a later retry, never bricking the sync
-            _reinvestLiquidityPremium(liquidityPremiumShares);
+            // Attempt to deploy the staged premium into the LT's market-making inventory
+            _attemptLiquidityPremiumReinvestment(liquidityPremiumShares);
         }
         // Mint the ST protocol fee shares to the protocol fee recipient and LT liquidity premium fee shares to the kernel at an identical price
         if (stProtocolFeeShares != 0) {
@@ -1304,6 +1303,15 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     // =============================
 
     /**
+     * @notice Preview counterpart of `_addLiquidity`: simulates the venue add and returns the LT assets it would mint
+     * @dev Must not mutate state
+     * @param _stShares The senior tranche shares the add would inject
+     * @param _quoteAssets The quote assets the add would inject
+     * @return ltAssets The LT tranche assets (LP token) the add would mint
+     */
+    function _previewAddLiquidity(uint256 _stShares, uint256 _quoteAssets) internal virtual returns (TRANCHE_UNIT ltAssets);
+
+    /**
      * @notice Single-sided/unbalanced add of (senior shares + quote) into the liquidity venue; returns the LT tranche assets (LP token) minted
      * @dev Overridden by the LT venue quoter/kernel
      * @param _stShares The exact amount of senior tranche shares to add into the liquidity venue
@@ -1314,13 +1322,13 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     function _addLiquidity(uint256 _stShares, uint256 _quoteAssets, TRANCHE_UNIT _minLTAssetsOut) internal virtual returns (TRANCHE_UNIT ltAssets);
 
     /**
-     * @notice Query-mode counterpart of `_addLiquidity`: simulates the venue add and returns the LT assets it would mint
-     * @dev Must not mutate state
-     * @param _stShares The senior tranche shares the add would inject
-     * @param _quoteAssets The quote assets the add would inject
-     * @return ltAssets The LT tranche assets (LP token) the add would mint
+     * @notice Preview counterpart of `_removeLiquidity`: simulates the proportional removal and returns the constituents it would withdraw
+     * @dev Must not mutate state and performs no slippage gating
+     * @param _ltAssets The LT tranche assets (LP token) the removal would burn
+     * @return stShares The senior tranche shares the removal would withdraw
+     * @return quoteAssets The quote assets the removal would withdraw
      */
-    function _previewAddLiquidity(uint256 _stShares, uint256 _quoteAssets) internal virtual returns (TRANCHE_UNIT ltAssets);
+    function _previewRemoveLiquidity(TRANCHE_UNIT _ltAssets) internal virtual returns (uint256 stShares, uint256 quoteAssets);
 
     /**
      * @notice Proportional removal of the LP token into its (senior shares + quote) constituents; returns the constituents withdrawn
@@ -1343,21 +1351,13 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         returns (uint256 stShares, uint256 quoteAssets);
 
     /**
-     * @notice Query-mode counterpart of `_removeLiquidity`: simulates the proportional removal and returns the constituents it would withdraw
-     * @dev Must not mutate state and performs no slippage gating
-     * @param _ltAssets The LT tranche assets (LP token) the removal would burn
-     * @return stShares The senior tranche shares the removal would withdraw
-     * @return quoteAssets The quote assets the removal would withdraw
-     */
-    function _previewRemoveLiquidity(TRANCHE_UNIT _ltAssets) internal virtual returns (uint256 stShares, uint256 quoteAssets);
-
-    /**
-     * @notice Reinvests the freshly minted liquidity-premium ST shares into the LT's market-making inventory
-     * @dev Intended to allow the LT to deploy the staged premium ST shares into its venue (eg a gated single-sided add)
+     * @notice Attempts to reinvest the freshly minted liquidity premium ST shares into the LT's market-making inventory
+     * @dev Intended to allow the LT to deploy the staged premium ST shares into its venue
+     * @dev Must tolerate reversions gracefully in order to be non-blocking for the tranche operation
      * @dev Overridden by the LT venue quoter/kernel
      * @param _premiumShares The ST shares minted for this liquidity premium payment
      */
-    function _reinvestLiquidityPremium(uint256 _premiumShares) internal virtual;
+    function _attemptLiquidityPremiumReinvestment(uint256 _premiumShares) internal virtual;
 
     // =============================
     // Tranche Compliance Methods
@@ -1430,15 +1430,17 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @notice Initializes the quoter
      * @dev Should be called at the start of a call
      * @dev Typically used to initialize the cached tranche unit to NAV unit conversion rate
+     * @dev Intentionally implemented with an empty body since inheriting contracts are not required to override this function: the cache is a pure optimization and quoters that do not cache read live
      */
-    function _initializeQuoterCache() internal virtual;
+    function _initializeQuoterCache() internal virtual { }
 
     /**
      * @notice Clears the quoter cache
      * @dev Should be called at the end of a call
      * @dev Typically used to clear the cached tranche unit to NAV unit conversion rate
+     * @dev Intentionally implemented with an empty body since inheriting contracts are not required to override this function: the cache is a pure optimization and quoters that do not cache read live
      */
-    function _clearQuoterCache() internal virtual;
+    function _clearQuoterCache() internal virtual { }
 
     // =============================
     // Kernel State Accessor Functions

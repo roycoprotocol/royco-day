@@ -220,6 +220,30 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     }
 
     /**
+     * @notice Query-mode callback that simulates the proportional BPT unwrap inside the Vault's query context
+     * @dev Only callable by the Balancer V3 Vault (re-entered via `quote`). Performs no settlement and moves no tokens: query mode
+     *      computes the constituents the removal would withdraw without finalizing balances, so no slippage floors are needed
+     * @param _ltAssets The exact BPT amount (LT assets) the removal would burn
+     * @return stShares The senior tranche shares the removal would withdraw
+     * @return quoteAssets The quote assets the removal would withdraw
+     */
+    function previewRemoveBalancerV3Liquidity(uint256 _ltAssets) external onlyVault returns (uint256 stShares, uint256 quoteAssets) {
+        // Compute the proportional constituents the unwrap would withdraw; in query mode no slippage gate and no credit/debt settlement is required
+        (, uint256[] memory amountsOut,) = _vault.removeLiquidity(
+            RemoveLiquidityParams({
+                pool: LT_ASSET,
+                from: address(this),
+                maxBptAmountIn: _ltAssets, // For PROPORTIONAL removals the Vault treats this as the exact BPT amount to burn (not an upper bound)
+                minAmountsOut: new uint256[](2), // Query mode needs no slippage floors
+                kind: RemoveLiquidityKind.PROPORTIONAL, // Proportional removals preserve the pool's composition, so the unwrap requires no pricing
+                userData: ""
+            })
+        );
+        stShares = amountsOut[ST_SHARE_POOL_INDEX];
+        quoteAssets = amountsOut[QUOTE_ASSET_POOL_INDEX];
+    }
+
+    /**
      * @notice Callback that performs the proportional BPT unwrap inside the unlocked Balancer V3 Vault's context
      * @dev Only callable by the Balancer V3 Vault
      * @dev This callback must settle all credit and debt created in the vault's accounting by the end of its execution
@@ -296,6 +320,13 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     }
 
     /// @inheritdoc RoycoDayKernel
+    /// @dev Routes the removal through the Vault's query mode (`quote`) so it simulates the constituents withdrawn without settling balances or moving tokens
+    function _previewRemoveLiquidity(TRANCHE_UNIT _ltAssets) internal override(RoycoDayKernel) returns (uint256 stShares, uint256 quoteAssets) {
+        bytes memory callbackReturnData = _vault.quote(abi.encodeCall(this.previewRemoveBalancerV3Liquidity, (toUint256(_ltAssets))));
+        (stShares, quoteAssets) = abi.decode(callbackReturnData, (uint256, uint256));
+    }
+
+    /// @inheritdoc RoycoDayKernel
     /// @dev Unlocks the Balancer V3 Vault and dispatches into the remove liquidity callback above
     /// @dev The vault is required to be unlocked with a callback in order to transition into a transient accounting state, expecting the callback to settle all credit and debt before returning
     function _removeLiquidity(
@@ -318,43 +349,12 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     }
 
     /**
-     * @notice Query-mode callback that simulates the proportional BPT unwrap inside the Vault's query context
-     * @dev Only callable by the Balancer V3 Vault (re-entered via `quote`). Performs no settlement and moves no tokens: query mode
-     *      computes the constituents the removal would withdraw without finalizing balances, so no slippage floors are needed
-     * @param _ltAssets The exact BPT amount (LT assets) the removal would burn
-     * @return stShares The senior tranche shares the removal would withdraw
-     * @return quoteAssets The quote assets the removal would withdraw
-     */
-    function previewRemoveBalancerV3Liquidity(uint256 _ltAssets) external onlyVault returns (uint256 stShares, uint256 quoteAssets) {
-        // Compute the proportional constituents the unwrap would withdraw; in query mode no slippage gate and no credit/debt settlement is required
-        (, uint256[] memory amountsOut,) = _vault.removeLiquidity(
-            RemoveLiquidityParams({
-                pool: LT_ASSET,
-                from: address(this),
-                maxBptAmountIn: _ltAssets, // For PROPORTIONAL removals the Vault treats this as the exact BPT amount to burn (not an upper bound)
-                minAmountsOut: new uint256[](2), // Query mode needs no slippage floors
-                kind: RemoveLiquidityKind.PROPORTIONAL, // Proportional removals preserve the pool's composition, so the unwrap requires no pricing
-                userData: ""
-            })
-        );
-        stShares = amountsOut[ST_SHARE_POOL_INDEX];
-        quoteAssets = amountsOut[QUOTE_ASSET_POOL_INDEX];
-    }
-
-    /// @inheritdoc RoycoDayKernel
-    /// @dev Routes the removal through the Vault's query mode (`quote`) so it simulates the constituents withdrawn without settling balances or moving tokens
-    function _previewRemoveLiquidity(TRANCHE_UNIT _ltAssets) internal override(RoycoDayKernel) returns (uint256 stShares, uint256 quoteAssets) {
-        bytes memory callbackReturnData = _vault.quote(abi.encodeCall(this.previewRemoveBalancerV3Liquidity, (toUint256(_ltAssets))));
-        (stShares, quoteAssets) = abi.decode(callbackReturnData, (uint256, uint256));
-    }
-
-    /**
      * @inheritdoc RoycoDayKernel
      * @dev Deploys the idle liquidity-premium senior share balance the kernel holds into the BPT via a gated single-sided add
      * @dev The min-BPT-out floors the add at the manipulation-resistant oracle's fair value (not the pool spot) less the max reinvestment slippage, so a manipulated pool cannot widen the tolerance
      * @dev Tolerates reversions to ensure a tranche operation doesn't revert on a failing reinvestment
      */
-    function _reinvestLiquidityPremium(uint256) internal override(RoycoDayKernel) {
+    function _attemptLiquidityPremiumReinvestment(uint256) internal override(RoycoDayKernel) {
         // Deploy the LT's idle ST shares into its market making inventory
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
         uint256 ltOwnedSeniorTrancheShares = $.ltOwnedSeniorTrancheShares;
