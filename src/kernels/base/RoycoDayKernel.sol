@@ -733,14 +733,14 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
             // Compute the number of senior tranche shares to mint for this ST asset deposit
             stSharesMinted = _navToShares(stConvertTrancheUnitsToNAVUnits(_stAssets), state.stEffectiveNAV, totalSTShares);
             // Credit the deposited ST underlying to the senior raw NAV and mint the corresponding senior shares to the kernel (raises supply only)
-            // The frozen senior share rate keeps the add priced at the pre-op rate, so the deposited underlying need not be committed here: the final LT_DEPOSIT post-op commits it via its deltaSTRawNAV >= 0 branch
+            // NOTE: The final post-op accounts for this ST deposit in addition to the subsequent LT deposit in one batch call
             $.stOwnedYieldBearingAssets = $.stOwnedYieldBearingAssets + _stAssets;
             IRoycoVaultTranche(SENIOR_TRANCHE).mint(address(this), stSharesMinted);
         }
 
         // Add the minted ST shares and supplied quote assets into the liquidity venue with the specified slippage check
         ltAssetsOut = _addLiquidity(stSharesMinted, _quoteAssets, _minLTAssetsOut);
-        // The precise value allocated is the value of the LT assets rendered by adding liquidity
+        // The precise value allocated is the value of the LT assets rendered from adding liquidity
         valueAllocated = ltConvertTrancheUnitsToNAVUnits(ltAssetsOut);
 
         // Credit the minted LT tranche assets (LP token) to the liquidity tranche
@@ -801,6 +801,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
         // Burn the redeemed senior shares and withdraw the bonus-adjusted ST claims to the receiver
         // The quote assets were remitted in the venue removal above
+        // NOTE: The final post-op accounts for this ST redemption in addition to the preceding LT redemption in one batch call
         IRoycoVaultTranche(SENIOR_TRANCHE).burn(stSharesToRedeem);
         _withdrawAssets(stClaims, _receiver);
 
