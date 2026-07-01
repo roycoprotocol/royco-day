@@ -447,4 +447,11 @@ interface IRoycoDayAccountant {
      * @return state The state of the accountant
      */
     function getState() external view returns (RoycoDayAccountantState memory state);
+
+    /**
+     * @notice Returns the senior tranche's last committed effective NAV from the accounting checkpoint
+     * @dev A narrow read for hot-path consumers (the senior share rate provider) that avoids copying the full accountant state struct
+     * @return lastSTEffectiveNAV The senior tranche's last committed effective NAV
+     */
+    function getLastSTEffectiveNAV() external view returns (NAV_UNIT lastSTEffectiveNAV);
 }

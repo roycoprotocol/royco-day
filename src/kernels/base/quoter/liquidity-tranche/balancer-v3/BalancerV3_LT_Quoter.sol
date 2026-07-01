@@ -142,16 +142,13 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
      * @dev Any pool liquidity operation will be fulfilled at the fresh rate because the pool executes an accounting synchronization prior
      */
     function getRate() external view virtual override(IRateProvider) returns (uint256 rate) {
-        // Preview a senior/junior accounting sync via the accountant, reconciling any PnL
-        SyncedAccountingState memory state = IRoycoDayAccountant(ACCOUNTANT).previewSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
-        // Compute ST share supply after the liquidity premium and the ST protocol fee shares are minted
-        (,, uint256 totalSTShares) = _computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(SENIOR_TRANCHE).totalSupply());
-        // Before the senior tranche is seeded, there are no shares to price: return a neutral 1.0 rate so the pool never divides by zero
-        if (totalSTShares == 0) return WAD;
+        // Before the senior tranche is seeded there are no shares to price: return a neutral 1.0 rate so the pool never divides by zero
+        uint256 seniorTrancheTotalSupply = IERC20(SENIOR_TRANCHE).totalSupply();
+        if (seniorTrancheTotalSupply == 0) return WAD;
 
-        // Compute the senior tranche share rate in NAV units using the most up to date ST effective NAV and total supply
+        // Compute the senior tranche share rate in NAV units using the last commited ST effective NAV and total supply
         // NOTE: Senior tranche shares always use WAD decimals of precision so WAD == 1 ST share
-        rate = toUint256(state.stEffectiveNAV.mulDiv(WAD, totalSTShares, Math.Rounding.Floor));
+        rate = toUint256((IRoycoDayAccountant(ACCOUNTANT).getLastSTEffectiveNAV()).mulDiv(WAD, seniorTrancheTotalSupply, Math.Rounding.Floor));
 
         // Floor the computed rate to 1 wei to prevent reversions in the underlying balancer pool
         if (rate == 0) rate = 1;
