@@ -693,7 +693,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         _withdrawAssets(userAssetClaims, _receiver);
 
         // Execute a post-redeem sync on accounting, specifying whether or not to bypass the markets' requirements
-        _postOpSyncTrancheAccounting(Operation.LT_REDEEM, ZERO_NAV_UNITS, !_bypassRedemptionRestrictions);
+        // LT redemption is exempt from satisfying the liquidity requirement once coverage utilization reaches its liquidation threshold
+        _postOpSyncTrancheAccounting(
+            Operation.LT_REDEEM, ZERO_NAV_UNITS, (!_bypassRedemptionRestrictions && (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD))
+        );
     }
 
     // =============================
@@ -806,7 +809,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         _withdrawAssets(stClaims, _receiver);
 
         // Execute a post-redeem sync on accounting with the applied ST liquidation bonus
-        _postOpSyncTrancheAccounting(Operation.LT_REDEEM, stSelfLiquidationBonusNAV, true);
+        // LT redemption is exempt from satisfying the liquidity requirement once coverage utilization reaches its liquidation threshold
+        _postOpSyncTrancheAccounting(Operation.LT_REDEEM, stSelfLiquidationBonusNAV, (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD));
     }
 
     // =============================
