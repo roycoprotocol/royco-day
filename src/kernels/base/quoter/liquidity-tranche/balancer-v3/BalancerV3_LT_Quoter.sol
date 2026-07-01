@@ -44,6 +44,9 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     /// @dev Resolved from this kernel's BPT registration
     address public immutable override(RoycoDayKernel) QUOTE_ASSET;
 
+    /// @dev The senior tranche share rate (senior NAV per share, scaled to WAD) frozen by each pre-op sync so an inline senior share mint or burn cannot transiently move the pool's senior-leg mark. It is scoped to the transaction via EIP-1153 rather than cleared per operation: unset until the first sync of a transaction (getRate then previews the rate live), re-frozen by every subsequent sync, and auto-cleared at transaction end. A same-transaction read after an operation returns that operation's rate, which equals a fresh preview since the committed state is unchanged
+    uint256 internal transient cachedSTShareRateWAD;
+
     /// @notice The namespaced storage for the BalancerV3_LT_Quoter
     /// @custom:field bptOracle - The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity tranche assets
     /// @custom:field maxReinvestmentSlippageWAD - The maximum slippage tolerated when single-sided reinvesting the liquidity premium ST shares into the BPT, scaled to WAD precision. Above this threshold the reinvestment defers to the auction fallback
@@ -58,11 +61,6 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     /// @notice Emitted when the maximum reinvestment slippage tolerance is updated
     /// @param maxReinvestmentSlippageWAD The new maximum slippage tolerated when single-sided reinvesting the liquidity premium into the BPT, scaled to WAD precision
     event MaxReinvestmentSlippageUpdated(uint64 maxReinvestmentSlippageWAD);
-
-    /// @notice Emitted when the kernel's held liquidity-premium senior shares are deployed into the BPT via the gated single-sided add
-    /// @param stSharesDeployed The senior tranche shares drained from the kernel's held balance and added into the pool
-    /// @param ltAssetsMinted The BPT (LT assets) minted to the liquidity tranche by the add
-    event LiquidityPremiumReinvested(uint256 stSharesDeployed, TRANCHE_UNIT ltAssetsMinted);
 
     /// @notice Thrown when the Balancer pool is not registered with the Balancer V3 Vault
     error POOL_NOT_REGISTERED();
@@ -137,18 +135,43 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
 
     /**
      * @inheritdoc IRateProvider
-     * @dev Values one senior tranche share in NAV units
-     * @dev Reads only committed state (the accountant checkpoint and senior tranche share supply) for safety
-     * @dev Any pool liquidity operation will be fulfilled at the fresh rate because the pool executes an accounting synchronization prior
+     * @dev Values one senior tranche share in NAV units, the rate at which the pool prices its senior share leg
+     * @dev Within a synchronized operation the rate is frozen to the value the pre-op sync cached, so an inline senior share mint or burn (a multi-asset deposit or redemption) cannot transiently move the senior-leg mark before the matching effective NAV is committed
+     * @dev Before the first sync of a transaction the cache is unset, so a standalone pool interaction or an off-chain read previews the fresh rate the next sync would resolve from committed state
      */
     function getRate() external view virtual override(IRateProvider) returns (uint256 rate) {
-        // Before the senior tranche is seeded there are no shares to price: return a neutral 1.0 rate so the pool never divides by zero
-        uint256 seniorTrancheTotalSupply = IERC20(SENIOR_TRANCHE).totalSupply();
-        if (seniorTrancheTotalSupply == 0) return WAD;
+        // Within a synchronized operation, return the rate the pre-op sync froze
+        (bool cacheHit, uint256 cachedSTShareRate) = _decodeCachedValue(cachedSTShareRateWAD);
+        if (cacheHit) return cachedSTShareRate;
 
-        // Compute the senior tranche share rate in NAV units using the last commited ST effective NAV and total supply
+        // Outside a synchronized operation preview the sync the accountant would commit and value the senior share against its post-mint supply
+        // NOTE: The accountant's preview is read directly (never the kernel's) so pricing the senior leg never recurses back into the liquidity tranche mark
+        SyncedAccountingState memory state = IRoycoDayAccountant(ACCOUNTANT).previewSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
+        (,, uint256 stTotalSupply) = _computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(SENIOR_TRANCHE).totalSupply());
+        return _computeSTShareRate(state.stEffectiveNAV, stTotalSupply);
+    }
+
+    /**
+     * @inheritdoc RoycoDayKernel
+     * @dev Freezes the post-mint senior share rate resolved by the pre-op sync: the accountant commits the senior effective NAV before this sync's premium and fee shares are minted, so caching the rate here lets an inline senior share mint or burn move the live supply within the operation without moving the senior-leg mark before the matching effective NAV is committed
+     */
+    function _cacheSTShareRate(NAV_UNIT _stEffectiveNAV, uint256 _stTotalSupplyAfterMints) internal override(RoycoDayKernel) {
+        cachedSTShareRateWAD = _computeSTShareRate(_stEffectiveNAV, _stTotalSupplyAfterMints) | CACHE_SET_MASK;
+    }
+
+    /**
+     * @notice Computes the senior tranche share rate (senior NAV per share) from a synced senior effective NAV and its post-mint supply
+     * @dev Shared by the pre-op cache and the standalone fallback so both resolve an identical rate
+     * @param _stEffectiveNAV The synced senior tranche effective NAV
+     * @param _stTotalSupply The senior tranche share supply after this sync's liquidity premium and ST protocol fee shares are minted, the per-share denominator
+     * @return rate The senior tranche share rate in NAV units, scaled to WAD precision
+     */
+    function _computeSTShareRate(NAV_UNIT _stEffectiveNAV, uint256 _stTotalSupply) internal pure returns (uint256 rate) {
+        // Before the senior tranche is seeded there are no shares to price: return a neutral 1.0 rate so the pool never divides by zero
+        if (_stTotalSupply == 0) return WAD;
+
         // NOTE: Senior tranche shares always use WAD decimals of precision so WAD == 1 ST share
-        rate = toUint256((IRoycoDayAccountant(ACCOUNTANT).getLastSTEffectiveNAV()).mulDiv(WAD, seniorTrancheTotalSupply, Math.Rounding.Floor));
+        rate = toUint256(_stEffectiveNAV.mulDiv(WAD, _stTotalSupply, Math.Rounding.Floor));
 
         // Floor the computed rate to 1 wei to prevent reversions in the underlying balancer pool
         if (rate == 0) rate = 1;

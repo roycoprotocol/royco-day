@@ -34,6 +34,9 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoDayKernelState")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ROYCO_DAY_KERNEL_STORAGE_SLOT = 0xc366ce7b07de4bd3f36c874874355fb088fd2057e716d8a9786c17b22e6fec00;
 
+    /// @dev The top bit set on a transient cache slot to mark it populated, shared by every quoter's transient rate cache so a set slot is distinguishable from an unset one
+    uint256 internal constant CACHE_SET_MASK = 1 << 255;
+
     /// @inheritdoc IRoycoDayKernel
     address public immutable override(IRoycoDayKernel) SENIOR_TRANCHE;
 
@@ -730,11 +733,9 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
             // Compute the number of senior tranche shares to mint for this ST asset deposit
             stSharesMinted = _navToShares(stConvertTrancheUnitsToNAVUnits(_stAssets), state.stEffectiveNAV, totalSTShares);
             // Credit the deposited ST underlying to the senior raw NAV and mint the corresponding senior shares to the kernel (raises supply only)
+            // The frozen senior share rate keeps the add priced at the pre-op rate, so the deposited underlying need not be committed here: the final LT_DEPOSIT post-op commits it via its deltaSTRawNAV >= 0 branch
             $.stOwnedYieldBearingAssets = $.stOwnedYieldBearingAssets + _stAssets;
             IRoycoVaultTranche(SENIOR_TRANCHE).mint(address(this), stSharesMinted);
-            // Commit the deposited ST underlying into the committed senior effective NAV before adding liquidity
-            // NOTE: Transiently exempt from satisfying the market's requirements: the final post-op sync checks that all requirements are satisfied
-            _postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, ZERO_NAV_UNITS, false);
         }
 
         // Add the minted ST shares and supplied quote assets into the liquidity venue with the specified slippage check
@@ -745,7 +746,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         // Credit the minted LT tranche assets (LP token) to the liquidity tranche
         $.ltOwnedYieldBearingAssets = $.ltOwnedYieldBearingAssets + ltAssetsOut;
 
-        // Execute a post-deposit sync on accounting, enforcing the market's coverage and liquidity requirements only when senior exposure was added
+        // Execute a post-deposit sync on accounting: it commits both the ST-leg deposit (deltaSTRawNAV >= 0) and the new pool depth (deltaLTRawNAV > 0), enforcing the market's coverage and liquidity requirements only when senior exposure was added
         // A quote-only deposit mints no senior shares: it cannot worsen coverage and only deepens liquidity, so it is guaranteed to be at least coverage and liquidity neutral
         _postOpSyncTrancheAccounting(Operation.LT_DEPOSIT, ZERO_NAV_UNITS, (_stAssets != ZERO_TRANCHE_UNITS));
     }
@@ -776,7 +777,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
         // Compute the LT assets
         AssetClaims memory userAssetClaims = UtilsLib.scaleAssetClaims(ltClaims, _ltShares, totalLTShares);
-        require(userAssetClaims.ltAssets != ZERO_TRANCHE_UNITS || userAssetClaims.stShares != 0, INSUFFICIENT_OUTPUT_AMOUNT());
 
         // Derive the ST total claims and supply from the synced state
         stClaims = _deriveTrancheAssetClaims(TrancheType.SENIOR, state);
@@ -855,10 +855,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     function _preOpSyncTrancheAccounting() internal virtual returns (SyncedAccountingState memory state) {
         // Execute the pre-op PnL synchronization via the accountant
         state = IRoycoDayAccountant(ACCOUNTANT).preOpSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
-
-        // Mint the protocol fee shares and the liquidity premium shares accrued by this sync
+        // Mint the fee and liquidity premium shares accrued by this sync, freezing the senior share rate for any liquidity venue before the premium is reinvested
         _processFeesAndLiquidityPremium(state);
-
         // Commit the liquidity tranche's fresh raw NAV against the post-sync market state
         _commitPostSyncLiquidityTrancheRawNAV(state);
     }
@@ -879,10 +877,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     {
         // Execute the pre-op PnL synchronization via the accountant
         state = IRoycoDayAccountant(ACCOUNTANT).preOpSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
-
-        // Mint the protocol fee shares and the liquidity premium shares accrued by this sync
+        // Mint the fee and liquidity premium shares accrued by this sync, freezing the senior share rate for any liquidity venue before the premium is reinvested
         _processFeesAndLiquidityPremium(state);
-
         // Commit the liquidity tranche's fresh raw NAV against the post-sync market state
         _commitPostSyncLiquidityTrancheRawNAV(state);
 
@@ -944,6 +940,9 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         // at one joint price against the pre-sync senior supply, so neither carve-out dilutes the other
         (uint256 liquidityPremiumShares, uint256 stProtocolFeeShares, uint256 stTotalSupplyAfterMints) =
             _computeSTFeeAndLiquidityPremiumSharesToMint(_state, IERC20(SENIOR_TRANCHE).totalSupply());
+
+        // Freeze the senior share rate at this sync's post-mint value before the reinvestment (or any venue mark read) consumes it, so an inline senior share move cannot shift the pool's senior-leg mark
+        _cacheSTShareRate(_state.stEffectiveNAV, stTotalSupplyAfterMints);
 
         // Mint the liquidity premium as senior tranche shares held by the kernel on behalf of the liquidity tranche
         // The premium is already booked into the senior effective NAV, so minting these shares only reassigns senior appreciation to the LT
@@ -1028,14 +1027,14 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @dev Both are priced over the same pre-sync supply against one shared denominator, the NAV the pre-existing shares retain net of the
      *      premium and fee (stEffectiveNAV - premium - fee), so neither dilutes the other. Both round down, so floor dust accrues to the pre-existing shares
      * @param _state The synced accounting state carrying the senior effective NAV, the liquidity premium, and the ST protocol fee
-     * @param _seniorTrancheTotalSupply The total senior tranche share supply before this sync mints the premium and fee shares
+     * @param _stTotalSupply The total senior tranche share supply before this sync mints the premium and fee shares
      * @return liquidityPremiumShares The senior shares to mint as the LT liquidity premium, rounded down
      * @return stProtocolFeeShares The senior shares to mint as the ST protocol fee, rounded down
      * @return stTotalSupplyAfterMints The total senior tranche supply after minting the premium and fee shares
      */
     function _computeSTFeeAndLiquidityPremiumSharesToMint(
         SyncedAccountingState memory _state,
-        uint256 _seniorTrancheTotalSupply
+        uint256 _stTotalSupply
     )
         internal
         pure
@@ -1046,9 +1045,9 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         NAV_UNIT retainedSeniorNAV = (_state.stEffectiveNAV - _state.ltLiquidityPremium - _state.stProtocolFee);
 
         // Convert each carve-out into senior shares against the retained NAV over the pre-sync supply (the zero-NAV boundary is handled in _navToShares)
-        liquidityPremiumShares = _navToShares(_state.ltLiquidityPremium, retainedSeniorNAV, _seniorTrancheTotalSupply);
-        stProtocolFeeShares = _navToShares(_state.stProtocolFee, retainedSeniorNAV, _seniorTrancheTotalSupply);
-        stTotalSupplyAfterMints = _seniorTrancheTotalSupply + liquidityPremiumShares + stProtocolFeeShares;
+        liquidityPremiumShares = _navToShares(_state.ltLiquidityPremium, retainedSeniorNAV, _stTotalSupply);
+        stProtocolFeeShares = _navToShares(_state.stProtocolFee, retainedSeniorNAV, _stTotalSupply);
+        stTotalSupplyAfterMints = _stTotalSupply + liquidityPremiumShares + stProtocolFeeShares;
     }
 
     /**
@@ -1444,6 +1443,26 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @dev Intentionally implemented with an empty body since inheriting contracts are not required to override this function: the cache is a pure optimization and quoters that do not cache read live
      */
     function _clearQuoterCache() internal virtual { }
+
+    /**
+     * @notice Caches the senior tranche share rate resolved by a pre-op synchronization for the duration of the operation
+     * @dev Called with the synced senior effective NAV and this sync's post-mint senior supply, before the premium is reinvested (or any venue mark is read), so a liquidity venue that prices the senior share through a rate provider can freeze the post-mint rate and value its senior leg consistently while an inline senior share mint or burn (a multi-asset deposit or redemption) moves the live supply within the operation
+     * @dev Intentionally implemented with an empty body since inheriting contracts are not required to override this function: only a kernel whose liquidity venue prices the senior share through a rate provider needs to freeze it
+     * @param _stEffectiveNAV The synced senior tranche effective NAV the cached rate is valued from
+     * @param _stTotalSupplyAfterMints The senior tranche share supply after this sync's liquidity premium and ST protocol fee shares are minted, the per-share denominator
+     */
+    function _cacheSTShareRate(NAV_UNIT _stEffectiveNAV, uint256 _stTotalSupplyAfterMints) internal virtual { }
+
+    /**
+     * @notice Decodes a transient cache slot into its populated flag and stored value
+     * @dev The single primitive shared by every quoter's transient rate cache: the top bit (CACHE_SET_MASK) marks a populated slot and the remaining bits hold the value, so an unset slot (zero) reads as a miss and a value is encoded for storage as `value | CACHE_SET_MASK`
+     * @param _cacheSlot The raw value read from a transient cache slot
+     * @return cacheHit Whether the slot holds a populated value
+     * @return value The cached value when cacheHit is true, otherwise zero
+     */
+    function _decodeCachedValue(uint256 _cacheSlot) internal pure returns (bool cacheHit, uint256 value) {
+        if (_cacheSlot & CACHE_SET_MASK != 0) return (true, _cacheSlot ^ CACHE_SET_MASK);
+    }
 
     // =============================
     // Kernel State Accessor Functions

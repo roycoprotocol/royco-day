@@ -25,9 +25,6 @@ abstract contract IdenticalAssets_ST_JT_OracleQuoter is RoycoDayKernel {
     /// @notice A sentinel value for the conversion rate, indicating that the conversion rate should be queried in real time from the specified oracle
     uint256 internal constant SENTINEL_CONVERSION_RATE = 0;
 
-    /// @dev This mask is set on the cached tranche unit to NAV unit conversion rate to indicate that it is cached
-    uint256 internal constant CACHED_TRANCHE_UNIT_TO_NAV_UNIT_CONVERSION_RATE_MASK = 1 << 255;
-
     /// @dev Value representing the scale factor of the tranche unit: 10^(TRANCHE_UNIT_DECIMALS)
     uint256 internal immutable TRANCHE_UNIT_SCALE_FACTOR;
 
@@ -129,8 +126,8 @@ abstract contract IdenticalAssets_ST_JT_OracleQuoter is RoycoDayKernel {
      * @dev This function is called at the start of a transaction to initialize the cached tranche unit to NAV unit conversion rate
      */
     function _initializeQuoterCache() internal virtual override {
-        // Get the tranche unit to NAV unit conversion rate and set the cached flag
-        cachedTrancheUnitToNAVUnitConversionRateWAD = getTrancheUnitToNAVUnitConversionRateWAD() | CACHED_TRANCHE_UNIT_TO_NAV_UNIT_CONVERSION_RATE_MASK;
+        // Get the tranche unit to NAV unit conversion rate and set the cache flag
+        cachedTrancheUnitToNAVUnitConversionRateWAD = getTrancheUnitToNAVUnitConversionRateWAD() | CACHE_SET_MASK;
     }
 
     /**
@@ -144,16 +141,13 @@ abstract contract IdenticalAssets_ST_JT_OracleQuoter is RoycoDayKernel {
 
     /**
      * @notice Returns the cached tranche unit to NAV unit conversion rate
-     * @dev If the cache is set (indicated by the mask bit), returns the cached value.
-     *      Otherwise falls back to getTrancheUnitToNAVUnitConversionRateWAD() for view function compatibility.
+     * @dev If the cache slot is populated returns the cached value, otherwise falls back to querying the rate live for view function compatibility
      * @return The tranche unit to NAV unit conversion rate
      */
     function _getCachedTrancheUnitToNAVUnitConversionRateWAD() internal view returns (uint256) {
-        uint256 _cachedTrancheUnitToNAVUnitConversionRateWAD = cachedTrancheUnitToNAVUnitConversionRateWAD;
-        // If the cache mask bit is set, use the cached value
-        if (_cachedTrancheUnitToNAVUnitConversionRateWAD & CACHED_TRANCHE_UNIT_TO_NAV_UNIT_CONVERSION_RATE_MASK != 0) {
-            return _cachedTrancheUnitToNAVUnitConversionRateWAD ^ CACHED_TRANCHE_UNIT_TO_NAV_UNIT_CONVERSION_RATE_MASK;
-        }
+        // If the cache slot is populated use the cached value
+        (bool cacheHit, uint256 conversionRateWAD) = _decodeCachedValue(cachedTrancheUnitToNAVUnitConversionRateWAD);
+        if (cacheHit) return conversionRateWAD;
         // Otherwise fall back to querying the rate directly (for view functions)
         return getTrancheUnitToNAVUnitConversionRateWAD();
     }

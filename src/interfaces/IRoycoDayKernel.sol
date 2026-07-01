@@ -85,6 +85,13 @@ interface IRoycoDayKernel {
      */
     event RoycoBlacklistUpdated(address roycoBlacklist);
 
+    /**
+     * @notice Emitted when the kernel deploys its held liquidity-premium senior shares into the liquidity tranche's venue
+     * @param stSharesReinvested The senior tranche shares drained from the kernel's held balance and deployed into the liquidity venue
+     * @param ltAssetsMinted The liquidity tranche assets minted to the liquidity tranche by the deployment
+     */
+    event LiquidityPremiumReinvested(uint256 stSharesReinvested, TRANCHE_UNIT ltAssetsMinted);
+
     /// @notice Thrown when the tranche and the kernel's corresponding tranche assets don't match
     error TRANCHE_AND_KERNEL_ASSETS_MISMATCH();
 
@@ -111,9 +118,6 @@ interface IRoycoDayKernel {
 
     /// @notice Thrown when the to address is not whitelisted on the tranche
     error ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(address to);
-
-    /// @notice Thrown when an LT multi-asset deposit/redeem produces less than the caller's specified minimum output
-    error INSUFFICIENT_OUTPUT_AMOUNT();
 
     /// @notice Thrown when an LT multi-asset deposit/redeem is made with zero of both constituent assets (ST underlying and quote)
     error MUST_DEPOSIT_NON_ZERO_ASSETS();

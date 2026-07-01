@@ -252,20 +252,25 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             require(deltaLTRawNAV > 0 && deltaSTRawNAV >= 0 && deltaJTRawNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
             stEffectiveNAV = stEffectiveNAV + toNAVUnits(deltaSTRawNAV);
         } else {
-            // Get the total value redeemed
-            NAV_UNIT totalRedemptionNAV = (toNAVUnits(-deltaSTRawNAV) + toNAVUnits(-deltaJTRawNAV));
+            // Compute the total value redeemed from ST and JT
+            NAV_UNIT totalSTAndJTRedemptionNAV = (toNAVUnits(-deltaSTRawNAV) + toNAVUnits(-deltaJTRawNAV));
             if (_op == Operation.ST_REDEEM || _op == Operation.LT_REDEEM) {
-                if (_op == Operation.LT_REDEEM) require(deltaLTRawNAV < 0, INVALID_POST_OP_STATE(_op));
-                else require(deltaLTRawNAV == 0 && totalRedemptionNAV > ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
+                if (_op == Operation.LT_REDEEM) {
+                    require(deltaLTRawNAV < 0 || (deltaLTRawNAV <= 0 && totalSTAndJTRedemptionNAV > ZERO_NAV_UNITS), INVALID_POST_OP_STATE(_op));
+                } else {
+                    require(deltaLTRawNAV == 0 && totalSTAndJTRedemptionNAV > ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
+                }
                 // Reduce JT effective NAV by the the bonus provided from its assets
                 jtEffectiveNAV = jtEffectiveNAV - _stSelfLiquidationBonusNAV;
                 // Reduce ST effective NAV by the total redemptions without the bonus provided from JT effective NAV
-                stEffectiveNAV = stEffectiveNAV - (totalRedemptionNAV - _stSelfLiquidationBonusNAV);
+                stEffectiveNAV = stEffectiveNAV - (totalSTAndJTRedemptionNAV - _stSelfLiquidationBonusNAV);
             } else if (_op == Operation.JT_REDEEM) {
                 // JT cannot get a bonus from its own NAV, and a junior redemption leaves the senior exposure and supply untouched so it cannot move the liquidity tranche mark
-                require(deltaLTRawNAV == 0 && totalRedemptionNAV > ZERO_NAV_UNITS && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
+                require(
+                    deltaLTRawNAV == 0 && totalSTAndJTRedemptionNAV > ZERO_NAV_UNITS && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op)
+                );
                 // The actual amount withdrawn from JT effective NAV could be from both tranches (its own share of its NAV, ST yield share, IL repayments, etc.)
-                jtEffectiveNAV = jtEffectiveNAV - totalRedemptionNAV;
+                jtEffectiveNAV = jtEffectiveNAV - totalSTAndJTRedemptionNAV;
                 // The withdrawing junior LP has realized its proportional share of past JT losses from coverage applied and its associated recovery optionality, rounding in favor of senior
                 if (jtCoverageImpermanentLoss != ZERO_NAV_UNITS) {
                     jtCoverageImpermanentLoss = jtCoverageImpermanentLoss.mulDiv(jtEffectiveNAV, $.lastJTEffectiveNAV, Math.Rounding.Floor);
@@ -1000,11 +1005,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     /// @inheritdoc IRoycoDayAccountant
     function getState() external view override(IRoycoDayAccountant) returns (RoycoDayAccountantState memory) {
         return _getRoycoDayAccountantStorage();
-    }
-
-    /// @inheritdoc IRoycoDayAccountant
-    function getLastSTEffectiveNAV() external view override(IRoycoDayAccountant) returns (NAV_UNIT) {
-        return _getRoycoDayAccountantStorage().lastSTEffectiveNAV;
     }
 
     /**
