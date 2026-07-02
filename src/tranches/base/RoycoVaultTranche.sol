@@ -225,23 +225,23 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // premium and protocol fee shares are minted (the kernel is the single source of truth for the post-sync supply)
         NAV_UNIT valueAllocated;
         NAV_UNIT effectiveNAV;
-        uint256 totalTrancheSharesAfterSync;
+        uint256 totalTrancheShares;
         if (TRANCHE_TYPE() == TrancheType.SENIOR) {
             SyncedAccountingState memory stateBeforeDeposit;
-            (stateBeforeDeposit, valueAllocated, totalTrancheSharesAfterSync) = IRoycoDayKernel(KERNEL).stPreviewDeposit(_assets);
+            (stateBeforeDeposit, valueAllocated, totalTrancheShares) = IRoycoDayKernel(KERNEL).stPreviewDeposit(_assets);
             effectiveNAV = stateBeforeDeposit.stEffectiveNAV;
         } else if (TRANCHE_TYPE() == TrancheType.JUNIOR) {
             SyncedAccountingState memory stateBeforeDeposit;
-            (stateBeforeDeposit, valueAllocated, totalTrancheSharesAfterSync) = IRoycoDayKernel(KERNEL).jtPreviewDeposit(_assets);
+            (stateBeforeDeposit, valueAllocated, totalTrancheShares) = IRoycoDayKernel(KERNEL).jtPreviewDeposit(_assets);
             effectiveNAV = stateBeforeDeposit.jtEffectiveNAV;
         } else {
             // The LT prices its shares at the effective NAV (value deployed into the AMM or another market-making venue plus the idle liquidity-premium senior shares), which is not
             // carried in SyncedAccountingState, so the kernel surfaces it directly as navToMintSharesAt
-            (, valueAllocated, totalTrancheSharesAfterSync, effectiveNAV) = IRoycoDayKernel(KERNEL).ltPreviewDeposit(_assets);
+            (, valueAllocated, totalTrancheShares, effectiveNAV) = IRoycoDayKernel(KERNEL).ltPreviewDeposit(_assets);
         }
 
         // Calculate the shares to be minted to the receiver against the post-sync supply, so the preview matches execution
-        shares = _convertToShares(valueAllocated, totalTrancheSharesAfterSync, effectiveNAV, Math.Rounding.Floor);
+        shares = _convertToShares(valueAllocated, totalTrancheShares, effectiveNAV, Math.Rounding.Floor);
     }
 
     /// @inheritdoc IRoycoVaultTranche

@@ -187,10 +187,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         public
         view
         override(IRoycoDayKernel)
-        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheSharesAfterSync)
+        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares)
     {
         // Preview the senior tranche state and its post-sync supply (after the premium and protocol fee shares) before the deposit
-        (stateBeforeDeposit,, totalTrancheSharesAfterSync) = previewSyncTrancheAccounting(TrancheType.SENIOR);
+        (stateBeforeDeposit,, totalTrancheShares) = previewSyncTrancheAccounting(TrancheType.SENIOR);
         // Convert the assets to NAV units
         valueAllocated = stConvertTrancheUnitsToNAVUnits(_assets);
     }
@@ -200,10 +200,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         public
         view
         override(IRoycoDayKernel)
-        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheSharesAfterSync)
+        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares)
     {
         // Preview the junior tranche state and its post-sync supply (after the protocol fee shares) before the deposit
-        (stateBeforeDeposit,, totalTrancheSharesAfterSync) = previewSyncTrancheAccounting(TrancheType.JUNIOR);
+        (stateBeforeDeposit,, totalTrancheShares) = previewSyncTrancheAccounting(TrancheType.JUNIOR);
         // Convert the assets to NAV units
         valueAllocated = jtConvertTrancheUnitsToNAVUnits(_assets);
     }
@@ -213,12 +213,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         external
         view
         override(IRoycoDayKernel)
-        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheSharesAfterSync, NAV_UNIT navToMintSharesAt)
+        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares, NAV_UNIT navToMintSharesAt)
     {
         // Preview the liquidity tranche state and its post-sync supply (after the protocol fee shares) before the deposit
-        (stateBeforeDeposit,, totalTrancheSharesAfterSync) = previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
-        // LT deposits are disabled during a fixed-term market state: a zero value allocated mints zero shares, matching the reverting deposit path
-        if (stateBeforeDeposit.marketState == MarketState.FIXED_TERM) return (stateBeforeDeposit, ZERO_NAV_UNITS, totalTrancheSharesAfterSync, ZERO_NAV_UNITS);
+        (stateBeforeDeposit,, totalTrancheShares) = previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
         // Convert the assets to NAV units
         valueAllocated = ltConvertTrancheUnitsToNAVUnits(_assets);
         // Compute the LT effective NAV prior to the deposit as the NAV to mint shares at
@@ -303,7 +301,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     function jtPreviewRedeem(uint256 _shares) public view override(IRoycoDayKernel) returns (AssetClaims memory userClaim) {
         // Preview the total claims the junior tranche has on each tranche's assets and the total shares after minting any protocol fee shares post-sync
         (, AssetClaims memory jtClaims, uint256 totalShares) = previewSyncTrancheAccounting(TrancheType.JUNIOR);
-
         // Calculate the user's claims based on the shares redeemed
         userClaim = UtilsLib.scaleAssetClaims(jtClaims, _shares, totalShares);
     }
@@ -312,10 +309,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     function ltPreviewRedeem(uint256 _shares) public view override(IRoycoDayKernel) returns (AssetClaims memory userClaim) {
         // Preview the total claims the liquidity tranche has on each tranche's assets and the total shares after minting any protocol fee shares post-sync
         (SyncedAccountingState memory state, AssetClaims memory ltClaims, uint256 totalShares) = previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
-
         // LT redemptions are disabled during a fixed-term market state: return an empty claim, matching the reverting redeem path
         if (state.marketState == MarketState.FIXED_TERM) return userClaim;
-
         // Calculate the user's claims based on the shares redeemed
         userClaim = UtilsLib.scaleAssetClaims(ltClaims, _shares, totalShares);
     }
@@ -333,7 +328,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         // ST deposits are disabled during a fixed-term market state
         if (state.marketState == MarketState.FIXED_TERM) return ZERO_TRANCHE_UNITS;
         // ST deposits are enabled as long as the market's coverage requirement is satisfied
-        // No need to include ST liquidation proceeds in the raw NAV because those assets are not exposed to any volatility
         NAV_UNIT stMaxDepositableNAV = IRoycoDayAccountant(ACCOUNTANT).maxSTDeposit(state);
         return ((stMaxDepositableNAV == MAX_NAV_UNITS) ? MAX_TRANCHE_UNITS : stConvertNAVUnitsToTrancheUnits(stMaxDepositableNAV));
     }

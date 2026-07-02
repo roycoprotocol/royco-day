@@ -290,25 +290,25 @@ interface IRoycoDayKernel {
      * @param _assets The amount of assets to deposit, denominated in the senior tranche's tranche units
      * @return stateBeforeDeposit The state of the senior tranche before the deposit, after applying the pre-op sync
      * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
-     * @return totalTrancheSharesAfterSync The senior tranche supply after the pre-op sync mints the premium and protocol fee shares
+     * @return totalTrancheShares The senior tranche supply after the pre-op sync mints the premium and protocol fee shares
      */
     function stPreviewDeposit(TRANCHE_UNIT _assets)
         external
         view
-        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheSharesAfterSync);
+        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares);
 
     /**
      * @notice Previews the deposit of a specified amount of assets into the liquidity tranche
      * @param _assets The amount of assets to deposit, denominated in the liquidity tranche's tranche units
      * @return stateBeforeDeposit The state of the liquidity tranche before the deposit, after applying the pre-op sync
      * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
-     * @return totalTrancheSharesAfterSync The liquidity tranche supply after the pre-op sync mints the protocol fee shares
+     * @return totalTrancheShares The liquidity tranche supply after the pre-op sync mints the protocol fee shares
      * @return navToMintSharesAt The pre-deposit LT effective NAV (value deployed into the AMM or another market-making venue plus the idle liquidity-premium senior shares) to mint LT shares at
      */
     function ltPreviewDeposit(TRANCHE_UNIT _assets)
         external
         view
-        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheSharesAfterSync, NAV_UNIT navToMintSharesAt);
+        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares, NAV_UNIT navToMintSharesAt);
 
     /**
      * @notice Previews a multi-asset LT deposit of (ST underlying + quote) by simulating the venue add
@@ -421,12 +421,12 @@ interface IRoycoDayKernel {
      * @param _assets The amount of assets to deposit, denominated in the junior tranche's tranche units
      * @return stateBeforeDeposit The state of the junior tranche before the deposit, after applying the pre-op sync
      * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
-     * @return totalTrancheSharesAfterSync The junior tranche supply after the pre-op sync mints the protocol fee shares
+     * @return totalTrancheShares The junior tranche supply after the pre-op sync mints the protocol fee shares
      */
     function jtPreviewDeposit(TRANCHE_UNIT _assets)
         external
         view
-        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheSharesAfterSync);
+        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares);
 
     /**
      * @notice Previews the redemption of a specified number of shares from the junior tranche
