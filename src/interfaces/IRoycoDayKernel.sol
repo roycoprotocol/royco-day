@@ -458,7 +458,7 @@ interface IRoycoDayKernel {
 
     /**
      * @notice Processes the deposit of a specified amount of assets into the liquidity tranche.
-     * @dev Enabled only in a PERPETUAL market state; reverts in a fixed-term market, where the LT is locked alongside every tranche.
+     * @dev An in-kind LT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state (including fixed-term).
      * @param _assets The amount of assets (the liquidity venue's position token) to deposit, denominated in the liquidity tranche's tranche units.
      * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units.
      * @return navToMintSharesAt The NAV at which the shares will be minted, exclusive of valueAllocated.

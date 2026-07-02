@@ -403,12 +403,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     /// @inheritdoc IRoycoDayKernel
+    /// @dev An in-kind LT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state and unbounded
     function ltMaxDeposit(address _receiver) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT) {
         // If the receiver is blacklisted or the kernel is currently paused, return zero tranche units
         if (_isBlacklisted(_receiver) || paused()) return ZERO_TRANCHE_UNITS;
-        // LT deposits are disabled during a fixed-term market state
-        if ((_previewSyncTrancheAccounting()).marketState == MarketState.FIXED_TERM) return ZERO_TRANCHE_UNITS;
-        // LT deposits are otherwise unbounded
+        // In-kind LT deposits are never gated, so the deposit is unbounded
         return MAX_TRANCHE_UNITS;
     }
 
@@ -430,10 +429,9 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         // LT redemptions are disabled during a fixed-term market state
         if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
-        // The liquidity tranche is the sole owner of the liquidity venue, so its entire claim is on the LT raw NAV (the market-making depth)
+        // An in-kind redemption pulls a proportional slice of both LT legs
         claimOnLTNAV = state.ltRawNAV;
-
-        // Otherwise the withdrawal is bounded by the liquidity requirement of the market (z <= ltRawNAV, so no cap against claimOnLTNAV is needed)
+        // The withdrawal is bounded by the market's liquidity requirement
         ltMaxWithdrawableNAV = IRoycoDayAccountant(ACCOUNTANT).maxLTWithdrawal(state);
     }
 
@@ -457,15 +455,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     /// @inheritdoc IRoycoDayKernel
-    function reinvestLiquidityPremium(uint256 _stShares)
-        external
-        virtual
-        override(IRoycoDayKernel)
-        whenNotPaused
-        restricted
-        nonReentrant
-        withQuoterCache
-    {
+    function reinvestLiquidityPremium(uint256 _stShares) external virtual override(IRoycoDayKernel) whenNotPaused restricted nonReentrant withQuoterCache {
         // Sync first so the reinvestment values the idle premium shares against fresh committed senior state (and stages any newly accrued premium)
         SyncedAccountingState memory state = _preOpSyncTrancheAccounting();
         // Reinvest the requested idle premium shares (type(uint256).max reinvests the entire idle balance) at this sync's post-mint senior share rate
@@ -652,7 +642,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     // =============================
 
     /// @inheritdoc IRoycoDayKernel
-    /// @dev LT deposits are enabled only in a PERPETUAL market state; the LT is locked alongside every tranche in a fixed-term market
+    /// @dev An in-kind LT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state and enforces no requirements
     function ltDeposit(TRANCHE_UNIT _assets)
         external
         virtual
@@ -665,8 +655,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     {
         // Execute an accounting sync to reconcile underlying PNL
         SyncedAccountingState memory state = _preOpSyncTrancheAccounting();
-        // LT deposits are disabled during a fixed-term market state
-        require(state.marketState == MarketState.PERPETUAL, DISABLED_IN_FIXED_TERM_STATE());
         // The NAV to mint tranche shares at is the pre-deposit liquidity tranche effective NAV (its MM depth in addition to its idle liquidity-premium senior shares the kernel holds)
         navToMintSharesAt = _getLiquidityTrancheEffectiveNAV(state.stEffectiveNAV, IERC20(SENIOR_TRANCHE).totalSupply());
         // The precise value allocated is the value of the deposited assets
