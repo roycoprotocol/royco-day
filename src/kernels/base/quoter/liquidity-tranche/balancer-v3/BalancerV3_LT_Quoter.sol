@@ -357,23 +357,31 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
      * @dev The min-BPT-out floors the add at the manipulation-resistant oracle's fair value (not the pool spot) less the max reinvestment slippage, so a manipulated pool cannot widen the tolerance
      * @dev Tolerates reversions to ensure a tranche operation doesn't revert on a failing reinvestment
      */
-    function _attemptLiquidityPremiumReinvestment(uint256, NAV_UNIT _stEffectiveNAV, uint256 _totalSTShares) internal override(RoycoDayKernel) {
+    function _attemptLiquidityPremiumReinvestment(
+        uint256 _stSharesToReinvest,
+        NAV_UNIT _stEffectiveNAV,
+        uint256 _totalSTShares
+    )
+        internal
+        override(RoycoDayKernel)
+    {
         // Deploy the LT's idle ST shares into its market making inventory
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
         uint256 ltOwnedSeniorTrancheShares = $.ltOwnedSeniorTrancheShares;
-        if (ltOwnedSeniorTrancheShares == 0) return;
+        // Reinvest the entire idle balance on the sentinel, else the requested amount capped at what the LT actually holds idle
+        uint256 stSharesToReinvest = Math.min(_stSharesToReinvest, ltOwnedSeniorTrancheShares);
+        if (stSharesToReinvest == 0) return;
 
         // Value the ST shares that need to be reinvested in NAV units at the synced senior share rate (effective NAV over the post-mint supply)
-        NAV_UNIT ltOwnedSeniorTrancheSharesNAV =
-            _totalSTShares == 0 ? ZERO_NAV_UNITS : _stEffectiveNAV.mulDiv(ltOwnedSeniorTrancheShares, _totalSTShares, Math.Rounding.Floor);
-        // Mark that senior NAV to its fair BPT at the manipulation-resistant oracle, then discount by the max tolerated slippage for the gate floor
-        TRANCHE_UNIT fairLTAssets = ltConvertNAVUnitsToTrancheUnits(ltOwnedSeniorTrancheSharesNAV);
-        TRANCHE_UNIT minLTAssetsOut = fairLTAssets.mulDiv((WAD - _getBalancerV3_LT_QuoterStorage().maxReinvestmentSlippageWAD), WAD, Math.Rounding.Ceil);
+        NAV_UNIT stSharesToReinvestNAV = _totalSTShares == 0 ? ZERO_NAV_UNITS : _stEffectiveNAV.mulDiv(stSharesToReinvest, _totalSTShares, Math.Rounding.Floor);
+        // Mark that senior NAV to its fair BPT at the manipulation-resistant oracle, discounted by the max tolerated slippage
+        TRANCHE_UNIT minLTAssetsOut = ltConvertNAVUnitsToTrancheUnits(stSharesToReinvestNAV)
+            .mulDiv((WAD - _getBalancerV3_LT_QuoterStorage().maxReinvestmentSlippageWAD), WAD, Math.Rounding.Ceil);
 
         // Single-sided add the ST shares through a low-level call into the Vault's callback
         // The inner unlock dispatches addBalancerV3Liquidity, which mints the BPT bounded by minLTAssetsOut and settles the shares in
         (bool reinvestmentSucceeded, bytes memory callbackReturnData) = address(_vault)
-            .call(abi.encodeCall(_vault.unlock, (abi.encodeCall(this.addBalancerV3Liquidity, (false, ltOwnedSeniorTrancheShares, uint256(0), minLTAssetsOut)))));
+            .call(abi.encodeCall(_vault.unlock, (abi.encodeCall(this.addBalancerV3Liquidity, (false, stSharesToReinvest, uint256(0), minLTAssetsOut)))));
         // On a breached gate (or any add revert) the premium shares remain idle: no state mutated here, the inner frame rolled back
         if (!reinvestmentSucceeded) return;
 
@@ -384,10 +392,10 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
         }
 
         // Debit the reinvested ST shares and credit the BPT minted from/to the LT
-        $.ltOwnedSeniorTrancheShares -= ltOwnedSeniorTrancheShares;
+        $.ltOwnedSeniorTrancheShares = ltOwnedSeniorTrancheShares - stSharesToReinvest;
         $.ltOwnedYieldBearingAssets = $.ltOwnedYieldBearingAssets + ltAssetsMinted;
 
-        emit LiquidityPremiumReinvested(ltOwnedSeniorTrancheShares, ltAssetsMinted);
+        emit LiquidityPremiumReinvested(stSharesToReinvest, ltAssetsMinted);
     }
 
     // =============================

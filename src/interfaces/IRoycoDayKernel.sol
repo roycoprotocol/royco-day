@@ -18,7 +18,7 @@ interface IRoycoDayKernel {
      * @custom:field jtAsset - The address of the base asset of the junior tranche
      * @custom:field accountant - The address of the accountant for the Royco market
      * @custom:field liquidityTranche - The address of the Royco liquidity tranche associated with this kernel
-     * @custom:field ltAsset - The base asset of the liquidity tranche (the market-making LP token)
+     * @custom:field ltAsset - The base asset of the liquidity tranche (the liquidity venue's market-making position token)
      * @custom:field enforceVaultSharesTransferWhitelist Whether to enforce the vault shares transfer whitelist
      */
     struct RoycoDayKernelConstructionParams {
@@ -155,10 +155,10 @@ interface IRoycoDayKernel {
     /// @notice Retrieves the liquidity tranche address.
     function LIQUIDITY_TRANCHE() external view returns (address liquidityTranche);
 
-    /// @notice Retrieves the liquidity tranche's base asset (the market-making LP token) address.
+    /// @notice Retrieves the liquidity tranche's base asset (the liquidity venue's market-making position token) address.
     function LT_ASSET() external view returns (address ltAsset);
 
-    /// @notice Retrieves the quote asset paired against the senior share in the LP token.
+    /// @notice Retrieves the quote asset paired against the senior share in the liquidity venue.
     function QUOTE_ASSET() external view returns (address quoteAsset);
 
     /**
@@ -239,6 +239,13 @@ interface IRoycoDayKernel {
     function syncTrancheAccounting() external returns (SyncedAccountingState memory state);
 
     /**
+     * @notice Syncs the tranche accounting and attempts to reinvest the liquidity tranche's idle liquidity-premium senior shares into its market-making inventory
+     * @dev Values the reinvested shares against the freshly synced senior share rate, so a smaller amount can clear the venue's slippage gate when reinvesting the entire idle balance would not
+     * @param _stShares The amount of idle liquidity-premium senior shares to reinvest, or type(uint256).max to reinvest the entire idle balance
+     */
+    function reinvestLiquidityPremium(uint256 _stShares) external;
+
+    /**
      * @notice Previews a synchronization of the raw and effective NAVs of both tranches
      * @dev Does not mutate any state
      * @param _trancheType An enumerator indicating which tranche to execute this preview for
@@ -305,12 +312,12 @@ interface IRoycoDayKernel {
 
     /**
      * @notice Previews a multi-asset LT deposit of (ST underlying + quote) by simulating the venue add
-     * @dev NON-VIEW: routes the venue add through its query mode (e.g. Balancer's `Vault.quote`), so callers must staticcall it
+     * @dev NON-VIEW: routes the venue add through its simulation/query mode, so callers must staticcall it
      * @param _stAssets The ST underlying leg, in the ST asset's native units
      * @param _quoteAssets The quote asset leg
      * @return valueAllocated The NAV value of the LT assets the add would mint
      * @return navToMintSharesAt The pre-deposit LT effective NAV that LT shares would be minted against
-     * @return ltAssetsOut The LT tranche assets (LP token) the add would mint
+     * @return ltAssetsOut The LT tranche assets the add would mint
      */
     function ltPreviewDepositMultiAsset(
         TRANCHE_UNIT _stAssets,
@@ -321,7 +328,7 @@ interface IRoycoDayKernel {
 
     /**
      * @notice Previews a multi-asset LT redemption of _ltShares by simulating the proportional venue removal and the senior unwind
-     * @dev NON-VIEW: routes the venue removal through its query mode (e.g. Balancer's `Vault.quote`), so callers must staticcall it
+     * @dev NON-VIEW: routes the venue removal through its simulation/query mode, so callers must staticcall it
      * @param _ltShares The number of LT shares to redeem
      * @return stClaims The ST redemption asset claims that would be transferred to the receiver, denominated in the respective tranches' tranche units
      * @return quoteAssets The quote assets the removal would withdraw to the receiver
@@ -452,7 +459,7 @@ interface IRoycoDayKernel {
     /**
      * @notice Processes the deposit of a specified amount of assets into the liquidity tranche.
      * @dev Enabled only in a PERPETUAL market state; reverts in a fixed-term market, where the LT is locked alongside every tranche.
-     * @param _assets The amount of assets (the LP token) to deposit, denominated in the liquidity tranche's tranche units.
+     * @param _assets The amount of assets (the liquidity venue's position token) to deposit, denominated in the liquidity tranche's tranche units.
      * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units.
      * @return navToMintSharesAt The NAV at which the shares will be minted, exclusive of valueAllocated.
      */
@@ -468,17 +475,17 @@ interface IRoycoDayKernel {
     function ltRedeem(uint256 _shares, address _receiver, bool _bypassRedemptionRestrictions) external returns (AssetClaims memory userAssetClaims);
 
     /**
-     * @notice Atomically enters the liquidity tranche with the LP token's constituent assets: deposits ST underlying (minting senior
-     *         shares), single-sided adds (senior shares + quote) into the liquidity venue to mint the LT tranche assets, then deposits them into the LT
+     * @notice Atomically enters the liquidity tranche with the LT assets' constituent assets: deposits ST underlying (minting senior
+     *         shares), adds (senior shares + quote) into the liquidity venue to mint the LT tranche assets, then deposits them into the LT
      * @dev Assumes the ST underlying and quote have been transferred to the kernel before this call (by the LT tranche)
      * @dev Enabled in a PERPETUAL market state, and in a fixed-term market only for a quote-only deposit (_stAssets == 0) that mints no senior shares; an ST-leg deposit reverts in a fixed-term market
      * @dev The combined new senior exposure is gated by the market's coverage and liquidity requirements; reverts if either is unsatisfied
      * @param _stAssets The amount of ST underlying (the senior tranche's base asset) to deposit, denominated in ST tranche units
-     * @param _quoteAssets The amount of quote asset to add as the second pool leg
-     * @param _minLTAssetsOut The minimum LT tranche assets (LP token) the liquidity add must mint (slippage bound against an unfavorable pool state)
+     * @param _quoteAssets The amount of quote asset to add as the second venue leg
+     * @param _minLTAssetsOut The minimum LT tranche assets the liquidity add must mint (slippage bound against an unfavorable venue state)
      * @return valueAllocated The value of the minted LT tranche assets, denominated in the kernel's NAV units
      * @return navToMintSharesAt The LT effective NAV at which the LT shares will be minted (pre-deposit)
-     * @return ltAssetsOut The amount of LT tranche assets (LP token) minted and credited to the liquidity tranche
+     * @return ltAssetsOut The amount of LT tranche assets minted and credited to the liquidity tranche
      */
     function ltDepositMultiAsset(
         TRANCHE_UNIT _stAssets,
@@ -489,9 +496,9 @@ interface IRoycoDayKernel {
         returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut);
 
     /**
-     * @notice Atomically exits the liquidity tranche to the LP token's constituent assets: proportionally removes the LP-token slice,
-     *         redeems the pooled senior shares to ST underlying, and returns (ST underlying + quote) to the receiver
-     * @param _ltShares The number of LT shares being redeemed (used to size the proportional LP-token slice)
+     * @notice Atomically exits the liquidity tranche to the LT assets' constituent assets: proportionally removes the LT-asset slice,
+     *         redeems the venue-held senior shares to ST underlying, and returns (ST underlying + quote) to the receiver
+     * @param _ltShares The number of LT shares being redeemed (used to size the proportional LT-asset slice)
      * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must return (slippage bound)
      * @param _minQuoteAssetsOut The minimum quote to return (slippage bound)
      * @param _receiver The address that receives the ST underlying and quote
