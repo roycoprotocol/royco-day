@@ -189,21 +189,6 @@ interface IRoycoVaultTranche is IERC20Metadata {
     function mint(address _to, uint256 _shares) external;
 
     /**
-     * @notice Burns shares from the caller
-     * @dev Only callable by the kernel during accounting synchronization
-     * @param _shares The number of shares to burn
-     */
-    function burn(uint256 _shares) external;
-
-    /**
-     * @notice Burns shares from the specified account
-     * @dev Only callable by the kernel during accounting synchronization
-     * @param _account The address to burn shares from
-     * @param _shares The number of shares to burn
-     */
-    function burnFrom(address _account, uint256 _shares) external;
-
-    /**
      * @notice Seizes shares from a user and transfers them to the receiver
      * @dev Only callable by a designated admin for compliance reasons
      * @dev Bypasses the balance update hook

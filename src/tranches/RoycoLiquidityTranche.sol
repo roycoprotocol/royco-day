@@ -39,16 +39,6 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         return TrancheType.LIQUIDITY;
     }
 
-    /// @inheritdoc IRoycoVaultTranche
-    function burn(uint256 _shares) public override(RoycoVaultTranche, IRoycoVaultTranche) {
-        super.burn(_shares);
-    }
-
-    /// @inheritdoc IRoycoVaultTranche
-    function burnFrom(address _account, uint256 _shares) public override(RoycoVaultTranche, IRoycoVaultTranche) {
-        super.burnFrom(_account, _shares);
-    }
-
     // =============================
     // Multi-Asset Deposit and Redeem Functions
     // =============================

@@ -26,21 +26,6 @@ contract RoycoSeniorTranche is RoycoVaultTranche, IRoycoSeniorTranche {
         __RoycoTranche_init(_stParams);
     }
 
-    /// @inheritdoc RoycoVaultTranche
-    function TRANCHE_TYPE() public pure virtual override(RoycoVaultTranche, IRoycoVaultTranche) returns (TrancheType) {
-        return TrancheType.SENIOR;
-    }
-
-    /// @inheritdoc IRoycoVaultTranche
-    function burn(uint256 _shares) public override(RoycoVaultTranche, IRoycoVaultTranche) {
-        super.burn(_shares);
-    }
-
-    /// @inheritdoc IRoycoVaultTranche
-    function burnFrom(address _account, uint256 _shares) public override(RoycoVaultTranche, IRoycoVaultTranche) {
-        super.burnFrom(_account, _shares);
-    }
-
     /// @inheritdoc IRoycoSeniorTranche
     function mintLiquidityPremiumShares(
         address _to,
@@ -49,15 +34,18 @@ contract RoycoSeniorTranche is RoycoVaultTranche, IRoycoSeniorTranche {
         external
         virtual
         override(IRoycoSeniorTranche)
+        onlyKernel
         returns (uint256 totalTrancheShares)
     {
-        // Only the kernel can mint liquidity premium shares based on a sync
-        require(msg.sender == KERNEL, ONLY_KERNEL());
-
         // Mint the precomputed liquidity premium shares to the holder (the kernel custodies them for the liquidity tranche)
         if (_liquidityPremiumShares != 0) _mint(_to, _liquidityPremiumShares);
 
         totalTrancheShares = totalSupply();
         emit LiquidityPremiumSharesMinted(_to, _liquidityPremiumShares, totalTrancheShares);
+    }
+
+    /// @inheritdoc RoycoVaultTranche
+    function TRANCHE_TYPE() public pure virtual override(RoycoVaultTranche, IRoycoVaultTranche) returns (TrancheType) {
+        return TrancheType.SENIOR;
     }
 }

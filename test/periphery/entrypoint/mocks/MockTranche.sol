@@ -92,11 +92,11 @@ contract MockTranche is IRoycoVaultTranche, ERC20 {
 
     /// @notice Burns shares from the caller (used by entry point for yield forfeiture)
     /// @param _amount Amount of shares to burn
-    function burn(uint256 _amount) external override {
+    function burn(uint256 _amount) external {
         _burn(msg.sender, _amount);
     }
 
-    function burnFrom(address _account, uint256 _amount) external override {
+    function burnFrom(address _account, uint256 _amount) external {
         _burn(_account, _amount);
     }
 

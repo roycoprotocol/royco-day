@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
 import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -805,7 +806,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         // Burn the redeemed senior shares and withdraw the bonus-adjusted ST claims to the receiver
         // The quote assets were remitted in the venue removal above
         // NOTE: The final post-op accounts for this ST redemption in addition to the preceding LT redemption in one batch call
-        IRoycoVaultTranche(SENIOR_TRANCHE).burn(stSharesToRedeem);
+        ERC20BurnableUpgradeable(SENIOR_TRANCHE).burn(stSharesToRedeem);
         _withdrawAssets(stClaims, _receiver);
 
         // Execute a post-redeem sync on accounting with the applied ST liquidation bonus

@@ -32,6 +32,12 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     /// @inheritdoc IRoycoVaultTranche
     address public immutable override(IRoycoVaultTranche) KERNEL;
 
+    /// @dev Permissions the function to only be callable by the kernel, the single source of truth for sync-driven share mints
+    modifier onlyKernel() {
+        require(msg.sender == KERNEL, ONLY_KERNEL());
+        _;
+    }
+
     /**
      * @notice Constructs the Royco vault tranche
      * @param _asset The underlying asset for the tranche
@@ -135,11 +141,9 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         external
         virtual
         override(IRoycoVaultTranche)
+        onlyKernel
         returns (uint256 totalTrancheShares)
     {
-        // Only the kernel can mint protocol fee shares based on a sync
-        require(msg.sender == KERNEL, ONLY_KERNEL());
-
         // Mint the precomputed protocol fee shares to the recipient (the kernel prices them jointly with the liquidity premium)
         if (_protocolFeeShares != 0) _mint(_protocolFeeRecipient, _protocolFeeShares);
 
@@ -206,12 +210,12 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     }
 
     /// @inheritdoc ERC20BurnableUpgradeable
-    function burn(uint256 _shares) public virtual override(ERC20BurnableUpgradeable, IRoycoVaultTranche) whenNotPaused restricted {
+    function burn(uint256 _shares) public virtual override(ERC20BurnableUpgradeable) whenNotPaused restricted {
         super.burn(_shares);
     }
 
     /// @inheritdoc ERC20BurnableUpgradeable
-    function burnFrom(address _account, uint256 _shares) public virtual override(ERC20BurnableUpgradeable, IRoycoVaultTranche) whenNotPaused restricted {
+    function burnFrom(address _account, uint256 _shares) public virtual override(ERC20BurnableUpgradeable) whenNotPaused restricted {
         super.burnFrom(_account, _shares);
     }
 

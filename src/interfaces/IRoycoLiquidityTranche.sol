@@ -16,33 +16,35 @@ interface IRoycoLiquidityTranche is IRoycoVaultTranche {
     /// @notice Thrown when a multi-asset deposit is made with zero of both constituent assets (ST underlying and quote)
     error MUST_DEPOSIT_NON_ZERO_ASSETS();
 
-    /// @notice Emitted on a multi-asset LT deposit (ST underlying + quote -> LP token -> LT shares)
-    /// @param caller The address that initiated the deposit
-    /// @param receiver The address that received the minted LT shares
-    /// @param stAssets The ST underlying deposited, in the ST asset's native units
-    /// @param quoteAssets The quote asset paired against the minted senior shares
-    /// @param trancheAssetsMinted The LT tranche assets (the LP token) minted from the liquidity add and deposited into the LT
-    /// @param shares The LT shares minted to the receiver
-    event MultiAssetDeposit(
-        address indexed caller, address indexed receiver, uint256 stAssets, uint256 quoteAssets, uint256 trancheAssetsMinted, uint256 shares
-    );
+    /**
+     * @notice Emitted on a multi-asset LT deposit (ST underlying + quote -> LP token -> LT shares)
+     * @param caller The address that initiated the deposit
+     * @param receiver The address that received the minted LT shares
+     * @param stAssets The ST underlying deposited, denominated in the ST asset's native units
+     * @param quoteAssets The quote asset paired against the minted senior shares
+     * @param ltAssetsMinted The LT tranche assets (the LP token) minted from the liquidity add and deposited into the LT
+     * @param shares The number of LT shares minted to the receiver
+     */
+    event MultiAssetDeposit(address indexed caller, address indexed receiver, uint256 stAssets, uint256 quoteAssets, uint256 ltAssetsMinted, uint256 shares);
 
-    /// @notice Emitted on a multi-asset LT redemption (LT shares -> LP token -> ST underlying + quote)
-    /// @param caller The address that initiated the redemption
-    /// @param receiver The address that received the ST underlying and quote
-    /// @param owner The address whose LT shares were burned
-    /// @param shares The LT shares redeemed
-    /// @param stClaims The ST redemption asset claims transferred to the receiver
-    /// @param quoteAssets The quote transferred to the receiver
+    /**
+     * @notice Emitted on a multi-asset LT redemption (LT shares -> LP token -> ST underlying + quote)
+     * @param caller The address that initiated the redemption
+     * @param receiver The address that received the ST underlying and quote
+     * @param owner The address whose LT shares were burned
+     * @param shares The number of LT shares redeemed
+     * @param stClaims The ST redemption asset claims transferred to the receiver
+     * @param quoteAssets The quote transferred to the receiver
+     */
     event MultiAssetRedeem(address indexed caller, address indexed receiver, address indexed owner, uint256 shares, AssetClaims stClaims, uint256 quoteAssets);
 
     /**
      * @notice Enters the LT with the LP token's constituent assets: ST underlying + quote
      * @dev Pulls the ST underlying and quote from the caller to the kernel, which mints senior shares, single-sided
      *      adds them with the quote into the liquidity venue to mint the LT tranche assets (LP token), and deposits them into the LT
-     * @param _stAssets The amount of ST underlying (the senior tranche's base asset) to deposit, in the ST asset's native units
+     * @param _stAssets The amount of ST underlying (the senior tranche's base asset) to deposit, denominated in the ST asset's native units
      * @param _quoteAssets The amount of quote asset to pair against the minted senior shares
-     * @param _minLTAssetsOut The minimum LP token the liquidity add must mint (slippage bound against an unfavorable pool state), in the LT asset's native units
+     * @param _minLTAssetsOut The minimum LP token the liquidity add must mint (slippage bound against an unfavorable pool state), denominated in the LT asset's native units
      * @param _receiver The address that receives the minted LT shares
      * @return shares The number of LT shares minted to the receiver
      */
@@ -51,7 +53,7 @@ interface IRoycoLiquidityTranche is IRoycoVaultTranche {
     /**
      * @notice Previews a multi-asset LT deposit of (ST underlying + quote): the LT shares it would mint
      * @dev NON-VIEW: simulates the venue add via its query mode, so callers must staticcall it (mirrors Balancer's `query*` convention)
-     * @param _stAssets The ST underlying leg, in the ST asset's native units
+     * @param _stAssets The ST underlying leg, denominated in the ST asset's native units
      * @param _quoteAssets The quote asset leg
      * @return shares The LT shares that would be minted to a receiver
      */
