@@ -692,9 +692,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
         // Execute a post-redeem sync on accounting, enforcing the market's liquidity requirement post-redemption
         // LT redemption is exempt from satisfying the liquidity requirement once coverage utilization reaches its liquidation threshold
-        _postOpSyncTrancheAccounting(
-            Operation.LT_REDEEM, ZERO_NAV_UNITS, (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD)
-        );
+        _postOpSyncTrancheAccounting(Operation.LT_REDEEM, ZERO_NAV_UNITS, (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD));
     }
 
     // =============================

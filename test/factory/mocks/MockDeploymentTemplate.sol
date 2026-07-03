@@ -174,8 +174,7 @@ contract MockDeploymentTemplate is IBaseTemplate {
         } else if (primitive == Primitive.DeployProxy) {
             // Point the proxy at an initializable implementation with valid (non-empty) init data.
             address impl = address(new InitTarget());
-            (lastDeployedProxy, lastAlreadyDeployed) =
-                ROYCO_FACTORY.deployDeterministicProxy(impl, abi.encodeCall(InitTarget.initialize, ()), salt);
+            (lastDeployedProxy, lastAlreadyDeployed) = ROYCO_FACTORY.deployDeterministicProxy(impl, abi.encodeCall(InitTarget.initialize, ()), salt);
         } else if (primitive == Primitive.SetTargetFunctionRole) {
             ROYCO_FACTORY.setMarketTargetFunctionRole(roleTarget, roleSelector, roleId);
         } else if (primitive == Primitive.GrantRole) {
