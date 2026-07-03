@@ -349,11 +349,10 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @inheritdoc ERC20PausableUpgradeable
     function _update(address _from, address _to, uint256 _value) internal override(ERC20PausableUpgradeable, ERC20Upgradeable) whenNotPaused {
-        // Call the kernel pre-balance update hook to assert that the balance update is valid
+        // Call the kernel's pre-balance update hook to assert that the balance update is valid
         IRoycoDayKernel(KERNEL).preTrancheBalanceUpdateHook(msg.sender, _from, _to, _value);
 
         // Call the parent contract update function to update the balance
-        // NOTE: This will execute even if the tranche is in a paused state
         ERC20Upgradeable._update(_from, _to, _value);
     }
 }
