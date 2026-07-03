@@ -23,7 +23,6 @@ uint64 constant ST_LP_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ST_LP_RO
 uint64 constant JT_LP_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_JT_LP_ROLE"))));
 uint64 constant LT_LP_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_LT_LP_ROLE"))));
 uint64 constant BURNER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_BURNER_ROLE"))));
-uint64 constant TRANSFER_AGENT_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_TRANSFER_AGENT_ROLE"))));
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // KERNEL ROLES

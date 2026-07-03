@@ -10,9 +10,6 @@ import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
  * @title RoycoSeniorTranche
  * @author Ankur Dubey, Shivaansh Kapoor
  * @notice Senior tranche implementation for Royco markets
- * @dev Inherits from RoycoVaultTranche and specifies SENIOR as the tranche type
- * @dev Carries the senior-specific liquidity premium share mint (IRoycoSeniorTranche): the premium is senior yield
- *      reassigned to the liquidity tranche, so it is paid as newly minted senior shares
  */
 contract RoycoSeniorTranche is RoycoVaultTranche, IRoycoSeniorTranche {
     constructor(address _asset, address _kernel) RoycoVaultTranche(_asset, _kernel) { }

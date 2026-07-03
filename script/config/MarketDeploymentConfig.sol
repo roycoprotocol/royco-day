@@ -106,8 +106,6 @@ abstract contract MarketDeploymentConfig {
         bytes ydmSpecificParams;
         // Liquidity tranche: the Gyro E-CLP {ST_share, quote} pool the LT BPT is minted from.
         BalancerV3DeploymentTemplate.GyroECLPPoolParams gyroECLPPoolParams;
-        // Compliance
-        address transferAgentAddress;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -240,8 +238,7 @@ abstract contract MarketDeploymentConfig {
                     yieldShareAtZeroUtilWAD: 0.06e18, yieldShareAtTargetUtilWAD: 0.06e18, yieldShareAtFullUtilWAD: 0.18e18, maxAdaptationSpeedWAD: 0
                 })
             ),
-            gyroECLPPoolParams: demoGyroECLPPoolParams(DAY_DEMO, usdc),
-            transferAgentAddress: address(0)
+            gyroECLPPoolParams: demoGyroECLPPoolParams(DAY_DEMO, usdc)
         });
     }
 

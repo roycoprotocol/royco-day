@@ -122,10 +122,10 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // It is expected that the kernel transfers the assets directly to the receiver
         claims =
         (TRANCHE_TYPE() == TrancheType.SENIOR
-                ? IRoycoDayKernel(KERNEL).stRedeem(_shares, _receiver, false)
+                ? IRoycoDayKernel(KERNEL).stRedeem(_shares, _receiver)
                 : TRANCHE_TYPE() == TrancheType.JUNIOR
-                    ? IRoycoDayKernel(KERNEL).jtRedeem(_shares, _receiver, false)
-                    : IRoycoDayKernel(KERNEL).ltRedeem(_shares, _receiver, false));
+                    ? IRoycoDayKernel(KERNEL).jtRedeem(_shares, _receiver)
+                    : IRoycoDayKernel(KERNEL).ltRedeem(_shares, _receiver));
 
         // Burn shares after kernel processes redemption (kernel depends on pre-burn total supply)
         _burn(_owner, _shares);
@@ -156,57 +156,6 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         require(_to != address(0), ERC20InvalidReceiver(address(0)));
         require(_shares != 0, MUST_MINT_NON_ZERO_SHARES());
         _mint(_to, _shares);
-    }
-
-    // =============================
-    // Tranche Compliance Functions
-    // =============================
-
-    /// @inheritdoc IRoycoVaultTranche
-    function seizeShares(address _from, address _receiver, uint256 _shares) external virtual override(IRoycoVaultTranche) restricted {
-        // Basic sanity checks on the seizure
-        require(_from != address(0), NULL_ADDRESS());
-        require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
-        require(_shares != 0, MUST_REQUEST_NON_ZERO_SHARES());
-
-        // Transfer the shares to the receiver
-        // Bypass the balance update hook
-        super._update(_from, _receiver, _shares);
-
-        emit SharesSeized(msg.sender, _from, _receiver, _shares);
-    }
-
-    /// @inheritdoc IRoycoVaultTranche
-    function seizeAndRedeemShares(
-        address _from,
-        address _receiver,
-        uint256 _shares
-    )
-        external
-        virtual
-        override(IRoycoVaultTranche)
-        restricted
-        returns (AssetClaims memory claims)
-    {
-        // Basic sanity checks on the seizure
-        require(_from != address(0), NULL_ADDRESS());
-        require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
-        require(_shares != 0, MUST_REQUEST_NON_ZERO_SHARES());
-
-        // Force process the withdrawal from the Royco market
-        // It is expected that the kernel transfers the assets directly to the receiver
-        claims =
-        (TRANCHE_TYPE() == TrancheType.SENIOR
-                ? IRoycoDayKernel(KERNEL).stRedeem(_shares, _receiver, true)
-                : TRANCHE_TYPE() == TrancheType.JUNIOR
-                    ? IRoycoDayKernel(KERNEL).jtRedeem(_shares, _receiver, true)
-                    : IRoycoDayKernel(KERNEL).ltRedeem(_shares, _receiver, true));
-
-        // Burn shares after kernel processes redemption
-        // Bypass the balance update hook
-        super._update(_from, address(0), _shares);
-
-        emit SharesSeizedAndRedeemed(msg.sender, _from, _receiver, claims, _shares);
     }
 
     /// @inheritdoc ERC20BurnableUpgradeable

@@ -20,8 +20,7 @@ import {
     JT_LP_ROLE,
     LP_ROLE_ADMIN_ROLE,
     ST_LP_ROLE,
-    SYNC_ROLE,
-    TRANSFER_AGENT_ROLE
+    SYNC_ROLE
 } from "../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../src/factory/RoycoFactory.sol";
 import { BalancerV3DeploymentTemplate } from "../src/factory/templates/BalancerV3DeploymentTemplate.sol";
@@ -195,7 +194,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         address deployerAddress;
         address deployerAdminAddress;
         address protocolFeeRecipientAddress;
-        address transferAgentAddress;
     }
 
     /// @notice A single role assignment applied to the AccessManager.
@@ -234,8 +232,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
                 guardianAddress: chainConfig.guardianAddress,
                 deployerAddress: chainConfig.deployerAddress,
                 deployerAdminAddress: chainConfig.deployerAdminAddress,
-                protocolFeeRecipientAddress: chainConfig.protocolFeeRecipient,
-                transferAgentAddress: marketConfig.transferAgentAddress
+                protocolFeeRecipientAddress: chainConfig.protocolFeeRecipient
             })
         );
 
@@ -299,7 +296,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
     /// @notice Builds the role assignments applied to the AccessManager (surface-compatible with the legacy helper).
     function generateRolesAssignments(RoleAssignmentAddresses memory _addresses) public pure returns (RoleAssignment[] memory roleAssignments) {
-        roleAssignments = new RoleAssignment[](14);
+        roleAssignments = new RoleAssignment[](13);
         roleAssignments[0] = _assignment(ADMIN_PAUSER_ROLE, _addresses.pauserAddress);
         roleAssignments[1] = _assignment(ADMIN_UPGRADER_ROLE, _addresses.upgraderAddress);
         roleAssignments[2] = _assignment(SYNC_ROLE, _addresses.syncRoleAddress);
@@ -313,7 +310,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         roleAssignments[10] = _assignment(GUARDIAN_ROLE, _addresses.guardianAddress);
         roleAssignments[11] = _assignment(DEPLOYER_ROLE, _addresses.deployerAddress);
         roleAssignments[12] = _assignment(DEPLOYER_ROLE_ADMIN_ROLE, _addresses.deployerAdminAddress);
-        roleAssignments[13] = _assignment(TRANSFER_AGENT_ROLE, _addresses.transferAgentAddress);
     }
 
     function _assignment(uint64 _role, address _assignee) private pure returns (RoleAssignment memory) {
@@ -335,7 +331,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (role == GUARDIAN_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: ADMIN_ROLE, executionDelay: 0 });
         if (role == DEPLOYER_ROLE) return RoleConfig({ adminRole: DEPLOYER_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == DEPLOYER_ROLE_ADMIN_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == TRANSFER_AGENT_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: ADMIN_ROLE, executionDelay: 0 });
         if (role == ADMIN_FACTORY_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         revert UNKNOWN_ROLE(role);
     }

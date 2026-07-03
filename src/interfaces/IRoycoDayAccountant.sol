@@ -285,8 +285,8 @@ interface IRoycoDayAccountant {
      * @dev When enforcement is requested, fails fast on the coverage requirement for operations that can worsen coverage (add senior exposure or
      *      remove the junior loss-absorption buffer: ST_DEPOSIT, LT_DEPOSIT, JT_REDEEM) and on the liquidity requirement for operations that can
      *      worsen liquidity (raise the senior effective NAV or reduce the depth of the AMM or another market-making venue: ST_DEPOSIT, the multi-asset
-     *      LT_DEPOSIT, and an LT_REDEEM that pays no self-liquidation bonus). A bonus-paying LT_REDEEM is a liquidation-breach exit and is exempt; bypass
-     *      redemptions and intermediate multi-asset sub-syncs pass false, deferring enforcement to the final post-op sync that books the combined exposure
+     *      LT_DEPOSIT, and an LT_REDEEM that pays no self-liquidation bonus). A bonus-paying LT_REDEEM is a liquidation-breach exit and is exempt;
+     *      intermediate multi-asset sub-syncs pass false, deferring enforcement to the final post-op sync that books the combined exposure
      * @param _op The operation being executed in between the pre and post operation synchronizations
      * @param _stRawNAV The post-op senior tranche's raw NAV
      * @param _jtRawNAV The post-op junior tranche's raw NAV

@@ -48,25 +48,6 @@ interface IRoycoVaultTranche is IERC20Metadata {
      */
     event ProtocolFeeSharesMinted(address indexed protocolFeeRecipient, uint256 mintedProtocolFeeShares, uint256 totalTrancheShares);
 
-    /**
-     * @notice Emitted when shares are seized from the tranche
-     * @param caller The designated admin that initiated the seizure
-     * @param from The address to seize shares from
-     * @param to The address that received the seized shares
-     * @param shares The amount of shares seized
-     */
-    event SharesSeized(address indexed caller, address indexed from, address indexed to, uint256 shares);
-
-    /**
-     * @notice Emitted when shares are seized and redeemed from the tranche
-     * @param caller The designated admin that initiated the seizure and redemption
-     * @param from The address to seize shares from
-     * @param to The address that received the assets from redeeming the shares
-     * @param claims The asset claims remitted to the receiver, including claims on ST assets, JT assets, and their total NAV value
-     * @param shares The number of shares seized and redeemed
-     */
-    event SharesSeizedAndRedeemed(address indexed caller, address indexed from, address indexed to, AssetClaims claims, uint256 shares);
-
     /// @notice Thrown when a deposit would mint zero tranche shares (either zero assets or dust amount that rounds to zero shares)
     error MUST_MINT_NON_ZERO_SHARES();
 
@@ -187,25 +168,6 @@ interface IRoycoVaultTranche is IERC20Metadata {
      * @param _shares The number of shares to mint
      */
     function mint(address _to, uint256 _shares) external;
-
-    /**
-     * @notice Seizes shares from a user and transfers them to the receiver
-     * @dev Only callable by a designated admin for compliance reasons
-     * @dev Bypasses the balance update hook
-     * @param _from The address to seize shares from
-     * @param _receiver The address that will receive the seized shares
-     * @param _shares The number of shares to seize
-     */
-    function seizeShares(address _from, address _receiver, uint256 _shares) external;
-
-    /**
-     * @notice Seizes shares from a user, redeems the shares, and transfers them to the receiver
-     * @dev Only callable by a designated admin for compliance reasons
-     * @param _from The address to seize and redeem shares from
-     * @param _receiver The address that received the assets for the redeemed shares
-     * @param _shares The number of shares to seize and redeem
-     */
-    function seizeAndRedeemShares(address _from, address _receiver, uint256 _shares) external returns (AssetClaims memory claims);
 
     /**
      * @notice Mints a kernel-computed number of protocol fee shares to the specified fee recipient

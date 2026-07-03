@@ -8,7 +8,6 @@ import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
  * @title RoycoJuniorTranche
  * @author Ankur Dubey, Shivaansh Kapoor
  * @notice Junior tranche implementation for Royco markets
- * @dev Inherits from RoycoVaultTranche and specifies JUNIOR as the tranche type
  */
 contract RoycoJuniorTranche is RoycoVaultTranche {
     constructor(address _asset, address _kernel) RoycoVaultTranche(_asset, _kernel) { }

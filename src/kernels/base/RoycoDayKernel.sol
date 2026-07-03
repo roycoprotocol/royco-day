@@ -531,8 +531,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     /// @dev ST redemptions are enabled if the market is in a PERPETUAL state
     function stRedeem(
         uint256 _shares,
-        address _receiver,
-        bool _bypassRedemptionRestrictions
+        address _receiver
     )
         external
         virtual
@@ -548,7 +547,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         // Execute an accounting sync to reconcile underlying PNL
         (state, userAssetClaims, totalTrancheShares) = _preOpSyncTrancheAccounting(TrancheType.SENIOR);
         // ST redemptions are disabled during a fixed-term market state
-        require(_bypassRedemptionRestrictions || state.marketState == MarketState.PERPETUAL, DISABLED_IN_FIXED_TERM_STATE());
+        require(state.marketState == MarketState.PERPETUAL, DISABLED_IN_FIXED_TERM_STATE());
 
         // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
         // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
@@ -561,7 +560,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         // Withdraw the asset claims from each tranche with the self-liquidation bonus applied and transfer them to the receiver
         _withdrawAssets(userAssetClaims, _receiver);
 
-        // Execute a post-redeem sync on accounting, specifying whether or not to bypass the markets' requirements
+        // Execute a post-redeem sync on accounting
         _postOpSyncTrancheAccounting(Operation.ST_REDEEM, stSelfLiquidationBonusNAV, false);
     }
 
@@ -599,11 +598,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     /// @inheritdoc IRoycoDayKernel
-    /// @dev JT redemptions are enabled only in a PERPETUAL market state (unless restrictions are bypassed for a seizure), granted that the market's coverage requirement is satisfied post-redemption
+    /// @dev JT redemptions are enabled only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-redemption
     function jtRedeem(
         uint256 _shares,
-        address _receiver,
-        bool _bypassRedemptionRestrictions
+        address _receiver
     )
         external
         virtual
@@ -619,7 +617,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         uint256 totalTrancheShares;
         (state, userAssetClaims, totalTrancheShares) = _preOpSyncTrancheAccounting(TrancheType.JUNIOR);
         // JT redemptions are disabled during a fixed-term market state
-        require(_bypassRedemptionRestrictions || state.marketState == MarketState.PERPETUAL, DISABLED_IN_FIXED_TERM_STATE());
+        require(state.marketState == MarketState.PERPETUAL, DISABLED_IN_FIXED_TERM_STATE());
 
         // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
         // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
@@ -628,8 +626,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         // Withdraw the asset claims from each tranche and transfer them to the receiver
         _withdrawAssets(userAssetClaims, _receiver);
 
-        // Execute a post-redeem sync on accounting, specifying whether or not to bypass the markets' requirements
-        _postOpSyncTrancheAccounting(Operation.JT_REDEEM, ZERO_NAV_UNITS, !_bypassRedemptionRestrictions);
+        // Execute a post-redeem sync on accounting, enforcing the market's coverage requirement post-redemption
+        _postOpSyncTrancheAccounting(Operation.JT_REDEEM, ZERO_NAV_UNITS, true);
     }
 
     // =============================
@@ -664,11 +662,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     /// @inheritdoc IRoycoDayKernel
-    /// @dev LT redemptions are enabled only in a PERPETUAL market state (unless restrictions are bypassed for a seizure), granted that the market's liquidity requirement is satisfied post-redemption
+    /// @dev LT redemptions are enabled only in a PERPETUAL market state, granted that the market's liquidity requirement is satisfied post-redemption
     function ltRedeem(
         uint256 _shares,
-        address _receiver,
-        bool _bypassRedemptionRestrictions
+        address _receiver
     )
         external
         virtual
@@ -684,7 +681,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         uint256 totalTrancheShares;
         (state, userAssetClaims, totalTrancheShares) = _preOpSyncTrancheAccounting(TrancheType.LIQUIDITY);
         // LT redemptions are disabled during a fixed-term market state
-        require(_bypassRedemptionRestrictions || state.marketState == MarketState.PERPETUAL, DISABLED_IN_FIXED_TERM_STATE());
+        require(state.marketState == MarketState.PERPETUAL, DISABLED_IN_FIXED_TERM_STATE());
 
         // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
         // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
@@ -693,10 +690,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         // Withdraw the asset claims from each tranche and transfer them to the receiver
         _withdrawAssets(userAssetClaims, _receiver);
 
-        // Execute a post-redeem sync on accounting, specifying whether or not to bypass the markets' requirements
+        // Execute a post-redeem sync on accounting, enforcing the market's liquidity requirement post-redemption
         // LT redemption is exempt from satisfying the liquidity requirement once coverage utilization reaches its liquidation threshold
         _postOpSyncTrancheAccounting(
-            Operation.LT_REDEEM, ZERO_NAV_UNITS, (!_bypassRedemptionRestrictions && (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD))
+            Operation.LT_REDEEM, ZERO_NAV_UNITS, (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD)
         );
     }
 
