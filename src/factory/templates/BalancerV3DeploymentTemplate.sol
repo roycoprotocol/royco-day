@@ -15,6 +15,7 @@ import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-
 import { BalancerPoolToken } from "../../../lib/balancer-v3-monorepo/pkg/vault/contracts/BalancerPoolToken.sol";
 import { AccessManagedUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/access/manager/AccessManagedUpgradeable.sol";
 import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
+import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IRoycoAuth } from "../../interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
@@ -37,8 +38,7 @@ import {
     LT_LP_ROLE,
     SHARE_MINTER_ROLE,
     ST_LP_ROLE,
-    SYNC_ROLE,
-    TRANSFER_AGENT_ROLE
+    SYNC_ROLE
 } from "../RolesConfiguration.sol";
 import { BaseDeploymentTemplate } from "./base/BaseDeploymentTemplate.sol";
 
@@ -358,8 +358,8 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     }
 
     function _trancheBinding(address _tranche, uint64 _lpRole, bool _isLiquidity) private pure returns (TargetBinding memory) {
-        // Base tranche surface (10 selectors) + the two LT-only multi-asset selectors when binding the liquidity tranche
-        uint256 n = _isLiquidity ? 12 : 10;
+        // Base tranche surface (8 selectors) + the two LT-only multi-asset selectors when binding the liquidity tranche
+        uint256 n = _isLiquidity ? 10 : 8;
         bytes4[] memory s = new bytes4[](n);
         uint64[] memory r = new uint64[](n);
         s[0] = IRoycoVaultTranche.deposit.selector;
@@ -372,22 +372,18 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         r[3] = ADMIN_UNPAUSER_ROLE;
         s[4] = UUPSUpgradeable.upgradeToAndCall.selector;
         r[4] = ADMIN_UPGRADER_ROLE;
-        s[5] = IRoycoVaultTranche.seizeShares.selector;
-        r[5] = TRANSFER_AGENT_ROLE;
-        s[6] = IRoycoVaultTranche.seizeAndRedeemShares.selector;
-        r[6] = TRANSFER_AGENT_ROLE;
-        s[7] = IRoycoVaultTranche.burn.selector;
-        r[7] = BURNER_ROLE;
-        s[8] = IRoycoVaultTranche.burnFrom.selector;
-        r[8] = BURNER_ROLE;
+        s[5] = ERC20BurnableUpgradeable.burn.selector;
+        r[5] = BURNER_ROLE;
+        s[6] = ERC20BurnableUpgradeable.burnFrom.selector;
+        r[6] = BURNER_ROLE;
         // The kernel is granted SHARE_MINTER_ROLE so it can mint senior shares to itself for pool seeding
-        s[9] = IRoycoVaultTranche.mint.selector;
-        r[9] = SHARE_MINTER_ROLE;
+        s[7] = IRoycoVaultTranche.mint.selector;
+        r[7] = SHARE_MINTER_ROLE;
         if (_isLiquidity) {
-            s[10] = RoycoLiquidityTranche.depositMultiAsset.selector;
-            r[10] = _lpRole;
-            s[11] = RoycoLiquidityTranche.redeemMultiAsset.selector;
-            r[11] = _lpRole;
+            s[8] = RoycoLiquidityTranche.depositMultiAsset.selector;
+            r[8] = _lpRole;
+            s[9] = RoycoLiquidityTranche.redeemMultiAsset.selector;
+            r[9] = _lpRole;
         }
         return TargetBinding({ target: _tranche, selectors: s, roleIds: r });
     }

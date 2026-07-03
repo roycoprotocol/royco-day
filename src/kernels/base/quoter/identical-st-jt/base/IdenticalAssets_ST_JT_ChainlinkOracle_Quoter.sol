@@ -3,23 +3,23 @@ pragma solidity ^0.8.28;
 
 import { Math } from "../../../../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { AggregatorV3Interface } from "../../../../../interfaces/external/chainlink/AggregatorV3Interface.sol";
-import { IdenticalAssets_ST_JT_OracleQuoter } from "./IdenticalAssets_ST_JT_OracleQuoter.sol";
+import { IdenticalAssets_ST_JT_Oracle_Quoter } from "./IdenticalAssets_ST_JT_Oracle_Quoter.sol";
 
 /**
- * @title IdenticalAssets_ST_JT_ChainlinkOracleQuoter
+ * @title IdenticalAssets_ST_JT_ChainlinkOracle_Quoter
  * @notice Quoter to convert tranche units to/from NAV units using a Chainlink (compatible) oracle to convert tranche units to reference assets which uses an admin or oracle set rate to convert to NAV units
  * @dev Use case: Convert PT-USDE (Tranche unit) to USDE (Reference asset) using a Chainlink (compatible) oracle and convert USDE to USD (NAV unit) using an admin or oracle set rate
  */
-abstract contract IdenticalAssets_ST_JT_ChainlinkOracleQuoter is IdenticalAssets_ST_JT_OracleQuoter {
+abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAssets_ST_JT_Oracle_Quoter {
     using Math for uint256;
 
-    /// @dev Storage slot for IdenticalAssets_ST_JT_ChainlinkOracleQuoterState using ERC-7201 pattern
-    // keccak256(abi.encode(uint256(keccak256("Royco.storage.IdenticalAssets_ST_JT_ChainlinkOracleQuoterState")) - 1)) & ~bytes32(uint256(0xff))
+    /// @dev Storage slot for IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState using ERC-7201 pattern
+    // keccak256(abi.encode(uint256(keccak256("Royco.storage.IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant IDENTICAL_ASSETS_ST_JT_CHAINLINK_ORACLE_QUOTER_STORAGE_SLOT = 0x8e7ed06a76894329325a62f314422440f9b1abd4bff8ec1da566b06f1d6e5900;
 
     /// @dev Storage state for the Royco identical assets chainlink oracle quoter
-    /// @custom:storage-location erc7201:Royco.storage.IdenticalAssets_ST_JT_ChainlinkOracleQuoterState
-    struct IdenticalAssets_ST_JT_ChainlinkOracleQuoterState {
+    /// @custom:storage-location erc7201:Royco.storage.IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState
+    struct IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState {
         address oracle;
         uint48 stalenessThresholdSeconds;
     }
@@ -44,7 +44,7 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracleQuoter is IdenticalAssets
      * @param _oracle The chainlink (compatible) oracle used to price an asset
      * @param _stalenessThresholdSeconds The staleness threshold in seconds
      */
-    function __IdenticalAssets_ST_JT_ChainlinkOracleQuoter_init_unchained(address _oracle, uint48 _stalenessThresholdSeconds) internal onlyInitializing {
+    function __IdenticalAssets_ST_JT_ChainlinkOracle_Quoter_init_unchained(address _oracle, uint48 _stalenessThresholdSeconds) internal onlyInitializing {
         _setChainlinkOracle(_oracle, _stalenessThresholdSeconds);
     }
 
@@ -57,7 +57,7 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracleQuoter is IdenticalAssets
         public
         view
         virtual
-        override(IdenticalAssets_ST_JT_OracleQuoter)
+        override(IdenticalAssets_ST_JT_Oracle_Quoter)
         returns (uint256 trancheToNAVUnitConversionRateWAD)
     {
         // Fetch the tranche asset price in reference assets and its precision
@@ -89,8 +89,8 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracleQuoter is IdenticalAssets
     }
 
     /// @dev Returns the chainlink oracle configuration for this quoter
-    function getChainlinkOracleConfiguration() external pure returns (IdenticalAssets_ST_JT_ChainlinkOracleQuoterState memory) {
-        return _getIdenticalAssets_ST_JT_ChainlinkOracleQuoterStorage();
+    function getChainlinkOracleConfiguration() external pure returns (IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState memory) {
+        return _getIdenticalAssets_ST_JT_ChainlinkOracle_QuoterStorage();
     }
 
     /**
@@ -101,7 +101,7 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracleQuoter is IdenticalAssets
      */
     function _queryChainlinkOracle() internal view returns (uint256 price, uint256 precision) {
         // Fetch the price of the asset
-        IdenticalAssets_ST_JT_ChainlinkOracleQuoterState storage $ = _getIdenticalAssets_ST_JT_ChainlinkOracleQuoterStorage();
+        IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState storage $ = _getIdenticalAssets_ST_JT_ChainlinkOracle_QuoterStorage();
         AggregatorV3Interface oracle = AggregatorV3Interface($.oracle);
         (uint80 roundId, int256 answer,, uint256 updatedAt, uint80 answeredInRound) = oracle.latestRoundData();
 
@@ -124,7 +124,7 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracleQuoter is IdenticalAssets
         require(_oracle != address(0), NULL_ADDRESS());
         require(_stalenessThresholdSeconds > 0, INVALID_STALENESS_THRESHOLD_SECONDS());
 
-        IdenticalAssets_ST_JT_ChainlinkOracleQuoterState storage $ = _getIdenticalAssets_ST_JT_ChainlinkOracleQuoterStorage();
+        IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState storage $ = _getIdenticalAssets_ST_JT_ChainlinkOracle_QuoterStorage();
         $.oracle = _oracle;
         $.stalenessThresholdSeconds = _stalenessThresholdSeconds;
 
@@ -132,11 +132,11 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracleQuoter is IdenticalAssets
     }
 
     /**
-     * @notice Returns a storage pointer to the IdenticalAssets_ST_JT_ChainlinkOracleQuoterState storage
+     * @notice Returns a storage pointer to the IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState storage
      * @dev Uses ERC-7201 storage slot pattern for collision-resistant storage
      * @return $ Storage pointer
      */
-    function _getIdenticalAssets_ST_JT_ChainlinkOracleQuoterStorage() private pure returns (IdenticalAssets_ST_JT_ChainlinkOracleQuoterState storage $) {
+    function _getIdenticalAssets_ST_JT_ChainlinkOracle_QuoterStorage() private pure returns (IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState storage $) {
         assembly ("memory-safe") {
             $.slot := IDENTICAL_ASSETS_ST_JT_CHAINLINK_ORACLE_QUOTER_STORAGE_SLOT
         }

@@ -4,10 +4,8 @@ pragma solidity ^0.8.28;
 import { MarketState, Operation, SyncedAccountingState } from "../libraries/Types.sol";
 import { NAV_UNIT } from "../libraries/Units.sol";
 
-/**
- * @title IRoycoDayAccountant
- * @notice Interface for the RoycoDayAccountant contract that manages accounting, coverage, and liquidity requirements for a Royco market
- */
+/// @title IRoycoDayAccountant
+/// @notice Interface for the RoycoDayAccountant contract that manages accounting, coverage, and liquidity requirements for a Royco market
 interface IRoycoDayAccountant {
     /**
      * @notice Initialization parameters for the Royco Accountant
@@ -204,9 +202,11 @@ interface IRoycoDayAccountant {
     /// @param minLiquidityWAD The new percentage of the senior tranche NAV that must be in the liquidity tranche's market making inventory, scaled to WAD precision
     event LiquidityUpdated(uint64 minLiquidityWAD);
 
-    /// @notice Emitted when the maximum JT and LT yield shares (premiums) are updated
-    /// @param maxJTYieldShareWAD The new maximum JT yield share (risk premium) as a percentage of senior appreciation, scaled to WAD precision
-    /// @param maxLTYieldShareWAD The new maximum LT yield share (liquidity premium) as a percentage of senior appreciation, scaled to WAD precision
+    /**
+     * @notice Emitted when the maximum JT and LT yield shares (premiums) are updated
+     * @param maxJTYieldShareWAD The new maximum JT yield share (risk premium) as a percentage of senior appreciation, scaled to WAD precision
+     * @param maxLTYieldShareWAD The new maximum LT yield share (liquidity premium) as a percentage of senior appreciation, scaled to WAD precision
+     */
     event MaxYieldSharesUpdated(uint64 maxJTYieldShareWAD, uint64 maxLTYieldShareWAD);
 
     /// @notice Thrown when the caller of the function is not the accountant's configured Royco Kernel
@@ -285,8 +285,8 @@ interface IRoycoDayAccountant {
      * @dev When enforcement is requested, fails fast on the coverage requirement for operations that can worsen coverage (add senior exposure or
      *      remove the junior loss-absorption buffer: ST_DEPOSIT, LT_DEPOSIT, JT_REDEEM) and on the liquidity requirement for operations that can
      *      worsen liquidity (raise the senior effective NAV or reduce the depth of the AMM or another market-making venue: ST_DEPOSIT, the multi-asset
-     *      LT_DEPOSIT, and an LT_REDEEM that pays no self-liquidation bonus). A bonus-paying LT_REDEEM is a liquidation-breach exit and is exempt; bypass
-     *      redemptions and intermediate multi-asset sub-syncs pass false, deferring enforcement to the final post-op sync that books the combined exposure
+     *      LT_DEPOSIT, and an LT_REDEEM that pays no self-liquidation bonus). A bonus-paying LT_REDEEM is a liquidation-breach exit and is exempt;
+     *      intermediate multi-asset sub-syncs pass false, deferring enforcement to the final post-op sync that books the combined exposure
      * @param _op The operation being executed in between the pre and post operation synchronizations
      * @param _stRawNAV The post-op senior tranche's raw NAV
      * @param _jtRawNAV The post-op junior tranche's raw NAV
@@ -442,9 +442,7 @@ interface IRoycoDayAccountant {
      */
     function setJuniorTrancheDustTolerance(NAV_UNIT _jtNAVDustTolerance) external;
 
-    /**
-     * @notice Returns the state of the accountant
-     * @return state The state of the accountant
-     */
+    /// @notice Returns the state of the accountant
+    /// @return state The state of the accountant
     function getState() external view returns (RoycoDayAccountantState memory state);
 }

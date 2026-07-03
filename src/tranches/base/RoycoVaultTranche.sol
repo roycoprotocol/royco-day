@@ -32,6 +32,12 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     /// @inheritdoc IRoycoVaultTranche
     address public immutable override(IRoycoVaultTranche) KERNEL;
 
+    /// @dev Permissions the function to only be callable by the kernel, the single source of truth for sync-driven share mints
+    modifier onlyKernel() {
+        require(msg.sender == KERNEL, ONLY_KERNEL());
+        _;
+    }
+
     /**
      * @notice Constructs the Royco vault tranche
      * @param _asset The underlying asset for the tranche
@@ -60,9 +66,11 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         __RoycoBase_init(_params.initialAuthority);
     }
 
-    /// =============================
-    /// Tranche Deposit and Redeem Functions
-    /// =============================
+    /**
+     * =============================
+     * Tranche Deposit and Redeem Functions
+     * =============================
+     */
 
     /// @inheritdoc IRoycoVaultTranche
     function deposit(TRANCHE_UNIT _assets, address _receiver) public virtual override(IRoycoVaultTranche) whenNotPaused restricted returns (uint256 shares) {
@@ -116,10 +124,10 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // It is expected that the kernel transfers the assets directly to the receiver
         claims =
         (TRANCHE_TYPE() == TrancheType.SENIOR
-                ? IRoycoDayKernel(KERNEL).stRedeem(_shares, _receiver, false)
+                ? IRoycoDayKernel(KERNEL).stRedeem(_shares, _receiver)
                 : TRANCHE_TYPE() == TrancheType.JUNIOR
-                    ? IRoycoDayKernel(KERNEL).jtRedeem(_shares, _receiver, false)
-                    : IRoycoDayKernel(KERNEL).ltRedeem(_shares, _receiver, false));
+                    ? IRoycoDayKernel(KERNEL).jtRedeem(_shares, _receiver)
+                    : IRoycoDayKernel(KERNEL).ltRedeem(_shares, _receiver));
 
         // Burn shares after kernel processes redemption (kernel depends on pre-burn total supply)
         _burn(_owner, _shares);
@@ -135,11 +143,9 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         external
         virtual
         override(IRoycoVaultTranche)
+        onlyKernel
         returns (uint256 totalTrancheShares)
     {
-        // Only the kernel can mint protocol fee shares based on a sync
-        require(msg.sender == KERNEL, ONLY_KERNEL());
-
         // Mint the precomputed protocol fee shares to the recipient (the kernel prices them jointly with the liquidity premium)
         if (_protocolFeeShares != 0) _mint(_protocolFeeRecipient, _protocolFeeShares);
 
@@ -154,70 +160,21 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         _mint(_to, _shares);
     }
 
-    // =============================
-    // Tranche Compliance Functions
-    // =============================
-
-    /// @inheritdoc IRoycoVaultTranche
-    function seizeShares(address _from, address _receiver, uint256 _shares) external virtual override(IRoycoVaultTranche) restricted {
-        // Basic sanity checks on the seizure
-        require(_from != address(0), NULL_ADDRESS());
-        require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
-        require(_shares != 0, MUST_REQUEST_NON_ZERO_SHARES());
-
-        // Transfer the shares to the receiver
-        // Bypass the balance update hook
-        super._update(_from, _receiver, _shares);
-
-        emit SharesSeized(msg.sender, _from, _receiver, _shares);
-    }
-
-    /// @inheritdoc IRoycoVaultTranche
-    function seizeAndRedeemShares(
-        address _from,
-        address _receiver,
-        uint256 _shares
-    )
-        external
-        virtual
-        override(IRoycoVaultTranche)
-        restricted
-        returns (AssetClaims memory claims)
-    {
-        // Basic sanity checks on the seizure
-        require(_from != address(0), NULL_ADDRESS());
-        require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
-        require(_shares != 0, MUST_REQUEST_NON_ZERO_SHARES());
-
-        // Force process the withdrawal from the Royco market
-        // It is expected that the kernel transfers the assets directly to the receiver
-        claims =
-        (TRANCHE_TYPE() == TrancheType.SENIOR
-                ? IRoycoDayKernel(KERNEL).stRedeem(_shares, _receiver, true)
-                : TRANCHE_TYPE() == TrancheType.JUNIOR
-                    ? IRoycoDayKernel(KERNEL).jtRedeem(_shares, _receiver, true)
-                    : IRoycoDayKernel(KERNEL).ltRedeem(_shares, _receiver, true));
-
-        // Burn shares after kernel processes redemption
-        // Bypass the balance update hook
-        super._update(_from, address(0), _shares);
-
-        emit SharesSeizedAndRedeemed(msg.sender, _from, _receiver, claims, _shares);
-    }
-
     /// @inheritdoc ERC20BurnableUpgradeable
-    function burn(uint256 _shares) public virtual override(ERC20BurnableUpgradeable, IRoycoVaultTranche) whenNotPaused restricted {
+    function burn(uint256 _shares) public virtual override(ERC20BurnableUpgradeable) whenNotPaused restricted {
         super.burn(_shares);
     }
 
     /// @inheritdoc ERC20BurnableUpgradeable
-    function burnFrom(address _account, uint256 _shares) public virtual override(ERC20BurnableUpgradeable, IRoycoVaultTranche) whenNotPaused restricted {
+    function burnFrom(address _account, uint256 _shares) public virtual override(ERC20BurnableUpgradeable) whenNotPaused restricted {
         super.burnFrom(_account, _shares);
     }
 
-    /// =============================
-    /// Tranche Preview and Conversion Functions
-    /// =============================
+    /**
+     * =============================
+     * Tranche Preview and Conversion Functions
+     * =============================
+     */
 
     /// @inheritdoc IRoycoVaultTranche
     function previewDeposit(TRANCHE_UNIT _assets) external view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
@@ -225,23 +182,23 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // premium and protocol fee shares are minted (the kernel is the single source of truth for the post-sync supply)
         NAV_UNIT valueAllocated;
         NAV_UNIT effectiveNAV;
-        uint256 totalTrancheSharesAfterSync;
+        uint256 totalTrancheShares;
         if (TRANCHE_TYPE() == TrancheType.SENIOR) {
             SyncedAccountingState memory stateBeforeDeposit;
-            (stateBeforeDeposit, valueAllocated, totalTrancheSharesAfterSync) = IRoycoDayKernel(KERNEL).stPreviewDeposit(_assets);
+            (stateBeforeDeposit, valueAllocated, totalTrancheShares) = IRoycoDayKernel(KERNEL).stPreviewDeposit(_assets);
             effectiveNAV = stateBeforeDeposit.stEffectiveNAV;
         } else if (TRANCHE_TYPE() == TrancheType.JUNIOR) {
             SyncedAccountingState memory stateBeforeDeposit;
-            (stateBeforeDeposit, valueAllocated, totalTrancheSharesAfterSync) = IRoycoDayKernel(KERNEL).jtPreviewDeposit(_assets);
+            (stateBeforeDeposit, valueAllocated, totalTrancheShares) = IRoycoDayKernel(KERNEL).jtPreviewDeposit(_assets);
             effectiveNAV = stateBeforeDeposit.jtEffectiveNAV;
         } else {
             // The LT prices its shares at the effective NAV (value deployed into the AMM or another market-making venue plus the idle liquidity-premium senior shares), which is not
             // carried in SyncedAccountingState, so the kernel surfaces it directly as navToMintSharesAt
-            (, valueAllocated, totalTrancheSharesAfterSync, effectiveNAV) = IRoycoDayKernel(KERNEL).ltPreviewDeposit(_assets);
+            (, valueAllocated, totalTrancheShares, effectiveNAV) = IRoycoDayKernel(KERNEL).ltPreviewDeposit(_assets);
         }
 
         // Calculate the shares to be minted to the receiver against the post-sync supply, so the preview matches execution
-        shares = _convertToShares(valueAllocated, totalTrancheSharesAfterSync, effectiveNAV, Math.Rounding.Floor);
+        shares = _convertToShares(valueAllocated, totalTrancheShares, effectiveNAV, Math.Rounding.Floor);
     }
 
     /// @inheritdoc IRoycoVaultTranche
@@ -272,9 +229,11 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         shares = _convertToShares(navAssets, trancheTotalShares, trancheClaims.nav, Math.Rounding.Floor);
     }
 
-    /// =============================
-    /// Tranche Max Deposit and Redeem Functions
-    /// =============================
+    /**
+     * =============================
+     * Tranche Max Deposit and Redeem Functions
+     * =============================
+     */
 
     /// @inheritdoc IRoycoVaultTranche
     function maxDeposit(address _receiver) external view virtual override(IRoycoVaultTranche) returns (TRANCHE_UNIT assets) {
@@ -324,9 +283,11 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         }
     }
 
-    /// =============================
-    /// General Tranche View Functions
-    /// =============================
+    /**
+     * =============================
+     * General Tranche View Functions
+     * =============================
+     */
 
     /// @inheritdoc IRoycoVaultTranche
     function totalAssets() external view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
@@ -388,11 +349,10 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @inheritdoc ERC20PausableUpgradeable
     function _update(address _from, address _to, uint256 _value) internal override(ERC20PausableUpgradeable, ERC20Upgradeable) whenNotPaused {
-        // Call the kernel pre-balance update hook to assert that the balance update is valid
+        // Call the kernel's pre-balance update hook to assert that the balance update is valid
         IRoycoDayKernel(KERNEL).preTrancheBalanceUpdateHook(msg.sender, _from, _to, _value);
 
         // Call the parent contract update function to update the balance
-        // NOTE: This will execute even if the tranche is in a paused state
         ERC20Upgradeable._update(_from, _to, _value);
     }
 }

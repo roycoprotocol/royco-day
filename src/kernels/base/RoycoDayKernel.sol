@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
 import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -187,10 +188,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         public
         view
         override(IRoycoDayKernel)
-        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheSharesAfterSync)
+        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares)
     {
         // Preview the senior tranche state and its post-sync supply (after the premium and protocol fee shares) before the deposit
-        (stateBeforeDeposit,, totalTrancheSharesAfterSync) = previewSyncTrancheAccounting(TrancheType.SENIOR);
+        (stateBeforeDeposit,, totalTrancheShares) = previewSyncTrancheAccounting(TrancheType.SENIOR);
         // Convert the assets to NAV units
         valueAllocated = stConvertTrancheUnitsToNAVUnits(_assets);
     }
@@ -200,10 +201,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         public
         view
         override(IRoycoDayKernel)
-        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheSharesAfterSync)
+        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares)
     {
         // Preview the junior tranche state and its post-sync supply (after the protocol fee shares) before the deposit
-        (stateBeforeDeposit,, totalTrancheSharesAfterSync) = previewSyncTrancheAccounting(TrancheType.JUNIOR);
+        (stateBeforeDeposit,, totalTrancheShares) = previewSyncTrancheAccounting(TrancheType.JUNIOR);
         // Convert the assets to NAV units
         valueAllocated = jtConvertTrancheUnitsToNAVUnits(_assets);
     }
@@ -213,12 +214,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         external
         view
         override(IRoycoDayKernel)
-        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheSharesAfterSync, NAV_UNIT navToMintSharesAt)
+        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares, NAV_UNIT navToMintSharesAt)
     {
         // Preview the liquidity tranche state and its post-sync supply (after the protocol fee shares) before the deposit
-        (stateBeforeDeposit,, totalTrancheSharesAfterSync) = previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
-        // LT deposits are disabled during a fixed-term market state: a zero value allocated mints zero shares, matching the reverting deposit path
-        if (stateBeforeDeposit.marketState == MarketState.FIXED_TERM) return (stateBeforeDeposit, ZERO_NAV_UNITS, totalTrancheSharesAfterSync, ZERO_NAV_UNITS);
+        (stateBeforeDeposit,, totalTrancheShares) = previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
         // Convert the assets to NAV units
         valueAllocated = ltConvertTrancheUnitsToNAVUnits(_assets);
         // Compute the LT effective NAV prior to the deposit as the NAV to mint shares at
@@ -303,7 +302,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     function jtPreviewRedeem(uint256 _shares) public view override(IRoycoDayKernel) returns (AssetClaims memory userClaim) {
         // Preview the total claims the junior tranche has on each tranche's assets and the total shares after minting any protocol fee shares post-sync
         (, AssetClaims memory jtClaims, uint256 totalShares) = previewSyncTrancheAccounting(TrancheType.JUNIOR);
-
         // Calculate the user's claims based on the shares redeemed
         userClaim = UtilsLib.scaleAssetClaims(jtClaims, _shares, totalShares);
     }
@@ -312,10 +310,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     function ltPreviewRedeem(uint256 _shares) public view override(IRoycoDayKernel) returns (AssetClaims memory userClaim) {
         // Preview the total claims the liquidity tranche has on each tranche's assets and the total shares after minting any protocol fee shares post-sync
         (SyncedAccountingState memory state, AssetClaims memory ltClaims, uint256 totalShares) = previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
-
         // LT redemptions are disabled during a fixed-term market state: return an empty claim, matching the reverting redeem path
         if (state.marketState == MarketState.FIXED_TERM) return userClaim;
-
         // Calculate the user's claims based on the shares redeemed
         userClaim = UtilsLib.scaleAssetClaims(ltClaims, _shares, totalShares);
     }
@@ -333,7 +329,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         // ST deposits are disabled during a fixed-term market state
         if (state.marketState == MarketState.FIXED_TERM) return ZERO_TRANCHE_UNITS;
         // ST deposits are enabled as long as the market's coverage requirement is satisfied
-        // No need to include ST liquidation proceeds in the raw NAV because those assets are not exposed to any volatility
         NAV_UNIT stMaxDepositableNAV = IRoycoDayAccountant(ACCOUNTANT).maxSTDeposit(state);
         return ((stMaxDepositableNAV == MAX_NAV_UNITS) ? MAX_TRANCHE_UNITS : stConvertNAVUnitsToTrancheUnits(stMaxDepositableNAV));
     }
@@ -536,8 +531,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     /// @dev ST redemptions are enabled if the market is in a PERPETUAL state
     function stRedeem(
         uint256 _shares,
-        address _receiver,
-        bool _bypassRedemptionRestrictions
+        address _receiver
     )
         external
         virtual
@@ -553,7 +547,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         // Execute an accounting sync to reconcile underlying PNL
         (state, userAssetClaims, totalTrancheShares) = _preOpSyncTrancheAccounting(TrancheType.SENIOR);
         // ST redemptions are disabled during a fixed-term market state
-        require(_bypassRedemptionRestrictions || state.marketState == MarketState.PERPETUAL, DISABLED_IN_FIXED_TERM_STATE());
+        require(state.marketState == MarketState.PERPETUAL, DISABLED_IN_FIXED_TERM_STATE());
 
         // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
         // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
@@ -566,7 +560,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         // Withdraw the asset claims from each tranche with the self-liquidation bonus applied and transfer them to the receiver
         _withdrawAssets(userAssetClaims, _receiver);
 
-        // Execute a post-redeem sync on accounting, specifying whether or not to bypass the markets' requirements
+        // Execute a post-redeem sync on accounting
         _postOpSyncTrancheAccounting(Operation.ST_REDEEM, stSelfLiquidationBonusNAV, false);
     }
 
@@ -604,11 +598,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     /// @inheritdoc IRoycoDayKernel
-    /// @dev JT redemptions are enabled only in a PERPETUAL market state (unless restrictions are bypassed for a seizure), granted that the market's coverage requirement is satisfied post-redemption
+    /// @dev JT redemptions are enabled only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-redemption
     function jtRedeem(
         uint256 _shares,
-        address _receiver,
-        bool _bypassRedemptionRestrictions
+        address _receiver
     )
         external
         virtual
@@ -624,7 +617,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         uint256 totalTrancheShares;
         (state, userAssetClaims, totalTrancheShares) = _preOpSyncTrancheAccounting(TrancheType.JUNIOR);
         // JT redemptions are disabled during a fixed-term market state
-        require(_bypassRedemptionRestrictions || state.marketState == MarketState.PERPETUAL, DISABLED_IN_FIXED_TERM_STATE());
+        require(state.marketState == MarketState.PERPETUAL, DISABLED_IN_FIXED_TERM_STATE());
 
         // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
         // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
@@ -633,8 +626,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         // Withdraw the asset claims from each tranche and transfer them to the receiver
         _withdrawAssets(userAssetClaims, _receiver);
 
-        // Execute a post-redeem sync on accounting, specifying whether or not to bypass the markets' requirements
-        _postOpSyncTrancheAccounting(Operation.JT_REDEEM, ZERO_NAV_UNITS, !_bypassRedemptionRestrictions);
+        // Execute a post-redeem sync on accounting, enforcing the market's coverage requirement post-redemption
+        _postOpSyncTrancheAccounting(Operation.JT_REDEEM, ZERO_NAV_UNITS, true);
     }
 
     // =============================
@@ -669,11 +662,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     /// @inheritdoc IRoycoDayKernel
-    /// @dev LT redemptions are enabled only in a PERPETUAL market state (unless restrictions are bypassed for a seizure), granted that the market's liquidity requirement is satisfied post-redemption
+    /// @dev LT redemptions are enabled only in a PERPETUAL market state, granted that the market's liquidity requirement is satisfied post-redemption
     function ltRedeem(
         uint256 _shares,
-        address _receiver,
-        bool _bypassRedemptionRestrictions
+        address _receiver
     )
         external
         virtual
@@ -689,7 +681,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         uint256 totalTrancheShares;
         (state, userAssetClaims, totalTrancheShares) = _preOpSyncTrancheAccounting(TrancheType.LIQUIDITY);
         // LT redemptions are disabled during a fixed-term market state
-        require(_bypassRedemptionRestrictions || state.marketState == MarketState.PERPETUAL, DISABLED_IN_FIXED_TERM_STATE());
+        require(state.marketState == MarketState.PERPETUAL, DISABLED_IN_FIXED_TERM_STATE());
 
         // Scale the cumulative tranche asset claims by the ratio of shares this user owns of the entire tranche
         // Protocol fee shares were minted in the pre-op sync, so the total tranche shares are up to date
@@ -698,10 +690,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         // Withdraw the asset claims from each tranche and transfer them to the receiver
         _withdrawAssets(userAssetClaims, _receiver);
 
-        // Execute a post-redeem sync on accounting, specifying whether or not to bypass the markets' requirements
+        // Execute a post-redeem sync on accounting, enforcing the market's liquidity requirement post-redemption
         // LT redemption is exempt from satisfying the liquidity requirement once coverage utilization reaches its liquidation threshold
         _postOpSyncTrancheAccounting(
-            Operation.LT_REDEEM, ZERO_NAV_UNITS, (!_bypassRedemptionRestrictions && (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD))
+            Operation.LT_REDEEM, ZERO_NAV_UNITS, (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD)
         );
     }
 
@@ -811,7 +803,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         // Burn the redeemed senior shares and withdraw the bonus-adjusted ST claims to the receiver
         // The quote assets were remitted in the venue removal above
         // NOTE: The final post-op accounts for this ST redemption in addition to the preceding LT redemption in one batch call
-        IRoycoVaultTranche(SENIOR_TRANCHE).burn(stSharesToRedeem);
+        ERC20BurnableUpgradeable(SENIOR_TRANCHE).burn(stSharesToRedeem);
         _withdrawAssets(stClaims, _receiver);
 
         // Execute a post-redeem sync on accounting with the applied ST liquidation bonus
@@ -846,10 +838,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     // Internal Tranche Accounting Synchronization Functions
     // =============================
 
-    /**
-     * @notice Previews an accounting sync via the accountant
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
-     */
+    /// @notice Previews an accounting sync via the accountant
+    /// @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
     function _previewSyncTrancheAccounting() internal view virtual whenNotPaused returns (SyncedAccountingState memory state) {
         // Preview a senior/junior accounting sync via the accountant
         state = IRoycoDayAccountant(ACCOUNTANT).previewSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
@@ -1080,28 +1070,22 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     // Internal Utility Functions
     // =============================
 
-    /**
-     * @notice Returns the raw net asset value of the senior tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
-     * @return stRawNAV The pure net asset value of the senior tranche invested assets
-     */
+    /// @notice Returns the raw net asset value of the senior tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
+    /// @return stRawNAV The pure net asset value of the senior tranche invested assets
     function _getSeniorTrancheRawNAV() internal view virtual returns (NAV_UNIT stRawNAV) {
         // Get the yield bearing assets owned by ST and convert them to NAV units via the configured quoter
         return stConvertTrancheUnitsToNAVUnits(_getRoycoDayKernelStorage().stOwnedYieldBearingAssets);
     }
 
-    /**
-     * @notice Returns the raw net asset value of the junior tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
-     * @return jtRawNAV The pure net asset value of the junior tranche invested assets
-     */
+    /// @notice Returns the raw net asset value of the junior tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
+    /// @return jtRawNAV The pure net asset value of the junior tranche invested assets
     function _getJuniorTrancheRawNAV() internal view virtual returns (NAV_UNIT jtRawNAV) {
         // Get the yield bearing assets owned by JT and convert them to NAV units via the configured quoter
         return jtConvertTrancheUnitsToNAVUnits(_getRoycoDayKernelStorage().jtOwnedYieldBearingAssets);
     }
 
-    /**
-     * @notice Returns the raw net asset value of the liquidity tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
-     * @return ltRawNAV The pure net asset value of the liquidity tranche invested assets
-     */
+    /// @notice Returns the raw net asset value of the liquidity tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
+    /// @return ltRawNAV The pure net asset value of the liquidity tranche invested assets
     function _getLiquidityTrancheRawNAV() internal view virtual returns (NAV_UNIT ltRawNAV) {
         // Get the yield bearing assets owned by LT and convert them to NAV units via the configured quoter
         return ltConvertTrancheUnitsToNAVUnits(_getRoycoDayKernelStorage().ltOwnedYieldBearingAssets);

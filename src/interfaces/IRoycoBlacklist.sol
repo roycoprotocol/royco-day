@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-/**
- * @title IRoycoBlacklist
- * @notice Interface for the RoycoBlacklist contract that manages account blacklisting and sanctions screening for a Royco market
- */
+/// @title IRoycoBlacklist
+/// @notice Interface for the RoycoBlacklist contract that manages account blacklisting and sanctions screening for a Royco market
 interface IRoycoBlacklist {
     /**
      * @notice Storage state for the Royco blacklist
@@ -17,22 +15,16 @@ interface IRoycoBlacklist {
         mapping(address account => bool isBlacklisted) accountToIsBlacklisted;
     }
 
-    /**
-     * @notice Emitted when an account is blacklisted
-     * @param account The address of the account
-     */
+    /// @notice Emitted when an account is blacklisted
+    /// @param account The address of the account
     event AccountBlacklisted(address indexed account);
 
-    /**
-     * @notice Emitted when an account is unblacklisted
-     * @param account The address of the account
-     */
+    /// @notice Emitted when an account is unblacklisted
+    /// @param account The address of the account
     event AccountUnblacklisted(address indexed account);
 
-    /**
-     * @notice Emitted when the Chainalysis sanctions list is updated
-     * @param chainalysisSanctionsList The new Chainalysis sanctions list address (the null address if unused)
-     */
+    /// @notice Emitted when the Chainalysis sanctions list is updated
+    /// @param chainalysisSanctionsList The new Chainalysis sanctions list address (the null address if unused)
     event SanctionsListUpdated(address chainalysisSanctionsList);
 
     /// @notice Thrown when the specified account is blacklisted
@@ -75,15 +67,11 @@ interface IRoycoBlacklist {
      */
     function enforceNotBlacklisted(address[] memory _accounts) external view;
 
-    /**
-     * @notice Sets the Chainalysis sanctions list used to screen accounts
-     * @param _chainalysisSanctionsList The Chainalysis maintained sanctions list address (set to the null address to disable sanctions screening)
-     */
+    /// @notice Sets the Chainalysis sanctions list used to screen accounts
+    /// @param _chainalysisSanctionsList The Chainalysis maintained sanctions list address (set to the null address to disable sanctions screening)
     function setSanctionsList(address _chainalysisSanctionsList) external;
 
-    /**
-     * @notice Returns the Chainalysis sanctions list used to screen accounts
-     * @return chainalysisSanctionsList The configured Chainalysis sanctions list address (the null address if unused)
-     */
+    /// @notice Returns the Chainalysis sanctions list used to screen accounts
+    /// @return chainalysisSanctionsList The configured Chainalysis sanctions list address (the null address if unused)
     function getSanctionsList() external view returns (address chainalysisSanctionsList);
 }

@@ -67,22 +67,16 @@ interface IRoycoDayKernel {
         address roycoBlacklist;
     }
 
-    /**
-     * @notice Emitted when the protocol fee recipient is updated
-     * @param protocolFeeRecipient The new protocol fee recipient
-     */
+    /// @notice Emitted when the protocol fee recipient is updated
+    /// @param protocolFeeRecipient The new protocol fee recipient
     event ProtocolFeeRecipientUpdated(address protocolFeeRecipient);
 
-    /**
-     * @notice Emitted when the ST self-liquidation bonus is updated
-     * @param stSelfLiquidationBonusWAD The new ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached
-     */
+    /// @notice Emitted when the ST self-liquidation bonus is updated
+    /// @param stSelfLiquidationBonusWAD The new ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached
     event SeniorTrancheSelfLiquidationBonusUpdated(uint64 stSelfLiquidationBonusWAD);
 
-    /**
-     * @notice Emitted when the market's blacklist contract is updated
-     * @param roycoBlacklist The new blacklist contract address (the null address if screening is disabled)
-     */
+    /// @notice Emitted when the market's blacklist contract is updated
+    /// @param roycoBlacklist The new blacklist contract address (the null address if screening is disabled)
     event RoycoBlacklistUpdated(address roycoBlacklist);
 
     /**
@@ -122,34 +116,24 @@ interface IRoycoDayKernel {
     /// @notice Thrown when an LT multi-asset deposit/redeem is made with zero of both constituent assets (ST underlying and quote)
     error MUST_DEPOSIT_NON_ZERO_ASSETS();
 
-    /**
-     * @notice Retrieves the senior tranche address
-     * @return seniorTranche The address of the senior tranche for this Royco market
-     */
+    /// @notice Retrieves the senior tranche address
+    /// @return seniorTranche The address of the senior tranche for this Royco market
     function SENIOR_TRANCHE() external view returns (address seniorTranche);
 
-    /**
-     * @notice Retrieves the ST asset address
-     * @return stAsset The senior tranche's base asset address
-     */
+    /// @notice Retrieves the ST asset address
+    /// @return stAsset The senior tranche's base asset address
     function ST_ASSET() external view returns (address stAsset);
 
-    /**
-     * @notice Retrieves the junior tranche address
-     * @return juniorTranche The address of the junior tranche for this Royco market
-     */
+    /// @notice Retrieves the junior tranche address
+    /// @return juniorTranche The address of the junior tranche for this Royco market
     function JUNIOR_TRANCHE() external view returns (address juniorTranche);
 
-    /**
-     * @notice Retrieves the JT asset address
-     * @return jtAsset The junior tranche's base asset address
-     */
+    /// @notice Retrieves the JT asset address
+    /// @return jtAsset The junior tranche's base asset address
     function JT_ASSET() external view returns (address jtAsset);
 
-    /**
-     * @notice Retrieves the accountant address
-     * @return accountant The accountant responsible for maintaining this Royco market's accounting state and marking tranche NAVs to market
-     */
+    /// @notice Retrieves the accountant address
+    /// @return accountant The accountant responsible for maintaining this Royco market's accounting state and marking tranche NAVs to market
     function ACCOUNTANT() external view returns (address accountant);
 
     /// @notice Retrieves the liquidity tranche address.
@@ -183,10 +167,8 @@ interface IRoycoDayKernel {
      */
     function setRoycoBlacklist(address _roycoBlacklist) external;
 
-    /**
-     * @notice Retrieves the state of the Royco kernel
-     * @return state The Royco kernel's state, including the protocol fee recipient and the kernel's controlled tranche and base assets
-     */
+    /// @notice Retrieves the state of the Royco kernel
+    /// @return state The Royco kernel's state, including the protocol fee recipient and the kernel's controlled tranche and base assets
     function getState() external view returns (RoycoDayKernelState memory state);
 
     /**
@@ -290,25 +272,25 @@ interface IRoycoDayKernel {
      * @param _assets The amount of assets to deposit, denominated in the senior tranche's tranche units
      * @return stateBeforeDeposit The state of the senior tranche before the deposit, after applying the pre-op sync
      * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
-     * @return totalTrancheSharesAfterSync The senior tranche supply after the pre-op sync mints the premium and protocol fee shares
+     * @return totalTrancheShares The senior tranche supply after the pre-op sync mints the premium and protocol fee shares
      */
     function stPreviewDeposit(TRANCHE_UNIT _assets)
         external
         view
-        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheSharesAfterSync);
+        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares);
 
     /**
      * @notice Previews the deposit of a specified amount of assets into the liquidity tranche
      * @param _assets The amount of assets to deposit, denominated in the liquidity tranche's tranche units
      * @return stateBeforeDeposit The state of the liquidity tranche before the deposit, after applying the pre-op sync
      * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
-     * @return totalTrancheSharesAfterSync The liquidity tranche supply after the pre-op sync mints the protocol fee shares
+     * @return totalTrancheShares The liquidity tranche supply after the pre-op sync mints the protocol fee shares
      * @return navToMintSharesAt The pre-deposit LT effective NAV (value deployed into the AMM or another market-making venue plus the idle liquidity-premium senior shares) to mint LT shares at
      */
     function ltPreviewDeposit(TRANCHE_UNIT _assets)
         external
         view
-        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheSharesAfterSync, NAV_UNIT navToMintSharesAt);
+        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares, NAV_UNIT navToMintSharesAt);
 
     /**
      * @notice Previews a multi-asset LT deposit of (ST underlying + quote) by simulating the venue add
@@ -363,10 +345,9 @@ interface IRoycoDayKernel {
      * @dev The function is expected to transfer the senior and junior assets directly to the receiver, based on the redemption claims
      * @param _shares The number of shares to redeem
      * @param _receiver The address that is receiving the assets
-     * @param _bypassRedemptionRestrictions Whether to bypass the redemption restrictions (eg. for Transfer Agent Obligations on RWA)
      * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
      */
-    function stRedeem(uint256 _shares, address _receiver, bool _bypassRedemptionRestrictions) external returns (AssetClaims memory userAssetClaims);
+    function stRedeem(uint256 _shares, address _receiver) external returns (AssetClaims memory userAssetClaims);
 
     /**
      * @notice Returns the maximum amount of assets that can be deposited into the junior tranche
@@ -421,12 +402,12 @@ interface IRoycoDayKernel {
      * @param _assets The amount of assets to deposit, denominated in the junior tranche's tranche units
      * @return stateBeforeDeposit The state of the junior tranche before the deposit, after applying the pre-op sync
      * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
-     * @return totalTrancheSharesAfterSync The junior tranche supply after the pre-op sync mints the protocol fee shares
+     * @return totalTrancheShares The junior tranche supply after the pre-op sync mints the protocol fee shares
      */
     function jtPreviewDeposit(TRANCHE_UNIT _assets)
         external
         view
-        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheSharesAfterSync);
+        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares);
 
     /**
      * @notice Previews the redemption of a specified number of shares from the junior tranche
@@ -451,10 +432,9 @@ interface IRoycoDayKernel {
      * @dev The function is expected to transfer the senior and junior assets directly to the receiver, based on the redemption claims
      * @param _shares The number of shares to redeem
      * @param _receiver The address that is receiving the assets
-     * @param _bypassRedemptionRestrictions Whether to bypass the redemption restrictions (eg. for Transfer Agent Obligations on RWA)
      * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
      */
-    function jtRedeem(uint256 _shares, address _receiver, bool _bypassRedemptionRestrictions) external returns (AssetClaims memory userAssetClaims);
+    function jtRedeem(uint256 _shares, address _receiver) external returns (AssetClaims memory userAssetClaims);
 
     /**
      * @notice Processes the deposit of a specified amount of assets into the liquidity tranche.
@@ -469,10 +449,9 @@ interface IRoycoDayKernel {
      * @notice Processes the redemption of a specified number of shares from the liquidity tranche.
      * @param _shares The number of shares to redeem.
      * @param _receiver The address that is receiving the assets.
-     * @param _bypassRedemptionRestrictions Whether to bypass the redemption restrictions.
      * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption.
      */
-    function ltRedeem(uint256 _shares, address _receiver, bool _bypassRedemptionRestrictions) external returns (AssetClaims memory userAssetClaims);
+    function ltRedeem(uint256 _shares, address _receiver) external returns (AssetClaims memory userAssetClaims);
 
     /**
      * @notice Atomically enters the liquidity tranche with the LT assets' constituent assets: deposits ST underlying (minting senior

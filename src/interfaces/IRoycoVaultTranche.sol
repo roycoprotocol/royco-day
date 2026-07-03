@@ -48,25 +48,6 @@ interface IRoycoVaultTranche is IERC20Metadata {
      */
     event ProtocolFeeSharesMinted(address indexed protocolFeeRecipient, uint256 mintedProtocolFeeShares, uint256 totalTrancheShares);
 
-    /**
-     * @notice Emitted when shares are seized from the tranche
-     * @param caller The designated admin that initiated the seizure
-     * @param from The address to seize shares from
-     * @param to The address that received the seized shares
-     * @param shares The amount of shares seized
-     */
-    event SharesSeized(address indexed caller, address indexed from, address indexed to, uint256 shares);
-
-    /**
-     * @notice Emitted when shares are seized and redeemed from the tranche
-     * @param caller The designated admin that initiated the seizure and redemption
-     * @param from The address to seize shares from
-     * @param to The address that received the assets from redeeming the shares
-     * @param claims The asset claims remitted to the receiver, including claims on ST assets, JT assets, and their total NAV value
-     * @param shares The number of shares seized and redeemed
-     */
-    event SharesSeizedAndRedeemed(address indexed caller, address indexed from, address indexed to, AssetClaims claims, uint256 shares);
-
     /// @notice Thrown when a deposit would mint zero tranche shares (either zero assets or dust amount that rounds to zero shares)
     error MUST_MINT_NON_ZERO_SHARES();
 
@@ -79,10 +60,8 @@ interface IRoycoVaultTranche is IERC20Metadata {
     /// @notice Thrown when the value allocated from a deposit does not match the expected value
     error INVALID_VALUE_ALLOCATED();
 
-    /**
-     * @notice Returns the address of the kernel that this tranche is associated with
-     * @return kernel The address of the kernel responsible for executing deposits and redemptions for this tranche
-     */
+    /// @notice Returns the address of the kernel that this tranche is associated with
+    /// @return kernel The address of the kernel responsible for executing deposits and redemptions for this tranche
     function KERNEL() external view returns (address kernel);
 
     /**
@@ -99,16 +78,12 @@ interface IRoycoVaultTranche is IERC20Metadata {
      */
     function totalAssets() external view returns (AssetClaims memory claims);
 
-    /**
-     * @notice Returns the address of the underlying base asset for this tranche
-     * @return asset The address of the ERC20 token used as the base asset for deposits into this tranche
-     */
+    /// @notice Returns the address of the underlying base asset for this tranche
+    /// @return asset The address of the ERC20 token used as the base asset for deposits into this tranche
     function asset() external view returns (address asset);
 
-    /**
-     * @notice Returns the tranche type indicating whether this is a senior or junior tranche
-     * @return trancheType An enumerator indicating SENIOR or JUNIOR tranche type
-     */
+    /// @notice Returns the tranche type indicating whether this is a senior or junior tranche
+    /// @return trancheType An enumerator indicating SENIOR or JUNIOR tranche type
     function TRANCHE_TYPE() external view returns (TrancheType trancheType);
 
     /**
@@ -187,40 +162,6 @@ interface IRoycoVaultTranche is IERC20Metadata {
      * @param _shares The number of shares to mint
      */
     function mint(address _to, uint256 _shares) external;
-
-    /**
-     * @notice Burns shares from the caller
-     * @dev Only callable by the kernel during accounting synchronization
-     * @param _shares The number of shares to burn
-     */
-    function burn(uint256 _shares) external;
-
-    /**
-     * @notice Burns shares from the specified account
-     * @dev Only callable by the kernel during accounting synchronization
-     * @param _account The address to burn shares from
-     * @param _shares The number of shares to burn
-     */
-    function burnFrom(address _account, uint256 _shares) external;
-
-    /**
-     * @notice Seizes shares from a user and transfers them to the receiver
-     * @dev Only callable by a designated admin for compliance reasons
-     * @dev Bypasses the balance update hook
-     * @param _from The address to seize shares from
-     * @param _receiver The address that will receive the seized shares
-     * @param _shares The number of shares to seize
-     */
-    function seizeShares(address _from, address _receiver, uint256 _shares) external;
-
-    /**
-     * @notice Seizes shares from a user, redeems the shares, and transfers them to the receiver
-     * @dev Only callable by a designated admin for compliance reasons
-     * @param _from The address to seize and redeem shares from
-     * @param _receiver The address that received the assets for the redeemed shares
-     * @param _shares The number of shares to seize and redeem
-     */
-    function seizeAndRedeemShares(address _from, address _receiver, uint256 _shares) external returns (AssetClaims memory claims);
 
     /**
      * @notice Mints a kernel-computed number of protocol fee shares to the specified fee recipient

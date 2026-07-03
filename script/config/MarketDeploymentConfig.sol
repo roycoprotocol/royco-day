@@ -3,6 +3,10 @@ pragma solidity ^0.8.28;
 
 import { IGyroECLPPool } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
 import { BalancerV3DeploymentTemplate } from "../../src/factory/templates/BalancerV3DeploymentTemplate.sol";
+import {
+    IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
+} from "../../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
+import { BalancerV3_LT_Quoter } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_Quoter.sol";
 import { DeployScript } from "../Deploy.s.sol";
 
 /**
@@ -106,8 +110,6 @@ abstract contract MarketDeploymentConfig {
         bytes ydmSpecificParams;
         // Liquidity tranche: the Gyro E-CLP {ST_share, quote} pool the LT BPT is minted from.
         BalancerV3DeploymentTemplate.GyroECLPPoolParams gyroECLPPoolParams;
-        // Compliance
-        address transferAgentAddress;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -216,14 +218,20 @@ abstract contract MarketDeploymentConfig {
             juniorAsset: erc4626YieldVault,
             stDustTolerance: 1e16,
             jtDustTolerance: 1e16,
-            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel,
+            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel,
             kernelSpecificParams: abi.encode(
-                DeployScript.IdenticalERC4626Shares_ST_JT_ToChainlinkOracleQuoterKernelParams({
+                DeployScript.IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams({
+                    stAndJTQuoterParams: IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams({
                         // Enable the oracle leg by using the sentinel initial conversion rate
                         initialConversionRateWAD: 0,
                         baseAssetToNavAssetOracle: 0x9A5a3c3Ed0361505cC1D4e824B3854De5724434A, // TODO: real base-asset->NAV Chainlink feed
                         stalenessThresholdSeconds: 48 hours
+                    }),
+                    ltQuoterParams: BalancerV3_LT_Quoter.LT_QuoterSpecificParams({
+                        bptOracle: 0x000000000000000000000000000000000000dEaD, // TODO: real manipulation-resistant Balancer V3 BPT (E-CLP LP) oracle
+                        maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
                     })
+                })
             ),
             enforceVaultSharesTransferWhitelist: false,
             stSelfLiquidationBonusWAD: 0,
@@ -240,8 +248,7 @@ abstract contract MarketDeploymentConfig {
                     yieldShareAtZeroUtilWAD: 0.06e18, yieldShareAtTargetUtilWAD: 0.06e18, yieldShareAtFullUtilWAD: 0.18e18, maxAdaptationSpeedWAD: 0
                 })
             ),
-            gyroECLPPoolParams: demoGyroECLPPoolParams(DAY_DEMO, usdc),
-            transferAgentAddress: address(0)
+            gyroECLPPoolParams: demoGyroECLPPoolParams(DAY_DEMO, usdc)
         });
     }
 

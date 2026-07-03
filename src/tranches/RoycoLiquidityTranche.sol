@@ -15,21 +15,16 @@ import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
 /**
  * @title RoycoLiquidityTranche
  * @author Ankur Dubey, Shivaansh Kapoor
- * @notice Liquidity tranche (LT) share token for Royco Day markets. The LT's base asset is a market-making LP token
- *         (the senior share paired against a quote stablecoin) and the tranche earns a liquidity premium out of ST yield.
- * @dev Inherits from RoycoVaultTranche and specifies LIQUIDITY as the tranche type. In addition to the standard
- *      LP-token deposit/redeem, it exposes multi-asset entrypoints that let an LP enter/exit with the LP token's
- *      constituent assets (ST underlying + quote) directly.
+ * @notice Liquidity tranche implementation for Royco markets
+ * @dev In addition to the standard LT asset deposit/redeem flows, it exposes multi-asset entrypoints that let an LP enter/exit with ST and quote assets directly (ST assets are used to mint ST shares)
  */
 contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
     using SafeERC20 for IERC20;
 
     constructor(address _asset, address _kernel) RoycoVaultTranche(_asset, _kernel) { }
 
-    /**
-     * @notice Initializes the Royco liquidity tranche.
-     * @param _ltParams Deployment parameters including name, symbol, and initial authority for the liquidity tranche.
-     */
+    /// @notice Initializes the Royco liquidity tranche.
+    /// @param _ltParams Deployment parameters including name, symbol, and initial authority for the liquidity tranche.
     function initialize(RoycoTrancheInitParams calldata _ltParams) external initializer {
         __RoycoTranche_init(_ltParams);
     }
@@ -37,16 +32,6 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
     /// @inheritdoc RoycoVaultTranche
     function TRANCHE_TYPE() public pure virtual override(RoycoVaultTranche, IRoycoVaultTranche) returns (TrancheType) {
         return TrancheType.LIQUIDITY;
-    }
-
-    /// @inheritdoc IRoycoVaultTranche
-    function burn(uint256 _shares) public override(RoycoVaultTranche, IRoycoVaultTranche) {
-        super.burn(_shares);
-    }
-
-    /// @inheritdoc IRoycoVaultTranche
-    function burnFrom(address _account, uint256 _shares) public override(RoycoVaultTranche, IRoycoVaultTranche) {
-        super.burnFrom(_account, _shares);
     }
 
     // =============================
@@ -130,7 +115,12 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
     }
 
     /// @inheritdoc IRoycoLiquidityTranche
-    function previewRedeemMultiAsset(uint256 _shares) external virtual override(IRoycoLiquidityTranche) returns (AssetClaims memory stClaims, uint256 quoteAssets) {
+    function previewRedeemMultiAsset(uint256 _shares)
+        external
+        virtual
+        override(IRoycoLiquidityTranche)
+        returns (AssetClaims memory stClaims, uint256 quoteAssets)
+    {
         // Simulate the kernel's multi-asset redemption for the ST claims and quote assets the receiver would get — identical to redeemMultiAsset's outputs
         (stClaims, quoteAssets) = IRoycoDayKernel(KERNEL).ltPreviewRedeemMultiAsset(_shares);
     }

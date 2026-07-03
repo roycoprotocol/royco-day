@@ -16,8 +16,7 @@ import {
     JT_LP_ROLE,
     LP_ROLE_ADMIN_ROLE,
     ST_LP_ROLE,
-    SYNC_ROLE,
-    TRANSFER_AGENT_ROLE
+    SYNC_ROLE
 } from "../../src/factory/RolesConfiguration.sol";
 
 /**
@@ -71,8 +70,6 @@ abstract contract RoleConfigUtils {
             return RoleConfig({ adminRole: DEPLOYER_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         } else if (role == DEPLOYER_ROLE_ADMIN_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        } else if (role == TRANSFER_AGENT_ROLE) {
-            return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: ADMIN_ROLE, executionDelay: 0 });
         } else if (role == BURNER_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: ADMIN_ROLE, executionDelay: 0 });
         } else {

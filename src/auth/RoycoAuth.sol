@@ -7,9 +7,13 @@ import { IRoycoAuth } from "../interfaces/IRoycoAuth.sol";
 
 /**
  * @title RoycoAuth
+ * @author Ankur Dubey, Shivaansh Kapoor
  * @notice Abstract contract that provides access control and pausability functionality for Royco contracts
+ * @dev Combines OpenZeppelin's AccessManager-based access control (`restricted` gating) with pausability
  */
 abstract contract RoycoAuth is AccessManagedUpgradeable, PausableUpgradeable, IRoycoAuth {
+    /// @notice Initializes the access control and pausability state
+    /// @param _initialAuthority The initial authority (AccessManager) that governs the restricted functions
     function __RoycoAuth_init(address _initialAuthority) internal onlyInitializing {
         require(_initialAuthority != address(0), NULL_ADDRESS());
         __AccessManaged_init(_initialAuthority);

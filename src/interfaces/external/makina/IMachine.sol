@@ -10,8 +10,10 @@ interface IMachine {
     /// @notice Address of the accounting token.
     function accountingToken() external view returns (address);
 
-    /// @notice Returns the amount of accounting tokens that the Machine would exchange for the amount of shares provided.
-    /// @param shares The amount of shares.
-    /// @return assets The amount of accounting tokens.
+    /**
+     * @notice Returns the amount of accounting tokens that the Machine would exchange for the amount of shares provided.
+     * @param shares The amount of shares.
+     * @return assets The amount of accounting tokens.
+     */
     function convertToAssets(uint256 shares) external view returns (uint256);
 }

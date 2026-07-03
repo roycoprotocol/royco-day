@@ -36,9 +36,11 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
     // ERRORS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Thrown when a market component (everything except YDM) was already deployed at
-    ///         its CREATE3 address — signals a `marketId` collision that would re-use the
-    ///         pre-existing contract instead of producing a fresh market.
+    /**
+     * @notice Thrown when a market component (everything except YDM) was already deployed at
+     *         its CREATE3 address — signals a `marketId` collision that would re-use the
+     *         pre-existing contract instead of producing a fresh market.
+     */
     error MARKET_COMPONENT_ALREADY_DEPLOYED(address deployedAt, bytes32 salt);
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -53,10 +55,12 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
         address asset;
     }
 
-    /// @notice Shape every template uses for the junior tranche.
-    /// @dev Salt is derived from the top-level `marketId` + the tag `"JT"` — not in params.
-    /// @dev For Dusk markets the `asset` field is filled in by the template after the
-    ///      Balancer pool is deployed (callers pass `address(0)`).
+    /**
+     * @notice Shape every template uses for the junior tranche.
+     * @dev Salt is derived from the top-level `marketId` + the tag `"JT"` — not in params.
+     * @dev For Dusk markets the `asset` field is filled in by the template after the
+     *      Balancer pool is deployed (callers pass `address(0)`).
+     */
     struct JuniorTrancheParams {
         string name;
         string symbol;
@@ -78,10 +82,12 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
         bytes ydmInitializationData;
     }
 
-    /// @notice Shape every template uses for the YDM singleton.
-    /// @dev YDM creation code lives in SSTORE2 keyed by `COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2`. Salt is derived
-    ///      from `_singletonSalt(componentTag, version)` so templates passing the same
-    ///      `(componentTag, version)` land on the same address.
+    /**
+     * @notice Shape every template uses for the YDM singleton.
+     * @dev YDM creation code lives in SSTORE2 keyed by `COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2`. Salt is derived
+     *      from `_singletonSalt(componentTag, version)` so templates passing the same
+     *      `(componentTag, version)` land on the same address.
+     */
     struct YDMParams {
         bytes32 componentTag; // e.g. bytes32("YDM_ADAPTIVE_CURVE_V2")
         bytes32 version; // e.g. bytes32("V1")
@@ -203,9 +209,11 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
         return SSTORE2.read(ptr);
     }
 
-    /// @notice Deploys an impl whose creation code lives at `_componentId`, with no constructor args.
-    /// @dev Reverts if a contract already exists at the CREATE3 address — every market component
-    ///      must be a fresh deployment. The YDM is the only exception and uses `_deployYDM`.
+    /**
+     * @notice Deploys an impl whose creation code lives at `_componentId`, with no constructor args.
+     * @dev Reverts if a contract already exists at the CREATE3 address — every market component
+     *      must be a fresh deployment. The YDM is the only exception and uses `_deployYDM`.
+     */
     function _deployImpl(bytes32 _componentId, bytes32 _salt) internal returns (address impl) {
         return _deployImpl(_componentId, "", _salt);
     }
@@ -227,9 +235,11 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
         require(!alreadyDeployed, MARKET_COMPONENT_ALREADY_DEPLOYED(proxy, _salt));
     }
 
-    /// @notice Deploys the YDM singleton, idempotent across templates.
-    /// @dev The ONLY component permitted to be already-deployed — bypasses the freshness check
-    ///      enforced by `_deployImpl` because two markets legitimately share the same YDM.
+    /**
+     * @notice Deploys the YDM singleton, idempotent across templates.
+     * @dev The ONLY component permitted to be already-deployed — bypasses the freshness check
+     *      enforced by `_deployImpl` because two markets legitimately share the same YDM.
+     */
     function _deployYDM(YDMParams memory _p) internal returns (address ydm, bool alreadyDeployed) {
         bytes memory creationCode = _readCreationCode(COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2);
         (ydm, alreadyDeployed) = ROYCO_FACTORY.deployDeterministicContract(creationCode, _singletonSalt(_p.componentTag, _p.version));
@@ -266,15 +276,17 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
         return abi.encodeCall(RoycoSeniorTranche.initialize, (params));
     }
 
-    /// @notice Builds ABI-encoded `initialize(...)` calldata for an accountant proxy.
-    /// @dev The liquidity tranche overlay is wired with a zero-minimum-liquidity baseline so a freshly deployed market
-    ///      reduces to a plain ST/JT market: `minLiquidityWAD = 0`, no LT fees, and an uninitialized LT YDM that is never
-    ///      consulted while `minLiquidityWAD == 0`. `_ltYdm` MUST be a distinct instance from `_jtYdm`: the accountant's
-    ///      `YDMS_CANNOT_BE_IDENTICAL` guard rejects identical JT and LT YDMs at `initialize()`. The full LDM wiring
-    ///      (premium model + LT liquidity/premium config) lands with the functional LT path (P2+).
-    /// @param _p The accountant parameters.
-    /// @param _jtYdm The JT YDM (risk-premium model) instance.
-    /// @param _ltYdm The LT YDM (liquidity-premium model) instance; a distinct placeholder until the LDM is wired.
+    /**
+     * @notice Builds ABI-encoded `initialize(...)` calldata for an accountant proxy.
+     * @dev The liquidity tranche overlay is wired with a zero-minimum-liquidity baseline so a freshly deployed market
+     *      reduces to a plain ST/JT market: `minLiquidityWAD = 0`, no LT fees, and an uninitialized LT YDM that is never
+     *      consulted while `minLiquidityWAD == 0`. `_ltYdm` MUST be a distinct instance from `_jtYdm`: the accountant's
+     *      `YDMS_CANNOT_BE_IDENTICAL` guard rejects identical JT and LT YDMs at `initialize()`. The full LDM wiring
+     *      (premium model + LT liquidity/premium config) lands with the functional LT path (P2+).
+     * @param _p The accountant parameters.
+     * @param _jtYdm The JT YDM (risk-premium model) instance.
+     * @param _ltYdm The LT YDM (liquidity-premium model) instance; a distinct placeholder until the LDM is wired.
+     */
     function _encodeAccountantInitData(AccountantParams memory _p, address _jtYdm, address _ltYdm) internal view returns (bytes memory) {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
             stProtocolFeeWAD: _p.stProtocolFeeWAD,
@@ -303,9 +315,7 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
     // ROLE BINDING APPLICATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /**
-     * @notice Applies every binding in `_bindings` by calling back into the factory.
-     */
+    /// @notice Applies every binding in `_bindings` by calling back into the factory.
     function _applyRoleBindings(RoleBindings memory _bindings) internal {
         // Go through each target binding and apply the selectors to the target.
         uint256 nTargets = _bindings.targetBindings.length;

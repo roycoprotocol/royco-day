@@ -186,10 +186,8 @@ interface IRoycoFactory {
      */
     function deployMarket(MarketDeploymentParams calldata _params) external returns (RoycoMarket memory roycoMarket);
 
-    /**
-     * @notice Sets the scheduled operations expiry seconds
-     * @param _scheduledOperationsExpirySeconds The expiry time for scheduled operations in seconds
-     */
+    /// @notice Sets the scheduled operations expiry seconds
+    /// @param _scheduledOperationsExpirySeconds The expiry time for scheduled operations in seconds
     function setScheduledOperationsExpiry(uint32 _scheduledOperationsExpirySeconds) external;
 
     /**

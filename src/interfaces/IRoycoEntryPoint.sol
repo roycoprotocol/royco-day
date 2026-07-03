@@ -4,10 +4,8 @@ pragma solidity ^0.8.28;
 import { AssetClaims } from "../libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "../libraries/Units.sol";
 
-/**
- * @title IRoycoEntryPoint
- * @notice Interface for the RoycoEntryPoint contract enabling asynchronous deposit and redemption flows on Royco Tranches
- */
+/// @title IRoycoEntryPoint
+/// @notice Interface for the RoycoEntryPoint contract enabling asynchronous deposit and redemption flows on Royco Tranches
 interface IRoycoEntryPoint {
     /**
      * @notice Defines the recipient of yield accrued during the redemption delay period
@@ -334,14 +332,14 @@ interface IRoycoEntryPoint {
      */
     function collectProtocolFees(address[] calldata _tranches, uint256[] calldata _sharesToClaim, address _receiver) external;
 
-    /// =============================
-    /// State Accessor Functions
-    /// =============================
-
     /**
-     * @notice Returns the last assigned request nonce
-     * @return nonce The last request nonce that was assigned
+     * =============================
+     * State Accessor Functions
+     * =============================
      */
+
+    /// @notice Returns the last assigned request nonce
+    /// @return nonce The last request nonce that was assigned
     function getLastRequestNonce() external view returns (uint256 nonce);
 
     /**

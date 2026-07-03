@@ -113,10 +113,8 @@ contract RoycoBlacklist is IRoycoBlacklist, RoycoBase {
         }
     }
 
-    /**
-     * @notice Sets the Chainalysis sanctions list used to screen accounts
-     * @param _chainalysisSanctionsList The Chainalysis maintained sanctions list address (set to the null address to disable sanctions screening)
-     */
+    /// @notice Sets the Chainalysis sanctions list used to screen accounts
+    /// @param _chainalysisSanctionsList The Chainalysis maintained sanctions list address (set to the null address to disable sanctions screening)
     function _setSanctionsList(address _chainalysisSanctionsList) internal {
         _getRoycoBlacklistStorage().chainalysisSanctionsList = _chainalysisSanctionsList;
         emit SanctionsListUpdated(_chainalysisSanctionsList);
