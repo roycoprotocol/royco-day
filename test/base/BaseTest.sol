@@ -22,7 +22,7 @@ import {
     SYNC_ROLE
 } from "../../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
-import { IRoycoBlacklist } from "../../src/interfaces/IRoycoBlacklist.sol";
+import { IRoycoBlacklistHook } from "../../src/interfaces/IRoycoBlacklistHook.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
@@ -145,7 +145,7 @@ abstract contract BaseTest is Test, Assertions {
     IRoycoVaultTranche internal JT;
     IRoycoDayKernel internal KERNEL;
     IRoycoDayAccountant internal ACCOUNTANT;
-    IRoycoBlacklist internal BLACKLIST;
+    IRoycoBlacklistHook internal BLACKLIST;
 
     // -----------------------------------------
     // Royco Deployments Parameters
@@ -333,7 +333,7 @@ abstract contract BaseTest is Test, Assertions {
         KERNEL = _deploymentResult.kernel;
         vm.label(address(KERNEL), "Kernel");
 
-        BLACKLIST = IRoycoBlacklist(_deploymentResult.roycoBlacklist);
+        BLACKLIST = IRoycoBlacklistHook(_deploymentResult.roycoBlacklist);
         vm.label(address(BLACKLIST), "Blacklist");
 
         FACTORY = _deploymentResult.factory;

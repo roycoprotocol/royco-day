@@ -19,7 +19,6 @@ interface IRoycoDayKernel {
      * @custom:field accountant - The address of the accountant for the Royco market
      * @custom:field liquidityTranche - The address of the Royco liquidity tranche associated with this kernel
      * @custom:field ltAsset - The base asset of the liquidity tranche (the liquidity venue's market-making position token)
-     * @custom:field enforceVaultSharesTransferWhitelist Whether to enforce the vault shares transfer whitelist
      */
     struct RoycoDayKernelConstructionParams {
         address seniorTranche;
@@ -29,7 +28,6 @@ interface IRoycoDayKernel {
         address accountant;
         address liquidityTranche;
         address ltAsset;
-        bool enforceVaultSharesTransferWhitelist;
     }
 
     /**
@@ -37,13 +35,11 @@ interface IRoycoDayKernel {
      * @custom:field initialAuthority - The access manager for this kernel
      * @custom:field protocolFeeRecipient - The market's protocol fee recipient
      * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached, scaled to WAD precision
-     * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables blacklist screening)
      */
     struct RoycoDayKernelInitParams {
         address initialAuthority;
         address protocolFeeRecipient;
         uint64 stSelfLiquidationBonusWAD;
-        address roycoBlacklist;
     }
 
     /**
@@ -55,7 +51,6 @@ interface IRoycoDayKernel {
      * @custom:field jtOwnedYieldBearingAssets - The yield bearing assets held by the junior tranche, in JT's asset units
      * @custom:field ltOwnedYieldBearingAssets - The yield bearing assets held by the liquidity tranche, in LT's asset units
      * @custom:field ltOwnedSeniorTrancheShares - The senior tranche shares held by the liquidity tranche (accumulated liquidity premium payments)
-     * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables blacklist screening)
      */
     struct RoycoDayKernelState {
         address protocolFeeRecipient;
@@ -64,7 +59,6 @@ interface IRoycoDayKernel {
         TRANCHE_UNIT jtOwnedYieldBearingAssets;
         TRANCHE_UNIT ltOwnedYieldBearingAssets;
         uint256 ltOwnedSeniorTrancheShares;
-        address roycoBlacklist;
     }
 
     /// @notice Emitted when the protocol fee recipient is updated
@@ -74,10 +68,6 @@ interface IRoycoDayKernel {
     /// @notice Emitted when the ST self-liquidation bonus is updated
     /// @param stSelfLiquidationBonusWAD The new ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached
     event SeniorTrancheSelfLiquidationBonusUpdated(uint64 stSelfLiquidationBonusWAD);
-
-    /// @notice Emitted when the market's blacklist contract is updated
-    /// @param roycoBlacklist The new blacklist contract address (the null address if screening is disabled)
-    event RoycoBlacklistUpdated(address roycoBlacklist);
 
     /**
      * @notice Emitted when the kernel deploys its held liquidity-premium senior shares into the liquidity tranche's venue
@@ -109,9 +99,6 @@ interface IRoycoDayKernel {
 
     /// @notice Thrown when the specified account is the null address
     error NULL_DEPOSITOR();
-
-    /// @notice Thrown when the to address is not whitelisted on the tranche
-    error ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(address to);
 
     /// @notice Thrown when an LT multi-asset deposit/redeem is made with zero of both constituent assets (ST underlying and quote)
     error MUST_DEPOSIT_NON_ZERO_ASSETS();
@@ -159,14 +146,6 @@ interface IRoycoDayKernel {
      */
     function setSeniorTrancheSelfLiquidationBonus(uint64 _stSelfLiquidationBonusWAD) external;
 
-    /**
-     * @notice Sets the blacklist contract consulted on tranche balance updates for this market
-     * @dev Only callable by a designated admin
-     * @dev Setting the blacklist to the null address disables blacklist screening for this market
-     * @param _roycoBlacklist The address of the market's blacklist contract (or the null address to disable screening)
-     */
-    function setRoycoBlacklist(address _roycoBlacklist) external;
-
     /// @notice Retrieves the state of the Royco kernel
     /// @return state The Royco kernel's state, including the protocol fee recipient and the kernel's controlled tranche and base assets
     function getState() external view returns (RoycoDayKernelState memory state);
@@ -195,9 +174,6 @@ interface IRoycoDayKernel {
         external
         view
         returns (NAV_UNIT ltEffectiveNAV);
-
-    /// @notice Returns whether an account is blacklisted under the market's configured screen
-    function isBlacklisted(address _account) external view returns (bool);
 
     /// @notice Derives the cumulative asset claims a tranche is entitled to for a synced accounting state
     /// @param _trancheType Which tranche to derive claims for
@@ -366,15 +342,4 @@ interface IRoycoDayKernel {
     )
         external
         returns (AssetClaims memory stClaims, uint256 quoteAssets);
-
-    /**
-     * @notice Pre-balance update hook for the tranche
-     * @dev This function should revert if the balance update is invalid.
-     * @dev Should be called before every tranche share balance update
-     * @param _caller The address that is calling the balance update
-     * @param _from The address from which the balance is being updated
-     * @param _to The address to which the balance is being updated
-     * @param _value The amount of the balance being updated
-     */
-    function preTrancheBalanceUpdateHook(address _caller, address _from, address _to, uint256 _value) external;
 }

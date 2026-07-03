@@ -2,9 +2,11 @@
 pragma solidity ^0.8.28;
 
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { IRoycoBlacklistHook } from "../../interfaces/IRoycoBlacklistHook.sol";
 import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoDayKernelLens } from "../../interfaces/IRoycoDayKernelLens.sol";
+import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { MAX_NAV_UNITS, MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../libraries/Constants.sol";
 import { RoycoDayKernelMathLib } from "../../libraries/RoycoDayKernelMathLib.sol";
 import { AssetClaims, MarketState, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
@@ -109,6 +111,11 @@ abstract contract RoycoDayKernelLens is IRoycoDayKernelLens {
         state = IRoycoDayAccountant(ACCOUNTANT).previewSyncTrancheAccounting(stRawNAV, jtRawNAV);
         state.ltRawNAV = ltRawNAV;
         state.liquidityUtilizationWAD = UtilsLib.computeLiquidityUtilization(state.stEffectiveNAV, state.minLiquidityWAD, state.ltRawNAV);
+    }
+
+    /// @dev Whether an account is blacklisted, read from the market's tranche balance-update hook (all tranches share it, so read the senior tranche's)
+    function _isBlacklisted(address _account) internal view returns (bool) {
+        return IRoycoBlacklistHook(IRoycoVaultTranche(SENIOR_TRANCHE).hook()).isBlacklisted(_account);
     }
 
     // =============================
@@ -243,7 +250,7 @@ abstract contract RoycoDayKernelLens is IRoycoDayKernelLens {
     /// @inheritdoc IRoycoDayKernelLens
     /// @dev ST deposits are allowed only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-deposit
     function stMaxDeposit(address _receiver) public view virtual override(IRoycoDayKernelLens) returns (TRANCHE_UNIT) {
-        if (ROYCO_DAY_KERNEL.isBlacklisted(_receiver) || IPausable(address(ROYCO_DAY_KERNEL)).paused()) return ZERO_TRANCHE_UNITS;
+        if (_isBlacklisted(_receiver) || IPausable(address(ROYCO_DAY_KERNEL)).paused()) return ZERO_TRANCHE_UNITS;
         SyncedAccountingState memory state = _previewSyncState();
         if (state.marketState == MarketState.FIXED_TERM) return ZERO_TRANCHE_UNITS;
         NAV_UNIT stMaxDepositableNAV = IRoycoDayAccountant(ACCOUNTANT).maxSTDeposit(state);
@@ -259,7 +266,7 @@ abstract contract RoycoDayKernelLens is IRoycoDayKernelLens {
         override(IRoycoDayKernelLens)
         returns (NAV_UNIT claimOnSTNAV, NAV_UNIT claimOnJTNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalTrancheShares)
     {
-        if (ROYCO_DAY_KERNEL.isBlacklisted(_owner) || IPausable(address(ROYCO_DAY_KERNEL)).paused()) {
+        if (_isBlacklisted(_owner) || IPausable(address(ROYCO_DAY_KERNEL)).paused()) {
             return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
         }
 
@@ -278,7 +285,7 @@ abstract contract RoycoDayKernelLens is IRoycoDayKernelLens {
     /// @inheritdoc IRoycoDayKernelLens
     /// @dev JT deposits are allowed if the market is in a PERPETUAL state
     function jtMaxDeposit(address _receiver) public view virtual override(IRoycoDayKernelLens) returns (TRANCHE_UNIT) {
-        if (ROYCO_DAY_KERNEL.isBlacklisted(_receiver) || IPausable(address(ROYCO_DAY_KERNEL)).paused()) return ZERO_TRANCHE_UNITS;
+        if (_isBlacklisted(_receiver) || IPausable(address(ROYCO_DAY_KERNEL)).paused()) return ZERO_TRANCHE_UNITS;
         if ((_previewSyncState()).marketState == MarketState.FIXED_TERM) return ZERO_TRANCHE_UNITS;
         return MAX_TRANCHE_UNITS;
     }
@@ -292,7 +299,7 @@ abstract contract RoycoDayKernelLens is IRoycoDayKernelLens {
         override(IRoycoDayKernelLens)
         returns (NAV_UNIT claimOnSTNAV, NAV_UNIT claimOnJTNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalTrancheShares)
     {
-        if (ROYCO_DAY_KERNEL.isBlacklisted(_owner) || IPausable(address(ROYCO_DAY_KERNEL)).paused()) {
+        if (_isBlacklisted(_owner) || IPausable(address(ROYCO_DAY_KERNEL)).paused()) {
             return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
         }
 
@@ -311,7 +318,7 @@ abstract contract RoycoDayKernelLens is IRoycoDayKernelLens {
     /// @inheritdoc IRoycoDayKernelLens
     /// @dev An in-kind LT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state and unbounded
     function ltMaxDeposit(address _receiver) public view virtual override(IRoycoDayKernelLens) returns (TRANCHE_UNIT) {
-        if (ROYCO_DAY_KERNEL.isBlacklisted(_receiver) || IPausable(address(ROYCO_DAY_KERNEL)).paused()) return ZERO_TRANCHE_UNITS;
+        if (_isBlacklisted(_receiver) || IPausable(address(ROYCO_DAY_KERNEL)).paused()) return ZERO_TRANCHE_UNITS;
         return MAX_TRANCHE_UNITS;
     }
 
@@ -323,7 +330,7 @@ abstract contract RoycoDayKernelLens is IRoycoDayKernelLens {
         override(IRoycoDayKernelLens)
         returns (NAV_UNIT claimOnLTNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheShares)
     {
-        if (ROYCO_DAY_KERNEL.isBlacklisted(_owner) || IPausable(address(ROYCO_DAY_KERNEL)).paused()) {
+        if (_isBlacklisted(_owner) || IPausable(address(ROYCO_DAY_KERNEL)).paused()) {
             return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
         }
 

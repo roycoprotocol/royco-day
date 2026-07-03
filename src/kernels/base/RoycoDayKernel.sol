@@ -2,12 +2,10 @@
 pragma solidity ^0.8.28;
 
 import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
-import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { ReentrancyGuardTransient } from "../../../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuardTransient.sol";
 import { RoycoBase } from "../../base/RoycoBase.sol";
-import { IRoycoBlacklist } from "../../interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoSeniorTranche } from "../../interfaces/IRoycoSeniorTranche.sol";
@@ -63,9 +61,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @inheritdoc IRoycoDayKernel
     address public immutable override(IRoycoDayKernel) ACCOUNTANT;
-
-    /// @notice Whether to enforce the tranche whitelist on share transfers
-    bool public immutable ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER;
 
     /// @dev Permissions the function to only be callable by the market's senior tranche
     /// @dev Should be placed on ST deposit and redeem functions
@@ -124,7 +119,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         ACCOUNTANT = _params.accountant;
         LIQUIDITY_TRANCHE = _params.liquidityTranche;
         LT_ASSET = _params.ltAsset;
-        ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER = _params.enforceVaultSharesTransferWhitelist;
 
         // If the senior and junior tranches share the same yield-bearing asset they are structurally correlated, so the junior tranche must be configured as co-invested in the accountant
         require((_params.stAsset != _params.jtAsset) || IRoycoDayAccountant(_params.accountant).JT_COINVESTED(), JT_MUST_BE_COINVESTED());
@@ -152,10 +146,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
         $.protocolFeeRecipient = _params.protocolFeeRecipient;
         $.stSelfLiquidationBonusWAD = _params.stSelfLiquidationBonusWAD;
-        $.roycoBlacklist = _params.roycoBlacklist;
         emit ProtocolFeeRecipientUpdated(_params.protocolFeeRecipient);
         emit SeniorTrancheSelfLiquidationBonusUpdated(_params.stSelfLiquidationBonusWAD);
-        emit RoycoBlacklistUpdated(_params.roycoBlacklist);
     }
 
     // =============================
@@ -539,12 +531,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     function setSeniorTrancheSelfLiquidationBonus(uint64 _stSelfLiquidationBonusWAD) external override(IRoycoDayKernel) restricted {
         _getRoycoDayKernelStorage().stSelfLiquidationBonusWAD = _stSelfLiquidationBonusWAD;
         emit SeniorTrancheSelfLiquidationBonusUpdated(_stSelfLiquidationBonusWAD);
-    }
-
-    /// @inheritdoc IRoycoDayKernel
-    function setRoycoBlacklist(address _roycoBlacklist) external override(IRoycoDayKernel) restricted {
-        _getRoycoDayKernelStorage().roycoBlacklist = _roycoBlacklist;
-        emit RoycoBlacklistUpdated(_roycoBlacklist);
     }
 
     // =============================
@@ -968,69 +954,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     function _attemptLiquidityPremiumReinvestment(uint256 _stSharesToReinvest, NAV_UNIT _stEffectiveNAV, uint256 _totalSTShares) internal virtual;
 
     // =============================
-    // Tranche Compliance Methods
-    // =============================
-
-    /// @inheritdoc IRoycoDayKernel
-    function preTrancheBalanceUpdateHook(
-        address _caller,
-        address _from,
-        address _to,
-        uint256 _value
-    )
-        external
-        override(IRoycoDayKernel)
-        onlyTranche
-        whenNotPaused
-    {
-        // Batch screen the involved accounts against the market's blacklist if one is configured (the null address disables screening)
-        address roycoBlacklist = _getRoycoDayKernelStorage().roycoBlacklist;
-        if (roycoBlacklist != address(0)) {
-            address[] memory accountsToScreen = new address[](3);
-            accountsToScreen[0] = _caller;
-            accountsToScreen[1] = _from;
-            accountsToScreen[2] = _to;
-            IRoycoBlacklist(roycoBlacklist).enforceNotBlacklisted(accountsToScreen);
-        }
-
-        // If transferring shares, ensure that the recipient is a whitelisted LP for the tranche
-        if (_to != address(0) && ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER) {
-            // It is assumed that the sender is already a whitelisted LP
-            address authority = authority();
-            // Check if the to address can call the deposit function on the tranche
-            /// @dev msg.sender is the tranche address
-            (bool isWhitelistedTrancheLP,) = IAccessManager(authority).canCall(_to, msg.sender, IRoycoVaultTranche.deposit.selector);
-            require(_to != authority && isWhitelistedTrancheLP, ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(_to));
-        }
-
-        // Call the market specific pre-balance update hook
-        _preTrancheBalanceUpdate(_caller, _from, _to, _value);
-    }
-
-    /**
-     * @notice Pre-balance update hook for the kernel
-     * @dev Intentionally implemented with an empty body since inheriting contracts are not required to override this function
-     * @dev Should be overridden by concrete kernel implementations to perform any additional checks or actions
-     * @dev The caller is the address that initiated the balance update
-     * @param _caller The address that initiated the balance update
-     * @param _from The address from which the balance is being updated
-     * @param _to The address to which the balance is being updated
-     * @param _value The amount of the balance being updated
-     */
-    function _preTrancheBalanceUpdate(address _caller, address _from, address _to, uint256 _value) internal virtual { }
-
-    /**
-     * @notice Returns whether the specified account is screened out by the market's blacklist
-     * @dev Returns false when no blacklist is configured (the null address disables screening)
-     * @param _account The address of the account to check
-     * @return Whether the account is blacklisted by the market's configured blacklist
-     */
-    function _isBlacklisted(address _account) internal view returns (bool) {
-        address roycoBlacklist = _getRoycoDayKernelStorage().roycoBlacklist;
-        return (roycoBlacklist != address(0) && IRoycoBlacklist(roycoBlacklist).isBlacklisted(_account));
-    }
-
-    // =============================
     // Internal Quoter Cache Functions
     // =============================
 
@@ -1103,11 +1026,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         returns (NAV_UNIT)
     {
         return _getLiquidityTrancheEffectiveNAV(_stEffectiveNAV, _totalSeniorTrancheShares, _ltOwnedSeniorTrancheShares);
-    }
-
-    /// @inheritdoc IRoycoDayKernel
-    function isBlacklisted(address _account) external view override(IRoycoDayKernel) returns (bool) {
-        return _isBlacklisted(_account);
     }
 
     /// @inheritdoc IRoycoDayKernel

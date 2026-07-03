@@ -21,7 +21,13 @@ import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
 contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
     using SafeERC20 for IERC20;
 
-    constructor(address _asset, address _kernel) RoycoVaultTranche(_asset, _kernel) { }
+    constructor(
+        address _asset,
+        address _kernel,
+        bool _enforceVaultSharesTransferWhitelist
+    )
+        RoycoVaultTranche(_asset, _kernel, _enforceVaultSharesTransferWhitelist)
+    { }
 
     /// @notice Initializes the Royco liquidity tranche.
     /// @param _ltParams Deployment parameters including name, symbol, and initial authority for the liquidity tranche.

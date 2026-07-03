@@ -51,11 +51,17 @@ interface IRoycoVaultTranche is IERC20Metadata {
     /// @notice Emitted when the tranche's kernel lens is wired (one-time, during market deployment)
     event LensSet(address indexed lens);
 
+    /// @notice Emitted when the tranche's balance-update hook is wired (one-time, during market deployment)
+    event HookSet(address indexed hook);
+
     /// @notice Thrown when a deposit would mint zero tranche shares (either zero assets or dust amount that rounds to zero shares)
     error MUST_MINT_NON_ZERO_SHARES();
 
     /// @notice Thrown when wiring the kernel lens more than once
     error LENS_ALREADY_SET();
+
+    /// @notice Thrown when wiring the tranche balance-update hook more than once
+    error HOOK_ALREADY_SET();
 
     /// @notice Thrown when a redemption is requested with zero shares
     error MUST_REQUEST_NON_ZERO_SHARES();
@@ -77,6 +83,17 @@ interface IRoycoVaultTranche is IERC20Metadata {
     /// @notice One-time wiring of the kernel lens; gated by the AccessManager and set during market deployment
     /// @param _lens The kernel lens for this market
     function setLens(address _lens) external;
+
+    /// @notice Whether share transfers require the recipient to be a whitelisted LP for this tranche
+    function ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER() external view returns (bool);
+
+    /// @notice Returns the tranche balance-update hook this tranche calls on every transfer/mint/burn
+    /// @return trancheHook The hook address (the zero address until wired during deployment)
+    function hook() external view returns (address trancheHook);
+
+    /// @notice One-time wiring of the tranche balance-update hook; gated by the AccessManager and set during market deployment
+    /// @param _hook The balance-update hook (the shared RoycoBlacklistHook) for this market
+    function setHook(address _hook) external;
 
     /**
      * @notice Returns the raw NAV of the tranche's invested assets

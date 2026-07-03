@@ -207,18 +207,19 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         (address ltYdm,) = _deployYDM(p.ltYdm);
 
         // 3. Deploy ST impl + proxy first — the pool needs ST_PROXY as one of its tokens.
-        address stImpl = _deploySeniorTrancheImpl(p.st.asset, result.kernel, _marketComponentSalt(p.marketId, "ST_IMPL"));
+        address stImpl = _deploySeniorTrancheImpl(p.st.asset, result.kernel, p.enforceVaultSharesTransferWhitelist, _marketComponentSalt(p.marketId, "ST_IMPL"));
         _deployProxy(stImpl, _encodeTrancheInitData(p.st.name, p.st.symbol), stProxySalt);
 
         // 4. Create the Gyro E-CLP pool `{ST_share, quote}` (no rate providers, no hooks). LT asset = pool.
         address balancerPool = _createBalancerV3Pool(p.gyroECLPPoolParams, result.seniorTranche, _marketComponentSalt(p.marketId, "BALANCER_V3_POOL"));
 
         // 5. Deploy JT impl + proxy (plain first-loss asset).
-        address jtImpl = _deployJuniorTrancheImpl(p.jt.asset, result.kernel, _marketComponentSalt(p.marketId, "JT_IMPL"));
+        address jtImpl = _deployJuniorTrancheImpl(p.jt.asset, result.kernel, p.enforceVaultSharesTransferWhitelist, _marketComponentSalt(p.marketId, "JT_IMPL"));
         _deployProxy(jtImpl, _encodeTrancheInitData(p.jt.name, p.jt.symbol), jtProxySalt);
 
         // 6. Deploy LT impl + proxy (asset = the pool BPT).
-        address ltImpl = _deployLiquidityTrancheImpl(balancerPool, result.kernel, _marketComponentSalt(p.marketId, "LT_IMPL"));
+        address ltImpl =
+            _deployLiquidityTrancheImpl(balancerPool, result.kernel, p.enforceVaultSharesTransferWhitelist, _marketComponentSalt(p.marketId, "LT_IMPL"));
         _deployProxy(ltImpl, _encodeTrancheInitData(p.lt.name, p.lt.symbol), ltProxySalt);
 
         // 7. Deploy accountant impl + proxy (Day accountant bytecode registered under the accountant component ID).
@@ -246,7 +247,6 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
             juniorTranche: _result.juniorTranche,
             jtAsset: _p.jt.asset,
             accountant: _result.accountant,
-            enforceVaultSharesTransferWhitelist: _p.enforceVaultSharesTransferWhitelist,
             liquidityTranche: _result.liquidityTranche,
             ltAsset: _balancerPool
         });
@@ -255,8 +255,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         IRoycoDayKernel.RoycoDayKernelInitParams memory kip = IRoycoDayKernel.RoycoDayKernelInitParams({
             initialAuthority: ROYCO_FACTORY.ROYCO_AUTHORITY(),
             protocolFeeRecipient: _p.protocolFeeRecipient,
-            stSelfLiquidationBonusWAD: _p.stSelfLiquidationBonusWAD,
-            roycoBlacklist: _p.roycoBlacklist
+            stSelfLiquidationBonusWAD: _p.stSelfLiquidationBonusWAD
         });
         _deployProxy(kernelImpl, _kernelInitData(kip, _p.kernelSpecificParams), _kernelProxySalt);
     }
@@ -389,8 +388,8 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     }
 
     function _kernelBinding(address _kernel) private pure returns (TargetBinding memory) {
-        bytes4[] memory s = new bytes4[](7);
-        uint64[] memory r = new uint64[](7);
+        bytes4[] memory s = new bytes4[](6);
+        uint64[] memory r = new uint64[](6);
         s[0] = IRoycoDayKernel.setProtocolFeeRecipient.selector;
         r[0] = ADMIN_KERNEL_ROLE;
         s[1] = IRoycoAuth.pause.selector;
@@ -401,10 +400,8 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         r[3] = ADMIN_UPGRADER_ROLE;
         s[4] = IRoycoDayKernel.syncTrancheAccounting.selector;
         r[4] = SYNC_ROLE;
-        s[5] = IRoycoDayKernel.setRoycoBlacklist.selector;
+        s[5] = IRoycoDayKernel.setSeniorTrancheSelfLiquidationBonus.selector;
         r[5] = ADMIN_KERNEL_ROLE;
-        s[6] = IRoycoDayKernel.setSeniorTrancheSelfLiquidationBonus.selector;
-        r[6] = ADMIN_KERNEL_ROLE;
         return TargetBinding({ target: _kernel, selectors: s, roleIds: r });
     }
 

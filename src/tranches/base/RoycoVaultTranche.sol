@@ -8,6 +8,7 @@ import { ERC20PermitUpgradeable } from "../../../lib/openzeppelin-contracts-upgr
 import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoBase } from "../../base/RoycoBase.sol";
+import { IRoycoBlacklistHook } from "../../interfaces/IRoycoBlacklistHook.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoDayKernelLens } from "../../interfaces/IRoycoDayKernelLens.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
@@ -33,10 +34,19 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     /// @inheritdoc IRoycoVaultTranche
     address public immutable override(IRoycoVaultTranche) KERNEL;
 
+    /// @inheritdoc IRoycoVaultTranche
+    /// @dev Whether share transfers require the recipient to be a whitelisted LP for this tranche; passed to the hook per transfer
+    bool public immutable override(IRoycoVaultTranche) ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER;
+
     /// @dev Namespaced (ERC-7201) storage slot holding the kernel lens address. The lens holds the read-only preview/max
     ///      surface (moved off the size-constrained kernel) and is deployed after the tranche, so it is set once post-deploy.
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoVaultTranche.lens")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant LENS_STORAGE_SLOT = 0xc4644d89fbb9ea1774311d4bbb6e85a5190c798679195f9770be920e0b4a8a00;
+
+    /// @dev Namespaced (ERC-7201) storage slot holding the tranche balance-update hook (the shared RoycoBlacklistHook).
+    ///      Wired once post-deploy (the shared hook exists independently of the market).
+    // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoVaultTranche.hook")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant HOOK_STORAGE_SLOT = 0xb86c5fc9b8af27aaacbbe608ea2ec81e6833c46cf4ef1d87a30e07da68251d00;
 
     /// @dev Permissions the function to only be callable by the kernel, the single source of truth for sync-driven share mints
     modifier onlyKernel() {
@@ -67,18 +77,38 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         return IRoycoDayKernelLens(LENS());
     }
 
+    /// @inheritdoc IRoycoVaultTranche
+    function hook() public view override(IRoycoVaultTranche) returns (address trancheHook) {
+        assembly ("memory-safe") {
+            trancheHook := sload(HOOK_STORAGE_SLOT)
+        }
+    }
+
+    /// @inheritdoc IRoycoVaultTranche
+    /// @dev One-time wiring of the tranche balance-update hook; gated by the AccessManager and set during market deployment
+    function setHook(address _hook) external override(IRoycoVaultTranche) restricted {
+        require(_hook != address(0), NULL_ADDRESS());
+        require(hook() == address(0), HOOK_ALREADY_SET());
+        assembly ("memory-safe") {
+            sstore(HOOK_STORAGE_SLOT, _hook)
+        }
+        emit HookSet(_hook);
+    }
+
     /**
      * @notice Constructs the Royco vault tranche
      * @param _asset The underlying asset for the tranche
      * @param _kernel The kernel that handles strategy logic
+     * @param _enforceVaultSharesTransferWhitelist Whether share transfers require the recipient to be a whitelisted LP for this tranche
      */
-    constructor(address _asset, address _kernel) {
+    constructor(address _asset, address _kernel, bool _enforceVaultSharesTransferWhitelist) {
         // Ensure that the asset and kernel are not null
         require(_asset != address(0) && _kernel != address(0), NULL_ADDRESS());
 
         // Set the immutable state
         ASSET = _asset;
         KERNEL = _kernel;
+        ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER = _enforceVaultSharesTransferWhitelist;
     }
 
     /**
@@ -378,7 +408,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     /// @inheritdoc ERC20PausableUpgradeable
     function _update(address _from, address _to, uint256 _value) internal override(ERC20PausableUpgradeable, ERC20Upgradeable) whenNotPaused {
         // Call the kernel's pre-balance update hook to assert that the balance update is valid
-        IRoycoDayKernel(KERNEL).preTrancheBalanceUpdateHook(msg.sender, _from, _to, _value);
+        IRoycoBlacklistHook(hook()).preTrancheBalanceUpdateHook(msg.sender, _from, _to, ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER);
 
         // Call the parent contract update function to update the balance
         ERC20Upgradeable._update(_from, _to, _value);

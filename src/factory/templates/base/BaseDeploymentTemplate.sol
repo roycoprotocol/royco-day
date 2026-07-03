@@ -245,19 +245,19 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
         (ydm, alreadyDeployed) = ROYCO_FACTORY.deployDeterministicContract(creationCode, _singletonSalt(_p.componentTag, _p.version));
     }
 
-    /// @notice Deploys the senior-tranche impl for a given (asset, kernel) pair.
-    function _deploySeniorTrancheImpl(address _asset, address _kernel, bytes32 _salt) internal returns (address impl) {
-        return _deployImpl(COMPONENT_ID_SENIOR_TRANCHE_IMPL, abi.encode(_asset, _kernel), _salt);
+    /// @notice Deploys the senior-tranche impl for a given (asset, kernel) pair with its transfer-whitelist enforcement flag.
+    function _deploySeniorTrancheImpl(address _asset, address _kernel, bool _enforceWhitelist, bytes32 _salt) internal returns (address impl) {
+        return _deployImpl(COMPONENT_ID_SENIOR_TRANCHE_IMPL, abi.encode(_asset, _kernel, _enforceWhitelist), _salt);
     }
 
-    /// @notice Deploys the junior-tranche impl for a given (asset, kernel) pair.
-    function _deployJuniorTrancheImpl(address _asset, address _kernel, bytes32 _salt) internal returns (address impl) {
-        return _deployImpl(COMPONENT_ID_JUNIOR_TRANCHE_IMPL, abi.encode(_asset, _kernel), _salt);
+    /// @notice Deploys the junior-tranche impl for a given (asset, kernel) pair with its transfer-whitelist enforcement flag.
+    function _deployJuniorTrancheImpl(address _asset, address _kernel, bool _enforceWhitelist, bytes32 _salt) internal returns (address impl) {
+        return _deployImpl(COMPONENT_ID_JUNIOR_TRANCHE_IMPL, abi.encode(_asset, _kernel, _enforceWhitelist), _salt);
     }
 
-    /// @notice Deploys the liquidity-tranche impl for a given (asset, kernel) pair.
-    function _deployLiquidityTrancheImpl(address _asset, address _kernel, bytes32 _salt) internal returns (address impl) {
-        return _deployImpl(COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL, abi.encode(_asset, _kernel), _salt);
+    /// @notice Deploys the liquidity-tranche impl for a given (asset, kernel) pair with its transfer-whitelist enforcement flag.
+    function _deployLiquidityTrancheImpl(address _asset, address _kernel, bool _enforceWhitelist, bytes32 _salt) internal returns (address impl) {
+        return _deployImpl(COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL, abi.encode(_asset, _kernel, _enforceWhitelist), _salt);
     }
 
     /// @notice Deploys the accountant impl for a given kernel and the junior tranche's fixed co-investment configuration.

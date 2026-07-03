@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { GyroECLPPoolFactory } from "../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import { AccessManager } from "../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { RoycoDayAccountant } from "../src/accountant/RoycoDayAccountant.sol";
-import { RoycoBlacklist } from "../src/auth/RoycoBlacklist.sol";
+import { RoycoBlacklistHook } from "../src/auth/RoycoBlacklistHook.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_FACTORY_ROLE,
@@ -527,12 +527,12 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     // INTERNAL: BLACKLIST + HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Deploys (or returns) the chain's shared RoycoBlacklist via CREATE2.
+    /// @notice Deploys (or returns) the chain's shared RoycoBlacklistHook via CREATE2.
     /// @param _authority The AccessManager that governs the blacklist's restricted functions.
     function _deployBlacklist(address _authority) internal returns (address blacklist) {
-        (address implAddr,) = deployWithSanityChecks(BLACKLIST_IMPL_SALT, type(RoycoBlacklist).creationCode, false);
+        (address implAddr,) = deployWithSanityChecks(BLACKLIST_IMPL_SALT, type(RoycoBlacklistHook).creationCode, false);
         address[] memory initialBlacklistedAccounts = new address[](0);
-        bytes memory initData = abi.encodeCall(RoycoBlacklist.initialize, (_authority, address(0), initialBlacklistedAccounts));
+        bytes memory initData = abi.encodeCall(RoycoBlacklistHook.initialize, (_authority, address(0), initialBlacklistedAccounts));
         (blacklist,) = deployWithSanityChecks(BLACKLIST_PROXY_SALT, getERC1967ProxyCreationCode(implAddr, initData), false);
     }
 

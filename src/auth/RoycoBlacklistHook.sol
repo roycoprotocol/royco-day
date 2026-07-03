@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { IAccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { RoycoBase } from "../base/RoycoBase.sol";
-import { IRoycoBlacklist } from "../interfaces/IRoycoBlacklist.sol";
+import { IRoycoBlacklistHook } from "../interfaces/IRoycoBlacklistHook.sol";
+import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 import { ISanctionsList } from "../interfaces/external/chainalysis/ISanctionsList.sol";
 
 /**
- * @title RoycoBlacklist
+ * @title RoycoBlacklistHook
  * @author Waymont
- * @notice Manages account blacklisting and Chainalysis sanctions screening for a Royco market
- * @notice Queried by kernels for any operations involving preview or state mutating asset transfers between accounts
+ * @notice Manages account blacklisting and Chainalysis sanctions screening for Royco markets, and serves as the tranche
+ *         balance-update hook: on every tranche transfer/mint/burn it screens the involved accounts against the blacklist
+ *         and enforces the tranche's transfer whitelist. Shared per chain and wired to each market's tranches.
  */
-contract RoycoBlacklist is IRoycoBlacklist, RoycoBase {
+contract RoycoBlacklistHook is IRoycoBlacklistHook, RoycoBase {
     /// @dev Storage slot for RoycoBlacklistState using ERC-7201 pattern
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoBlacklistState")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ROYCO_BLACKLIST_STORAGE_SLOT = 0x9cdd7566a2b8c3aa6c16fbea0646d47b549e37af578fc5d5261a1bd123401800;
@@ -40,13 +43,13 @@ contract RoycoBlacklist is IRoycoBlacklist, RoycoBase {
     // Blacklist Mutation Functions
     // =============================
 
-    /// @inheritdoc IRoycoBlacklist
-    function blacklistAccounts(address[] calldata _accounts) public override(IRoycoBlacklist) restricted {
+    /// @inheritdoc IRoycoBlacklistHook
+    function blacklistAccounts(address[] calldata _accounts) public override(IRoycoBlacklistHook) restricted {
         _blacklistAccounts(_accounts);
     }
 
-    /// @inheritdoc IRoycoBlacklist
-    function unblacklistAccounts(address[] calldata _accounts) external override(IRoycoBlacklist) restricted {
+    /// @inheritdoc IRoycoBlacklistHook
+    function unblacklistAccounts(address[] calldata _accounts) external override(IRoycoBlacklistHook) restricted {
         RoycoBlacklistState storage $ = _getRoycoBlacklistStorage();
         for (uint256 i = 0; i < _accounts.length; ++i) {
             address account = _accounts[i];
@@ -60,20 +63,20 @@ contract RoycoBlacklist is IRoycoBlacklist, RoycoBase {
     // Blacklist Query Functions
     // =============================
 
-    /// @inheritdoc IRoycoBlacklist
-    function isBlacklisted(address _account) public view override(IRoycoBlacklist) returns (bool) {
+    /// @inheritdoc IRoycoBlacklistHook
+    function isBlacklisted(address _account) public view override(IRoycoBlacklistHook) returns (bool) {
         // An account is blacklisted if it is locally blacklisted or screened by the configured Chainalysis sanctions list
         if (_account == address(0)) return false;
         return (_getRoycoBlacklistStorage().accountToIsBlacklisted[_account] || _isSanctioned(_account));
     }
 
-    /// @inheritdoc IRoycoBlacklist
-    function enforceNotBlacklisted(address _account) public view override(IRoycoBlacklist) {
+    /// @inheritdoc IRoycoBlacklistHook
+    function enforceNotBlacklisted(address _account) public view override(IRoycoBlacklistHook) {
         require(!isBlacklisted(_account), ACCOUNT_BLACKLISTED(_account));
     }
 
-    /// @inheritdoc IRoycoBlacklist
-    function enforceNotBlacklisted(address[] memory _accounts) external view override(IRoycoBlacklist) {
+    /// @inheritdoc IRoycoBlacklistHook
+    function enforceNotBlacklisted(address[] memory _accounts) external view override(IRoycoBlacklistHook) {
         uint256 numChecks = _accounts.length;
         for (uint256 i = 0; i < numChecks; ++i) {
             enforceNotBlacklisted(_accounts[i]);
@@ -81,16 +84,36 @@ contract RoycoBlacklist is IRoycoBlacklist, RoycoBase {
     }
 
     // =============================
+    // Tranche Balance-Update Hook
+    // =============================
+
+    /// @inheritdoc IRoycoBlacklistHook
+    function preTrancheBalanceUpdateHook(address _caller, address _from, address _to, bool _enforceWhitelist) external view override(IRoycoBlacklistHook) {
+        // Screen the involved accounts against the blacklist (the null address is skipped inside isBlacklisted)
+        enforceNotBlacklisted(_caller);
+        enforceNotBlacklisted(_from);
+        enforceNotBlacklisted(_to);
+
+        // If transferring shares and the calling tranche enforces its whitelist, the recipient must be a whitelisted LP for that tranche
+        if (_to != address(0) && _enforceWhitelist) {
+            // The hook shares the market's AccessManager; msg.sender is the calling tranche
+            address am = authority();
+            (bool isWhitelistedTrancheLP,) = IAccessManager(am).canCall(_to, msg.sender, IRoycoVaultTranche.deposit.selector);
+            require(_to != am && isWhitelistedTrancheLP, ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(_to));
+        }
+    }
+
+    // =============================
     // Sanctions List Functions
     // =============================
 
-    /// @inheritdoc IRoycoBlacklist
-    function setSanctionsList(address _chainalysisSanctionsList) external override(IRoycoBlacklist) restricted {
+    /// @inheritdoc IRoycoBlacklistHook
+    function setSanctionsList(address _chainalysisSanctionsList) external override(IRoycoBlacklistHook) restricted {
         _setSanctionsList(_chainalysisSanctionsList);
     }
 
-    /// @inheritdoc IRoycoBlacklist
-    function getSanctionsList() external view override(IRoycoBlacklist) returns (address chainalysisSanctionsList) {
+    /// @inheritdoc IRoycoBlacklistHook
+    function getSanctionsList() external view override(IRoycoBlacklistHook) returns (address chainalysisSanctionsList) {
         return _getRoycoBlacklistStorage().chainalysisSanctionsList;
     }
 
