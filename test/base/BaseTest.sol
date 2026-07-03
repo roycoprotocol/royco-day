@@ -19,8 +19,7 @@ import {
     JT_LP_ROLE,
     LP_ROLE_ADMIN_ROLE,
     ST_LP_ROLE,
-    SYNC_ROLE,
-    TRANSFER_AGENT_ROLE
+    SYNC_ROLE
 } from "../../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoBlacklist } from "../../src/interfaces/IRoycoBlacklist.sol";
@@ -95,9 +94,6 @@ abstract contract BaseTest is Test, Assertions {
 
     Vm.Wallet internal DEPLOYER_ADMIN;
     address internal DEPLOYER_ADMIN_ADDRESS;
-
-    Vm.Wallet internal TRANSFER_AGENT;
-    address internal TRANSFER_AGENT_ADDRESS;
 
     // ST-only providers
     Vm.Wallet internal ST_ALICE;
@@ -273,10 +269,6 @@ abstract contract BaseTest is Test, Assertions {
 
         DEPLOYER_ADMIN = _initWallet("DEPLOYER_ADMIN", 1000 ether);
         DEPLOYER_ADMIN_ADDRESS = DEPLOYER_ADMIN.addr;
-
-        // Transfer agent wallet (for compliance operations)
-        TRANSFER_AGENT = _initWallet("TRANSFER_AGENT", 1000 ether);
-        TRANSFER_AGENT_ADDRESS = TRANSFER_AGENT.addr;
     }
 
     function _setupProviders() internal {
@@ -351,32 +343,6 @@ abstract contract BaseTest is Test, Assertions {
         vm.label(address(ACCESS_MANAGER), "AccessManager");
 
         _wireExtraRoles();
-        _wireBlacklistRoles();
-    }
-
-    /// @dev Wires the shared blacklist's function-roles on the factory (the blacklist's AccessManager authority).
-    ///      In production this is a one-time admin action per chain (see script/update/blacklist); here it is replayed
-    ///      against the freshly deployed blacklist by pranking the factory admin, mirroring `_wireExtraRoles`.
-    function _wireBlacklistRoles() internal {
-        if (address(BLACKLIST) == address(0)) return;
-
-        // Resolve the factory admin (role 0): OWNER for a fresh in-memory deploy, ROOT_MULTISIG on a forked chain.
-        address fndn;
-        (bool ownerIsAdmin,) = ACCESS_MANAGER.hasRole(0, OWNER_ADDRESS);
-        fndn = ownerIsAdmin ? OWNER_ADDRESS : 0x7c405bbD131e42af506d14e752f2e59B19D49997;
-
-        // blacklistAccounts / unblacklistAccounts are gated by the transfer agent role
-        bytes4[] memory agentSelectors = new bytes4[](2);
-        agentSelectors[0] = IRoycoBlacklist.blacklistAccounts.selector;
-        agentSelectors[1] = IRoycoBlacklist.unblacklistAccounts.selector;
-        vm.prank(fndn);
-        ACCESS_MANAGER.setTargetFunctionRole(address(BLACKLIST), agentSelectors, TRANSFER_AGENT_ROLE);
-
-        // setSanctionsList is a kernel-admin configuration action
-        bytes4[] memory adminSelectors = new bytes4[](1);
-        adminSelectors[0] = IRoycoBlacklist.setSanctionsList.selector;
-        vm.prank(fndn);
-        ACCESS_MANAGER.setTargetFunctionRole(address(BLACKLIST), adminSelectors, ADMIN_KERNEL_ROLE);
     }
 
     /// @dev Wires roles that live in `ExtraRoles` and are intentionally NOT passed through
@@ -573,8 +539,7 @@ abstract contract BaseTest is Test, Assertions {
                 guardianAddress: ROLE_GUARDIAN_ADDRESS,
                 deployerAddress: DEPLOYER_ADDRESS,
                 deployerAdminAddress: DEPLOYER_ADMIN_ADDRESS,
-                protocolFeeRecipientAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS,
-                transferAgentAddress: TRANSFER_AGENT_ADDRESS
+                protocolFeeRecipientAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS
             })
         );
     }
@@ -608,9 +573,6 @@ abstract contract BaseTest is Test, Assertions {
 
         // Grant LP_ROLE_ADMIN_ROLE
         ACCESS_MANAGER.grantRole(LP_ROLE_ADMIN_ROLE, LP_ROLE_ADMIN_ADDRESS, 0);
-
-        // Grant TRANSFER_AGENT_ROLE
-        ACCESS_MANAGER.grantRole(TRANSFER_AGENT_ROLE, TRANSFER_AGENT_ADDRESS, 0);
 
         // Set ST_LP_ROLE and JT_LP_ROLE admin to LP_ROLE_ADMIN_ROLE
         ACCESS_MANAGER.setRoleAdmin(ST_LP_ROLE, LP_ROLE_ADMIN_ROLE);

@@ -54,9 +54,6 @@ uint64 constant ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE = uint64(uint256(keccak256(abi.
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // BALANCER V3 POOL MANAGER ROLE
-// Gates the non-pauser surface of Balancer V3 PoolRoleAccounts: static-swap-fee + pool-creator
-// fee settings + pool-creator fee withdrawals. Pause / unpause stay on the standard
-// pauser/unpauser roles.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 uint64 constant ADMIN_BALANCER_POOL_MANAGER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_BALANCER_POOL_MANAGER_ROLE"))));
