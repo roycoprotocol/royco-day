@@ -77,7 +77,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
     /// @inheritdoc IRoycoLiquidityTranche
     function previewDepositMultiAsset(uint256 _stAssets, uint256 _quoteAssets) external virtual override(IRoycoLiquidityTranche) returns (uint256 shares) {
         // Simulate the kernel's multi-asset deposit for the value allocated and the pre-deposit LT effective NAV per share
-        (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt,) = IRoycoDayKernel(KERNEL).ltPreviewDepositMultiAsset(toTrancheUnits(_stAssets), _quoteAssets);
+        (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt,) = _lens().ltPreviewDepositMultiAsset(toTrancheUnits(_stAssets), _quoteAssets);
         // Mint LT shares at the pre-deposit LT effective NAV per share — identical to depositMultiAsset's share math
         shares = _convertToShares(valueAllocated, totalSupply(), navToMintSharesAt, Math.Rounding.Floor);
     }
@@ -122,6 +122,6 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
         // Simulate the kernel's multi-asset redemption for the ST claims and quote assets the receiver would get — identical to redeemMultiAsset's outputs
-        (stClaims, quoteAssets) = IRoycoDayKernel(KERNEL).ltPreviewRedeemMultiAsset(_shares);
+        (stClaims, quoteAssets) = _lens().ltPreviewRedeemMultiAsset(_shares);
     }
 }

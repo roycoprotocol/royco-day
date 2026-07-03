@@ -48,8 +48,14 @@ interface IRoycoVaultTranche is IERC20Metadata {
      */
     event ProtocolFeeSharesMinted(address indexed protocolFeeRecipient, uint256 mintedProtocolFeeShares, uint256 totalTrancheShares);
 
+    /// @notice Emitted when the tranche's kernel lens is wired (one-time, during market deployment)
+    event LensSet(address indexed lens);
+
     /// @notice Thrown when a deposit would mint zero tranche shares (either zero assets or dust amount that rounds to zero shares)
     error MUST_MINT_NON_ZERO_SHARES();
+
+    /// @notice Thrown when wiring the kernel lens more than once
+    error LENS_ALREADY_SET();
 
     /// @notice Thrown when a redemption is requested with zero shares
     error MUST_REQUEST_NON_ZERO_SHARES();
@@ -63,6 +69,14 @@ interface IRoycoVaultTranche is IERC20Metadata {
     /// @notice Returns the address of the kernel that this tranche is associated with
     /// @return kernel The address of the kernel responsible for executing deposits and redemptions for this tranche
     function KERNEL() external view returns (address kernel);
+
+    /// @notice Returns the kernel lens this tranche reads its preview/max surface from
+    /// @return lens The kernel lens address (the zero address until wired during deployment)
+    function LENS() external view returns (address lens);
+
+    /// @notice One-time wiring of the kernel lens; gated by the AccessManager and set during market deployment
+    /// @param _lens The kernel lens for this market
+    function setLens(address _lens) external;
 
     /**
      * @notice Returns the raw NAV of the tranche's invested assets

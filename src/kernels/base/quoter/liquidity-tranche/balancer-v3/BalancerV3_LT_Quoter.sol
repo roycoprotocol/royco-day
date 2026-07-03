@@ -16,6 +16,7 @@ import { IERC20 } from "../../../../../../lib/openzeppelin-contracts/contracts/t
 import { SafeERC20 } from "../../../../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IRoycoDayAccountant } from "../../../../../interfaces/IRoycoDayAccountant.sol";
 import { WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../../../../libraries/Constants.sol";
+import { RoycoDayKernelMathLib } from "../../../../../libraries/RoycoDayKernelMathLib.sol";
 import { Math, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../../libraries/Units.sol";
 import { RoycoDayKernel, SyncedAccountingState } from "../../../RoycoDayKernel.sol";
 
@@ -156,7 +157,7 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
         // Outside a synchronized operation preview the sync the accountant would commit and value the senior share against its post-mint supply
         // NOTE: The accountant's preview is read directly (never the kernel's) so pricing the senior leg never recurses back into the liquidity tranche mark
         SyncedAccountingState memory state = IRoycoDayAccountant(ACCOUNTANT).previewSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
-        (,, uint256 stTotalSupply) = _computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(SENIOR_TRANCHE).totalSupply());
+        (,, uint256 stTotalSupply) = RoycoDayKernelMathLib.computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(SENIOR_TRANCHE).totalSupply());
         return _computeSTShareRate(state.stEffectiveNAV, stTotalSupply);
     }
 
@@ -298,19 +299,11 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     // Balancer V3 Liquidity Tranche Venue Hooks
     // =============================
 
-    /// @inheritdoc RoycoDayKernel
-    /// @dev Routes the add through the Vault's query mode (`quote`) so it simulates the BPT minted without settling balances or moving tokens
-    function _previewAddLiquidity(uint256 _seniorShares, uint256 _quoteAssets) internal override(RoycoDayKernel) returns (TRANCHE_UNIT ltAssets) {
-        bytes memory callbackReturnData = _vault.quote(abi.encodeCall(this.addBalancerV3Liquidity, (true, _seniorShares, _quoteAssets, ZERO_TRANCHE_UNITS)));
-        assembly ("memory-safe") {
-            ltAssets := mload(add(callbackReturnData, 0x20))
-        }
-    }
-
     /**
      * @inheritdoc RoycoDayKernel
      * @dev Unlocks the Balancer V3 Vault and dispatches into the add liquidity callback above
      * @dev The vault is required to be unlocked with a callback in order to transition into a transient accounting state, expecting the callback to settle all credit and debt before returning
+     * @dev The preview counterpart (`_previewAddLiquidity`) lives on the kernel lens, which re-enters its own `addBalancerV3Liquidity` callback via `Vault.quote`
      */
     function _addLiquidity(
         uint256 _seniorShares,
@@ -328,20 +321,11 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
         }
     }
 
-    /// @inheritdoc RoycoDayKernel
-    /// @dev Routes the removal through the Vault's query mode (`quote`) so it simulates the constituents withdrawn without settling balances or moving tokens
-    function _previewRemoveLiquidity(TRANCHE_UNIT _ltAssets) internal override(RoycoDayKernel) returns (uint256 stShares, uint256 quoteAssets) {
-        bytes memory callbackReturnData = _vault.quote(abi.encodeCall(this.removeBalancerV3Liquidity, (true, _ltAssets, uint256(0), uint256(0), address(0))));
-        assembly ("memory-safe") {
-            stShares := mload(add(callbackReturnData, 0x20))
-            quoteAssets := mload(add(callbackReturnData, 0x40))
-        }
-    }
-
     /**
      * @inheritdoc RoycoDayKernel
      * @dev Unlocks the Balancer V3 Vault and dispatches into the remove liquidity callback above
      * @dev The vault is required to be unlocked with a callback in order to transition into a transient accounting state, expecting the callback to settle all credit and debt before returning
+     * @dev The preview counterpart (`_previewRemoveLiquidity`) lives on the kernel lens, which re-enters its own `removeBalancerV3Liquidity` callback via `Vault.quote`
      */
     function _removeLiquidity(
         TRANCHE_UNIT _ltAssets,
