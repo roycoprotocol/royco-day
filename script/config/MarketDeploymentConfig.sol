@@ -105,9 +105,13 @@ abstract contract MarketDeploymentConfig {
         bool jtCoinvested;
         uint256 coverageLiquidationUtilizationWAD;
         uint24 fixedTermDurationSeconds;
-        // YDM
+        // YDM (JT risk-premium model) + LDM (LT liquidity-premium model). Both share the YDM type/param encoding, but each
+        // has its own curve params and target utilization (the JT YDM is driven by coverage utilization, the LDM by liquidity).
         DeployScript.YDMType ydmType;
-        bytes ydmSpecificParams;
+        bytes ydmSpecificParams; // JT YDM curve
+        bytes ltYdmSpecificParams; // LDM curve
+        uint256 jtYdmTargetUtilizationWAD; // JT YDM target-utilization kink
+        uint256 ltYdmTargetUtilizationWAD; // LDM target-utilization kink
         // Liquidity tranche: the Gyro E-CLP {ST_share, quote} pool the LT BPT is minted from.
         BalancerV3DeploymentTemplate.GyroECLPPoolParams gyroECLPPoolParams;
     }
@@ -248,6 +252,15 @@ abstract contract MarketDeploymentConfig {
                     yieldShareAtZeroUtilWAD: 0.06e18, yieldShareAtTargetUtilWAD: 0.06e18, yieldShareAtFullUtilWAD: 0.18e18, maxAdaptationSpeedWAD: 0
                 })
             ),
+            // LDM curve. The LT liquidity premium is off in this baseline (maxLTYieldShareWAD == 0), so these values are not
+            // economically live yet — they only need to be a valid curve so the accountant can initialize the LDM.
+            ltYdmSpecificParams: abi.encode(
+                DeployScript.AdaptiveCurveYDM_V2_Params({
+                    yieldShareAtZeroUtilWAD: 0.06e18, yieldShareAtTargetUtilWAD: 0.06e18, yieldShareAtFullUtilWAD: 0.18e18, maxAdaptationSpeedWAD: 0
+                })
+            ),
+            jtYdmTargetUtilizationWAD: 0.9e18, // JT coverage-utilization kink (was previously hardcoded in the YDM creation code)
+            ltYdmTargetUtilizationWAD: 0.9e18, // LDM liquidity-utilization kink
             gyroECLPPoolParams: demoGyroECLPPoolParams(DAY_DEMO, usdc)
         });
     }

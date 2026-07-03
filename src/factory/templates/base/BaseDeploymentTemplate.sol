@@ -9,8 +9,6 @@ import { IRoycoVaultTranche } from "../../../interfaces/IRoycoVaultTranche.sol";
 import { IBaseTemplate } from "../../../interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../../../interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../interfaces/factory/IRoycoProtocolTemplate.sol";
-import { WAD } from "../../../libraries/Constants.sol";
-import { NAV_UNIT } from "../../../libraries/Units.sol";
 import { RoycoSeniorTranche } from "../../../tranches/RoycoSeniorTranche.sol";
 import {
     COMPONENT_ID_ACCOUNTANT_IMPL,
@@ -27,7 +25,7 @@ import {
  *           - Component param shapes (ST / JT / Accountant / YDM) so concrete templates
  *             share a vocabulary for the bits that don't vary across recipes.
  *           - SSTORE2-backed bytecode storage loaded once via factory-driven `initialize`.
- *           - Salt-derivation helpers (`_marketComponentSalt`, `_singletonSalt`).
+ *           - Salt-derivation helper (`_marketComponentSalt`).
  *           - Internal deployment helpers that call back into the factory's primitives.
  *           - A declarative role-bindings struct + a generic `_applyRoleBindings` loop.
  */
@@ -42,56 +40,6 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
      *         pre-existing contract instead of producing a fresh market.
      */
     error MARKET_COMPONENT_ALREADY_DEPLOYED(address deployedAt, bytes32 salt);
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // STANDARD COMPONENT PARAM SHAPES
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @notice Shape every template uses for the senior tranche.
-    /// @dev Salt is derived from the top-level `marketId` + the tag `"ST"` — not in params.
-    struct SeniorTrancheParams {
-        string name;
-        string symbol;
-        address asset;
-    }
-
-    /**
-     * @notice Shape every template uses for the junior tranche.
-     * @dev Salt is derived from the top-level `marketId` + the tag `"JT"` — not in params.
-     * @dev For Dusk markets the `asset` field is filled in by the template after the
-     *      Balancer pool is deployed (callers pass `address(0)`).
-     */
-    struct JuniorTrancheParams {
-        string name;
-        string symbol;
-        address asset;
-    }
-
-    /// @notice Shape every template uses for the accountant.
-    /// @dev Salt derived from `(marketId, "ACCOUNTANT")`. YDM address derived from `YDMParams`.
-    struct AccountantParams {
-        uint64 stProtocolFeeWAD;
-        uint64 jtProtocolFeeWAD;
-        uint64 yieldShareProtocolFeeWAD;
-        uint64 coverageWAD;
-        bool jtCoinvested;
-        uint256 liquidationUtilizationWAD;
-        uint24 fixedTermDurationSeconds;
-        NAV_UNIT stNAVDustTolerance;
-        NAV_UNIT jtNAVDustTolerance;
-        bytes ydmInitializationData;
-    }
-
-    /**
-     * @notice Shape every template uses for the YDM singleton.
-     * @dev YDM creation code lives in SSTORE2 keyed by `COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2`. Salt is derived
-     *      from `_singletonSalt(componentTag, version)` so templates passing the same
-     *      `(componentTag, version)` land on the same address.
-     */
-    struct YDMParams {
-        bytes32 componentTag; // e.g. bytes32("YDM_ADAPTIVE_CURVE_V2")
-        bytes32 version; // e.g. bytes32("V1")
-    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // DECLARATIVE ROLE BINDINGS
@@ -186,18 +134,6 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
         return keccak256(abi.encodePacked("ROYCO_MARKET_", _marketId, _componentTag));
     }
 
-    /**
-     * @notice Singleton salt. Same `(componentTag, version)` across all templates produces
-     *         the same address — used for shared modules like the YDM that should be
-     *         deployed once and reused across markets / templates.
-     * @param _componentTag E.g. `bytes32("YDM_ADAPTIVE_CURVE_V2")`.
-     * @param _version E.g. `bytes32("V1")`. Bump only when the bytecode changes and a new
-     *        address is desired.
-     */
-    function _singletonSalt(bytes32 _componentTag, bytes32 _version) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked("ROYCO_SINGLETON_", _componentTag, _version));
-    }
-
     // ═══════════════════════════════════════════════════════════════════════════
     // DEPLOYMENT HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
@@ -236,28 +172,60 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
     }
 
     /**
-     * @notice Deploys the YDM singleton, idempotent across templates.
-     * @dev The ONLY component permitted to be already-deployed — bypasses the freshness check
-     *      enforced by `_deployImpl` because two markets legitimately share the same YDM.
+     * @notice Deploys an adaptive-curve YDM instance at the caller-supplied salt, pinning its target utilization (the curve kink).
+     * @dev The registered creation code is the bare `AdaptiveCurveYDM_V2` bytecode; the target utilization is a constructor arg
+     *      appended here (per market), rather than baked into the registered creation code.
+     * @param _salt The CREATE3 salt for this YDM instance
+     * @param _targetUtilizationWAD The utilization at which the YDM curve's "target" yield share applies, scaled to WAD
      */
-    function _deployYDM(YDMParams memory _p) internal returns (address ydm, bool alreadyDeployed) {
+    function _deployYDM(bytes32 _salt, uint256 _targetUtilizationWAD) internal returns (address ydm, bool alreadyDeployed) {
         bytes memory creationCode = _readCreationCode(COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2);
-        (ydm, alreadyDeployed) = ROYCO_FACTORY.deployDeterministicContract(creationCode, _singletonSalt(_p.componentTag, _p.version));
+        (ydm, alreadyDeployed) = ROYCO_FACTORY.deployDeterministicContract(abi.encodePacked(creationCode, abi.encode(_targetUtilizationWAD)), _salt);
     }
 
-    /// @notice Deploys the senior-tranche impl for a given (asset, kernel) pair with its transfer-whitelist enforcement flag.
-    function _deploySeniorTrancheImpl(address _asset, address _kernel, bool _enforceWhitelist, bytes32 _salt) internal returns (address impl) {
-        return _deployImpl(COMPONENT_ID_SENIOR_TRANCHE_IMPL, abi.encode(_asset, _kernel, _enforceWhitelist), _salt);
+    /// @notice Deploys the senior-tranche impl, pinning its (asset, kernel, whitelist flag, lens, hook) immutables.
+    function _deploySeniorTrancheImpl(
+        address _asset,
+        address _kernel,
+        bool _enforceWhitelist,
+        address _lens,
+        address _hook,
+        bytes32 _salt
+    )
+        internal
+        returns (address impl)
+    {
+        return _deployImpl(COMPONENT_ID_SENIOR_TRANCHE_IMPL, abi.encode(_asset, _kernel, _enforceWhitelist, _lens, _hook), _salt);
     }
 
-    /// @notice Deploys the junior-tranche impl for a given (asset, kernel) pair with its transfer-whitelist enforcement flag.
-    function _deployJuniorTrancheImpl(address _asset, address _kernel, bool _enforceWhitelist, bytes32 _salt) internal returns (address impl) {
-        return _deployImpl(COMPONENT_ID_JUNIOR_TRANCHE_IMPL, abi.encode(_asset, _kernel, _enforceWhitelist), _salt);
+    /// @notice Deploys the junior-tranche impl, pinning its (asset, kernel, whitelist flag, lens, hook) immutables.
+    function _deployJuniorTrancheImpl(
+        address _asset,
+        address _kernel,
+        bool _enforceWhitelist,
+        address _lens,
+        address _hook,
+        bytes32 _salt
+    )
+        internal
+        returns (address impl)
+    {
+        return _deployImpl(COMPONENT_ID_JUNIOR_TRANCHE_IMPL, abi.encode(_asset, _kernel, _enforceWhitelist, _lens, _hook), _salt);
     }
 
-    /// @notice Deploys the liquidity-tranche impl for a given (asset, kernel) pair with its transfer-whitelist enforcement flag.
-    function _deployLiquidityTrancheImpl(address _asset, address _kernel, bool _enforceWhitelist, bytes32 _salt) internal returns (address impl) {
-        return _deployImpl(COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL, abi.encode(_asset, _kernel, _enforceWhitelist), _salt);
+    /// @notice Deploys the liquidity-tranche impl, pinning its (asset, kernel, whitelist flag, lens, hook) immutables.
+    function _deployLiquidityTrancheImpl(
+        address _asset,
+        address _kernel,
+        bool _enforceWhitelist,
+        address _lens,
+        address _hook,
+        bytes32 _salt
+    )
+        internal
+        returns (address impl)
+    {
+        return _deployImpl(COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL, abi.encode(_asset, _kernel, _enforceWhitelist, _lens, _hook), _salt);
     }
 
     /// @notice Deploys the accountant impl for a given kernel and the junior tranche's fixed co-investment configuration.
@@ -269,46 +237,33 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
     // INIT DATA BUILDERS (standard components)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Builds ABI-encoded `initialize(...)` calldata for ST or JT proxies.
-    function _encodeTrancheInitData(string memory _name, string memory _symbol) internal view returns (bytes memory) {
-        IRoycoVaultTranche.RoycoTrancheInitParams memory params =
-            IRoycoVaultTranche.RoycoTrancheInitParams({ name: _name, symbol: _symbol, initialAuthority: ROYCO_FACTORY.ROYCO_AUTHORITY() });
-        return abi.encodeCall(RoycoSeniorTranche.initialize, (params));
+    /// @notice Builds `initialize(...)` calldata for a tranche proxy from its canonical init params, forcing the market authority.
+    /// @dev The caller-supplied `initialAuthority` is ignored/overwritten — the market's authority is always the factory's authority.
+    function _encodeTrancheInitData(IRoycoVaultTranche.RoycoTrancheInitParams memory _params) internal view returns (bytes memory) {
+        _params.initialAuthority = ROYCO_FACTORY.ROYCO_AUTHORITY();
+        return abi.encodeCall(RoycoSeniorTranche.initialize, (_params));
     }
 
     /**
-     * @notice Builds ABI-encoded `initialize(...)` calldata for an accountant proxy.
-     * @dev The liquidity tranche overlay is wired with a zero-minimum-liquidity baseline so a freshly deployed market
-     *      reduces to a plain ST/JT market: `minLiquidityWAD = 0`, no LT fees, and an uninitialized LT YDM that is never
-     *      consulted while `minLiquidityWAD == 0`. `_ltYdm` MUST be a distinct instance from `_jtYdm`: the accountant's
-     *      `YDMS_CANNOT_BE_IDENTICAL` guard rejects identical JT and LT YDMs at `initialize()`. The full LDM wiring
-     *      (premium model + LT liquidity/premium config) lands with the functional LT path (P2+).
-     * @param _p The accountant parameters.
+     * @notice Builds `initialize(...)` calldata for an accountant proxy from its canonical init params.
+     * @dev The caller supplies the full accountant configuration (including both the JT and LT YDM initialization data, so
+     *      both YDMs are initialized); the template injects only the deployment-derived YDM addresses and the market authority.
+     * @param _params The accountant's canonical init params (its `jtYDM`/`ltYDM` fields are overwritten with the deployed instances).
      * @param _jtYdm The JT YDM (risk-premium model) instance.
-     * @param _ltYdm The LT YDM (liquidity-premium model) instance; a distinct placeholder until the LDM is wired.
+     * @param _ltYdm The LT YDM (liquidity-premium model / LDM) instance; a distinct instance from `_jtYdm`.
      */
-    function _encodeAccountantInitData(AccountantParams memory _p, address _jtYdm, address _ltYdm) internal view returns (bytes memory) {
-        IRoycoDayAccountant.RoycoDayAccountantInitParams memory params = IRoycoDayAccountant.RoycoDayAccountantInitParams({
-            stProtocolFeeWAD: _p.stProtocolFeeWAD,
-            jtProtocolFeeWAD: _p.jtProtocolFeeWAD,
-            jtYieldShareProtocolFeeWAD: _p.yieldShareProtocolFeeWAD,
-            minCoverageWAD: _p.coverageWAD,
-            jtYDM: _jtYdm,
-            jtYDMInitializationData: _p.ydmInitializationData,
-            // JT risk premium is uncapped at the WAD ceiling (its real cap comes from the JT YDM); the LT premium is disabled in the zero-liquidity baseline
-            maxJTYieldShareWAD: uint64(WAD),
-            maxLTYieldShareWAD: 0,
-            fixedTermDurationSeconds: _p.fixedTermDurationSeconds,
-            coverageLiquidationUtilizationWAD: _p.liquidationUtilizationWAD,
-            stNAVDustTolerance: _p.stNAVDustTolerance,
-            jtNAVDustTolerance: _p.jtNAVDustTolerance,
-            // Liquidity tranche overlay: zero-liquidity baseline; LT YDM is a distinct, uninitialized placeholder pending the LDM (see @dev above)
-            ltYieldShareProtocolFeeWAD: 0,
-            minLiquidityWAD: 0,
-            ltYDM: _ltYdm,
-            ltYDMInitializationData: bytes("")
-        });
-        return abi.encodeCall(RoycoDayAccountant.initialize, (params, ROYCO_FACTORY.ROYCO_AUTHORITY()));
+    function _encodeAccountantInitData(
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory _params,
+        address _jtYdm,
+        address _ltYdm
+    )
+        internal
+        view
+        returns (bytes memory)
+    {
+        _params.jtYDM = _jtYdm;
+        _params.ltYDM = _ltYdm;
+        return abi.encodeCall(RoycoDayAccountant.initialize, (_params, ROYCO_FACTORY.ROYCO_AUTHORITY()));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

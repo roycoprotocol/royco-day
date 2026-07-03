@@ -54,3 +54,10 @@ bytes32 constant COMPONENT_ID_DAY_KERNEL_CHAINLINK_ST_CHAINLINK_QUOTE = keccak25
  *      the LT holds a Balancer V3 pool position valued by a manipulation-resistant BPT oracle).
  */
 bytes32 constant COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK = keccak256("ROYCO_COMPONENT_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK");
+
+/**
+ * @dev Creation-code id for `Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Lens`, the read-only
+ *      companion deployed per market alongside the kernel above. It holds the preview/max/withdrawable surface that
+ *      does not fit on the kernel proxy under EIP-170; the tranches read it via `LENS()`.
+ */
+bytes32 constant COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK_LENS = keccak256("ROYCO_COMPONENT_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK_LENS");

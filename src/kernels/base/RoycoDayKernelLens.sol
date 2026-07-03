@@ -115,7 +115,7 @@ abstract contract RoycoDayKernelLens is IRoycoDayKernelLens {
 
     /// @dev Whether an account is blacklisted, read from the market's tranche balance-update hook (all tranches share it, so read the senior tranche's)
     function _isBlacklisted(address _account) internal view returns (bool) {
-        return IRoycoBlacklistHook(IRoycoVaultTranche(SENIOR_TRANCHE).hook()).isBlacklisted(_account);
+        return IRoycoBlacklistHook(IRoycoVaultTranche(SENIOR_TRANCHE).HOOK()).isBlacklisted(_account);
     }
 
     // =============================

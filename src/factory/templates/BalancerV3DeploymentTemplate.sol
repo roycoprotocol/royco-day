@@ -23,6 +23,8 @@ import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { IRoycoFactory } from "../../interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../interfaces/factory/IRoycoProtocolTemplate.sol";
+import { RoycoDayBalancerV3Hooks } from "../../kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3Hooks.sol";
+import { RoycoDayBalancerV3HooksStandIn } from "../../kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3HooksStandIn.sol";
 import { TrancheType } from "../../libraries/Types.sol";
 import { RoycoLiquidityTranche } from "../../tranches/RoycoLiquidityTranche.sol";
 import {
@@ -41,18 +43,12 @@ import {
     SYNC_ROLE
 } from "../RolesConfiguration.sol";
 import { BaseDeploymentTemplate } from "./base/BaseDeploymentTemplate.sol";
+import { COMPONENT_ID_DAY_BALANCER_HOOKS } from "./base/Components.sol";
 
 /**
  * @title BalancerV3DeploymentTemplate
  * @author Ankur Dubey, Shivaansh Kapoor
  * @notice Abstract base for every Royco Day market deployment template (ST + JT + LT).
- *
- * @dev Derived structurally from the Dusk-Balancer template, but Day-shaped: the junior tranche is a plain
- *      first-loss tranche, and a third Liquidity Tranche (LT) holds the Balancer BPT `{ST_share, quote}`.
- *      Dusk peripherals (rate providers + custom hooks) are intentionally omitted for now — pool tokens are
- *      registered `STANDARD` (no rate provider) and the pool runs without hooks. These are wired in later.
- *
- *      Concrete subclasses plug in their kernel by overriding `_kernelComponentId()` and `_kernelInitData(...)`.
  */
 abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     // ═══════════════════════════════════════════════════════════════════════════
@@ -71,22 +67,19 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         address quoteToken;
     }
 
-    /// @notice LT params. The asset is the Balancer BPT, filled in by the template after the pool is created.
-    struct LiquidityTrancheParams {
-        string name;
-        string symbol;
-    }
-
     /// @notice Top-level params struct passed to `deployMarket(bytes)`.
     struct DayParams {
         bytes32 marketId;
-        SeniorTrancheParams st;
-        JuniorTrancheParams jt;
-        LiquidityTrancheParams lt;
-        AccountantParams accountant;
+        IRoycoVaultTranche.RoycoTrancheInitParams stTranche;
+        IRoycoVaultTranche.RoycoTrancheInitParams jtTranche;
+        IRoycoVaultTranche.RoycoTrancheInitParams ltTranche;
+        address stAsset;
+        address jtAsset;
+        bool jtCoinvested;
+        IRoycoDayAccountant.RoycoDayAccountantInitParams accountant;
         GyroECLPPoolParams gyroECLPPoolParams;
-        YDMParams ydm;
-        YDMParams ltYdm;
+        uint256 jtYDMTargetUtilizationWAD;
+        uint256 ltYDMTargetUtilizationWAD;
         address protocolFeeRecipient;
         uint64 stSelfLiquidationBonusWAD;
         address roycoBlacklist;
@@ -94,9 +87,10 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         bool enforceVaultSharesTransferWhitelist;
     }
 
-    /// @notice Dusk/Day-specific addresses recorded for verification.
+    /// @notice Balancer V3-specific addresses recorded for verification.
     struct ExtraContractsDeployedResult {
         address balancerPool;
+        address balancerHook;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -120,6 +114,9 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     error INVALID_KERNEL_ON_ACCOUNTANT();
     error POOL_NOT_REGISTERED_WITH_VAULT();
     error POOL_TOKEN_CONFIGURATION_MISMATCH();
+    error INVALID_LENS_ON_TRANCHE();
+    error INVALID_HOOK_ON_TRANCHE();
+    error INVALID_KERNEL_ON_BALANCER_HOOK();
 
     // ═══════════════════════════════════════════════════════════════════════════
     // IMMUTABLES
@@ -131,6 +128,10 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     /// @notice The Balancer V3 vault.
     IVault public immutable BALANCER_V3_VAULT;
 
+    /// @notice Shared registration-time stand-in hook implementation, deployed once here and reused as the initial
+    ///         implementation behind every market's pool-hook proxy (it is stateless, so one instance serves all markets).
+    address public immutable BALANCER_HOOK_STANDIN_IMPL;
+
     // ═══════════════════════════════════════════════════════════════════════════
     // CONSTRUCTION
     // ═══════════════════════════════════════════════════════════════════════════
@@ -138,6 +139,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     constructor(IRoycoFactory _factory, GyroECLPPoolFactory _balancerV3PoolFactory) BaseDeploymentTemplate(_factory) {
         BALANCER_V3_POOL_FACTORY = _balancerV3PoolFactory;
         BALANCER_V3_VAULT = IVault(address(_balancerV3PoolFactory.getVault()));
+        BALANCER_HOOK_STANDIN_IMPL = address(new RoycoDayBalancerV3HooksStandIn());
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -146,6 +148,9 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
 
     /// @dev Returns the SSTORE2 component ID that holds the Day kernel's creation code.
     function _kernelComponentId() internal pure virtual returns (bytes32);
+
+    /// @dev Returns the SSTORE2 component ID that holds the Day kernel lens's creation code (the read-only companion deployed per market).
+    function _lensComponentId() internal pure virtual returns (bytes32);
 
     /// @dev Returns the ABI-encoded kernel `initialize(...)` calldata for the concrete Day kernel.
     function _kernelInitData(
@@ -165,17 +170,15 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     function validateParams(bytes calldata _params) external pure override(IRoycoProtocolTemplate) {
         DayParams memory p = abi.decode(_params, (DayParams));
         require(p.marketId != bytes32(0), INVALID_PARAMS());
-        require(bytes(p.st.name).length > 0 && bytes(p.st.symbol).length > 0 && p.st.asset != address(0), INVALID_PARAMS());
-        require(bytes(p.jt.name).length > 0 && bytes(p.jt.symbol).length > 0 && p.jt.asset != address(0), INVALID_PARAMS());
-        require(bytes(p.lt.name).length > 0 && bytes(p.lt.symbol).length > 0, INVALID_PARAMS());
+        require(bytes(p.stTranche.name).length > 0 && bytes(p.stTranche.symbol).length > 0 && p.stAsset != address(0), INVALID_PARAMS());
+        require(bytes(p.jtTranche.name).length > 0 && bytes(p.jtTranche.symbol).length > 0 && p.jtAsset != address(0), INVALID_PARAMS());
+        require(bytes(p.ltTranche.name).length > 0 && bytes(p.ltTranche.symbol).length > 0, INVALID_PARAMS());
         require(p.gyroECLPPoolParams.quoteToken != address(0), INVALID_PARAMS());
         require(p.protocolFeeRecipient != address(0), INVALID_PARAMS());
-        require(p.ydm.componentTag != bytes32(0) && p.ydm.version != bytes32(0), INVALID_PARAMS());
-        // The LT YDM must be a distinct instance from the JT YDM (accountant `YDMS_CANNOT_BE_IDENTICAL` guard); a
-        // differing version under the same component tag is sufficient since it resolves to a different CREATE3 address.
-        require(p.ltYdm.componentTag != bytes32(0) && p.ltYdm.version != bytes32(0), INVALID_PARAMS());
-        require(p.ydm.componentTag != p.ltYdm.componentTag || p.ydm.version != p.ltYdm.version, INVALID_PARAMS());
-        require(p.accountant.ydmInitializationData.length > 0, INVALID_PARAMS());
+        // Both YDMs must have a curve kink and initialization data, so the accountant initializes each of them (an
+        // uninitialized YDM reverts when the accountant consults it on the second sync).
+        require(p.jtYDMTargetUtilizationWAD != 0 && p.ltYDMTargetUtilizationWAD != 0, INVALID_PARAMS());
+        require(p.accountant.jtYDMInitializationData.length > 0 && p.accountant.ltYDMInitializationData.length > 0, INVALID_PARAMS());
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -186,56 +189,77 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     function deployMarket(bytes calldata _params) external override(IRoycoProtocolTemplate) onlyRoycoFactory returns (DeploymentResult memory result) {
         DayParams memory p = abi.decode(_params, (DayParams));
 
-        // 1. Predict the 5 market proxy addresses.
+        // 1. Predict the 6 market proxy addresses.
         bytes32 stProxySalt = _marketComponentSalt(p.marketId, "ST");
         bytes32 jtProxySalt = _marketComponentSalt(p.marketId, "JT");
         bytes32 ltProxySalt = _marketComponentSalt(p.marketId, "LT");
         bytes32 kernelProxySalt = _marketComponentSalt(p.marketId, "KERNEL");
         bytes32 accountantProxySalt = _marketComponentSalt(p.marketId, "ACCOUNTANT");
+        bytes32 lensSalt = _marketComponentSalt(p.marketId, "LENS");
 
         result.seniorTranche = ROYCO_FACTORY.predictDeterministicAddress(stProxySalt);
         result.juniorTranche = ROYCO_FACTORY.predictDeterministicAddress(jtProxySalt);
         result.liquidityTranche = ROYCO_FACTORY.predictDeterministicAddress(ltProxySalt);
         result.kernel = ROYCO_FACTORY.predictDeterministicAddress(kernelProxySalt);
         result.accountant = ROYCO_FACTORY.predictDeterministicAddress(accountantProxySalt);
+        result.lens = ROYCO_FACTORY.predictDeterministicAddress(lensSalt);
+        result.hook = p.roycoBlacklist;
 
-        // 2. Deploy the JT YDM (idempotent across templates) and a distinct LT YDM placeholder (the LDM slot). Both
-        //    resolve from the same registered YDM creation code; the differing `version` yields a distinct address so
-        //    the accountant's `YDMS_CANNOT_BE_IDENTICAL` guard is satisfied. The LT YDM is uninitialized and unused
-        //    while `minLiquidityWAD == 0`.
-        (result.ydm,) = _deployYDM(p.ydm);
-        (address ltYdm,) = _deployYDM(p.ltYdm);
+        // 2. Deploy the JT YDM (driven by coverage utilization) and the LT YDM / LDM (driven by liquidity utilization), each
+        //    pinning its own target-utilization curve kink.
+        (result.ydm,) = _deployYDM(_marketComponentSalt(p.marketId, "YDM"), p.jtYDMTargetUtilizationWAD);
+        (result.ltYdm,) = _deployYDM(_marketComponentSalt(p.marketId, "LDM"), p.ltYDMTargetUtilizationWAD);
 
         // 3. Deploy ST impl + proxy first — the pool needs ST_PROXY as one of its tokens.
-        address stImpl = _deploySeniorTrancheImpl(p.st.asset, result.kernel, p.enforceVaultSharesTransferWhitelist, _marketComponentSalt(p.marketId, "ST_IMPL"));
-        _deployProxy(stImpl, _encodeTrancheInitData(p.st.name, p.st.symbol), stProxySalt);
+        address stImpl = _deploySeniorTrancheImpl(
+            p.stAsset, result.kernel, p.enforceVaultSharesTransferWhitelist, result.lens, result.hook, _marketComponentSalt(p.marketId, "ST_IMPL")
+        );
+        _deployProxy(stImpl, _encodeTrancheInitData(p.stTranche), stProxySalt);
 
-        // 4. Create the Gyro E-CLP pool `{ST_share, quote}` (no rate providers, no hooks). LT asset = pool.
-        address balancerPool = _createBalancerV3Pool(p.gyroECLPPoolParams, result.seniorTranche, _marketComponentSalt(p.marketId, "BALANCER_V3_POOL"));
+        // 4. Deploy the pool hooks proxy against the shared stand-in implementation (returns true from onRegister and advertises
+        //    the real hook's flags) so the pool can register now; it is upgraded to the real kernel-bound hook after step 9.
+        address balancerHook = _deployProxy(BALANCER_HOOK_STANDIN_IMPL, "", _marketComponentSalt(p.marketId, "BALANCER_HOOK"));
 
-        // 5. Deploy JT impl + proxy (plain first-loss asset).
-        address jtImpl = _deployJuniorTrancheImpl(p.jt.asset, result.kernel, p.enforceVaultSharesTransferWhitelist, _marketComponentSalt(p.marketId, "JT_IMPL"));
-        _deployProxy(jtImpl, _encodeTrancheInitData(p.jt.name, p.jt.symbol), jtProxySalt);
+        // 5. Create the Gyro E-CLP pool `{ST_share, quote}`: senior leg WITH_RATE (rate provider = the predicted kernel),
+        //    hooked to the stand-in proxy. LT asset = pool.
+        address balancerPool = _createBalancerV3Pool(
+            p.gyroECLPPoolParams, result.seniorTranche, result.kernel, balancerHook, _marketComponentSalt(p.marketId, "BALANCER_V3_POOL")
+        );
 
-        // 6. Deploy LT impl + proxy (asset = the pool BPT).
-        address ltImpl =
-            _deployLiquidityTrancheImpl(balancerPool, result.kernel, p.enforceVaultSharesTransferWhitelist, _marketComponentSalt(p.marketId, "LT_IMPL"));
-        _deployProxy(ltImpl, _encodeTrancheInitData(p.lt.name, p.lt.symbol), ltProxySalt);
+        // 6. Deploy JT impl + proxy (plain first-loss asset).
+        address jtImpl = _deployJuniorTrancheImpl(
+            p.jtAsset, result.kernel, p.enforceVaultSharesTransferWhitelist, result.lens, result.hook, _marketComponentSalt(p.marketId, "JT_IMPL")
+        );
+        _deployProxy(jtImpl, _encodeTrancheInitData(p.jtTranche), jtProxySalt);
 
-        // 7. Deploy accountant impl + proxy (Day accountant bytecode registered under the accountant component ID).
-        address accountantImpl = _deployAccountantImpl(result.kernel, p.accountant.jtCoinvested, _marketComponentSalt(p.marketId, "ACCOUNTANT_IMPL"));
-        _deployProxy(accountantImpl, _encodeAccountantInitData(p.accountant, result.ydm, ltYdm), accountantProxySalt);
+        // 7. Deploy LT impl + proxy (asset = the pool BPT).
+        address ltImpl = _deployLiquidityTrancheImpl(
+            balancerPool, result.kernel, p.enforceVaultSharesTransferWhitelist, result.lens, result.hook, _marketComponentSalt(p.marketId, "LT_IMPL")
+        );
+        _deployProxy(ltImpl, _encodeTrancheInitData(p.ltTranche), ltProxySalt);
 
-        // 8. Deploy kernel impl + proxy.
+        // 8. Deploy accountant impl + proxy (Day accountant bytecode registered under the accountant component ID).
+        address accountantImpl = _deployAccountantImpl(result.kernel, p.jtCoinvested, _marketComponentSalt(p.marketId, "ACCOUNTANT_IMPL"));
+        _deployProxy(accountantImpl, _encodeAccountantInitData(p.accountant, result.ydm, result.ltYdm), accountantProxySalt);
+
+        // 9. Deploy kernel impl + proxy.
         _deployKernelImplAndProxy(p, result, balancerPool, kernelProxySalt);
 
-        // 9. Apply selector->role bindings + post-init grants.
-        _applyRoleBindings(_buildRoleBindings(result));
+        // 10. Now that the kernel exists, deploy the real kernel-bound hook implementation and upgrade the pool hook proxy to it
+        address realHookImpl = _deployImpl(COMPONENT_ID_DAY_BALANCER_HOOKS, abi.encode(result.kernel), _marketComponentSalt(p.marketId, "BALANCER_HOOK_IMPL"));
+        UUPSUpgradeable(balancerHook).upgradeToAndCall(realHookImpl, abi.encodeCall(RoycoDayBalancerV3Hooks.initialize, (ROYCO_FACTORY.ROYCO_AUTHORITY())));
 
-        // 10. Record + verify-friendly extras.
-        result.extras = abi.encode(ExtraContractsDeployedResult({ balancerPool: balancerPool }));
+        // 11. Deploy the kernel lens (a plain immutable contract pointed at the now-initialized kernel proxy) at its predicted
+        //     salt, so it lands at the address already pinned into the tranches' immutable LENS.
+        _deployImpl(_lensComponentId(), abi.encode(result.kernel), lensSalt);
 
-        // 11. Sanity-check the pool wiring lines up with what we built.
+        // 12. Apply selector->role bindings + post-init grants (including SYNC_ROLE for the pool hook so it can sync the kernel).
+        _applyRoleBindings(_buildRoleBindings(result, balancerHook));
+
+        // 13. Record + verify-friendly extras.
+        result.extras = abi.encode(ExtraContractsDeployedResult({ balancerPool: balancerPool, balancerHook: balancerHook }));
+
+        // 14. Sanity-check the pool wiring lines up with what we built.
         _assertPoolWiredCorrectly(balancerPool, result.seniorTranche);
     }
 
@@ -243,9 +267,9 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     function _deployKernelImplAndProxy(DayParams memory _p, DeploymentResult memory _result, address _balancerPool, bytes32 _kernelProxySalt) internal {
         IRoycoDayKernel.RoycoDayKernelConstructionParams memory cp = IRoycoDayKernel.RoycoDayKernelConstructionParams({
             seniorTranche: _result.seniorTranche,
-            stAsset: _p.st.asset,
+            stAsset: _p.stAsset,
             juniorTranche: _result.juniorTranche,
-            jtAsset: _p.jt.asset,
+            jtAsset: _p.jtAsset,
             accountant: _result.accountant,
             liquidityTranche: _result.liquidityTranche,
             ltAsset: _balancerPool
@@ -260,22 +284,29 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         _deployProxy(kernelImpl, _kernelInitData(kip, _p.kernelSpecificParams), _kernelProxySalt);
     }
 
-    /// @notice Creates the Gyro E-CLP pool with tokens `{ST_share, quote}` registered `STANDARD` (no rate providers, no hooks).
-    function _createBalancerV3Pool(GyroECLPPoolParams memory _p, address _seniorTranche, bytes32 _salt) internal returns (address balancerV3Pool) {
-        // Balancer V3 requires a pool's tokens registered in ascending address order — the vault reverts
-        // `TokensNotSorted` otherwise. Both legs are STANDARD with no rate provider, so they only differ by
-        // address; order them here.
-        // NOTE: the E-CLP curve params (`eclpParams`/`derivedEclpParams`) are defined relative to token0/token1,
-        //       so they MUST be computed for this sorted `{token0, token1}` ordering.
+    /// @notice Creates the Gyro E-CLP pool with tokens `{ST_share, quote}`:
+    /// @param _p The Gyro E-CLP pool parameters
+    /// @param _seniorTranche The senior tranche address
+    /// @param _rateProvider The rate provider address
+    /// @param _hook The hook address
+    /// @param _salt The salt for the pool
+    /// @return balancerV3Pool The address of the created Gyro E-CLP pool
+    function _createBalancerV3Pool(
+        GyroECLPPoolParams memory _p,
+        address _seniorTranche,
+        address _rateProvider,
+        address _hook,
+        bytes32 _salt
+    )
+        internal
+        returns (address balancerV3Pool)
+    {
+        // Balancer V3 requires a pool's tokens registered in ascending address order
         (address token0, address token1) = uint160(_seniorTranche) < uint160(_p.quoteToken) ? (_seniorTranche, _p.quoteToken) : (_p.quoteToken, _seniorTranche);
 
         BalancerV3TokenConfig[] memory tokens = new BalancerV3TokenConfig[](2);
-        tokens[0] = BalancerV3TokenConfig({
-            token: IERC20(token0), tokenType: BalancerV3TokenType.STANDARD, rateProvider: IRateProvider(address(0)), paysYieldFees: false
-        });
-        tokens[1] = BalancerV3TokenConfig({
-            token: IERC20(token1), tokenType: BalancerV3TokenType.STANDARD, rateProvider: IRateProvider(address(0)), paysYieldFees: false
-        });
+        tokens[0] = _buildTokenConfig(token0, _seniorTranche, _rateProvider);
+        tokens[1] = _buildTokenConfig(token1, _seniorTranche, _rateProvider);
 
         address authority = ROYCO_FACTORY.ROYCO_AUTHORITY();
         BalancerV3PoolRoleAccounts memory roleAccounts =
@@ -289,11 +320,22 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
             _p.derivedEclpParams,
             roleAccounts,
             _p.swapFeePercentage,
-            address(0), // no hooks
+            _hook,
             _p.enableDonation,
             _p.disableUnbalancedLiquidity,
             _salt
         );
+    }
+
+    /// @dev Token config for a pool leg: the senior-tranche leg is `WITH_RATE` (priced by the kernel rate provider); every other leg is `STANDARD`.
+    function _buildTokenConfig(address _token, address _seniorTranche, address _rateProvider) private pure returns (BalancerV3TokenConfig memory) {
+        bool isSeniorLeg = _token == _seniorTranche;
+        return BalancerV3TokenConfig({
+            token: IERC20(_token),
+            tokenType: isSeniorLeg ? BalancerV3TokenType.WITH_RATE : BalancerV3TokenType.STANDARD,
+            rateProvider: isSeniorLeg ? IRateProvider(_rateProvider) : IRateProvider(address(0)),
+            paysYieldFees: false
+        });
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -331,14 +373,26 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         ExtraContractsDeployedResult memory extras = abi.decode(_d.extras, (ExtraContractsDeployedResult));
         require(kernel.LT_ASSET() == extras.balancerPool, INVALID_LT_ASSET_ON_KERNEL());
         _assertPoolWiredCorrectly(extras.balancerPool, _d.seniorTranche);
+
+        // The pool hook proxy was upgraded from the stand-in to the real kernel-bound hook and initialized with this market's
+        // authority — reading its authority proves the upgrade+initialize landed (the stand-in is not AccessManaged).
+        require(AccessManagedUpgradeable(extras.balancerHook).authority() == expectedAuthority, INVALID_ACCESS_MANAGER());
+        require(RoycoDayBalancerV3Hooks(extras.balancerHook).ROYCO_DAY_KERNEL() == _d.kernel, INVALID_KERNEL_ON_BALANCER_HOOK());
+
+        // Every tranche must carry the same market lens and balance-update hook (pinned as immutables at construction).
+        address[3] memory tranches = [_d.seniorTranche, _d.juniorTranche, _d.liquidityTranche];
+        for (uint256 i = 0; i < tranches.length; ++i) {
+            require(IRoycoVaultTranche(tranches[i]).LENS() == _d.lens, INVALID_LENS_ON_TRANCHE());
+            require(IRoycoVaultTranche(tranches[i]).HOOK() == _d.hook, INVALID_HOOK_ON_TRANCHE());
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // ROLE BINDINGS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function _buildRoleBindings(DeploymentResult memory _r) internal view virtual returns (RoleBindings memory) {
-        TargetBinding[] memory targets = new TargetBinding[](7);
+    function _buildRoleBindings(DeploymentResult memory _r, address _balancerHook) internal view virtual returns (RoleBindings memory) {
+        TargetBinding[] memory targets = new TargetBinding[](8);
         targets[0] = _trancheBinding(_r.seniorTranche, ST_LP_ROLE, false);
         targets[1] = _trancheBinding(_r.juniorTranche, JT_LP_ROLE, false);
         targets[2] = _trancheBinding(_r.liquidityTranche, LT_LP_ROLE, true);
@@ -346,14 +400,30 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         targets[4] = _accountantBinding(_r.accountant);
         targets[5] = _balancerVaultBinding(address(BALANCER_V3_VAULT));
         targets[6] = _balancerProtocolFeeControllerBinding(address(BALANCER_V3_VAULT.getProtocolFeeController()));
+        targets[7] = _balancerHookBinding(_balancerHook);
 
-        // The kernel mints senior shares (SHARE_MINTER_ROLE) and burns them (BURNER_ROLE) when seeding/unwinding the LT's Balancer pool
-        RoleGrant[] memory grants = new RoleGrant[](3);
+        // The kernel mints senior shares (SHARE_MINTER_ROLE) and burns them (BURNER_ROLE) when seeding/unwinding the LT's Balancer pool.
+        // The pool hook holds SYNC_ROLE so it can sync the kernel before every externally-initiated pool operation.
+        RoleGrant[] memory grants = new RoleGrant[](4);
         grants[0] = RoleGrant({ roleId: SYNC_ROLE, account: _r.accountant, executionDelay: 0 });
         grants[1] = RoleGrant({ roleId: SHARE_MINTER_ROLE, account: _r.kernel, executionDelay: 0 });
         grants[2] = RoleGrant({ roleId: BURNER_ROLE, account: _r.kernel, executionDelay: 0 });
+        grants[3] = RoleGrant({ roleId: SYNC_ROLE, account: _balancerHook, executionDelay: 0 });
 
         return RoleBindings({ targetBindings: targets, postInitGrants: grants });
+    }
+
+    /// @notice Admin surface for the Balancer pool hook (a RoycoBase UUPS contract): pause/unpause/upgrade.
+    function _balancerHookBinding(address _hook) private pure returns (TargetBinding memory) {
+        bytes4[] memory s = new bytes4[](3);
+        uint64[] memory r = new uint64[](3);
+        s[0] = IRoycoAuth.pause.selector;
+        r[0] = ADMIN_PAUSER_ROLE;
+        s[1] = IRoycoAuth.unpause.selector;
+        r[1] = ADMIN_UNPAUSER_ROLE;
+        s[2] = UUPSUpgradeable.upgradeToAndCall.selector;
+        r[2] = ADMIN_UPGRADER_ROLE;
+        return TargetBinding({ target: _hook, selectors: s, roleIds: r });
     }
 
     function _trancheBinding(address _tranche, uint64 _lpRole, bool _isLiquidity) private pure returns (TargetBinding memory) {
