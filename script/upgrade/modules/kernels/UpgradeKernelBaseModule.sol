@@ -6,12 +6,6 @@ import { NAV_UNIT, TRANCHE_UNIT } from "../../../../src/libraries/Units.sol";
 
 import { UpgradeModuleBase } from "../UpgradeModuleBase.sol";
 
-/// @notice Minimal interface to read the immutable bool that's exposed on the concrete `RoycoDayKernel`
-///         but not on `IRoycoDayKernel`. Avoids importing the full `RoycoDayKernel` here.
-interface IKernelExtra {
-    function ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER() external view returns (bool);
-}
-
 /**
  * @title UpgradeKernelBaseModule
  * @notice Abstract base for `RoycoDayKernel`-family upgrades. Concrete subclasses (one per kernel
@@ -105,7 +99,8 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
         cp.juniorTranche = k.JUNIOR_TRANCHE();
         cp.jtAsset = k.JT_ASSET();
         cp.accountant = k.ACCOUNTANT();
-        cp.enforceVaultSharesTransferWhitelist = IKernelExtra(_proxy).ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER();
+        cp.liquidityTranche = k.LIQUIDITY_TRANCHE();
+        cp.ltAsset = k.LT_ASSET();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -132,17 +127,7 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
         IRoycoDayKernel.RoycoDayKernelState memory state = k.getState();
         uint256 stConv = NAV_UNIT.unwrap(k.stConvertTrancheUnitsToNAVUnits(_oneTrancheUnit()));
         uint256 jtConv = NAV_UNIT.unwrap(k.jtConvertTrancheUnitsToNAVUnits(_oneTrancheUnit()));
-        return abi.encode(
-            k.SENIOR_TRANCHE(),
-            k.ST_ASSET(),
-            k.JUNIOR_TRANCHE(),
-            k.JT_ASSET(),
-            k.ACCOUNTANT(),
-            IKernelExtra(_proxy).ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER(),
-            state,
-            stConv,
-            jtConv
-        );
+        return abi.encode(k.SENIOR_TRANCHE(), k.ST_ASSET(), k.JUNIOR_TRANCHE(), k.JT_ASSET(), k.ACCOUNTANT(), state, stConv, jtConv);
     }
 
     function _verifyCommon(address _proxy, bytes memory _snap) internal view {
@@ -152,11 +137,10 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
             address junior,
             address jtAsset,
             address accountant,
-            bool enforceWhitelist,
             IRoycoDayKernel.RoycoDayKernelState memory state,
             uint256 stConvRate,
             uint256 jtConvRate
-        ) = abi.decode(_snap, (address, address, address, address, address, bool, IRoycoDayKernel.RoycoDayKernelState, uint256, uint256));
+        ) = abi.decode(_snap, (address, address, address, address, address, IRoycoDayKernel.RoycoDayKernelState, uint256, uint256));
 
         IRoycoDayKernel k = IRoycoDayKernel(_proxy);
         require(k.SENIOR_TRANCHE() == senior, UpgradeKernelBaseModule__ImmutableChanged("SENIOR_TRANCHE"));
@@ -164,13 +148,8 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
         require(k.JUNIOR_TRANCHE() == junior, UpgradeKernelBaseModule__ImmutableChanged("JUNIOR_TRANCHE"));
         require(k.JT_ASSET() == jtAsset, UpgradeKernelBaseModule__ImmutableChanged("JT_ASSET"));
         require(k.ACCOUNTANT() == accountant, UpgradeKernelBaseModule__ImmutableChanged("ACCOUNTANT"));
-        require(
-            IKernelExtra(_proxy).ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER() == enforceWhitelist,
-            UpgradeKernelBaseModule__ImmutableChanged("ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER")
-        );
 
         IRoycoDayKernel.RoycoDayKernelState memory post = k.getState();
-        require(post.roycoBlacklist == state.roycoBlacklist, UpgradeKernelBaseModule__StateChanged("roycoBlacklist"));
         require(post.protocolFeeRecipient == state.protocolFeeRecipient, UpgradeKernelBaseModule__StateChanged("protocolFeeRecipient"));
         require(post.stSelfLiquidationBonusWAD == state.stSelfLiquidationBonusWAD, UpgradeKernelBaseModule__StateChanged("stSelfLiquidationBonusWAD"));
         require(

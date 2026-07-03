@@ -8,7 +8,7 @@ import {
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel
 } from "../../kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel.sol";
 import { BalancerV3DeploymentTemplate } from "./BalancerV3DeploymentTemplate.sol";
-import { COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK } from "./base/Components.sol";
+import { COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK, COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK_LENS } from "./base/Components.sol";
 
 /**
  * @title DayIdenticalERC4626ChainlinkDeploymentTemplate
@@ -24,6 +24,11 @@ contract DayIdenticalERC4626ChainlinkDeploymentTemplate is BalancerV3DeploymentT
     /// @inheritdoc BalancerV3DeploymentTemplate
     function _kernelComponentId() internal pure override(BalancerV3DeploymentTemplate) returns (bytes32) {
         return COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK;
+    }
+
+    /// @inheritdoc BalancerV3DeploymentTemplate
+    function _lensComponentId() internal pure override(BalancerV3DeploymentTemplate) returns (bytes32) {
+        return COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK_LENS;
     }
 
     /// @inheritdoc BalancerV3DeploymentTemplate

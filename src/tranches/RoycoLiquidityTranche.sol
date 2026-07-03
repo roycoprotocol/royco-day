@@ -5,6 +5,7 @@ import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/I
 import { SafeERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
+import { IRoycoDayKernelLens } from "../interfaces/IRoycoDayKernelLens.sol";
 import { IRoycoLiquidityTranche } from "../interfaces/IRoycoLiquidityTranche.sol";
 import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 import { ZERO_NAV_UNITS } from "../libraries/Constants.sol";
@@ -21,7 +22,15 @@ import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
 contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
     using SafeERC20 for IERC20;
 
-    constructor(address _asset, address _kernel) RoycoVaultTranche(_asset, _kernel) { }
+    constructor(
+        address _asset,
+        address _kernel,
+        bool _enforceVaultSharesTransferWhitelist,
+        address _lens,
+        address _hook
+    )
+        RoycoVaultTranche(_asset, _kernel, _enforceVaultSharesTransferWhitelist, _lens, _hook)
+    { }
 
     /// @notice Initializes the Royco liquidity tranche.
     /// @param _ltParams Deployment parameters including name, symbol, and initial authority for the liquidity tranche.
@@ -77,7 +86,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
     /// @inheritdoc IRoycoLiquidityTranche
     function previewDepositMultiAsset(uint256 _stAssets, uint256 _quoteAssets) external virtual override(IRoycoLiquidityTranche) returns (uint256 shares) {
         // Simulate the kernel's multi-asset deposit for the value allocated and the pre-deposit LT effective NAV per share
-        (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt,) = IRoycoDayKernel(KERNEL).ltPreviewDepositMultiAsset(toTrancheUnits(_stAssets), _quoteAssets);
+        (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt,) = IRoycoDayKernelLens(LENS).ltPreviewDepositMultiAsset(toTrancheUnits(_stAssets), _quoteAssets);
         // Mint LT shares at the pre-deposit LT effective NAV per share — identical to depositMultiAsset's share math
         shares = _convertToShares(valueAllocated, totalSupply(), navToMintSharesAt, Math.Rounding.Floor);
     }
@@ -122,6 +131,6 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
         // Simulate the kernel's multi-asset redemption for the ST claims and quote assets the receiver would get — identical to redeemMultiAsset's outputs
-        (stClaims, quoteAssets) = IRoycoDayKernel(KERNEL).ltPreviewRedeemMultiAsset(_shares);
+        (stClaims, quoteAssets) = IRoycoDayKernelLens(LENS).ltPreviewRedeemMultiAsset(_shares);
     }
 }
