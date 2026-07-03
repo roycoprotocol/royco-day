@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { IAccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { RoycoBase } from "../base/RoycoBase.sol";
 import { IRoycoBlacklistHook } from "../interfaces/IRoycoBlacklistHook.sol";
+import { IRoycoTrancheHook } from "../interfaces/IRoycoTrancheHook.sol";
 import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 import { ISanctionsList } from "../interfaces/external/chainalysis/ISanctionsList.sol";
 
@@ -87,8 +88,8 @@ contract RoycoBlacklistHook is IRoycoBlacklistHook, RoycoBase {
     // Tranche Balance-Update Hook
     // =============================
 
-    /// @inheritdoc IRoycoBlacklistHook
-    function preTrancheBalanceUpdateHook(address _caller, address _from, address _to, bool _enforceWhitelist) external view override(IRoycoBlacklistHook) {
+    /// @inheritdoc IRoycoTrancheHook
+    function preTrancheBalanceUpdateHook(address _caller, address _from, address _to, bool _enforceWhitelist) external view override(IRoycoTrancheHook) {
         // Screen the involved accounts against the blacklist (the null address is skipped inside isBlacklisted)
         enforceNotBlacklisted(_caller);
         enforceNotBlacklisted(_from);

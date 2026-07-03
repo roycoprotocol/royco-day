@@ -8,9 +8,9 @@ import { ERC20PermitUpgradeable } from "../../../lib/openzeppelin-contracts-upgr
 import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoBase } from "../../base/RoycoBase.sol";
-import { IRoycoBlacklistHook } from "../../interfaces/IRoycoBlacklistHook.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoDayKernelLens } from "../../interfaces/IRoycoDayKernelLens.sol";
+import { IRoycoTrancheHook } from "../../interfaces/IRoycoTrancheHook.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { WAD_DECIMALS, ZERO_NAV_UNITS } from "../../libraries/Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
@@ -369,7 +369,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     /// @inheritdoc ERC20PausableUpgradeable
     function _update(address _from, address _to, uint256 _value) internal override(ERC20PausableUpgradeable, ERC20Upgradeable) whenNotPaused {
         // Call the kernel's pre-balance update hook to assert that the balance update is valid
-        IRoycoBlacklistHook(HOOK).preTrancheBalanceUpdateHook(msg.sender, _from, _to, ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER);
+        IRoycoTrancheHook(HOOK).preTrancheBalanceUpdateHook(msg.sender, _from, _to, ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER);
 
         // Call the parent contract update function to update the balance
         ERC20Upgradeable._update(_from, _to, _value);

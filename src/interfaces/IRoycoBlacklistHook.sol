@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { IRoycoTrancheHook } from "./IRoycoTrancheHook.sol";
+
 /// @title IRoycoBlacklistHook
 /// @notice Interface for the RoycoBlacklistHook contract: account blacklisting + sanctions screening plus the tranche
 ///         balance-update hook (blacklist screening + tranche-whitelist enforcement) the tranches call on every transfer.
-interface IRoycoBlacklistHook {
+/// @dev Implements the minimal `IRoycoTrancheHook` that the tranches depend on.
+interface IRoycoBlacklistHook is IRoycoTrancheHook {
     /**
      * @notice Storage state for the Royco blacklist
      * @custom:storage-location erc7201:Royco.storage.RoycoBlacklistState
@@ -33,17 +36,6 @@ interface IRoycoBlacklistHook {
 
     /// @notice Thrown when a share transfer recipient is not a whitelisted LP for the calling tranche
     error ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(address account);
-
-    /**
-     * @notice Tranche balance-update hook: screens the involved accounts against the blacklist and, when the calling
-     *         tranche enforces its whitelist, requires the recipient to be a whitelisted LP for that tranche.
-     * @dev Called by a tranche from its `_update`; `msg.sender` is the calling tranche. Pure guard (view), reverts on violation.
-     * @param _caller The address that initiated the balance update
-     * @param _from The address the balance is moving from (the null address on mints)
-     * @param _to The address the balance is moving to (the null address on burns)
-     * @param _enforceWhitelist Whether the calling tranche enforces its transfer whitelist
-     */
-    function preTrancheBalanceUpdateHook(address _caller, address _from, address _to, bool _enforceWhitelist) external view;
 
     /**
      * @notice Blacklists the specified addresses from holding or transferring Royco tranche shares
