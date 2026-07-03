@@ -13,7 +13,7 @@ import { IdenticalERC4626Shares_ST_JT_Oracle_Quoter } from "./base/IdenticalERC4
  */
 abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToAdminOracle_Quoter is IdenticalERC4626Shares_ST_JT_Oracle_Quoter, IdenticalAssets_ST_JT_AdminOracle_Quoter {
     /**
-     * @notice The quoter-specific initialization parameters, composed into the kernel's `KernelSpecificInitParams`
+     * @notice The quoter-specific initialization parameters
      * @custom:field initialConversionRateWAD - The initial conversion rate as defined by the oracle, scaled to WAD precision
      */
     struct QuoterSpecificParams {

@@ -17,7 +17,7 @@ abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quote
     using Math for uint256;
 
     /**
-     * @notice The quoter-specific initialization parameters, composed into the kernel's `KernelSpecificInitParams`
+     * @notice The quoter-specific initialization parameters
      * @custom:field initialConversionRateWAD - The initial conversion rate as defined by the oracle, scaled to WAD precision
      * @custom:field baseAssetToNavAssetOracle - The ERC4626 base asset to NAV accounting asset oracle
      * @custom:field stalenessThresholdSeconds - The staleness threshold in seconds

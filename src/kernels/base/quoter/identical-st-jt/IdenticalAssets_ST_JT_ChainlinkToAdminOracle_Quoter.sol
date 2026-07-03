@@ -12,7 +12,7 @@ import { IdenticalAssets_ST_JT_Oracle_Quoter } from "./base/IdenticalAssets_ST_J
  */
 abstract contract IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter is IdenticalAssets_ST_JT_ChainlinkOracle_Quoter, IdenticalAssets_ST_JT_AdminOracle_Quoter {
     /**
-     * @notice The quoter-specific initialization parameters, composed into the kernel's `KernelSpecificInitParams`
+     * @notice The quoter-specific initialization parameters
      * @custom:field initialConversionRateWAD - The initial conversion rate as defined by the oracle, scaled to WAD precision
      * @custom:field trancheAssetToReferenceAssetOracle - The tranche asset to reference asset oracle
      * @custom:field stalenessThresholdSeconds - The staleness threshold in seconds

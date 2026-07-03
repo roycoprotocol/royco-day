@@ -22,8 +22,7 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kerne
     BalancerV3_LT_Quoter
 {
     /**
-     * @notice Kernel-specific initialization parameters, decoded from the deployment template's `kernelSpecificParams`.
-     * @dev A composition of each inherited quoter's `QuoterSpecificParams`, so combining different ST/JT and liquidity tranche quoters into a new kernel reuses their parameters without re-listing fields.
+     * @notice Kernel-specific initialization parameters
      * @custom:field stAndJTQuoterParams - The senior/junior tranche ERC4626-shares-to-Chainlink quoter's parameters
      * @custom:field ltQuoterParams - The liquidity tranche Balancer V3 quoter's parameters
      */

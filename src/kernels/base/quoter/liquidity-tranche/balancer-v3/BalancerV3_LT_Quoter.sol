@@ -93,7 +93,7 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     }
 
     /**
-     * @notice The quoter-specific initialization parameters, composed into the kernel's `KernelSpecificInitParams`
+     * @notice The quoter-specific initialization parameters
      * @custom:field bptOracle - The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity tranche
      * @custom:field maxReinvestmentSlippageWAD - The maximum slippage tolerated when single-sided reinvesting the ST shares minted as a liquidity premium into the Balancer V3 Pool, scaled to WAD precision
      */
