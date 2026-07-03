@@ -35,18 +35,13 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     address public immutable override(IRoycoVaultTranche) KERNEL;
 
     /// @inheritdoc IRoycoVaultTranche
-    /// @dev Whether share transfers require the recipient to be a whitelisted LP for this tranche; passed to the hook per transfer
     bool public immutable override(IRoycoVaultTranche) ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER;
 
-    /// @dev Namespaced (ERC-7201) storage slot holding the kernel lens address. The lens holds the read-only preview/max
-    ///      surface (moved off the size-constrained kernel) and is deployed after the tranche, so it is set once post-deploy.
-    // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoVaultTranche.lens")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant LENS_STORAGE_SLOT = 0xc4644d89fbb9ea1774311d4bbb6e85a5190c798679195f9770be920e0b4a8a00;
+    /// @inheritdoc IRoycoVaultTranche
+    address public immutable override(IRoycoVaultTranche) LENS;
 
-    /// @dev Namespaced (ERC-7201) storage slot holding the tranche balance-update hook (the shared RoycoBlacklistHook).
-    ///      Wired once post-deploy (the shared hook exists independently of the market).
-    // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoVaultTranche.hook")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant HOOK_STORAGE_SLOT = 0xb86c5fc9b8af27aaacbbe608ea2ec81e6833c46cf4ef1d87a30e07da68251d00;
+    /// @inheritdoc IRoycoVaultTranche
+    address public immutable override(IRoycoVaultTranche) HOOK;
 
     /// @dev Permissions the function to only be callable by the kernel, the single source of truth for sync-driven share mints
     modifier onlyKernel() {
@@ -54,61 +49,24 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         _;
     }
 
-    /// @inheritdoc IRoycoVaultTranche
-    function LENS() public view override(IRoycoVaultTranche) returns (address lens) {
-        assembly ("memory-safe") {
-            lens := sload(LENS_STORAGE_SLOT)
-        }
-    }
-
-    /// @inheritdoc IRoycoVaultTranche
-    /// @dev One-time wiring of the kernel lens; gated by the AccessManager and set during market deployment
-    function setLens(address _lens) external override(IRoycoVaultTranche) restricted {
-        require(_lens != address(0), NULL_ADDRESS());
-        require(LENS() == address(0), LENS_ALREADY_SET());
-        assembly ("memory-safe") {
-            sstore(LENS_STORAGE_SLOT, _lens)
-        }
-        emit LensSet(_lens);
-    }
-
-    /// @dev The kernel lens typed for read calls
-    function _lens() internal view returns (IRoycoDayKernelLens) {
-        return IRoycoDayKernelLens(LENS());
-    }
-
-    /// @inheritdoc IRoycoVaultTranche
-    function hook() public view override(IRoycoVaultTranche) returns (address trancheHook) {
-        assembly ("memory-safe") {
-            trancheHook := sload(HOOK_STORAGE_SLOT)
-        }
-    }
-
-    /// @inheritdoc IRoycoVaultTranche
-    /// @dev One-time wiring of the tranche balance-update hook; gated by the AccessManager and set during market deployment
-    function setHook(address _hook) external override(IRoycoVaultTranche) restricted {
-        require(_hook != address(0), NULL_ADDRESS());
-        require(hook() == address(0), HOOK_ALREADY_SET());
-        assembly ("memory-safe") {
-            sstore(HOOK_STORAGE_SLOT, _hook)
-        }
-        emit HookSet(_hook);
-    }
-
     /**
      * @notice Constructs the Royco vault tranche
      * @param _asset The underlying asset for the tranche
      * @param _kernel The kernel that handles strategy logic
      * @param _enforceVaultSharesTransferWhitelist Whether share transfers require the recipient to be a whitelisted LP for this tranche
+     * @param _lens The kernel lens this tranche reads its preview/max surface from (its CREATE3-deterministic address)
+     * @param _hook The tranche balance-update hook (the shared RoycoBlacklistHook) consulted on every balance update
      */
-    constructor(address _asset, address _kernel, bool _enforceVaultSharesTransferWhitelist) {
-        // Ensure that the asset and kernel are not null
-        require(_asset != address(0) && _kernel != address(0), NULL_ADDRESS());
+    constructor(address _asset, address _kernel, bool _enforceVaultSharesTransferWhitelist, address _lens, address _hook) {
+        // Ensure that the asset, kernel, lens, and hook are not null
+        require(_asset != address(0) && _kernel != address(0) && _lens != address(0) && _hook != address(0), NULL_ADDRESS());
 
         // Set the immutable state
         ASSET = _asset;
         KERNEL = _kernel;
         ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER = _enforceVaultSharesTransferWhitelist;
+        LENS = _lens;
+        HOOK = _hook;
     }
 
     /**
@@ -244,16 +202,16 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         uint256 totalTrancheShares;
         if (TRANCHE_TYPE() == TrancheType.SENIOR) {
             SyncedAccountingState memory stateBeforeDeposit;
-            (stateBeforeDeposit, valueAllocated, totalTrancheShares) = _lens().stPreviewDeposit(_assets);
+            (stateBeforeDeposit, valueAllocated, totalTrancheShares) = IRoycoDayKernelLens(LENS).stPreviewDeposit(_assets);
             effectiveNAV = stateBeforeDeposit.stEffectiveNAV;
         } else if (TRANCHE_TYPE() == TrancheType.JUNIOR) {
             SyncedAccountingState memory stateBeforeDeposit;
-            (stateBeforeDeposit, valueAllocated, totalTrancheShares) = _lens().jtPreviewDeposit(_assets);
+            (stateBeforeDeposit, valueAllocated, totalTrancheShares) = IRoycoDayKernelLens(LENS).jtPreviewDeposit(_assets);
             effectiveNAV = stateBeforeDeposit.jtEffectiveNAV;
         } else {
             // The LT prices its shares at the effective NAV (value deployed into the AMM or another market-making venue plus the idle liquidity-premium senior shares), which is not
             // carried in SyncedAccountingState, so the kernel surfaces it directly as navToMintSharesAt
-            (, valueAllocated, totalTrancheShares, effectiveNAV) = _lens().ltPreviewDeposit(_assets);
+            (, valueAllocated, totalTrancheShares, effectiveNAV) = IRoycoDayKernelLens(LENS).ltPreviewDeposit(_assets);
         }
 
         // Calculate the shares to be minted to the receiver against the post-sync supply, so the preview matches execution
@@ -264,8 +222,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     function previewRedeem(uint256 _shares) external view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
         claims =
         (TRANCHE_TYPE() == TrancheType.SENIOR
-                ? _lens().stPreviewRedeem(_shares)
-                : TRANCHE_TYPE() == TrancheType.JUNIOR ? _lens().jtPreviewRedeem(_shares) : _lens().ltPreviewRedeem(_shares));
+                ? IRoycoDayKernelLens(LENS).stPreviewRedeem(_shares)
+                : TRANCHE_TYPE() == TrancheType.JUNIOR ? IRoycoDayKernelLens(LENS).jtPreviewRedeem(_shares) : IRoycoDayKernelLens(LENS).ltPreviewRedeem(_shares));
     }
 
     /// @inheritdoc IRoycoVaultTranche
@@ -298,8 +256,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     function maxDeposit(address _receiver) external view virtual override(IRoycoVaultTranche) returns (TRANCHE_UNIT assets) {
         assets =
         (TRANCHE_TYPE() == TrancheType.SENIOR
-                ? _lens().stMaxDeposit(_receiver)
-                : TRANCHE_TYPE() == TrancheType.JUNIOR ? _lens().jtMaxDeposit(_receiver) : _lens().ltMaxDeposit(_receiver));
+                ? IRoycoDayKernelLens(LENS).stMaxDeposit(_receiver)
+                : TRANCHE_TYPE() == TrancheType.JUNIOR ? IRoycoDayKernelLens(LENS).jtMaxDeposit(_receiver) : IRoycoDayKernelLens(LENS).ltMaxDeposit(_receiver));
     }
 
     /// @inheritdoc IRoycoVaultTranche
@@ -317,8 +275,10 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
             //  Therefore, the maximum amount of shares that can be redeemed is:
             //      s' = min(s, T * L_s / N_s, T * L_j / N_j)
             // Get the notional claims and the max withdrawable assets for the tranche
-            (NAV_UNIT claimOnSTNAV, NAV_UNIT claimOnJTNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalSharesAfterMintingFees) =
-                (TRANCHE_TYPE() == TrancheType.SENIOR ? _lens().stMaxWithdrawable(_owner) : _lens().jtMaxWithdrawable(_owner));
+            (NAV_UNIT claimOnSTNAV, NAV_UNIT claimOnJTNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalSharesAfterMintingFees) = (TRANCHE_TYPE()
+                    == TrancheType.SENIOR
+                    ? IRoycoDayKernelLens(LENS).stMaxWithdrawable(_owner)
+                    : IRoycoDayKernelLens(LENS).jtMaxWithdrawable(_owner));
 
             // We do not allow redemptions if the tranche has no claims on the assets
             if (claimOnSTNAV + claimOnJTNAV == ZERO_NAV_UNITS) return 0;
@@ -332,7 +292,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
             shares = Math.min(sharesOwned, Math.min(sharesWithdrawableBasedOnSeniorConstraints, sharesWithdrawableBasedOnJuniorConstraints));
         } else {
             // The liquidity tranche has claims only on its own RAW NAV
-            (NAV_UNIT claimOnLTNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees) = _lens().ltMaxWithdrawable(_owner);
+            (NAV_UNIT claimOnLTNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees) =
+                IRoycoDayKernelLens(LENS).ltMaxWithdrawable(_owner);
 
             // We do not allow redemptions if the tranche has no claims on the assets
             if (claimOnLTNAV == ZERO_NAV_UNITS) return 0;
@@ -349,12 +310,12 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @inheritdoc IRoycoVaultTranche
     function totalAssets() external view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
-        (, claims,) = _lens().previewSyncTrancheAccounting(TRANCHE_TYPE());
+        (, claims,) = IRoycoDayKernelLens(LENS).previewSyncTrancheAccounting(TRANCHE_TYPE());
     }
 
     /// @inheritdoc IRoycoVaultTranche
     function getRawNAV() external view virtual override(IRoycoVaultTranche) returns (NAV_UNIT nav) {
-        (SyncedAccountingState memory state,,) = _lens().previewSyncTrancheAccounting(TRANCHE_TYPE());
+        (SyncedAccountingState memory state,,) = IRoycoDayKernelLens(LENS).previewSyncTrancheAccounting(TRANCHE_TYPE());
         nav = TRANCHE_TYPE() == TrancheType.SENIOR ? state.stRawNAV : TRANCHE_TYPE() == TrancheType.JUNIOR ? state.jtRawNAV : state.ltRawNAV;
     }
 
@@ -383,7 +344,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
      * @return trancheTotalShares The total supply of tranche shares (including marginally minted fee shares)
      */
     function _previewPostSyncTrancheState() internal view returns (AssetClaims memory trancheClaims, uint256 trancheTotalShares) {
-        (, trancheClaims, trancheTotalShares) = _lens().previewSyncTrancheAccounting(TRANCHE_TYPE());
+        (, trancheClaims, trancheTotalShares) = IRoycoDayKernelLens(LENS).previewSyncTrancheAccounting(TRANCHE_TYPE());
     }
 
     /**
@@ -408,7 +369,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     /// @inheritdoc ERC20PausableUpgradeable
     function _update(address _from, address _to, uint256 _value) internal override(ERC20PausableUpgradeable, ERC20Upgradeable) whenNotPaused {
         // Call the kernel's pre-balance update hook to assert that the balance update is valid
-        IRoycoBlacklistHook(hook()).preTrancheBalanceUpdateHook(msg.sender, _from, _to, ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER);
+        IRoycoBlacklistHook(HOOK).preTrancheBalanceUpdateHook(msg.sender, _from, _to, ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER);
 
         // Call the parent contract update function to update the balance
         ERC20Upgradeable._update(_from, _to, _value);

@@ -15,9 +15,11 @@ contract RoycoSeniorTranche is RoycoVaultTranche, IRoycoSeniorTranche {
     constructor(
         address _asset,
         address _kernel,
-        bool _enforceVaultSharesTransferWhitelist
+        bool _enforceVaultSharesTransferWhitelist,
+        address _lens,
+        address _hook
     )
-        RoycoVaultTranche(_asset, _kernel, _enforceVaultSharesTransferWhitelist)
+        RoycoVaultTranche(_asset, _kernel, _enforceVaultSharesTransferWhitelist, _lens, _hook)
     { }
 
     /// @notice Initializes the Royco senior tranche
