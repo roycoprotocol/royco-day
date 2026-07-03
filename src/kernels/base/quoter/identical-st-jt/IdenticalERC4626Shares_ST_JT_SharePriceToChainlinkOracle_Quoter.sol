@@ -22,7 +22,7 @@ abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quote
      * @custom:field baseAssetToNavAssetOracle - The ERC4626 base asset to NAV accounting asset oracle
      * @custom:field stalenessThresholdSeconds - The staleness threshold in seconds
      */
-    struct STAndJTQuoterSpecificParams {
+    struct ST_JT_QuoterSpecificParams {
         uint256 initialConversionRateWAD;
         address baseAssetToNavAssetOracle;
         uint48 stalenessThresholdSeconds;
@@ -30,7 +30,7 @@ abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quote
 
     /// @notice Initializes the identical ERC4626 shares chainlink oracle quoter and its inherited contracts
     /// @param _params The quoter-specific initialization parameters
-    function __IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter_init(STAndJTQuoterSpecificParams calldata _params) internal onlyInitializing {
+    function __IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter_init(ST_JT_QuoterSpecificParams calldata _params) internal onlyInitializing {
         __IdenticalAssets_ST_JT_Oracle_Quoter_init_unchained(_params.initialConversionRateWAD);
         __IdenticalAssets_ST_JT_ChainlinkOracle_Quoter_init_unchained(_params.baseAssetToNavAssetOracle, _params.stalenessThresholdSeconds);
     }

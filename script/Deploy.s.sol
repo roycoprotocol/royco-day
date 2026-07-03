@@ -130,8 +130,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     }
 
     struct IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams {
-        IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.STAndJTQuoterSpecificParams stAndJTQuoterParams;
-        BalancerV3_LT_Quoter.LTQuoterSpecificParams ltQuoterParams;
+        IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams stAndJTQuoterParams;
+        BalancerV3_LT_Quoter.LT_QuoterSpecificParams ltQuoterParams;
     }
 
     struct IdenticalAssets_ST_JT_AdminOracle_QuoterKernelParams {

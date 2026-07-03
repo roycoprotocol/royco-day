@@ -99,14 +99,14 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
      * @custom:field bptOracle - The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity tranche
      * @custom:field maxReinvestmentSlippageWAD - The maximum slippage tolerated when single-sided reinvesting the ST shares minted as a liquidity premium into the Balancer V3 Pool, scaled to WAD precision
      */
-    struct LTQuoterSpecificParams {
+    struct LT_QuoterSpecificParams {
         address bptOracle;
         uint64 maxReinvestmentSlippageWAD;
     }
 
     /// @notice Initializes the Balancer V3 liquidity tranche quoter
     /// @param _params The quoter-specific initialization parameters
-    function __BalancerV3_LT_Quoter_init_unchained(LTQuoterSpecificParams calldata _params) internal onlyInitializing {
+    function __BalancerV3_LT_Quoter_init_unchained(LT_QuoterSpecificParams calldata _params) internal onlyInitializing {
         _setBPTOracle(_params.bptOracle);
         _setMaxReinvestmentSlippage(_params.maxReinvestmentSlippageWAD);
     }

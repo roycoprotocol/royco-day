@@ -27,8 +27,8 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kerne
      * @custom:field ltQuoterParams - The liquidity tranche Balancer V3 quoter's parameters
      */
     struct KernelSpecificInitParams {
-        IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.STAndJTQuoterSpecificParams stAndJTQuoterParams;
-        BalancerV3_LT_Quoter.LTQuoterSpecificParams ltQuoterParams;
+        IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams stAndJTQuoterParams;
+        BalancerV3_LT_Quoter.LT_QuoterSpecificParams ltQuoterParams;
     }
 
     /// @notice Constructs the kernel state and resolves the quote asset from the liquidity tranche's Balancer V3 pool
