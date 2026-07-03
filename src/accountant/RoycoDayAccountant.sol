@@ -180,6 +180,8 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         if (initialMarketState == MarketState.PERPETUAL && state.marketState == MarketState.FIXED_TERM) {
             emit FixedTermCommenced(($.fixedTermEndTimestamp = state.fixedTermEndTimestamp));
         } else if (initialMarketState == MarketState.FIXED_TERM && state.marketState == MarketState.PERPETUAL) {
+            // Reset the fixed-term end timestamp
+            delete $.fixedTermEndTimestamp;
             emit FixedTermEnded();
         }
 
@@ -916,6 +918,8 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             emit JuniorTrancheCoverageImpermanentLossReset($.lastJTCoverageImpermanentLoss);
             $.lastJTCoverageImpermanentLoss = ZERO_NAV_UNITS;
             $.lastMarketState = MarketState.PERPETUAL;
+            // Reset the fixed-term end timestamp
+            delete $.fixedTermEndTimestamp;
         }
         emit FixedTermDurationUpdated(_fixedTermDurationSeconds);
     }

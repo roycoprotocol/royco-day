@@ -93,13 +93,22 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     }
 
     /**
-     * @notice Initializes the Balancer V3 liquidity tranche quoter
-     * @param _bptOracle The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity tranche
-     * @param _maxReinvestmentSlippageWAD The maximum slippage tolerated when single-sided reinvesting the ST shares minted as a liquidity premium into the Balancer V3 Pool, scaled to WAD precision
+     * @notice The quoter-specific initialization parameters, composed into the kernel's `KernelSpecificInitParams`
+     * @custom:field bptOracle - The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity tranche
+     * @custom:field maxReinvestmentSlippageWAD - The maximum slippage tolerated when single-sided reinvesting the ST shares minted as a liquidity premium into the Balancer V3 Pool, scaled to WAD precision
      */
-    function __BalancerV3_LT_Quoter_init_unchained(address _bptOracle, uint64 _maxReinvestmentSlippageWAD) internal onlyInitializing {
-        _setBPTOracle(_bptOracle);
-        _setMaxReinvestmentSlippage(_maxReinvestmentSlippageWAD);
+    struct LiquidityQuoterSpecificParams {
+        address bptOracle;
+        uint64 maxReinvestmentSlippageWAD;
+    }
+
+    /**
+     * @notice Initializes the Balancer V3 liquidity tranche quoter
+     * @param _params The quoter-specific initialization parameters
+     */
+    function __BalancerV3_LT_Quoter_init_unchained(LiquidityQuoterSpecificParams calldata _params) internal onlyInitializing {
+        _setBPTOracle(_params.bptOracle);
+        _setMaxReinvestmentSlippage(_params.maxReinvestmentSlippageWAD);
     }
 
     // =============================

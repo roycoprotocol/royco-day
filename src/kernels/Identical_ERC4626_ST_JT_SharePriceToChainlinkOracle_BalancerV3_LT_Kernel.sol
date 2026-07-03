@@ -23,18 +23,13 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kerne
 {
     /**
      * @notice Kernel-specific initialization parameters, decoded from the deployment template's `kernelSpecificParams`.
-     * @custom:field initialConversionRateWAD - The initial ERC4626 base-asset-to-NAV-asset conversion rate, scaled to WAD precision
-     * @custom:field baseAssetToNavAssetOracle - The Chainlink oracle pricing the ERC4626 base asset in NAV accounting assets
-     * @custom:field stalenessThresholdSeconds - The maximum age of a Chainlink answer before it is considered stale
-     * @custom:field bptOracle - The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity tranche
-     * @custom:field maxReinvestmentSlippageWAD - The maximum slippage tolerated when single-sided reinvesting the liquidity premium into the BPT, scaled to WAD precision
+     * @dev A composition of each inherited quoter's `QuoterSpecificParams`, so combining different ST/JT and liquidity tranche quoters into a new kernel reuses their parameters without re-listing fields.
+     * @custom:field stAndJTQuoterParams - The senior/junior tranche ERC4626-shares-to-Chainlink quoter's parameters
+     * @custom:field ltQuoterParams - The liquidity tranche Balancer V3 quoter's parameters
      */
     struct KernelSpecificInitParams {
-        uint256 initialConversionRateWAD;
-        address baseAssetToNavAssetOracle;
-        uint48 stalenessThresholdSeconds;
-        address bptOracle;
-        uint64 maxReinvestmentSlippageWAD;
+        IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.QuoterSpecificParams stAndJTQuoterParams;
+        BalancerV3_LT_Quoter.LiquidityQuoterSpecificParams ltQuoterParams;
     }
 
     /// @notice Constructs the kernel state and resolves the quote asset from the liquidity tranche's Balancer V3 pool
@@ -44,17 +39,21 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kerne
     /**
      * @notice Initializes the Royco Day kernel and its ST/JT and liquidity tranche quoters
      * @param _standardParams The standard initialization parameters for the Royco Day kernel
-     * @param _specificParams The kernel-specific (quoter) initialization parameters
+     * @param _specificParams The kernel-specific initialization parameters
      */
-    function initialize(IRoycoDayKernel.RoycoDayKernelInitParams calldata _standardParams, KernelSpecificInitParams calldata _specificParams) external initializer {
+    function initialize(
+        IRoycoDayKernel.RoycoDayKernelInitParams calldata _standardParams,
+        KernelSpecificInitParams calldata _specificParams
+    )
+        external
+        initializer
+    {
         // Initialize the base kernel state
         __RoycoDayKernel_init(_standardParams);
         // Initialize the identical ERC4626 shares to Chainlink (compatible) oracle ST/JT quoter
-        __IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter_init(
-            _specificParams.initialConversionRateWAD, _specificParams.baseAssetToNavAssetOracle, _specificParams.stalenessThresholdSeconds
-        );
+        __IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter_init(_specificParams.stAndJTQuoterParams);
         // Initialize the Balancer V3 liquidity tranche quoter
-        __BalancerV3_LT_Quoter_init_unchained(_specificParams.bptOracle, _specificParams.maxReinvestmentSlippageWAD);
+        __BalancerV3_LT_Quoter_init_unchained(_specificParams.ltQuoterParams);
     }
 
     /**

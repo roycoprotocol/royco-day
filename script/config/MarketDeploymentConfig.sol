@@ -3,6 +3,10 @@ pragma solidity ^0.8.28;
 
 import { IGyroECLPPool } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
 import { BalancerV3DeploymentTemplate } from "../../src/factory/templates/BalancerV3DeploymentTemplate.sol";
+import {
+    IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
+} from "../../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
+import { BalancerV3_LT_Quoter } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_Quoter.sol";
 import { DeployScript } from "../Deploy.s.sol";
 
 /**
@@ -217,13 +221,17 @@ abstract contract MarketDeploymentConfig {
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams({
+                    stAndJTQuoterParams: IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.QuoterSpecificParams({
                         // Enable the oracle leg by using the sentinel initial conversion rate
                         initialConversionRateWAD: 0,
                         baseAssetToNavAssetOracle: 0x9A5a3c3Ed0361505cC1D4e824B3854De5724434A, // TODO: real base-asset->NAV Chainlink feed
-                        stalenessThresholdSeconds: 48 hours,
+                        stalenessThresholdSeconds: 48 hours
+                    }),
+                    ltQuoterParams: BalancerV3_LT_Quoter.LiquidityQuoterSpecificParams({
                         bptOracle: 0x000000000000000000000000000000000000dEaD, // TODO: real manipulation-resistant Balancer V3 BPT (E-CLP LP) oracle
                         maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
                     })
+                })
             ),
             enforceVaultSharesTransferWhitelist: false,
             stSelfLiquidationBonusWAD: 0,

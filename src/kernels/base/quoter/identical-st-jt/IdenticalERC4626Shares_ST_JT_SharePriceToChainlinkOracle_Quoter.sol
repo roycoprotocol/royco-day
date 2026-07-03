@@ -17,21 +17,24 @@ abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quote
     using Math for uint256;
 
     /**
-     * @notice Initializes the identical ERC4626 shares chainlink oracle quoter and its inherited contracts
-     * @param _initialConversionRateWAD The initial conversion rate as defined by the oracle, scaled to WAD precision
-     * @param _baseAssetToNavAssetOracle The ERC4626 base asset to NAV accounting asset oracle
-     * @param _stalenessThresholdSeconds The staleness threshold in seconds
+     * @notice The quoter-specific initialization parameters, composed into the kernel's `KernelSpecificInitParams`
+     * @custom:field initialConversionRateWAD - The initial conversion rate as defined by the oracle, scaled to WAD precision
+     * @custom:field baseAssetToNavAssetOracle - The ERC4626 base asset to NAV accounting asset oracle
+     * @custom:field stalenessThresholdSeconds - The staleness threshold in seconds
      */
-    function __IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter_init(
-        uint256 _initialConversionRateWAD,
-        address _baseAssetToNavAssetOracle,
-        uint48 _stalenessThresholdSeconds
-    )
-        internal
-        onlyInitializing
-    {
-        __IdenticalAssets_ST_JT_Oracle_Quoter_init_unchained(_initialConversionRateWAD);
-        __IdenticalAssets_ST_JT_ChainlinkOracle_Quoter_init_unchained(_baseAssetToNavAssetOracle, _stalenessThresholdSeconds);
+    struct QuoterSpecificParams {
+        uint256 initialConversionRateWAD;
+        address baseAssetToNavAssetOracle;
+        uint48 stalenessThresholdSeconds;
+    }
+
+    /**
+     * @notice Initializes the identical ERC4626 shares chainlink oracle quoter and its inherited contracts
+     * @param _params The quoter-specific initialization parameters
+     */
+    function __IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter_init(QuoterSpecificParams calldata _params) internal onlyInitializing {
+        __IdenticalAssets_ST_JT_Oracle_Quoter_init_unchained(_params.initialConversionRateWAD);
+        __IdenticalAssets_ST_JT_ChainlinkOracle_Quoter_init_unchained(_params.baseAssetToNavAssetOracle, _params.stalenessThresholdSeconds);
     }
 
     /**

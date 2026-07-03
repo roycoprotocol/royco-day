@@ -43,6 +43,10 @@ import { IRoycoProtocolTemplate } from "../src/interfaces/factory/IRoycoProtocol
 import {
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel
 } from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel.sol";
+import {
+    IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
+} from "../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
+import { BalancerV3_LT_Quoter } from "../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_Quoter.sol";
 import { toNAVUnits } from "../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoLiquidityTranche } from "../src/tranches/RoycoLiquidityTranche.sol";
@@ -126,11 +130,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     }
 
     struct IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams {
-        uint256 initialConversionRateWAD;
-        address baseAssetToNavAssetOracle;
-        uint48 stalenessThresholdSeconds;
-        address bptOracle;
-        uint64 maxReinvestmentSlippageWAD;
+        IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.QuoterSpecificParams stAndJTQuoterParams;
+        BalancerV3_LT_Quoter.LiquidityQuoterSpecificParams ltQuoterParams;
     }
 
     struct IdenticalAssets_ST_JT_AdminOracle_QuoterKernelParams {

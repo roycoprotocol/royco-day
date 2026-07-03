@@ -13,11 +13,19 @@ import { IdenticalERC4626Shares_ST_JT_Oracle_Quoter } from "./base/IdenticalERC4
  */
 abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToAdminOracle_Quoter is IdenticalERC4626Shares_ST_JT_Oracle_Quoter, IdenticalAssets_ST_JT_AdminOracle_Quoter {
     /**
-     * @notice Initializes the identical ERC4626 shares admin oracle quoter and the base identical assets oracle quoter
-     * @param _initialConversionRateWAD The initial conversion rate as defined by the oracle, scaled to WAD precision
+     * @notice The quoter-specific initialization parameters, composed into the kernel's `KernelSpecificInitParams`
+     * @custom:field initialConversionRateWAD - The initial conversion rate as defined by the oracle, scaled to WAD precision
      */
-    function __IdenticalERC4626Shares_ST_JT_SharePriceToAdminOracle_Quoter_init(uint256 _initialConversionRateWAD) internal onlyInitializing {
-        __IdenticalAssets_ST_JT_AdminOracle_Quoter_init(_initialConversionRateWAD);
+    struct QuoterSpecificParams {
+        uint256 initialConversionRateWAD;
+    }
+
+    /**
+     * @notice Initializes the identical ERC4626 shares admin oracle quoter and the base identical assets oracle quoter
+     * @param _params The quoter-specific initialization parameters
+     */
+    function __IdenticalERC4626Shares_ST_JT_SharePriceToAdminOracle_Quoter_init(QuoterSpecificParams calldata _params) internal onlyInitializing {
+        __IdenticalAssets_ST_JT_AdminOracle_Quoter_init(_params.initialConversionRateWAD);
     }
 
     /// @inheritdoc IdenticalAssets_ST_JT_AdminOracle_Quoter
