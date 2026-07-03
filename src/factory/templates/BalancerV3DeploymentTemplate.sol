@@ -9,6 +9,7 @@ import { IVaultAdmin } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/co
 import {
     PoolRoleAccounts as BalancerV3PoolRoleAccounts,
     TokenConfig as BalancerV3TokenConfig,
+    TokenInfo as BalancerV3TokenInfo,
     TokenType as BalancerV3TokenType
 } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
 import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
@@ -20,17 +21,23 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { IRoycoAuth } from "../../interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
+import { IRoycoDayQuoter } from "../../interfaces/IRoycoDayQuoter.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { IRoycoFactory } from "../../interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../interfaces/factory/IRoycoProtocolTemplate.sol";
-import { RoycoDayBalancerV3Hooks } from "../../kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3Hooks.sol";
-import { RoycoDayBalancerV3HooksStandIn } from "../../kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3HooksStandIn.sol";
+import { BalancerV3_LT_Venue_Kernel } from "../../kernels/lt-venue/balancer-v3/BalancerV3_LT_Venue_Kernel.sol";
+import { RoycoDayBalancerV3Hooks } from "../../kernels/lt-venue/balancer-v3/RoycoDayBalancerV3Hooks.sol";
+import { RoycoDayBalancerV3HooksStandIn } from "../../kernels/lt-venue/balancer-v3/RoycoDayBalancerV3HooksStandIn.sol";
 import { TrancheType } from "../../libraries/Types.sol";
+import { IdenticalAssets_ST_JT_ChainlinkOracle_Quoter } from "../../quoters/identical-st-jt/base/IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol";
+import { IdenticalAssets_ST_JT_Oracle_Quoter } from "../../quoters/identical-st-jt/base/IdenticalAssets_ST_JT_Oracle_Quoter.sol";
+import { BalancerV3_LT_Quoter } from "../../quoters/liquidity-tranche/balancer-v3/BalancerV3_LT_Quoter.sol";
 import { RoycoLiquidityTranche } from "../../tranches/RoycoLiquidityTranche.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
     ADMIN_KERNEL_ROLE,
+    ADMIN_ORACLE_QUOTER_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
     ADMIN_UNPAUSER_ROLE,
@@ -84,6 +91,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         uint64 stSelfLiquidationBonusWAD;
         address roycoBlacklist;
         bytes kernelSpecificParams;
+        bytes quoterSpecificParams;
         bool enforceVaultSharesTransferWhitelist;
     }
 
@@ -114,9 +122,12 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     error INVALID_KERNEL_ON_ACCOUNTANT();
     error POOL_NOT_REGISTERED_WITH_VAULT();
     error POOL_TOKEN_CONFIGURATION_MISMATCH();
-    error INVALID_LENS_ON_TRANCHE();
+    error INVALID_QUOTER_ON_TRANCHE();
     error INVALID_HOOK_ON_TRANCHE();
     error INVALID_KERNEL_ON_BALANCER_HOOK();
+    error INVALID_QUOTER_ON_KERNEL();
+    error INVALID_KERNEL_ON_QUOTER();
+    error INVALID_RATE_PROVIDER_ON_POOL();
 
     // ═══════════════════════════════════════════════════════════════════════════
     // IMMUTABLES
@@ -149,8 +160,8 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     /// @dev Returns the SSTORE2 component ID that holds the Day kernel's creation code.
     function _kernelComponentId() internal pure virtual returns (bytes32);
 
-    /// @dev Returns the SSTORE2 component ID that holds the Day kernel lens's creation code (the read-only companion deployed per market).
-    function _lensComponentId() internal pure virtual returns (bytes32);
+    /// @dev Returns the SSTORE2 component ID that holds the Day quoter's creation code (the view-only companion deployed per market).
+    function _quoterComponentId() internal pure virtual returns (bytes32);
 
     /// @dev Returns the ABI-encoded kernel `initialize(...)` calldata for the concrete Day kernel.
     function _kernelInitData(
@@ -161,6 +172,11 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         pure
         virtual
         returns (bytes memory);
+
+    /// @dev Returns the ABI-encoded quoter `initialize(...)` calldata for the concrete Day quoter.
+    /// @param _authority The market authority that governs the quoter's restricted (oracle setter) functions.
+    /// @param _quoterSpecificParams The market's ABI-encoded concrete-quoter init blob (ST/JT pricing params + LT BPT oracle).
+    function _quoterInitData(address _authority, bytes memory _quoterSpecificParams) internal view virtual returns (bytes memory);
 
     // ═══════════════════════════════════════════════════════════════════════════
     // VALIDATE
@@ -195,14 +211,16 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         bytes32 ltProxySalt = _marketComponentSalt(p.marketId, "LT");
         bytes32 kernelProxySalt = _marketComponentSalt(p.marketId, "KERNEL");
         bytes32 accountantProxySalt = _marketComponentSalt(p.marketId, "ACCOUNTANT");
-        bytes32 lensSalt = _marketComponentSalt(p.marketId, "LENS");
+        bytes32 quoterProxySalt = _marketComponentSalt(p.marketId, "QUOTER");
 
         result.seniorTranche = ROYCO_FACTORY.predictDeterministicAddress(stProxySalt);
         result.juniorTranche = ROYCO_FACTORY.predictDeterministicAddress(jtProxySalt);
         result.liquidityTranche = ROYCO_FACTORY.predictDeterministicAddress(ltProxySalt);
         result.kernel = ROYCO_FACTORY.predictDeterministicAddress(kernelProxySalt);
         result.accountant = ROYCO_FACTORY.predictDeterministicAddress(accountantProxySalt);
-        result.lens = ROYCO_FACTORY.predictDeterministicAddress(lensSalt);
+        // Predict the quoter proxy up front: the kernel/quoter form a bidirectional immutable cycle (kernel.QUOTER() == quoter,
+        // quoter.KERNEL() == kernel), so both addresses are CREATE3-predicted before either is deployed to break the cycle.
+        result.quoter = ROYCO_FACTORY.predictDeterministicAddress(quoterProxySalt);
         result.hook = p.roycoBlacklist;
 
         // 2. Deploy the JT YDM (driven by coverage utilization) and the LT YDM / LDM (driven by liquidity utilization), each
@@ -212,7 +230,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
 
         // 3. Deploy ST impl + proxy first — the pool needs ST_PROXY as one of its tokens.
         address stImpl = _deploySeniorTrancheImpl(
-            p.stAsset, result.kernel, p.enforceVaultSharesTransferWhitelist, result.lens, result.hook, _marketComponentSalt(p.marketId, "ST_IMPL")
+            p.stAsset, result.kernel, p.enforceVaultSharesTransferWhitelist, result.quoter, result.hook, _marketComponentSalt(p.marketId, "ST_IMPL")
         );
         _deployProxy(stImpl, _encodeTrancheInitData(p.stTranche), stProxySalt);
 
@@ -220,21 +238,21 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         //    the real hook's flags) so the pool can register now; it is upgraded to the real kernel-bound hook after step 9.
         address balancerHook = _deployProxy(BALANCER_HOOK_STANDIN_IMPL, bytes("no-op"), _marketComponentSalt(p.marketId, "BALANCER_HOOK"));
 
-        // 5. Create the Gyro E-CLP pool `{ST_share, quote}`: senior leg WITH_RATE (rate provider = the predicted kernel),
-        //    hooked to the stand-in proxy. LT asset = pool.
+        // 5. Create the Gyro E-CLP pool `{ST_share, quote}`: senior leg WITH_RATE (rate provider = the predicted quoter, since
+        //    `getRate()` now lives on the quoter, not the kernel), hooked to the stand-in proxy. LT asset = pool.
         address balancerPool = _createBalancerV3Pool(
-            p.gyroECLPPoolParams, result.seniorTranche, result.kernel, balancerHook, _marketComponentSalt(p.marketId, "BALANCER_V3_POOL")
+            p.gyroECLPPoolParams, result.seniorTranche, result.quoter, balancerHook, _marketComponentSalt(p.marketId, "BALANCER_V3_POOL")
         );
 
         // 6. Deploy JT impl + proxy (plain first-loss asset).
         address jtImpl = _deployJuniorTrancheImpl(
-            p.jtAsset, result.kernel, p.enforceVaultSharesTransferWhitelist, result.lens, result.hook, _marketComponentSalt(p.marketId, "JT_IMPL")
+            p.jtAsset, result.kernel, p.enforceVaultSharesTransferWhitelist, result.quoter, result.hook, _marketComponentSalt(p.marketId, "JT_IMPL")
         );
         _deployProxy(jtImpl, _encodeTrancheInitData(p.jtTranche), jtProxySalt);
 
         // 7. Deploy LT impl + proxy (asset = the pool BPT).
         address ltImpl = _deployLiquidityTrancheImpl(
-            balancerPool, result.kernel, p.enforceVaultSharesTransferWhitelist, result.lens, result.hook, _marketComponentSalt(p.marketId, "LT_IMPL")
+            balancerPool, result.kernel, p.enforceVaultSharesTransferWhitelist, result.quoter, result.hook, _marketComponentSalt(p.marketId, "LT_IMPL")
         );
         _deployProxy(ltImpl, _encodeTrancheInitData(p.ltTranche), ltProxySalt);
 
@@ -249,9 +267,11 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         address realHookImpl = _deployImpl(COMPONENT_ID_DAY_BALANCER_HOOKS, abi.encode(result.kernel), _marketComponentSalt(p.marketId, "BALANCER_HOOK_IMPL"));
         UUPSUpgradeable(balancerHook).upgradeToAndCall(realHookImpl, abi.encodeCall(RoycoDayBalancerV3Hooks.initialize, (ROYCO_FACTORY.ROYCO_AUTHORITY())));
 
-        // 11. Deploy the kernel lens (a plain immutable contract pointed at the now-initialized kernel proxy) at its predicted
-        //     salt, so it lands at the address already pinned into the tranches' immutable LENS.
-        _deployImpl(_lensComponentId(), abi.encode(result.kernel), lensSalt);
+        // 11. Deploy the quoter impl + proxy. The quoter is the pool's senior-share rate provider and the tranches' preview
+        //     surface; its constructor resolves the pool wiring from the now-initialized kernel proxy, and the proxy lands at the
+        //     QUOTER proxy salt already pinned into the tranches' immutable QUOTER and the pool's senior-leg rate provider.
+        address quoterImpl = _deployImpl(_quoterComponentId(), abi.encode(result.kernel), _marketComponentSalt(p.marketId, "QUOTER_IMPL"));
+        _deployProxy(quoterImpl, _quoterInitData(ROYCO_FACTORY.ROYCO_AUTHORITY(), p.quoterSpecificParams), quoterProxySalt);
 
         // 12. Apply selector->role bindings + post-init grants (including SYNC_ROLE for the pool hook so it can sync the kernel).
         _applyRoleBindings(_buildRoleBindings(result, balancerHook));
@@ -259,8 +279,8 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         // 13. Record + verify-friendly extras.
         result.extras = abi.encode(ExtraContractsDeployedResult({ balancerPool: balancerPool, balancerHook: balancerHook }));
 
-        // 14. Sanity-check the pool wiring lines up with what we built.
-        _assertPoolWiredCorrectly(balancerPool, result.seniorTranche);
+        // 14. Sanity-check the pool wiring lines up with what we built (including the quoter as the senior-leg rate provider).
+        _assertPoolWiredCorrectly(balancerPool, result.seniorTranche, result.quoter);
     }
 
     /// @notice Deploys the Day kernel impl + proxy.
@@ -272,7 +292,8 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
             jtAsset: _p.jtAsset,
             accountant: _result.accountant,
             liquidityTranche: _result.liquidityTranche,
-            ltAsset: _balancerPool
+            ltAsset: _balancerPool,
+            quoter: _result.quoter
         });
         address kernelImpl = _deployImpl(_kernelComponentId(), abi.encode(cp), _marketComponentSalt(_p.marketId, "KERNEL_IMPL"));
 
@@ -327,7 +348,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         );
     }
 
-    /// @dev Token config for a pool leg: the senior-tranche leg is `WITH_RATE` (priced by the kernel rate provider); every other leg is `STANDARD`.
+    /// @dev Token config for a pool leg: the senior-tranche leg is `WITH_RATE` (priced by the quoter's senior-share rate provider); every other leg is `STANDARD`.
     function _buildTokenConfig(address _token, address _seniorTranche, address _rateProvider) private pure returns (BalancerV3TokenConfig memory) {
         bool isSeniorLeg = _token == _seniorTranche;
         return BalancerV3TokenConfig({
@@ -372,19 +393,23 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         // The LT asset is the pool; the pool is wired with `{ST_share, quote}`.
         ExtraContractsDeployedResult memory extras = abi.decode(_d.extras, (ExtraContractsDeployedResult));
         require(kernel.LT_ASSET() == extras.balancerPool, INVALID_LT_ASSET_ON_KERNEL());
-        _assertPoolWiredCorrectly(extras.balancerPool, _d.seniorTranche);
+        _assertPoolWiredCorrectly(extras.balancerPool, _d.seniorTranche, _d.quoter);
 
         // The pool hook proxy was upgraded from the stand-in to the real kernel-bound hook and initialized with this market's
         // authority — reading its authority proves the upgrade+initialize landed (the stand-in is not AccessManaged).
         require(AccessManagedUpgradeable(extras.balancerHook).authority() == expectedAuthority, INVALID_ACCESS_MANAGER());
         require(RoycoDayBalancerV3Hooks(extras.balancerHook).ROYCO_DAY_KERNEL() == _d.kernel, INVALID_KERNEL_ON_BALANCER_HOOK());
 
-        // Every tranche must carry the same market lens and balance-update hook (pinned as immutables at construction).
+        // Every tranche must carry the same market quoter and balance-update hook (pinned as immutables at construction).
         address[3] memory tranches = [_d.seniorTranche, _d.juniorTranche, _d.liquidityTranche];
         for (uint256 i = 0; i < tranches.length; ++i) {
-            require(IRoycoVaultTranche(tranches[i]).LENS() == _d.lens, INVALID_LENS_ON_TRANCHE());
+            require(IRoycoVaultTranche(tranches[i]).QUOTER() == _d.quoter, INVALID_QUOTER_ON_TRANCHE());
             require(IRoycoVaultTranche(tranches[i]).HOOK() == _d.hook, INVALID_HOOK_ON_TRANCHE());
         }
+
+        // The kernel and quoter form a bidirectional immutable cycle, and the quoter is the pool's senior-leg rate provider.
+        require(kernel.QUOTER() == _d.quoter, INVALID_QUOTER_ON_KERNEL());
+        require(IRoycoDayQuoter(_d.quoter).KERNEL() == _d.kernel, INVALID_KERNEL_ON_QUOTER());
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -392,7 +417,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _buildRoleBindings(DeploymentResult memory _r, address _balancerHook) internal view virtual returns (RoleBindings memory) {
-        TargetBinding[] memory targets = new TargetBinding[](8);
+        TargetBinding[] memory targets = new TargetBinding[](9);
         targets[0] = _trancheBinding(_r.seniorTranche, ST_LP_ROLE, false);
         targets[1] = _trancheBinding(_r.juniorTranche, JT_LP_ROLE, false);
         targets[2] = _trancheBinding(_r.liquidityTranche, LT_LP_ROLE, true);
@@ -401,16 +426,41 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         targets[5] = _balancerVaultBinding(address(BALANCER_V3_VAULT));
         targets[6] = _balancerProtocolFeeControllerBinding(address(BALANCER_V3_VAULT.getProtocolFeeController()));
         targets[7] = _balancerHookBinding(_balancerHook);
+        targets[8] = _quoterBinding(_r.quoter);
 
         // The kernel mints senior shares (SHARE_MINTER_ROLE) and burns them (BURNER_ROLE) when seeding/unwinding the LT's Balancer pool.
         // The pool hook holds SYNC_ROLE so it can sync the kernel before every externally-initiated pool operation.
-        RoleGrant[] memory grants = new RoleGrant[](4);
+        // The quoter holds SYNC_ROLE because its oracle setters call `KERNEL.syncTrancheAccounting()` (SYNC_ROLE-gated) around an oracle swap.
+        RoleGrant[] memory grants = new RoleGrant[](5);
         grants[0] = RoleGrant({ roleId: SYNC_ROLE, account: _r.accountant, executionDelay: 0 });
         grants[1] = RoleGrant({ roleId: SHARE_MINTER_ROLE, account: _r.kernel, executionDelay: 0 });
         grants[2] = RoleGrant({ roleId: BURNER_ROLE, account: _r.kernel, executionDelay: 0 });
         grants[3] = RoleGrant({ roleId: SYNC_ROLE, account: _balancerHook, executionDelay: 0 });
+        grants[4] = RoleGrant({ roleId: SYNC_ROLE, account: _r.quoter, executionDelay: 0 });
 
         return RoleBindings({ targetBindings: targets, postInitGrants: grants });
+    }
+
+    /// @notice Admin surface for the market quoter (a RoycoBase UUPS contract): the oracle setters (ST/JT pricing + LT BPT oracle)
+    ///         are gated by `ADMIN_ORACLE_QUOTER_ROLE`; pause/unpause/upgrade mirror the kernel's admin bindings.
+    /// @dev The oracle-setter selectors are the ST/JT-chainlink + Balancer-V3 quoter surface, matching the single concrete Day
+    ///      quoter this template deploys. A future non-chainlink quoter template overrides `_buildRoleBindings` to rebind them.
+    function _quoterBinding(address _quoter) private pure returns (TargetBinding memory) {
+        bytes4[] memory s = new bytes4[](6);
+        uint64[] memory r = new uint64[](6);
+        s[0] = IdenticalAssets_ST_JT_Oracle_Quoter.setConversionRate.selector;
+        r[0] = ADMIN_ORACLE_QUOTER_ROLE;
+        s[1] = IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.setChainlinkOracle.selector;
+        r[1] = ADMIN_ORACLE_QUOTER_ROLE;
+        s[2] = BalancerV3_LT_Quoter.setBPTOracle.selector;
+        r[2] = ADMIN_ORACLE_QUOTER_ROLE;
+        s[3] = IRoycoAuth.pause.selector;
+        r[3] = ADMIN_PAUSER_ROLE;
+        s[4] = IRoycoAuth.unpause.selector;
+        r[4] = ADMIN_UNPAUSER_ROLE;
+        s[5] = UUPSUpgradeable.upgradeToAndCall.selector;
+        r[5] = ADMIN_UPGRADER_ROLE;
+        return TargetBinding({ target: _quoter, selectors: s, roleIds: r });
     }
 
     /// @notice Admin surface for the Balancer pool hook (a RoycoBase UUPS contract): pause/unpause/upgrade.
@@ -458,8 +508,8 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     }
 
     function _kernelBinding(address _kernel) private pure returns (TargetBinding memory) {
-        bytes4[] memory s = new bytes4[](6);
-        uint64[] memory r = new uint64[](6);
+        bytes4[] memory s = new bytes4[](7);
+        uint64[] memory r = new uint64[](7);
         s[0] = IRoycoDayKernel.setProtocolFeeRecipient.selector;
         r[0] = ADMIN_KERNEL_ROLE;
         s[1] = IRoycoAuth.pause.selector;
@@ -472,6 +522,9 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         r[4] = SYNC_ROLE;
         s[5] = IRoycoDayKernel.setSeniorTrancheSelfLiquidationBonus.selector;
         r[5] = ADMIN_KERNEL_ROLE;
+        // The single-sided reinvestment slippage gate moved onto the kernel's Balancer V3 venue; it is an oracle-quoter admin concern.
+        s[6] = BalancerV3_LT_Venue_Kernel.setMaxReinvestmentSlippage.selector;
+        r[6] = ADMIN_ORACLE_QUOTER_ROLE;
         return TargetBinding({ target: _kernel, selectors: s, roleIds: r });
     }
 
@@ -537,15 +590,22 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     // INTERNAL HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Asserts the pool is registered with the Vault and is a two-token pool that includes the senior tranche share (the other token is the quote asset by construction).
-    function _assertPoolWiredCorrectly(address _pool, address _stProxy) internal view {
+    /// @dev Asserts the pool is registered with the Vault, is a two-token pool that includes the senior tranche share (the other
+    ///      token is the quote asset by construction), and that the senior-share leg is priced by the market quoter's rate provider.
+    function _assertPoolWiredCorrectly(address _pool, address _stProxy, address _quoter) internal view {
         IVault vault = BalancerPoolToken(_pool).getVault();
         require(vault.isPoolRegistered(_pool), POOL_NOT_REGISTERED_WITH_VAULT());
 
-        IERC20[] memory ierc20Tokens = vault.getPoolTokens(_pool);
-        require(ierc20Tokens.length == 2, POOL_TOKEN_CONFIGURATION_MISMATCH());
-        address t0 = address(ierc20Tokens[0]);
-        address t1 = address(ierc20Tokens[1]);
-        require(t0 == _stProxy || t1 == _stProxy, POOL_TOKEN_CONFIGURATION_MISMATCH());
+        (IERC20[] memory tokens, BalancerV3TokenInfo[] memory tokenInfo,,) = vault.getPoolTokenInfo(_pool);
+        require(tokens.length == 2, POOL_TOKEN_CONFIGURATION_MISMATCH());
+
+        bool seniorSeen;
+        for (uint256 i = 0; i < 2; ++i) {
+            if (address(tokens[i]) != _stProxy) continue;
+            seniorSeen = true;
+            // The senior-share leg must be priced by the quoter's `getRate()` (the quoter is the pool's senior-leg rate provider).
+            require(address(tokenInfo[i].rateProvider) == _quoter, INVALID_RATE_PROVIDER_ON_POOL());
+        }
+        require(seniorSeen, POOL_TOKEN_CONFIGURATION_MISMATCH());
     }
 }

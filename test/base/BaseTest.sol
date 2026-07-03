@@ -25,6 +25,7 @@ import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoBlacklistHook } from "../../src/interfaces/IRoycoBlacklistHook.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
+import { IRoycoDayQuoter } from "../../src/interfaces/IRoycoDayQuoter.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
 import { AssetClaims, TrancheType } from "../../src/libraries/Types.sol";
@@ -144,6 +145,7 @@ abstract contract BaseTest is Test, Assertions {
     IRoycoVaultTranche internal ST;
     IRoycoVaultTranche internal JT;
     IRoycoDayKernel internal KERNEL;
+    IRoycoDayQuoter internal QUOTER;
     IRoycoDayAccountant internal ACCOUNTANT;
     IRoycoBlacklistHook internal BLACKLIST;
 
@@ -331,6 +333,7 @@ abstract contract BaseTest is Test, Assertions {
         vm.label(address(ACCOUNTANT), "Accountant");
 
         KERNEL = _deploymentResult.kernel;
+        QUOTER = IRoycoDayQuoter(KERNEL.QUOTER());
         vm.label(address(KERNEL), "Kernel");
 
         BLACKLIST = IRoycoBlacklistHook(_deploymentResult.roycoBlacklist);
@@ -497,14 +500,14 @@ abstract contract BaseTest is Test, Assertions {
     /// @param _assets The assets denominated in JT's tranche units to convert to the kernel's NAV units
     /// @return value The specified assets denominated in JT's tranche units converted to the kernel's NAV units
     function _toJTValue(TRANCHE_UNIT _assets) internal view returns (NAV_UNIT) {
-        return KERNEL.jtConvertTrancheUnitsToNAVUnits(_assets);
+        return QUOTER.jtConvertTrancheUnitsToNAVUnits(_assets);
     }
 
     /// @notice Converts the specified assets denominated in ST's tranche units to the kernel's NAV units
     /// @param _assets The assets denominated in ST's tranche units to convert to the kernel's NAV units
     /// @return value The specified assets denominated in ST's tranche units converted to the kernel's NAV units
     function _toSTValue(TRANCHE_UNIT _assets) internal view returns (NAV_UNIT) {
-        return KERNEL.stConvertTrancheUnitsToNAVUnits(_assets);
+        return QUOTER.stConvertTrancheUnitsToNAVUnits(_assets);
     }
 
     /// @notice Deploys a KERNEL using ERC1967 proxy

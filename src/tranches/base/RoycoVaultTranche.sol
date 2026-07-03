@@ -9,7 +9,7 @@ import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/E
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoBase } from "../../base/RoycoBase.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
-import { IRoycoDayKernelLens } from "../../interfaces/IRoycoDayKernelLens.sol";
+import { IRoycoDayQuoter } from "../../interfaces/IRoycoDayQuoter.sol";
 import { IRoycoTrancheHook } from "../../interfaces/IRoycoTrancheHook.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { WAD_DECIMALS, ZERO_NAV_UNITS } from "../../libraries/Constants.sol";
@@ -38,7 +38,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     bool public immutable override(IRoycoVaultTranche) ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER;
 
     /// @inheritdoc IRoycoVaultTranche
-    address public immutable override(IRoycoVaultTranche) LENS;
+    address public immutable override(IRoycoVaultTranche) QUOTER;
 
     /// @inheritdoc IRoycoVaultTranche
     address public immutable override(IRoycoVaultTranche) HOOK;
@@ -54,18 +54,18 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
      * @param _asset The underlying asset for the tranche
      * @param _kernel The kernel that handles strategy logic
      * @param _enforceVaultSharesTransferWhitelist Whether share transfers require the recipient to be a whitelisted LP for this tranche
-     * @param _lens The kernel lens this tranche reads its preview/max surface from (its CREATE3-deterministic address)
+     * @param _quoter The market quoter this tranche reads its preview/max surface from (its CREATE3-deterministic address)
      * @param _hook The tranche balance-update hook (the shared RoycoBlacklistHook) consulted on every balance update
      */
-    constructor(address _asset, address _kernel, bool _enforceVaultSharesTransferWhitelist, address _lens, address _hook) {
-        // Ensure that the asset, kernel, lens, and hook are not null
-        require(_asset != address(0) && _kernel != address(0) && _lens != address(0) && _hook != address(0), NULL_ADDRESS());
+    constructor(address _asset, address _kernel, bool _enforceVaultSharesTransferWhitelist, address _quoter, address _hook) {
+        // Ensure that the asset, kernel, quoter, and hook are not null
+        require(_asset != address(0) && _kernel != address(0) && _quoter != address(0) && _hook != address(0), NULL_ADDRESS());
 
         // Set the immutable state
         ASSET = _asset;
         KERNEL = _kernel;
         ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER = _enforceVaultSharesTransferWhitelist;
-        LENS = _lens;
+        QUOTER = _quoter;
         HOOK = _hook;
     }
 
@@ -202,16 +202,16 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         uint256 totalTrancheShares;
         if (TRANCHE_TYPE() == TrancheType.SENIOR) {
             SyncedAccountingState memory stateBeforeDeposit;
-            (stateBeforeDeposit, valueAllocated, totalTrancheShares) = IRoycoDayKernelLens(LENS).stPreviewDeposit(_assets);
+            (stateBeforeDeposit, valueAllocated, totalTrancheShares) = IRoycoDayQuoter(QUOTER).stPreviewDeposit(_assets);
             effectiveNAV = stateBeforeDeposit.stEffectiveNAV;
         } else if (TRANCHE_TYPE() == TrancheType.JUNIOR) {
             SyncedAccountingState memory stateBeforeDeposit;
-            (stateBeforeDeposit, valueAllocated, totalTrancheShares) = IRoycoDayKernelLens(LENS).jtPreviewDeposit(_assets);
+            (stateBeforeDeposit, valueAllocated, totalTrancheShares) = IRoycoDayQuoter(QUOTER).jtPreviewDeposit(_assets);
             effectiveNAV = stateBeforeDeposit.jtEffectiveNAV;
         } else {
             // The LT prices its shares at the effective NAV (value deployed into the AMM or another market-making venue plus the idle liquidity-premium senior shares), which is not
             // carried in SyncedAccountingState, so the kernel surfaces it directly as navToMintSharesAt
-            (, valueAllocated, totalTrancheShares, effectiveNAV) = IRoycoDayKernelLens(LENS).ltPreviewDeposit(_assets);
+            (, valueAllocated, totalTrancheShares, effectiveNAV) = IRoycoDayQuoter(QUOTER).ltPreviewDeposit(_assets);
         }
 
         // Calculate the shares to be minted to the receiver against the post-sync supply, so the preview matches execution
@@ -222,8 +222,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     function previewRedeem(uint256 _shares) external view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
         claims =
         (TRANCHE_TYPE() == TrancheType.SENIOR
-                ? IRoycoDayKernelLens(LENS).stPreviewRedeem(_shares)
-                : TRANCHE_TYPE() == TrancheType.JUNIOR ? IRoycoDayKernelLens(LENS).jtPreviewRedeem(_shares) : IRoycoDayKernelLens(LENS).ltPreviewRedeem(_shares));
+                ? IRoycoDayQuoter(QUOTER).stPreviewRedeem(_shares)
+                : TRANCHE_TYPE() == TrancheType.JUNIOR ? IRoycoDayQuoter(QUOTER).jtPreviewRedeem(_shares) : IRoycoDayQuoter(QUOTER).ltPreviewRedeem(_shares));
     }
 
     /// @inheritdoc IRoycoVaultTranche
@@ -238,10 +238,10 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // Get the post-sync tranche state: applying NAV reconciliation.
         NAV_UNIT navAssets =
         (TRANCHE_TYPE() == TrancheType.SENIOR
-                ? IRoycoDayKernel(KERNEL).stConvertTrancheUnitsToNAVUnits(_assets)
+                ? IRoycoDayQuoter(QUOTER).stConvertTrancheUnitsToNAVUnits(_assets)
                 : TRANCHE_TYPE() == TrancheType.JUNIOR
-                    ? IRoycoDayKernel(KERNEL).jtConvertTrancheUnitsToNAVUnits(_assets)
-                    : IRoycoDayKernel(KERNEL).ltConvertTrancheUnitsToNAVUnits(_assets));
+                    ? IRoycoDayQuoter(QUOTER).jtConvertTrancheUnitsToNAVUnits(_assets)
+                    : IRoycoDayQuoter(QUOTER).ltConvertTrancheUnitsToNAVUnits(_assets));
         (AssetClaims memory trancheClaims, uint256 trancheTotalShares) = _previewPostSyncTrancheState();
         shares = _convertToShares(navAssets, trancheTotalShares, trancheClaims.nav, Math.Rounding.Floor);
     }
@@ -256,8 +256,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     function maxDeposit(address _receiver) external view virtual override(IRoycoVaultTranche) returns (TRANCHE_UNIT assets) {
         assets =
         (TRANCHE_TYPE() == TrancheType.SENIOR
-                ? IRoycoDayKernelLens(LENS).stMaxDeposit(_receiver)
-                : TRANCHE_TYPE() == TrancheType.JUNIOR ? IRoycoDayKernelLens(LENS).jtMaxDeposit(_receiver) : IRoycoDayKernelLens(LENS).ltMaxDeposit(_receiver));
+                ? IRoycoDayQuoter(QUOTER).stMaxDeposit(_receiver)
+                : TRANCHE_TYPE() == TrancheType.JUNIOR ? IRoycoDayQuoter(QUOTER).jtMaxDeposit(_receiver) : IRoycoDayQuoter(QUOTER).ltMaxDeposit(_receiver));
     }
 
     /// @inheritdoc IRoycoVaultTranche
@@ -277,8 +277,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
             // Get the notional claims and the max withdrawable assets for the tranche
             (NAV_UNIT claimOnSTNAV, NAV_UNIT claimOnJTNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalSharesAfterMintingFees) = (TRANCHE_TYPE()
                     == TrancheType.SENIOR
-                    ? IRoycoDayKernelLens(LENS).stMaxWithdrawable(_owner)
-                    : IRoycoDayKernelLens(LENS).jtMaxWithdrawable(_owner));
+                    ? IRoycoDayQuoter(QUOTER).stMaxWithdrawable(_owner)
+                    : IRoycoDayQuoter(QUOTER).jtMaxWithdrawable(_owner));
 
             // We do not allow redemptions if the tranche has no claims on the assets
             if (claimOnSTNAV + claimOnJTNAV == ZERO_NAV_UNITS) return 0;
@@ -293,7 +293,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         } else {
             // The liquidity tranche has claims only on its own RAW NAV
             (NAV_UNIT claimOnLTNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees) =
-                IRoycoDayKernelLens(LENS).ltMaxWithdrawable(_owner);
+                IRoycoDayQuoter(QUOTER).ltMaxWithdrawable(_owner);
 
             // We do not allow redemptions if the tranche has no claims on the assets
             if (claimOnLTNAV == ZERO_NAV_UNITS) return 0;
@@ -310,12 +310,12 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @inheritdoc IRoycoVaultTranche
     function totalAssets() external view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
-        (, claims,) = IRoycoDayKernelLens(LENS).previewSyncTrancheAccounting(TRANCHE_TYPE());
+        (, claims,) = IRoycoDayQuoter(QUOTER).previewSyncTrancheAccounting(TRANCHE_TYPE());
     }
 
     /// @inheritdoc IRoycoVaultTranche
     function getRawNAV() external view virtual override(IRoycoVaultTranche) returns (NAV_UNIT nav) {
-        (SyncedAccountingState memory state,,) = IRoycoDayKernelLens(LENS).previewSyncTrancheAccounting(TRANCHE_TYPE());
+        (SyncedAccountingState memory state,,) = IRoycoDayQuoter(QUOTER).previewSyncTrancheAccounting(TRANCHE_TYPE());
         nav = TRANCHE_TYPE() == TrancheType.SENIOR ? state.stRawNAV : TRANCHE_TYPE() == TrancheType.JUNIOR ? state.jtRawNAV : state.ltRawNAV;
     }
 
@@ -344,7 +344,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
      * @return trancheTotalShares The total supply of tranche shares (including marginally minted fee shares)
      */
     function _previewPostSyncTrancheState() internal view returns (AssetClaims memory trancheClaims, uint256 trancheTotalShares) {
-        (, trancheClaims, trancheTotalShares) = IRoycoDayKernelLens(LENS).previewSyncTrancheAccounting(TRANCHE_TYPE());
+        (, trancheClaims, trancheTotalShares) = IRoycoDayQuoter(QUOTER).previewSyncTrancheAccounting(TRANCHE_TYPE());
     }
 
     /**

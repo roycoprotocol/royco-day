@@ -30,7 +30,7 @@ import {
     COMPONENT_ID_ACCOUNTANT_IMPL,
     COMPONENT_ID_DAY_BALANCER_HOOKS,
     COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK,
-    COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK_LENS,
+    COMPONENT_ID_DAY_QUOTER_IDENTICAL_ERC4626_CHAINLINK,
     COMPONENT_ID_JUNIOR_TRANCHE_IMPL,
     COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL,
     COMPONENT_ID_SENIOR_TRANCHE_IMPL,
@@ -42,17 +42,11 @@ import { IRoycoVaultTranche } from "../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../src/interfaces/IYDM.sol";
 import { IRoycoFactory } from "../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../src/interfaces/factory/IRoycoProtocolTemplate.sol";
+import { BalancerV3_LT_Kernel } from "../src/kernels/BalancerV3_LT_Kernel.sol";
+import { RoycoDayBalancerV3Hooks } from "../src/kernels/lt-venue/balancer-v3/RoycoDayBalancerV3Hooks.sol";
 import {
-    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel
-} from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel.sol";
-import {
-    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Lens
-} from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Lens.sol";
-import {
-    IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
-} from "../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
-import { BalancerV3_LT_Quoter } from "../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_Quoter.sol";
-import { RoycoDayBalancerV3Hooks } from "../src/kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3Hooks.sol";
+    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Quoter
+} from "../src/quoters/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Quoter.sol";
 import { toNAVUnits } from "../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoLiquidityTranche } from "../src/tranches/RoycoLiquidityTranche.sol";
@@ -133,11 +127,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
     struct IdenticalERC4626Shares_ST_JT_SharePriceToAdminOracle_QuoterKernelParams {
         uint256 initialConversionRateWAD;
-    }
-
-    struct IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams {
-        IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams stAndJTQuoterParams;
-        BalancerV3_LT_Quoter.LT_QuoterSpecificParams ltQuoterParams;
     }
 
     struct IdenticalAssets_ST_JT_AdminOracle_QuoterKernelParams {
@@ -416,9 +405,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         IRoycoFactory factoryIface = IRoycoFactory(address(_factory));
         bytes32 kernelComponentId;
         bytes memory kernelCreationCode;
-        bytes32 lensComponentId;
-        bytes memory lensCreationCode;
-        (template, kernelComponentId, kernelCreationCode, lensComponentId, lensCreationCode) = _deployTemplate(factoryIface, _kernelType);
+        bytes32 quoterComponentId;
+        bytes memory quoterCreationCode;
+        (template, kernelComponentId, kernelCreationCode, quoterComponentId, quoterCreationCode) = _deployTemplate(factoryIface, _kernelType);
 
         bytes32[] memory ids = new bytes32[](8);
         bytes[] memory codes = new bytes[](8);
@@ -436,8 +425,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         codes[4] = type(AdaptiveCurveYDM_V2).creationCode;
         ids[5] = kernelComponentId;
         codes[5] = kernelCreationCode;
-        ids[6] = lensComponentId;
-        codes[6] = lensCreationCode;
+        ids[6] = quoterComponentId;
+        codes[6] = quoterCreationCode;
         // The real kernel-bound Balancer pool hook (kernel address appended by the template at deploy time). The
         // registration-time stand-in is not a registered component — the template deploys one shared instance in its constructor.
         ids[7] = COMPONENT_ID_DAY_BALANCER_HOOKS;
@@ -453,7 +442,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         KernelType _kernelType
     )
         internal
-        returns (address template, bytes32 kernelComponentId, bytes memory kernelCreationCode, bytes32 lensComponentId, bytes memory lensCreationCode)
+        returns (address template, bytes32 kernelComponentId, bytes memory kernelCreationCode, bytes32 quoterComponentId, bytes memory quoterCreationCode)
     {
         // The concrete Balancer-V3 templates are constructed with the chain's Gyro E-CLP pool factory.
         GyroECLPPoolFactory poolFactory = GyroECLPPoolFactory(getChainConfig(block.chainid).gyroECLPPoolFactory);
@@ -462,9 +451,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             return (
                 address(new DayIdenticalERC4626ChainlinkDeploymentTemplate(_factory, poolFactory)),
                 COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK,
-                type(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel).creationCode,
-                COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK_LENS,
-                type(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Lens).creationCode
+                type(BalancerV3_LT_Kernel).creationCode,
+                COMPONENT_ID_DAY_QUOTER_IDENTICAL_ERC4626_CHAINLINK,
+                type(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Quoter).creationCode
             );
         }
         revert UnsupportedKernelType(_kernelType);
@@ -524,7 +513,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         params.gyroECLPPoolParams = _config.gyroECLPPoolParams;
         params.jtYDMTargetUtilizationWAD = _config.jtYdmTargetUtilizationWAD;
         params.ltYDMTargetUtilizationWAD = _config.ltYdmTargetUtilizationWAD;
-        params.kernelSpecificParams = _config.kernelSpecificParams; // template KernelParams are field-identical to the config blobs
+        params.kernelSpecificParams = _config.kernelSpecificParams; // BalancerV3_LT_Kernel.KernelSpecificInitParams blob
+        params.quoterSpecificParams = _config.quoterSpecificParams; // concrete quoter QuoterSpecificInitParams blob
         params.protocolFeeRecipient = _protocolFeeRecipient;
         params.stSelfLiquidationBonusWAD = _config.stSelfLiquidationBonusWAD;
         params.roycoBlacklist = _roycoBlacklist;

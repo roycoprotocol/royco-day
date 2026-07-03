@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IRoycoDayKernel } from "../../../../src/interfaces/IRoycoDayKernel.sol";
+import { IRoycoDayQuoter } from "../../../../src/interfaces/IRoycoDayQuoter.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "../../../../src/libraries/Units.sol";
 
 import { UpgradeModuleBase } from "../UpgradeModuleBase.sol";
@@ -125,8 +126,9 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
     function _snapshotCommon(address _proxy) internal view returns (bytes memory) {
         IRoycoDayKernel k = IRoycoDayKernel(_proxy);
         IRoycoDayKernel.RoycoDayKernelState memory state = k.getState();
-        uint256 stConv = NAV_UNIT.unwrap(k.stConvertTrancheUnitsToNAVUnits(_oneTrancheUnit()));
-        uint256 jtConv = NAV_UNIT.unwrap(k.jtConvertTrancheUnitsToNAVUnits(_oneTrancheUnit()));
+        IRoycoDayQuoter quoter = IRoycoDayQuoter(k.QUOTER());
+        uint256 stConv = NAV_UNIT.unwrap(quoter.stConvertTrancheUnitsToNAVUnits(_oneTrancheUnit()));
+        uint256 jtConv = NAV_UNIT.unwrap(quoter.jtConvertTrancheUnitsToNAVUnits(_oneTrancheUnit()));
         return abi.encode(k.SENIOR_TRANCHE(), k.ST_ASSET(), k.JUNIOR_TRANCHE(), k.JT_ASSET(), k.ACCOUNTANT(), state, stConv, jtConv);
     }
 
@@ -161,8 +163,9 @@ abstract contract UpgradeKernelBaseModule is UpgradeModuleBase {
             UpgradeKernelBaseModule__StateChanged("jtOwnedYieldBearingAssets")
         );
 
-        uint256 postStConv = NAV_UNIT.unwrap(k.stConvertTrancheUnitsToNAVUnits(_oneTrancheUnit()));
-        uint256 postJtConv = NAV_UNIT.unwrap(k.jtConvertTrancheUnitsToNAVUnits(_oneTrancheUnit()));
+        IRoycoDayQuoter quoter = IRoycoDayQuoter(k.QUOTER());
+        uint256 postStConv = NAV_UNIT.unwrap(quoter.stConvertTrancheUnitsToNAVUnits(_oneTrancheUnit()));
+        uint256 postJtConv = NAV_UNIT.unwrap(quoter.jtConvertTrancheUnitsToNAVUnits(_oneTrancheUnit()));
         require(postStConv == stConvRate, UpgradeKernelBaseModule__ConversionRateChanged("ST", stConvRate, postStConv));
         require(postJtConv == jtConvRate, UpgradeKernelBaseModule__ConversionRateChanged("JT", jtConvRate, postJtConv));
     }

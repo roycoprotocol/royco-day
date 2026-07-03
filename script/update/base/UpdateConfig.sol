@@ -62,6 +62,7 @@ abstract contract UpdateConfig {
     /// @notice Resolved market addresses (derived from kernel at runtime)
     struct MarketAddresses {
         address kernel;
+        address quoter;
         address accountant;
         address seniorTranche;
         address juniorTranche;
@@ -113,6 +114,7 @@ abstract contract UpdateConfig {
         require(addrs.kernel != address(0), MarketNotFound(_marketName, block.chainid));
 
         IRoycoDayKernel kernel = IRoycoDayKernel(addrs.kernel);
+        addrs.quoter = kernel.QUOTER();
         addrs.accountant = kernel.ACCOUNTANT();
         addrs.seniorTranche = kernel.SENIOR_TRANCHE();
         addrs.juniorTranche = kernel.JUNIOR_TRANCHE();

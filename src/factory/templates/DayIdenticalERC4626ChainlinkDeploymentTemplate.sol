@@ -4,19 +4,22 @@ pragma solidity ^0.8.28;
 import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoFactory } from "../../interfaces/factory/IRoycoFactory.sol";
+import { BalancerV3_LT_Kernel } from "../../kernels/BalancerV3_LT_Kernel.sol";
 import {
-    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel
-} from "../../kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel.sol";
+    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Quoter
+} from "../../quoters/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Quoter.sol";
 import { BalancerV3DeploymentTemplate } from "./BalancerV3DeploymentTemplate.sol";
-import { COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK, COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK_LENS } from "./base/Components.sol";
+import { COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK, COMPONENT_ID_DAY_QUOTER_IDENTICAL_ERC4626_CHAINLINK } from "./base/Components.sol";
 
 /**
  * @title DayIdenticalERC4626ChainlinkDeploymentTemplate
- * @notice Concrete Royco Day deployment template for a market whose ST/JT kernel is
- *         `Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel` and whose LT holds a Gyro E-CLP pool position.
- * @dev The Balancer pool creation, three-tranche + accountant + kernel deployment, role bindings, and `verify`
- *      are all inherited from `BalancerV3DeploymentTemplate`. This subclass only plugs in the concrete kernel
- *      via `_kernelComponentId()` (its registered creation-code id) and `_kernelInitData()` (its `initialize` calldata).
+ * @notice Concrete Royco Day deployment template for a market whose kernel is `BalancerV3_LT_Kernel` and whose
+ *         quoter is `Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Quoter` (ST/JT share an ERC4626
+ *         vault share priced share->base via `convertToAssets`, base->NAV via Chainlink; the LT holds a Gyro E-CLP BPT).
+ * @dev The Balancer pool creation, three-tranche + accountant + kernel + quoter deployment, role bindings, and `verify`
+ *      are all inherited from `BalancerV3DeploymentTemplate`. This subclass only plugs in the concrete kernel and quoter
+ *      via their registered creation-code ids (`_kernelComponentId()`/`_quoterComponentId()`) and their `initialize`
+ *      calldata builders (`_kernelInitData()`/`_quoterInitData()`).
  */
 contract DayIdenticalERC4626ChainlinkDeploymentTemplate is BalancerV3DeploymentTemplate {
     constructor(IRoycoFactory _factory, GyroECLPPoolFactory _balancerV3PoolFactory) BalancerV3DeploymentTemplate(_factory, _balancerV3PoolFactory) { }
@@ -27,8 +30,8 @@ contract DayIdenticalERC4626ChainlinkDeploymentTemplate is BalancerV3DeploymentT
     }
 
     /// @inheritdoc BalancerV3DeploymentTemplate
-    function _lensComponentId() internal pure override(BalancerV3DeploymentTemplate) returns (bytes32) {
-        return COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK_LENS;
+    function _quoterComponentId() internal pure override(BalancerV3DeploymentTemplate) returns (bytes32) {
+        return COMPONENT_ID_DAY_QUOTER_IDENTICAL_ERC4626_CHAINLINK;
     }
 
     /// @inheritdoc BalancerV3DeploymentTemplate
@@ -41,8 +44,16 @@ contract DayIdenticalERC4626ChainlinkDeploymentTemplate is BalancerV3DeploymentT
         override(BalancerV3DeploymentTemplate)
         returns (bytes memory)
     {
-        Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel.KernelSpecificInitParams memory qp =
-            abi.decode(_kernelSpecificParams, (Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel.KernelSpecificInitParams));
-        return abi.encodeCall(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel.initialize, (_kip, qp));
+        BalancerV3_LT_Kernel.KernelSpecificInitParams memory kp =
+            abi.decode(_kernelSpecificParams, (BalancerV3_LT_Kernel.KernelSpecificInitParams));
+        return abi.encodeCall(BalancerV3_LT_Kernel.initialize, (_kip, kp));
+    }
+
+    /// @inheritdoc BalancerV3DeploymentTemplate
+    function _quoterInitData(address _authority, bytes memory _quoterSpecificParams) internal view override(BalancerV3DeploymentTemplate) returns (bytes memory) {
+        Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Quoter.QuoterSpecificInitParams memory qp = abi.decode(
+            _quoterSpecificParams, (Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Quoter.QuoterSpecificInitParams)
+        );
+        return abi.encodeCall(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Quoter.initialize, (_authority, qp));
     }
 }

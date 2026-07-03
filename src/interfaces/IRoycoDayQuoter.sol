@@ -1,10 +1,77 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "../libraries/Units.sol";
 
-interface IRoycoDayKernelLens {
+/**
+ * @title IRoycoDayQuoter
+ * @notice Interface for the Royco Day quoter, the view-only companion that prices a market's tranche assets and holds its preview surface
+ * @dev The quoter owns the tranche-unit to NAV-unit conversions and the senior share rate, and reads the kernel's committed state to compose previews
+ */
+interface IRoycoDayQuoter {
+    /// @notice Retrieves the kernel this quoter prices and reads its committed state from
+    /// @return kernel The address of the kernel paired with this quoter
+    function KERNEL() external view returns (address kernel);
+
+    /**
+     * @notice Converts the specified ST assets denominated in its tranche units to the kernel's NAV units
+     * @param _stAssets The ST assets denominated in tranche units to convert to the kernel's NAV units
+     * @return nav The specified ST assets denominated in its tranche units converted to the kernel's NAV units
+     */
+    function stConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _stAssets) external view returns (NAV_UNIT nav);
+
+    /**
+     * @notice Converts the specified JT assets denominated in its tranche units to the kernel's NAV units
+     * @param _jtAssets The JT assets denominated in tranche units to convert to the kernel's NAV units
+     * @return nav The specified JT assets denominated in its tranche units converted to the kernel's NAV units
+     */
+    function jtConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _jtAssets) external view returns (NAV_UNIT nav);
+
+    /**
+     * @notice Converts the specified LT assets denominated in its tranche units to the kernel's NAV units
+     * @param _ltAssets The LT assets denominated in tranche units to convert to the kernel's NAV units
+     * @return nav The specified LT assets denominated in its tranche units converted to the kernel's NAV units
+     */
+    function ltConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _ltAssets) external view returns (NAV_UNIT nav);
+
+    /**
+     * @notice Converts the specified assets denominated in the kernel's NAV units to assets denominated in ST's tranche units
+     * @param _navAssets The NAV of the assets denominated in the kernel's NAV units to convert to assets denominated in ST's tranche units
+     * @return stAssets The specified NAV of the assets denominated in the kernel's NAV units converted to assets denominated in ST's tranche units
+     */
+    function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) external view returns (TRANCHE_UNIT stAssets);
+
+    /**
+     * @notice Converts the specified assets denominated in the kernel's NAV units to assets denominated in JT's tranche units
+     * @param _navAssets The NAV of the assets denominated in the kernel's NAV units to convert to assets denominated in JT's tranche units
+     * @return jtAssets The specified NAV of the assets denominated in the kernel's NAV units converted to assets denominated in JT's tranche units
+     */
+    function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) external view returns (TRANCHE_UNIT jtAssets);
+
+    /**
+     * @notice Converts the specified assets denominated in the kernel's NAV units to assets denominated in LT's tranche units
+     * @param _navAssets The NAV of the assets denominated in the kernel's NAV units to convert to assets denominated in LT's tranche units
+     * @return ltAssets The specified NAV of the assets denominated in the kernel's NAV units converted to assets denominated in LT's tranche units
+     */
+    function ltConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) external view returns (TRANCHE_UNIT ltAssets);
+
+    /// @notice Initializes the quoter's per-operation cache
+    /// @dev Only callable by the kernel, at the start of a cached operation
+    function initializeQuoterCache() external;
+
+    /// @notice Clears the quoter's per-operation cache
+    /// @dev Only callable by the kernel, at the end of a cached operation
+    function clearQuoterCache() external;
+
+    /**
+     * @notice Caches the senior tranche share rate resolved by a pre-op synchronization for the duration of the operation
+     * @dev Only callable by the kernel, so an inline senior share mint or burn (a multi-asset deposit or redemption) cannot transiently move the venue's senior-leg mark before the matching effective NAV is committed
+     * @param _stEffectiveNAV The synced senior tranche effective NAV the cached rate is valued from
+     * @param _stTotalSupplyAfterMints The senior tranche share supply after this sync's liquidity premium and ST protocol fee shares are minted, the per-share denominator
+     */
+    function cacheSTShareRate(NAV_UNIT _stEffectiveNAV, uint256 _stTotalSupplyAfterMints) external;
+
     /**
      * @notice Previews a synchronization of the raw and effective NAVs of both tranches
      * @dev Does not mutate any state

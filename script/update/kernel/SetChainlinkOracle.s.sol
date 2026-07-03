@@ -3,15 +3,16 @@ pragma solidity ^0.8.28;
 
 import {
     IdenticalAssets_ST_JT_ChainlinkOracle_Quoter
-} from "../../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol";
+} from "../../../src/quoters/identical-st-jt/base/IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol";
 import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
 
 /**
  * @title SetChainlinkOracle
- * @notice Generates a Safe transaction batch for updating a kernel's Chainlink-style oracle
+ * @notice Generates a Safe transaction batch for updating a market quoter's Chainlink-style oracle
  *         address + staleness threshold across multiple markets and chains.
  *
- * @dev `setChainlinkOracle` on the kernel is gated by `ADMIN_ORACLE_QUOTER_ROLE`, which has an
+ * @dev `setChainlinkOracle` lives on the market quoter (resolved via `kernel.QUOTER()`) and is gated by
+ *      `ADMIN_ORACLE_QUOTER_ROLE`, which has an
  *      execution delay of 0 (Immediate per `RolesConfiguration`). So this uses the harness's
  *      direct-call flow (`_processChainDirect`) — one Safe JSON per chain, no schedule/execute
  *      split. `ROOT_MULTISIG` holds the role on production factories.
@@ -118,7 +119,7 @@ contract SetChainlinkOracle is ParameterUpdateBase {
 
                 updates[idx] = UpdateParams({
                     marketName: cfg.marketName,
-                    target: addrs.kernel,
+                    target: addrs.quoter,
                     callData: abi.encodeCall(
                         IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.setChainlinkOracle, (cfg.newOracle, cfg.newStalenessThresholdSeconds, cfg.syncBeforeUpdate)
                     ),

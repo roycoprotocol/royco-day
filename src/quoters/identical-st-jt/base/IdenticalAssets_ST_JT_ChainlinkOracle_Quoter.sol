@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { Math } from "../../../../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { AggregatorV3Interface } from "../../../../../interfaces/external/chainlink/AggregatorV3Interface.sol";
+import { Math } from "../../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import { AggregatorV3Interface } from "../../../interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { IdenticalAssets_ST_JT_Oracle_Quoter } from "./IdenticalAssets_ST_JT_Oracle_Quoter.sol";
 
 /**
@@ -81,11 +81,11 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
      */
     function setChainlinkOracle(address _oracle, uint48 _stalenessThresholdSeconds, bool _syncBeforeUpdate) external restricted {
         // If specified, sync the tranche accounting before updating the chainlink oracle
-        if (_syncBeforeUpdate) _preOpSyncTrancheAccounting();
+        if (_syncBeforeUpdate) ROYCO_DAY_KERNEL.syncTrancheAccounting();
         // Update the chainlink oracle
         _setChainlinkOracle(_oracle, _stalenessThresholdSeconds);
         // Sync the tranche accounting after updating the chainlink oracle
-        _preOpSyncTrancheAccounting();
+        ROYCO_DAY_KERNEL.syncTrancheAccounting();
     }
 
     /// @dev Returns the chainlink oracle configuration for this quoter

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IHooks } from "../../../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IHooks.sol";
+import { IHooks } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IHooks.sol";
 import {
     AddLiquidityKind,
     HookFlags,
@@ -9,12 +9,12 @@ import {
     PoolSwapParams,
     RemoveLiquidityKind,
     TokenConfig
-} from "../../../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
-import { BalancerPoolToken } from "../../../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/BalancerPoolToken.sol";
-import { BaseHooks } from "../../../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/BaseHooks.sol";
-import { VaultGuard } from "../../../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/VaultGuard.sol";
-import { RoycoBase } from "../../../../../base/RoycoBase.sol";
-import { IRoycoDayKernel } from "../../../../../interfaces/IRoycoDayKernel.sol";
+} from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
+import { BalancerPoolToken } from "../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/BalancerPoolToken.sol";
+import { BaseHooks } from "../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/BaseHooks.sol";
+import { VaultGuard } from "../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/VaultGuard.sol";
+import { RoycoBase } from "../../../base/RoycoBase.sol";
+import { IRoycoDayKernel } from "../../../interfaces/IRoycoDayKernel.sol";
 
 /**
  * @title RoycoDayBalancerV3Hooks

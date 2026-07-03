@@ -26,8 +26,8 @@ import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
-import { RoycoDayKernelLens } from "../../src/kernels/base/RoycoDayKernelLens.sol";
-import { RoycoDayBalancerV3Hooks } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3Hooks.sol";
+import { IRoycoDayQuoter } from "../../src/interfaces/IRoycoDayQuoter.sol";
+import { RoycoDayBalancerV3Hooks } from "../../src/kernels/lt-venue/balancer-v3/RoycoDayBalancerV3Hooks.sol";
 import { TrancheType } from "../../src/libraries/Types.sol";
 import { TRANCHE_UNIT } from "../../src/libraries/Units.sol";
 import { RoycoLiquidityTranche } from "../../src/tranches/RoycoLiquidityTranche.sol";
@@ -61,7 +61,7 @@ contract DayMarketDeploymentTest is BaseTest {
 
     // ── Deployed market (BaseTest sets FACTORY/ACCESS_MANAGER/ST/JT/KERNEL/ACCOUNTANT/YDM/BLACKLIST via _setDeployedMarket) ──
     IRoycoVaultTranche internal LT;
-    address internal LENS_ADDR;
+    address internal QUOTER_ADDR;
     address internal BLACKLIST_HOOK; // the tranche balance-update hook (== BLACKLIST)
     address internal POOL; // the Gyro E-CLP BPT (== kernel.LT_ASSET())
     address internal BALANCER_HOOK; // the pool's hooks contract (the kernel-bound RoycoDayBalancerV3Hooks proxy)
@@ -100,7 +100,7 @@ contract DayMarketDeploymentTest is BaseTest {
 
         // Capture the Day-only addresses the script's DeploymentResult omits, by reading the deployed contracts.
         LT = IRoycoVaultTranche(KERNEL.LIQUIDITY_TRANCHE());
-        LENS_ADDR = ST.LENS();
+        QUOTER_ADDR = ST.QUOTER();
         BLACKLIST_HOOK = ST.HOOK();
         POOL = KERNEL.LT_ASSET();
         LT_YDM = ACCOUNTANT.getState().ltYDM;
@@ -124,7 +124,7 @@ contract DayMarketDeploymentTest is BaseTest {
             address(ACCOUNTANT),
             address(YDM),
             LT_YDM,
-            LENS_ADDR,
+            QUOTER_ADDR,
             POOL,
             BALANCER_HOOK
         ];
@@ -164,14 +164,16 @@ contract DayMarketDeploymentTest is BaseTest {
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
-    // 3. LENS + HOOK IMMUTABLES
+    // 3. QUOTER + HOOK IMMUTABLES
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-    function test_linkage_lensAndHookImmutables() public view {
-        assertEq(ST.LENS(), LENS_ADDR, "ST lens");
-        assertEq(JT.LENS(), LENS_ADDR, "JT lens");
-        assertEq(LT.LENS(), LENS_ADDR, "LT lens");
-        assertEq(address(RoycoDayKernelLens(LENS_ADDR).ROYCO_DAY_KERNEL()), address(KERNEL), "lens -> kernel");
+    function test_linkage_quoterAndHookImmutables() public view {
+        assertEq(ST.QUOTER(), QUOTER_ADDR, "ST quoter");
+        assertEq(JT.QUOTER(), QUOTER_ADDR, "JT quoter");
+        assertEq(LT.QUOTER(), QUOTER_ADDR, "LT quoter");
+        // The kernel <-> quoter bidirectional immutable cycle.
+        assertEq(IRoycoDayQuoter(QUOTER_ADDR).KERNEL(), address(KERNEL), "quoter -> kernel");
+        assertEq(KERNEL.QUOTER(), QUOTER_ADDR, "kernel -> quoter");
 
         assertEq(ST.HOOK(), address(BLACKLIST), "ST hook == blacklist");
         assertEq(JT.HOOK(), address(BLACKLIST), "JT hook");
@@ -197,12 +199,12 @@ contract DayMarketDeploymentTest is BaseTest {
         assertTrue(quoteSeen, "quote leg missing");
     }
 
-    function test_pool_rateProviderIsKernel() public view {
+    function test_pool_rateProviderIsQuoter() public view {
         (IERC20[] memory tokens, TokenInfo[] memory info,,) = VAULT.getPoolTokenInfo(POOL);
         for (uint256 i = 0; i < tokens.length; ++i) {
             if (address(tokens[i]) == address(ST)) {
                 assertTrue(info[i].tokenType == TokenType.WITH_RATE, "senior leg not WITH_RATE");
-                assertEq(address(info[i].rateProvider), address(KERNEL), "rate provider != kernel");
+                assertEq(address(info[i].rateProvider), QUOTER_ADDR, "rate provider != quoter");
             } else {
                 assertTrue(info[i].tokenType == TokenType.STANDARD, "quote leg not STANDARD");
                 assertEq(address(info[i].rateProvider), address(0), "quote leg has rate provider");

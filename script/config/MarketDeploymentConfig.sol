@@ -3,10 +3,14 @@ pragma solidity ^0.8.28;
 
 import { IGyroECLPPool } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
 import { BalancerV3DeploymentTemplate } from "../../src/factory/templates/BalancerV3DeploymentTemplate.sol";
+import { BalancerV3_LT_Kernel } from "../../src/kernels/BalancerV3_LT_Kernel.sol";
+import {
+    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Quoter
+} from "../../src/quoters/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Quoter.sol";
 import {
     IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
-} from "../../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
-import { BalancerV3_LT_Quoter } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_Quoter.sol";
+} from "../../src/quoters/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
+import { BalancerV3_LT_Quoter } from "../../src/quoters/liquidity-tranche/balancer-v3/BalancerV3_LT_Quoter.sol";
 import { DeployScript } from "../Deploy.s.sol";
 
 /**
@@ -93,9 +97,10 @@ abstract contract MarketDeploymentConfig {
         // Dust tolerances
         uint256 stDustTolerance;
         uint256 jtDustTolerance;
-        // Kernel
+        // Kernel + quoter
         DeployScript.KernelType kernelType;
-        bytes kernelSpecificParams;
+        bytes kernelSpecificParams; // BalancerV3_LT_Kernel.KernelSpecificInitParams (the venue reinvestment slippage gate)
+        bytes quoterSpecificParams; // concrete quoter QuoterSpecificInitParams (ST/JT pricing params + LT BPT oracle)
         uint64 stSelfLiquidationBonusWAD;
         bool enforceVaultSharesTransferWhitelist;
         // Accountant
@@ -224,8 +229,15 @@ abstract contract MarketDeploymentConfig {
             stDustTolerance: 1e16,
             jtDustTolerance: 1e16,
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel,
+            // The reinvestment slippage gate lives on the kernel's Balancer V3 venue.
             kernelSpecificParams: abi.encode(
-                DeployScript.IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams({
+                BalancerV3_LT_Kernel.KernelSpecificInitParams({
+                    maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
+                 })
+            ),
+            // The ST/JT pricing params and the LT BPT oracle live on the quoter.
+            quoterSpecificParams: abi.encode(
+                Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Quoter.QuoterSpecificInitParams({
                         stAndJTQuoterParams: IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams({
                             // Enable the oracle leg by using the sentinel initial conversion rate
                             initialConversionRateWAD: 0,
@@ -233,9 +245,8 @@ abstract contract MarketDeploymentConfig {
                             stalenessThresholdSeconds: 48 hours
                         }),
                         ltQuoterParams: BalancerV3_LT_Quoter.LT_QuoterSpecificParams({
-                            bptOracle: 0x000000000000000000000000000000000000dEaD, // TODO: real manipulation-resistant Balancer V3 BPT (E-CLP LP) oracle
-                            maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
-                        })
+                            bptOracle: 0x000000000000000000000000000000000000dEaD // TODO: real manipulation-resistant Balancer V3 BPT (E-CLP LP) oracle
+                         })
                     })
             ),
             enforceVaultSharesTransferWhitelist: false,
@@ -282,8 +293,15 @@ abstract contract MarketDeploymentConfig {
             stDustTolerance: 5,
             jtDustTolerance: 5,
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel,
+            // The reinvestment slippage gate lives on the kernel's Balancer V3 venue.
             kernelSpecificParams: abi.encode(
-                DeployScript.IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams({
+                BalancerV3_LT_Kernel.KernelSpecificInitParams({
+                    maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
+                 })
+            ),
+            // The ST/JT pricing params and the LT BPT oracle live on the quoter.
+            quoterSpecificParams: abi.encode(
+                Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Quoter.QuoterSpecificInitParams({
                         stAndJTQuoterParams: IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams({
                             // Enable the oracle leg by using the sentinel initial conversion rate
                             initialConversionRateWAD: 0,
@@ -292,9 +310,8 @@ abstract contract MarketDeploymentConfig {
                             stalenessThresholdSeconds: 48 hours
                         }),
                         ltQuoterParams: BalancerV3_LT_Quoter.LT_QuoterSpecificParams({
-                            bptOracle: 0x000000000000000000000000000000000000dEaD, // TODO: real manipulation-resistant E-CLP BPT oracle
-                            maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
-                        })
+                            bptOracle: 0x000000000000000000000000000000000000dEaD // TODO: real manipulation-resistant E-CLP BPT oracle
+                         })
                     })
             ),
             enforceVaultSharesTransferWhitelist: false,

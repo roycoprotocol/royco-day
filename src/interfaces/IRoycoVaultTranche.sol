@@ -64,9 +64,9 @@ interface IRoycoVaultTranche is IERC20Metadata {
     /// @return kernel The address of the kernel responsible for executing deposits and redemptions for this tranche
     function KERNEL() external view returns (address kernel);
 
-    /// @notice Returns the kernel lens this tranche reads its preview/max surface from (immutable)
-    /// @return lens The kernel lens address
-    function LENS() external view returns (address lens);
+    /// @notice Returns the market quoter this tranche reads its preview/max surface from (immutable)
+    /// @return quoter The market quoter address
+    function QUOTER() external view returns (address quoter);
 
     /// @notice Whether share transfers require the recipient to be a whitelisted LP for this tranche
     function ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER() external view returns (bool);

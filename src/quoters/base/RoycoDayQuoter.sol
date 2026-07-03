@@ -2,10 +2,11 @@
 pragma solidity ^0.8.28;
 
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { RoycoBase } from "../../base/RoycoBase.sol";
 import { IRoycoBlacklistHook } from "../../interfaces/IRoycoBlacklistHook.sol";
 import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
-import { IRoycoDayKernelLens } from "../../interfaces/IRoycoDayKernelLens.sol";
+import { IRoycoDayQuoter } from "../../interfaces/IRoycoDayQuoter.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { MAX_NAV_UNITS, MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../libraries/Constants.sol";
 import { RoycoDayKernelMathLib } from "../../libraries/RoycoDayKernelMathLib.sol";
@@ -20,29 +21,46 @@ interface IPausable {
 }
 
 /**
- * @title RoycoDayKernelLens
- * @notice Read-only companion to `RoycoDayKernel`: it holds the entire preview/max/withdrawable surface so that
- *         bytecode lives off the kernel proxy (which is over the EIP-170 limit). It is a standalone contract that
- *         composes over the kernel's public interface — every value it needs comes from an external call on the
- *         kernel (state, conversions, raw NAVs, the composite claim/effective-NAV/self-liquidation-bonus helpers,
- *         blacklist, pause) plus shared pure math in `RoycoDayKernelMathLib`, so preview always equals execution.
- * @dev Abstract: the venue preview simulation (`_previewAddLiquidity`/`_previewRemoveLiquidity`) is venue-specific
- *      and supplied by a concrete lens (e.g. the Balancer V3 preview quoter).
+ * @title RoycoDayQuoter
+ * @author Ankur Dubey, Shivaansh Kapoor
+ * @notice Abstract base for all Royco Day quoters: the view-only companion that prices a market's tranche assets and
+ *         holds its entire preview/max/withdrawable surface, so that bytecode lives off the kernel proxy (which is over
+ *         the EIP-170 limit). It owns the tranche-unit to NAV-unit conversions and the per-operation rate caches (driven
+ *         by the kernel), and reads the kernel's committed state (state, raw NAVs, the composite claim/effective-NAV/
+ *         self-liquidation-bonus helpers, blacklist, pause) plus shared pure math in `RoycoDayKernelMathLib`, so preview
+ *         always equals execution.
+ * @dev Abstract: the tranche-asset conversions are supplied by a concrete ST/JT and liquidity-tranche quoter, and the
+ *      venue preview simulation (`_previewAddLiquidity`/`_previewRemoveLiquidity`) is venue-specific.
  */
-abstract contract RoycoDayKernelLens is IRoycoDayKernelLens {
+abstract contract RoycoDayQuoter is RoycoBase, IRoycoDayQuoter {
     using UnitsMathLib for NAV_UNIT;
 
-    /// @notice The kernel this lens reads from
-    IRoycoDayKernel public immutable ROYCO_DAY_KERNEL;
+    /// @dev The top bit set on a transient cache slot to mark it populated, shared by every quoter's transient rate cache so a set slot is distinguishable from an unset one
+    uint256 internal constant CACHE_SET_MASK = 1 << 255;
 
-    /// @dev Immutables pulled from the kernel at construction so the lens can reference them cheaply
+    /// @dev The kernel this quoter prices and reads its committed state from
+    IRoycoDayKernel internal immutable ROYCO_DAY_KERNEL;
+
+    /// @dev Immutables pulled from the kernel at construction so the quoter can reference them cheaply
     address internal immutable ACCOUNTANT;
     address internal immutable SENIOR_TRANCHE;
     address internal immutable JUNIOR_TRANCHE;
     address internal immutable LIQUIDITY_TRANCHE;
+    address internal immutable ST_ASSET;
+    address internal immutable JT_ASSET;
+    address internal immutable LT_ASSET;
 
     /// @notice Thrown when a preview is requested while the kernel is paused (mirrors the kernel's whenNotPaused preview gate)
     error KERNEL_PAUSED();
+
+    /// @notice Thrown when the caller of a kernel-only function isn't the kernel paired with this quoter
+    error ONLY_KERNEL();
+
+    /// @dev Permissions the function to only be callable by the kernel paired with this quoter
+    modifier onlyKernel() {
+        require(msg.sender == address(ROYCO_DAY_KERNEL), ONLY_KERNEL());
+        _;
+    }
 
     constructor(address _roycoDayKernel) {
         ROYCO_DAY_KERNEL = IRoycoDayKernel(_roycoDayKernel);
@@ -50,6 +68,78 @@ abstract contract RoycoDayKernelLens is IRoycoDayKernelLens {
         SENIOR_TRANCHE = ROYCO_DAY_KERNEL.SENIOR_TRANCHE();
         JUNIOR_TRANCHE = ROYCO_DAY_KERNEL.JUNIOR_TRANCHE();
         LIQUIDITY_TRANCHE = ROYCO_DAY_KERNEL.LIQUIDITY_TRANCHE();
+        ST_ASSET = ROYCO_DAY_KERNEL.ST_ASSET();
+        JT_ASSET = ROYCO_DAY_KERNEL.JT_ASSET();
+        LT_ASSET = ROYCO_DAY_KERNEL.LT_ASSET();
+    }
+
+    /// @inheritdoc IRoycoDayQuoter
+    function KERNEL() external view override(IRoycoDayQuoter) returns (address kernel) {
+        return address(ROYCO_DAY_KERNEL);
+    }
+
+    // =============================
+    // Tranche Asset Quoter Functions (implemented by the concrete ST/JT and liquidity-tranche quoters)
+    // =============================
+
+    /// @inheritdoc IRoycoDayQuoter
+    function stConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _stAssets) public view virtual override(IRoycoDayQuoter) returns (NAV_UNIT);
+
+    /// @inheritdoc IRoycoDayQuoter
+    function jtConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _jtAssets) public view virtual override(IRoycoDayQuoter) returns (NAV_UNIT);
+
+    /// @inheritdoc IRoycoDayQuoter
+    function ltConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _ltAssets) public view virtual override(IRoycoDayQuoter) returns (NAV_UNIT);
+
+    /// @inheritdoc IRoycoDayQuoter
+    function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view virtual override(IRoycoDayQuoter) returns (TRANCHE_UNIT);
+
+    /// @inheritdoc IRoycoDayQuoter
+    function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view virtual override(IRoycoDayQuoter) returns (TRANCHE_UNIT);
+
+    /// @inheritdoc IRoycoDayQuoter
+    function ltConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view virtual override(IRoycoDayQuoter) returns (TRANCHE_UNIT);
+
+    // =============================
+    // Quoter Cache Functions (kernel-driven; overridden by a caching quoter)
+    // =============================
+
+    /// @inheritdoc IRoycoDayQuoter
+    function initializeQuoterCache() external override(IRoycoDayQuoter) onlyKernel {
+        _initializeQuoterCache();
+    }
+
+    /// @inheritdoc IRoycoDayQuoter
+    function clearQuoterCache() external override(IRoycoDayQuoter) onlyKernel {
+        _clearQuoterCache();
+    }
+
+    /// @inheritdoc IRoycoDayQuoter
+    function cacheSTShareRate(NAV_UNIT _stEffectiveNAV, uint256 _stTotalSupplyAfterMints) external override(IRoycoDayQuoter) onlyKernel {
+        _cacheSTShareRate(_stEffectiveNAV, _stTotalSupplyAfterMints);
+    }
+
+    /// @notice Initializes the quoter's per-operation cache
+    /// @dev Intentionally implemented with an empty body since inheriting contracts are not required to override this function: the cache is a pure optimization and quoters that do not cache read live
+    function _initializeQuoterCache() internal virtual { }
+
+    /// @notice Clears the quoter's per-operation cache
+    /// @dev Intentionally implemented with an empty body since inheriting contracts are not required to override this function: the cache is a pure optimization and quoters that do not cache read live
+    function _clearQuoterCache() internal virtual { }
+
+    /// @notice Caches the senior tranche share rate resolved by a pre-op synchronization for the duration of the operation
+    /// @dev Intentionally implemented with an empty body since inheriting contracts are not required to override this function: only a quoter whose liquidity venue prices the senior share through a rate provider needs to freeze it
+    function _cacheSTShareRate(NAV_UNIT _stEffectiveNAV, uint256 _stTotalSupplyAfterMints) internal virtual { }
+
+    /**
+     * @notice Decodes a transient cache slot into its populated flag and stored value
+     * @dev The single primitive shared by every quoter's transient rate cache: the top bit (CACHE_SET_MASK) marks a populated slot and the remaining bits hold the value, so an unset slot (zero) reads as a miss and a value is encoded for storage as `value | CACHE_SET_MASK`
+     * @param _cacheSlot The raw value read from a transient cache slot
+     * @return cacheHit Whether the slot holds a populated value
+     * @return value The cached value when cacheHit is true, otherwise zero
+     */
+    function _decodeCachedValue(uint256 _cacheSlot) internal pure returns (bool cacheHit, uint256 value) {
+        if (_cacheSlot & CACHE_SET_MASK != 0) return (true, _cacheSlot ^ CACHE_SET_MASK);
     }
 
     // =============================
@@ -66,12 +156,12 @@ abstract contract RoycoDayKernelLens is IRoycoDayKernelLens {
     // Preview Sync
     // =============================
 
-    /// @inheritdoc IRoycoDayKernelLens
+    /// @inheritdoc IRoycoDayQuoter
     function previewSyncTrancheAccounting(TrancheType _trancheType)
         public
         view
         virtual
-        override(IRoycoDayKernelLens)
+        override(IRoycoDayQuoter)
         returns (SyncedAccountingState memory state, AssetClaims memory claims, uint256 totalTrancheShares)
     {
         // Preview an accounting sync (senior/junior via the accountant, then refresh the LT raw NAV + liquidity utilization in memory)
@@ -122,37 +212,37 @@ abstract contract RoycoDayKernelLens is IRoycoDayKernelLens {
     // Tranche Preview Functions
     // =============================
 
-    /// @inheritdoc IRoycoDayKernelLens
+    /// @inheritdoc IRoycoDayQuoter
     function stPreviewDeposit(TRANCHE_UNIT _assets)
         public
         view
-        override(IRoycoDayKernelLens)
+        override(IRoycoDayQuoter)
         returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares)
     {
         (stateBeforeDeposit,, totalTrancheShares) = previewSyncTrancheAccounting(TrancheType.SENIOR);
-        valueAllocated = ROYCO_DAY_KERNEL.stConvertTrancheUnitsToNAVUnits(_assets);
+        valueAllocated = stConvertTrancheUnitsToNAVUnits(_assets);
     }
 
-    /// @inheritdoc IRoycoDayKernelLens
+    /// @inheritdoc IRoycoDayQuoter
     function jtPreviewDeposit(TRANCHE_UNIT _assets)
         public
         view
-        override(IRoycoDayKernelLens)
+        override(IRoycoDayQuoter)
         returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares)
     {
         (stateBeforeDeposit,, totalTrancheShares) = previewSyncTrancheAccounting(TrancheType.JUNIOR);
-        valueAllocated = ROYCO_DAY_KERNEL.jtConvertTrancheUnitsToNAVUnits(_assets);
+        valueAllocated = jtConvertTrancheUnitsToNAVUnits(_assets);
     }
 
-    /// @inheritdoc IRoycoDayKernelLens
+    /// @inheritdoc IRoycoDayQuoter
     function ltPreviewDeposit(TRANCHE_UNIT _assets)
         external
         view
-        override(IRoycoDayKernelLens)
+        override(IRoycoDayQuoter)
         returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares, NAV_UNIT navToMintSharesAt)
     {
         (stateBeforeDeposit,, totalTrancheShares) = previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
-        valueAllocated = ROYCO_DAY_KERNEL.ltConvertTrancheUnitsToNAVUnits(_assets);
+        valueAllocated = ltConvertTrancheUnitsToNAVUnits(_assets);
         // The LT prices its shares at the pre-deposit LT effective NAV (deployed depth plus the idle premium senior shares)
         (uint256 liquidityPremiumShares,, uint256 stTotalSupplyAfterMints) =
             RoycoDayKernelMathLib.computeSTFeeAndLiquidityPremiumSharesToMint(stateBeforeDeposit, IERC20(SENIOR_TRANCHE).totalSupply());
@@ -161,14 +251,14 @@ abstract contract RoycoDayKernelLens is IRoycoDayKernelLens {
         );
     }
 
-    /// @inheritdoc IRoycoDayKernelLens
+    /// @inheritdoc IRoycoDayQuoter
     function ltPreviewDepositMultiAsset(
         TRANCHE_UNIT _stAssets,
         uint256 _quoteAssets
     )
         external
         virtual
-        override(IRoycoDayKernelLens)
+        override(IRoycoDayQuoter)
         returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut)
     {
         // Preview the senior sync and its post-mint supply (after the liquidity premium and protocol fee shares), exactly as ltDepositMultiAsset reads them
@@ -183,18 +273,18 @@ abstract contract RoycoDayKernelLens is IRoycoDayKernelLens {
         // Size the senior shares the ST leg would mint (zero if no ST underlying is supplied), priced like the execution path
         uint256 stSharesToAdd = _stAssets == ZERO_TRANCHE_UNITS
             ? 0
-            : RoycoDayKernelMathLib.navToShares(ROYCO_DAY_KERNEL.stConvertTrancheUnitsToNAVUnits(_stAssets), state.stEffectiveNAV, totalSTShares);
+            : RoycoDayKernelMathLib.navToShares(stConvertTrancheUnitsToNAVUnits(_stAssets), state.stEffectiveNAV, totalSTShares);
         // Quote the venue add for the senior shares and quote assets (simulation only: no slippage gate, no settlement)
         ltAssetsOut = _previewAddLiquidity(stSharesToAdd, _quoteAssets);
         // The value allocated is the value of the LT assets the add would mint
-        valueAllocated = ROYCO_DAY_KERNEL.ltConvertTrancheUnitsToNAVUnits(ltAssetsOut);
+        valueAllocated = ltConvertTrancheUnitsToNAVUnits(ltAssetsOut);
     }
 
-    /// @inheritdoc IRoycoDayKernelLens
+    /// @inheritdoc IRoycoDayQuoter
     function ltPreviewRedeemMultiAsset(uint256 _ltShares)
         external
         virtual
-        override(IRoycoDayKernelLens)
+        override(IRoycoDayQuoter)
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
         // Preview the liquidity tranche sync
@@ -222,21 +312,21 @@ abstract contract RoycoDayKernelLens is IRoycoDayKernelLens {
         (stClaims,) = ROYCO_DAY_KERNEL.applySeniorTrancheSelfLiquidationBonus(state, stClaims);
     }
 
-    /// @inheritdoc IRoycoDayKernelLens
-    function stPreviewRedeem(uint256 _shares) public view override(IRoycoDayKernelLens) returns (AssetClaims memory userClaim) {
+    /// @inheritdoc IRoycoDayQuoter
+    function stPreviewRedeem(uint256 _shares) public view override(IRoycoDayQuoter) returns (AssetClaims memory userClaim) {
         (SyncedAccountingState memory state, AssetClaims memory stClaims, uint256 totalShares) = previewSyncTrancheAccounting(TrancheType.SENIOR);
         userClaim = UtilsLib.scaleAssetClaims(stClaims, _shares, totalShares);
         (userClaim,) = ROYCO_DAY_KERNEL.applySeniorTrancheSelfLiquidationBonus(state, userClaim);
     }
 
-    /// @inheritdoc IRoycoDayKernelLens
-    function jtPreviewRedeem(uint256 _shares) public view override(IRoycoDayKernelLens) returns (AssetClaims memory userClaim) {
+    /// @inheritdoc IRoycoDayQuoter
+    function jtPreviewRedeem(uint256 _shares) public view override(IRoycoDayQuoter) returns (AssetClaims memory userClaim) {
         (, AssetClaims memory jtClaims, uint256 totalShares) = previewSyncTrancheAccounting(TrancheType.JUNIOR);
         userClaim = UtilsLib.scaleAssetClaims(jtClaims, _shares, totalShares);
     }
 
-    /// @inheritdoc IRoycoDayKernelLens
-    function ltPreviewRedeem(uint256 _shares) public view override(IRoycoDayKernelLens) returns (AssetClaims memory userClaim) {
+    /// @inheritdoc IRoycoDayQuoter
+    function ltPreviewRedeem(uint256 _shares) public view override(IRoycoDayQuoter) returns (AssetClaims memory userClaim) {
         (SyncedAccountingState memory state, AssetClaims memory ltClaims, uint256 totalShares) = previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
         // LT redemptions are disabled during a fixed-term market state: return an empty claim, matching the reverting redeem path
         if (state.marketState == MarketState.FIXED_TERM) return userClaim;
@@ -247,23 +337,23 @@ abstract contract RoycoDayKernelLens is IRoycoDayKernelLens {
     // Tranche Max Deposit and Redeem Functions
     // =============================
 
-    /// @inheritdoc IRoycoDayKernelLens
+    /// @inheritdoc IRoycoDayQuoter
     /// @dev ST deposits are allowed only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-deposit
-    function stMaxDeposit(address _receiver) public view virtual override(IRoycoDayKernelLens) returns (TRANCHE_UNIT) {
+    function stMaxDeposit(address _receiver) public view virtual override(IRoycoDayQuoter) returns (TRANCHE_UNIT) {
         if (_isBlacklisted(_receiver) || IPausable(address(ROYCO_DAY_KERNEL)).paused()) return ZERO_TRANCHE_UNITS;
         SyncedAccountingState memory state = _previewSyncState();
         if (state.marketState == MarketState.FIXED_TERM) return ZERO_TRANCHE_UNITS;
         NAV_UNIT stMaxDepositableNAV = IRoycoDayAccountant(ACCOUNTANT).maxSTDeposit(state);
-        return ((stMaxDepositableNAV == MAX_NAV_UNITS) ? MAX_TRANCHE_UNITS : ROYCO_DAY_KERNEL.stConvertNAVUnitsToTrancheUnits(stMaxDepositableNAV));
+        return ((stMaxDepositableNAV == MAX_NAV_UNITS) ? MAX_TRANCHE_UNITS : stConvertNAVUnitsToTrancheUnits(stMaxDepositableNAV));
     }
 
-    /// @inheritdoc IRoycoDayKernelLens
+    /// @inheritdoc IRoycoDayQuoter
     /// @dev ST redemptions are allowed in PERPETUAL market states
     function stMaxWithdrawable(address _owner)
         public
         view
         virtual
-        override(IRoycoDayKernelLens)
+        override(IRoycoDayQuoter)
         returns (NAV_UNIT claimOnSTNAV, NAV_UNIT claimOnJTNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalTrancheShares)
     {
         if (_isBlacklisted(_owner) || IPausable(address(ROYCO_DAY_KERNEL)).paused()) {
@@ -276,27 +366,27 @@ abstract contract RoycoDayKernelLens is IRoycoDayKernelLens {
 
         if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
-        claimOnSTNAV = ROYCO_DAY_KERNEL.stConvertTrancheUnitsToNAVUnits(stClaims.stAssets);
-        claimOnJTNAV = ROYCO_DAY_KERNEL.jtConvertTrancheUnitsToNAVUnits(stClaims.jtAssets);
+        claimOnSTNAV = stConvertTrancheUnitsToNAVUnits(stClaims.stAssets);
+        claimOnJTNAV = jtConvertTrancheUnitsToNAVUnits(stClaims.jtAssets);
 
         (stMaxWithdrawableNAV, jtMaxWithdrawableNAV,) = ROYCO_DAY_KERNEL.getTrancheRawNAVs();
     }
 
-    /// @inheritdoc IRoycoDayKernelLens
+    /// @inheritdoc IRoycoDayQuoter
     /// @dev JT deposits are allowed if the market is in a PERPETUAL state
-    function jtMaxDeposit(address _receiver) public view virtual override(IRoycoDayKernelLens) returns (TRANCHE_UNIT) {
+    function jtMaxDeposit(address _receiver) public view virtual override(IRoycoDayQuoter) returns (TRANCHE_UNIT) {
         if (_isBlacklisted(_receiver) || IPausable(address(ROYCO_DAY_KERNEL)).paused()) return ZERO_TRANCHE_UNITS;
         if ((_previewSyncState()).marketState == MarketState.FIXED_TERM) return ZERO_TRANCHE_UNITS;
         return MAX_TRANCHE_UNITS;
     }
 
-    /// @inheritdoc IRoycoDayKernelLens
+    /// @inheritdoc IRoycoDayQuoter
     /// @dev JT redemptions are allowed only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-redemption
     function jtMaxWithdrawable(address _owner)
         public
         view
         virtual
-        override(IRoycoDayKernelLens)
+        override(IRoycoDayQuoter)
         returns (NAV_UNIT claimOnSTNAV, NAV_UNIT claimOnJTNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalTrancheShares)
     {
         if (_isBlacklisted(_owner) || IPausable(address(ROYCO_DAY_KERNEL)).paused()) {
@@ -315,19 +405,19 @@ abstract contract RoycoDayKernelLens is IRoycoDayKernelLens {
         (stMaxWithdrawableNAV, jtMaxWithdrawableNAV) = IRoycoDayAccountant(ACCOUNTANT).maxJTWithdrawal(state);
     }
 
-    /// @inheritdoc IRoycoDayKernelLens
+    /// @inheritdoc IRoycoDayQuoter
     /// @dev An in-kind LT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state and unbounded
-    function ltMaxDeposit(address _receiver) public view virtual override(IRoycoDayKernelLens) returns (TRANCHE_UNIT) {
+    function ltMaxDeposit(address _receiver) public view virtual override(IRoycoDayQuoter) returns (TRANCHE_UNIT) {
         if (_isBlacklisted(_receiver) || IPausable(address(ROYCO_DAY_KERNEL)).paused()) return ZERO_TRANCHE_UNITS;
         return MAX_TRANCHE_UNITS;
     }
 
-    /// @inheritdoc IRoycoDayKernelLens
+    /// @inheritdoc IRoycoDayQuoter
     function ltMaxWithdrawable(address _owner)
         public
         view
         virtual
-        override(IRoycoDayKernelLens)
+        override(IRoycoDayQuoter)
         returns (NAV_UNIT claimOnLTNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheShares)
     {
         if (_isBlacklisted(_owner) || IPausable(address(ROYCO_DAY_KERNEL)).paused()) {

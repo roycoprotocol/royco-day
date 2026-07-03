@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { HookFlags, LiquidityManagement, TokenConfig } from "../../../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
-import { BaseHooks } from "../../../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/BaseHooks.sol";
-import { UUPSUpgradeable } from "../../../../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
+import { HookFlags, LiquidityManagement, TokenConfig } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
+import { BaseHooks } from "../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/BaseHooks.sol";
+import { UUPSUpgradeable } from "../../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 
 /**
  * @title RoycoDayBalancerV3HooksStandIn

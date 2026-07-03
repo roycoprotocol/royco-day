@@ -32,8 +32,8 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     // ── Day market-topology addresses the script's `DeploymentResult` does not surface ──
     /// @notice The liquidity tranche (holds the Gyro E-CLP BPT).
     IRoycoVaultTranche internal LT;
-    /// @notice The kernel lens (read-only preview/max surface) all tranches read from.
-    address internal LENS_ADDR;
+    /// @notice The market quoter (read-only pricing + preview/max surface) all tranches read from.
+    address internal QUOTER_ADDR;
     /// @notice The liquidity tranche's Gyro E-CLP pool (the BPT, == `KERNEL.LT_ASSET()`).
     address internal POOL;
     /// @notice The pool's kernel-bound hook (the upgraded `RoycoDayBalancerV3Hooks` proxy).
@@ -111,7 +111,7 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         if (testConfig.hasLiquidityTranche) {
             LT = IRoycoVaultTranche(KERNEL.LIQUIDITY_TRANCHE());
             POOL = KERNEL.LT_ASSET();
-            LENS_ADDR = ST.LENS();
+            QUOTER_ADDR = ST.QUOTER();
             LT_YDM = ACCOUNTANT.getState().ltYDM;
             VAULT = IVault(address(GyroECLPPoolFactory(DEPLOY_SCRIPT.getChainConfig(block.chainid).gyroECLPPoolFactory).getVault()));
             BALANCER_HOOK = VAULT.getHooksConfig(POOL).hooksContract;

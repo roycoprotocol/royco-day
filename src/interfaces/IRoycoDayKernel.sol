@@ -19,6 +19,7 @@ interface IRoycoDayKernel {
      * @custom:field accountant - The address of the accountant for the Royco market
      * @custom:field liquidityTranche - The address of the Royco liquidity tranche associated with this kernel
      * @custom:field ltAsset - The base asset of the liquidity tranche (the liquidity venue's market-making position token)
+     * @custom:field quoter - The address of the quoter that prices this kernel's tranche assets and holds the market's preview surface
      */
     struct RoycoDayKernelConstructionParams {
         address seniorTranche;
@@ -28,6 +29,7 @@ interface IRoycoDayKernel {
         address accountant;
         address liquidityTranche;
         address ltAsset;
+        address quoter;
     }
 
     /**
@@ -132,6 +134,9 @@ interface IRoycoDayKernel {
     /// @notice Retrieves the quote asset paired against the senior share in the liquidity venue.
     function QUOTE_ASSET() external view returns (address quoteAsset);
 
+    /// @notice Retrieves the quoter that prices this kernel's tranche assets and holds the market's preview surface.
+    function QUOTER() external view returns (address quoter);
+
     /**
      * @notice Sets the new protocol fee recipient
      * @dev Only callable by a designated admin
@@ -151,9 +156,17 @@ interface IRoycoDayKernel {
     function getState() external view returns (RoycoDayKernelState memory state);
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // Lens accessors — external views surfacing the kernel's internal, context-dependent computations
-    // (storage + quoter conversions) to RoycoDayKernelLens so previews reuse the kernel's execution bodies.
+    // Quoter accessors — external views surfacing the kernel's internal, context-dependent computations
+    // (storage + quoter conversions) to the quoter so previews reuse the kernel's execution bodies.
     // ─────────────────────────────────────────────────────────────────────────────
+
+    /// @notice Returns the raw net asset value of the senior tranche, valuing its holdings in the kernel's NAV units
+    /// @return stRawNAV The senior tranche raw NAV
+    function getSeniorTrancheRawNAV() external view returns (NAV_UNIT stRawNAV);
+
+    /// @notice Returns the raw net asset value of the junior tranche, valuing its holdings in the kernel's NAV units
+    /// @return jtRawNAV The junior tranche raw NAV
+    function getJuniorTrancheRawNAV() external view returns (NAV_UNIT jtRawNAV);
 
     /// @notice Returns the raw NAVs of all three tranches (each tranche's holdings valued in the kernel's NAV units)
     /// @return stRawNAV The senior tranche raw NAV
@@ -193,48 +206,6 @@ interface IRoycoDayKernel {
         external
         view
         returns (AssetClaims memory stUserClaimsWithBonus, NAV_UNIT stSelfLiquidationBonusNAV);
-
-    /**
-     * @notice Converts the specified ST assets denominated in its tranche units to the kernel's NAV units
-     * @param _stAssets The ST assets denominated in tranche units to convert to the kernel's NAV units
-     * @return nav The specified ST assets denominated in its tranche units converted to the kernel's NAV units
-     */
-    function stConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _stAssets) external view returns (NAV_UNIT nav);
-
-    /**
-     * @notice Converts the specified JT assets denominated in its tranche units to the kernel's NAV units
-     * @param _jtAssets The JT assets denominated in tranche units to convert to the kernel's NAV units
-     * @return nav The specified JT assets denominated in its tranche units converted to the kernel's NAV units
-     */
-    function jtConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _jtAssets) external view returns (NAV_UNIT nav);
-
-    /**
-     * @notice Converts the specified LT assets denominated in its tranche units to the kernel's NAV units
-     * @param _ltAssets The LT assets denominated in tranche units to convert to the kernel's NAV units
-     * @return nav The specified LT assets denominated in its tranche units converted to the kernel's NAV units
-     */
-    function ltConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _ltAssets) external view returns (NAV_UNIT nav);
-
-    /**
-     * @notice Converts the specified assets denominated in the kernel's NAV units to assets denominated in ST's tranche units
-     * @param _navAssets The NAV of the assets denominated in the kernel's NAV units to convert to assets denominated in ST's tranche units
-     * @return stAssets The specified NAV of the assets denominated in the kernel's NAV units converted to assets denominated in ST's tranche units
-     */
-    function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) external view returns (TRANCHE_UNIT stAssets);
-
-    /**
-     * @notice Converts the specified assets denominated in the kernel's NAV units to assets denominated in JT's tranche units
-     * @param _navAssets The NAV of the assets denominated in the kernel's NAV units to convert to assets denominated in JT's tranche units
-     * @return jtAssets The specified NAV of the assets denominated in the kernel's NAV units converted to assets denominated in JT's tranche units
-     */
-    function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) external view returns (TRANCHE_UNIT jtAssets);
-
-    /**
-     * @notice Converts the specified assets denominated in the kernel's NAV units to assets denominated in LT's tranche units
-     * @param _navAssets The NAV of the assets denominated in the kernel's NAV units to convert to assets denominated in LT's tranche units
-     * @return ltAssets The specified NAV of the assets denominated in the kernel's NAV units converted to assets denominated in LT's tranche units
-     */
-    function ltConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) external view returns (TRANCHE_UNIT ltAssets);
 
     /**
      * @notice Synchronizes and persists the raw and effective NAVs of both tranches

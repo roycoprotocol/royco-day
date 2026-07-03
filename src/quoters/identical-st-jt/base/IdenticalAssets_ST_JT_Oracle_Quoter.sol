@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IERC20Metadata } from "../../../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
-import { Math, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../../libraries/Units.sol";
-import { RoycoDayKernel } from "../../../RoycoDayKernel.sol";
+import { IERC20Metadata } from "../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
+import { Math, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toNAVUnits, toTrancheUnits, toUint256 } from "../../../libraries/Units.sol";
+import { RoycoDayQuoter } from "../../base/RoycoDayQuoter.sol";
 
 /**
  * @title IdenticalAssets_ST_JT_Oracle_Quoter
@@ -14,7 +14,7 @@ import { RoycoDayKernel } from "../../../RoycoDayKernel.sol";
  *      Supported use-cases include:
  *      - Identical Yield Bearing ERC20 for ST And JT: Yield Bearing ERC20 and Tranche Unit (FalconXUSDC, reUSD, etc.), NAV Unit (USD)
  */
-abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
+abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayQuoter {
     using UnitsMathLib for NAV_UNIT;
     using UnitsMathLib for TRANCHE_UNIT;
 
@@ -62,23 +62,23 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
         emit ConversionRateUpdated(_initialConversionRateWAD);
     }
 
-    /// @inheritdoc RoycoDayKernel
-    function stConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _stAssets) public view override(RoycoDayKernel) returns (NAV_UNIT nav) {
+    /// @inheritdoc RoycoDayQuoter
+    function stConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _stAssets) public view override(RoycoDayQuoter) returns (NAV_UNIT nav) {
         return _convertTrancheUnitsToNAVUnits(_stAssets);
     }
 
-    /// @inheritdoc RoycoDayKernel
-    function jtConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _jtAssets) public view override(RoycoDayKernel) returns (NAV_UNIT nav) {
+    /// @inheritdoc RoycoDayQuoter
+    function jtConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _jtAssets) public view override(RoycoDayQuoter) returns (NAV_UNIT nav) {
         return _convertTrancheUnitsToNAVUnits(_jtAssets);
     }
 
-    /// @inheritdoc RoycoDayKernel
-    function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view override(RoycoDayKernel) returns (TRANCHE_UNIT stAssets) {
+    /// @inheritdoc RoycoDayQuoter
+    function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view override(RoycoDayQuoter) returns (TRANCHE_UNIT stAssets) {
         return _convertNAVUnitsToTrancheUnits(_navAssets);
     }
 
-    /// @inheritdoc RoycoDayKernel
-    function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view override(RoycoDayKernel) returns (TRANCHE_UNIT jtAssets) {
+    /// @inheritdoc RoycoDayQuoter
+    function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view override(RoycoDayQuoter) returns (TRANCHE_UNIT jtAssets) {
         return _convertNAVUnitsToTrancheUnits(_navAssets);
     }
 
@@ -92,12 +92,12 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
      */
     function setConversionRate(uint256 _conversionRateWAD, bool _syncBeforeUpdate) public virtual restricted {
         // If specified, sync the tranche accounting to reflect the PNL up to this point in time
-        if (_syncBeforeUpdate) _preOpSyncTrancheAccounting();
+        if (_syncBeforeUpdate) ROYCO_DAY_KERNEL.syncTrancheAccounting();
         // Set the new conversion rate
         _getIdenticalAssets_ST_JT_Oracle_QuoterStorage().conversionRateWAD = _conversionRateWAD;
         emit ConversionRateUpdated(_conversionRateWAD);
         // Sync the tranche accounting to reflect the PNL from the updated conversion rate
-        _preOpSyncTrancheAccounting();
+        ROYCO_DAY_KERNEL.syncTrancheAccounting();
     }
 
     /**
@@ -123,7 +123,7 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
      * @dev Should be called at the start of a transaction
      * @dev This function is called at the start of a transaction to initialize the cached tranche unit to NAV unit conversion rate
      */
-    function _initializeQuoterCache() internal virtual override {
+    function _initializeQuoterCache() internal virtual override(RoycoDayQuoter) {
         // Get the tranche unit to NAV unit conversion rate and set the cache flag
         cachedTrancheUnitToNAVUnitConversionRateWAD = getTrancheUnitToNAVUnitConversionRateWAD() | CACHE_SET_MASK;
     }
@@ -133,7 +133,7 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
      * @dev Should be called at the end of a transaction
      * @dev This function is called at the end of a transaction to clear the cached tranche unit to NAV unit conversion rate
      */
-    function _clearQuoterCache() internal virtual override {
+    function _clearQuoterCache() internal virtual override(RoycoDayQuoter) {
         cachedTrancheUnitToNAVUnitConversionRateWAD = 0;
     }
 
