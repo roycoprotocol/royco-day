@@ -66,9 +66,11 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         __RoycoBase_init(_params.initialAuthority);
     }
 
-    /// =============================
-    /// Tranche Deposit and Redeem Functions
-    /// =============================
+    /**
+     * =============================
+     * Tranche Deposit and Redeem Functions
+     * =============================
+     */
 
     /// @inheritdoc IRoycoVaultTranche
     function deposit(TRANCHE_UNIT _assets, address _receiver) public virtual override(IRoycoVaultTranche) whenNotPaused restricted returns (uint256 shares) {
@@ -168,9 +170,11 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         super.burnFrom(_account, _shares);
     }
 
-    /// =============================
-    /// Tranche Preview and Conversion Functions
-    /// =============================
+    /**
+     * =============================
+     * Tranche Preview and Conversion Functions
+     * =============================
+     */
 
     /// @inheritdoc IRoycoVaultTranche
     function previewDeposit(TRANCHE_UNIT _assets) external view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
@@ -225,9 +229,11 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         shares = _convertToShares(navAssets, trancheTotalShares, trancheClaims.nav, Math.Rounding.Floor);
     }
 
-    /// =============================
-    /// Tranche Max Deposit and Redeem Functions
-    /// =============================
+    /**
+     * =============================
+     * Tranche Max Deposit and Redeem Functions
+     * =============================
+     */
 
     /// @inheritdoc IRoycoVaultTranche
     function maxDeposit(address _receiver) external view virtual override(IRoycoVaultTranche) returns (TRANCHE_UNIT assets) {
@@ -277,9 +283,11 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         }
     }
 
-    /// =============================
-    /// General Tranche View Functions
-    /// =============================
+    /**
+     * =============================
+     * General Tranche View Functions
+     * =============================
+     */
 
     /// @inheritdoc IRoycoVaultTranche
     function totalAssets() external view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {

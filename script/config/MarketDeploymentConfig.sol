@@ -221,13 +221,13 @@ abstract contract MarketDeploymentConfig {
             kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams({
-                    stAndJTQuoterParams: IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.QuoterSpecificParams({
+                    stAndJTQuoterParams: IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.STAndJTQuoterSpecificParams({
                         // Enable the oracle leg by using the sentinel initial conversion rate
                         initialConversionRateWAD: 0,
                         baseAssetToNavAssetOracle: 0x9A5a3c3Ed0361505cC1D4e824B3854De5724434A, // TODO: real base-asset->NAV Chainlink feed
                         stalenessThresholdSeconds: 48 hours
                     }),
-                    ltQuoterParams: BalancerV3_LT_Quoter.LiquidityQuoterSpecificParams({
+                    ltQuoterParams: BalancerV3_LT_Quoter.LTQuoterSpecificParams({
                         bptOracle: 0x000000000000000000000000000000000000dEaD, // TODO: real manipulation-resistant Balancer V3 BPT (E-CLP LP) oracle
                         maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
                     })

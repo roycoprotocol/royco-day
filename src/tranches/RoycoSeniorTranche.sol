@@ -14,10 +14,8 @@ import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
 contract RoycoSeniorTranche is RoycoVaultTranche, IRoycoSeniorTranche {
     constructor(address _asset, address _kernel) RoycoVaultTranche(_asset, _kernel) { }
 
-    /**
-     * @notice Initializes the Royco senior tranche
-     * @param _stParams Deployment parameters including name, symbol, and initial authority for the senior tranche
-     */
+    /// @notice Initializes the Royco senior tranche
+    /// @param _stParams Deployment parameters including name, symbol, and initial authority for the senior tranche
     function initialize(RoycoTrancheInitParams calldata _stParams) external initializer {
         // Initialize the Royco Senior Tranche
         __RoycoTranche_init(_stParams);

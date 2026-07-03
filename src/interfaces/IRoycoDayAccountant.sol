@@ -4,10 +4,8 @@ pragma solidity ^0.8.28;
 import { MarketState, Operation, SyncedAccountingState } from "../libraries/Types.sol";
 import { NAV_UNIT } from "../libraries/Units.sol";
 
-/**
- * @title IRoycoDayAccountant
- * @notice Interface for the RoycoDayAccountant contract that manages accounting, coverage, and liquidity requirements for a Royco market
- */
+/// @title IRoycoDayAccountant
+/// @notice Interface for the RoycoDayAccountant contract that manages accounting, coverage, and liquidity requirements for a Royco market
 interface IRoycoDayAccountant {
     /**
      * @notice Initialization parameters for the Royco Accountant
@@ -204,9 +202,11 @@ interface IRoycoDayAccountant {
     /// @param minLiquidityWAD The new percentage of the senior tranche NAV that must be in the liquidity tranche's market making inventory, scaled to WAD precision
     event LiquidityUpdated(uint64 minLiquidityWAD);
 
-    /// @notice Emitted when the maximum JT and LT yield shares (premiums) are updated
-    /// @param maxJTYieldShareWAD The new maximum JT yield share (risk premium) as a percentage of senior appreciation, scaled to WAD precision
-    /// @param maxLTYieldShareWAD The new maximum LT yield share (liquidity premium) as a percentage of senior appreciation, scaled to WAD precision
+    /**
+     * @notice Emitted when the maximum JT and LT yield shares (premiums) are updated
+     * @param maxJTYieldShareWAD The new maximum JT yield share (risk premium) as a percentage of senior appreciation, scaled to WAD precision
+     * @param maxLTYieldShareWAD The new maximum LT yield share (liquidity premium) as a percentage of senior appreciation, scaled to WAD precision
+     */
     event MaxYieldSharesUpdated(uint64 maxJTYieldShareWAD, uint64 maxLTYieldShareWAD);
 
     /// @notice Thrown when the caller of the function is not the accountant's configured Royco Kernel
@@ -442,9 +442,7 @@ interface IRoycoDayAccountant {
      */
     function setJuniorTrancheDustTolerance(NAV_UNIT _jtNAVDustTolerance) external;
 
-    /**
-     * @notice Returns the state of the accountant
-     * @return state The state of the accountant
-     */
+    /// @notice Returns the state of the accountant
+    /// @return state The state of the accountant
     function getState() external view returns (RoycoDayAccountantState memory state);
 }

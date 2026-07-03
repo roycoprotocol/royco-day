@@ -55,10 +55,8 @@ contract RoycoDayBalancerV3Hooks is RoycoBase, BaseHooks, VaultGuard {
         ROYCO_DAY_KERNEL = _roycoKernel;
     }
 
-    /**
-     * @notice Initializes the Royco Day Balancer V3 hooks contract
-     * @param _initialAuthority The initial authority for the contract
-     */
+    /// @notice Initializes the Royco Day Balancer V3 hooks contract
+    /// @param _initialAuthority The initial authority for the contract
     function initialize(address _initialAuthority) external virtual initializer {
         __RoycoBase_init(_initialAuthority);
     }
@@ -128,10 +126,8 @@ contract RoycoDayBalancerV3Hooks is RoycoBase, BaseHooks, VaultGuard {
         return _preLiquidityOperationSyncTrancheAccounting();
     }
 
-    /**
-     * @inheritdoc IHooks
-     * @dev All liquidity operations execute a PNL accounting sync to ensure that accounting is fresh before the operation
-     */
+    /// @inheritdoc IHooks
+    /// @dev All liquidity operations execute a PNL accounting sync to ensure that accounting is fresh before the operation
     function getHookFlags() public view virtual override(BaseHooks) returns (HookFlags memory) {
         return HookFlags({
             enableHookAdjustedAmounts: false,

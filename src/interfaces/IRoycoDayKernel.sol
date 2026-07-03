@@ -67,22 +67,16 @@ interface IRoycoDayKernel {
         address roycoBlacklist;
     }
 
-    /**
-     * @notice Emitted when the protocol fee recipient is updated
-     * @param protocolFeeRecipient The new protocol fee recipient
-     */
+    /// @notice Emitted when the protocol fee recipient is updated
+    /// @param protocolFeeRecipient The new protocol fee recipient
     event ProtocolFeeRecipientUpdated(address protocolFeeRecipient);
 
-    /**
-     * @notice Emitted when the ST self-liquidation bonus is updated
-     * @param stSelfLiquidationBonusWAD The new ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached
-     */
+    /// @notice Emitted when the ST self-liquidation bonus is updated
+    /// @param stSelfLiquidationBonusWAD The new ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached
     event SeniorTrancheSelfLiquidationBonusUpdated(uint64 stSelfLiquidationBonusWAD);
 
-    /**
-     * @notice Emitted when the market's blacklist contract is updated
-     * @param roycoBlacklist The new blacklist contract address (the null address if screening is disabled)
-     */
+    /// @notice Emitted when the market's blacklist contract is updated
+    /// @param roycoBlacklist The new blacklist contract address (the null address if screening is disabled)
     event RoycoBlacklistUpdated(address roycoBlacklist);
 
     /**
@@ -122,34 +116,24 @@ interface IRoycoDayKernel {
     /// @notice Thrown when an LT multi-asset deposit/redeem is made with zero of both constituent assets (ST underlying and quote)
     error MUST_DEPOSIT_NON_ZERO_ASSETS();
 
-    /**
-     * @notice Retrieves the senior tranche address
-     * @return seniorTranche The address of the senior tranche for this Royco market
-     */
+    /// @notice Retrieves the senior tranche address
+    /// @return seniorTranche The address of the senior tranche for this Royco market
     function SENIOR_TRANCHE() external view returns (address seniorTranche);
 
-    /**
-     * @notice Retrieves the ST asset address
-     * @return stAsset The senior tranche's base asset address
-     */
+    /// @notice Retrieves the ST asset address
+    /// @return stAsset The senior tranche's base asset address
     function ST_ASSET() external view returns (address stAsset);
 
-    /**
-     * @notice Retrieves the junior tranche address
-     * @return juniorTranche The address of the junior tranche for this Royco market
-     */
+    /// @notice Retrieves the junior tranche address
+    /// @return juniorTranche The address of the junior tranche for this Royco market
     function JUNIOR_TRANCHE() external view returns (address juniorTranche);
 
-    /**
-     * @notice Retrieves the JT asset address
-     * @return jtAsset The junior tranche's base asset address
-     */
+    /// @notice Retrieves the JT asset address
+    /// @return jtAsset The junior tranche's base asset address
     function JT_ASSET() external view returns (address jtAsset);
 
-    /**
-     * @notice Retrieves the accountant address
-     * @return accountant The accountant responsible for maintaining this Royco market's accounting state and marking tranche NAVs to market
-     */
+    /// @notice Retrieves the accountant address
+    /// @return accountant The accountant responsible for maintaining this Royco market's accounting state and marking tranche NAVs to market
     function ACCOUNTANT() external view returns (address accountant);
 
     /// @notice Retrieves the liquidity tranche address.
@@ -183,10 +167,8 @@ interface IRoycoDayKernel {
      */
     function setRoycoBlacklist(address _roycoBlacklist) external;
 
-    /**
-     * @notice Retrieves the state of the Royco kernel
-     * @return state The Royco kernel's state, including the protocol fee recipient and the kernel's controlled tranche and base assets
-     */
+    /// @notice Retrieves the state of the Royco kernel
+    /// @return state The Royco kernel's state, including the protocol fee recipient and the kernel's controlled tranche and base assets
     function getState() external view returns (RoycoDayKernelState memory state);
 
     /**

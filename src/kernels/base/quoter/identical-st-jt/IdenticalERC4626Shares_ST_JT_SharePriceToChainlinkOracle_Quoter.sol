@@ -22,17 +22,15 @@ abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quote
      * @custom:field baseAssetToNavAssetOracle - The ERC4626 base asset to NAV accounting asset oracle
      * @custom:field stalenessThresholdSeconds - The staleness threshold in seconds
      */
-    struct QuoterSpecificParams {
+    struct STAndJTQuoterSpecificParams {
         uint256 initialConversionRateWAD;
         address baseAssetToNavAssetOracle;
         uint48 stalenessThresholdSeconds;
     }
 
-    /**
-     * @notice Initializes the identical ERC4626 shares chainlink oracle quoter and its inherited contracts
-     * @param _params The quoter-specific initialization parameters
-     */
-    function __IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter_init(QuoterSpecificParams calldata _params) internal onlyInitializing {
+    /// @notice Initializes the identical ERC4626 shares chainlink oracle quoter and its inherited contracts
+    /// @param _params The quoter-specific initialization parameters
+    function __IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter_init(STAndJTQuoterSpecificParams calldata _params) internal onlyInitializing {
         __IdenticalAssets_ST_JT_Oracle_Quoter_init_unchained(_params.initialConversionRateWAD);
         __IdenticalAssets_ST_JT_ChainlinkOracle_Quoter_init_unchained(_params.baseAssetToNavAssetOracle, _params.stalenessThresholdSeconds);
     }
@@ -53,10 +51,8 @@ abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quote
         return IdenticalERC4626Shares_ST_JT_Oracle_Quoter.getTrancheUnitToNAVUnitConversionRateWAD();
     }
 
-    /**
-     * @notice Returns the conversion rate from the ERC4626 base asset to NAV units, scaled to WAD precision
-     * @return baseAssetToNAVUnitConversionRateWAD The conversion rate from the ERC4626 base asset to NAV units, scaled to WAD precision
-     */
+    /// @notice Returns the conversion rate from the ERC4626 base asset to NAV units, scaled to WAD precision
+    /// @return baseAssetToNAVUnitConversionRateWAD The conversion rate from the ERC4626 base asset to NAV units, scaled to WAD precision
     function _getConversionRateFromOracleWAD()
         internal
         view

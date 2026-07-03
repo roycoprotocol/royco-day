@@ -47,9 +47,11 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
     /// @dev The senior tranche share rate (senior NAV per share, scaled to WAD) frozen by each pre-op sync so an inline senior share mint or burn cannot transiently move the pool's senior-leg mark. It is scoped to the transaction via EIP-1153 rather than cleared per operation: unset until the first sync of a transaction (getRate then previews the rate live), re-frozen by every subsequent sync, and auto-cleared at transaction end. A same-transaction read after an operation returns that operation's rate, which equals a fresh preview since the committed state is unchanged
     uint256 internal transient cachedSTShareRateWAD;
 
-    /// @notice The namespaced storage for the BalancerV3_LT_Quoter
-    /// @custom:field bptOracle - The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity tranche assets
-    /// @custom:field maxReinvestmentSlippageWAD - The maximum slippage tolerated when single-sided reinvesting the liquidity premium ST shares into the BPT, scaled to WAD precision. Above this threshold the reinvestment defers to the auction fallback
+    /**
+     * @notice The namespaced storage for the BalancerV3_LT_Quoter
+     * @custom:field bptOracle - The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity tranche assets
+     * @custom:field maxReinvestmentSlippageWAD - The maximum slippage tolerated when single-sided reinvesting the liquidity premium ST shares into the BPT, scaled to WAD precision. Above this threshold the reinvestment defers to the auction fallback
+     */
     struct BalancerV3_LT_QuoterState {
         address bptOracle;
         uint64 maxReinvestmentSlippageWAD;
@@ -97,16 +99,14 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
      * @custom:field bptOracle - The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity tranche
      * @custom:field maxReinvestmentSlippageWAD - The maximum slippage tolerated when single-sided reinvesting the ST shares minted as a liquidity premium into the Balancer V3 Pool, scaled to WAD precision
      */
-    struct LiquidityQuoterSpecificParams {
+    struct LTQuoterSpecificParams {
         address bptOracle;
         uint64 maxReinvestmentSlippageWAD;
     }
 
-    /**
-     * @notice Initializes the Balancer V3 liquidity tranche quoter
-     * @param _params The quoter-specific initialization parameters
-     */
-    function __BalancerV3_LT_Quoter_init_unchained(LiquidityQuoterSpecificParams calldata _params) internal onlyInitializing {
+    /// @notice Initializes the Balancer V3 liquidity tranche quoter
+    /// @param _params The quoter-specific initialization parameters
+    function __BalancerV3_LT_Quoter_init_unchained(LTQuoterSpecificParams calldata _params) internal onlyInitializing {
         _setBPTOracle(_params.bptOracle);
         _setMaxReinvestmentSlippage(_params.maxReinvestmentSlippageWAD);
     }
@@ -160,10 +160,8 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
         return _computeSTShareRate(state.stEffectiveNAV, stTotalSupply);
     }
 
-    /**
-     * @inheritdoc RoycoDayKernel
-     * @dev Freezes the post-mint senior share rate resolved by the pre-op sync: the accountant commits the senior effective NAV before this sync's premium and fee shares are minted, so caching the rate here lets an inline senior share mint or burn move the live supply within the operation without moving the senior-leg mark before the matching effective NAV is committed
-     */
+    /// @inheritdoc RoycoDayKernel
+    /// @dev Freezes the post-mint senior share rate resolved by the pre-op sync: the accountant commits the senior effective NAV before this sync's premium and fee shares are minted, so caching the rate here lets an inline senior share mint or burn move the live supply within the operation without moving the senior-leg mark before the matching effective NAV is committed
     function _cacheSTShareRate(NAV_UNIT _stEffectiveNAV, uint256 _stTotalSupplyAfterMints) internal virtual override(RoycoDayKernel) {
         cachedSTShareRateWAD = _computeSTShareRate(_stEffectiveNAV, _stTotalSupplyAfterMints) | CACHE_SET_MASK;
     }
@@ -309,9 +307,11 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
         }
     }
 
-    /// @inheritdoc RoycoDayKernel
-    /// @dev Unlocks the Balancer V3 Vault and dispatches into the add liquidity callback above
-    /// @dev The vault is required to be unlocked with a callback in order to transition into a transient accounting state, expecting the callback to settle all credit and debt before returning
+    /**
+     * @inheritdoc RoycoDayKernel
+     * @dev Unlocks the Balancer V3 Vault and dispatches into the add liquidity callback above
+     * @dev The vault is required to be unlocked with a callback in order to transition into a transient accounting state, expecting the callback to settle all credit and debt before returning
+     */
     function _addLiquidity(
         uint256 _seniorShares,
         uint256 _quoteAssets,
@@ -338,9 +338,11 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
         }
     }
 
-    /// @inheritdoc RoycoDayKernel
-    /// @dev Unlocks the Balancer V3 Vault and dispatches into the remove liquidity callback above
-    /// @dev The vault is required to be unlocked with a callback in order to transition into a transient accounting state, expecting the callback to settle all credit and debt before returning
+    /**
+     * @inheritdoc RoycoDayKernel
+     * @dev Unlocks the Balancer V3 Vault and dispatches into the remove liquidity callback above
+     * @dev The vault is required to be unlocked with a callback in order to transition into a transient accounting state, expecting the callback to settle all credit and debt before returning
+     */
     function _removeLiquidity(
         TRANCHE_UNIT _ltAssets,
         uint256 _minSTSharesOut,

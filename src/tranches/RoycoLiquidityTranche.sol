@@ -23,10 +23,8 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
 
     constructor(address _asset, address _kernel) RoycoVaultTranche(_asset, _kernel) { }
 
-    /**
-     * @notice Initializes the Royco liquidity tranche.
-     * @param _ltParams Deployment parameters including name, symbol, and initial authority for the liquidity tranche.
-     */
+    /// @notice Initializes the Royco liquidity tranche.
+    /// @param _ltParams Deployment parameters including name, symbol, and initial authority for the liquidity tranche.
     function initialize(RoycoTrancheInitParams calldata _ltParams) external initializer {
         __RoycoTranche_init(_ltParams);
     }

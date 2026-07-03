@@ -17,17 +17,15 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter is Identic
      * @custom:field trancheAssetToReferenceAssetOracle - The tranche asset to reference asset oracle
      * @custom:field stalenessThresholdSeconds - The staleness threshold in seconds
      */
-    struct QuoterSpecificParams {
+    struct STAndJTQuoterSpecificParams {
         uint256 initialConversionRateWAD;
         address trancheAssetToReferenceAssetOracle;
         uint48 stalenessThresholdSeconds;
     }
 
-    /**
-     * @notice Initializes the identical assets chainlink oracle quoter and the base identical assets oracle quoter
-     * @param _params The quoter-specific initialization parameters
-     */
-    function __IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter_init(QuoterSpecificParams calldata _params) internal onlyInitializing {
+    /// @notice Initializes the identical assets chainlink oracle quoter and the base identical assets oracle quoter
+    /// @param _params The quoter-specific initialization parameters
+    function __IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter_init(STAndJTQuoterSpecificParams calldata _params) internal onlyInitializing {
         __IdenticalAssets_ST_JT_AdminOracle_Quoter_init(_params.initialConversionRateWAD);
         __IdenticalAssets_ST_JT_ChainlinkOracle_Quoter_init_unchained(_params.trancheAssetToReferenceAssetOracle, _params.stalenessThresholdSeconds);
     }

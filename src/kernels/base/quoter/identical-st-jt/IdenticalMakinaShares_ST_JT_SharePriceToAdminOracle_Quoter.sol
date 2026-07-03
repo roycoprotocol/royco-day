@@ -46,19 +46,15 @@ abstract contract IdenticalMakinaShares_ST_JT_SharePriceToAdminOracle_Quoter is 
             10 ** (WAD_DECIMALS + IERC20Metadata(ST_ASSET).decimals() - IERC20Metadata(IMachine(_makinaMachine).accountingToken()).decimals());
     }
 
-    /**
-     * @notice The quoter-specific initialization parameters
-     * @custom:field initialConversionRateWAD - The initial conversion rate as defined by the oracle, scaled to WAD precision
-     */
-    struct QuoterSpecificParams {
+    /// @notice The quoter-specific initialization parameters
+    /// @custom:field initialConversionRateWAD - The initial conversion rate as defined by the oracle, scaled to WAD precision
+    struct STAndJTQuoterSpecificParams {
         uint256 initialConversionRateWAD;
     }
 
-    /**
-     * @notice Initializes the identical Makina machine shares admin oracle quoter and the base identical assets oracle quoter
-     * @param _params The quoter-specific initialization parameters
-     */
-    function __IdenticalMakinaShares_ST_JT_SharePriceToAdminOracle_Quoter_init(QuoterSpecificParams calldata _params) internal onlyInitializing {
+    /// @notice Initializes the identical Makina machine shares admin oracle quoter and the base identical assets oracle quoter
+    /// @param _params The quoter-specific initialization parameters
+    function __IdenticalMakinaShares_ST_JT_SharePriceToAdminOracle_Quoter_init(STAndJTQuoterSpecificParams calldata _params) internal onlyInitializing {
         __IdenticalAssets_ST_JT_AdminOracle_Quoter_init(_params.initialConversionRateWAD);
     }
 

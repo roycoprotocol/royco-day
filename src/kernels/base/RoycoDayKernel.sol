@@ -838,10 +838,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     // Internal Tranche Accounting Synchronization Functions
     // =============================
 
-    /**
-     * @notice Previews an accounting sync via the accountant
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
-     */
+    /// @notice Previews an accounting sync via the accountant
+    /// @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
     function _previewSyncTrancheAccounting() internal view virtual whenNotPaused returns (SyncedAccountingState memory state) {
         // Preview a senior/junior accounting sync via the accountant
         state = IRoycoDayAccountant(ACCOUNTANT).previewSyncTrancheAccounting(_getSeniorTrancheRawNAV(), _getJuniorTrancheRawNAV());
@@ -1072,28 +1070,22 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     // Internal Utility Functions
     // =============================
 
-    /**
-     * @notice Returns the raw net asset value of the senior tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
-     * @return stRawNAV The pure net asset value of the senior tranche invested assets
-     */
+    /// @notice Returns the raw net asset value of the senior tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
+    /// @return stRawNAV The pure net asset value of the senior tranche invested assets
     function _getSeniorTrancheRawNAV() internal view virtual returns (NAV_UNIT stRawNAV) {
         // Get the yield bearing assets owned by ST and convert them to NAV units via the configured quoter
         return stConvertTrancheUnitsToNAVUnits(_getRoycoDayKernelStorage().stOwnedYieldBearingAssets);
     }
 
-    /**
-     * @notice Returns the raw net asset value of the junior tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
-     * @return jtRawNAV The pure net asset value of the junior tranche invested assets
-     */
+    /// @notice Returns the raw net asset value of the junior tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
+    /// @return jtRawNAV The pure net asset value of the junior tranche invested assets
     function _getJuniorTrancheRawNAV() internal view virtual returns (NAV_UNIT jtRawNAV) {
         // Get the yield bearing assets owned by JT and convert them to NAV units via the configured quoter
         return jtConvertTrancheUnitsToNAVUnits(_getRoycoDayKernelStorage().jtOwnedYieldBearingAssets);
     }
 
-    /**
-     * @notice Returns the raw net asset value of the liquidity tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
-     * @return ltRawNAV The pure net asset value of the liquidity tranche invested assets
-     */
+    /// @notice Returns the raw net asset value of the liquidity tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
+    /// @return ltRawNAV The pure net asset value of the liquidity tranche invested assets
     function _getLiquidityTrancheRawNAV() internal view virtual returns (NAV_UNIT ltRawNAV) {
         // Get the yield bearing assets owned by LT and convert them to NAV units via the configured quoter
         return ltConvertTrancheUnitsToNAVUnits(_getRoycoDayKernelStorage().ltOwnedYieldBearingAssets);

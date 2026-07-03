@@ -53,10 +53,8 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
         TRANCHE_UNIT_SCALE_FACTOR = 10 ** IERC20Metadata(ST_ASSET).decimals();
     }
 
-    /**
-     * @notice Initializes the identical assets oracle quoter
-     * @param _initialConversionRateWAD The initial conversion rate as defined by the oracle, scaled to WAD precision
-     */
+    /// @notice Initializes the identical assets oracle quoter
+    /// @param _initialConversionRateWAD The initial conversion rate as defined by the oracle, scaled to WAD precision
     function __IdenticalAssets_ST_JT_Oracle_Quoter_init_unchained(uint256 _initialConversionRateWAD) internal onlyInitializing {
         // Preemptively return if this quoter is reliant on an oracle instead of an admin set conversion rate
         if (_initialConversionRateWAD == SENTINEL_CONVERSION_RATE) return;

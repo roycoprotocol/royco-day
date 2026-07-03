@@ -48,7 +48,9 @@ bytes32 constant COMPONENT_ID_DAY_KERNEL_CHAINLINK_ST_CHAINLINK_QUOTE = keccak25
 
 // ─── Day kernels ─────────────────────────────────────────────────────────────
 
-/// @dev Creation-code id for `Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel`
-///      (ST/JT share an ERC4626 vault share priced share->base via `convertToAssets`, base->NAV via Chainlink;
-///      the LT holds a Balancer V3 pool position valued by a manipulation-resistant BPT oracle).
+/**
+ * @dev Creation-code id for `Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel`
+ *      (ST/JT share an ERC4626 vault share priced share->base via `convertToAssets`, base->NAV via Chainlink;
+ *      the LT holds a Balancer V3 pool position valued by a manipulation-resistant BPT oracle).
+ */
 bytes32 constant COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK = keccak256("ROYCO_COMPONENT_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK");

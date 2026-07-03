@@ -60,10 +60,8 @@ interface IRoycoVaultTranche is IERC20Metadata {
     /// @notice Thrown when the value allocated from a deposit does not match the expected value
     error INVALID_VALUE_ALLOCATED();
 
-    /**
-     * @notice Returns the address of the kernel that this tranche is associated with
-     * @return kernel The address of the kernel responsible for executing deposits and redemptions for this tranche
-     */
+    /// @notice Returns the address of the kernel that this tranche is associated with
+    /// @return kernel The address of the kernel responsible for executing deposits and redemptions for this tranche
     function KERNEL() external view returns (address kernel);
 
     /**
@@ -80,16 +78,12 @@ interface IRoycoVaultTranche is IERC20Metadata {
      */
     function totalAssets() external view returns (AssetClaims memory claims);
 
-    /**
-     * @notice Returns the address of the underlying base asset for this tranche
-     * @return asset The address of the ERC20 token used as the base asset for deposits into this tranche
-     */
+    /// @notice Returns the address of the underlying base asset for this tranche
+    /// @return asset The address of the ERC20 token used as the base asset for deposits into this tranche
     function asset() external view returns (address asset);
 
-    /**
-     * @notice Returns the tranche type indicating whether this is a senior or junior tranche
-     * @return trancheType An enumerator indicating SENIOR or JUNIOR tranche type
-     */
+    /// @notice Returns the tranche type indicating whether this is a senior or junior tranche
+    /// @return trancheType An enumerator indicating SENIOR or JUNIOR tranche type
     function TRANCHE_TYPE() external view returns (TrancheType trancheType);
 
     /**
