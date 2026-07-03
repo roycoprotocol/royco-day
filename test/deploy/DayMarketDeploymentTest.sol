@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IGyroECLPPool } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
 import { IVault } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
 import { HooksConfig, TokenInfo, TokenType } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
 import { GyroECLPPoolFactory } from "../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
@@ -9,9 +8,7 @@ import { AccessManagedUpgradeable } from "../../lib/openzeppelin-contracts-upgra
 import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { ERC20BurnableUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import { IERC20Metadata } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
-import { MarketDeploymentConfig } from "../../script/config/MarketDeploymentConfig.sol";
 import {
     ADMIN_ENTRY_POINT_ROLE,
     ADMIN_KERNEL_ROLE,
@@ -25,16 +22,11 @@ import {
     ST_LP_ROLE,
     SYNC_ROLE
 } from "../../src/factory/RolesConfiguration.sol";
-import { BalancerV3DeploymentTemplate } from "../../src/factory/templates/BalancerV3DeploymentTemplate.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { RoycoDayKernelLens } from "../../src/kernels/base/RoycoDayKernelLens.sol";
-import {
-    IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
-} from "../../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
-import { BalancerV3_LT_Quoter } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_Quoter.sol";
 import { RoycoDayBalancerV3Hooks } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3Hooks.sol";
 import { TrancheType } from "../../src/libraries/Types.sol";
 import { TRANCHE_UNIT } from "../../src/libraries/Units.sol";
@@ -63,22 +55,7 @@ contract DayMarketDeploymentTest is BaseTest {
     address internal constant BPT_ORACLE_PLACEHOLDER = 0x000000000000000000000000000000000000dEaD; // stored-only at deploy
     address internal constant FACTORY_ADMIN = 0x7c405bbD131e42af506d14e752f2e59B19D49997; // ROOT_MULTISIG
 
-    // ── Golden Gyro E-CLP curve params (copied from lib/.../pool-gyro/test/foundry/utils/GyroEclpPoolDeployer.sol) ──
-    int256 internal constant P_ALPHA = 998_502_246_630_054_917;
-    int256 internal constant P_BETA = 1_000_200_040_008_001_600;
-    int256 internal constant P_C = 707_106_781_186_547_524;
-    int256 internal constant P_S = 707_106_781_186_547_524;
-    int256 internal constant P_LAMBDA = 4_000_000_000_000_000_000_000;
-    int256 internal constant TAU_ALPHA_X = -94_861_212_813_096_057_289_512_505_574_275_160_547;
-    int256 internal constant TAU_ALPHA_Y = 31_644_119_574_235_279_926_451_292_677_567_331_630;
-    int256 internal constant TAU_BETA_X = 37_142_269_533_113_549_537_591_131_345_643_981_951;
-    int256 internal constant TAU_BETA_Y = 92_846_388_265_400_743_995_957_747_409_218_517_601;
-    int256 internal constant P_U = 66_001_741_173_104_803_338_721_745_994_955_553_010;
-    int256 internal constant P_V = 62_245_253_919_818_011_890_633_399_060_291_020_887;
-    int256 internal constant P_W = 30_601_134_345_582_732_000_058_913_853_921_008_022;
-    int256 internal constant P_Z = -28_859_471_639_991_253_843_240_999_485_797_747_790;
-    int256 internal constant P_DSQ = 99_999_999_999_999_999_886_624_093_342_106_115_200;
-
+    // Expected values asserted against the config-file `snUSD` market config.
     uint64 internal constant TARGET_UTIL = 0.9e18;
     uint256 internal constant SWAP_FEE = 1e14; // 1 bp
 
@@ -109,9 +86,10 @@ contract DayMarketDeploymentTest is BaseTest {
         // Fork mainnet + create wallets + `new DeployScript()`.
         _setUpRoyco();
 
-        // Deploy a Day-shaped SNUSD market end to end through the real script.
+        // Deploy the Day-shaped SNUSD market end to end through the real script, sourcing the market config from the config
+        // file (single source of truth) — not an inline test fixture.
         DeployScript.DeploymentResult memory result = DEPLOY_SCRIPT.deploy(
-            _buildSnusdDayConfig(),
+            DEPLOY_SCRIPT.getMarketConfig("snUSD"),
             FACTORY_ADMIN, // factory admin (holds AccessManager ADMIN_ROLE)
             PROTOCOL_FEE_RECIPIENT_ADDRESS,
             0,
@@ -128,85 +106,6 @@ contract DayMarketDeploymentTest is BaseTest {
         LT_YDM = ACCOUNTANT.getState().ltYDM;
         VAULT = IVault(address(GyroECLPPoolFactory(DEPLOY_SCRIPT.getChainConfig(block.chainid).gyroECLPPoolFactory).getVault()));
         BALANCER_HOOK = VAULT.getHooksConfig(POOL).hooksContract;
-    }
-
-    // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
-    // CONFIG FIXTURE (Dawn SNUSD -> Day)
-    // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
-
-    function _buildSnusdDayConfig() internal view returns (MarketDeploymentConfig.MarketConfig memory cfg) {
-        cfg.marketName = "SNUSD-Day";
-        cfg.chainId = block.chainid;
-        cfg.seniorTrancheName = "Royco Senior snUSD";
-        cfg.seniorTrancheSymbol = "rST-snUSD";
-        cfg.juniorTrancheName = "Royco Junior snUSD";
-        cfg.juniorTrancheSymbol = "rJT-snUSD";
-        cfg.liquidityTrancheName = "Royco Liquidity snUSD";
-        cfg.liquidityTrancheSymbol = "rLT-snUSD";
-        cfg.seniorAsset = SNUSD_VAULT;
-        cfg.juniorAsset = SNUSD_VAULT;
-        cfg.stDustTolerance = 5;
-        cfg.jtDustTolerance = 5;
-
-        cfg.kernelType = DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel;
-        cfg.kernelSpecificParams = abi.encode(
-            DeployScript.IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams({
-                stAndJTQuoterParams: IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams({
-                    initialConversionRateWAD: 0, // sentinel: enable the oracle leg
-                    baseAssetToNavAssetOracle: NUSD_REDSTONE_ORACLE,
-                    stalenessThresholdSeconds: 48 hours
-                }),
-                ltQuoterParams: BalancerV3_LT_Quoter.LT_QuoterSpecificParams({
-                    bptOracle: BPT_ORACLE_PLACEHOLDER, // stored-only at deploy; a real LP oracle is needed for sync/preview
-                    maxReinvestmentSlippageWAD: 0.001e18 // 10 bps
-                })
-            })
-        );
-
-        cfg.stSelfLiquidationBonusWAD = 0.005e18;
-        cfg.enforceVaultSharesTransferWhitelist = false;
-        cfg.stProtocolFeeWAD = 0.1e18;
-        cfg.jtProtocolFeeWAD = 0;
-        cfg.jtYieldShareProtocolFeeWAD = 0.45e18;
-        cfg.minCoverageWAD = 0.1e18; // Dawn `coverageWAD`
-        cfg.jtCoinvested = true; // ST and JT share the snUSD vault
-        cfg.coverageLiquidationUtilizationWAD = 1.0009009e18; // Dawn `liquidationUtilizationWAD`
-        cfg.fixedTermDurationSeconds = 0;
-
-        cfg.ydmType = DeployScript.YDMType.AdaptiveCurve_V2;
-        bytes memory curve = abi.encode(
-            DeployScript.AdaptiveCurveYDM_V2_Params({
-                yieldShareAtZeroUtilWAD: 0.11e18,
-                yieldShareAtTargetUtilWAD: 0.11e18,
-                yieldShareAtFullUtilWAD: 0.31e18,
-                maxAdaptationSpeedWAD: uint64(50e18 / uint256(365 days))
-            })
-        );
-        cfg.ydmSpecificParams = curve; // JT YDM curve
-        cfg.ltYdmSpecificParams = curve; // LDM curve (valid; LT premium off in this baseline)
-        cfg.jtYdmTargetUtilizationWAD = TARGET_UTIL;
-        cfg.ltYdmTargetUtilizationWAD = TARGET_UTIL;
-
-        cfg.gyroECLPPoolParams = _goldenPoolParams();
-    }
-
-    function _goldenPoolParams() internal pure returns (BalancerV3DeploymentTemplate.GyroECLPPoolParams memory p) {
-        p.name = "Royco Day LP SNUSD";
-        p.symbol = "ROY-LP-SNUSD";
-        p.eclpParams = IGyroECLPPool.EclpParams({ alpha: P_ALPHA, beta: P_BETA, c: P_C, s: P_S, lambda: P_LAMBDA });
-        p.derivedEclpParams = IGyroECLPPool.DerivedEclpParams({
-            tauAlpha: IGyroECLPPool.Vector2(TAU_ALPHA_X, TAU_ALPHA_Y),
-            tauBeta: IGyroECLPPool.Vector2(TAU_BETA_X, TAU_BETA_Y),
-            u: P_U,
-            v: P_V,
-            w: P_W,
-            z: P_Z,
-            dSq: P_DSQ
-        });
-        p.swapFeePercentage = SWAP_FEE;
-        p.enableDonation = false;
-        p.disableUnbalancedLiquidity = false;
-        p.quoteToken = MAINNET_USDC;
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -373,9 +272,9 @@ contract DayMarketDeploymentTest is BaseTest {
         assertEq(ks.protocolFeeRecipient, PROTOCOL_FEE_RECIPIENT_ADDRESS, "protocolFeeRecipient");
         assertEq(ks.stSelfLiquidationBonusWAD, 0.005e18, "stSelfLiquidationBonus");
 
-        assertEq(ST.name(), "Royco Senior snUSD", "ST name");
-        assertEq(ST.symbol(), "rST-snUSD", "ST symbol");
-        assertEq(LT.symbol(), "rLT-snUSD", "LT symbol");
+        assertEq(ST.name(), "Royco Senior Tranche snUSD", "ST name");
+        assertEq(ST.symbol(), "ROY-ST-snUSD", "ST symbol");
+        assertEq(LT.symbol(), "ROY-LT-snUSD", "LT symbol");
         assertFalse(ST.ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER(), "ST enforce flag");
         assertFalse(JT.ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER(), "JT enforce flag");
         assertFalse(LT.ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER(), "LT enforce flag");
