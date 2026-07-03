@@ -4,15 +4,15 @@ pragma solidity ^0.8.28;
 import { IERC20Metadata, IERC4626 } from "../../../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
 import { Math } from "../../../../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { WAD, WAD_DECIMALS } from "../../../../../libraries/Constants.sol";
-import { IdenticalAssets_ST_JT_OracleQuoter } from "./IdenticalAssets_ST_JT_OracleQuoter.sol";
+import { IdenticalAssets_ST_JT_Oracle_Quoter } from "./IdenticalAssets_ST_JT_Oracle_Quoter.sol";
 
 /**
- * @title IdenticalERC4626Shares_ST_JT_OracleQuoter
+ * @title IdenticalERC4626Shares_ST_JT_Oracle_Quoter
  * @notice Quoter to convert tranche units (ERC4626 vault shares) to/from NAV units by converting the shares to base assets and converting base assets to NAV units using an admin or oracle set rate
  * @dev The senior and junior tranches must have the same ERC4626 vault share as their tranche unit
  * @dev Use case: Convert sUSDE (Tranche unit) to USDE (base assets) using ERC4626's convertToAssets and convert USDE to USD (NAV unit) using an admin or oracle set rate
  */
-abstract contract IdenticalERC4626Shares_ST_JT_OracleQuoter is IdenticalAssets_ST_JT_OracleQuoter {
+abstract contract IdenticalERC4626Shares_ST_JT_Oracle_Quoter is IdenticalAssets_ST_JT_Oracle_Quoter {
     using Math for uint256;
 
     /// @dev The share amount to pass to convertToAssets() such that the result is scaled to WAD precision
@@ -39,7 +39,7 @@ abstract contract IdenticalERC4626Shares_ST_JT_OracleQuoter is IdenticalAssets_S
         public
         view
         virtual
-        override(IdenticalAssets_ST_JT_OracleQuoter)
+        override(IdenticalAssets_ST_JT_Oracle_Quoter)
         returns (uint256 trancheToNAVUnitConversionRateWAD)
     {
         // Fetch the conversion rate from the tranche asset (ERC4626 share) to its underlying asset, scaled to WAD precision

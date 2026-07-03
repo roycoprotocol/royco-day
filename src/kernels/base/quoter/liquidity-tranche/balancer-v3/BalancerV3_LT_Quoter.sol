@@ -155,7 +155,7 @@ abstract contract BalancerV3_LT_Quoter is RoycoDayKernel, VaultGuard, IRateProvi
      * @inheritdoc RoycoDayKernel
      * @dev Freezes the post-mint senior share rate resolved by the pre-op sync: the accountant commits the senior effective NAV before this sync's premium and fee shares are minted, so caching the rate here lets an inline senior share mint or burn move the live supply within the operation without moving the senior-leg mark before the matching effective NAV is committed
      */
-    function _cacheSTShareRate(NAV_UNIT _stEffectiveNAV, uint256 _stTotalSupplyAfterMints) internal override(RoycoDayKernel) {
+    function _cacheSTShareRate(NAV_UNIT _stEffectiveNAV, uint256 _stTotalSupplyAfterMints) internal virtual override(RoycoDayKernel) {
         cachedSTShareRateWAD = _computeSTShareRate(_stEffectiveNAV, _stTotalSupplyAfterMints) | CACHE_SET_MASK;
     }
 

@@ -214,13 +214,15 @@ abstract contract MarketDeploymentConfig {
             juniorAsset: erc4626YieldVault,
             stDustTolerance: 1e16,
             jtDustTolerance: 1e16,
-            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_Day_Kernel,
+            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel,
             kernelSpecificParams: abi.encode(
-                DeployScript.IdenticalERC4626Shares_ST_JT_ToChainlinkOracleQuoterKernelParams({
+                DeployScript.IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams({
                         // Enable the oracle leg by using the sentinel initial conversion rate
                         initialConversionRateWAD: 0,
                         baseAssetToNavAssetOracle: 0x9A5a3c3Ed0361505cC1D4e824B3854De5724434A, // TODO: real base-asset->NAV Chainlink feed
-                        stalenessThresholdSeconds: 48 hours
+                        stalenessThresholdSeconds: 48 hours,
+                        bptOracle: 0x000000000000000000000000000000000000dEaD, // TODO: real manipulation-resistant Balancer V3 BPT (E-CLP LP) oracle
+                        maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
                     })
             ),
             enforceVaultSharesTransferWhitelist: false,

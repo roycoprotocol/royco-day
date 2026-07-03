@@ -5,16 +5,16 @@ import { IERC20Metadata } from "../../../../../lib/openzeppelin-contracts/contra
 import { Math } from "../../../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IMachine } from "../../../../interfaces/external/makina/IMachine.sol";
 import { WAD, WAD_DECIMALS } from "../../../../libraries/Constants.sol";
-import { IdenticalAssets_ST_JT_AdminOracleQuoter, IdenticalAssets_ST_JT_OracleQuoter } from "./base/IdenticalAssets_ST_JT_AdminOracleQuoter.sol";
+import { IdenticalAssets_ST_JT_AdminOracle_Quoter, IdenticalAssets_ST_JT_Oracle_Quoter } from "./base/IdenticalAssets_ST_JT_AdminOracle_Quoter.sol";
 
 /**
- * @title IdenticalMakinaShares_ST_JT_ToAdminOracleQuoter
+ * @title IdenticalMakinaShares_ST_JT_SharePriceToAdminOracle_Quoter
  * @notice Quoter to convert tranche units (Makina machine shares) to/from NAV units by converting the shares to accounting assets and converting accounting assets to NAV units using an admin set rate
  * @dev Mandates that the accounting asset to NAV units uses an admin controlled oracle
  * @dev The senior and junior tranches must have the same Makina machine share as their tranche unit
  * @dev Use case: Convert DUSD (Tranche unit) to USDC (accounting assets) using the machine's convertToAssets and convert USDC to USD (NAV unit) using an admin set rate
  */
-abstract contract IdenticalMakinaShares_ST_JT_ToAdminOracleQuoter is IdenticalAssets_ST_JT_AdminOracleQuoter {
+abstract contract IdenticalMakinaShares_ST_JT_SharePriceToAdminOracle_Quoter is IdenticalAssets_ST_JT_AdminOracle_Quoter {
     using Math for uint256;
 
     /// @dev The address of the Makina machine for the ST and JT asset
@@ -50,8 +50,8 @@ abstract contract IdenticalMakinaShares_ST_JT_ToAdminOracleQuoter is IdenticalAs
      * @notice Initializes the identical Makina machine shares admin oracle quoter and the base identical assets oracle quoter
      * @param _initialConversionRateWAD The initial conversion rate as defined by the oracle, scaled to WAD precision
      */
-    function __IdenticalMakinaShares_ST_JT_ToAdminOracleQuoter_init(uint256 _initialConversionRateWAD) internal onlyInitializing {
-        __IdenticalAssets_ST_JT_AdminOracleQuoter_init(_initialConversionRateWAD);
+    function __IdenticalMakinaShares_ST_JT_SharePriceToAdminOracle_Quoter_init(uint256 _initialConversionRateWAD) internal onlyInitializing {
+        __IdenticalAssets_ST_JT_AdminOracle_Quoter_init(_initialConversionRateWAD);
     }
 
     /**
@@ -64,7 +64,7 @@ abstract contract IdenticalMakinaShares_ST_JT_ToAdminOracleQuoter is IdenticalAs
         public
         view
         virtual
-        override(IdenticalAssets_ST_JT_OracleQuoter)
+        override(IdenticalAssets_ST_JT_Oracle_Quoter)
         returns (uint256 trancheToNAVUnitConversionRateWAD)
     {
         // Fetch the conversion rate from the tranche asset (Makina machine share) to its underlying asset, scaled to WAD precision
