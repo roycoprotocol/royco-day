@@ -47,4 +47,7 @@ contract RoycoDayBalancerV3HooksStandIn is BaseHooks, UUPSUpgradeable {
 
     /// @dev Open by design — see contract-level notice. The proxy is upgraded to the real hook during the deploy tx.
     function _authorizeUpgrade(address) internal pure override(UUPSUpgradeable) { }
+
+    /// noop fallback to prevent the proxy from reverting if it receives a call
+    fallback() external payable { }
 }

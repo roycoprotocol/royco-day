@@ -218,7 +218,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
 
         // 4. Deploy the pool hooks proxy against the shared stand-in implementation (returns true from onRegister and advertises
         //    the real hook's flags) so the pool can register now; it is upgraded to the real kernel-bound hook after step 9.
-        address balancerHook = _deployProxy(BALANCER_HOOK_STANDIN_IMPL, "", _marketComponentSalt(p.marketId, "BALANCER_HOOK"));
+        address balancerHook = _deployProxy(BALANCER_HOOK_STANDIN_IMPL, bytes("no-op"), _marketComponentSalt(p.marketId, "BALANCER_HOOK"));
 
         // 5. Create the Gyro E-CLP pool `{ST_share, quote}`: senior leg WITH_RATE (rate provider = the predicted kernel),
         //    hooked to the stand-in proxy. LT asset = pool.

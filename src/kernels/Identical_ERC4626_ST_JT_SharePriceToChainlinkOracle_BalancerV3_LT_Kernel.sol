@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { BalancerPoolToken } from "../../lib/balancer-v3-monorepo/pkg/vault/contracts/BalancerPoolToken.sol";
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
 import { NAV_UNIT } from "../libraries/Units.sol";
 import { RoycoDayKernel } from "./base/RoycoDayKernel.sol";
@@ -32,8 +33,14 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kerne
     }
 
     /// @notice Constructs the kernel state and resolves the quote asset from the liquidity tranche's Balancer V3 pool
+    /// @dev The Balancer V3 Vault is resolved here from `_params.ltAsset` (the BPT) and passed to the LT quoter's constructor.
+    ///      It cannot be read from the `LT_ASSET` immutable inside that base constructor's arguments (it is not yet assigned
+    ///      during construction), so it is threaded explicitly from the construction params, which are always readable.
     /// @param _params The standard construction parameters for the Royco Day kernel
-    constructor(IRoycoDayKernel.RoycoDayKernelConstructionParams memory _params) RoycoDayKernel(_params) { }
+    constructor(IRoycoDayKernel.RoycoDayKernelConstructionParams memory _params)
+        RoycoDayKernel(_params)
+        BalancerV3_LT_Quoter(BalancerPoolToken(_params.ltAsset).getVault())
+    { }
 
     /**
      * @notice Initializes the Royco Day kernel and its ST/JT and liquidity tranche quoters

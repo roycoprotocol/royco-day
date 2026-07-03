@@ -38,7 +38,7 @@ abstract contract MarketDeploymentConfig {
 
     /// @dev Balancer V3 Gyro E-CLP pool factory used to create the liquidity tranche's `{ST_share, quote}` pool.
     /// @dev TODO: set the real per-chain Balancer V3 Gyro E-CLP pool factory address before deploying.
-    address internal constant GYRO_ECLP_POOL_FACTORY = address(0);
+    address internal constant GYRO_ECLP_POOL_FACTORY = 0x04d584195a96DFfc7F8B695aA3C9D3c1606b69d1;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // MARKET NAMES
