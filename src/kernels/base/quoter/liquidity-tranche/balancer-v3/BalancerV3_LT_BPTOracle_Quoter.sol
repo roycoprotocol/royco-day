@@ -151,6 +151,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         // Query the cache for the ST share rate
         bool cacheHit;
         (cacheHit, rate) = Cache._read(CacheKey.ST_SHARE_RATE);
+
         // On a cache miss, value the senior share against the post-sync ST effective NAV and total supply
         if (!cacheHit) {
             // NOTE: The accountant's preview is read directly so pricing the senior leg never recurses back into the liquidity tranche mark
@@ -158,9 +159,12 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
             SyncedAccountingState memory state = IRoycoDayAccountant(ACCOUNTANT)
                 .previewSyncTrancheAccounting(ValuationLogic._getSeniorTrancheRawNAV($), ValuationLogic._getJuniorTrancheRawNAV($));
             (,, uint256 stTotalSupply) = FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(SENIOR_TRANCHE).totalSupply());
+
             // Compute the ST share rate
+            // NOTE: Tranche shares always have 18 decimals of precision, so WAD == 1 whole tranche share
             rate = toUint256(ValuationLogic._convertToValue(WAD, stTotalSupply, state.stEffectiveNAV, Math.Rounding.Floor));
         }
+
         // Floor the ST share rate to 1 wei so the Balancer pool never receives a zero rate, which it would reject
         return (rate == 0 ? 1 : rate);
     }
