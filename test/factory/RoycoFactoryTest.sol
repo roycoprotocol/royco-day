@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { ILPOracleFactoryBase } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleFactoryBase.sol";
 import { GyroECLPPoolFactory } from "../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import { Test } from "../../lib/forge-std/src/Test.sol";
 import { Initializable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
@@ -27,6 +28,7 @@ import { IRoycoProtocolTemplate } from "../../src/interfaces/factory/IRoycoProto
 contract RoycoFactoryTest is Test {
     uint256 internal constant FORK_BLOCK = 25_400_000;
     address internal constant GYRO_ECLP_POOL_FACTORY = 0x04d584195a96DFfc7F8B695aA3C9D3c1606b69d1;
+    address internal constant ECLP_LP_ORACLE_FACTORY = 0x301EDe5Fd4f9d7266B09c3A2E38F97776447154B;
 
     AccessManager internal am;
     RoycoFactory internal factory;
@@ -46,12 +48,7 @@ contract RoycoFactoryTest is Test {
     event MarketDeploymentCompleted(address indexed template, IRoycoProtocolTemplate.DeploymentResult result);
 
     function setUp() public {
-        string memory rpc = vm.envOr("MAINNET_RPC_URL", string(""));
-        if (bytes(rpc).length == 0) {
-            // The real template's constructor + deployMarket need real Balancer V3 + Gyro + snUSD code.
-            vm.skip(true);
-            return;
-        }
+        string memory rpc = vm.envString("MAINNET_RPC_URL");
         vm.createSelectFork(rpc, FORK_BLOCK);
 
         // This test contract is the AccessManager admin (ADMIN_ROLE).
@@ -74,15 +71,18 @@ contract RoycoFactoryTest is Test {
         // The real Day template, bound to this factory. `deployScript` is used only for its pure/view build helpers
         // (`dayTemplateComponents`, `buildDayParams`, `getMarketConfig`) — the factory + template above are the units under test.
         deployScript = new DeployScript();
-        template = new DayIdenticalERC4626ChainlinkDeploymentTemplate(IRoycoFactory(address(factory)), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY));
+        template = new DayIdenticalERC4626ChainlinkDeploymentTemplate(
+            IRoycoFactory(address(factory)), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY), ILPOracleFactoryBase(ECLP_LP_ORACLE_FACTORY)
+        );
     }
 
     // ─── helpers ───
 
     function _register() internal {
         (bytes32[] memory ids, bytes[] memory codes) = deployScript.dayTemplateComponents();
+        template.initialize(ids, codes);
         vm.prank(FACTORY_ADMIN);
-        factory.registerTemplate(address(template), ids, codes);
+        factory.registerTemplate(address(template));
     }
 
     function _encodedParams(bytes32 _marketId) internal view returns (bytes memory) {
@@ -145,49 +145,74 @@ contract RoycoFactoryTest is Test {
     function test_registerTemplate_succeeds() external {
         assertFalse(factory.isTemplateEnabled(address(template)), "not enabled pre");
 
+        // The deployer initializes the template directly (SSTORE2-persisting each component's creation code) ...
+        (bytes32[] memory ids, bytes[] memory codes) = deployScript.dayTemplateComponents();
+        template.initialize(ids, codes);
+        assertTrue(template.bytecodePointer(COMPONENT_ID_SENIOR_TRANCHE_IMPL) != address(0), "component bytecode persisted");
+        assertTrue(template.isInitialized(), "template initialized");
+
+        // ... then the factory registers the pre-initialized template.
         vm.expectEmit(true, false, false, false, address(factory));
         emit TemplateRegistered(address(template));
-
-        _register();
+        vm.prank(FACTORY_ADMIN);
+        factory.registerTemplate(address(template));
 
         assertTrue(factory.isTemplateEnabled(address(template)), "enabled post");
-        // Registration ran the template's `initialize`, which SSTORE2-persisted each component's creation code.
-        assertTrue(template.bytecodePointer(COMPONENT_ID_SENIOR_TRANCHE_IMPL) != address(0), "component bytecode persisted");
     }
 
     function test_registerTemplate_revertsForNonAdmin() external {
         vm.prank(STRANGER);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, STRANGER));
-        factory.registerTemplate(address(template), new bytes32[](0), new bytes[](0));
+        factory.registerTemplate(address(template));
     }
 
     function test_registerTemplate_revertsOnZeroAddress() external {
         vm.prank(FACTORY_ADMIN);
         vm.expectRevert(IRoycoFactory.TEMPLATE_CANNOT_BE_ZERO_ADDRESS.selector);
-        factory.registerTemplate(address(0), new bytes32[](0), new bytes[](0));
+        factory.registerTemplate(address(0));
     }
 
     function test_registerTemplate_revertsOnDoubleRegister() external {
         _register();
         vm.prank(FACTORY_ADMIN);
         vm.expectRevert(IRoycoFactory.TEMPLATE_ALREADY_REGISTERED.selector);
-        factory.registerTemplate(address(template), new bytes32[](0), new bytes[](0));
+        factory.registerTemplate(address(template));
+    }
+
+    function test_registerTemplate_revertsWhenNotInitialized() external {
+        // The factory refuses to enable a template whose component bytecode store was never initialized.
+        vm.prank(FACTORY_ADMIN);
+        vm.expectRevert(IRoycoFactory.TEMPLATE_NOT_INITIALIZED.selector);
+        factory.registerTemplate(address(template));
+    }
+
+    function test_registerTemplate_reRegisterAfterDisable() external {
+        // Registration no longer initializes the template, so disable is reversible: disable -> re-register works.
+        _register();
+        vm.prank(FACTORY_ADMIN);
+        factory.disableTemplate(address(template));
+        assertFalse(factory.isTemplateEnabled(address(template)), "disabled");
+
+        vm.prank(FACTORY_ADMIN);
+        factory.registerTemplate(address(template));
+        assertTrue(factory.isTemplateEnabled(address(template)), "re-enabled");
     }
 
     function test_registerTemplate_revertsForForeignFactory() external {
         // A real template bound to a different factory address must be rejected.
-        DayIdenticalERC4626ChainlinkDeploymentTemplate foreign =
-            new DayIdenticalERC4626ChainlinkDeploymentTemplate(IRoycoFactory(makeAddr("OTHER_FACTORY")), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY));
+        DayIdenticalERC4626ChainlinkDeploymentTemplate foreign = new DayIdenticalERC4626ChainlinkDeploymentTemplate(
+            IRoycoFactory(makeAddr("OTHER_FACTORY")), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY), ILPOracleFactoryBase(ECLP_LP_ORACLE_FACTORY)
+        );
         vm.prank(FACTORY_ADMIN);
         vm.expectRevert(IRoycoFactory.TEMPLATE_BOUND_TO_DIFFERENT_FACTORY.selector);
-        factory.registerTemplate(address(foreign), new bytes32[](0), new bytes[](0));
+        factory.registerTemplate(address(foreign));
     }
 
     function test_registerTemplate_revertsWhenPaused() external {
         factory.pause(); // this == AM admin
         vm.prank(FACTORY_ADMIN);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        factory.registerTemplate(address(template), new bytes32[](0), new bytes[](0));
+        factory.registerTemplate(address(template));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

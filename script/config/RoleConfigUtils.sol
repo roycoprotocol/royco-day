@@ -3,11 +3,15 @@ pragma solidity ^0.8.28;
 
 import {
     ADMIN_ACCOUNTANT_ROLE,
+    ADMIN_BALANCER_POOL_MANAGER_ROLE,
+    ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
+    ADMIN_MARKET_OPS_ROLE,
     ADMIN_ORACLE_QUOTER_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
     ADMIN_ROLE,
+    ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     BURNER_ROLE,
     DEPLOYER_ROLE,
@@ -15,6 +19,7 @@ import {
     GUARDIAN_ROLE,
     JT_LP_ROLE,
     LP_ROLE_ADMIN_ROLE,
+    LT_LP_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
 } from "../../src/factory/RolesConfiguration.sol";
@@ -46,11 +51,12 @@ abstract contract RoleConfigUtils {
      * @return config The role configuration
      */
     function getRoleConfig(uint64 role) public pure returns (RoleConfig memory config) {
+        // TODO: Update these configurations
         if (role == ADMIN_PAUSER_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         } else if (role == ADMIN_UPGRADER_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
-        } else if (role == ST_LP_ROLE || role == JT_LP_ROLE) {
+        } else if (role == ST_LP_ROLE || role == JT_LP_ROLE || role == LT_LP_ROLE) {
             return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         } else if (role == LP_ROLE_ADMIN_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
@@ -72,6 +78,14 @@ abstract contract RoleConfigUtils {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         } else if (role == BURNER_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: ADMIN_ROLE, executionDelay: 0 });
+        } else if (role == ADMIN_UNPAUSER_ROLE) {
+            return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        } else if (role == ADMIN_FACTORY_ROLE) {
+            return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        } else if (role == ADMIN_BALANCER_POOL_MANAGER_ROLE) {
+            return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
+        } else if (role == ADMIN_MARKET_OPS_ROLE) {
+            return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
         } else {
             revert UNKNOWN_ROLE(role);
         }

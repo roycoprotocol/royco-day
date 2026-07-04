@@ -1,24 +1,36 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { ILPOracleBase } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleBase.sol";
+import { ILPOracleFactoryBase } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleFactoryBase.sol";
 import { IVault } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
 import { HooksConfig, TokenInfo, TokenType } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
+import { LPOracleBase } from "../../lib/balancer-v3-monorepo/pkg/oracles/contracts/LPOracleBase.sol";
 import { GyroECLPPoolFactory } from "../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
+import {
+    AggregatorV3Interface as BalancerAggregatorV3Interface
+} from "../../lib/chainlink-brownie-contracts/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import { AccessManagedUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/access/manager/AccessManagedUpgradeable.sol";
 import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { ERC20BurnableUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
+import { IAccessManaged } from "../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
 import {
+    ADMIN_BALANCER_POOL_MANAGER_ROLE,
     ADMIN_ENTRY_POINT_ROLE,
+    ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
+    ADMIN_MARKET_OPS_ROLE,
+    ADMIN_ORACLE_QUOTER_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     BURNER_ROLE,
+    DEPLOYER_ROLE,
     JT_LP_ROLE,
     LT_LP_ROLE,
-    SHARE_MINTER_ROLE,
+    PUBLIC_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
 } from "../../src/factory/RolesConfiguration.sol";
@@ -27,6 +39,7 @@ import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.so
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { RoycoDayKernel } from "../../src/kernels/base/RoycoDayKernel.sol";
+import { BalancerV3_LT_BPTOracle_Quoter } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 import { RoycoDayBalancerV3Hooks } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3Hooks.sol";
 import { TrancheType } from "../../src/libraries/Types.sol";
 import { TRANCHE_UNIT } from "../../src/libraries/Units.sol";
@@ -39,20 +52,22 @@ import { BaseTest } from "../base/BaseTest.sol";
  * @notice End-to-end deployment test: runs the real `DeployScript` against a mainnet fork to deploy a full Day snUSD
  *         market on the real Balancer V3 + Gyro E-CLP infra, then rigorously asserts every parameter, linkage, and
  *         AccessManager auth wiring.
- * @dev Scope: deploy + static assertions (no deposits/syncs). The deploy only *stores* the BPT/base->NAV oracles, so a
- *      non-zero placeholder BPT oracle + the real (uncalled) RedStone feed suffice. The ST/JT asset is the real snUSD
- *      ERC4626 vault (answers `decimals()`/`asset()` on the fork); the E-CLP curve params are a known-good set copied from
- *      Balancer's pool-gyro test util (the Gyro `create` validates them).
+ * @dev Scope: deploy + static assertions (no deposits/syncs). The BPT oracle is deployed by the template through the
+ *      real Balancer E-CLP LP oracle factory and injected into the kernel (asserted here); the RedStone feed is the real
+ *      (uncalled at deploy) base->NAV oracle. The ST/JT asset is the real snUSD ERC4626 vault (answers
+ *      `decimals()`/`asset()` on the fork); the E-CLP curve params are a known-good set copied from Balancer's
+ *      pool-gyro test util (the Gyro `create` validates them).
  *
  *      Requires env `MAINNET_RPC_URL` and (optionally) `FORK_BLOCK` (a block where the Gyro factory, Balancer V3 vault,
- *      snUSD vault, USDC, and the RedStone feed all have code). Without an RPC the whole suite is skipped.
+ *      E-CLP LP oracle factory, snUSD vault, USDC, and the RedStone feed all have code). Without an RPC the suite FAILS
+ *      (no silent skip).
  */
 contract DayMarketDeploymentTest is BaseTest {
     // ── Real mainnet addresses (snUSD market) ────────────────────────────────────────────────────────────────────
     address internal constant SNUSD_VAULT = 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313; // ST/JT ERC4626 asset
     address internal constant NUSD_REDSTONE_ORACLE = 0x5e7281f74e74D76347f0b8f4a36Fd3cb29c19d95; // base->NAV feed
     address internal constant MAINNET_USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48; // pool quote token
-    address internal constant BPT_ORACLE_PLACEHOLDER = 0x000000000000000000000000000000000000dEaD; // stored-only at deploy
+    address internal constant MAINNET_USDC_USD_FEED = 0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6; // Chainlink USDC/USD
     address internal constant FACTORY_ADMIN = 0x7c405bbD131e42af506d14e752f2e59B19D49997; // ROOT_MULTISIG
 
     // Expected values asserted against the config-file `snUSD` market config.
@@ -67,20 +82,14 @@ contract DayMarketDeploymentTest is BaseTest {
     IVault internal VAULT;
 
     function _forkConfiguration() internal view override returns (uint256 forkBlock, string memory forkRpcUrl) {
-        forkRpcUrl = vm.envOr("MAINNET_RPC_URL", string(""));
-        // A block where the Gyro E-CLP factory (deployed ~24.2M), the Balancer V3 vault, the snUSD vault, USDC, and the
-        // RedStone nUSD feed all have code. Overridable via the FORK_BLOCK env var.
+        // No skip: the suite FAILS (env not found) when MAINNET_RPC_URL is unset, instead of silently passing.
+        forkRpcUrl = vm.envString("MAINNET_RPC_URL");
+        // A block where the Gyro E-CLP factory (deployed ~24.2M), the Balancer V3 vault, the E-CLP LP oracle factory,
+        // the snUSD vault, USDC, and the RedStone nUSD feed all have code. Overridable via the FORK_BLOCK env var.
         forkBlock = vm.envOr("FORK_BLOCK", uint256(25_400_000));
     }
 
     function setUp() public {
-        (, string memory rpc) = _forkConfiguration();
-        if (bytes(rpc).length == 0) {
-            // No mainnet RPC configured — this suite requires a fork (real Balancer V3 + Gyro + snUSD vault).
-            vm.skip(true);
-            return;
-        }
-
         // Fork mainnet + create wallets + `new DeployScript()`.
         _setUpRoyco();
 
@@ -293,8 +302,11 @@ contract DayMarketDeploymentTest is BaseTest {
         _assertRole(address(ST), IRoycoVaultTranche.deposit.selector, ST_LP_ROLE);
         _assertRole(address(ST), IRoycoVaultTranche.redeem.selector, ST_LP_ROLE);
         _assertRole(address(JT), IRoycoVaultTranche.deposit.selector, JT_LP_ROLE);
-        _assertRole(address(LT), IRoycoVaultTranche.deposit.selector, LT_LP_ROLE);
-        _assertRole(address(LT), RoycoLiquidityTranche.depositMultiAsset.selector, LT_LP_ROLE);
+        _assertRole(address(JT), IRoycoVaultTranche.redeem.selector, JT_LP_ROLE);
+        // LT deposits are open (they only deepen senior liquidity); LT redemptions stay role-gated.
+        _assertRole(address(LT), IRoycoVaultTranche.deposit.selector, PUBLIC_ROLE);
+        _assertRole(address(LT), RoycoLiquidityTranche.depositMultiAsset.selector, PUBLIC_ROLE);
+        _assertRole(address(LT), IRoycoVaultTranche.redeem.selector, LT_LP_ROLE);
         _assertRole(address(LT), RoycoLiquidityTranche.redeemMultiAsset.selector, LT_LP_ROLE);
 
         for (uint256 i = 0; i < 3; ++i) {
@@ -304,7 +316,8 @@ contract DayMarketDeploymentTest is BaseTest {
             _assertRole(t, UUPSUpgradeable.upgradeToAndCall.selector, ADMIN_UPGRADER_ROLE);
             _assertRole(t, ERC20BurnableUpgradeable.burn.selector, BURNER_ROLE);
             _assertRole(t, ERC20BurnableUpgradeable.burnFrom.selector, BURNER_ROLE);
-            _assertRole(t, IRoycoVaultTranche.mint.selector, SHARE_MINTER_ROLE);
+            // `mint` carries NO binding: it is gated by the tranche's own onlyKernel check (per-market, not AM-global).
+            _assertRole(t, IRoycoVaultTranche.mint.selector, 0);
         }
     }
 
@@ -313,6 +326,19 @@ contract DayMarketDeploymentTest is BaseTest {
         _assertRole(address(KERNEL), IRoycoDayKernel.setSeniorTrancheSelfLiquidationBonus.selector, ADMIN_KERNEL_ROLE);
         _assertRole(address(KERNEL), IRoycoDayKernel.syncTrancheAccounting.selector, SYNC_ROLE);
         _assertRole(address(KERNEL), IRoycoAuth.pause.selector, ADMIN_PAUSER_ROLE);
+
+        // Operational maintenance surface -> ADMIN_MARKET_OPS_ROLE.
+        _assertRole(address(KERNEL), IRoycoDayKernel.reinvestLiquidityPremium.selector, ADMIN_MARKET_OPS_ROLE);
+        _assertRole(address(KERNEL), IRoycoDayKernel.setRoycoBlacklist.selector, ADMIN_MARKET_OPS_ROLE);
+        _assertRole(address(ACCOUNTANT), IRoycoDayAccountant.setSeniorTrancheDustTolerance.selector, ADMIN_MARKET_OPS_ROLE);
+        _assertRole(address(ACCOUNTANT), IRoycoDayAccountant.setJuniorTrancheDustTolerance.selector, ADMIN_MARKET_OPS_ROLE);
+
+        // Quoter admin surface -> ADMIN_ORACLE_QUOTER_ROLE (previously unbound => silently defaulted to ADMIN_ROLE).
+        _assertRole(address(KERNEL), BalancerV3_LT_BPTOracle_Quoter.setBPTOracle.selector, ADMIN_ORACLE_QUOTER_ROLE);
+        _assertRole(address(KERNEL), BalancerV3_LT_BPTOracle_Quoter.setMaxReinvestmentSlippage.selector, ADMIN_ORACLE_QUOTER_ROLE);
+        _assertRole(address(KERNEL), bytes4(keccak256("setConversionRate(uint256,bool)")), ADMIN_ORACLE_QUOTER_ROLE);
+        _assertRole(address(KERNEL), bytes4(keccak256("setChainlinkOracle(address,uint48,bool)")), ADMIN_ORACLE_QUOTER_ROLE);
+        _assertRole(address(KERNEL), bytes4(keccak256("setSequencerUptimeFeed(address,uint48)")), ADMIN_ORACLE_QUOTER_ROLE);
 
         _assertRole(BALANCER_HOOK, IRoycoAuth.pause.selector, ADMIN_PAUSER_ROLE);
         _assertRole(BALANCER_HOOK, IRoycoAuth.unpause.selector, ADMIN_UNPAUSER_ROLE);
@@ -324,10 +350,59 @@ contract DayMarketDeploymentTest is BaseTest {
         assertTrue(syncAcc, "accountant SYNC_ROLE");
         (bool syncHook,) = ACCESS_MANAGER.hasRole(SYNC_ROLE, BALANCER_HOOK);
         assertTrue(syncHook, "balancer hook SYNC_ROLE");
-        (bool minter,) = ACCESS_MANAGER.hasRole(SHARE_MINTER_ROLE, address(KERNEL));
-        assertTrue(minter, "kernel SHARE_MINTER_ROLE");
         (bool burner,) = ACCESS_MANAGER.hasRole(BURNER_ROLE, address(KERNEL));
         assertTrue(burner, "kernel BURNER_ROLE");
+
+        // Every bound role has a live grantee at deploy end (no memberless-role liveness cliffs).
+        (bool unpauser,) = ACCESS_MANAGER.hasRole(ADMIN_UNPAUSER_ROLE, UNPAUSER_ADDRESS);
+        assertTrue(unpauser, "unpauser granted");
+        (bool ltLp,) = ACCESS_MANAGER.hasRole(LT_LP_ROLE, PROTOCOL_FEE_RECIPIENT_ADDRESS);
+        assertTrue(ltLp, "LT LP granted");
+        (bool poolMgr,) = ACCESS_MANAGER.hasRole(ADMIN_BALANCER_POOL_MANAGER_ROLE, KERNEL_ADMIN_ADDRESS);
+        assertTrue(poolMgr, "balancer pool manager granted");
+        (bool marketOps,) = ACCESS_MANAGER.hasRole(ADMIN_MARKET_OPS_ROLE, KERNEL_ADMIN_ADDRESS);
+        assertTrue(marketOps, "market ops granted");
+    }
+
+    function test_auth_deployerPrivilegesDropped() public view {
+        // The deploy script renounces the hot deployer key's super-admin surface after deployment completes.
+        (bool isAdmin,) = ACCESS_MANAGER.hasRole(0, DEPLOYER_ADDRESS); // ADMIN_ROLE == 0
+        assertFalse(isAdmin, "deployer still ADMIN_ROLE");
+        (bool isFactoryAdmin,) = ACCESS_MANAGER.hasRole(ADMIN_FACTORY_ROLE, DEPLOYER_ADDRESS);
+        assertFalse(isFactoryAdmin, "deployer still ADMIN_FACTORY_ROLE");
+        // DEPLOYER_ROLE (executeMarketDeployment only) is retained.
+        (bool isDeployer,) = ACCESS_MANAGER.hasRole(DEPLOYER_ROLE, DEPLOYER_ADDRESS);
+        assertTrue(isDeployer, "deployer lost DEPLOYER_ROLE");
+    }
+
+    function test_mint_gatedByOnlyKernelNotRole() public {
+        // Cross-market bleed defense: mint is an immutable-address check on THIS market's kernel, not an AM role.
+        vm.prank(address(0xBAD));
+        vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
+        ST.mint(address(0xBAD), 1);
+    }
+
+    function test_bptOracle_deployedByTemplateAndWired() public view {
+        // The template deployed the BPT oracle through Balancer's E-CLP LP oracle factory and injected it into the kernel.
+        address bptOracle = BalancerV3_LT_BPTOracle_Quoter(address(KERNEL)).getBalancerQuoterConfiguration().bptOracle;
+        assertTrue(bptOracle != address(0), "bptOracle unset");
+        assertGt(bptOracle.code.length, 0, "bptOracle has no code");
+        address eclpOracleFactory = DEPLOY_SCRIPT.getChainConfig(block.chainid).eclpLPOracleFactory;
+        assertTrue(ILPOracleFactoryBase(eclpOracleFactory).isOracleFromFactory(ILPOracleBase(bptOracle)), "not from oracle factory");
+
+        // Feed wiring follows the vault's token order: quote leg -> USDC/USD market feed; senior leg -> constant-1.0 feed.
+        IERC20[] memory tokens = VAULT.getPoolTokens(POOL);
+        BalancerAggregatorV3Interface[] memory feeds = LPOracleBase(bptOracle).getFeeds();
+        assertEq(feeds.length, tokens.length, "feed count");
+        for (uint256 i = 0; i < tokens.length; ++i) {
+            if (address(tokens[i]) == address(ST)) {
+                (, int256 answer,,,) = feeds[i].latestRoundData();
+                assertEq(answer, 1e18, "senior leg feed must answer 1.0");
+                assertEq(feeds[i].decimals(), 18, "senior leg feed decimals");
+            } else {
+                assertEq(address(feeds[i]), MAINNET_USDC_USD_FEED, "quote leg feed != USDC/USD");
+            }
+        }
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -336,20 +411,20 @@ contract DayMarketDeploymentTest is BaseTest {
 
     function test_auth_negative_randomCannotPauseKernel() public {
         vm.prank(address(0xBAD));
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(0xBAD)));
         IRoycoAuth(address(KERNEL)).pause();
     }
 
     function test_auth_negative_randomCannotSetProtocolFeeRecipient() public {
         vm.prank(address(0xBAD));
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(0xBAD)));
         KERNEL.setProtocolFeeRecipient(address(0xBAD));
     }
 
     function test_auth_negative_nonLpCannotDeposit() public {
         // snUSD tranche deposit is gated by ST_LP_ROLE; a random address is not an LP (reverts on auth before value checks).
         vm.prank(address(0xBAD));
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(0xBAD)));
         ST.deposit(TRANCHE_UNIT.wrap(0), address(0xBAD));
     }
 

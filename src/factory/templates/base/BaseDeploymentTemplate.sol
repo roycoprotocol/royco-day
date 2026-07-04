@@ -102,7 +102,6 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
 
     /// @inheritdoc IRoycoProtocolTemplate
     function initialize(bytes32[] calldata _componentIds, bytes[] calldata _creationCodes) external override(IRoycoProtocolTemplate) initializer {
-        require(msg.sender == address(ROYCO_FACTORY), ONLY_ROYCO_FACTORY());
         require(_componentIds.length == _creationCodes.length, LENGTH_MISMATCH());
 
         uint256 n = _componentIds.length;
@@ -117,6 +116,11 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
     /// @inheritdoc IBaseTemplate
     function bytecodePointer(bytes32 _componentId) external view override(IBaseTemplate) returns (address) {
         return _bytecodePointers[_componentId];
+    }
+
+    /// @inheritdoc IBaseTemplate
+    function isInitialized() external view override(IBaseTemplate) returns (bool) {
+        return _getInitializedVersion() > 0;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

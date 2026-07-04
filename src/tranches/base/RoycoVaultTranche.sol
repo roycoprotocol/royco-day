@@ -152,7 +152,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     }
 
     /// @inheritdoc IRoycoVaultTranche
-    function mint(address _to, uint256 _shares) external virtual override(IRoycoVaultTranche) whenNotPaused restricted {
+    function mint(address _to, uint256 _shares) external virtual override(IRoycoVaultTranche) whenNotPaused onlyKernel {
         require(_to != address(0), ERC20InvalidReceiver(address(0)));
         require(_shares != 0, MUST_MINT_NON_ZERO_SHARES());
         _mint(_to, _shares);

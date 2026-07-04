@@ -43,6 +43,8 @@ interface IRoycoFactory {
     error TEMPLATE_CANNOT_BE_ZERO_ADDRESS();
     /// @notice Thrown when registering an already-registered template.
     error TEMPLATE_ALREADY_REGISTERED();
+    /// @notice Thrown when registering a template whose component bytecode store was never initialized.
+    error TEMPLATE_NOT_INITIALIZED();
     /// @notice Thrown when the template's bound factory is not this factory.
     error TEMPLATE_BOUND_TO_DIFFERENT_FACTORY();
     /// @notice Thrown when deploying via a template that is not enabled.
@@ -56,12 +58,11 @@ interface IRoycoFactory {
     function ROYCO_AUTHORITY() external view returns (address);
 
     /**
-     * @notice Registers + enables a template and loads its component creation codes.
+     * @notice Registers + enables a pre-initialized template.
+     * @dev The deployer initializes the template (loading its component creation codes) directly, before registering.
      * @param _template The template to register.
-     * @param _componentIds The component IDs the template will store.
-     * @param _creationCodes The creation code for each component, index-aligned with `_componentIds`.
      */
-    function registerTemplate(address _template, bytes32[] calldata _componentIds, bytes[] calldata _creationCodes) external;
+    function registerTemplate(address _template) external;
 
     /// @notice Disables a registered template.
     function disableTemplate(address _template) external;

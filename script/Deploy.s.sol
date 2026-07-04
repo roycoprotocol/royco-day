@@ -1,24 +1,29 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { ILPOracleFactoryBase } from "../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleFactoryBase.sol";
 import { GyroECLPPoolFactory } from "../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import { AccessManager } from "../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { RoycoDayAccountant } from "../src/accountant/RoycoDayAccountant.sol";
 import { RoycoBlacklist } from "../src/auth/RoycoBlacklist.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
+    ADMIN_BALANCER_POOL_MANAGER_ROLE,
     ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
+    ADMIN_MARKET_OPS_ROLE,
     ADMIN_ORACLE_QUOTER_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
     ADMIN_ROLE,
+    ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     DEPLOYER_ROLE,
     DEPLOYER_ROLE_ADMIN_ROLE,
     GUARDIAN_ROLE,
     JT_LP_ROLE,
     LP_ROLE_ADMIN_ROLE,
+    LT_LP_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
 } from "../src/factory/RolesConfiguration.sol";
@@ -33,12 +38,17 @@ import {
     COMPONENT_ID_JUNIOR_TRANCHE_IMPL,
     COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL,
     COMPONENT_ID_SENIOR_TRANCHE_IMPL,
-    COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2
+    COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2,
+    TAG_ACCOUNTANT_IMPL,
+    TAG_JT_IMPL,
+    TAG_KERNEL_IMPL,
+    TAG_ST_IMPL
 } from "../src/factory/templates/base/Components.sol";
 import { IRoycoDayAccountant } from "../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../src/interfaces/IYDM.sol";
+import { IBaseTemplate } from "../src/interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import {
@@ -71,6 +81,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     error UnsupportedKernelType(KernelType kernelType);
     error UnsupportedYDMType(YDMType ydmType);
     error UNKNOWN_ROLE(uint64 role);
+    error PredictedImplementationHasNoCode(bytes32 componentTag, address predicted);
 
     // CREATE2 salts for the singletons (AccessManager + factory) so reruns within a test reuse them.
     bytes32 constant ACCESS_MANAGER_SALT = keccak256("ROYCO_ACCESS_MANAGER_V2");
@@ -135,10 +146,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     struct DeploymentResult {
         RoycoFactory factory;
         AccessManager accessManager;
-        RoycoDayAccountant accountantImplementation;
-        RoycoSeniorTranche stTrancheImplementation;
-        RoycoJuniorTranche jtTrancheImplementation;
-        address kernelImplementation;
         IYDM ydm;
         IRoycoVaultTranche seniorTranche;
         IRoycoVaultTranche juniorTranche;
@@ -162,6 +169,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         address deployerAddress;
         address deployerAdminAddress;
         address protocolFeeRecipientAddress;
+        address balancerPoolManagerAddress;
+        address marketOpsAddress;
     }
 
     /// @notice A single role assignment applied to the AccessManager.
@@ -200,7 +209,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
                 guardianAddress: chainConfig.guardianAddress,
                 deployerAddress: chainConfig.deployerAddress,
                 deployerAdminAddress: chainConfig.deployerAdminAddress,
-                protocolFeeRecipientAddress: chainConfig.protocolFeeRecipient
+                protocolFeeRecipientAddress: chainConfig.protocolFeeRecipient,
+                balancerPoolManagerAddress: chainConfig.balancerPoolManagerAddress,
+                marketOpsAddress: chainConfig.marketOpsAddress
             })
         );
 
@@ -244,15 +255,15 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         BalancerV3DeploymentTemplate.DayParams memory params = _buildDayParams(_config, marketId, _protocolFeeRecipient, roycoBlacklist);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(template, abi.encode(params));
 
+        // Renounce the deployer's roles after deployment is complete.
+        accessManager.renounceRole(ADMIN_FACTORY_ROLE, deployer);
+        accessManager.renounceRole(ADMIN_ROLE, deployer);
+
         vm.stopBroadcast();
 
         return DeploymentResult({
             factory: factory,
             accessManager: accessManager,
-            accountantImplementation: RoycoDayAccountant(_predictImpl(factory, marketId, "ACCOUNTANT_IMPL")),
-            stTrancheImplementation: RoycoSeniorTranche(_predictImpl(factory, marketId, "ST_IMPL")),
-            jtTrancheImplementation: RoycoJuniorTranche(_predictImpl(factory, marketId, "JT_IMPL")),
-            kernelImplementation: _predictImpl(factory, marketId, "KERNEL_IMPL"),
             ydm: IYDM(r.ydm),
             seniorTranche: IRoycoVaultTranche(r.seniorTranche),
             juniorTranche: IRoycoVaultTranche(r.juniorTranche),
@@ -264,7 +275,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
     /// @notice Builds the role assignments applied to the AccessManager (surface-compatible with the legacy helper).
     function generateRolesAssignments(RoleAssignmentAddresses memory _addresses) public pure returns (RoleAssignment[] memory roleAssignments) {
-        roleAssignments = new RoleAssignment[](13);
+        roleAssignments = new RoleAssignment[](17);
         roleAssignments[0] = _assignment(ADMIN_PAUSER_ROLE, _addresses.pauserAddress);
         roleAssignments[1] = _assignment(ADMIN_UPGRADER_ROLE, _addresses.upgraderAddress);
         roleAssignments[2] = _assignment(SYNC_ROLE, _addresses.syncRoleAddress);
@@ -278,6 +289,10 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         roleAssignments[10] = _assignment(GUARDIAN_ROLE, _addresses.guardianAddress);
         roleAssignments[11] = _assignment(DEPLOYER_ROLE, _addresses.deployerAddress);
         roleAssignments[12] = _assignment(DEPLOYER_ROLE_ADMIN_ROLE, _addresses.deployerAdminAddress);
+        roleAssignments[13] = _assignment(ADMIN_UNPAUSER_ROLE, _addresses.unpauserAddress);
+        roleAssignments[14] = _assignment(LT_LP_ROLE, _addresses.protocolFeeRecipientAddress);
+        roleAssignments[15] = _assignment(ADMIN_BALANCER_POOL_MANAGER_ROLE, _addresses.balancerPoolManagerAddress);
+        roleAssignments[16] = _assignment(ADMIN_MARKET_OPS_ROLE, _addresses.marketOpsAddress);
     }
 
     function _assignment(uint64 _role, address _assignee) private pure returns (RoleAssignment memory) {
@@ -300,6 +315,10 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (role == DEPLOYER_ROLE) return RoleConfig({ adminRole: DEPLOYER_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == DEPLOYER_ROLE_ADMIN_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_FACTORY_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == ADMIN_UNPAUSER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == LT_LP_ROLE) return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == ADMIN_BALANCER_POOL_MANAGER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == ADMIN_MARKET_OPS_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         revert UNKNOWN_ROLE(role);
     }
 
@@ -326,14 +345,11 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         bytes memory factoryProxyCreationCode = getERC1967ProxyCreationCode(factoryImpl, abi.encodeCall(RoycoFactory.initialize, (amAddr)));
         address predictedFactory = generateDeterminsticAddress(FACTORY_PROXY_SALT, factoryProxyCreationCode);
 
-        // The factory's `initialize` (run in the proxy ctor) requires it to already hold ADMIN_ROLE on the AM.
-        if (!amExisted) accessManager.grantRole(ADMIN_ROLE, predictedFactory, 0);
+        if (predictedFactory.code.length == 0) accessManager.grantRole(ADMIN_ROLE, predictedFactory, 0);
 
         (address factoryProxy,) = deployWithSanityChecks(FACTORY_PROXY_SALT, factoryProxyCreationCode, false);
         require(factoryProxy == predictedFactory, "factory address mismatch");
         factory = RoycoFactory(factoryProxy);
-
-        // Wire the role graph + assignments on the AM.
         if (!amExisted) _applyRoleGraph(accessManager, _factoryAdmin, _deployer, _roleAssignments);
     }
 
@@ -378,7 +394,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         (template, kernelComponentId, kernelCreationCode) = _deployTemplate(factoryIface, _kernelType);
 
         (bytes32[] memory ids, bytes[] memory codes) = _dayTemplateComponents(kernelComponentId, kernelCreationCode);
-        _factory.registerTemplate(template, ids, codes);
+        IBaseTemplate(template).initialize(ids, codes);
+        _factory.registerTemplate(template);
         kernelTypeToTemplate[uint256(_kernelType)] = template;
     }
 
@@ -440,12 +457,15 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         internal
         returns (address template, bytes32 kernelComponentId, bytes memory kernelCreationCode)
     {
-        // The concrete Balancer-V3 templates are constructed with the chain's Gyro E-CLP pool factory.
-        GyroECLPPoolFactory poolFactory = GyroECLPPoolFactory(getChainConfig(block.chainid).gyroECLPPoolFactory);
+        // The concrete Balancer-V3 templates are constructed with the chain's Gyro E-CLP pool factory and Balancer's
+        // E-CLP LP oracle factory (through which the template deploys each market's BPT oracle).
+        ChainConfig memory chainConfig = getChainConfig(block.chainid);
+        GyroECLPPoolFactory poolFactory = GyroECLPPoolFactory(chainConfig.gyroECLPPoolFactory);
+        ILPOracleFactoryBase eclpLPOracleFactory = ILPOracleFactoryBase(chainConfig.eclpLPOracleFactory);
 
         if (_kernelType == KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel) {
             return (
-                address(new DayIdenticalERC4626ChainlinkDeploymentTemplate(_factory, poolFactory)),
+                address(new DayIdenticalERC4626ChainlinkDeploymentTemplate(_factory, poolFactory, eclpLPOracleFactory)),
                 COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK,
                 type(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode
             );
@@ -505,6 +525,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         });
 
         params.gyroECLPPoolParams = _config.gyroECLPPoolParams;
+        params.quoteTokenPriceFeed = _config.quoteTokenPriceFeed;
         params.jtYDMTargetUtilizationWAD = _config.jtYdmTargetUtilizationWAD;
         params.ltYDMTargetUtilizationWAD = _config.ltYdmTargetUtilizationWAD;
         params.kernelSpecificParams = _config.kernelSpecificParams; // template KernelParams are field-identical to the config blobs
@@ -551,8 +572,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     }
 
     /// @notice Predicts a market component implementation address from the template's `_marketComponentSalt` scheme.
-    function _predictImpl(RoycoFactory _factory, bytes32 _marketId, bytes32 _componentTag) internal view returns (address) {
+    function _predictImpl(RoycoFactory _factory, bytes32 _marketId, bytes32 _componentTag) internal view returns (address impl) {
         bytes32 salt = keccak256(abi.encodePacked("ROYCO_MARKET_", _marketId, _componentTag));
-        return _factory.predictDeterministicAddress(salt);
+        impl = _factory.predictDeterministicAddress(salt);
+        require(impl.code.length > 0, PredictedImplementationHasNoCode(_componentTag, impl));
     }
 }

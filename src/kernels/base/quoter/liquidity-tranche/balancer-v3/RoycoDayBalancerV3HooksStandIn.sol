@@ -49,5 +49,5 @@ contract RoycoDayBalancerV3HooksStandIn is BaseHooks, UUPSUpgradeable {
     function _authorizeUpgrade(address) internal pure override(UUPSUpgradeable) { }
 
     /// noop fallback to prevent the proxy from reverting if it receives a call
-    fallback() external payable { }
+    fallback() external { }
 }

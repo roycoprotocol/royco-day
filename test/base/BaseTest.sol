@@ -137,10 +137,6 @@ abstract contract BaseTest is Test, Assertions {
     RoycoFactory internal FACTORY;
     AccessManager internal ACCESS_MANAGER;
     IYDM internal YDM;
-    RoycoSeniorTranche public ST_IMPL;
-    RoycoJuniorTranche internal JT_IMPL;
-    RoycoDayAccountant internal ACCOUNTANT_IMPL;
-    address internal KERNEL_IMPL;
     IRoycoVaultTranche internal ST;
     IRoycoVaultTranche internal JT;
     IRoycoDayKernel internal KERNEL;
@@ -306,18 +302,6 @@ abstract contract BaseTest is Test, Assertions {
     }
 
     function _setDeployedMarket(DeployScript.DeploymentResult memory _deploymentResult) internal {
-        ST_IMPL = _deploymentResult.stTrancheImplementation;
-        vm.label(address(ST_IMPL), "STImpl");
-
-        JT_IMPL = _deploymentResult.jtTrancheImplementation;
-        vm.label(address(JT_IMPL), "JTImpl");
-
-        ACCOUNTANT_IMPL = _deploymentResult.accountantImplementation;
-        vm.label(address(ACCOUNTANT_IMPL), "AccountantImpl");
-
-        KERNEL_IMPL = _deploymentResult.kernelImplementation;
-        vm.label(address(KERNEL_IMPL), "KernelImpl");
-
         YDM = _deploymentResult.ydm;
         vm.label(address(YDM), "YDM");
 
@@ -539,7 +523,9 @@ abstract contract BaseTest is Test, Assertions {
                 guardianAddress: ROLE_GUARDIAN_ADDRESS,
                 deployerAddress: DEPLOYER_ADDRESS,
                 deployerAdminAddress: DEPLOYER_ADMIN_ADDRESS,
-                protocolFeeRecipientAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS
+                protocolFeeRecipientAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS,
+                balancerPoolManagerAddress: KERNEL_ADMIN_ADDRESS,
+                marketOpsAddress: KERNEL_ADMIN_ADDRESS
             })
         );
     }
