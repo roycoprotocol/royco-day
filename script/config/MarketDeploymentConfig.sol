@@ -229,7 +229,10 @@ abstract contract MarketDeploymentConfig {
                         initialConversionRateWAD: 0,
                         baseAssetToNavAssetOracle: nusdRedstoneOracle,
                         // RedStone pushes updates ~every 12 hours; 48h staleness threshold for safety
-                        stalenessThresholdSeconds: 48 hours
+                        stalenessThresholdSeconds: 48 hours,
+                        // Ethereum mainnet has no L2 sequencer, so the sequencer-uptime check is disabled
+                        sequencerUptimeFeed: address(0),
+                        gracePeriodSeconds: 0
                     }),
                     ltQuoterParams: BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams({
                         bptOracle: 0x000000000000000000000000000000000000dEaD, // TODO: real manipulation-resistant E-CLP BPT oracle

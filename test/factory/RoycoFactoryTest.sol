@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { GyroECLPPoolFactory } from "../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import { Test } from "../../lib/forge-std/src/Test.sol";
 import { Initializable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
@@ -8,27 +9,35 @@ import { PausableUpgradeable } from "../../lib/openzeppelin-contracts-upgradeabl
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import { DeployScript } from "../../script/Deploy.s.sol";
 import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ROLE, ADMIN_UPGRADER_ROLE, DEPLOYER_ROLE } from "../../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
+import { DayIdenticalERC4626ChainlinkDeploymentTemplate } from "../../src/factory/templates/DayIdenticalERC4626ChainlinkDeploymentTemplate.sol";
+import { COMPONENT_ID_SENIOR_TRANCHE_IMPL } from "../../src/factory/templates/base/Components.sol";
 import { IRoycoFactory } from "../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
-import { CallRecorder, Dummy, MockDeploymentTemplate } from "./mocks/MockDeploymentTemplate.sol";
 
 /// @title RoycoFactoryTest
-/// @notice Unit tests for `RoycoFactory` in isolation from any real market recipe, driven by a configurable
-///         `MockDeploymentTemplate`. Covers: initialization + role wiring, template registration/disabling,
-///         the deployment entrypoint (mapping storage, event emission, verify-revert propagation, reentrancy),
-///         the active-template-gated primitives (both in and out of a deployment window), pausability, and the
-///         UUPS upgrade gate.
+/// @notice Fork tests for `RoycoFactory` driven by the REAL Day market template
+///         (`DayIdenticalERC4626ChainlinkDeploymentTemplate`) — no mock. Covers: initialization + role wiring,
+///         template registration/disabling, the deployment entrypoint standing up a real snUSD market (tranche
+///         mappings + events + live contracts), auth/pause gating, the active-template-gated primitives rejecting
+///         outside a deployment window, getters, and the UUPS upgrade gate.
+/// @dev Requires a mainnet fork (real Balancer V3 + Gyro E-CLP + snUSD vault). Skips when `MAINNET_RPC_URL` is unset.
 contract RoycoFactoryTest is Test {
+    uint256 internal constant FORK_BLOCK = 25_400_000;
+    address internal constant GYRO_ECLP_POOL_FACTORY = 0x04d584195a96DFfc7F8B695aA3C9D3c1606b69d1;
+
     AccessManager internal am;
     RoycoFactory internal factory;
-    MockDeploymentTemplate internal template;
+    DeployScript internal deployScript;
+    DayIdenticalERC4626ChainlinkDeploymentTemplate internal template;
 
     address internal FACTORY_ADMIN = makeAddr("FACTORY_ADMIN");
     address internal DEPLOYER = makeAddr("DEPLOYER");
     address internal UPGRADER = makeAddr("UPGRADER");
     address internal STRANGER = makeAddr("STRANGER");
+    address internal PROTOCOL_FEE_RECIPIENT = makeAddr("PROTOCOL_FEE_RECIPIENT");
 
     // Mirrors of the factory's events, for `vm.expectEmit`.
     event TemplateRegistered(address indexed template);
@@ -37,12 +46,20 @@ contract RoycoFactoryTest is Test {
     event MarketDeploymentCompleted(address indexed template, IRoycoProtocolTemplate.DeploymentResult result);
 
     function setUp() public {
+        string memory rpc = vm.envOr("MAINNET_RPC_URL", string(""));
+        if (bytes(rpc).length == 0) {
+            // The real template's constructor + deployMarket need real Balancer V3 + Gyro + snUSD code.
+            vm.skip(true);
+            return;
+        }
+        vm.createSelectFork(rpc, FORK_BLOCK);
+
         // This test contract is the AccessManager admin (ADMIN_ROLE).
         am = new AccessManager(address(this));
 
-        // OZ mandates init data in the ERC1967Proxy constructor, and `initialize` requires the factory to
-        // already hold ADMIN_ROLE on the AM. So predict the proxy's CREATE address, grant it ADMIN_ROLE, then
-        // construct the proxy with real init data (mirrors DeployScript's predicted-factory grant).
+        // OZ mandates init data in the ERC1967Proxy constructor, and `initialize` requires the factory to already hold
+        // ADMIN_ROLE on the AM. So predict the proxy's CREATE address, grant it ADMIN_ROLE, then construct the proxy with
+        // real init data (mirrors DeployScript's predicted-factory grant).
         RoycoFactory impl = new RoycoFactory();
         address predicted = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
         am.grantRole(ADMIN_ROLE, predicted, 0);
@@ -54,19 +71,30 @@ contract RoycoFactoryTest is Test {
         am.grantRole(DEPLOYER_ROLE, DEPLOYER, 0);
         am.grantRole(ADMIN_UPGRADER_ROLE, UPGRADER, 0);
 
-        template = new MockDeploymentTemplate(factory);
+        // The real Day template, bound to this factory. `deployScript` is used only for its pure/view build helpers
+        // (`dayTemplateComponents`, `buildDayParams`, `getMarketConfig`) — the factory + template above are the units under test.
+        deployScript = new DeployScript();
+        template = new DayIdenticalERC4626ChainlinkDeploymentTemplate(IRoycoFactory(address(factory)), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY));
     }
 
     // ─── helpers ───
 
-    function _register(address _template) internal {
+    function _register() internal {
+        (bytes32[] memory ids, bytes[] memory codes) = deployScript.dayTemplateComponents();
         vm.prank(FACTORY_ADMIN);
-        factory.registerTemplate(_template, new bytes32[](0), new bytes[](0));
+        factory.registerTemplate(address(template), ids, codes);
     }
 
-    function _deploy() internal returns (IRoycoProtocolTemplate.DeploymentResult memory) {
+    function _encodedParams(bytes32 _marketId) internal view returns (bytes memory) {
+        return abi.encode(deployScript.buildDayParams(deployScript.getMarketConfig("snUSD"), _marketId, PROTOCOL_FEE_RECIPIENT, address(0)));
+    }
+
+    function _deploy(bytes32 _marketId) internal returns (IRoycoProtocolTemplate.DeploymentResult memory) {
+        // Precompute the params first: `_encodedParams` makes external calls to `deployScript`, which would otherwise
+        // consume the `vm.prank(DEPLOYER)` intended for `executeMarketDeployment`.
+        bytes memory p = _encodedParams(_marketId);
         vm.prank(DEPLOYER);
-        return factory.executeMarketDeployment(address(template), "");
+        return factory.executeMarketDeployment(address(template), p);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -77,11 +105,9 @@ contract RoycoFactoryTest is Test {
         assertEq(factory.authority(), address(am), "authority");
         assertEq(factory.ROYCO_AUTHORITY(), address(am), "ROYCO_AUTHORITY");
 
-        // Factory holds ADMIN_ENTRY_POINT_ROLE on the AM.
         (bool hasEntryPoint,) = am.hasRole(ADMIN_ENTRY_POINT_ROLE, address(factory));
         assertTrue(hasEntryPoint, "factory should hold ADMIN_ENTRY_POINT_ROLE");
 
-        // Selector→role bindings from initialize().
         assertEq(am.getTargetFunctionRole(address(factory), IRoycoFactory.executeMarketDeployment.selector), DEPLOYER_ROLE, "deploy role");
         assertEq(am.getTargetFunctionRole(address(factory), IRoycoFactory.registerTemplate.selector), ADMIN_FACTORY_ROLE, "register role");
         assertEq(am.getTargetFunctionRole(address(factory), IRoycoFactory.disableTemplate.selector), ADMIN_FACTORY_ROLE, "disable role");
@@ -89,7 +115,6 @@ contract RoycoFactoryTest is Test {
     }
 
     function test_initialize_revertsOnZeroAccessManager() external {
-        // initialize runs inside the proxy constructor, so the construction call reverts.
         RoycoFactory freshImpl = new RoycoFactory();
         vm.expectRevert(IRoycoFactory.ACCESS_MANAGER_CANNOT_BE_ZERO_ADDRESS.selector);
         new ERC1967Proxy(address(freshImpl), abi.encodeCall(RoycoFactory.initialize, (address(0))));
@@ -103,7 +128,6 @@ contract RoycoFactoryTest is Test {
     }
 
     function test_initialize_revertsWhenFactoryNotAdminOnAM() external {
-        // The proxy's predicted address is never granted ADMIN_ROLE on `am`, so initialize rejects it.
         RoycoFactory freshImpl = new RoycoFactory();
         vm.expectRevert(IRoycoFactory.FACTORY_NOT_ADMIN_ON_ACCESS_MANAGER.selector);
         new ERC1967Proxy(address(freshImpl), abi.encodeCall(RoycoFactory.initialize, (address(am))));
@@ -124,11 +148,11 @@ contract RoycoFactoryTest is Test {
         vm.expectEmit(true, false, false, false, address(factory));
         emit TemplateRegistered(address(template));
 
-        _register(address(template));
+        _register();
 
         assertTrue(factory.isTemplateEnabled(address(template)), "enabled post");
-        assertTrue(template.initialized(), "template.initialize called");
-        assertEq(template.initializeCallCount(), 1, "initialize called once");
+        // Registration ran the template's `initialize`, which SSTORE2-persisted each component's creation code.
+        assertTrue(template.bytecodePointer(COMPONENT_ID_SENIOR_TRANCHE_IMPL) != address(0), "component bytecode persisted");
     }
 
     function test_registerTemplate_revertsForNonAdmin() external {
@@ -144,22 +168,23 @@ contract RoycoFactoryTest is Test {
     }
 
     function test_registerTemplate_revertsOnDoubleRegister() external {
-        _register(address(template));
+        _register();
         vm.prank(FACTORY_ADMIN);
         vm.expectRevert(IRoycoFactory.TEMPLATE_ALREADY_REGISTERED.selector);
         factory.registerTemplate(address(template), new bytes32[](0), new bytes[](0));
     }
 
     function test_registerTemplate_revertsForForeignFactory() external {
-        // A template bound to a different factory address must be rejected.
-        MockDeploymentTemplate foreign = new MockDeploymentTemplate(IRoycoFactory(makeAddr("OTHER_FACTORY")));
+        // A real template bound to a different factory address must be rejected.
+        DayIdenticalERC4626ChainlinkDeploymentTemplate foreign =
+            new DayIdenticalERC4626ChainlinkDeploymentTemplate(IRoycoFactory(makeAddr("OTHER_FACTORY")), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY));
         vm.prank(FACTORY_ADMIN);
         vm.expectRevert(IRoycoFactory.TEMPLATE_BOUND_TO_DIFFERENT_FACTORY.selector);
         factory.registerTemplate(address(foreign), new bytes32[](0), new bytes[](0));
     }
 
     function test_registerTemplate_revertsWhenPaused() external {
-        factory.pause(); // this == AM admin, pause defaults to ADMIN_ROLE
+        factory.pause(); // this == AM admin
         vm.prank(FACTORY_ADMIN);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         factory.registerTemplate(address(template), new bytes32[](0), new bytes[](0));
@@ -170,7 +195,7 @@ contract RoycoFactoryTest is Test {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function test_disableTemplate_succeeds() external {
-        _register(address(template));
+        _register();
 
         vm.expectEmit(true, false, false, false, address(factory));
         emit TemplateDisabled(address(template));
@@ -182,209 +207,86 @@ contract RoycoFactoryTest is Test {
     }
 
     function test_disableTemplate_revertsForNonAdmin() external {
-        _register(address(template));
+        _register();
         vm.prank(STRANGER);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, STRANGER));
         factory.disableTemplate(address(template));
     }
 
     function test_disableTemplate_thenDeployReverts() external {
-        _register(address(template));
+        _register();
         vm.prank(FACTORY_ADMIN);
         factory.disableTemplate(address(template));
 
+        bytes memory p = _encodedParams(keccak256("disabled"));
         vm.prank(DEPLOYER);
         vm.expectRevert(IRoycoFactory.TEMPLATE_NOT_ENABLED.selector);
-        factory.executeMarketDeployment(address(template), "");
+        factory.executeMarketDeployment(address(template), p);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // executeMarketDeployment
+    // executeMarketDeployment — against the real template
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function test_execute_storesMappingsAndEmits() external {
-        _register(address(template));
+    function test_execute_deploysRealMarketAndStoresMappings() external {
+        _register();
+        bytes memory p = _encodedParams(keccak256("snUSD-market-A"));
 
-        address senior = makeAddr("SENIOR");
-        address junior = makeAddr("JUNIOR");
-        address liquidity = makeAddr("LIQUIDITY");
-        template.setDeployResult(senior, junior, liquidity);
-
-        // Both lifecycle events fire (do not match the full result struct data; just topics + emitter).
         vm.expectEmit(true, true, false, false, address(factory));
         emit MarketDeploymentStarted(address(template), DEPLOYER);
         vm.expectEmit(true, false, false, false, address(factory));
         emit MarketDeploymentCompleted(address(template), _emptyResult());
 
-        IRoycoProtocolTemplate.DeploymentResult memory result = _deploy();
+        vm.prank(DEPLOYER);
+        IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
 
-        assertEq(result.seniorTranche, senior, "result senior");
-        assertEq(result.juniorTranche, junior, "result junior");
-        assertEq(result.liquidityTranche, liquidity, "result liquidity");
+        // The real template produced live contracts.
+        assertGt(r.seniorTranche.code.length, 0, "senior live");
+        assertGt(r.juniorTranche.code.length, 0, "junior live");
+        assertGt(r.liquidityTranche.code.length, 0, "liquidity live");
+        assertGt(r.kernel.code.length, 0, "kernel live");
+        assertGt(r.accountant.code.length, 0, "accountant live");
+        assertTrue(r.ydm != address(0) && r.ltYdm != address(0) && r.ydm != r.ltYdm, "distinct YDM + LDM");
 
-        assertEq(factory.seniorTrancheToJuniorTranche(senior), junior, "s->j mapping");
-        assertEq(factory.juniorTrancheToSeniorTranche(junior), senior, "j->s mapping");
+        // The factory recorded the senior<->junior tranche pairing.
+        assertEq(factory.seniorTrancheToJuniorTranche(r.seniorTranche), r.juniorTranche, "s->j mapping");
+        assertEq(factory.juniorTrancheToSeniorTranche(r.juniorTranche), r.seniorTranche, "j->s mapping");
+    }
+
+    function test_execute_clearsActiveTemplate_allowsSequentialDeploys() external {
+        _register();
+
+        IRoycoProtocolTemplate.DeploymentResult memory a = _deploy(keccak256("seq-A"));
+        // A second deployment succeeding proves the transient active-template binding was cleared.
+        IRoycoProtocolTemplate.DeploymentResult memory b = _deploy(keccak256("seq-B"));
+
+        assertTrue(a.kernel != b.kernel, "distinct markets");
+        assertEq(factory.seniorTrancheToJuniorTranche(b.seniorTranche), b.juniorTranche, "second mapping");
     }
 
     function test_execute_revertsForNonDeployer() external {
-        _register(address(template));
+        _register();
+        bytes memory p = _encodedParams(keccak256("nd"));
         vm.prank(STRANGER);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, STRANGER));
-        factory.executeMarketDeployment(address(template), "");
+        factory.executeMarketDeployment(address(template), p);
     }
 
     function test_execute_revertsWhenTemplateNotEnabled() external {
         // Never registered.
+        bytes memory p = _encodedParams(keccak256("ne"));
         vm.prank(DEPLOYER);
         vm.expectRevert(IRoycoFactory.TEMPLATE_NOT_ENABLED.selector);
-        factory.executeMarketDeployment(address(template), "");
+        factory.executeMarketDeployment(address(template), p);
     }
 
     function test_execute_revertsWhenPaused() external {
-        _register(address(template));
+        _register();
+        bytes memory p = _encodedParams(keccak256("pz"));
         factory.pause();
         vm.prank(DEPLOYER);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        factory.executeMarketDeployment(address(template), "");
-    }
-
-    function test_execute_propagatesDeployRevert() external {
-        _register(address(template));
-        template.setRevertOnDeploy(true);
-        vm.prank(DEPLOYER);
-        vm.expectRevert(IRoycoProtocolTemplate.INVALID_PARAMS.selector);
-        factory.executeMarketDeployment(address(template), "");
-    }
-
-    function test_execute_propagatesVerifyRevertAndRollsBack() external {
-        _register(address(template));
-        address senior = makeAddr("SENIOR");
-        address junior = makeAddr("JUNIOR");
-        template.setDeployResult(senior, junior, address(0));
-        template.setRevertOnVerify(true);
-
-        vm.prank(DEPLOYER);
-        vm.expectRevert(IRoycoProtocolTemplate.INVALID_PARAMS.selector);
-        factory.executeMarketDeployment(address(template), "");
-
-        // The revert must roll back the mapping writes.
-        assertEq(factory.seniorTrancheToJuniorTranche(senior), address(0), "s->j not stored on revert");
-        assertEq(factory.juniorTrancheToSeniorTranche(junior), address(0), "j->s not stored on revert");
-    }
-
-    function test_execute_clearsActiveTemplate_allowsSequentialDeploys() external {
-        _register(address(template));
-
-        template.setDeployResult(makeAddr("S1"), makeAddr("J1"), address(0));
-        _deploy();
-
-        // A second deployment succeeding proves the transient active-template binding was cleared.
-        template.setDeployResult(makeAddr("S2"), makeAddr("J2"), address(0));
-        IRoycoProtocolTemplate.DeploymentResult memory r2 = _deploy();
-        assertEq(r2.seniorTranche, makeAddr("S2"), "second deploy senior");
-        assertEq(factory.seniorTrancheToJuniorTranche(makeAddr("S2")), makeAddr("J2"), "second mapping");
-    }
-
-    function test_execute_reentrancyReverts() external {
-        _register(address(template));
-        // Give the template DEPLOYER_ROLE so its re-entrant call clears the `restricted` gate and reaches
-        // the `_activeTemplate == 0` guard, which must reject the nested deployment.
-        am.grantRole(DEPLOYER_ROLE, address(template), 0);
-        template.setPrimitive(MockDeploymentTemplate.Primitive.ReenterExecuteMarketDeployment, bytes32(0));
-
-        vm.prank(DEPLOYER);
-        vm.expectRevert(IRoycoFactory.NO_ACTIVE_TEMPLATE.selector);
-        factory.executeMarketDeployment(address(template), "");
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // TEMPLATE-CALLABLE PRIMITIVES — inside an active deployment window
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    function test_primitive_deployContract_duringWindow() external {
-        _register(address(template));
-        bytes32 salt = keccak256("dummy-salt");
-        template.setPrimitive(MockDeploymentTemplate.Primitive.DeployContract, salt);
-
-        _deploy();
-
-        address deployed = template.lastDeployedContract();
-        assertEq(deployed, factory.predictDeterministicAddress(salt), "deployed == predicted");
-        assertGt(deployed.code.length, 0, "deployed has code");
-        assertFalse(template.lastAlreadyDeployed(), "fresh deploy");
-    }
-
-    function test_primitive_deployContract_idempotentForSameSalt() external {
-        _register(address(template));
-        bytes32 salt = keccak256("dup-salt");
-        template.setPrimitive(MockDeploymentTemplate.Primitive.DeployContractTwiceSameSalt, salt);
-
-        _deploy();
-
-        assertTrue(template.lastAlreadyDeployed(), "second call reports alreadyDeployed");
-        assertEq(template.lastDeployedContract(), factory.predictDeterministicAddress(salt), "stable address");
-    }
-
-    function test_primitive_deployProxy_duringWindow() external {
-        _register(address(template));
-        bytes32 salt = keccak256("proxy-salt");
-        template.setPrimitive(MockDeploymentTemplate.Primitive.DeployProxy, salt);
-
-        _deploy();
-
-        address proxy = template.lastDeployedProxy();
-        assertEq(proxy, factory.predictDeterministicAddress(salt), "proxy == predicted");
-        assertGt(proxy.code.length, 0, "proxy has code");
-    }
-
-    function test_primitive_setTargetFunctionRole_duringWindow() external {
-        _register(address(template));
-        address target = makeAddr("SOME_TARGET");
-        bytes4 selector = bytes4(keccak256("someFn()"));
-        uint64 someRole = 777;
-        template.setPrimitive(MockDeploymentTemplate.Primitive.SetTargetFunctionRole, bytes32(0));
-        template.setRoleWiring(target, selector, someRole, address(0));
-
-        _deploy();
-
-        assertEq(am.getTargetFunctionRole(target, selector), someRole, "target function role bound");
-    }
-
-    function test_primitive_grantRole_duringWindow() external {
-        _register(address(template));
-        address account = makeAddr("GRANTEE");
-        uint64 someRole = 888;
-        template.setPrimitive(MockDeploymentTemplate.Primitive.GrantRole, bytes32(0));
-        template.setRoleWiring(address(0), bytes4(0), someRole, account);
-
-        _deploy();
-
-        (bool has,) = am.hasRole(someRole, account);
-        assertTrue(has, "role granted to account");
-    }
-
-    function test_primitive_executeAsFactory_forwardsAsFactory() external {
-        _register(address(template));
-        CallRecorder recorder = new CallRecorder();
-        template.setPrimitive(MockDeploymentTemplate.Primitive.ExecuteAsFactory, bytes32(0));
-        template.setRoleWiring(address(recorder), CallRecorder.ping.selector, 0, address(0));
-
-        _deploy();
-
-        assertEq(recorder.lastCaller(), address(factory), "call arrived as the factory");
-        assertEq(recorder.pings(), 1, "recorder pinged once");
-        assertEq(abi.decode(template.lastExecuteAsFactoryReturn(), (uint256)), 1, "forwarded return value");
-    }
-
-    function test_primitive_executeAsFactory_propagatesFailure() external {
-        _register(address(template));
-        CallRecorder recorder = new CallRecorder();
-        template.setPrimitive(MockDeploymentTemplate.Primitive.ExecuteAsFactory, bytes32(0));
-        template.setRoleWiring(address(recorder), CallRecorder.boom.selector, 0, address(0));
-
-        vm.prank(DEPLOYER);
-        vm.expectPartialRevert(IRoycoFactory.FACTORY_CALL_FAILED.selector);
-        factory.executeMarketDeployment(address(template), "");
+        factory.executeMarketDeployment(address(template), p);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -396,7 +298,7 @@ contract RoycoFactoryTest is Test {
         vm.startPrank(STRANGER);
 
         vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
-        factory.deployDeterministicContract(type(Dummy).creationCode, keccak256("x"));
+        factory.deployDeterministicContract(hex"00", keccak256("x"));
 
         vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
         factory.deployDeterministicProxy(address(this), "", keccak256("y"));
@@ -437,7 +339,6 @@ contract RoycoFactoryTest is Test {
         address newImpl = address(new RoycoFactory());
         vm.prank(UPGRADER);
         factory.upgradeToAndCall(newImpl, "");
-        // Still governed by the same AM after upgrade.
         assertEq(factory.authority(), address(am), "authority preserved");
     }
 

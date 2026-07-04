@@ -414,8 +414,23 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         bytes memory kernelCreationCode;
         (template, kernelComponentId, kernelCreationCode) = _deployTemplate(factoryIface, _kernelType);
 
-        bytes32[] memory ids = new bytes32[](7);
-        bytes[] memory codes = new bytes[](7);
+        (bytes32[] memory ids, bytes[] memory codes) = _dayTemplateComponents(kernelComponentId, kernelCreationCode);
+        _factory.registerTemplate(template, ids, codes);
+        kernelTypeToTemplate[uint256(_kernelType)] = template;
+    }
+
+    /// @notice The (component id, creation code) pairs a Day market template is registered with.
+    /// @dev Extracted so tests (and tooling) can register a Day template on their own factory without re-listing the set.
+    function _dayTemplateComponents(
+        bytes32 _kernelComponentId,
+        bytes memory _kernelCreationCode
+    )
+        internal
+        pure
+        returns (bytes32[] memory ids, bytes[] memory codes)
+    {
+        ids = new bytes32[](7);
+        codes = new bytes[](7);
         ids[0] = COMPONENT_ID_SENIOR_TRANCHE_IMPL;
         codes[0] = type(RoycoSeniorTranche).creationCode;
         ids[1] = COMPONENT_ID_JUNIOR_TRANCHE_IMPL;
@@ -426,13 +441,32 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         codes[3] = type(RoycoDayAccountant).creationCode;
         ids[4] = COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2;
         codes[4] = type(AdaptiveCurveYDM_V2).creationCode;
-        ids[5] = kernelComponentId;
-        codes[5] = kernelCreationCode;
+        ids[5] = _kernelComponentId;
+        codes[5] = _kernelCreationCode;
         ids[6] = COMPONENT_ID_DAY_BALANCER_HOOKS;
         codes[6] = type(RoycoDayBalancerV3Hooks).creationCode;
+    }
 
-        _factory.registerTemplate(template, ids, codes);
-        kernelTypeToTemplate[uint256(_kernelType)] = template;
+    /// @notice Public helper: the component set for the Day ERC4626-Chainlink-Balancer kernel template (test/tooling use).
+    function dayTemplateComponents() public pure returns (bytes32[] memory ids, bytes[] memory codes) {
+        return _dayTemplateComponents(
+            COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK,
+            type(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode
+        );
+    }
+
+    /// @notice Public wrapper over `_buildDayParams` so tests can construct real template deploy params from a market config.
+    function buildDayParams(
+        MarketConfig memory _config,
+        bytes32 _marketId,
+        address _protocolFeeRecipient,
+        address _roycoBlacklist
+    )
+        public
+        pure
+        returns (BalancerV3DeploymentTemplate.DayParams memory)
+    {
+        return _buildDayParams(_config, _marketId, _protocolFeeRecipient, _roycoBlacklist);
     }
 
     /// @notice Deploys the concrete Day template for a kernel type and returns its kernel component id + creation code.
