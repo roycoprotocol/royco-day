@@ -14,6 +14,7 @@ import {
     TokenConfig as BalancerV3TokenConfig,
     TokenType as BalancerV3TokenType
 } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
+import { ConstantPriceFeed } from "../../../lib/balancer-v3-monorepo/pkg/oracles/contracts/ConstantPriceFeed.sol";
 import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import { BalancerPoolToken } from "../../../lib/balancer-v3-monorepo/pkg/vault/contracts/BalancerPoolToken.sol";
 import { SingletonAuthentication } from "../../../lib/balancer-v3-monorepo/pkg/vault/contracts/SingletonAuthentication.sol";
@@ -33,7 +34,6 @@ import { IRoycoProtocolTemplate } from "../../interfaces/factory/IRoycoProtocolT
 import { BalancerV3_LT_BPTOracle_Quoter } from "../../kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 import { RoycoDayBalancerV3Hooks } from "../../kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3Hooks.sol";
 import { RoycoDayBalancerV3HooksStandIn } from "../../kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3HooksStandIn.sol";
-import { UnitPriceFeed } from "../../kernels/base/quoter/liquidity-tranche/balancer-v3/UnitPriceFeed.sol";
 import { TrancheType } from "../../libraries/Types.sol";
 import { RoycoLiquidityTranche } from "../../tranches/RoycoLiquidityTranche.sol";
 import {
@@ -93,6 +93,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         bool enableDonation;
         bool disableUnbalancedLiquidity;
         address quoteToken;
+        address quoteTokenRateProvider;
     }
 
     /// @notice Top-level params struct passed to `deployMarket(bytes)`.
@@ -113,7 +114,6 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         address roycoBlacklist;
         bytes kernelSpecificParams;
         bool enforceVaultSharesTransferWhitelist;
-        address quoteTokenPriceFeed;
     }
 
     /// @notice Balancer V3-specific addresses recorded for verification.
@@ -166,8 +166,9 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     ///         TVL oracle through it, immediately after the market's pool is created.
     ILPOracleFactoryBase public immutable ECLP_LP_ORACLE_FACTORY;
 
-    /// @notice Shared constant-1.0 price feed for the senior-tranche pool leg, deployed once here (it is stateless).
-    address public immutable UNIT_PRICE_FEED;
+    /// @notice Shared Balancer constant-1.0 price feed for both pool legs of the BPT oracle, deployed once here (it is
+    ///         stateless): each leg's live balance is already priced by its rate provider, so the residual feed is 1.
+    address public immutable CONSTANT_PRICE_FEED;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CONSTRUCTION
@@ -185,7 +186,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         BALANCER_HOOK_STANDIN_IMPL = address(new RoycoDayBalancerV3HooksStandIn());
         require(address(SingletonAuthentication(address(_eclpLPOracleFactory)).getVault()) == address(BALANCER_V3_VAULT), INVALID_ECLP_LP_ORACLE_FACTORY());
         ECLP_LP_ORACLE_FACTORY = _eclpLPOracleFactory;
-        UNIT_PRICE_FEED = address(new UnitPriceFeed());
+        CONSTANT_PRICE_FEED = address(new ConstantPriceFeed());
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -243,7 +244,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         );
 
         // 6. Now that the pool is registered, deploy its manipulation-resistant BPT TVL oracle through Balancer's E-CLP LP oracle factory
-        address bptOracle = _deployBPTOracle(balancerPool, result.seniorTranche, p.quoteTokenPriceFeed);
+        address bptOracle = _deployBPTOracle(balancerPool);
 
         // 7. Deploy JT impl + proxy (plain first-loss asset).
         address jtImpl = _deployJuniorTrancheImpl(p.jtAsset, result.kernel, _marketComponentSalt(p.marketId, TAG_JT_IMPL));
@@ -273,15 +274,12 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
 
     /**
      * @notice Deploys the market's E-CLP BPT TVL oracle through Balancer's LP oracle factory.
-     * @dev Feed ordering must match the vault's (ascending-address) token registration order: the senior leg gets the
-     *      shared constant-1.0 feed (its live balance is already rate-scaled into NAV units by the kernel's rate
-     *      provider), the quote leg gets its market feed.
      */
-    function _deployBPTOracle(address _balancerPool, address _seniorTranche, address _quoteTokenPriceFeed) internal returns (address) {
+    function _deployBPTOracle(address _balancerPool) internal returns (address) {
         IERC20[] memory poolTokens = BALANCER_V3_VAULT.getPoolTokens(_balancerPool);
         BalancerAggregatorV3Interface[] memory feeds = new BalancerAggregatorV3Interface[](poolTokens.length);
         for (uint256 i; i < poolTokens.length; ++i) {
-            feeds[i] = BalancerAggregatorV3Interface(address(poolTokens[i]) == _seniorTranche ? UNIT_PRICE_FEED : _quoteTokenPriceFeed);
+            feeds[i] = BalancerAggregatorV3Interface(CONSTANT_PRICE_FEED);
         }
 
         return address(
@@ -343,8 +341,8 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         (address token0, address token1) = uint160(_seniorTranche) < uint160(_p.quoteToken) ? (_seniorTranche, _p.quoteToken) : (_p.quoteToken, _seniorTranche);
 
         BalancerV3TokenConfig[] memory tokens = new BalancerV3TokenConfig[](2);
-        tokens[0] = _buildTokenConfig(token0, _seniorTranche, _rateProvider);
-        tokens[1] = _buildTokenConfig(token1, _seniorTranche, _rateProvider);
+        tokens[0] = _buildTokenConfig(token0, _seniorTranche, _rateProvider, _p.quoteTokenRateProvider);
+        tokens[1] = _buildTokenConfig(token1, _seniorTranche, _rateProvider, _p.quoteTokenRateProvider);
 
         address authority = ROYCO_FACTORY.ROYCO_AUTHORITY();
         BalancerV3PoolRoleAccounts memory roleAccounts =
@@ -366,12 +364,21 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     }
 
     /// @dev Token config for a pool leg: the senior-tranche leg is `WITH_RATE` (priced by the kernel rate provider); every other leg is `STANDARD`.
-    function _buildTokenConfig(address _token, address _seniorTranche, address _rateProvider) private pure returns (BalancerV3TokenConfig memory) {
-        bool isSeniorLeg = _token == _seniorTranche;
+    function _buildTokenConfig(
+        address _token,
+        address _seniorTranche,
+        address _seniorRateProvider,
+        address _quoteRateProvider
+    )
+        private
+        pure
+        returns (BalancerV3TokenConfig memory)
+    {
+        address rateProvider = _token == _seniorTranche ? _seniorRateProvider : _quoteRateProvider;
         return BalancerV3TokenConfig({
             token: IERC20(_token),
-            tokenType: isSeniorLeg ? BalancerV3TokenType.WITH_RATE : BalancerV3TokenType.STANDARD,
-            rateProvider: isSeniorLeg ? IRateProvider(_rateProvider) : IRateProvider(address(0)),
+            tokenType: rateProvider == address(0) ? BalancerV3TokenType.STANDARD : BalancerV3TokenType.WITH_RATE,
+            rateProvider: IRateProvider(rateProvider),
             paysYieldFees: false
         });
     }

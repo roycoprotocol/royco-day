@@ -65,9 +65,16 @@ abstract contract Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest is Abstra
         return false;
     }
 
-    /// @dev Keep the mocked feed's `updatedAt` fresh across warps so the kernel's staleness check keeps passing.
+    /// @dev Keep the mocked feed's `updatedAt` fresh at the current (post-warp) time so the kernel's staleness check keeps
+    ///      passing. Only re-stamps an already-seeded mock — seed it while the feed is still fresh (see `_pinOracleFresh`).
     function _refreshOraclesAfterWarp() internal virtual override {
         if (_oracleMocked) _applyOracleMock(_baseAssetToNavOracle());
+    }
+
+    /// @dev Freeze the base->NAV feed's live value into the mock (a 0% move) while it is still fresh, so a later warp can
+    ///      re-stamp it via `_refreshOraclesAfterWarp` without re-reading a by-then-stale real feed.
+    function _pinOracleFresh() internal {
+        _moveOracle(int256(1), 0);
     }
 
     function _moveOracle(int256 _sign, uint256 _percentageWAD) internal {

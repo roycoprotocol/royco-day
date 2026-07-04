@@ -525,7 +525,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         });
 
         params.gyroECLPPoolParams = _config.gyroECLPPoolParams;
-        params.quoteTokenPriceFeed = _config.quoteTokenPriceFeed;
         params.jtYDMTargetUtilizationWAD = _config.jtYdmTargetUtilizationWAD;
         params.ltYDMTargetUtilizationWAD = _config.ltYdmTargetUtilizationWAD;
         params.kernelSpecificParams = _config.kernelSpecificParams; // template KernelParams are field-identical to the config blobs
