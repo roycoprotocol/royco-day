@@ -15,11 +15,11 @@ type NAV_UNIT is uint256;
 type TRANCHE_UNIT is uint256;
 
 /**
- * @title UnitsMathLib
+ * @title RoycoUnitsMath
  * @notice Typed math helpers for Royco units (NAV_UNIT and TRANCHE_UNIT)
  * @dev Wraps OpenZeppelin Math helpers and preserves unit typing on return values
  */
-library UnitsMathLib {
+library RoycoUnitsMath {
     /// @notice Returns the minimum of two NAV-denominated quantities
     function min(NAV_UNIT _a, NAV_UNIT _b) internal pure returns (NAV_UNIT) {
         return toNAVUnits(Math.min(toUint256(_a), toUint256(_b)));

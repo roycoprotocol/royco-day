@@ -5,9 +5,10 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoSeniorTranche } from "../../interfaces/IRoycoSeniorTranche.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
-import { ZERO_NAV_UNITS } from "../Constants.sol";
+import { Cache, CacheKey } from "../Cache.sol";
+import { WAD, ZERO_NAV_UNITS } from "../Constants.sol";
 import { SyncedAccountingState } from "../Types.sol";
-import { NAV_UNIT } from "../Units.sol";
+import { Math, NAV_UNIT, toUint256 } from "../Units.sol";
 import { ValuationLogic } from "./ValuationLogic.sol";
 
 /**
@@ -16,8 +17,6 @@ import { ValuationLogic } from "./ValuationLogic.sol";
  * @notice The post-sync protocol fee and liquidity-premium share mint for a Royco market: the premium/fee split and the mint orchestration
  */
 library FeeAndLiquidityPremiumLogic {
-    // ===== Fee & liquidity premium processing =====
-
     /**
      * @notice Mints the protocol fee shares and the liquidity premium shares accrued by a pre-op sync
      * @dev The liquidity premium is senior yield routed to the LT: it is minted as senior tranche shares the kernel holds for the
@@ -40,8 +39,8 @@ library FeeAndLiquidityPremiumLogic {
         (uint256 liquidityPremiumShares, uint256 stProtocolFeeShares, uint256 stTotalSupplyAfterMints) =
             _computeSTFeeAndLiquidityPremiumSharesToMint(_state, IERC20(_immutables.seniorTranche).totalSupply());
 
-        // Freeze the senior share rate at this sync's post-mint value before the reinvestment (or any venue mark read) consumes it, so an inline senior share move cannot shift the venue's senior-leg mark
-        IRoycoDayKernel(address(this)).cacheSTShareRate(_state.stEffectiveNAV, stTotalSupplyAfterMints);
+        // Cache the senior share rate at this sync's post-mint value before the reinvestment (or any venue mark read) consumes it, so an inline senior share move cannot shift the venue's senior-leg mark
+        Cache._write(CacheKey.ST_SHARE_RATE, toUint256(ValuationLogic._convertToValue(WAD, stTotalSupplyAfterMints, _state.stEffectiveNAV, Math.Rounding.Floor)));
 
         // Mint the liquidity premium as senior tranche shares held by the kernel on behalf of the liquidity tranche
         // The premium is already booked into the senior effective NAV, so minting these shares only reassigns senior appreciation to the LT
@@ -57,15 +56,17 @@ library FeeAndLiquidityPremiumLogic {
         }
         // If JT fees were accrued, price them against the post-fee junior NAV (the fee dilutes existing holders) and mint to the recipient
         if (_state.jtProtocolFee != ZERO_NAV_UNITS) {
-            uint256 jtProtocolFeeShares =
-                ValuationLogic._navToShares(_state.jtProtocolFee, _state.jtEffectiveNAV - _state.jtProtocolFee, IERC20(_immutables.juniorTranche).totalSupply());
+            uint256 jtProtocolFeeShares = ValuationLogic._convertToShares(
+                _state.jtProtocolFee, (_state.jtEffectiveNAV - _state.jtProtocolFee), IERC20(_immutables.juniorTranche).totalSupply(), Math.Rounding.Floor
+            );
             IRoycoVaultTranche(_immutables.juniorTranche).mintProtocolFeeShares(protocolFeeRecipient, jtProtocolFeeShares);
         }
         // If LT fees were accrued, price them against the post-fee LT effective NAV (its market-making depth plus the idle premium) and mint to the recipient
         if (_state.ltProtocolFee != ZERO_NAV_UNITS) {
             NAV_UNIT ltEffectiveNAV = ValuationLogic._getLiquidityTrancheEffectiveNAV($, _state.stEffectiveNAV, stTotalSupplyAfterMints);
-            uint256 ltProtocolFeeShares =
-                ValuationLogic._navToShares(_state.ltProtocolFee, ltEffectiveNAV - _state.ltProtocolFee, IERC20(_immutables.liquidityTranche).totalSupply());
+            uint256 ltProtocolFeeShares = ValuationLogic._convertToShares(
+                _state.ltProtocolFee, (ltEffectiveNAV - _state.ltProtocolFee), IERC20(_immutables.liquidityTranche).totalSupply(), Math.Rounding.Floor
+            );
             IRoycoVaultTranche(_immutables.liquidityTranche).mintProtocolFeeShares(protocolFeeRecipient, ltProtocolFeeShares);
         }
     }
@@ -94,9 +95,9 @@ library FeeAndLiquidityPremiumLogic {
         // NOTE: The waterfall enforces that (premium + fee) <= senior effective NAV, so the subtraction never underflows
         NAV_UNIT retainedSeniorNAV = (_state.stEffectiveNAV - _state.ltLiquidityPremium - _state.stProtocolFee);
 
-        // Convert each carve-out into senior shares against the retained NAV over the pre-sync supply (the zero-NAV boundary is handled in _navToShares)
-        liquidityPremiumShares = ValuationLogic._navToShares(_state.ltLiquidityPremium, retainedSeniorNAV, _stTotalSupply);
-        stProtocolFeeShares = ValuationLogic._navToShares(_state.stProtocolFee, retainedSeniorNAV, _stTotalSupply);
-        stTotalSupplyAfterMints = _stTotalSupply + liquidityPremiumShares + stProtocolFeeShares;
+        // Convert each carve-out into senior shares against the retained NAV over the pre-sync supply (the zero-NAV boundary is handled in _convertToShares)
+        liquidityPremiumShares = ValuationLogic._convertToShares(_state.ltLiquidityPremium, retainedSeniorNAV, _stTotalSupply, Math.Rounding.Floor);
+        stProtocolFeeShares = ValuationLogic._convertToShares(_state.stProtocolFee, retainedSeniorNAV, _stTotalSupply, Math.Rounding.Floor);
+        stTotalSupplyAfterMints = (_stTotalSupply + liquidityPremiumShares + stProtocolFeeShares);
     }
 }

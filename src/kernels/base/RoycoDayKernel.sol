@@ -9,10 +9,10 @@ import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "../../libraries/Units.sol";
+import { AccountingSyncLogic } from "../../libraries/logic/AccountingSyncLogic.sol";
 import { BlacklistLogic } from "../../libraries/logic/BlacklistLogic.sol";
 import { DepositLogic } from "../../libraries/logic/DepositLogic.sol";
 import { RedemptionLogic } from "../../libraries/logic/RedemptionLogic.sol";
-import { SyncLogic } from "../../libraries/logic/SyncLogic.sol";
 
 /**
  * @title RoycoDayKernel
@@ -23,11 +23,8 @@ import { SyncLogic } from "../../libraries/logic/SyncLogic.sol";
  */
 abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardTransient {
     /// @dev Storage slot for RoycoDayKernelState using ERC-7201 pattern
-    // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoDayKernelState")) - 1)) & ~bytes32(uint256(0xff))
+    /// @dev keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoDayKernelState")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ROYCO_DAY_KERNEL_STORAGE_SLOT = 0xc366ce7b07de4bd3f36c874874355fb088fd2057e716d8a9786c17b22e6fec00;
-
-    /// @dev The top bit set on a transient cache slot to mark it populated, shared by every quoter's transient rate cache so a set slot is distinguishable from an unset one
-    uint256 internal constant CACHE_SET_MASK = 1 << 255;
 
     /// @inheritdoc IRoycoDayKernel
     address public immutable override(IRoycoDayKernel) SENIOR_TRANCHE;
@@ -57,7 +54,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     /// @notice Whether to enforce the tranche whitelist on share transfers
     bool public immutable ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER;
 
-    /// @dev Permissions the function to only be callable by this contract via a self-call, the seam through which the kernel's delegatecall logic libraries reach the liquidity venue drivers
+    /// @dev Permissions the function to only be callable by this contract via a self-call, the seam through which the delegatecall logic libraries reach callback into the kernel
     modifier onlySelf() {
         require(msg.sender == address(this), ONLY_SELF());
         _;
@@ -90,12 +87,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         _;
     }
 
-    /// @dev Initializes and clears the quoter cache at the start and end of the call respectively
+    /// @dev Initializes the quoter cache at the start of the call; no teardown is needed since the transient cache auto-clears at transaction end
     /// @dev Should be placed on all functions that use the quoter cache
     modifier withQuoterCache() {
         _initializeQuoterCache();
         _;
-        _clearQuoterCache();
     }
 
     // =============================
@@ -168,13 +164,13 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     function ltConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _ltAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
 
     /// @inheritdoc IRoycoDayKernel
-    function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
+    function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
 
     /// @inheritdoc IRoycoDayKernel
-    function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
+    function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
 
     /// @inheritdoc IRoycoDayKernel
-    function ltConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
+    function ltConvertNAVUnitsToTrancheUnits(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
 
     // =============================
     // Tranche Preview Deposit and Redeem Functions
@@ -306,7 +302,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     // =============================
-    // External Tranche Accounting and Synchronization Functions
+    // Tranche Accounting and Synchronization Functions
     // =============================
 
     /// @inheritdoc IRoycoDayKernel
@@ -320,12 +316,12 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         withQuoterCache
         returns (SyncedAccountingState memory state)
     {
-        return SyncLogic.syncTrancheAccounting(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState());
+        return AccountingSyncLogic.syncTrancheAccounting(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState());
     }
 
     /// @inheritdoc IRoycoDayKernel
     function reinvestLiquidityPremium(uint256 _stShares) external virtual override(IRoycoDayKernel) whenNotPaused restricted nonReentrant withQuoterCache {
-        SyncLogic.reinvestLiquidityPremium(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _stShares);
+        AccountingSyncLogic.reinvestLiquidityPremium(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _stShares);
     }
 
     /// @inheritdoc IRoycoDayKernel
@@ -337,7 +333,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         whenNotPaused
         returns (SyncedAccountingState memory state, AssetClaims memory claims, uint256 totalTrancheShares)
     {
-        return SyncLogic.previewSyncTrancheAccounting(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _trancheType);
+        return AccountingSyncLogic.previewSyncTrancheAccounting(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _trancheType);
     }
 
     // =============================
@@ -451,10 +447,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         return RedemptionLogic.ltRedeem(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _shares, _receiver);
     }
 
-    // =============================
-    // Liquidity Tranche Multi-Asset Deposit and Redeem Functions
-    // =============================
-
     /// @inheritdoc IRoycoDayKernel
     /// @dev LT multi-asset deposits are enabled in a PERPETUAL market state (granted the market's coverage and liquidity requirements are satisfied against the new senior exposure), and in a fixed-term market only for a quote-only deposit that mints no senior shares
     function ltDepositMultiAsset(
@@ -520,21 +512,18 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     // =============================
-    // Internal Tranche Accounting and Valuation Functions
+    // Internal Utility Functions
     // =============================
 
     /**
      * @notice Invokes the accountant to do a pre-operation (deposit and withdrawal) NAV sync and mints any protocol fee shares accrued
      * @dev A sync must be executed before every NAV mutating operation (deposit and withdrawal)
+     * @dev Uses the quoter cache since it is called by admin setters outside a cached operation, so it re-initializes the quoter cache to the live rate before syncing
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
-    function _preOpSyncTrancheAccounting() internal virtual returns (SyncedAccountingState memory state) {
-        return SyncLogic._preOpSyncTrancheAccounting(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState());
+    function _preOpSyncTrancheAccounting() internal virtual withQuoterCache returns (SyncedAccountingState memory state) {
+        return AccountingSyncLogic._preOpSyncTrancheAccounting(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState());
     }
-
-    // =============================
-    // Tranche Compliance Methods
-    // =============================
 
     /// @inheritdoc IRoycoDayKernel
     function preTrancheBalanceUpdateHook(
@@ -577,10 +566,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      */
     function _preTrancheBalanceUpdate(address _caller, address _from, address _to, uint256 _value) internal virtual { }
 
-    // =============================
-    // Internal Quoter Cache Functions
-    // =============================
-
     /**
      * @notice Initializes the quoter
      * @dev Should be called at the start of a call
@@ -588,29 +573,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @dev Intentionally implemented with an empty body since inheriting contracts are not required to override this function: the cache is a pure optimization and quoters that do not cache read live
      */
     function _initializeQuoterCache() internal virtual { }
-
-    /**
-     * @notice Clears the quoter cache
-     * @dev Should be called at the end of a call
-     * @dev Typically used to clear the cached tranche unit to NAV unit conversion rate
-     * @dev Intentionally implemented with an empty body since inheriting contracts are not required to override this function: the cache is a pure optimization and quoters that do not cache read live
-     */
-    function _clearQuoterCache() internal virtual { }
-
-    /**
-     * @notice Decodes a transient cache slot into its populated flag and stored value
-     * @dev The single primitive shared by every quoter's transient rate cache: the top bit (CACHE_SET_MASK) marks a populated slot and the remaining bits hold the value, so an unset slot (zero) reads as a miss and a value is encoded for storage as `value | CACHE_SET_MASK`
-     * @param _cacheSlot The raw value read from a transient cache slot
-     * @return cacheHit Whether the slot holds a populated value
-     * @return value The cached value when cacheHit is true, otherwise zero
-     */
-    function _decodeCachedValue(uint256 _cacheSlot) internal pure returns (bool cacheHit, uint256 value) {
-        if (_cacheSlot & CACHE_SET_MASK != 0) return (true, _cacheSlot ^ CACHE_SET_MASK);
-    }
-
-    // =============================
-    // Kernel State Accessor Functions
-    // =============================
 
     /**
      * @notice Builds the immutables carrier threaded into the kernel's delegatecall logic libraries

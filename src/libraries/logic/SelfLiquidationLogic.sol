@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { WAD, ZERO_NAV_UNITS } from "../Constants.sol";
 import { AssetClaims, SyncedAccountingState } from "../Types.sol";
-import { Math, NAV_UNIT, UnitsMathLib } from "../Units.sol";
+import { Math, NAV_UNIT, RoycoUnitsMath } from "../Units.sol";
 import { TrancheClaimsLogic } from "./TrancheClaimsLogic.sol";
 
 /**
@@ -13,7 +13,7 @@ import { TrancheClaimsLogic } from "./TrancheClaimsLogic.sol";
  * @notice The senior-tranche self-liquidation bonus computation for a Royco market
  */
 library SelfLiquidationLogic {
-    using UnitsMathLib for NAV_UNIT;
+    using RoycoUnitsMath for NAV_UNIT;
 
     /**
      * @notice Computes and applies the self-liquidation bonus for ST redemptions when the liquidation coverageUtilization threshold is breached, sourced from JT asset claims
@@ -50,14 +50,14 @@ library SelfLiquidationLogic {
         NAV_UNIT maxCoverageUtilizationNeutralBonusNAV = _computeMaxCoverageUtilizationNeutralBonus(_state, _stUserClaims, jtClaimOnSTRawNAV);
 
         // Clamp the actual bonus by the remaining JT controlled NAV and the maximum coverage-utilization-neutral (leverage retaining or delevering) NAV
-        stSelfLiquidationBonusNAV = UnitsMathLib.min(UnitsMathLib.min(desiredBonusNAV, _state.jtEffectiveNAV), maxCoverageUtilizationNeutralBonusNAV);
+        stSelfLiquidationBonusNAV = RoycoUnitsMath.min(RoycoUnitsMath.min(desiredBonusNAV, _state.jtEffectiveNAV), maxCoverageUtilizationNeutralBonusNAV);
 
         // Preemptively return if there is no remaining bonus capital to remit
         if (stSelfLiquidationBonusNAV == ZERO_NAV_UNITS) return (_stUserClaims, ZERO_NAV_UNITS);
 
         // Compute the bonus NAV sourced from JT's claims on each tranche's NAV: prioritize ST assets over JT assets for sourcing
         // stSelfLiquidationBonusNAV <= (jtClaimOnSTRawNAV + jtClaimOnSelfRawNAV) since it was bounded by JT effective NAV already
-        NAV_UNIT bonusFromJTClaimOnSTRawNAV = UnitsMathLib.min(stSelfLiquidationBonusNAV, jtClaimOnSTRawNAV);
+        NAV_UNIT bonusFromJTClaimOnSTRawNAV = RoycoUnitsMath.min(stSelfLiquidationBonusNAV, jtClaimOnSTRawNAV);
         NAV_UNIT bonusFromJTClaimOnSelfRawNAV = (stSelfLiquidationBonusNAV - bonusFromJTClaimOnSTRawNAV);
 
         // Apply the derived bonus to the user's asset claims

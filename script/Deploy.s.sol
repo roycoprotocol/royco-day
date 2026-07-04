@@ -41,8 +41,8 @@ import { IYDM } from "../src/interfaces/IYDM.sol";
 import { IRoycoFactory } from "../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import {
-    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel
-} from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel.sol";
+    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel
+} from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
 import {
     IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
 } from "../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
@@ -85,7 +85,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     /// @notice Enum for the Day kernel types this script can deploy.
     /// @dev The Dawn-era kernel zoo was removed in the Day fork. New Day kernels are added here as they ship.
     enum KernelType {
-        Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel
+        Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel
     }
 
     /// @notice Enum for YDM types
@@ -444,11 +444,11 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         // The concrete Balancer-V3 templates are constructed with the chain's Gyro E-CLP pool factory.
         GyroECLPPoolFactory poolFactory = GyroECLPPoolFactory(getChainConfig(block.chainid).gyroECLPPoolFactory);
 
-        if (_kernelType == KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel) {
+        if (_kernelType == KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel) {
             return (
                 address(new DayIdenticalERC4626ChainlinkDeploymentTemplate(_factory, poolFactory)),
                 COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK,
-                type(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel).creationCode
+                type(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode
             );
         }
         revert UnsupportedKernelType(_kernelType);

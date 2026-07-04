@@ -11,8 +11,9 @@ import {
 import { IERC20 } from "../../../../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "../../../../../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IRoycoDayKernel } from "../../../../../../interfaces/IRoycoDayKernel.sol";
-import { WAD, ZERO_NAV_UNITS } from "../../../../../../libraries/Constants.sol";
-import { Math, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toUint256 } from "../../../../../../libraries/Units.sol";
+import { WAD } from "../../../../../../libraries/Constants.sol";
+import { Math, NAV_UNIT, TRANCHE_UNIT, RoycoUnitsMath, toUint256 } from "../../../../../../libraries/Units.sol";
+import { ValuationLogic } from "../../../../../../libraries/logic/ValuationLogic.sol";
 import { IBalancerV3VenueCallbacks } from "../interfaces/IBalancerV3VenueCallbacks.sol";
 
 /**
@@ -39,8 +40,8 @@ struct BalancerV3VenueImmutableState {
  * @notice Externalized Balancer V3 liquidity tranche venue logic delegatecalled by the kernel's BalancerV3_LT_BPTOracle_Quoter mixin
  */
 library BalancerV3VenueLogic {
-    using UnitsMathLib for NAV_UNIT;
-    using UnitsMathLib for TRANCHE_UNIT;
+    using RoycoUnitsMath for NAV_UNIT;
+    using RoycoUnitsMath for TRANCHE_UNIT;
     using SafeERC20 for IERC20;
 
     /**
@@ -175,7 +176,7 @@ library BalancerV3VenueLogic {
         if (stSharesToReinvest == 0) return;
 
         // Value the ST shares that need to be reinvested in NAV units at the synced senior share rate (effective NAV over the post-mint supply)
-        NAV_UNIT stSharesToReinvestNAV = _totalSTShares == 0 ? ZERO_NAV_UNITS : _stEffectiveNAV.mulDiv(stSharesToReinvest, _totalSTShares, Math.Rounding.Floor);
+        NAV_UNIT stSharesToReinvestNAV = ValuationLogic._convertToValue(stSharesToReinvest, _totalSTShares, _stEffectiveNAV, Math.Rounding.Floor);
         // Mark that senior NAV to its fair BPT at the manipulation-resistant oracle, discounted by the max tolerated slippage
         TRANCHE_UNIT minLTAssetsOut = IRoycoDayKernel(address(this)).ltConvertNAVUnitsToTrancheUnits(stSharesToReinvestNAV)
             .mulDiv((WAD - _maxReinvestmentSlippageWAD), WAD, Math.Rounding.Ceil);

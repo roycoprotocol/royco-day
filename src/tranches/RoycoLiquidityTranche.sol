@@ -10,6 +10,7 @@ import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 import { ZERO_NAV_UNITS } from "../libraries/Constants.sol";
 import { AssetClaims, TrancheType } from "../libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../libraries/Units.sol";
+import { ValuationLogic } from "../libraries/logic/ValuationLogic.sol";
 import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
 
 /**
@@ -67,7 +68,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         require(valueAllocated != ZERO_NAV_UNITS, INVALID_VALUE_ALLOCATED());
 
         // Mint the LT shares to the receiver at the pre-deposit LT effective NAV per share
-        shares = _convertToShares(valueAllocated, totalSupply(), navToMintSharesAt, Math.Rounding.Floor);
+        shares = ValuationLogic._convertToShares(valueAllocated, navToMintSharesAt, totalSupply(), Math.Rounding.Floor);
         require(shares != 0, MUST_MINT_NON_ZERO_SHARES());
         _mint(_receiver, shares);
 
@@ -79,7 +80,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         // Simulate the kernel's multi-asset deposit for the value allocated and the pre-deposit LT effective NAV per share
         (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt,) = IRoycoDayKernel(KERNEL).ltPreviewDepositMultiAsset(toTrancheUnits(_stAssets), _quoteAssets);
         // Mint LT shares at the pre-deposit LT effective NAV per share — identical to depositMultiAsset's share math
-        shares = _convertToShares(valueAllocated, totalSupply(), navToMintSharesAt, Math.Rounding.Floor);
+        shares = ValuationLogic._convertToShares(valueAllocated, navToMintSharesAt, totalSupply(), Math.Rounding.Floor);
     }
 
     /// @inheritdoc IRoycoLiquidityTranche

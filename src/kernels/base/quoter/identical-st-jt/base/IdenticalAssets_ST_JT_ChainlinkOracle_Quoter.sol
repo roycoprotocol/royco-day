@@ -112,7 +112,7 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
 
         // Return the price and the scaled precision
         price = uint256(answer);
-        precision = 10 ** uint256(oracle.decimals());
+        precision = (10 ** uint256(oracle.decimals()));
     }
 
     /**

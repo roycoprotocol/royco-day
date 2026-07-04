@@ -12,7 +12,7 @@ import { NAV_UNIT, TRANCHE_UNIT } from "../Units.sol";
 import { BlacklistLogic } from "./BlacklistLogic.sol";
 import { FeeAndLiquidityPremiumLogic } from "./FeeAndLiquidityPremiumLogic.sol";
 import { SelfLiquidationLogic } from "./SelfLiquidationLogic.sol";
-import { SyncLogic } from "./SyncLogic.sol";
+import { AccountingSyncLogic } from "./AccountingSyncLogic.sol";
 import { TrancheClaimsLogic } from "./TrancheClaimsLogic.sol";
 import { ValuationLogic } from "./ValuationLogic.sol";
 
@@ -47,7 +47,7 @@ library RedemptionLogic {
         SyncedAccountingState memory state;
         uint256 totalTrancheShares;
         // Execute an accounting sync to reconcile underlying PNL
-        (state, userAssetClaims, totalTrancheShares) = SyncLogic._preOpSyncTrancheAccounting($, _immutables, TrancheType.SENIOR);
+        (state, userAssetClaims, totalTrancheShares) = AccountingSyncLogic._preOpSyncTrancheAccounting($, _immutables, TrancheType.SENIOR);
         // ST redemptions are disabled during a fixed-term market state
         require(state.marketState == MarketState.PERPETUAL, IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE());
 
@@ -63,7 +63,7 @@ library RedemptionLogic {
         TrancheClaimsLogic._withdrawAssets($, _immutables, userAssetClaims, _receiver);
 
         // Execute a post-redeem sync on accounting
-        SyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.ST_REDEEM, stSelfLiquidationBonusNAV, false);
+        AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.ST_REDEEM, stSelfLiquidationBonusNAV, false);
     }
 
     // =============================
@@ -90,7 +90,7 @@ library RedemptionLogic {
         // Execute a pre-op sync on accounting
         SyncedAccountingState memory state;
         uint256 totalTrancheShares;
-        (state, userAssetClaims, totalTrancheShares) = SyncLogic._preOpSyncTrancheAccounting($, _immutables, TrancheType.JUNIOR);
+        (state, userAssetClaims, totalTrancheShares) = AccountingSyncLogic._preOpSyncTrancheAccounting($, _immutables, TrancheType.JUNIOR);
         // JT redemptions are disabled during a fixed-term market state
         require(state.marketState == MarketState.PERPETUAL, IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE());
 
@@ -102,7 +102,7 @@ library RedemptionLogic {
         TrancheClaimsLogic._withdrawAssets($, _immutables, userAssetClaims, _receiver);
 
         // Execute a post-redeem sync on accounting, enforcing the market's coverage requirement post-redemption
-        SyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.JT_REDEEM, ZERO_NAV_UNITS, true);
+        AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.JT_REDEEM, ZERO_NAV_UNITS, true);
     }
 
     // =============================
@@ -128,7 +128,7 @@ library RedemptionLogic {
         // Execute a pre-op sync on accounting
         SyncedAccountingState memory state;
         uint256 totalTrancheShares;
-        (state, userAssetClaims, totalTrancheShares) = SyncLogic._preOpSyncTrancheAccounting($, _immutables, TrancheType.LIQUIDITY);
+        (state, userAssetClaims, totalTrancheShares) = AccountingSyncLogic._preOpSyncTrancheAccounting($, _immutables, TrancheType.LIQUIDITY);
         // LT redemptions are disabled during a fixed-term market state
         require(state.marketState == MarketState.PERPETUAL, IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE());
 
@@ -141,7 +141,7 @@ library RedemptionLogic {
 
         // Execute a post-redeem sync on accounting, enforcing the market's liquidity requirement post-redemption
         // LT redemption is exempt from satisfying the liquidity requirement once coverage utilization reaches its liquidation threshold
-        SyncLogic._postOpSyncTrancheAccounting(
+        AccountingSyncLogic._postOpSyncTrancheAccounting(
             $, _immutables, Operation.LT_REDEEM, ZERO_NAV_UNITS, (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD)
         );
     }
@@ -174,7 +174,7 @@ library RedemptionLogic {
     {
         // Execute a pre-op sync, minting this period's liquidity premium into the kernel's held senior shares so the held pile and the LT supply are consistent for sizing the redeemer's slice
         (SyncedAccountingState memory state, AssetClaims memory ltClaims, uint256 totalLTShares) =
-            SyncLogic._preOpSyncTrancheAccounting($, _immutables, TrancheType.LIQUIDITY);
+            AccountingSyncLogic._preOpSyncTrancheAccounting($, _immutables, TrancheType.LIQUIDITY);
         // Multi-asset redemptions are disabled during a fixed-term market state
         require(state.marketState == MarketState.PERPETUAL, IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE());
 
@@ -212,7 +212,7 @@ library RedemptionLogic {
 
         // Execute a post-redeem sync on accounting with the applied ST liquidation bonus
         // LT redemption is exempt from satisfying the liquidity requirement once coverage utilization reaches its liquidation threshold
-        SyncLogic._postOpSyncTrancheAccounting(
+        AccountingSyncLogic._postOpSyncTrancheAccounting(
             $, _immutables, Operation.LT_REDEEM, stSelfLiquidationBonusNAV, (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD)
         );
     }

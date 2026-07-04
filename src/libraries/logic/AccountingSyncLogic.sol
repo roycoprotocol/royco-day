@@ -5,19 +5,19 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { AssetClaims, Operation, SyncedAccountingState, TrancheType } from "../Types.sol";
-import { NAV_UNIT } from "../Units.sol";
+import { Math, NAV_UNIT } from "../Units.sol";
 import { FeeAndLiquidityPremiumLogic } from "./FeeAndLiquidityPremiumLogic.sol";
 import { TrancheClaimsLogic } from "./TrancheClaimsLogic.sol";
 import { UtilizationLogic } from "./UtilizationLogic.sol";
 import { ValuationLogic } from "./ValuationLogic.sol";
 
 /**
- * @title SyncLogic
+ * @title AccountingSyncLogic
  * @author Waymont
  * @notice Tranche-accounting synchronization for a Royco market: the pre-op and post-op sync, protocol fee and liquidity-premium
  *         processing, the idle liquidity-premium reinvestment, and the sync preview
  */
-library SyncLogic {
+library AccountingSyncLogic {
     // =============================
     // External Tranche Accounting and Synchronization Functions
     // =============================
@@ -83,7 +83,7 @@ library SyncLogic {
             // Compute JT share supply after the JT protocol fee shares are minted
             uint256 jtTotalSupply = IERC20(_immutables.juniorTranche).totalSupply();
             totalTrancheShares =
-                jtTotalSupply + ValuationLogic._navToShares(state.jtProtocolFee, (state.jtEffectiveNAV - state.jtProtocolFee), jtTotalSupply);
+                jtTotalSupply + ValuationLogic._convertToShares(state.jtProtocolFee, (state.jtEffectiveNAV - state.jtProtocolFee), jtTotalSupply, Math.Rounding.Floor);
         } else {
             // Compute LT share supply after the LT protocol fee shares are minted
             (uint256 liquidityPremiumShares,, uint256 stTotalSupplyAfterMints) =
@@ -94,7 +94,7 @@ library SyncLogic {
             NAV_UNIT ltEffectiveNAV =
                 ValuationLogic._getLiquidityTrancheEffectiveNAV($, state.stEffectiveNAV, stTotalSupplyAfterMints, ltOwnedSeniorTrancheShares);
             uint256 ltTotalSupply = IERC20(_immutables.liquidityTranche).totalSupply();
-            totalTrancheShares = ltTotalSupply + ValuationLogic._navToShares(state.ltProtocolFee, (ltEffectiveNAV - state.ltProtocolFee), ltTotalSupply);
+            totalTrancheShares = ltTotalSupply + ValuationLogic._convertToShares(state.ltProtocolFee, (ltEffectiveNAV - state.ltProtocolFee), ltTotalSupply, Math.Rounding.Floor);
         }
     }
 
@@ -134,7 +134,7 @@ library SyncLogic {
     {
         // Execute the pre-op PnL synchronization via the accountant
         state = IRoycoDayAccountant(_immutables.accountant).preOpSyncTrancheAccounting(ValuationLogic._getSeniorTrancheRawNAV($), ValuationLogic._getJuniorTrancheRawNAV($));
-        // Mint the fee and liquidity premium shares accrued by this sync, freezing the senior share rate for any liquidity venue before the premium is reinvested
+        // Mint the fee and liquidity premium shares accrued by this sync, caching the senior share rate for any liquidity venue before the premium is reinvested
         FeeAndLiquidityPremiumLogic._processFeesAndLiquidityPremium($, _immutables, state);
         // Commit the liquidity tranche's fresh raw NAV against the post-sync market state
         _commitPostSyncLiquidityTrancheRawNAV($, _immutables, state);
@@ -159,7 +159,7 @@ library SyncLogic {
     {
         // Execute the pre-op PnL synchronization via the accountant
         state = IRoycoDayAccountant(_immutables.accountant).preOpSyncTrancheAccounting(ValuationLogic._getSeniorTrancheRawNAV($), ValuationLogic._getJuniorTrancheRawNAV($));
-        // Mint the fee and liquidity premium shares accrued by this sync, freezing the senior share rate for any liquidity venue before the premium is reinvested
+        // Mint the fee and liquidity premium shares accrued by this sync, caching the senior share rate for any liquidity venue before the premium is reinvested
         FeeAndLiquidityPremiumLogic._processFeesAndLiquidityPremium($, _immutables, state);
         // Commit the liquidity tranche's fresh raw NAV against the post-sync market state
         _commitPostSyncLiquidityTrancheRawNAV($, _immutables, state);

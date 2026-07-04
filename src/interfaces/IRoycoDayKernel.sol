@@ -70,13 +70,13 @@ interface IRoycoDayKernel {
     /**
      * @notice Immutables carrier passed to the kernel's delegatecall logic libraries so a moved body can reach the seven
      *         kernel-level addresses it would otherwise read from an immutable (which a delegatecalled library cannot see)
-     * @custom:field seniorTranche The address of the Royco senior tranche associated with the kernel
-     * @custom:field stAsset The address of the base asset of the senior tranche
-     * @custom:field juniorTranche The address of the Royco junior tranche associated with the kernel
-     * @custom:field jtAsset The address of the base asset of the junior tranche
-     * @custom:field liquidityTranche The address of the Royco liquidity tranche associated with the kernel
-     * @custom:field ltAsset The base asset of the liquidity tranche (the liquidity venue's market-making position token)
-     * @custom:field accountant The address of the accountant for the Royco market
+     * @custom:field seniorTranche - The address of the Royco senior tranche associated with the kernel
+     * @custom:field stAsset - The address of the base asset of the senior tranche
+     * @custom:field juniorTranche - The address of the Royco junior tranche associated with the kernel
+     * @custom:field jtAsset - The address of the base asset of the junior tranche
+     * @custom:field liquidityTranche - The address of the Royco liquidity tranche associated with the kernel
+     * @custom:field ltAsset - The base asset of the liquidity tranche (the liquidity venue's market-making position token)
+     * @custom:field accountant - The address of the accountant for the Royco market
      */
     struct RoycoDayKernelImmutableState {
         address seniorTranche;
@@ -218,24 +218,24 @@ interface IRoycoDayKernel {
 
     /**
      * @notice Converts the specified assets denominated in the kernel's NAV units to assets denominated in ST's tranche units
-     * @param _navAssets The NAV of the assets denominated in the kernel's NAV units to convert to assets denominated in ST's tranche units
+     * @param _value The NAV of the assets denominated in the kernel's NAV units to convert to assets denominated in ST's tranche units
      * @return stAssets The specified NAV of the assets denominated in the kernel's NAV units converted to assets denominated in ST's tranche units
      */
-    function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) external view returns (TRANCHE_UNIT stAssets);
+    function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _value) external view returns (TRANCHE_UNIT stAssets);
 
     /**
      * @notice Converts the specified assets denominated in the kernel's NAV units to assets denominated in JT's tranche units
-     * @param _navAssets The NAV of the assets denominated in the kernel's NAV units to convert to assets denominated in JT's tranche units
+     * @param _value The NAV of the assets denominated in the kernel's NAV units to convert to assets denominated in JT's tranche units
      * @return jtAssets The specified NAV of the assets denominated in the kernel's NAV units converted to assets denominated in JT's tranche units
      */
-    function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) external view returns (TRANCHE_UNIT jtAssets);
+    function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _value) external view returns (TRANCHE_UNIT jtAssets);
 
     /**
      * @notice Converts the specified assets denominated in the kernel's NAV units to assets denominated in LT's tranche units
-     * @param _navAssets The NAV of the assets denominated in the kernel's NAV units to convert to assets denominated in LT's tranche units
+     * @param _value The NAV of the assets denominated in the kernel's NAV units to convert to assets denominated in LT's tranche units
      * @return ltAssets The specified NAV of the assets denominated in the kernel's NAV units converted to assets denominated in LT's tranche units
      */
-    function ltConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) external view returns (TRANCHE_UNIT ltAssets);
+    function ltConvertNAVUnitsToTrancheUnits(NAV_UNIT _value) external view returns (TRANCHE_UNIT ltAssets);
 
     /**
      * @notice Synchronizes and persists the raw and effective NAVs of both tranches
@@ -575,13 +575,6 @@ interface IRoycoDayKernel {
      */
     function attemptLiquidityPremiumReinvestment(uint256 _stSharesToReinvest, NAV_UNIT _stEffectiveNAV, uint256 _totalSTShares) external;
 
-    /**
-     * @notice Caches the senior tranche share rate resolved by a pre-op synchronization for the duration of the operation
-     * @dev Supplied with the synced senior effective NAV and this sync's post-mint senior supply, before the premium is reinvested or any venue mark is read, so a liquidity venue that prices the senior share through a rate provider freezes the post-mint rate and values its senior leg consistently while an inline senior share mint or burn (a multi-asset deposit or redemption) moves the live supply within the operation
-     * @param _stEffectiveNAV The synced senior tranche effective NAV the cached rate is valued from
-     * @param _stTotalSupplyAfterMints The senior tranche share supply after this sync's liquidity premium and senior tranche protocol fee shares are minted, the per-share denominator
-     */
-    function cacheSTShareRate(NAV_UNIT _stEffectiveNAV, uint256 _stTotalSupplyAfterMints) external;
 
     /**
      * @notice Pre-balance update hook for the tranche

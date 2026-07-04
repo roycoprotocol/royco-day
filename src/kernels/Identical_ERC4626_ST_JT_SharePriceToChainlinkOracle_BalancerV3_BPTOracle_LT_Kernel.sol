@@ -10,13 +10,13 @@ import { IdenticalAssets_ST_JT_Oracle_Quoter } from "./base/quoter/identical-st-
 import { BalancerV3_LT_BPTOracle_Quoter } from "./base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 
 /**
- * @title Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel
+ * @title Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel
  * @author Waymont
  * @notice The senior and junior tranches transfer in the same yield bearing ERC4626 shares (sUSDS, sUSDe, etc.), and the liquidity tranche provides secondary liquidity via a Balancer V3 pool pairing the senior tranche share against a quote asset (USDC, srRoyUSDC, etc.)
  * @dev ST/JT NAV computations convert tranche units (ERC4626 shares) to base assets using the vault's exchange rate and then convert base assets to NAV units using a Chainlink (compatible) oracle or an admin set exchange rate
  * @dev LT NAV computations value the pool position (BPT) using a manipulation-resistant Balancer V3 oracle, and the pool prices the senior share leg via this kernel's senior share rate provider
  */
-contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel is
+contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel is
     IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter,
     BalancerV3_LT_BPTOracle_Quoter
 {
@@ -54,21 +54,8 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kerne
         __BalancerV3_LT_BPTOracle_Quoter_init_unchained(_specificParams.ltQuoterParams);
     }
 
-    /**
-     * @inheritdoc RoycoDayKernel
-     * @dev Diamond resolution: only the ST/JT quoter overrides this hook (to initialize its per-operation quoter cache); the Balancer V3
-     *      quoter inherits the base no-op. Dispatches explicitly to the ST/JT implementation.
-     */
+    /// @inheritdoc RoycoDayKernel
     function _initializeQuoterCache() internal override(RoycoDayKernel, IdenticalAssets_ST_JT_Oracle_Quoter) {
         IdenticalAssets_ST_JT_Oracle_Quoter._initializeQuoterCache();
-    }
-
-    /**
-     * @inheritdoc RoycoDayKernel
-     * @dev Diamond resolution: only the ST/JT quoter overrides this hook (to clear its per-operation quoter cache); the Balancer V3
-     *      quoter inherits the base no-op. Dispatches explicitly to the ST/JT implementation.
-     */
-    function _clearQuoterCache() internal override(RoycoDayKernel, IdenticalAssets_ST_JT_Oracle_Quoter) {
-        IdenticalAssets_ST_JT_Oracle_Quoter._clearQuoterCache();
     }
 }

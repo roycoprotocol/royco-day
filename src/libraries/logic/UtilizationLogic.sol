@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { ZERO_NAV_UNITS } from "../Constants.sol";
-import { Math, NAV_UNIT, UnitsMathLib } from "../Units.sol";
+import { Math, NAV_UNIT, RoycoUnitsMath } from "../Units.sol";
 
 /**
  * @title UtilizationLogic
@@ -10,7 +10,7 @@ import { Math, NAV_UNIT, UnitsMathLib } from "../Units.sol";
  * @notice Coverage and liquidity utilization math for a Royco market
  */
 library UtilizationLogic {
-    using UnitsMathLib for NAV_UNIT;
+    using RoycoUnitsMath for NAV_UNIT;
 
     /**
      * @notice Computes the coverage utilization of the Royco market given the market's state

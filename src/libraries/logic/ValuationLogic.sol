@@ -2,8 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
-import { ZERO_NAV_UNITS } from "../Constants.sol";
-import { Math, NAV_UNIT, UnitsMathLib, toNAVUnits, toUint256 } from "../Units.sol";
+import { ONE_NAV_UNIT, ZERO_NAV_UNITS } from "../Constants.sol";
+import { Math, NAV_UNIT, RoycoUnitsMath, toUint256 } from "../Units.sol";
 
 /**
  * @title ValuationLogic
@@ -12,12 +12,8 @@ import { Math, NAV_UNIT, UnitsMathLib, toNAVUnits, toUint256 } from "../Units.so
  * @dev Invoked by the kernel via delegatecall
  */
 library ValuationLogic {
-    using UnitsMathLib for NAV_UNIT;
-    using UnitsMathLib for uint256;
-
-    // =============================
-    // Internal Utility Functions
-    // =============================
+    using RoycoUnitsMath for NAV_UNIT;
+    using RoycoUnitsMath for uint256;
 
     /// @notice Returns the raw net asset value of the senior tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
     /// @return stRawNAV The pure net asset value of the senior tranche invested assets
@@ -90,22 +86,38 @@ library ValuationLogic {
         // If there are no held senior shares or no senior shares outstanding, the effective NAV is just the raw NAV
         if (_ltOwnedSeniorTrancheShares == 0 || _totalSeniorTrancheShares == 0) return ltRawNAV;
 
-        // The LT effective NAV is the sum of the NAVs of its market-making inventory and ST shares
-        return (ltRawNAV + _stEffectiveNAV.mulDiv(_ltOwnedSeniorTrancheShares, _totalSeniorTrancheShares, Math.Rounding.Floor));
+        // The LT effective NAV is the sum of the NAVs of its market-making inventory and its held ST shares
+        return (ltRawNAV + _convertToValue(_ltOwnedSeniorTrancheShares, _totalSeniorTrancheShares, _stEffectiveNAV, Math.Rounding.Floor));
     }
 
     /**
-     * @notice Converts a NAV value to a tranche share count, mirroring `RoycoVaultTranche._convertToShares`
-     * @dev Used to compute the fair senior share count to mint when seeding the venue so it matches a tranche-side mint
-     * @param _nav The NAV value being converted to shares
-     * @param _totalTrancheNAV The tranche's total controlled NAV (the per-share denominator)
-     * @param _totalSupply The tranche's total share supply (including any minted protocol fee shares)
-     * @return shares The share count for the specified NAV value, rounded down
+     * @notice Returns the number of shares that have a claim on the specified value
+     * @dev The single share-conversion primitive, shared by the tranches and the kernel-side mint sizing so both resolve identical share counts
+     * @param _value The value to convert in NAV units
+     * @param _totalValue The total tranche controlled value in NAV units
+     * @param _totalSupply The total supply of tranche shares (including any marginally minted fee shares)
+     * @param _rounding The rounding mode to use
+     * @return shares The number of shares that have a claim on the specified value
      */
-    function _navToShares(NAV_UNIT _nav, NAV_UNIT _totalTrancheNAV, uint256 _totalSupply) internal pure returns (uint256 shares) {
-        // With no shares outstanding the conversion is 1:1 with the NAV value, mirroring the tranche's first mint
-        if (_totalSupply == 0) return toUint256(_nav);
-        // When the total tranche NAV is zero, assume the existing supply is backed by a single NAV unit, mirroring the tranche's boundary
-        shares = _totalSupply.mulDiv(_nav, (_totalTrancheNAV == ZERO_NAV_UNITS ? toNAVUnits(uint256(1)) : _totalTrancheNAV), Math.Rounding.Floor);
+    function _convertToShares(NAV_UNIT _value, NAV_UNIT _totalValue, uint256 _totalSupply, Math.Rounding _rounding) internal pure returns (uint256 shares) {
+        // With no shares outstanding the conversion is 1:1 with the value, mirroring the tranche's first mint
+        if (_totalSupply == 0) return toUint256(_value);
+        // When the total value is zero, assume all existing shares are backed by a single NAV unit so new depositors dilute the existing unbacked holders
+        return _totalSupply.mulDiv(_value, (_totalValue == ZERO_NAV_UNITS ? ONE_NAV_UNIT : _totalValue), _rounding);
+    }
+
+    /**
+     * @notice Returns the value (in NAV units) that the specified amount of shares have a claim on
+     * @dev The single value-conversion primitive, the inverse of _convertToShares, so a share count and its value round-trip consistently
+     * @param _shares The number of shares to convert
+     * @param _totalSupply The total supply of tranche shares (including any marginally minted fee shares)
+     * @param _totalValue The total tranche controlled value in NAV units
+     * @param _rounding The rounding mode to use
+     * @return value The value in NAV units that the shares have a claim on
+     */
+    function _convertToValue(uint256 _shares, uint256 _totalSupply, NAV_UNIT _totalValue, Math.Rounding _rounding) internal pure returns (NAV_UNIT value) {
+        // With no shares outstanding there is nothing to have a claim on, so the conversion is zero
+        if (_totalSupply == 0) return ZERO_NAV_UNITS;
+        return _totalValue.mulDiv(_shares, _totalSupply, _rounding);
     }
 }

@@ -7,7 +7,7 @@ import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../Types.sol";
-import { Math, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toUint256 } from "../Units.sol";
+import { Math, NAV_UNIT, TRANCHE_UNIT, RoycoUnitsMath, toUint256 } from "../Units.sol";
 import { ValuationLogic } from "./ValuationLogic.sol";
 
 /**
@@ -17,9 +17,9 @@ import { ValuationLogic } from "./ValuationLogic.sol";
  */
 library TrancheClaimsLogic {
     using SafeERC20 for IERC20;
-    using UnitsMathLib for NAV_UNIT;
-    using UnitsMathLib for TRANCHE_UNIT;
-    using UnitsMathLib for uint256;
+    using RoycoUnitsMath for NAV_UNIT;
+    using RoycoUnitsMath for TRANCHE_UNIT;
+    using RoycoUnitsMath for uint256;
     using Math for uint256;
 
     // =============================
@@ -173,8 +173,8 @@ library TrancheClaimsLogic {
         returns (NAV_UNIT stClaimOnSTRawNAV, NAV_UNIT stClaimOnJTRawNAV, NAV_UNIT jtClaimOnSTRawNAV, NAV_UNIT jtClaimOnJTRawNAV)
     {
         // Cross-tranche claims (the NAV that can't funded by the tranche's own raw NAV)
-        stClaimOnJTRawNAV = UnitsMathLib.saturatingSub(_stEffectiveNAV, _stRawNAV);
-        jtClaimOnSTRawNAV = UnitsMathLib.saturatingSub(_jtEffectiveNAV, _jtRawNAV);
+        stClaimOnJTRawNAV = RoycoUnitsMath.saturatingSub(_stEffectiveNAV, _stRawNAV);
+        jtClaimOnSTRawNAV = RoycoUnitsMath.saturatingSub(_jtEffectiveNAV, _jtRawNAV);
 
         // Self-backed portions (the NAV that can be funded by the tranche's own raw NAV)
         // NOTE: Since NAV conservation is enforced in the accountant, these will never underflow
