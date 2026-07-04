@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { GyroECLPPoolFactory } from "../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import { AccessManager } from "../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { RoycoDayAccountant } from "../src/accountant/RoycoDayAccountant.sol";
-import { RoycoBlacklist } from "../src/auth/RoycoBlacklist.sol";
+import { RoycoBlacklistHook } from "../src/auth/RoycoBlacklistHook.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_FACTORY_ROLE,
@@ -28,7 +28,9 @@ import { DayIdenticalERC4626ChainlinkDeploymentTemplate } from "../src/factory/t
 import { BaseDeploymentTemplate } from "../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import {
     COMPONENT_ID_ACCOUNTANT_IMPL,
+    COMPONENT_ID_DAY_BALANCER_HOOKS,
     COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK,
+    COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK_LENS,
     COMPONENT_ID_JUNIOR_TRANCHE_IMPL,
     COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL,
     COMPONENT_ID_SENIOR_TRANCHE_IMPL,
@@ -41,12 +43,16 @@ import { IYDM } from "../src/interfaces/IYDM.sol";
 import { IRoycoFactory } from "../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import {
-    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel
-} from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
+    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel
+} from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel.sol";
+import {
+    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Lens
+} from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Lens.sol";
 import {
     IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
 } from "../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
-import { BalancerV3_LT_BPTOracle_Quoter } from "../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
+import { BalancerV3_LT_Quoter } from "../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_Quoter.sol";
+import { RoycoDayBalancerV3Hooks } from "../src/kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3Hooks.sol";
 import { toNAVUnits } from "../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoLiquidityTranche } from "../src/tranches/RoycoLiquidityTranche.sol";
@@ -85,7 +91,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     /// @notice Enum for the Day kernel types this script can deploy.
     /// @dev The Dawn-era kernel zoo was removed in the Day fork. New Day kernels are added here as they ship.
     enum KernelType {
-        Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel
+        Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel
     }
 
     /// @notice Enum for YDM types
@@ -131,7 +137,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
     struct IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams {
         IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams stAndJTQuoterParams;
-        BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams ltQuoterParams;
+        BalancerV3_LT_Quoter.LT_QuoterSpecificParams ltQuoterParams;
     }
 
     struct IdenticalAssets_ST_JT_AdminOracle_QuoterKernelParams {
@@ -410,10 +416,12 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         IRoycoFactory factoryIface = IRoycoFactory(address(_factory));
         bytes32 kernelComponentId;
         bytes memory kernelCreationCode;
-        (template, kernelComponentId, kernelCreationCode) = _deployTemplate(factoryIface, _kernelType);
+        bytes32 lensComponentId;
+        bytes memory lensCreationCode;
+        (template, kernelComponentId, kernelCreationCode, lensComponentId, lensCreationCode) = _deployTemplate(factoryIface, _kernelType);
 
-        bytes32[] memory ids = new bytes32[](6);
-        bytes[] memory codes = new bytes[](6);
+        bytes32[] memory ids = new bytes32[](8);
+        bytes[] memory codes = new bytes[](8);
         ids[0] = COMPONENT_ID_SENIOR_TRANCHE_IMPL;
         codes[0] = type(RoycoSeniorTranche).creationCode;
         ids[1] = COMPONENT_ID_JUNIOR_TRANCHE_IMPL;
@@ -423,11 +431,17 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         ids[3] = COMPONENT_ID_ACCOUNTANT_IMPL;
         codes[3] = type(RoycoDayAccountant).creationCode;
         ids[4] = COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2;
-        // The template deploys the YDM singleton verbatim (no ctor args appended), so bake the target-utilization
-        // (JT coverage kink at 90%) constructor arg into the registered creation code.
-        codes[4] = abi.encodePacked(type(AdaptiveCurveYDM_V2).creationCode, abi.encode(uint256(0.9e18)));
+        // Bare YDM creation code — the template appends each YDM's target-utilization constructor arg per market
+        // (JT YDM and LDM get their own target utilizations from the market params).
+        codes[4] = type(AdaptiveCurveYDM_V2).creationCode;
         ids[5] = kernelComponentId;
         codes[5] = kernelCreationCode;
+        ids[6] = lensComponentId;
+        codes[6] = lensCreationCode;
+        // The real kernel-bound Balancer pool hook (kernel address appended by the template at deploy time). The
+        // registration-time stand-in is not a registered component — the template deploys one shared instance in its constructor.
+        ids[7] = COMPONENT_ID_DAY_BALANCER_HOOKS;
+        codes[7] = type(RoycoDayBalancerV3Hooks).creationCode;
 
         _factory.registerTemplate(template, ids, codes);
         kernelTypeToTemplate[uint256(_kernelType)] = template;
@@ -439,16 +453,18 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         KernelType _kernelType
     )
         internal
-        returns (address template, bytes32 kernelComponentId, bytes memory kernelCreationCode)
+        returns (address template, bytes32 kernelComponentId, bytes memory kernelCreationCode, bytes32 lensComponentId, bytes memory lensCreationCode)
     {
         // The concrete Balancer-V3 templates are constructed with the chain's Gyro E-CLP pool factory.
         GyroECLPPoolFactory poolFactory = GyroECLPPoolFactory(getChainConfig(block.chainid).gyroECLPPoolFactory);
 
-        if (_kernelType == KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel) {
+        if (_kernelType == KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel) {
             return (
                 address(new DayIdenticalERC4626ChainlinkDeploymentTemplate(_factory, poolFactory)),
                 COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK,
-                type(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode
+                type(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel).creationCode,
+                COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK_LENS,
+                type(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Lens).creationCode
             );
         }
         revert UnsupportedKernelType(_kernelType);
@@ -470,29 +486,44 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         returns (BalancerV3DeploymentTemplate.DayParams memory params)
     {
         params.marketId = _marketId;
-        params.st =
-            BaseDeploymentTemplate.SeniorTrancheParams({ name: _config.seniorTrancheName, symbol: _config.seniorTrancheSymbol, asset: _config.seniorAsset });
-        params.jt =
-            BaseDeploymentTemplate.JuniorTrancheParams({ name: _config.juniorTrancheName, symbol: _config.juniorTrancheSymbol, asset: _config.juniorAsset });
-        params.accountant = BaseDeploymentTemplate.AccountantParams({
-            stProtocolFeeWAD: _config.stProtocolFeeWAD,
-            jtProtocolFeeWAD: _config.jtProtocolFeeWAD,
-            yieldShareProtocolFeeWAD: _config.jtYieldShareProtocolFeeWAD,
-            coverageWAD: _config.minCoverageWAD,
-            jtCoinvested: _config.jtCoinvested,
-            liquidationUtilizationWAD: _config.coverageLiquidationUtilizationWAD,
+
+        // Tranche init params — the template overwrites `initialAuthority` with the market authority.
+        params.stTranche =
+            IRoycoVaultTranche.RoycoTrancheInitParams({ name: _config.seniorTrancheName, symbol: _config.seniorTrancheSymbol, initialAuthority: address(0) });
+        params.jtTranche =
+            IRoycoVaultTranche.RoycoTrancheInitParams({ name: _config.juniorTrancheName, symbol: _config.juniorTrancheSymbol, initialAuthority: address(0) });
+        params.ltTranche = IRoycoVaultTranche.RoycoTrancheInitParams({
+            name: _config.liquidityTrancheName, symbol: _config.liquidityTrancheSymbol, initialAuthority: address(0)
+        });
+        params.stAsset = _config.seniorAsset;
+        params.jtAsset = _config.juniorAsset;
+        params.jtCoinvested = _config.jtCoinvested;
+
+        // Accountant init params. `jtYDM`/`ltYDM` are overwritten by the template with the deployed instances. BOTH YDMs get
+        // initialization data so the accountant initializes each of them. The LT premium/liquidity overlay is at its zero
+        // baseline (LT service off) — but the LDM is still deployed, initialized, and distinct from the JT YDM.
+        params.accountant = IRoycoDayAccountant.RoycoDayAccountantInitParams({
+            minCoverageWAD: _config.minCoverageWAD,
+            coverageLiquidationUtilizationWAD: _config.coverageLiquidationUtilizationWAD,
+            minLiquidityWAD: 0,
+            jtYDM: address(0),
+            jtYDMInitializationData: _buildYDMInitializationData(_config.ydmType, _config.ydmSpecificParams),
+            ltYDM: address(0),
+            ltYDMInitializationData: _buildYDMInitializationData(_config.ydmType, _config.ltYdmSpecificParams),
+            maxJTYieldShareWAD: uint64(1e18), // uncapped at the WAD ceiling; the real JT cap comes from the JT YDM curve
+            maxLTYieldShareWAD: 0, // LT liquidity premium disabled in the baseline
             fixedTermDurationSeconds: _config.fixedTermDurationSeconds,
             stNAVDustTolerance: toNAVUnits(_config.stDustTolerance),
             jtNAVDustTolerance: toNAVUnits(_config.jtDustTolerance),
-            ydmInitializationData: _buildYDMInitializationData(_config.ydmType, _config.ydmSpecificParams)
+            stProtocolFeeWAD: _config.stProtocolFeeWAD,
+            jtProtocolFeeWAD: _config.jtProtocolFeeWAD,
+            jtYieldShareProtocolFeeWAD: _config.jtYieldShareProtocolFeeWAD,
+            ltYieldShareProtocolFeeWAD: 0
         });
-        // Liquidity tranche (holds the Gyro E-CLP BPT) and the pool params it is created against.
-        params.lt = BalancerV3DeploymentTemplate.LiquidityTrancheParams({ name: _config.liquidityTrancheName, symbol: _config.liquidityTrancheSymbol });
+
         params.gyroECLPPoolParams = _config.gyroECLPPoolParams;
-        // The JT YDM and a distinct LT YDM (the LDM placeholder). Same registered creation code, distinct `version`
-        // so they resolve to different addresses and satisfy the accountant's `YDMS_CANNOT_BE_IDENTICAL` guard.
-        params.ydm = BaseDeploymentTemplate.YDMParams({ componentTag: bytes32("YDM_ADAPTIVE_CURVE_V2"), version: bytes32("V1") });
-        params.ltYdm = BaseDeploymentTemplate.YDMParams({ componentTag: bytes32("YDM_ADAPTIVE_CURVE_V2"), version: bytes32("LT_V1") });
+        params.jtYDMTargetUtilizationWAD = _config.jtYdmTargetUtilizationWAD;
+        params.ltYDMTargetUtilizationWAD = _config.ltYdmTargetUtilizationWAD;
         params.kernelSpecificParams = _config.kernelSpecificParams; // template KernelParams are field-identical to the config blobs
         params.protocolFeeRecipient = _protocolFeeRecipient;
         params.stSelfLiquidationBonusWAD = _config.stSelfLiquidationBonusWAD;
@@ -527,12 +558,12 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     // INTERNAL: BLACKLIST + HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Deploys (or returns) the chain's shared RoycoBlacklist via CREATE2.
+    /// @notice Deploys (or returns) the chain's shared RoycoBlacklistHook via CREATE2.
     /// @param _authority The AccessManager that governs the blacklist's restricted functions.
     function _deployBlacklist(address _authority) internal returns (address blacklist) {
-        (address implAddr,) = deployWithSanityChecks(BLACKLIST_IMPL_SALT, type(RoycoBlacklist).creationCode, false);
+        (address implAddr,) = deployWithSanityChecks(BLACKLIST_IMPL_SALT, type(RoycoBlacklistHook).creationCode, false);
         address[] memory initialBlacklistedAccounts = new address[](0);
-        bytes memory initData = abi.encodeCall(RoycoBlacklist.initialize, (_authority, address(0), initialBlacklistedAccounts));
+        bytes memory initData = abi.encodeCall(RoycoBlacklistHook.initialize, (_authority, address(0), initialBlacklistedAccounts));
         (blacklist,) = deployWithSanityChecks(BLACKLIST_PROXY_SALT, getERC1967ProxyCreationCode(implAddr, initData), false);
     }
 
