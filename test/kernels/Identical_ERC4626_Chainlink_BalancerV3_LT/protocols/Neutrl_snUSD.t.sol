@@ -15,7 +15,7 @@ import { Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest } from "../base/Id
 contract Neutrl_snUSD is Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest {
     address internal constant SNUSD_VAULT = 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313; // ST/JT ERC4626 asset
     address internal constant NUSD_REDSTONE_ORACLE = 0x5e7281f74e74D76347f0b8f4a36Fd3cb29c19d95; // base(nUSD)->NAV feed
-    address internal constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48; // LT pool quote token
+    address internal constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48; // LT pool quote asset
 
     function _baseAssetToNavOracle() internal pure override returns (address) {
         return NUSD_REDSTONE_ORACLE;

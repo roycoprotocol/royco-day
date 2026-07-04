@@ -302,8 +302,8 @@ abstract contract MarketDeploymentConfig {
                 swapFeePercentage: 1e14, // 1 bp
                 enableDonation: false,
                 disableUnbalancedLiquidity: false,
-                quoteToken: USDC[block.chainid],
-                quoteTokenRateProvider: address(0) // USDC is a pegged quote: register STANDARD (rate = 1)
+                quoteAsset: USDC[block.chainid],
+                quoteAssetRateProvider: address(0) // USDC is a pegged quote: register STANDARD (rate = 1)
             })
         });
     }
@@ -342,13 +342,13 @@ abstract contract MarketDeploymentConfig {
         return string(abi.encodePacked("ROY-LT-", marketName));
     }
 
-    /// @notice Returns the pool name for a given market name and quote token (e.g. "Royco Day LP ROY-ST-snUSD-USDC")
-    function _poolName(string memory marketName, address quoteToken) internal view returns (string memory) {
-        return string(abi.encodePacked("Royco Day LP ", _seniorTrancheSymbol(marketName), "-", IERC20Metadata(quoteToken).symbol()));
+    /// @notice Returns the pool name for a given market name and quote asset (e.g. "Royco Day LP ROY-ST-snUSD-USDC")
+    function _poolName(string memory marketName, address quoteAsset) internal view returns (string memory) {
+        return string(abi.encodePacked("Royco Day LP ", _seniorTrancheSymbol(marketName), "-", IERC20Metadata(quoteAsset).symbol()));
     }
 
-    /// @notice Returns the pool symbol for a given market name and quote token (e.g. "ROY-LP-ROY-ST-snUSD-USDC")
-    function _poolSymbol(string memory marketName, address quoteToken) internal view returns (string memory) {
-        return string(abi.encodePacked("ROY-LP-", _seniorTrancheSymbol(marketName), "-", IERC20Metadata(quoteToken).symbol()));
+    /// @notice Returns the pool symbol for a given market name and quote asset (e.g. "ROY-LP-ROY-ST-snUSD-USDC")
+    function _poolSymbol(string memory marketName, address quoteAsset) internal view returns (string memory) {
+        return string(abi.encodePacked("ROY-LP-", _seniorTrancheSymbol(marketName), "-", IERC20Metadata(quoteAsset).symbol()));
     }
 }

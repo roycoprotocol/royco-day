@@ -214,7 +214,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         external
         virtual
         override(IRoycoDayKernel)
-        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut)
+        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut, uint256 ltTotalSupplyAfterMints)
     {
         return DepositLogic.ltPreviewDepositMultiAsset(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _stAssets, _quoteAssets);
     }

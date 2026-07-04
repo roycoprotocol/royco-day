@@ -100,6 +100,7 @@ library DepositLogic {
      * @return valueAllocated The NAV value of the LT assets the add would mint
      * @return navToMintSharesAt The pre-deposit LT effective NAV that LT shares would be minted against
      * @return ltAssetsOut The LT tranche assets the add would mint
+     * @return ltTotalSupplyAfterMints The LT tranche supply after this sync mints its protocol fee shares, which LT shares must be priced against
      */
     function ltPreviewDepositMultiAsset(
         IRoycoDayKernel.RoycoDayKernelState storage $,
@@ -108,19 +109,22 @@ library DepositLogic {
         uint256 _quoteAssets
     )
         external
-        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut)
+        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut, uint256 ltTotalSupplyAfterMints)
     {
-        // Preview the senior sync and its post-mint supply (after the liquidity premium and protocol fee shares), exactly as ltDepositMultiAsset reads them
-        (SyncedAccountingState memory state,, uint256 totalSTShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.SENIOR);
+        // Preview the sync and the LT supply after this sync mints the LT protocol fee shares, exactly as depositMultiAsset reads totalSupply() post-sync
+        SyncedAccountingState memory state;
+        (state,, ltTotalSupplyAfterMints) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
         // During a fixed-term market state only a quote-only deposit is permitted; an ST-leg deposit reverts, so return zero before quoting the venue add to match it
-        if (state.marketState == MarketState.FIXED_TERM && _stAssets != ZERO_TRANCHE_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS);
-        // The NAV to mint LT shares at is the pre-deposit LT effective NAV (market-making depth plus the idle premium senior shares),
-        (uint256 liquidityPremiumShares,,) =
+        if (state.marketState == MarketState.FIXED_TERM && _stAssets != ZERO_TRANCHE_UNITS) {
+            return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS, ltTotalSupplyAfterMints);
+        }
+        // The NAV to mint LT shares at is the pre-deposit LT effective NAV (market-making depth plus the idle premium senior shares); the senior supply is taken after its premium and protocol fee mint
+        (uint256 liquidityPremiumShares,, uint256 totalSTShares) =
             FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(_immutables.seniorTranche).totalSupply());
         navToMintSharesAt =
             ValuationLogic._getLiquidityTrancheEffectiveNAV($, state.stEffectiveNAV, totalSTShares, ($.ltOwnedSeniorTrancheShares + liquidityPremiumShares));
         // Size the senior shares the ST leg would mint (zero if no ST underlying is supplied), priced like the execution path
-        uint256 stSharesToAdd = _stAssets == ZERO_TRANCHE_UNITS
+        uint256 stSharesToAdd = (_stAssets == ZERO_TRANCHE_UNITS)
             ? 0
             : ValuationLogic._convertToShares(
                 IRoycoDayKernel(address(this)).stConvertTrancheUnitsToNAVUnits(_stAssets), state.stEffectiveNAV, totalSTShares, Math.Rounding.Floor

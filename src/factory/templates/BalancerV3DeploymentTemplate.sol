@@ -92,7 +92,8 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
      * @custom:field swapFeePercentage - The pool's swap fee, scaled to WAD (1e18 = 100%).
      * @custom:field enableDonation - Whether unbalanced donation-style adds are permitted on the pool.
      * @custom:field disableUnbalancedLiquidity - Whether to disable unbalanced add/remove liquidity, forcing proportional-only.
-     * @custom:field quoteToken - The quote asset (stablecoin) paired against the senior tranche share in the pool.
+     * @custom:field quoteAsset - The quote asset (stablecoin) paired against the senior tranche share in the pool.
+     * @custom:field quoteAssetRateProvider - The rate provider supplying the quote leg's rate to the pool; the BPT oracle then prices this leg with the shared constant-1.0 feed.
      */
     struct GyroECLPPoolParams {
         string name;
@@ -102,8 +103,8 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         uint256 swapFeePercentage;
         bool enableDonation;
         bool disableUnbalancedLiquidity;
-        address quoteToken;
-        address quoteTokenRateProvider;
+        address quoteAsset;
+        address quoteAssetRateProvider;
     }
 
     /**
@@ -124,7 +125,6 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
      * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables screening).
      * @custom:field kernelSpecificParams - ABI-encoded kernel/quoter-specific initialization params.
      * @custom:field enforceVaultSharesTransferWhitelist - Whether to enforce the vault shares transfer whitelist.
-     * @custom:field quoteTokenPriceFeed - The price feed for the pool's quote token consumed by the BPT oracle.
      */
     struct DayParams {
         bytes32 marketId;
@@ -376,11 +376,11 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         returns (address balancerV3Pool)
     {
         // Balancer V3 requires a pool's tokens registered in ascending address order
-        (address token0, address token1) = uint160(_seniorTranche) < uint160(_p.quoteToken) ? (_seniorTranche, _p.quoteToken) : (_p.quoteToken, _seniorTranche);
+        (address token0, address token1) = uint160(_seniorTranche) < uint160(_p.quoteAsset) ? (_seniorTranche, _p.quoteAsset) : (_p.quoteAsset, _seniorTranche);
 
         BalancerV3TokenConfig[] memory tokens = new BalancerV3TokenConfig[](2);
-        tokens[0] = _buildTokenConfig(token0, _seniorTranche, _rateProvider, _p.quoteTokenRateProvider);
-        tokens[1] = _buildTokenConfig(token1, _seniorTranche, _rateProvider, _p.quoteTokenRateProvider);
+        tokens[0] = _buildTokenConfig(token0, _seniorTranche, _rateProvider, _p.quoteAssetRateProvider);
+        tokens[1] = _buildTokenConfig(token1, _seniorTranche, _rateProvider, _p.quoteAssetRateProvider);
 
         address authority = ROYCO_FACTORY.ROYCO_AUTHORITY();
         BalancerV3PoolRoleAccounts memory roleAccounts =

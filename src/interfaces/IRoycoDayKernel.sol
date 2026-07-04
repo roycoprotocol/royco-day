@@ -324,13 +324,14 @@ interface IRoycoDayKernel {
      * @return valueAllocated The NAV value of the LT assets the add would mint
      * @return navToMintSharesAt The pre-deposit LT effective NAV that LT shares would be minted against
      * @return ltAssetsOut The LT tranche assets the add would mint
+     * @return ltTotalSupplyAfterMints The LT tranche supply after this sync mints its protocol fee shares, which LT shares must be priced against
      */
     function ltPreviewDepositMultiAsset(
         TRANCHE_UNIT _stAssets,
         uint256 _quoteAssets
     )
         external
-        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut);
+        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut, uint256 ltTotalSupplyAfterMints);
 
     /**
      * @notice Previews a multi-asset LT redemption of _ltShares by simulating the proportional venue removal and the senior unwind
