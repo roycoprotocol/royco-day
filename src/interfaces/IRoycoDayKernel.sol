@@ -482,8 +482,8 @@ interface IRoycoDayKernel {
      * @notice Atomically enters the liquidity tranche with the LT assets' constituent assets: deposits ST underlying (minting senior
      *         shares), adds (senior shares + quote) into the liquidity venue to mint the LT tranche assets, then deposits them into the LT
      * @dev Assumes the ST underlying and quote have been transferred to the kernel before this call (by the LT tranche)
-     * @dev Enabled in a PERPETUAL market state, and in a fixed-term market only for a quote-only deposit (_stAssets == 0) that mints no senior shares; an ST-leg deposit reverts in a fixed-term market
-     * @dev The combined new senior exposure is gated by the market's coverage and liquidity requirements; reverts if either is unsatisfied
+     * @dev Enabled in a PERPETUAL market state, and in a fixed-term market only for a quote-only deposit (_stAssets == 0) that mints no senior shares. An ST-leg deposit reverts in a fixed-term market
+     * @dev The combined new senior exposure is gated by the market's coverage and liquidity requirements. Reverts if either is unsatisfied
      * @param _stAssets The amount of ST underlying (the senior tranche's base asset) to deposit, denominated in ST tranche units
      * @param _quoteAssets The amount of quote asset to add as the second venue leg
      * @param _minLTAssetsOut The minimum LT tranche assets the liquidity add must mint (slippage bound against an unfavorable venue state)
@@ -536,7 +536,7 @@ interface IRoycoDayKernel {
      * @param _ltAssets The exact liquidity tranche assets to burn
      * @param _minSTSharesOut The minimum senior tranche shares that must be withdrawn, bounding the removal's slippage
      * @param _minQuoteAssetsOut The minimum quote assets that must be withdrawn, bounding the removal's slippage
-     * @param _quoteAssetsReceiver The recipient of the withdrawn quote assets; the withdrawn senior shares are returned to the kernel for the combined senior unwind
+     * @param _quoteAssetsReceiver The recipient of the withdrawn quote assets. The withdrawn senior shares are returned to the kernel for the combined senior unwind
      * @return stShares The senior tranche shares withdrawn by the removal
      * @return quoteAssets The quote assets withdrawn by the removal
      */

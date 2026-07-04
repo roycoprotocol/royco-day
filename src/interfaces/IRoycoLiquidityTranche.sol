@@ -9,7 +9,7 @@ import { IRoycoVaultTranche } from "./IRoycoVaultTranche.sol";
  * @notice Interface for the liquidity tranche (LT): the standard share-token surface (inherited from IRoycoVaultTranche)
  *         plus the LT-specific multi-asset entrypoints that let an LP enter/exit with the LP token's constituent assets
  *         (ST underlying + quote) directly.
- * @dev The LT's base asset is a market-making LP token; the kernel keeps the specific venue (e.g. the AMM) behind its
+ * @dev The LT's base asset is a market-making LP token. The kernel keeps the specific venue (e.g. the AMM) behind its
  *      own hooks, so this surface stays venue-agnostic.
  */
 interface IRoycoLiquidityTranche is IRoycoVaultTranche {

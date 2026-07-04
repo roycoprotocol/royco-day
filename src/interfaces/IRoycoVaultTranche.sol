@@ -155,7 +155,7 @@ interface IRoycoVaultTranche is IERC20Metadata {
 
     /**
      * @notice Mints tranche shares to the specified account
-     * @dev Authorized via the AccessManager `restricted` modifier; the deploy template grants the market's kernel the role
+     * @dev Authorized via the AccessManager `restricted` modifier. The deploy template grants the market's kernel the role
      *      for this selector so the kernel can mint senior shares to itself when seeding the LT's Balancer pool
      * @dev Takes a raw share count: the caller (kernel) is responsible for computing a fair, non-diluting amount
      * @param _to The account to mint the shares to

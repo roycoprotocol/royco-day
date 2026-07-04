@@ -384,7 +384,7 @@ library RedemptionLogic {
         if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
         // Use the precise NAV claims directly from the decomposition instead of round-tripping them through tranche units (NAV -> tranche -> NAV).
-        (,, claimOnSTNAV, claimOnJTNAV) = TrancheClaimsLogic._computeSTandJTClaimsOnNAV(state);
+        (,, claimOnSTNAV, claimOnJTNAV) = TrancheClaimsLogic._computeSTandJTClaimsOnRawNAVs(state);
 
         // Get the max withdrawable ST and JT assets in NAV units from the accountant considering the coverage requirement
         (stMaxWithdrawableNAV, jtMaxWithdrawableNAV) = IRoycoDayAccountant(_immutables.accountant).maxJTWithdrawal(state);

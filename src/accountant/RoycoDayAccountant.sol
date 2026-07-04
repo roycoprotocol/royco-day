@@ -392,11 +392,11 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
      *
      * @dev Coverage Requirement: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_COINVESTED ? JT_RAW_NAV : 0)) * MIN_COVERAGE
      * @dev When assets are claimed from the JT, they are always liquidated in the same proportion as the tranche's total claims on the ST and JT assets
-     * @dev Let S be the JT's total claims on ST assets and J be the JT's total claims on JT assets, in NAV Units. The total claims on the ST and JT assets are S + J NAV Units
-     * @dev Let K_S be S / (S + J) and K_J be J / (S + J)
-     * @dev Therefore, if a total NAV of y is claimed from the JT, K_S * y will be claimed from the ST_RAW_NAV and K_J * y will be claimed from the JT_RAW_NAV
-     * @dev Max assets withdrawable from JT, y: (JT_EFFECTIVE_NAV - y) = ((ST_RAW_NAV - K_S * y) + (JT_COINVESTED ? (JT_RAW_NAV - K_J * y) : 0)) * COV
-     *      Isolate y: y = (JT_EFFECTIVE_NAV - (MIN_COVERAGE * (ST_RAW_NAV + (JT_COINVESTED ? JT_RAW_NAV : 0)))) / (1 - (MIN_COVERAGE * (K_S + (JT_COINVESTED ? K_J : 0))))
+     * @dev Let JT_CLAIM_ON_ST and JT_CLAIM_ON_JT be the JT's total claims on the ST and JT assets respectively, in NAV units. The JT's total claims are JT_CLAIM_ON_ST + JT_CLAIM_ON_JT
+     * @dev Let ST_CLAIM_FRACTION be JT_CLAIM_ON_ST / (JT_CLAIM_ON_ST + JT_CLAIM_ON_JT) and JT_CLAIM_FRACTION be JT_CLAIM_ON_JT / (JT_CLAIM_ON_ST + JT_CLAIM_ON_JT)
+     * @dev Therefore, if a total NAV of y is claimed from the JT, ST_CLAIM_FRACTION * y is claimed from the ST_RAW_NAV and JT_CLAIM_FRACTION * y is claimed from the JT_RAW_NAV
+     * @dev Max assets withdrawable from JT, y: (JT_EFFECTIVE_NAV - y) = ((ST_RAW_NAV - ST_CLAIM_FRACTION * y) + (JT_COINVESTED ? (JT_RAW_NAV - JT_CLAIM_FRACTION * y) : 0)) * MIN_COVERAGE
+     *      Isolate y: y = (JT_EFFECTIVE_NAV - (MIN_COVERAGE * (ST_RAW_NAV + (JT_COINVESTED ? JT_RAW_NAV : 0)))) / (1 - (MIN_COVERAGE * (ST_CLAIM_FRACTION + (JT_COINVESTED ? JT_CLAIM_FRACTION : 0))))
      */
     function maxJTWithdrawal(SyncedAccountingState memory state)
         external
@@ -408,7 +408,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
 
         // Decompose the junior tranche's claims on the ST and JT raw NAVs from the synced accounting state
-        (,, NAV_UNIT jtClaimOnStUnits, NAV_UNIT jtClaimOnJtUnits) = TrancheClaimsLogic._computeSTandJTClaimsOnNAV(state);
+        (,, NAV_UNIT jtClaimOnSTRawNAV, NAV_UNIT jtClaimOnJTRawNAV) = TrancheClaimsLogic._computeSTandJTClaimsOnRawNAVs(state);
 
         // Get the surplus JT assets in NAV units
         // Compute the total covered exposure of the underlying investment, rounding in favor of senior protection
@@ -423,21 +423,21 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         if (surplusJTValue == ZERO_NAV_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         // Compute the total JT claim on NAV and preemptively return if zero
-        NAV_UNIT totalJTClaims = jtClaimOnStUnits + jtClaimOnJtUnits;
+        NAV_UNIT totalJTClaims = jtClaimOnSTRawNAV + jtClaimOnJTRawNAV;
         if (totalJTClaims == ZERO_NAV_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS);
-        // Calculate K_S
-        uint256 kS_WAD = jtClaimOnStUnits.mulDiv(WAD, totalJTClaims, Math.Rounding.Floor);
-        // Calculate K_J
-        uint256 kJ_WAD = jtClaimOnJtUnits.mulDiv(WAD, totalJTClaims, Math.Rounding.Floor);
+        // The fraction of the JT's total NAV claims resting on the ST raw NAV
+        uint256 jtClaimOnSTFractionWAD = jtClaimOnSTRawNAV.mulDiv(WAD, totalJTClaims, Math.Rounding.Floor);
+        // The fraction of the JT's total NAV claims resting on the JT raw NAV
+        uint256 jtClaimOnJTFractionWAD = jtClaimOnJTRawNAV.mulDiv(WAD, totalJTClaims, Math.Rounding.Floor);
         // Compute how much coverage the system retains per 1 nav unit of JT assets withdrawn scaled to WAD precision
-        uint256 coverageRetentionWAD = (WAD - state.minCoverageWAD.mulDiv((kS_WAD + (state.jtCoinvested ? kJ_WAD : uint256(0))), WAD, Math.Rounding.Floor));
+        uint256 coverageRetentionWAD = (WAD - state.minCoverageWAD.mulDiv((jtClaimOnSTFractionWAD + (state.jtCoinvested ? jtClaimOnJTFractionWAD : uint256(0))), WAD, Math.Rounding.Floor));
         // Calculate how much of the surplus can be withdrawn while satisfying the coverage requirement
         NAV_UNIT totalNAVClaimable = surplusJTValue.mulDiv(WAD, coverageRetentionWAD, Math.Rounding.Floor);
         if (totalNAVClaimable == ZERO_NAV_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         // Split it into individual tranche's claims
-        stWithdrawableNAV = totalNAVClaimable.mulDiv(kS_WAD, WAD, Math.Rounding.Floor);
-        jtWithdrawableNAV = totalNAVClaimable.mulDiv(kJ_WAD, WAD, Math.Rounding.Floor);
+        stWithdrawableNAV = totalNAVClaimable.mulDiv(jtClaimOnSTFractionWAD, WAD, Math.Rounding.Floor);
+        jtWithdrawableNAV = totalNAVClaimable.mulDiv(jtClaimOnJTFractionWAD, WAD, Math.Rounding.Floor);
     }
 
     /**
@@ -507,10 +507,9 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             NAV_UNIT lastJTRawNAV = $.lastJTRawNAV;
 
             // Decompose the last checkpointed senior claim into its self-backed portion (funded by ST's own raw NAV) and its cross-tranche portion (funded by JT's raw NAV)
-            // Inlined from the tranche claim decomposition: only the two senior claims feed attribution, so the junior self-claim and junior-on-junior claim are never computed
-            NAV_UNIT stClaimOnJTRawNAV = stEffectiveNAV.saturatingSub(lastSTRawNAV);
-            NAV_UNIT jtClaimOnSTRawNAV = jtEffectiveNAV.saturatingSub(lastJTRawNAV);
-            NAV_UNIT stClaimOnSTRawNAV = (lastSTRawNAV - jtClaimOnSTRawNAV);
+            // Only the two senior claims feed the PNL attribution below; the two junior claims the decomposition returns are discarded
+            (NAV_UNIT stClaimOnSTRawNAV, NAV_UNIT stClaimOnJTRawNAV,,) =
+                TrancheClaimsLogic._computeSTandJTClaimsOnRawNAVs(lastSTRawNAV, lastJTRawNAV, stEffectiveNAV, jtEffectiveNAV);
 
             // Compute the deltas in the raw NAVs of each tranche: the unrealized PNL of the underlying investment since the last NAV checkpoints
             int256 deltaSTRawNAV = RoycoUnitsMath.computeNAVDelta(_stRawNAV, lastSTRawNAV);

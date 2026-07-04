@@ -21,7 +21,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.RoycoFactoryV2State")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ROYCO_FACTORY_STORAGE_SLOT = 0x40ecf137e43ccc3fb8e0ec956edc7094cfc159472690a44f90b2be053a987500;
 
-    /// @dev Holds the address of the template currently inside an `executeMarketDeployment` window; `address(0)` otherwise.
+    /// @dev Holds the address of the template currently inside an `executeMarketDeployment` window, `address(0)` otherwise.
     address private transient _activeTemplate;
 
     // ═══════════════════════════════════════════════════════════════════════════

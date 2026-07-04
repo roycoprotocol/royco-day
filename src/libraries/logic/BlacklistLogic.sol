@@ -23,7 +23,7 @@ library BlacklistLogic {
 
     /**
      * @notice Batch-screens the accounts involved in a tranche share balance update against the market's configured blacklist
-     * @dev No-op when no blacklist is configured (the null address disables screening); reverts if any involved account is blacklisted
+     * @dev No-op when no blacklist is configured (the null address disables screening). Reverts if any involved account is blacklisted
      * @param _caller The address that initiated the balance update
      * @param _from The address the shares are moving from
      * @param _to The address the shares are moving to

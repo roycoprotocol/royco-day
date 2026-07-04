@@ -234,8 +234,8 @@ contract DayMarketDeploymentTest is BaseTest {
     }
 
     function test_ydm_bothInitializedForThisAccountant() public view {
-        (uint64 jtTarget,,,,) = AdaptiveCurveYDM_V2(address(YDM)).accountantToCurve(address(ACCOUNTANT));
-        (uint64 ltTarget,,,,) = AdaptiveCurveYDM_V2(LT_YDM).accountantToCurve(address(ACCOUNTANT));
+        (uint64 jtTarget,,,) = AdaptiveCurveYDM_V2(address(YDM)).accountantToCurve(address(ACCOUNTANT));
+        (uint64 ltTarget,,,) = AdaptiveCurveYDM_V2(LT_YDM).accountantToCurve(address(ACCOUNTANT));
         assertEq(jtTarget, 0.11e18, "JT YDM curve uninitialized");
         assertEq(ltTarget, 0.11e18, "LDM curve uninitialized");
     }

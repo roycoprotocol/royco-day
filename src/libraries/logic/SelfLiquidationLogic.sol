@@ -44,7 +44,7 @@ library SelfLiquidationLogic {
         NAV_UNIT desiredBonusNAV = _stUserClaims.nav.mulDiv($.stSelfLiquidationBonusWAD, WAD, Math.Rounding.Floor);
 
         // Decompose the NAV claims for the Junior Tranche to get the NAV claims for sourcing the bonus
-        (,, NAV_UNIT jtClaimOnSTRawNAV,) = TrancheClaimsLogic._computeSTandJTClaimsOnNAV(_state);
+        (,, NAV_UNIT jtClaimOnSTRawNAV,) = TrancheClaimsLogic._computeSTandJTClaimsOnRawNAVs(_state);
 
         // Compute the maximum bonus that doesn't increase coverage utilization, preventing bank run dynamics
         NAV_UNIT maxCoverageUtilizationNeutralBonusNAV = _computeMaxCoverageUtilizationNeutralBonus(_state, _stUserClaims, jtClaimOnSTRawNAV);

@@ -16,7 +16,7 @@ import { UUPSUpgradeable } from "../../../../../../lib/openzeppelin-contracts-up
  *      the real hook's `onRegister` returns `false` so it cannot be registered directly. The Vault calls `onRegister`
  *      (which this returns `true` for) and freezes the pool's callback set from `getHookFlags` AT REGISTRATION TIME —
  *      so this stand-in advertises the EXACT SAME flags as the real hook. After the kernel is deployed, the deploy
- *      template upgrades this proxy to the real `RoycoDayBalancerV3Hooks` implementation; the frozen flags then match
+ *      template upgrades this proxy to the real `RoycoDayBalancerV3Hooks` implementation. The frozen flags then match
  *      the real hook's callbacks. `_authorizeUpgrade` is intentionally open because the proxy is upgraded to the real,
  *      access-controlled hook within the same deployment transaction — the open window never survives the deploy.
  */

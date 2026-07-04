@@ -12,7 +12,7 @@ interface IRoycoProtocolTemplate {
      * @notice The set of contracts produced by a market deployment.
      * @custom:field seniorTranche - The senior tranche proxy.
      * @custom:field juniorTranche - The junior tranche proxy.
-     * @custom:field liquidityTranche - The liquidity tranche proxy (Royco Day markets only; zero otherwise).
+     * @custom:field liquidityTranche - The liquidity tranche proxy (Royco Day markets only, zero otherwise).
      * @custom:field kernel - The kernel proxy.
      * @custom:field accountant - The accountant proxy.
      * @custom:field ydm - The junior tranche's (possibly shared) YDM singleton.

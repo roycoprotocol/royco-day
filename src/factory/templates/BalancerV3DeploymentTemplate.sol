@@ -93,7 +93,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
      * @custom:field enableDonation - Whether unbalanced donation-style adds are permitted on the pool.
      * @custom:field disableUnbalancedLiquidity - Whether to disable unbalanced add/remove liquidity, forcing proportional-only.
      * @custom:field quoteAsset - The quote asset (stablecoin) paired against the senior tranche share in the pool.
-     * @custom:field quoteAssetRateProvider - The rate provider supplying the quote leg's rate to the pool; the BPT oracle then prices this leg with the shared constant-1.0 feed.
+     * @custom:field quoteAssetRateProvider - The rate provider supplying the quote leg's rate to the pool. The BPT oracle then prices this leg with the shared constant-1.0 feed.
      */
     struct GyroECLPPoolParams {
         string name;
@@ -232,7 +232,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
 
     /**
      * @dev Returns the ABI-encoded kernel `initialize(...)` calldata for the concrete Day kernel.
-     * @param _bptOracle The template-deployed E-CLP BPT oracle for this market's pool; the concrete template must
+     * @param _bptOracle The template-deployed E-CLP BPT oracle for this market's pool. The concrete template must
      *        inject it into the kernel's LT-quoter init params (overwriting any caller-supplied value).
      */
     function _kernelInitData(
@@ -401,7 +401,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         );
     }
 
-    /// @dev Token config for a pool leg: the senior-tranche leg is `WITH_RATE` (priced by the kernel rate provider); every other leg is `STANDARD`.
+    /// @dev Token config for a pool leg: the senior-tranche leg is `WITH_RATE` (priced by the kernel rate provider). Every other leg is `STANDARD`.
     function _buildTokenConfig(
         address _token,
         address _seniorTranche,
@@ -446,7 +446,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     }
 
     /// @dev The concrete Day kernel's quoter admin selectors (its ST/JT quoter family varies per kernel type). The
-    ///      base binds the universal Balancer LT-quoter setters; subclasses extend with their ST/JT quoter setters.
+    ///      base binds the universal Balancer LT-quoter setters. Subclasses extend with their ST/JT quoter setters.
     function _kernelQuoterBinding(address _kernel) internal view virtual returns (TargetBinding memory) {
         bytes4[] memory s = new bytes4[](2);
         uint64[] memory r = new uint64[](2);

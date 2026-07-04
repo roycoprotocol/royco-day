@@ -139,7 +139,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         uint64 yieldShareAtZeroUtilWAD;
         uint64 yieldShareAtTargetUtilWAD;
         uint64 yieldShareAtFullUtilWAD;
-        uint64 maxAdaptationSpeedWAD;
     }
 
     /// @notice Complete deployment result. `accessManager` is new (the factory's separate AM).
@@ -550,7 +549,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             AdaptiveCurveYDM_V2_Params memory ydmParams = abi.decode(_ydmSpecificParams, (AdaptiveCurveYDM_V2_Params));
             ydmInitializationData = abi.encodeCall(
                 AdaptiveCurveYDM_V2.initializeYDMForMarket,
-                (ydmParams.yieldShareAtZeroUtilWAD, ydmParams.yieldShareAtTargetUtilWAD, ydmParams.yieldShareAtFullUtilWAD, ydmParams.maxAdaptationSpeedWAD)
+                (ydmParams.yieldShareAtZeroUtilWAD, ydmParams.yieldShareAtTargetUtilWAD, ydmParams.yieldShareAtFullUtilWAD)
             );
         } else {
             revert UnsupportedYDMType(_ydmType);

@@ -153,7 +153,7 @@ contract RoycoDayBalancerV3Hooks is RoycoBase, BaseHooks, VaultGuard {
      *      kernel captures any oracle drift on the senior side before the operation mutates the pool's composition
      * @dev Requires this hook contract to hold the SYNCER role on the kernel
      * @dev Reverts if this hook contract is paused
-     * @return synced Always true on success; lets callers forward the result directly as the hook's required `bool` return
+     * @return synced Always true on success. Lets callers forward the result directly as the hook's required `bool` return
      */
     function _preLiquidityOperationSyncTrancheAccounting() internal whenNotPaused returns (bool synced) {
         IRoycoDayKernel(ROYCO_DAY_KERNEL).syncTrancheAccounting();

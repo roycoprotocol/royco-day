@@ -40,7 +40,7 @@ library ValuationLogic {
      * @notice Returns the effective net asset value (NAV) of the liquidity tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
      * @dev The effective NAV is the liquidity tranche's deployed market-making inventory (its raw NAV) plus the value of the
      *      senior tranche shares it holds from accumulated, not yet reinvested, liquidity premium payments
-     * @dev Reads the held senior-share count from storage, the value execution sees after the premium mint; the preview path uses
+     * @dev Reads the held senior-share count from storage, the value execution sees after the premium mint. The preview path uses
      *      the overload below to inject the post-mint count that storage does not yet reflect
      * @dev The senior NAV and share supply must be mutually consistent: the post-sync effective NAV against the
      *      post-carve-out-mint total supply, so the held senior shares are valued at the correct NAV per share

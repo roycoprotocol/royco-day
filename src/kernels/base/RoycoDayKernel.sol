@@ -87,7 +87,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         _;
     }
 
-    /// @dev Initializes the quoter cache at the start of the call; no teardown is needed since the transient cache auto-clears at transaction end
+    /// @dev Initializes the quoter cache at the start of the call. No teardown is needed since the transient cache auto-clears at transaction end
     /// @dev Should be placed on all functions that use the quoter cache
     modifier withQuoterCache() {
         _initializeQuoterCache();

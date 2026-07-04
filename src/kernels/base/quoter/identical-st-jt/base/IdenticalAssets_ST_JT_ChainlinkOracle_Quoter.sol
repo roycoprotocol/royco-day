@@ -174,8 +174,8 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
      * @param _stalenessThresholdSeconds The new staleness threshold seconds
      */
     function _setChainlinkOracle(address _oracle, uint48 _stalenessThresholdSeconds) internal {
-        require(_oracle != address(0), NULL_ADDRESS());
-        require(_stalenessThresholdSeconds > 0, INVALID_STALENESS_THRESHOLD_SECONDS());
+        // Oracle can be set to the null address since upstream contracts may use an admin set price with the chainlink oracle as a fallback
+        require(_oracle != address(0) || _stalenessThresholdSeconds > 0, INVALID_STALENESS_THRESHOLD_SECONDS());
 
         IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState storage $ = _getIdenticalAssets_ST_JT_ChainlinkOracle_QuoterStorage();
         $.oracle = _oracle;
@@ -186,7 +186,7 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
 
     /**
      * @notice Sets the new L2 sequencer uptime feed and grace period
-     * @dev A null sequencer uptime feed disables the L2 sequencer check; when a feed is set, the grace period must be a positive
+     * @dev A null sequencer uptime feed disables the L2 sequencer check. When a feed is set, the grace period must be a positive
      *      duration (mirroring the treatment of the staleness threshold for the price feed)
      * @param _sequencerUptimeFeed The new L2 sequencer uptime feed (set to the null address to disable the check)
      * @param _gracePeriodSeconds The new grace period seconds

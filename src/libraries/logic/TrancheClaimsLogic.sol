@@ -45,7 +45,7 @@ library TrancheClaimsLogic {
         if (_trancheType == TrancheType.SENIOR || _trancheType == TrancheType.JUNIOR) {
             // Decompose the NAV claims for the senior and junior tranches based on the synced accounting state
             (NAV_UNIT stClaimOnSTRawNAV, NAV_UNIT stClaimOnJTRawNAV, NAV_UNIT jtClaimOnSTRawNAV, NAV_UNIT jtClaimOnJTRawNAV) =
-                _computeSTandJTClaimsOnNAV(_state);
+                _computeSTandJTClaimsOnRawNAVs(_state);
 
             // Compute the cumulative asset claims for the specified tranche based on the NAV decomposition
             if (_trancheType == TrancheType.SENIOR) {
@@ -161,12 +161,12 @@ library TrancheClaimsLogic {
      * @return jtClaimOnSTRawNAV The amount of JT's effective NAV that is backed by ST's raw NAV
      * @return jtClaimOnJTRawNAV The amount of JT's effective NAV that is backed by JT's own raw NAV
      */
-    function _computeSTandJTClaimsOnNAV(SyncedAccountingState memory _state)
+    function _computeSTandJTClaimsOnRawNAVs(SyncedAccountingState memory _state)
         internal
         pure
         returns (NAV_UNIT stClaimOnSTRawNAV, NAV_UNIT stClaimOnJTRawNAV, NAV_UNIT jtClaimOnSTRawNAV, NAV_UNIT jtClaimOnJTRawNAV)
     {
-        return _computeSTandJTClaimsOnNAV(_state.stRawNAV, _state.jtRawNAV, _state.stEffectiveNAV, _state.jtEffectiveNAV);
+        return _computeSTandJTClaimsOnRawNAVs(_state.stRawNAV, _state.jtRawNAV, _state.stEffectiveNAV, _state.jtEffectiveNAV);
     }
 
     /**
@@ -180,7 +180,7 @@ library TrancheClaimsLogic {
      * @return jtClaimOnSTRawNAV The amount of JT's effective NAV that is backed by ST's raw NAV
      * @return jtClaimOnJTRawNAV The amount of JT's effective NAV that is backed by JT's own raw NAV
      */
-    function _computeSTandJTClaimsOnNAV(
+    function _computeSTandJTClaimsOnRawNAVs(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
         NAV_UNIT _stEffectiveNAV,
@@ -191,6 +191,7 @@ library TrancheClaimsLogic {
         returns (NAV_UNIT stClaimOnSTRawNAV, NAV_UNIT stClaimOnJTRawNAV, NAV_UNIT jtClaimOnSTRawNAV, NAV_UNIT jtClaimOnJTRawNAV)
     {
         // Cross-tranche claims (the NAV that can't funded by the tranche's own raw NAV)
+        // NOTE: Since NAV conservation is enforced in the accountant, only one of these values can be non-zero
         stClaimOnJTRawNAV = RoycoUnitsMath.saturatingSub(_stEffectiveNAV, _stRawNAV);
         jtClaimOnSTRawNAV = RoycoUnitsMath.saturatingSub(_jtEffectiveNAV, _jtRawNAV);
 

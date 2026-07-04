@@ -33,7 +33,6 @@ contract SetYDM is ParameterUpdateBase {
         uint64 yieldShareAtZeroUtilWAD;
         uint64 yieldShareAtTargetUtilWAD;
         uint64 yieldShareAtFullUtilWAD;
-        uint64 maxAdaptationSpeedWAD;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -57,7 +56,6 @@ contract SetYDM is ParameterUpdateBase {
     /**
      * @notice Configure YDM re-initialization here
      * @dev Values mirror the AdaptiveCurveYDM_V2 params from script/config/MarketDeploymentConfig.sol,
-     *      with `maxAdaptationSpeedWAD` forced to 0.
      */
     function _initializeConfigs() internal {
         // Populate with Day markets as they ship. Empty by default.
@@ -96,14 +94,14 @@ contract SetYDM is ParameterUpdateBase {
 
                     bytes memory ydmInitData = abi.encodeCall(
                         AdaptiveCurveYDM_V2.initializeYDMForMarket,
-                        (cfg.yieldShareAtZeroUtilWAD, cfg.yieldShareAtTargetUtilWAD, cfg.yieldShareAtFullUtilWAD, cfg.maxAdaptationSpeedWAD)
+                        (cfg.yieldShareAtZeroUtilWAD, cfg.yieldShareAtTargetUtilWAD, cfg.yieldShareAtFullUtilWAD)
                     );
 
                     updates[idx] = UpdateParams({
                         marketName: cfg.marketName,
                         target: addrs.accountant,
                         callData: abi.encodeCall(IRoycoDayAccountant.setJuniorTrancheYDM, (cfg.ydm, ydmInitData)),
-                        description: string.concat("Set YDM for ", cfg.marketName, " (maxAdaptationSpeedWAD=", vm.toString(cfg.maxAdaptationSpeedWAD), ")")
+                        description: string.concat("Set YDM for ", cfg.marketName)
                     });
                     idx++;
                 }
@@ -126,7 +124,7 @@ contract SetYDM is ParameterUpdateBase {
         (address expectedYDM, bytes memory initData) = _decodeSetYDMCallData(_params.callData);
 
         // Decode `initializeYDMForMarket(uint64,uint64,uint64,uint64)` from initData
-        (uint64 expectedZeroUtilWAD, uint64 expectedTargetUtilWAD, uint64 expectedFullUtilWAD, uint64 expectedMaxAdaptationSpeedWAD) =
+        (uint64 expectedZeroUtilWAD, uint64 expectedTargetUtilWAD, uint64 expectedFullUtilWAD) =
             _decodeInitializeYDMForMarketCallData(initData);
 
         // Accountant must now point at the expected YDM
@@ -141,13 +139,11 @@ contract SetYDM is ParameterUpdateBase {
         (
             uint64 yieldShareAtTargetWAD,
             uint32 lastAdaptationTimestamp,
-            uint64 maxAdaptationSpeedWAD,
             uint64 discountToTargetAtZeroUtilWAD,
             uint64 premiumToTargetAtFullUtilWAD
         ) = AdaptiveCurveYDM_V2(expectedYDM).accountantToCurve(_params.target);
 
         require(yieldShareAtTargetWAD == expectedTargetUtilWAD, VerificationFailed("yieldShareAtTargetWAD mismatch"));
-        require(maxAdaptationSpeedWAD == expectedMaxAdaptationSpeedWAD, VerificationFailed("maxAdaptationSpeedWAD mismatch"));
         require(discountToTargetAtZeroUtilWAD == expectedDiscount, VerificationFailed("discountToTargetAtZeroUtilWAD mismatch"));
         require(premiumToTargetAtFullUtilWAD == expectedPremium, VerificationFailed("premiumToTargetAtFullUtilWAD mismatch"));
         // initializeYDMForMarket resets the last-adaptation timestamp to zero
@@ -167,17 +163,17 @@ contract SetYDM is ParameterUpdateBase {
         (ydm, initData) = abi.decode(args, (address, bytes));
     }
 
-    /// @dev Strips the 4-byte selector and abi.decodes the 4 uint64 params of `initializeYDMForMarket`.
+    /// @dev Strips the 4-byte selector and abi.decodes the 3 uint64 params of `initializeYDMForMarket`.
     function _decodeInitializeYDMForMarketCallData(bytes memory _cd)
         internal
         pure
-        returns (uint64 zeroUtilWAD, uint64 targetUtilWAD, uint64 fullUtilWAD, uint64 maxAdaptationSpeedWAD)
+        returns (uint64 zeroUtilWAD, uint64 targetUtilWAD, uint64 fullUtilWAD)
     {
         bytes memory args = new bytes(_cd.length - 4);
         for (uint256 i = 0; i < args.length; i++) {
             args[i] = _cd[i + 4];
         }
-        (zeroUtilWAD, targetUtilWAD, fullUtilWAD, maxAdaptationSpeedWAD) = abi.decode(args, (uint64, uint64, uint64, uint64));
+        (zeroUtilWAD, targetUtilWAD, fullUtilWAD) = abi.decode(args, (uint64, uint64, uint64));
     }
 
     function _getUniqueChainIds() internal view returns (uint256[] memory) {
