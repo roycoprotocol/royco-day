@@ -85,7 +85,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     mapping(uint256 kernelType => address template) internal kernelTypeToTemplate;
 
     /// @notice Enum for the Day kernel types this script can deploy.
-    /// @dev The Dawn-era kernel zoo was removed in the Day fork. New Day kernels are added here as they ship.
+    /// @dev New Day kernel types are added here as they ship.
     enum KernelType {
         Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel
     }
@@ -104,48 +104,11 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         uint32 executionDelay;
     }
 
-    // ─── Legacy kernel-specific param structs (kept: tests encode against these; the template KernelParams are field-identical) ───
-
-    struct IdleAACdoSTCdoJTKernelParams {
-        address idleCDO;
-    }
-
-    struct ReUSDSTReUSDJTKernelParams {
-        address reusd;
-        address reusdUsdQuoteToken;
-        address insuranceCapitalLayer;
-    }
-
-    struct IdenticalMakinaSTMakinaJTKernelParams {
-        address makinaMachine;
-        uint256 initialConversionRateWAD;
-    }
-
-    struct IdenticalAssets_ST_JT_ChainlinkToAdminOracle_QuoterKernelParams {
-        uint256 initialConversionRateWAD;
-        address trancheAssetToReferenceAssetOracle;
-        uint48 stalenessThresholdSeconds;
-    }
-
-    struct IdenticalERC4626Shares_ST_JT_SharePriceToAdminOracle_QuoterKernelParams {
-        uint256 initialConversionRateWAD;
-    }
+    // ─── Kernel-specific param struct for the Day ERC4626-Chainlink-Balancer kernel (field-identical to the template's) ───
 
     struct IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams {
         IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams stAndJTQuoterParams;
         BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams ltQuoterParams;
-    }
-
-    struct IdenticalAssets_ST_JT_AdminOracle_QuoterKernelParams {
-        uint256 initialConversionRateWAD;
-    }
-
-    struct LockedIUSDKernelParams {
-        address infiniFiGateway;
-        uint32 unwindingEpochs;
-        uint256 initialConversionRateWAD;
-        address iUSDToNavAssetOracle;
-        uint48 stalenessThresholdSeconds;
     }
 
     // ─── YDM param structs ───

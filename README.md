@@ -1,6 +1,6 @@
-# Royco Dawn [![CI](https://github.com/roycoprotocol/royco-dawn/actions/workflows/test.yml/badge.svg)](https://github.com/roycoprotocol/royco-dawn/actions/workflows/test.yml)
+# Royco Day [![CI](https://github.com/roycoprotocol/royco-day/actions/workflows/test.yml/badge.svg)](https://github.com/roycoprotocol/royco-day/actions/workflows/test.yml)
 
-Dawn enables structured risk tranching for any yield source by splitting it into two distinct risk and return profiles: a junior and senior tranche. The junior tranche serves as first-loss capital in exchange for a risk premium paid by the senior tranche.
+Day enables structured risk tranching for any yield source by splitting it into distinct risk and return profiles across three tranches: a junior, a senior, and a liquidity tranche. The junior tranche serves as first-loss capital in exchange for a risk premium paid by the senior tranche. The liquidity tranche is market-making capital that provides secondary liquidity for senior shares in exchange for a liquidity premium paid by the senior tranche.
 
 ## Core Concepts
 
@@ -32,21 +32,35 @@ Markets target a slight excess of junior capital above the minimum coverage requ
 
 Each market also defines a **liquidation utilization threshold**. When utilization exceeds this threshold, the market is deemed unhealthy and ST redeemers receive a self-liquidation bonus funded by JT assets, incentivizing seniors to exit to restore the market into a healthy state. This threshold must be greater than 100% to ensure that the market is only considered unhealthy when the minimum coverage requirement is violated. A threshold of 150% means the market enters liquidation mode when JT's remaining buffer can only cover two-thirds of the required coverage relative to senior exposure.
 
+### Liquidity and Liquidity Utilization
+
+Beyond guaranteeing minimum coverage for senior shares, Day guarantees a minimum secondary liquidity for them. The liquidity tranche (LT) holds market-making capital — a Balancer pool position pairing the senior tranche share against a quote stablecoin — so senior holders always have a venue to exit into. Liquidity utilization measures the senior liquidity demand against the depth the LT provides:
+
+```
+                        ST_EFFECTIVE_NAV × MIN_LIQUIDITY
+Liquidity Utilization = ─────────────────────────────────
+                                  LT_RAW_NAV
+```
+
+A Liquidity Distribution Model (LDM), the same model family as the YDM, prices this utilization into the liquidity premium paid to the LT out of senior yield. Redemptions that reduce pooled depth are gated so the pool can't be drained below the senior tranche's required liquidity floor. A market with zero minimum liquidity behaves exactly like a plain senior/junior market.
+
 ## Architecture
 
 ### Factory
 
-The **RoycoFactory** is a singleton contract that deploys and manages all Dawn markets. Each market deployment creates four interconnected contracts (senior and junior tranche, kernel, and accountant) via CREATE3 for deterministic addresses. The Factory also serves as the global access manager for all deployed markets, administering role-based permissions across the protocol.
+The **RoycoFactory** is a singleton contract that deploys and manages all Day markets. Each market deployment creates the tranche (senior, junior, and liquidity), kernel, and accountant contracts via CREATE3 for deterministic addresses. The Factory also serves as the global access manager for all deployed markets, administering role-based permissions across the protocol.
 
 ### Tranches
 
-Each market has two ERC4626-style vault contracts representing the two tranches:
+Each market has ERC4626-style vault contracts representing its tranches:
 
-**Senior Tranche (ST)**: The capital-protected tier. Senior LPs receive downside protection from the junior tranche when the underlying yield source experiences losses, the junior tranche absorbs them first. In exchange for this protection, senior LPs pay a risk premium (portion of their yield) to junior LPs. Senior has first claim on any recoveries after a loss event.
+**Senior Tranche (ST)**: The capital-protected tier. Senior LPs receive downside protection from the junior tranche when the underlying yield source experiences losses, the junior tranche absorbs them first. In exchange for this protection, senior LPs pay a risk premium (portion of their yield) to junior LPs, and a liquidity premium to liquidity LPs. Senior has first claim on any recoveries after a loss event.
 
 **Junior Tranche (JT)**: The first-loss capital tier. Junior LPs provide a coverage buffer that protects senior capital from losses. In return, they earn a risk premium from senior yield. The size of this premium is determined by the market's Yield Distribution Model (YDM).
 
-Both tranches are ERC20Permit enabled, pausable, and support standard preview and deposit/redeem operations.
+**Liquidity Tranche (LT)**: Covered senior capital that also provides liquidity. It holds a Balancer pool position (BPT) pairing the senior tranche share against a quote stablecoin, giving senior holders a venue to exit into. It earns a liquidity premium from senior yield, sized by the market's Liquidity Distribution Model (LDM). The premium is minted as senior shares and reinvested into the pool, so the LT share is up-only and composable.
+
+Tranches are ERC20Permit enabled, pausable, and support standard preview and deposit/redeem operations.
 
 Royco tranches are natively composable across DeFi. Senior tranches transform high-risk vault tokens into leverage-eligible collateral for lending markets, unlocking net-new capital that wasn't accessible before.
 
@@ -54,9 +68,9 @@ Beyond lending, tranches can be paired on AMMs/CLOBs, split on Pendle for fixed 
 
 ### Kernel
 
-The **Kernel** is the operational core of each market. It orchestrates all deposits and redemptions, routing assets between tranches and enforcing market constraints. Each Kernel includes a pluggable **Quoter** module that handles tranche asset to NAV conversions using protocol-specific pricing logic (e.g., ERC4626 share prices, Chainlink oracles, or custom oracle integrations).
+The **Kernel** is the operational core of each market. It orchestrates all deposits and redemptions, routing assets between tranches and enforcing market constraints. Each Kernel includes a pluggable **Quoter** module that handles tranche asset to NAV conversions using protocol-specific pricing logic (e.g., ERC4626 share prices, Chainlink oracles, or a Balancer pool oracle for the liquidity tranche).
 
-The Kernel enforces coverage requirements: it will block operations that would leave the senior tranche undercollateralized or junior tranche LPs realizing unwarranted losses. It also manages blacklist functionality for compliance requirements.
+The Kernel enforces coverage requirements: it will block operations that would leave the senior tranche undercollateralized or junior tranche LPs realizing unwarranted losses. It also enforces the liquidity gate on redemptions and manages blacklist functionality for compliance requirements.
 
 ### Accountant
 
@@ -66,13 +80,14 @@ The **Accountant** maintains the financial state of each market. Before and afte
 2. Applying coverage obligations on losses
 3. Tracking impermanent losses (temporary losses that may recover)
 4. Distributing yield from senior to junior (risk premium) as instructed by the market's YDM
-5. Accruing protocol fees
+5. Distributing yield from senior to the liquidity tranche (liquidity premium) as instructed by the market's LDM
+6. Accruing protocol fees
 
 ### Yield Distribution Model (YDM)
 
-The **YDM** determines what percentage of senior yield flows to junior as compensation for providing coverage.
+The **YDM** determines what percentage of senior yield flows to junior as compensation for providing coverage. The same model family, instantiated as the **LDM**, prices the liquidity premium paid to the liquidity tranche from `liquidityUtilization`.
 
-Dawn supports multiple YDM implementations:
+Day supports multiple YDM implementations:
 
 **Static Curve YDM**: A fixed piecewise curve that remains eternally static. The curve is defined by three anchor points: JT yield share at 0%, 90%, and 100% utilization. Higher utilization means JT earns more of the senior yield. Setting all three of these parameters at the same JT yield share results in a fixed yield share market.
 
@@ -84,11 +99,11 @@ Dawn supports multiple YDM implementations:
 
 ### Market States
 
-Markets operate as perpetual instruments with full liquidity for both tranches under normal conditions. If senior capital incurs a loss, junior coverage is immediately applied and the market enters a fixed-term regime. This gives the underlying position time to recover before junior LPs realize any losses. If the position recovers, juniors are made whole and the market shifts back to a perpetual state. In the event that losses persist and coverage runs thin, seniors can exit early with their guaranteed protection intact.
+Markets operate as perpetual instruments with full liquidity for all tranches under normal conditions. If senior capital incurs a loss, junior coverage is immediately applied and the market enters a fixed-term regime. This gives the underlying position time to recover before junior LPs realize any losses. If the position recovers, juniors are made whole and the market shifts back to a perpetual state. In the event that losses persist and coverage runs thin, seniors can exit early with their guaranteed protection intact.
 
 The two states are:
 
-**PERPETUAL**: Normal operation. All deposits and redemptions are enabled (subject to coverage constraints), the YDM actively adapts, and protocol fees accrue.
+**PERPETUAL**: Normal operation. All deposits and redemptions are enabled (subject to coverage and liquidity constraints), the YDM/LDM actively adapt, and protocol fees accrue.
 
 **FIXED_TERM**: Recovery state entered when JT provides coverage for ST losses. ST redemptions and JT deposits are blocked to protect JT's claim on future recovery. ST deposits and JT redemptions remain enabled. The YDM is frozen and no protocol fees are taken.
 
@@ -102,30 +117,19 @@ When losses occur, they are handled differently based on which tranche experienc
 
 **JT Losses**: First reduce JT effective NAV. If JT effective NAV is depleted, excess losses spill over to ST and are tracked as ST IL.
 
-**Recovery**: When appreciation occurs, ST IL is recovered first (senior priority), then JT IL is repaid. Remaining gains are distributed as yield via the YDM.
+**Recovery**: When appreciation occurs, ST IL is recovered first (senior priority), then JT IL is repaid. Remaining gains are distributed as yield via the YDM (risk premium) and LDM (liquidity premium).
 
 **JT IL Erasure**: JT IL is erased (JT forfeits its claim) when the market transitions to PERPETUAL state. This occurs when the fixed-term period expires, utilization exceeds the liquidation threshold, or ST IL exists (distressed state).
 
 ## Supported Yield Sources
 
-Dawn's pluggable quoter architecture enables integration with any yield-bearing asset. Each Kernel implementation defines how tranche assets are priced in NAV terms.
+Day's pluggable quoter architecture enables integration with any yield-bearing asset. Each Kernel implementation defines how tranche assets are priced in NAV terms.
 
-**ERC4626 Vaults**: Any ERC4626-compliant vault with socialized losses (Morpho v1 and v2, Yearn Finance, etc.) using share price for tranche asset to base asset conversion, with either an admin-set or Chainlink-compatible oracle for base asset to NAV conversion.
+**ERC4626 Vaults**: Any ERC4626-compliant vault with socialized losses (Morpho, Yearn, snUSD, etc.) using share price for tranche asset to base asset conversion, with either an admin-set or Chainlink-compatible oracle for base asset to NAV conversion. This is the kernel Day ships today, paired with a Balancer V3 Gyro E-CLP liquidity tranche.
 
-**ERC20 Tokens**: Generic yield-bearing ERC20s (mf-ONE, ACRED, etc.) priced via Chainlink-compatible oracles.
-
-**Protocol-Specific**:
-- **Maple Finance (Pool V2)**: Pool V2 tokens (syrupUSDC, Maple Institutional, etc.) using exit share price
-- **Pareto/Idle (AA CDO)**: Pareto's CDO AA tranches (AA-FalconXUSDC, etc.) using virtual price
-- **Metastreet (sUSDai)**: Staked USDai using redemption share price
-- **Re (reUSD)**: reUSD using Insurance Capital Layer oracle
-- **Makina (machines)**: Machine shares (DUSD, DBIT, etc.) using machine exchange rate
+The senior and junior tranches can be deployed into identical or disparate yield sources, and additional kernel/quoter variants can be added to price other yield-bearing assets (generic ERC20s via Chainlink feeds, protocol-specific share prices, etc.) as they ship.
 
 ## Extended Capabilities
-
-**Flexible Deployment**: Senior and junior capital within the same market can be deployed into identical or disparate yield sources.
-
-For example, seniors might be invested in Ethena while juniors are invested in Aave.
 
 **Depeg Protection**: Markets backed by synthetic assets use oracles that value the underlying based on actual backing rather than secondary market prices.
 

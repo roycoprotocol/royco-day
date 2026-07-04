@@ -60,8 +60,7 @@ contract SetDustTolerance is ParameterUpdateBase {
      *      that represents ~$1, use the raw integer (e.g. `5` for 5 wei of dust).
      */
     function _initializeConfigs() internal {
-        // stcUSD on Ethereum — set ST/JT dust to 5 (raw NAV units; cUSD is 18-decimal)
-        _configs.push(SetDustToleranceConfig({ chainId: MAINNET, marketName: STCUSD, newSTDustTolerance: 1e16, newJTDustTolerance: 1e16 }));
+        // Populate with Day markets as they ship. Empty by default.
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

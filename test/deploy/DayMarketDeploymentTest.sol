@@ -36,9 +36,9 @@ import { BaseTest } from "../base/BaseTest.sol";
 
 /**
  * @title DayMarketDeploymentTest
- * @notice End-to-end deployment test: runs the real `DeployScript` against a mainnet fork to deploy a full Day market
- *         (a Day-shaped equivalent of the Royco Dawn SNUSD market) on the real Balancer V3 + Gyro E-CLP infra, then
- *         rigorously asserts every parameter, linkage, and AccessManager auth wiring.
+ * @notice End-to-end deployment test: runs the real `DeployScript` against a mainnet fork to deploy a full Day snUSD
+ *         market on the real Balancer V3 + Gyro E-CLP infra, then rigorously asserts every parameter, linkage, and
+ *         AccessManager auth wiring.
  * @dev Scope: deploy + static assertions (no deposits/syncs). The deploy only *stores* the BPT/base->NAV oracles, so a
  *      non-zero placeholder BPT oracle + the real (uncalled) RedStone feed suffice. The ST/JT asset is the real snUSD
  *      ERC4626 vault (answers `decimals()`/`asset()` on the fork); the E-CLP curve params are a known-good set copied from
@@ -48,7 +48,7 @@ import { BaseTest } from "../base/BaseTest.sol";
  *      snUSD vault, USDC, and the RedStone feed all have code). Without an RPC the whole suite is skipped.
  */
 contract DayMarketDeploymentTest is BaseTest {
-    // ── Real mainnet addresses (from the Dawn SNUSD config) ──────────────────────────────────────────────────────
+    // ── Real mainnet addresses (snUSD market) ────────────────────────────────────────────────────────────────────
     address internal constant SNUSD_VAULT = 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313; // ST/JT ERC4626 asset
     address internal constant NUSD_REDSTONE_ORACLE = 0x5e7281f74e74D76347f0b8f4a36Fd3cb29c19d95; // base->NAV feed
     address internal constant MAINNET_USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48; // pool quote token

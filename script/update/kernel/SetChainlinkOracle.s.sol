@@ -70,7 +70,7 @@ contract SetChainlinkOracle is ParameterUpdateBase {
      *      ```
      *      _configs.push(SetChainlinkOracleConfig({
      *          chainId: MAINNET,
-     *          marketName: STCUSD,
+     *          marketName: SNUSD,
      *          newOracle: 0x...,
      *          newStalenessThresholdSeconds: 48 hours,
      *          syncBeforeUpdate: true
@@ -78,15 +78,7 @@ contract SetChainlinkOracle is ParameterUpdateBase {
      *      ```
      */
     function _initializeConfigs() internal {
-        _configs.push(
-            SetChainlinkOracleConfig({
-                chainId: MAINNET,
-                marketName: STCUSD,
-                newOracle: 0x04F34B121Bb3691443A07E70De71251e35a120F8,
-                newStalenessThresholdSeconds: 48 hours,
-                syncBeforeUpdate: true
-            })
-        );
+        // Populate with Day markets as they ship. Empty by default.
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

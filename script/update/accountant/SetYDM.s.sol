@@ -60,45 +60,7 @@ contract SetYDM is ParameterUpdateBase {
      *      with `maxAdaptationSpeedWAD` forced to 0.
      */
     function _initializeConfigs() internal {
-        // ── Mainnet ──────────────────────────────────────────────────────────
-        // syrupUSDC : Y_0=7%, Y_target=7%, Y_100=11%, adaptation speed = 40 days
-        _configs.push(
-            SetYDMConfig({
-                chainId: MAINNET,
-                marketName: SYRUP_USDC,
-                ydm: ADAPTIVE_CURVE_YDM_V2,
-                yieldShareAtZeroUtilWAD: 0.07e18,
-                yieldShareAtTargetUtilWAD: 0.07e18,
-                yieldShareAtFullUtilWAD: 0.11e18,
-                maxAdaptationSpeedWAD: uint64(40e18 / uint256(365 days))
-            })
-        );
-        // stcUSD    : Y_0=6%, Y_target=6%, Y_100=18%, adaptation speed = 40 days
-        _configs.push(
-            SetYDMConfig({
-                chainId: MAINNET,
-                marketName: STCUSD,
-                ydm: ADAPTIVE_CURVE_YDM_V2,
-                yieldShareAtZeroUtilWAD: 0.06e18,
-                yieldShareAtTargetUtilWAD: 0.06e18,
-                yieldShareAtFullUtilWAD: 0.18e18,
-                maxAdaptationSpeedWAD: uint64(40e18 / uint256(365 days))
-            })
-        );
-
-        // ── Arbitrum ─────────────────────────────────────────────────────────
-        // sUSDai    : Y_0=11%, Y_target=11%, Y_100=31%, adaptation speed = 40 days
-        _configs.push(
-            SetYDMConfig({
-                chainId: ARBITRUM,
-                marketName: SUSDAI,
-                ydm: ADAPTIVE_CURVE_YDM_V2,
-                yieldShareAtZeroUtilWAD: 0.11e18,
-                yieldShareAtTargetUtilWAD: 0.11e18,
-                yieldShareAtFullUtilWAD: 0.31e18,
-                maxAdaptationSpeedWAD: uint64(40e18 / uint256(365 days))
-            })
-        );
+        // Populate with Day markets as they ship. Empty by default.
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

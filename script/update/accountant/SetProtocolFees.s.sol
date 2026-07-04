@@ -67,7 +67,7 @@ contract SetProtocolFees is ParameterUpdateBase {
      *      ```
      *      _configs.push(SetProtocolFeesConfig({
      *          chainId: MAINNET,
-     *          marketName: APYUSD,
+     *          marketName: SNUSD,
      *          stProtocolFeeWAD: 0.1e18,
      *          jtProtocolFeeWAD: SKIP,
      *          jtYieldShareProtocolFeeWAD: 0.45e18
@@ -75,9 +75,7 @@ contract SetProtocolFees is ParameterUpdateBase {
      *      ```
      */
     function _initializeConfigs() internal {
-        _configs.push(
-            SetProtocolFeesConfig({ chainId: MAINNET, marketName: APYUSD, stProtocolFeeWAD: 0.1e18, jtProtocolFeeWAD: 0, jtYieldShareProtocolFeeWAD: 0.1e18 })
-        );
+        // Populate with Day markets as they ship. Empty by default.
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

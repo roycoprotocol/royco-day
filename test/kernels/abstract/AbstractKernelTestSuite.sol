@@ -18,7 +18,7 @@ import { IKernelTestHooks } from "../../interfaces/IKernelTestHooks.sol";
  *         `_deployKernelAndMarket` hook, which selects a market config by name from the config file), wires every deployed
  *         contract into member vars (including the Day-only LT/pool/hook/LDM topology the script's result omits), and
  *         funds the ST/JT providers. Concrete kernel tests then only supply the per-kernel `IKernelTestHooks` and the market
- *         name — mirroring the Royco Dawn "abstract kernel test per kernel type" pattern.
+ *         name — following an "abstract kernel test per kernel type" pattern.
  * @dev No `test_*` methods live here yet; the shared test battery is added on top of this scaffolding later.
  */
 abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
