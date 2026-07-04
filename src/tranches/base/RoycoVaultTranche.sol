@@ -13,7 +13,7 @@ import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { WAD_DECIMALS, ZERO_NAV_UNITS } from "../../libraries/Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toNAVUnits, toUint256 } from "../../libraries/Units.sol";
-import { UtilsLib } from "../../libraries/UtilsLib.sol";
+import { TrancheClaimsLogic } from "../../libraries/logic/TrancheClaimsLogic.sol";
 
 /**
  * @title RoycoVaultTranche
@@ -213,7 +213,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     function convertToAssets(uint256 _shares) public view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
         // Get the post-sync tranche state: applying NAV reconciliation.
         (AssetClaims memory trancheClaims, uint256 trancheTotalShares) = _previewPostSyncTrancheState();
-        return UtilsLib.scaleAssetClaims(trancheClaims, _shares, trancheTotalShares);
+        return TrancheClaimsLogic._scaleAssetClaims(trancheClaims, _shares, trancheTotalShares);
     }
 
     /// @inheritdoc IRoycoVaultTranche

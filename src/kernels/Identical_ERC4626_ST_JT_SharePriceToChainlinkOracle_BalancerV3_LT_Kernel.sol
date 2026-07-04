@@ -2,13 +2,12 @@
 pragma solidity ^0.8.28;
 
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
-import { NAV_UNIT } from "../libraries/Units.sol";
 import { RoycoDayKernel } from "./base/RoycoDayKernel.sol";
 import {
     IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
 } from "./base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
 import { IdenticalAssets_ST_JT_Oracle_Quoter } from "./base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_Oracle_Quoter.sol";
-import { BalancerV3_LT_Quoter } from "./base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_Quoter.sol";
+import { BalancerV3_LT_BPTOracle_Quoter } from "./base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 
 /**
  * @title Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel
@@ -19,7 +18,7 @@ import { BalancerV3_LT_Quoter } from "./base/quoter/liquidity-tranche/balancer-v
  */
 contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel is
     IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter,
-    BalancerV3_LT_Quoter
+    BalancerV3_LT_BPTOracle_Quoter
 {
     /**
      * @notice Kernel-specific initialization parameters
@@ -28,7 +27,7 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kerne
      */
     struct KernelSpecificInitParams {
         IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams stAndJTQuoterParams;
-        BalancerV3_LT_Quoter.LT_QuoterSpecificParams ltQuoterParams;
+        BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams ltQuoterParams;
     }
 
     /// @notice Constructs the kernel state and resolves the quote asset from the liquidity tranche's Balancer V3 pool
@@ -52,16 +51,7 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kerne
         // Initialize the identical ERC4626 shares to Chainlink (compatible) oracle ST/JT quoter
         __IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter_init(_specificParams.stAndJTQuoterParams);
         // Initialize the Balancer V3 liquidity tranche quoter
-        __BalancerV3_LT_Quoter_init_unchained(_specificParams.ltQuoterParams);
-    }
-
-    /**
-     * @inheritdoc RoycoDayKernel
-     * @dev Diamond resolution: only the Balancer V3 liquidity tranche quoter overrides this hook (to freeze the senior share rate for the
-     *      pool's senior leg); the ST/JT quoter inherits the base no-op. Dispatches explicitly to the Balancer implementation.
-     */
-    function _cacheSTShareRate(NAV_UNIT _stEffectiveNAV, uint256 _stTotalSupplyAfterMints) internal override(RoycoDayKernel, BalancerV3_LT_Quoter) {
-        BalancerV3_LT_Quoter._cacheSTShareRate(_stEffectiveNAV, _stTotalSupplyAfterMints);
+        __BalancerV3_LT_BPTOracle_Quoter_init_unchained(_specificParams.ltQuoterParams);
     }
 
     /**

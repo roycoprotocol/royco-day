@@ -7,8 +7,9 @@ import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
 import { IYDM } from "../interfaces/IYDM.sol";
 import { MAX_NAV_UNITS, MAX_PROTOCOL_FEE_WAD, WAD, ZERO_NAV_UNITS } from "../libraries/Constants.sol";
 import { MarketState, NAV_UNIT, Operation, SyncedAccountingState } from "../libraries/Types.sol";
-import { UnitsMathLib, toNAVUnits } from "../libraries/Units.sol";
-import { Math, UtilsLib } from "../libraries/UtilsLib.sol";
+import { Math, UnitsMathLib, toNAVUnits } from "../libraries/Units.sol";
+import { TrancheClaimsLogic } from "../libraries/logic/TrancheClaimsLogic.sol";
+import { UtilizationLogic } from "../libraries/logic/UtilizationLogic.sol";
 
 /**
  * @title RoycoDayAccountant
@@ -309,8 +310,8 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             stProtocolFee: ZERO_NAV_UNITS,
             jtProtocolFee: ZERO_NAV_UNITS,
             ltProtocolFee: ZERO_NAV_UNITS,
-            coverageUtilizationWAD: UtilsLib.computeCoverageUtilization(_stRawNAV, _jtRawNAV, JT_COINVESTED, minCoverageWAD, jtEffectiveNAV),
-            liquidityUtilizationWAD: UtilsLib.computeLiquidityUtilization(stEffectiveNAV, minLiquidityWAD, _ltRawNAV),
+            coverageUtilizationWAD: UtilizationLogic._computeCoverageUtilization(_stRawNAV, _jtRawNAV, JT_COINVESTED, minCoverageWAD, jtEffectiveNAV),
+            liquidityUtilizationWAD: UtilizationLogic._computeLiquidityUtilization(stEffectiveNAV, minLiquidityWAD, _ltRawNAV),
             fixedTermEndTimestamp: $.fixedTermEndTimestamp,
             minCoverageWAD: minCoverageWAD,
             jtCoinvested: JT_COINVESTED,
@@ -407,7 +408,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
 
         // Decompose the junior tranche's claims on the ST and JT raw NAVs from the synced accounting state
-        (,, NAV_UNIT jtClaimOnStUnits, NAV_UNIT jtClaimOnJtUnits) = UtilsLib.computeSTandJTClaimsOnNAV(state);
+        (,, NAV_UNIT jtClaimOnStUnits, NAV_UNIT jtClaimOnJtUnits) = TrancheClaimsLogic._computeSTandJTClaimsOnNAV(state);
 
         // Get the surplus JT assets in NAV units
         // Compute the total covered exposure of the underlying investment, rounding in favor of senior protection
@@ -601,7 +602,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
                         IYDM($.jtYDM)
                             .previewYieldShare(
                                 initialMarketState,
-                                UtilsLib.computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, JT_COINVESTED, $.minCoverageWAD, $.lastJTEffectiveNAV)
+                                UtilizationLogic._computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, JT_COINVESTED, $.minCoverageWAD, $.lastJTEffectiveNAV)
                             ),
                         $.maxJTYieldShareWAD
                     );
@@ -609,7 +610,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
                     _twLTYieldShareAccruedWAD = Math.min(
                         IYDM($.ltYDM)
                             .previewYieldShare(
-                                initialMarketState, UtilsLib.computeLiquidityUtilization($.lastSTEffectiveNAV, $.minLiquidityWAD, $.lastLTRawNAV)
+                                initialMarketState, UtilizationLogic._computeLiquidityUtilization($.lastSTEffectiveNAV, $.minLiquidityWAD, $.lastLTRawNAV)
                             ),
                         $.maxLTYieldShareWAD
                     );
@@ -651,7 +652,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         uint256 minCoverageWAD = $.minCoverageWAD;
         uint256 minLiquidityWAD = $.minLiquidityWAD;
         uint256 coverageLiquidationUtilizationWAD = $.coverageLiquidationUtilizationWAD;
-        uint256 coverageUtilizationWAD = UtilsLib.computeCoverageUtilization(_stRawNAV, _jtRawNAV, JT_COINVESTED, minCoverageWAD, jtEffectiveNAV);
+        uint256 coverageUtilizationWAD = UtilizationLogic._computeCoverageUtilization(_stRawNAV, _jtRawNAV, JT_COINVESTED, minCoverageWAD, jtEffectiveNAV);
         MarketState resultingMarketState;
         uint32 fixedTermEndTimestamp = $.fixedTermEndTimestamp;
         {
@@ -800,8 +801,8 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Get the storage pointer to the accountant state
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
         // Compute both utilizations
-        coverageUtilizationWAD = UtilsLib.computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, JT_COINVESTED, $.minCoverageWAD, $.lastJTEffectiveNAV);
-        liquidityUtilizationWAD = UtilsLib.computeLiquidityUtilization($.lastSTEffectiveNAV, $.minLiquidityWAD, $.lastLTRawNAV);
+        coverageUtilizationWAD = UtilizationLogic._computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, JT_COINVESTED, $.minCoverageWAD, $.lastJTEffectiveNAV);
+        liquidityUtilizationWAD = UtilizationLogic._computeLiquidityUtilization($.lastSTEffectiveNAV, $.minLiquidityWAD, $.lastLTRawNAV);
     }
 
     // =============================
