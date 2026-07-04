@@ -2,7 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "../../../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC20Metadata.sol";
-import { Math, NAV_UNIT, TRANCHE_UNIT, UnitsMathLib, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../../libraries/Units.sol";
+import { Cache, CacheKey } from "../../../../../libraries/Cache.sol";
+import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../../libraries/Units.sol";
 import { RoycoDayKernel } from "../../../RoycoDayKernel.sol";
 
 /**
@@ -15,8 +16,8 @@ import { RoycoDayKernel } from "../../../RoycoDayKernel.sol";
  *      - Identical Yield Bearing ERC20 for ST And JT: Yield Bearing ERC20 and Tranche Unit (FalconXUSDC, reUSD, etc.), NAV Unit (USD)
  */
 abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
-    using UnitsMathLib for NAV_UNIT;
-    using UnitsMathLib for TRANCHE_UNIT;
+    using RoycoUnitsMath for NAV_UNIT;
+    using RoycoUnitsMath for TRANCHE_UNIT;
 
     /// @dev Storage slot for IdenticalAssets_ST_JT_Oracle_QuoterState using ERC-7201 pattern
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.IdenticalAssets_ST_JT_Oracle_QuoterState")) - 1)) & ~bytes32(uint256(0xff))
@@ -28,11 +29,11 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
     /// @dev Value representing the scale factor of the tranche unit: 10^(TRANCHE_UNIT_DECIMALS)
     uint256 internal immutable TRANCHE_UNIT_SCALE_FACTOR;
 
-    /// @dev The cached tranche unit to NAV unit conversion rate
-    uint256 internal transient cachedTrancheUnitToNAVUnitConversionRateWAD;
-
-    /// @dev Storage state for the Royco identical assets overridable oracle quoter
-    /// @custom:storage-location erc7201:Royco.storage.IdenticalAssets_ST_JT_Oracle_QuoterState
+    /**
+     * @dev Storage state for the Royco identical assets overridable oracle quoter
+     * @custom:storage-location erc7201:Royco.storage.IdenticalAssets_ST_JT_Oracle_QuoterState
+     * @custom:field conversionRateWAD - The tranche unit to NAV unit conversion rate scaled to WAD precision, or SENTINEL_CONVERSION_RATE (0) to query the oracle in real time
+     */
     struct IdenticalAssets_ST_JT_Oracle_QuoterState {
         uint256 conversionRateWAD;
     }
@@ -73,13 +74,13 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
     }
 
     /// @inheritdoc RoycoDayKernel
-    function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view override(RoycoDayKernel) returns (TRANCHE_UNIT stAssets) {
-        return _convertNAVUnitsToTrancheUnits(_navAssets);
+    function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _value) public view override(RoycoDayKernel) returns (TRANCHE_UNIT stAssets) {
+        return _convertNAVUnitsToTrancheUnits(_value);
     }
 
     /// @inheritdoc RoycoDayKernel
-    function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _navAssets) public view override(RoycoDayKernel) returns (TRANCHE_UNIT jtAssets) {
-        return _convertNAVUnitsToTrancheUnits(_navAssets);
+    function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _value) public view override(RoycoDayKernel) returns (TRANCHE_UNIT jtAssets) {
+        return _convertNAVUnitsToTrancheUnits(_value);
     }
 
     /**
@@ -96,7 +97,7 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
         // Set the new conversion rate
         _getIdenticalAssets_ST_JT_Oracle_QuoterStorage().conversionRateWAD = _conversionRateWAD;
         emit ConversionRateUpdated(_conversionRateWAD);
-        // Sync the tranche accounting to reflect the PNL from the updated conversion rate
+        // Sync the tranche accounting to reflect the PNL from the updated conversion rate (the sync entrypoint refreshes the quoter cache to this new rate)
         _preOpSyncTrancheAccounting();
     }
 
@@ -118,23 +119,11 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
         return _getIdenticalAssets_ST_JT_Oracle_QuoterStorage().conversionRateWAD;
     }
 
-    /**
-     * @notice Initializes the quoter for a transaction
-     * @dev Should be called at the start of a transaction
-     * @dev This function is called at the start of a transaction to initialize the cached tranche unit to NAV unit conversion rate
-     */
+    /// @notice Initializes the quoter cache for the operation
+    /// @dev Called at the start of a synchronized operation to cache the tranche unit to NAV unit conversion rate, so every conversion in the operation values against one consistent rate. No teardown is needed: each operation re-caches and the transient cache auto-clears at transaction end
     function _initializeQuoterCache() internal virtual override {
-        // Get the tranche unit to NAV unit conversion rate and set the cache flag
-        cachedTrancheUnitToNAVUnitConversionRateWAD = getTrancheUnitToNAVUnitConversionRateWAD() | CACHE_SET_MASK;
-    }
-
-    /**
-     * @notice Clears the quoter cache
-     * @dev Should be called at the end of a transaction
-     * @dev This function is called at the end of a transaction to clear the cached tranche unit to NAV unit conversion rate
-     */
-    function _clearQuoterCache() internal virtual override {
-        cachedTrancheUnitToNAVUnitConversionRateWAD = 0;
+        // Cache the tranche unit to NAV unit conversion rate for the operation
+        Cache._write(CacheKey.IDENTICAL_ST_JT_TRANCHE_TO_NAV_UNIT_RATE, getTrancheUnitToNAVUnitConversionRateWAD());
     }
 
     /**
@@ -144,7 +133,7 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
      */
     function _getCachedTrancheUnitToNAVUnitConversionRateWAD() internal view returns (uint256) {
         // If the cache slot is populated use the cached value
-        (bool cacheHit, uint256 conversionRateWAD) = _decodeCachedValue(cachedTrancheUnitToNAVUnitConversionRateWAD);
+        (bool cacheHit, uint256 conversionRateWAD) = Cache._read(CacheKey.IDENTICAL_ST_JT_TRANCHE_TO_NAV_UNIT_RATE);
         if (cacheHit) return conversionRateWAD;
         // Otherwise fall back to querying the rate directly (for view functions)
         return getTrancheUnitToNAVUnitConversionRateWAD();

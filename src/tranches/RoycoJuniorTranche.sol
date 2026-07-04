@@ -10,15 +10,7 @@ import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
  * @notice Junior tranche implementation for Royco markets
  */
 contract RoycoJuniorTranche is RoycoVaultTranche {
-    constructor(
-        address _asset,
-        address _kernel,
-        bool _enforceVaultSharesTransferWhitelist,
-        address _lens,
-        address _hook
-    )
-        RoycoVaultTranche(_asset, _kernel, _enforceVaultSharesTransferWhitelist, _lens, _hook)
-    { }
+    constructor(address _asset, address _kernel) RoycoVaultTranche(_asset, _kernel) { }
 
     /// @notice Initializes the Royco junior tranche
     /// @param _jtParams Deployment parameters including name, symbol, and initial authority for the junior tranche

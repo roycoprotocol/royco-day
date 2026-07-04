@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoTrancheHook } from "./IRoycoTrancheHook.sol";
-
-/// @title IRoycoBlacklistHook
-/// @notice Interface for the RoycoBlacklistHook contract: account blacklisting + sanctions screening plus the tranche
-///         balance-update hook (blacklist screening + tranche-whitelist enforcement) the tranches call on every transfer.
-/// @dev Implements the minimal `IRoycoTrancheHook` that the tranches depend on.
-interface IRoycoBlacklistHook is IRoycoTrancheHook {
+/// @title IRoycoBlacklist
+/// @notice Interface for the RoycoBlacklist contract that manages account blacklisting and sanctions screening for a Royco market
+interface IRoycoBlacklist {
     /**
      * @notice Storage state for the Royco blacklist
      * @custom:storage-location erc7201:Royco.storage.RoycoBlacklistState
@@ -33,9 +29,6 @@ interface IRoycoBlacklistHook is IRoycoTrancheHook {
 
     /// @notice Thrown when the specified account is blacklisted
     error ACCOUNT_BLACKLISTED(address account);
-
-    /// @notice Thrown when a share transfer recipient is not a whitelisted LP for the calling tranche
-    error ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(address account);
 
     /**
      * @notice Blacklists the specified addresses from holding or transferring Royco tranche shares

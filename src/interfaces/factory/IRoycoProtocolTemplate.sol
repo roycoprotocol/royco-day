@@ -15,7 +15,8 @@ interface IRoycoProtocolTemplate {
      * @custom:field liquidityTranche - The liquidity tranche proxy (Royco Day markets only; zero otherwise).
      * @custom:field kernel - The kernel proxy.
      * @custom:field accountant - The accountant proxy.
-     * @custom:field ydm - The (possibly shared) YDM singleton.
+     * @custom:field ydm - The junior tranche's (possibly shared) YDM singleton.
+     * @custom:field ltYdm - The liquidity tranche's (possibly shared) LDM singleton (zero for markets without a liquidity tranche).
      * @custom:field extras - ABI-encoded template-specific addenda consumed by `verify` and downstream tooling.
      */
     struct DeploymentResult {
@@ -26,8 +27,6 @@ interface IRoycoProtocolTemplate {
         address accountant;
         address ydm;
         address ltYdm;
-        address lens;
-        address hook;
         bytes extras;
     }
 
@@ -41,18 +40,10 @@ interface IRoycoProtocolTemplate {
      */
     function initialize(bytes32[] calldata _componentIds, bytes[] calldata _creationCodes) external;
 
-    /// @notice Validates an ABI-encoded params blob without deploying.
-    /// @param _params The ABI-encoded template-specific params.
-    function validateParams(bytes calldata _params) external view;
-
     /**
      * @notice Deploys a market from an ABI-encoded params blob. Only callable by the factory.
      * @param _params The ABI-encoded template-specific params.
      * @return result The deployed market's contracts.
      */
     function deployMarket(bytes calldata _params) external returns (DeploymentResult memory result);
-
-    /// @notice Verifies the cross-wiring of a deployed market. Reverts on any mismatch.
-    /// @param _result The deployment result to verify.
-    function verify(DeploymentResult calldata _result) external view;
 }

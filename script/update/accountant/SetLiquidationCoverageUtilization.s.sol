@@ -52,29 +52,7 @@ contract SetLiquidationCoverageUtilization is ParameterUpdateBase {
     /// @notice Configure liquidation-coverageUtilization updates here.
     /// @dev Values are WAD-scaled fractional percentages (1e18 = 100%).
     function _initializeConfigs() internal {
-        // ── Mainnet ──────────────────────────────────────────────────────────
-        // sNUSD                : 100.14306%
-        _configs.push(SetLiquidationCoverageUtilizationConfig({ chainId: MAINNET, marketName: SNUSD, newLiquidationCoverageUtilizationWAD: 1.0014306e18 }));
-        // autoUSD              : 125.00000%
-        _configs.push(SetLiquidationCoverageUtilizationConfig({ chainId: MAINNET, marketName: AUTOUSD, newLiquidationCoverageUtilizationWAD: 1.25e18 }));
-        // syrupUSDC            : 133.33333%
-        _configs.push(SetLiquidationCoverageUtilizationConfig({ chainId: MAINNET, marketName: SYRUP_USDC, newLiquidationCoverageUtilizationWAD: 1.3333333e18 }));
-        // stcUSD               : 100.33445%
-        _configs.push(SetLiquidationCoverageUtilizationConfig({ chainId: MAINNET, marketName: STCUSD, newLiquidationCoverageUtilizationWAD: 1.0033445e18 }));
-        // ParetoFalconX        : 300.00000%
-        _configs.push(SetLiquidationCoverageUtilizationConfig({ chainId: MAINNET, marketName: PARETO_FALCONX, newLiquidationCoverageUtilizationWAD: 3.0e18 }));
-        // apyUSD               : 200.00000%
-        _configs.push(SetLiquidationCoverageUtilizationConfig({ chainId: MAINNET, marketName: APYUSD, newLiquidationCoverageUtilizationWAD: 2.0e18 }));
-        // eEARN                : 101.01010%
-        _configs.push(SetLiquidationCoverageUtilizationConfig({ chainId: MAINNET, marketName: eEARN, newLiquidationCoverageUtilizationWAD: 1.010101e18 }));
-
-        // ── Avalanche ────────────────────────────────────────────────────────
-        // savUSD               : 100.05003%
-        // _configs.push(SetLiquidationCoverageUtilizationConfig({ chainId: AVALANCHE, marketName: SAVUSD, newLiquidationCoverageUtilizationWAD: 1.0005003e18 }));
-
-        // ── Arbitrum ─────────────────────────────────────────────────────────
-        // sUSDai               : 116.66667%
-        _configs.push(SetLiquidationCoverageUtilizationConfig({ chainId: ARBITRUM, marketName: SUSDAI, newLiquidationCoverageUtilizationWAD: 1.1666667e18 }));
+        // Populate with Day markets as they ship. Empty by default.
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

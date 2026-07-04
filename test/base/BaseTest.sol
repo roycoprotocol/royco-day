@@ -22,7 +22,7 @@ import {
     SYNC_ROLE
 } from "../../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
-import { IRoycoBlacklistHook } from "../../src/interfaces/IRoycoBlacklistHook.sol";
+import { IRoycoBlacklist } from "../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
@@ -137,15 +137,11 @@ abstract contract BaseTest is Test, Assertions {
     RoycoFactory internal FACTORY;
     AccessManager internal ACCESS_MANAGER;
     IYDM internal YDM;
-    RoycoSeniorTranche public ST_IMPL;
-    RoycoJuniorTranche internal JT_IMPL;
-    RoycoDayAccountant internal ACCOUNTANT_IMPL;
-    address internal KERNEL_IMPL;
     IRoycoVaultTranche internal ST;
     IRoycoVaultTranche internal JT;
     IRoycoDayKernel internal KERNEL;
     IRoycoDayAccountant internal ACCOUNTANT;
-    IRoycoBlacklistHook internal BLACKLIST;
+    IRoycoBlacklist internal BLACKLIST;
 
     // -----------------------------------------
     // Royco Deployments Parameters
@@ -306,18 +302,6 @@ abstract contract BaseTest is Test, Assertions {
     }
 
     function _setDeployedMarket(DeployScript.DeploymentResult memory _deploymentResult) internal {
-        ST_IMPL = _deploymentResult.stTrancheImplementation;
-        vm.label(address(ST_IMPL), "STImpl");
-
-        JT_IMPL = _deploymentResult.jtTrancheImplementation;
-        vm.label(address(JT_IMPL), "JTImpl");
-
-        ACCOUNTANT_IMPL = _deploymentResult.accountantImplementation;
-        vm.label(address(ACCOUNTANT_IMPL), "AccountantImpl");
-
-        KERNEL_IMPL = _deploymentResult.kernelImplementation;
-        vm.label(address(KERNEL_IMPL), "KernelImpl");
-
         YDM = _deploymentResult.ydm;
         vm.label(address(YDM), "YDM");
 
@@ -333,7 +317,7 @@ abstract contract BaseTest is Test, Assertions {
         KERNEL = _deploymentResult.kernel;
         vm.label(address(KERNEL), "Kernel");
 
-        BLACKLIST = IRoycoBlacklistHook(_deploymentResult.roycoBlacklist);
+        BLACKLIST = IRoycoBlacklist(_deploymentResult.roycoBlacklist);
         vm.label(address(BLACKLIST), "Blacklist");
 
         FACTORY = _deploymentResult.factory;
@@ -539,7 +523,9 @@ abstract contract BaseTest is Test, Assertions {
                 guardianAddress: ROLE_GUARDIAN_ADDRESS,
                 deployerAddress: DEPLOYER_ADDRESS,
                 deployerAdminAddress: DEPLOYER_ADMIN_ADDRESS,
-                protocolFeeRecipientAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS
+                protocolFeeRecipientAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS,
+                balancerPoolManagerAddress: KERNEL_ADMIN_ADDRESS,
+                marketOpsAddress: KERNEL_ADMIN_ADDRESS
             })
         );
     }

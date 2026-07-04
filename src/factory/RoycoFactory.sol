@@ -89,16 +89,8 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @inheritdoc IRoycoFactory
-    function registerTemplate(
-        address _template,
-        bytes32[] calldata _componentIds,
-        bytes[] calldata _creationCodes
-    )
-        external
-        override(IRoycoFactory)
-        whenNotPaused
-        restricted
-    {
+
+    function registerTemplate(address _template) external override(IRoycoFactory) whenNotPaused restricted {
         require(_template != address(0), TEMPLATE_CANNOT_BE_ZERO_ADDRESS());
 
         RoycoFactoryState storage $ = _getRoycoFactoryStorage();
@@ -107,8 +99,8 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         // Sanity: template was constructed pointing at this factory.
         require(address(IBaseTemplate(_template).ROYCO_FACTORY()) == address(this), TEMPLATE_BOUND_TO_DIFFERENT_FACTORY());
 
-        // Atomically initialize the template's SSTORE2-backed bytecode storage.
-        IBaseTemplate(_template).initialize(_componentIds, _creationCodes);
+        // Check if the template is initialized
+        require(IBaseTemplate(_template).isInitialized(), TEMPLATE_NOT_INITIALIZED());
 
         $.isTemplateEnabled[_template] = true;
         emit TemplateRegistered(_template);
@@ -151,9 +143,6 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
 
         // Deploy the market.
         result = IBaseTemplate(_template).deployMarket(_params);
-
-        // Verify the market.
-        IBaseTemplate(_template).verify(result);
 
         // Explicit clear for clarity; transient storage auto-clears at tx-end as a backstop.
         _activeTemplate = address(0);

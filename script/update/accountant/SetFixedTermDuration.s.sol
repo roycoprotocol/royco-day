@@ -51,8 +51,7 @@ contract SetFixedTermDuration is ParameterUpdateBase {
      * @dev `newFixedTermDurationSeconds` is a `uint24` (max ~194 days). Use `0` for perpetual.
      */
     function _initializeConfigs() internal {
-        // autoUSD → 5 days
-        _configs.push(SetFixedTermDurationConfig({ chainId: MAINNET, marketName: AUTOUSD, newFixedTermDurationSeconds: uint24(5 days) }));
+        // Populate with Day markets as they ship. Empty by default.
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

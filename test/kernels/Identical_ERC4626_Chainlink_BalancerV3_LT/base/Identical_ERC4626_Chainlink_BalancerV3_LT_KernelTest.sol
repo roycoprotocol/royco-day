@@ -6,7 +6,7 @@ import { AbstractKernelTestSuite } from "../../abstract/AbstractKernelTestSuite.
 
 /**
  * @title Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest
- * @notice Per-kernel-type test base for the `Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel`
+ * @notice Per-kernel-type test base for the `Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel`
  *         family: ST and JT are the same ERC4626 vault share (priced share->base via the vault and base->NAV via a
  *         Chainlink-compatible feed), and the LT holds the Gyro E-CLP BPT of `{ST_share, quote}`.
  * @dev Implements the `IKernelTestHooks` deal + simulate seams once for this kernel family, so concrete protocol tests
@@ -65,9 +65,16 @@ abstract contract Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest is Abstra
         return false;
     }
 
-    /// @dev Keep the mocked feed's `updatedAt` fresh across warps so the kernel's staleness check keeps passing.
+    /// @dev Keep the mocked feed's `updatedAt` fresh at the current (post-warp) time so the kernel's staleness check keeps
+    ///      passing. Only re-stamps an already-seeded mock — seed it while the feed is still fresh (see `_pinOracleFresh`).
     function _refreshOraclesAfterWarp() internal virtual override {
         if (_oracleMocked) _applyOracleMock(_baseAssetToNavOracle());
+    }
+
+    /// @dev Freeze the base->NAV feed's live value into the mock (a 0% move) while it is still fresh, so a later warp can
+    ///      re-stamp it via `_refreshOraclesAfterWarp` without re-reading a by-then-stale real feed.
+    function _pinOracleFresh() internal {
+        _moveOracle(int256(1), 0);
     }
 
     function _moveOracle(int256 _sign, uint256 _percentageWAD) internal {

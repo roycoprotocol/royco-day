@@ -19,45 +19,30 @@ bytes32 constant COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL = keccak256("ROYCO_COMPONEN
 bytes32 constant COMPONENT_ID_ACCOUNTANT_IMPL = keccak256("ROYCO_COMPONENT_ACCOUNTANT_IMPL");
 bytes32 constant COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2 = keccak256("ROYCO_COMPONENT_YDM_ADAPTIVE_CURVE_V2");
 
-// ─── Senior/Junior kernel variants ──────────────────────────────────────────
+// ─── Day-Balancer ────────────────────────────────────────────────────────────
 
-bytes32 constant COMPONENT_ID_KERNEL_REUSD = keccak256("ROYCO_COMPONENT_KERNEL_REUSD");
-bytes32 constant COMPONENT_ID_KERNEL_IDENTICAL_ERC20_CHAINLINK = keccak256("ROYCO_COMPONENT_KERNEL_IDENTICAL_ERC20_CHAINLINK");
-bytes32 constant COMPONENT_ID_KERNEL_IDENTICAL_ERC4626_ADMIN_ORACLE = keccak256("ROYCO_COMPONENT_KERNEL_IDENTICAL_ERC4626_ADMIN_ORACLE");
-bytes32 constant COMPONENT_ID_KERNEL_IDENTICAL_ERC4626_CHAINLINK_ORACLE = keccak256("ROYCO_COMPONENT_KERNEL_IDENTICAL_ERC4626_CHAINLINK_ORACLE");
-bytes32 constant COMPONENT_ID_KERNEL_IDLECDOAA = keccak256("ROYCO_COMPONENT_KERNEL_IDLECDOAA");
-bytes32 constant COMPONENT_ID_KERNEL_IDENTICAL_ERC20_CHAINLINK_SBT = keccak256("ROYCO_COMPONENT_KERNEL_IDENTICAL_ERC20_CHAINLINK_SBT");
-bytes32 constant COMPONENT_ID_KERNEL_IDENTICAL_MAKINA = keccak256("ROYCO_COMPONENT_KERNEL_IDENTICAL_MAKINA");
-bytes32 constant COMPONENT_ID_KERNEL_SUSDAI = keccak256("ROYCO_COMPONENT_KERNEL_SUSDAI");
-bytes32 constant COMPONENT_ID_KERNEL_MAPLE_V2 = keccak256("ROYCO_COMPONENT_KERNEL_MAPLE_V2");
-bytes32 constant COMPONENT_ID_KERNEL_APYUSD = keccak256("ROYCO_COMPONENT_KERNEL_APYUSD");
-bytes32 constant COMPONENT_ID_KERNEL_LOCKED_IUSD = keccak256("ROYCO_COMPONENT_KERNEL_LOCKED_IUSD");
-bytes32 constant COMPONENT_ID_KERNEL_SUSDAT = keccak256("ROYCO_COMPONENT_KERNEL_SUSDAT");
-
-// ─── Dusk-Balancer ───────────────────────────────────────────────────────────
-
-bytes32 constant COMPONENT_ID_DUSK_BALANCER_HOOKS = keccak256("ROYCO_COMPONENT_DUSK_BALANCER_HOOKS");
-bytes32 constant COMPONENT_ID_DUSK_BALANCER_RATE_PROVIDER = keccak256("ROYCO_COMPONENT_DUSK_BALANCER_RATE_PROVIDER");
-bytes32 constant COMPONENT_ID_DUSK_BALANCER_POOL_ROLE_ADAPTER = keccak256("ROYCO_COMPONENT_DUSK_BALANCER_POOL_ROLE_ADAPTER");
-bytes32 constant COMPONENT_ID_DUSK_KERNEL_CHAINLINK_ST_BPT_CHAINLINK_QUOTE = keccak256("ROYCO_COMPONENT_DUSK_KERNEL_CHAINLINK_ST_BPT_CHAINLINK_QUOTE");
-
-// ─── Day-Balancer ──────────────────────────────────────────────────────────────
-
+/// @dev The real kernel-bound Balancer V3 pool hook (`RoycoDayBalancerV3Hooks`).
 bytes32 constant COMPONENT_ID_DAY_BALANCER_HOOKS = keccak256("ROYCO_COMPONENT_DAY_BALANCER_HOOKS");
-bytes32 constant COMPONENT_ID_DAY_KERNEL_CHAINLINK_ST_CHAINLINK_QUOTE = keccak256("ROYCO_COMPONENT_DAY_KERNEL_CHAINLINK_ST_CHAINLINK_QUOTE");
 
 // ─── Day kernels ─────────────────────────────────────────────────────────────
 
-/**
- * @dev Creation-code id for `Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel`
- *      (ST/JT share an ERC4626 vault share priced share->base via `convertToAssets`, base->NAV via Chainlink;
- *      the LT holds a Balancer V3 pool position valued by a manipulation-resistant BPT oracle).
- */
+/// @dev Creation-code id for `Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel`.
 bytes32 constant COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK = keccak256("ROYCO_COMPONENT_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK");
 
-/**
- * @dev Creation-code id for `Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Lens`, the read-only
- *      companion deployed per market alongside the kernel above. It holds the preview/max/withdrawable surface that
- *      does not fit on the kernel proxy under EIP-170; the tranches read it via `LENS()`.
- */
-bytes32 constant COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK_LENS = keccak256("ROYCO_COMPONENT_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK_LENS");
+// ─── Market component salt tags ──────────────────────────────────────────────
+
+bytes32 constant TAG_ST_PROXY = "ST";
+bytes32 constant TAG_JT_PROXY = "JT";
+bytes32 constant TAG_LT_PROXY = "LT";
+bytes32 constant TAG_KERNEL_PROXY = "KERNEL";
+bytes32 constant TAG_ACCOUNTANT_PROXY = "ACCOUNTANT";
+bytes32 constant TAG_ST_IMPL = "ST_IMPL";
+bytes32 constant TAG_JT_IMPL = "JT_IMPL";
+bytes32 constant TAG_LT_IMPL = "LT_IMPL";
+bytes32 constant TAG_KERNEL_IMPL = "KERNEL_IMPL";
+bytes32 constant TAG_ACCOUNTANT_IMPL = "ACCOUNTANT_IMPL";
+bytes32 constant TAG_YDM = "YDM";
+bytes32 constant TAG_LDM = "LDM";
+bytes32 constant TAG_BALANCER_HOOK = "BALANCER_HOOK";
+bytes32 constant TAG_BALANCER_HOOK_IMPL = "BALANCER_HOOK_IMPL";
+bytes32 constant TAG_BALANCER_V3_POOL = "BALANCER_V3_POOL";

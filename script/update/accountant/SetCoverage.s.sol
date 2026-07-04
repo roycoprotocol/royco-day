@@ -52,8 +52,7 @@ contract SetCoverage is ParameterUpdateBase {
      *      Valid range: 0.05e18 (5%) to 1e18 (100%).
      */
     function _initializeConfigs() internal {
-        // sUSDai → 7%
-        _configs.push(SetCoverageConfig({ chainId: ARBITRUM, marketName: SUSDAI, newMinCoverageWAD: 0.07e18 }));
+        // Populate with Day markets as they ship. Empty by default.
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

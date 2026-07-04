@@ -12,15 +12,7 @@ import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
  * @notice Senior tranche implementation for Royco markets
  */
 contract RoycoSeniorTranche is RoycoVaultTranche, IRoycoSeniorTranche {
-    constructor(
-        address _asset,
-        address _kernel,
-        bool _enforceVaultSharesTransferWhitelist,
-        address _lens,
-        address _hook
-    )
-        RoycoVaultTranche(_asset, _kernel, _enforceVaultSharesTransferWhitelist, _lens, _hook)
-    { }
+    constructor(address _asset, address _kernel) RoycoVaultTranche(_asset, _kernel) { }
 
     /// @notice Initializes the Royco senior tranche
     /// @param _stParams Deployment parameters including name, symbol, and initial authority for the senior tranche

@@ -45,22 +45,36 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
     // DECLARATIVE ROLE BINDINGS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice One target's selector→role map.
-    /// @dev `selectors[i]` is bound to `roleIds[i]`. Lengths must match.
+    /**
+     * @notice One target's selector→role map.
+     * @dev `selectors[i]` is bound to `roleIds[i]`. Lengths must match.
+     * @custom:field target - The contract whose functions are being access-gated.
+     * @custom:field selectors - The function selectors on `target` to bind, index-aligned with `roleIds`.
+     * @custom:field roleIds - The role id required to call each corresponding selector, index-aligned with `selectors`.
+     */
     struct TargetBinding {
         address target;
         bytes4[] selectors;
         uint64[] roleIds;
     }
 
-    /// @notice A role grant applied after deployment (e.g. SYNC_ROLE → accountant).
+    /**
+     * @notice A role grant applied after deployment (e.g. SYNC_ROLE → accountant).
+     * @custom:field roleId - The role id to grant.
+     * @custom:field account - The account receiving the role.
+     * @custom:field executionDelay - The access-manager execution delay in seconds applied to the grant.
+     */
     struct RoleGrant {
         uint64 roleId;
         address account;
         uint32 executionDelay;
     }
 
-    /// @notice The full role-wiring config a template applies via `_applyRoleBindings`.
+    /**
+     * @notice The full role-wiring config a template applies via `_applyRoleBindings`.
+     * @custom:field targetBindings - The per-target selector→role maps to install.
+     * @custom:field postInitGrants - The role grants to apply after deployment and initialization.
+     */
     struct RoleBindings {
         TargetBinding[] targetBindings;
         RoleGrant[] postInitGrants;
@@ -102,7 +116,6 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
 
     /// @inheritdoc IRoycoProtocolTemplate
     function initialize(bytes32[] calldata _componentIds, bytes[] calldata _creationCodes) external override(IRoycoProtocolTemplate) initializer {
-        require(msg.sender == address(ROYCO_FACTORY), ONLY_ROYCO_FACTORY());
         require(_componentIds.length == _creationCodes.length, LENGTH_MISMATCH());
 
         uint256 n = _componentIds.length;
@@ -117,6 +130,11 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
     /// @inheritdoc IBaseTemplate
     function bytecodePointer(bytes32 _componentId) external view override(IBaseTemplate) returns (address) {
         return _bytecodePointers[_componentId];
+    }
+
+    /// @inheritdoc IBaseTemplate
+    function isInitialized() external view override(IBaseTemplate) returns (bool) {
+        return _getInitializedVersion() > 0;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -183,49 +201,19 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
         (ydm, alreadyDeployed) = ROYCO_FACTORY.deployDeterministicContract(abi.encodePacked(creationCode, abi.encode(_targetUtilizationWAD)), _salt);
     }
 
-    /// @notice Deploys the senior-tranche impl, pinning its (asset, kernel, whitelist flag, lens, hook) immutables.
-    function _deploySeniorTrancheImpl(
-        address _asset,
-        address _kernel,
-        bool _enforceWhitelist,
-        address _lens,
-        address _hook,
-        bytes32 _salt
-    )
-        internal
-        returns (address impl)
-    {
-        return _deployImpl(COMPONENT_ID_SENIOR_TRANCHE_IMPL, abi.encode(_asset, _kernel, _enforceWhitelist, _lens, _hook), _salt);
+    /// @notice Deploys the senior-tranche impl, pinning its (asset, kernel) immutables.
+    function _deploySeniorTrancheImpl(address _asset, address _kernel, bytes32 _salt) internal returns (address impl) {
+        return _deployImpl(COMPONENT_ID_SENIOR_TRANCHE_IMPL, abi.encode(_asset, _kernel), _salt);
     }
 
-    /// @notice Deploys the junior-tranche impl, pinning its (asset, kernel, whitelist flag, lens, hook) immutables.
-    function _deployJuniorTrancheImpl(
-        address _asset,
-        address _kernel,
-        bool _enforceWhitelist,
-        address _lens,
-        address _hook,
-        bytes32 _salt
-    )
-        internal
-        returns (address impl)
-    {
-        return _deployImpl(COMPONENT_ID_JUNIOR_TRANCHE_IMPL, abi.encode(_asset, _kernel, _enforceWhitelist, _lens, _hook), _salt);
+    /// @notice Deploys the junior-tranche impl, pinning its (asset, kernel) immutables.
+    function _deployJuniorTrancheImpl(address _asset, address _kernel, bytes32 _salt) internal returns (address impl) {
+        return _deployImpl(COMPONENT_ID_JUNIOR_TRANCHE_IMPL, abi.encode(_asset, _kernel), _salt);
     }
 
-    /// @notice Deploys the liquidity-tranche impl, pinning its (asset, kernel, whitelist flag, lens, hook) immutables.
-    function _deployLiquidityTrancheImpl(
-        address _asset,
-        address _kernel,
-        bool _enforceWhitelist,
-        address _lens,
-        address _hook,
-        bytes32 _salt
-    )
-        internal
-        returns (address impl)
-    {
-        return _deployImpl(COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL, abi.encode(_asset, _kernel, _enforceWhitelist, _lens, _hook), _salt);
+    /// @notice Deploys the liquidity-tranche impl, pinning its (asset, kernel) immutables.
+    function _deployLiquidityTrancheImpl(address _asset, address _kernel, bytes32 _salt) internal returns (address impl) {
+        return _deployImpl(COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL, abi.encode(_asset, _kernel), _salt);
     }
 
     /// @notice Deploys the accountant impl for a given kernel and the junior tranche's fixed co-investment configuration.

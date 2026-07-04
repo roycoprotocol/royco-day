@@ -95,23 +95,7 @@ contract UpgradeBatch is UpgradeBase {
      * @notice Populate the upgrade list here. Empty by default.
      */
     function _initializeConfigs() internal {
-        string memory v = "V1.3.0";
-
-        // ── Mainnet ──────────────────────────────────────────────────────────
-        _pushTrancheAndAccountantUpgrades(MAINNET, SNUSD, v);
-        _pushTrancheAndAccountantUpgrades(MAINNET, AUTOUSD, v);
-        _pushTrancheAndAccountantUpgrades(MAINNET, SMOKEHOUSE_USDC, v);
-        _pushTrancheAndAccountantUpgrades(MAINNET, SYRUP_USDC, v);
-        _pushTrancheAndAccountantUpgrades(MAINNET, STCUSD, v);
-        _pushTrancheAndAccountantUpgrades(MAINNET, PARETO_FALCONX, v);
-        _pushTrancheAndAccountantUpgrades(MAINNET, APYUSD, v);
-        _pushTrancheAndAccountantUpgrades(MAINNET, EEARN, v);
-
-        // ── Avalanche ────────────────────────────────────────────────────────
-        _pushTrancheAndAccountantUpgrades(AVALANCHE, SAVUSD, v);
-
-        // ── Arbitrum ─────────────────────────────────────────────────────────
-        _pushTrancheAndAccountantUpgrades(ARBITRUM, SUSDAI, v);
+        // Populate with Day markets as they ship. Empty by default.
     }
 
     /// @dev Push ST + JT + Kernel + Accountant entries for a market. The caller picks the right

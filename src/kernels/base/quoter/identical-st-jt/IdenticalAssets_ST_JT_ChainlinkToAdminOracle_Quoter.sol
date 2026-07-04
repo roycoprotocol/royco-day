@@ -17,12 +17,16 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter is
     /**
      * @notice The quoter-specific initialization parameters
      * @custom:field initialConversionRateWAD - The initial conversion rate as defined by the oracle, scaled to WAD precision
-     * @custom:field trancheAssetToReferenceAssetOracle - The tranche asset to reference asset oracle
-     * @custom:field stalenessThresholdSeconds - The staleness threshold in seconds
+     * @custom:field trancheAssetToReferenceAssetOracle - The Chainlink (compatible) tranche asset to reference asset oracle
+     * @custom:field gracePeriodSeconds - The grace period in seconds after the L2 sequencer is back up before oracle prices are trusted again
+     * @custom:field sequencerUptimeFeed - The L2 sequencer uptime feed used to gate price queries (the null address when not applicable)
+     * @custom:field stalenessThresholdSeconds - The maximum age in seconds an oracle price may have before it is considered stale
      */
     struct ST_JT_QuoterSpecificParams {
         uint256 initialConversionRateWAD;
         address trancheAssetToReferenceAssetOracle;
+        uint48 gracePeriodSeconds;
+        address sequencerUptimeFeed;
         uint48 stalenessThresholdSeconds;
     }
 
@@ -30,7 +34,9 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter is
     /// @param _params The quoter-specific initialization parameters
     function __IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter_init(ST_JT_QuoterSpecificParams calldata _params) internal onlyInitializing {
         __IdenticalAssets_ST_JT_AdminOracle_Quoter_init(_params.initialConversionRateWAD);
-        __IdenticalAssets_ST_JT_ChainlinkOracle_Quoter_init_unchained(_params.trancheAssetToReferenceAssetOracle, _params.stalenessThresholdSeconds);
+        __IdenticalAssets_ST_JT_ChainlinkOracle_Quoter_init_unchained(
+            _params.trancheAssetToReferenceAssetOracle, _params.stalenessThresholdSeconds, _params.sequencerUptimeFeed, _params.gracePeriodSeconds
+        );
     }
 
     /// @inheritdoc IdenticalAssets_ST_JT_AdminOracle_Quoter

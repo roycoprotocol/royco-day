@@ -28,4 +28,7 @@ interface IBaseTemplate is IRoycoProtocolTemplate {
 
     /// @notice Returns the SSTORE2 pointer holding a component's creation code (zero if unset).
     function bytecodePointer(bytes32 _componentId) external view returns (address);
+
+    /// @notice Whether the template's component bytecode store has been initialized.
+    function isInitialized() external view returns (bool);
 }

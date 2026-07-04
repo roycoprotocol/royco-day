@@ -64,17 +64,6 @@ interface IRoycoVaultTranche is IERC20Metadata {
     /// @return kernel The address of the kernel responsible for executing deposits and redemptions for this tranche
     function KERNEL() external view returns (address kernel);
 
-    /// @notice Returns the kernel lens this tranche reads its preview/max surface from (immutable)
-    /// @return lens The kernel lens address
-    function LENS() external view returns (address lens);
-
-    /// @notice Whether share transfers require the recipient to be a whitelisted LP for this tranche
-    function ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER() external view returns (bool);
-
-    /// @notice Returns the tranche balance-update hook this tranche calls on every transfer/mint/burn (immutable)
-    /// @return trancheHook The hook address (the shared RoycoBlacklistHook)
-    function HOOK() external view returns (address trancheHook);
-
     /**
      * @notice Returns the raw NAV of the tranche's invested assets
      * @dev The raw NAV represents the pure value of the tranche's assets before any coverage adjustments or yield sharing

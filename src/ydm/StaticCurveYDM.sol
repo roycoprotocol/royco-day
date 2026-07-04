@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import { SafeCast } from "../../lib/openzeppelin-contracts/contracts/utils/math/SafeCast.sol";
 import { IYDM, MarketState } from "../interfaces/IYDM.sol";
 import { WAD } from "../libraries/Constants.sol";
 import { BaseYDM } from "./base/BaseYDM.sol";
@@ -147,6 +148,6 @@ contract StaticCurveYDM is BaseYDM {
      * @return slopeWAD The slope of the line, scaled to WAD precision
      */
     function _computeSlope(uint256 _y0WAD, uint256 _y1WAD, uint256 _x0WAD, uint256 _x1WAD) internal pure returns (uint64 slopeWAD) {
-        slopeWAD = uint64((_y1WAD - _y0WAD).mulDiv(WAD, (_x1WAD - _x0WAD), Math.Rounding.Floor));
+        slopeWAD = SafeCast.toUint64((_y1WAD - _y0WAD).mulDiv(WAD, (_x1WAD - _x0WAD), Math.Rounding.Floor));
     }
 }

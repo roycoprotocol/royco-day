@@ -37,7 +37,7 @@ abstract contract ParameterUpdateBase is AccessManagerConfigUtils, UpdateConfig 
 
     /// @notice Parameters describing a single parameter update operation
     struct UpdateParams {
-        /// @dev Market name (e.g. "stcUSD"). Empty string for factory-level updates.
+        /// @dev Market name (e.g. "snUSD"). Empty string for factory-level updates.
         string marketName;
         /// @dev The target contract to call (accountant, kernel, or factory)
         address target;
