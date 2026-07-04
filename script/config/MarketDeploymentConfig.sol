@@ -37,8 +37,6 @@ abstract contract MarketDeploymentConfig {
     mapping(uint256 chainId => address) internal GYRO_ECLP_POOL_FACTORY;
     /// @dev Balancer's E-CLP LP oracle factory (deploys the manipulation-resistant BPT TVL oracle per pool).
     mapping(uint256 chainId => address) internal ECLP_LP_ORACLE_FACTORY;
-    /// @dev Chainlink USDC/USD price feed (the quote-leg market feed for the LT pool's BPT oracle).
-    mapping(uint256 chainId => address) internal USDC_USD_ORACLE;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // MARKET NAMES
@@ -116,8 +114,6 @@ abstract contract MarketDeploymentConfig {
         uint256 ltYdmTargetUtilizationWAD; // LDM target-utilization kink
         // Liquidity tranche: the Gyro E-CLP {ST_share, quote} pool the LT BPT is minted from.
         BalancerV3DeploymentTemplate.GyroECLPPoolParams gyroECLPPoolParams;
-        // The quote leg's market price feed (e.g. Chainlink USDC/USD), consumed by the template-deployed BPT oracle.
-        address quoteTokenPriceFeed;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -146,9 +142,6 @@ abstract contract MarketDeploymentConfig {
 
         // Balancer's canonical E-CLP LP oracle factory (https://etherscan.io/address/0x301EDe5Fd4f9d7266B09c3A2E38F97776447154B).
         ECLP_LP_ORACLE_FACTORY[MAINNET] = 0x301EDe5Fd4f9d7266B09c3A2E38F97776447154B;
-
-        // Chainlink USDC/USD feed on mainnet.
-        USDC_USD_ORACLE[MAINNET] = 0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6;
 
         _initializeMarketConfigs();
     }
@@ -309,9 +302,9 @@ abstract contract MarketDeploymentConfig {
                 swapFeePercentage: 1e14, // 1 bp
                 enableDonation: false,
                 disableUnbalancedLiquidity: false,
-                quoteToken: USDC[block.chainid]
-            }),
-            quoteTokenPriceFeed: USDC_USD_ORACLE[block.chainid]
+                quoteToken: USDC[block.chainid],
+                quoteTokenRateProvider: address(0) // USDC is a pegged quote: register STANDARD (rate = 1)
+            })
         });
     }
 
