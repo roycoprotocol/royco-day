@@ -67,7 +67,6 @@ contract DayMarketDeploymentTest is BaseTest {
     address internal constant SNUSD_VAULT = 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313; // ST/JT ERC4626 asset
     address internal constant NUSD_REDSTONE_ORACLE = 0x5e7281f74e74D76347f0b8f4a36Fd3cb29c19d95; // base->NAV feed
     address internal constant MAINNET_USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48; // pool quote token
-    address internal constant MAINNET_USDC_USD_FEED = 0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6; // Chainlink USDC/USD
     address internal constant FACTORY_ADMIN = 0x7c405bbD131e42af506d14e752f2e59B19D49997; // ROOT_MULTISIG
 
     // Expected values asserted against the config-file `snUSD` market config.
@@ -390,18 +389,15 @@ contract DayMarketDeploymentTest is BaseTest {
         address eclpOracleFactory = DEPLOY_SCRIPT.getChainConfig(block.chainid).eclpLPOracleFactory;
         assertTrue(ILPOracleFactoryBase(eclpOracleFactory).isOracleFromFactory(ILPOracleBase(bptOracle)), "not from oracle factory");
 
-        // Feed wiring follows the vault's token order: quote leg -> USDC/USD market feed; senior leg -> constant-1.0 feed.
+        // Both legs are priced by their rate providers (kernel NAV rate on the senior leg, the configured quote rate
+        // provider — or an implicit rate of 1 when STANDARD — on the quote leg), so both use the constant-1.0 feed.
         IERC20[] memory tokens = VAULT.getPoolTokens(POOL);
         BalancerAggregatorV3Interface[] memory feeds = LPOracleBase(bptOracle).getFeeds();
         assertEq(feeds.length, tokens.length, "feed count");
         for (uint256 i = 0; i < tokens.length; ++i) {
-            if (address(tokens[i]) == address(ST)) {
-                (, int256 answer,,,) = feeds[i].latestRoundData();
-                assertEq(answer, 1e18, "senior leg feed must answer 1.0");
-                assertEq(feeds[i].decimals(), 18, "senior leg feed decimals");
-            } else {
-                assertEq(address(feeds[i]), MAINNET_USDC_USD_FEED, "quote leg feed != USDC/USD");
-            }
+            (, int256 answer,,,) = feeds[i].latestRoundData();
+            assertEq(answer, 1e18, "leg feed must answer 1.0");
+            assertEq(feeds[i].decimals(), 18, "leg feed decimals");
         }
     }
 
