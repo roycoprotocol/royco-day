@@ -88,7 +88,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
 
     constructor(IVault _balancerV3Vault) VaultGuard(_balancerV3Vault) {
         // Ensure the passed vault is the one the pool (LT_ASSET) is registered with (LT_ASSET reads fine here in the body)
-        require(BalancerPoolToken(LT_ASSET).getVault() == _balancerV3Vault, INVALID_BALANCER_V3_VAULT());
+        require(address(BalancerPoolToken(LT_ASSET).getVault()) == address(_balancerV3Vault), INVALID_BALANCER_V3_VAULT());
 
         // Ensure that the Balancer V3 Pool is registered with the vault
         require(_vault.isPoolRegistered(LT_ASSET), POOL_NOT_REGISTERED());

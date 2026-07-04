@@ -14,8 +14,8 @@ import { DeployScript } from "../Deploy.s.sol";
  * @notice Configuration for the Royco Day market deployment path.
  * @dev The Dawn-era multi-kernel market catalog was removed in the Day fork. This config now describes the single
  *      Day deployment path (ST/JT + a Balancer Gyro E-CLP liquidity tranche). Add further Day markets as they ship.
- *      Addresses and E-CLP curve params below are ILLUSTRATIVE PLACEHOLDERS — set real, SDK-derived values per
- *      market/chain before broadcasting a deployment.
+ *      The `snUSD` market's asset/oracle addresses and E-CLP curve params are real mainnet values; the only values
+ *      still to finalize per market/chain are the ones marked `TODO` (the BPT oracle and the Gyro pool factory).
  */
 abstract contract MarketDeploymentConfig {
     // ═══════════════════════════════════════════════════════════════════════════
@@ -274,7 +274,7 @@ abstract contract MarketDeploymentConfig {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // E-CLP POOL PARAMS (PLACEHOLDER)
+    // E-CLP POOL PARAMS
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Gyro E-CLP pool params for the snUSD market's `{snUSD_share, quote}` near-peg pool.
