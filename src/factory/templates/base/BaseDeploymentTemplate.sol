@@ -183,49 +183,19 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
         (ydm, alreadyDeployed) = ROYCO_FACTORY.deployDeterministicContract(abi.encodePacked(creationCode, abi.encode(_targetUtilizationWAD)), _salt);
     }
 
-    /// @notice Deploys the senior-tranche impl, pinning its (asset, kernel, whitelist flag, lens, hook) immutables.
-    function _deploySeniorTrancheImpl(
-        address _asset,
-        address _kernel,
-        bool _enforceWhitelist,
-        address _lens,
-        address _hook,
-        bytes32 _salt
-    )
-        internal
-        returns (address impl)
-    {
-        return _deployImpl(COMPONENT_ID_SENIOR_TRANCHE_IMPL, abi.encode(_asset, _kernel, _enforceWhitelist, _lens, _hook), _salt);
+    /// @notice Deploys the senior-tranche impl, pinning its (asset, kernel) immutables.
+    function _deploySeniorTrancheImpl(address _asset, address _kernel, bytes32 _salt) internal returns (address impl) {
+        return _deployImpl(COMPONENT_ID_SENIOR_TRANCHE_IMPL, abi.encode(_asset, _kernel), _salt);
     }
 
-    /// @notice Deploys the junior-tranche impl, pinning its (asset, kernel, whitelist flag, lens, hook) immutables.
-    function _deployJuniorTrancheImpl(
-        address _asset,
-        address _kernel,
-        bool _enforceWhitelist,
-        address _lens,
-        address _hook,
-        bytes32 _salt
-    )
-        internal
-        returns (address impl)
-    {
-        return _deployImpl(COMPONENT_ID_JUNIOR_TRANCHE_IMPL, abi.encode(_asset, _kernel, _enforceWhitelist, _lens, _hook), _salt);
+    /// @notice Deploys the junior-tranche impl, pinning its (asset, kernel) immutables.
+    function _deployJuniorTrancheImpl(address _asset, address _kernel, bytes32 _salt) internal returns (address impl) {
+        return _deployImpl(COMPONENT_ID_JUNIOR_TRANCHE_IMPL, abi.encode(_asset, _kernel), _salt);
     }
 
-    /// @notice Deploys the liquidity-tranche impl, pinning its (asset, kernel, whitelist flag, lens, hook) immutables.
-    function _deployLiquidityTrancheImpl(
-        address _asset,
-        address _kernel,
-        bool _enforceWhitelist,
-        address _lens,
-        address _hook,
-        bytes32 _salt
-    )
-        internal
-        returns (address impl)
-    {
-        return _deployImpl(COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL, abi.encode(_asset, _kernel, _enforceWhitelist, _lens, _hook), _salt);
+    /// @notice Deploys the liquidity-tranche impl, pinning its (asset, kernel) immutables.
+    function _deployLiquidityTrancheImpl(address _asset, address _kernel, bytes32 _salt) internal returns (address impl) {
+        return _deployImpl(COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL, abi.encode(_asset, _kernel), _salt);
     }
 
     /// @notice Deploys the accountant impl for a given kernel and the junior tranche's fixed co-investment configuration.

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { BalancerPoolToken } from "../../lib/balancer-v3-monorepo/pkg/vault/contracts/BalancerPoolToken.sol";
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
 import { RoycoDayKernel } from "./base/RoycoDayKernel.sol";
 import {
@@ -32,7 +33,10 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracl
 
     /// @notice Constructs the kernel state and resolves the quote asset from the liquidity tranche's Balancer V3 pool
     /// @param _params The standard construction parameters for the Royco Day kernel
-    constructor(IRoycoDayKernel.RoycoDayKernelConstructionParams memory _params) RoycoDayKernel(_params) { }
+    constructor(IRoycoDayKernel.RoycoDayKernelConstructionParams memory _params)
+        RoycoDayKernel(_params)
+        BalancerV3_LT_BPTOracle_Quoter(BalancerPoolToken(_params.ltAsset).getVault())
+    { }
 
     /**
      * @notice Initializes the Royco Day kernel and its ST/JT and liquidity tranche quoters

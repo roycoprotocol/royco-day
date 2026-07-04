@@ -7,7 +7,7 @@ import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../Types.sol";
-import { Math, NAV_UNIT, TRANCHE_UNIT, RoycoUnitsMath, toUint256 } from "../Units.sol";
+import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toUint256 } from "../Units.sol";
 import { ValuationLogic } from "./ValuationLogic.sol";
 
 /**
@@ -32,7 +32,12 @@ library TrancheClaimsLogic {
      * @param _state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
      * @return claims The cumulative asset claims that the specified tranche is entitled to
      */
-    function _deriveTrancheAssetClaims(IRoycoDayKernel.RoycoDayKernelState storage $, IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables, TrancheType _trancheType, SyncedAccountingState memory _state)
+    function _deriveTrancheAssetClaims(
+        IRoycoDayKernel.RoycoDayKernelState storage $,
+        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
+        TrancheType _trancheType,
+        SyncedAccountingState memory _state
+    )
         internal
         view
         returns (AssetClaims memory claims)
@@ -55,7 +60,9 @@ library TrancheClaimsLogic {
         } else {
             if (_state.ltRawNAV != ZERO_NAV_UNITS) claims.ltAssets = IRoycoDayKernel(address(this)).ltConvertNAVUnitsToTrancheUnits(_state.ltRawNAV);
             claims.stShares = $.ltOwnedSeniorTrancheShares;
-            claims.nav = ValuationLogic._getLiquidityTrancheEffectiveNAV($, _state.stEffectiveNAV, IRoycoVaultTranche(_immutables.seniorTranche).totalSupply(), claims.stShares);
+            claims.nav = ValuationLogic._getLiquidityTrancheEffectiveNAV(
+                $, _state.stEffectiveNAV, IRoycoVaultTranche(_immutables.seniorTranche).totalSupply(), claims.stShares
+            );
         }
     }
 
@@ -64,7 +71,14 @@ library TrancheClaimsLogic {
      * @param _claims The ST and JT assets to withdraw and transfer to the specified receiver
      * @param _receiver The receiver of the tranche asset claims
      */
-    function _withdrawAssets(IRoycoDayKernel.RoycoDayKernelState storage $, IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables, AssetClaims memory _claims, address _receiver) internal {
+    function _withdrawAssets(
+        IRoycoDayKernel.RoycoDayKernelState storage $,
+        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
+        AssetClaims memory _claims,
+        address _receiver
+    )
+        internal
+    {
         // Cache the individual claims
         TRANCHE_UNIT stAssetsToClaim = _claims.stAssets;
         TRANCHE_UNIT jtAssetsToClaim = _claims.jtAssets;
@@ -100,7 +114,11 @@ library TrancheClaimsLogic {
      * @param _totalTrancheShares The total number of shares that exist in the tranche
      * @return scaledClaims The scaled claims on ST and JT assets of the tranche
      */
-    function _scaleAssetClaims(AssetClaims memory _claims, uint256 _shares, uint256 _totalTrancheShares)
+    function _scaleAssetClaims(
+        AssetClaims memory _claims,
+        uint256 _shares,
+        uint256 _totalTrancheShares
+    )
         internal
         pure
         returns (AssetClaims memory scaledClaims)

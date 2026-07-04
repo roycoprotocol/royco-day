@@ -6,7 +6,7 @@ import { BalancerV3DeploymentTemplate } from "../../src/factory/templates/Balanc
 import {
     IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
 } from "../../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
-import { BalancerV3_LT_Quoter } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_Quoter.sol";
+import { BalancerV3_LT_BPTOracle_Quoter } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 import { DeployScript } from "../Deploy.s.sol";
 
 /**
@@ -44,8 +44,6 @@ abstract contract MarketDeploymentConfig {
     // MARKET NAMES
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Single illustrative Day market: ST/JT share an ERC4626 yield vault, LT holds the {ST_share, USDC} E-CLP BPT.
-    string public constant DAY_DEMO = "DayDemoMarket";
     string public constant SNUSD = "snUSD";
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -205,65 +203,7 @@ abstract contract MarketDeploymentConfig {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _initializeMarketConfigs() internal {
-        // Single illustrative Day market. ST and JT share the same ERC4626 yield vault; the LT holds the
-        // Gyro E-CLP BPT of {ST_share, USDC}. All addresses and E-CLP curve params below are PLACEHOLDERS.
-        address erc4626YieldVault = 0x88887bE419578051FF9F4eb6C858A951921D8888; // TODO: real ST/JT ERC4626 vault share
-        address usdc = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48; // quote token
-
-        _marketConfigs[DAY_DEMO] = MarketConfig({
-            marketName: DAY_DEMO,
-            chainId: MAINNET,
-            seniorTrancheName: _seniorTrancheName(DAY_DEMO),
-            seniorTrancheSymbol: _seniorTrancheSymbol(DAY_DEMO),
-            juniorTrancheName: _juniorTrancheName(DAY_DEMO),
-            juniorTrancheSymbol: _juniorTrancheSymbol(DAY_DEMO),
-            liquidityTrancheName: _liquidityTrancheName(DAY_DEMO),
-            liquidityTrancheSymbol: _liquidityTrancheSymbol(DAY_DEMO),
-            seniorAsset: erc4626YieldVault,
-            juniorAsset: erc4626YieldVault,
-            stDustTolerance: 1e16,
-            jtDustTolerance: 1e16,
-            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel,
-            kernelSpecificParams: abi.encode(
-                DeployScript.IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams({
-                        stAndJTQuoterParams: IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams({
-                            // Enable the oracle leg by using the sentinel initial conversion rate
-                            initialConversionRateWAD: 0,
-                            baseAssetToNavAssetOracle: 0x9A5a3c3Ed0361505cC1D4e824B3854De5724434A, // TODO: real base-asset->NAV Chainlink feed
-                            stalenessThresholdSeconds: 48 hours
-                        }),
-                        ltQuoterParams: BalancerV3_LT_Quoter.LT_QuoterSpecificParams({
-                            bptOracle: 0x000000000000000000000000000000000000dEaD, // TODO: real manipulation-resistant Balancer V3 BPT (E-CLP LP) oracle
-                            maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
-                        })
-                    })
-            ),
-            enforceVaultSharesTransferWhitelist: false,
-            stSelfLiquidationBonusWAD: 0,
-            stProtocolFeeWAD: 0.1e18,
-            jtProtocolFeeWAD: 0,
-            jtYieldShareProtocolFeeWAD: 0.45e18,
-            minCoverageWAD: 0.03e18,
-            jtCoinvested: true,
-            coverageLiquidationUtilizationWAD: 1.0032441e18,
-            fixedTermDurationSeconds: 0,
-            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
-            ydmSpecificParams: abi.encode(
-                DeployScript.AdaptiveCurveYDM_V2_Params({
-                    yieldShareAtZeroUtilWAD: 0.06e18, yieldShareAtTargetUtilWAD: 0.06e18, yieldShareAtFullUtilWAD: 0.18e18, maxAdaptationSpeedWAD: 0
-                })
-            ),
-            // LDM curve. The LT liquidity premium is off in this baseline (maxLTYieldShareWAD == 0), so these values are not
-            // economically live yet — they only need to be a valid curve so the accountant can initialize the LDM.
-            ltYdmSpecificParams: abi.encode(
-                DeployScript.AdaptiveCurveYDM_V2_Params({
-                    yieldShareAtZeroUtilWAD: 0.06e18, yieldShareAtTargetUtilWAD: 0.06e18, yieldShareAtFullUtilWAD: 0.18e18, maxAdaptationSpeedWAD: 0
-                })
-            ),
-            jtYdmTargetUtilizationWAD: 0.9e18, // JT coverage-utilization kink (was previously hardcoded in the YDM creation code)
-            ltYdmTargetUtilizationWAD: 0.9e18, // LDM liquidity-utilization kink
-            gyroECLPPoolParams: demoGyroECLPPoolParams(DAY_DEMO, usdc)
-        });
+        address usdc = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48; // LT pool quote token
 
         address snusdVault = 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313; // snUSD ERC4626 (ST/JT asset)
         address nusdRedstoneOracle = 0x5e7281f74e74D76347f0b8f4a36Fd3cb29c19d95; // base(nUSD)->NAV feed
@@ -281,21 +221,21 @@ abstract contract MarketDeploymentConfig {
             juniorAsset: snusdVault,
             stDustTolerance: 5,
             jtDustTolerance: 5,
-            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel,
+            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel,
             kernelSpecificParams: abi.encode(
                 DeployScript.IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams({
-                        stAndJTQuoterParams: IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams({
-                            // Enable the oracle leg by using the sentinel initial conversion rate
-                            initialConversionRateWAD: 0,
-                            baseAssetToNavAssetOracle: nusdRedstoneOracle,
-                            // RedStone pushes updates ~every 12 hours; 48h staleness threshold for safety
-                            stalenessThresholdSeconds: 48 hours
-                        }),
-                        ltQuoterParams: BalancerV3_LT_Quoter.LT_QuoterSpecificParams({
-                            bptOracle: 0x000000000000000000000000000000000000dEaD, // TODO: real manipulation-resistant E-CLP BPT oracle
-                            maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
-                        })
+                    stAndJTQuoterParams: IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams({
+                        // Enable the oracle leg by using the sentinel initial conversion rate
+                        initialConversionRateWAD: 0,
+                        baseAssetToNavAssetOracle: nusdRedstoneOracle,
+                        // RedStone pushes updates ~every 12 hours; 48h staleness threshold for safety
+                        stalenessThresholdSeconds: 48 hours
+                    }),
+                    ltQuoterParams: BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams({
+                        bptOracle: 0x000000000000000000000000000000000000dEaD, // TODO: real manipulation-resistant E-CLP BPT oracle
+                        maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
                     })
+                })
             ),
             enforceVaultSharesTransferWhitelist: false,
             stSelfLiquidationBonusWAD: 0.005e18,
@@ -333,32 +273,6 @@ abstract contract MarketDeploymentConfig {
     // ═══════════════════════════════════════════════════════════════════════════
     // E-CLP POOL PARAMS (PLACEHOLDER)
     // ═══════════════════════════════════════════════════════════════════════════
-
-    /// @notice Builds the Gyro E-CLP pool params for a market's `{ST_share, quote}` liquidity-tranche pool.
-    /// @dev TODO: the E-CLP curve params (`eclpParams`/`derivedEclpParams`) MUST be computed off-chain via the Gyro
-    ///      SDK for the target near-peg curve and supplied here — the placeholder zeros below will not produce a valid
-    ///      pool and exist only so the deployment path compiles and wires correctly.
-    function demoGyroECLPPoolParams(
-        string memory _marketName,
-        address _quoteToken
-    )
-        public
-        pure
-        returns (BalancerV3DeploymentTemplate.GyroECLPPoolParams memory)
-    {
-        return BalancerV3DeploymentTemplate.GyroECLPPoolParams({
-            name: string(abi.encodePacked("Royco Day LP ", _marketName)),
-            symbol: string(abi.encodePacked("ROY-LP-", _marketName)),
-            eclpParams: IGyroECLPPool.EclpParams({ alpha: 0, beta: 0, c: 0, s: 0, lambda: 0 }),
-            derivedEclpParams: IGyroECLPPool.DerivedEclpParams({
-                tauAlpha: IGyroECLPPool.Vector2({ x: 0, y: 0 }), tauBeta: IGyroECLPPool.Vector2({ x: 0, y: 0 }), u: 0, v: 0, w: 0, z: 0, dSq: 0
-            }),
-            swapFeePercentage: 0.0001e18, // 1 bp (directional-fee tuning is a P6 calibration concern)
-            enableDonation: false,
-            disableUnbalancedLiquidity: false,
-            quoteToken: _quoteToken
-        });
-    }
 
     /// @notice Gyro E-CLP pool params for the snUSD market's `{snUSD_share, quote}` near-peg pool.
     /// @dev The curve params are a known-good near-peg set (copied from Balancer's pool-gyro test util, extracted from a real

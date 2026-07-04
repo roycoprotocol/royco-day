@@ -25,6 +25,7 @@ interface IRoycoProtocolTemplate {
         address kernel;
         address accountant;
         address ydm;
+        address ltYdm;
         bytes extras;
     }
 

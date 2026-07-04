@@ -26,7 +26,7 @@ import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
-import { RoycoDayKernelLens } from "../../src/kernels/base/RoycoDayKernelLens.sol";
+import { RoycoDayKernel } from "../../src/kernels/base/RoycoDayKernel.sol";
 import { RoycoDayBalancerV3Hooks } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3Hooks.sol";
 import { TrancheType } from "../../src/libraries/Types.sol";
 import { TRANCHE_UNIT } from "../../src/libraries/Units.sol";
@@ -61,8 +61,6 @@ contract DayMarketDeploymentTest is BaseTest {
 
     // ── Deployed market (BaseTest sets FACTORY/ACCESS_MANAGER/ST/JT/KERNEL/ACCOUNTANT/YDM/BLACKLIST via _setDeployedMarket) ──
     IRoycoVaultTranche internal LT;
-    address internal LENS_ADDR;
-    address internal BLACKLIST_HOOK; // the tranche balance-update hook (== BLACKLIST)
     address internal POOL; // the Gyro E-CLP BPT (== kernel.LT_ASSET())
     address internal BALANCER_HOOK; // the pool's hooks contract (the kernel-bound RoycoDayBalancerV3Hooks proxy)
     address internal LT_YDM; // the LDM
@@ -100,8 +98,6 @@ contract DayMarketDeploymentTest is BaseTest {
 
         // Capture the Day-only addresses the script's DeploymentResult omits, by reading the deployed contracts.
         LT = IRoycoVaultTranche(KERNEL.LIQUIDITY_TRANCHE());
-        LENS_ADDR = ST.LENS();
-        BLACKLIST_HOOK = ST.HOOK();
         POOL = KERNEL.LT_ASSET();
         LT_YDM = ACCOUNTANT.getState().ltYDM;
         VAULT = IVault(address(GyroECLPPoolFactory(DEPLOY_SCRIPT.getChainConfig(block.chainid).gyroECLPPoolFactory).getVault()));
@@ -113,7 +109,7 @@ contract DayMarketDeploymentTest is BaseTest {
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
     function test_deployment_allAddressesLive() public view {
-        address[13] memory a = [
+        address[12] memory a = [
             address(FACTORY),
             address(ACCESS_MANAGER),
             address(BLACKLIST),
@@ -124,7 +120,6 @@ contract DayMarketDeploymentTest is BaseTest {
             address(ACCOUNTANT),
             address(YDM),
             LT_YDM,
-            LENS_ADDR,
             POOL,
             BALANCER_HOOK
         ];
@@ -164,19 +159,13 @@ contract DayMarketDeploymentTest is BaseTest {
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
-    // 3. LENS + HOOK IMMUTABLES
+    // 3. BLACKLIST + WHITELIST WIRING (kernel-mediated)
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-    function test_linkage_lensAndHookImmutables() public view {
-        assertEq(ST.LENS(), LENS_ADDR, "ST lens");
-        assertEq(JT.LENS(), LENS_ADDR, "JT lens");
-        assertEq(LT.LENS(), LENS_ADDR, "LT lens");
-        assertEq(address(RoycoDayKernelLens(LENS_ADDR).ROYCO_DAY_KERNEL()), address(KERNEL), "lens -> kernel");
-
-        assertEq(ST.HOOK(), address(BLACKLIST), "ST hook == blacklist");
-        assertEq(JT.HOOK(), address(BLACKLIST), "JT hook");
-        assertEq(LT.HOOK(), address(BLACKLIST), "LT hook");
-        assertEq(BLACKLIST_HOOK, address(BLACKLIST), "captured hook == blacklist");
+    function test_linkage_blacklistWiredToKernel() public view {
+        // The tranche balance-update hook is kernel-mediated now: tranche._update -> kernel.preTrancheBalanceUpdateHook ->
+        // BlacklistLogic(kernel.roycoBlacklist). The deployed RoycoBlacklist must be the kernel's configured blacklist.
+        assertEq(KERNEL.getState().roycoBlacklist, address(BLACKLIST), "kernel blacklist");
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -275,9 +264,8 @@ contract DayMarketDeploymentTest is BaseTest {
         assertEq(ST.name(), "Royco Senior Tranche snUSD", "ST name");
         assertEq(ST.symbol(), "ROY-ST-snUSD", "ST symbol");
         assertEq(LT.symbol(), "ROY-LT-snUSD", "LT symbol");
-        assertFalse(ST.ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER(), "ST enforce flag");
-        assertFalse(JT.ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER(), "JT enforce flag");
-        assertFalse(LT.ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER(), "LT enforce flag");
+        // The transfer-whitelist gate is a kernel immutable now (enforced in kernel.preTrancheBalanceUpdateHook), not per-tranche.
+        assertFalse(RoycoDayKernel(address(KERNEL)).ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER(), "kernel enforce flag");
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════

@@ -9,10 +9,10 @@ import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../Constants.sol";
 import { AssetClaims, MarketState, Operation, SyncedAccountingState, TrancheType } from "../Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "../Units.sol";
+import { AccountingSyncLogic } from "./AccountingSyncLogic.sol";
 import { BlacklistLogic } from "./BlacklistLogic.sol";
 import { FeeAndLiquidityPremiumLogic } from "./FeeAndLiquidityPremiumLogic.sol";
 import { SelfLiquidationLogic } from "./SelfLiquidationLogic.sol";
-import { AccountingSyncLogic } from "./AccountingSyncLogic.sol";
 import { TrancheClaimsLogic } from "./TrancheClaimsLogic.sol";
 import { ValuationLogic } from "./ValuationLogic.sol";
 
@@ -292,7 +292,8 @@ library RedemptionLogic {
         // Derive the ST total claims from the synced state, and the senior supply AFTER this sync mints the premium and ST protocol fee shares.
         // The execution path reads totalSupply() after the pre-op sync has minted those shares, so the preview must use the same post-mint supply
         stClaims = TrancheClaimsLogic._deriveTrancheAssetClaims($, _immutables, TrancheType.SENIOR, state);
-        (,, uint256 totalSTShares) = FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(_immutables.seniorTranche).totalSupply());
+        (,, uint256 totalSTShares) =
+            FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(_immutables.seniorTranche).totalSupply());
 
         // Quote the proportional venue removal for the LT-asset slice (simulation only: no slippage gate, no settlement)
         uint256 stSharesWithdrawn;

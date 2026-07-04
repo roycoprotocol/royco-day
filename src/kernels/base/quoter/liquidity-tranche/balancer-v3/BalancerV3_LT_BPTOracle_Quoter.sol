@@ -71,6 +71,9 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     /// @param maxReinvestmentSlippageWAD The new maximum slippage tolerated when single-sided reinvesting the liquidity premium into the BPT, scaled to WAD precision
     event MaxReinvestmentSlippageUpdated(uint64 maxReinvestmentSlippageWAD);
 
+    /// @notice Thrown when the Balancer V3 Vault passed to the constructor is not the one the pool (`LT_ASSET`) is registered with
+    error INVALID_BALANCER_V3_VAULT();
+
     /// @notice Thrown when the Balancer pool is not registered with the Balancer V3 Vault
     error POOL_NOT_REGISTERED();
 
@@ -83,7 +86,10 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     /// @notice Thrown when the configured maximum reinvestment slippage is not strictly less than WAD (100%)
     error INVALID_MAX_REINVESTMENT_SLIPPAGE();
 
-    constructor() VaultGuard(BalancerPoolToken(LT_ASSET).getVault()) {
+    constructor(IVault _balancerV3Vault) VaultGuard(_balancerV3Vault) {
+        // Ensure the passed vault is the one the pool (LT_ASSET) is registered with (LT_ASSET reads fine here in the body)
+        require(BalancerPoolToken(LT_ASSET).getVault() == _balancerV3Vault, INVALID_BALANCER_V3_VAULT());
+
         // Ensure that the Balancer V3 Pool is registered with the vault
         require(_vault.isPoolRegistered(LT_ASSET), POOL_NOT_REGISTERED());
 

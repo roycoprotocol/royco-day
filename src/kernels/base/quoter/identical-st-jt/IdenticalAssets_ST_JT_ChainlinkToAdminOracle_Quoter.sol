@@ -10,7 +10,10 @@ import { IdenticalAssets_ST_JT_Oracle_Quoter } from "./base/IdenticalAssets_ST_J
  * @dev Mandates that the reference asset to NAV units uses an admin controlled oracle
  * @dev Use case: Convert PT-USDe (Tranche unit) to USDe (Reference asset) using a Chainlink (compatible) oracle and convert USDe to USD (NAV unit) using an admin set rate
  */
-abstract contract IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter is IdenticalAssets_ST_JT_ChainlinkOracle_Quoter, IdenticalAssets_ST_JT_AdminOracle_Quoter {
+abstract contract IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter is
+    IdenticalAssets_ST_JT_ChainlinkOracle_Quoter,
+    IdenticalAssets_ST_JT_AdminOracle_Quoter
+{
     /**
      * @notice The quoter-specific initialization parameters
      * @custom:field initialConversionRateWAD - The initial conversion rate as defined by the oracle, scaled to WAD precision

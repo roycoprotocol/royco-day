@@ -6,7 +6,7 @@ import { AbstractKernelTestSuite } from "../../abstract/AbstractKernelTestSuite.
 
 /**
  * @title Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest
- * @notice Per-kernel-type test base for the `Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_LT_Kernel`
+ * @notice Per-kernel-type test base for the `Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel`
  *         family: ST and JT are the same ERC4626 vault share (priced share->base via the vault and base->NAV via a
  *         Chainlink-compatible feed), and the LT holds the Gyro E-CLP BPT of `{ST_share, quote}`.
  * @dev Implements the `IKernelTestHooks` deal + simulate seams once for this kernel family, so concrete protocol tests

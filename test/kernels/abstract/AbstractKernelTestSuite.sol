@@ -16,7 +16,7 @@ import { IKernelTestHooks } from "../../interfaces/IKernelTestHooks.sol";
  * @notice The shared, config-driven base every Day kernel test extends. `setUp` reads the concrete kernel's `TestConfig`,
  *         forks the configured network, deploys the market end-to-end through the real `DeployScript` (via the concrete
  *         `_deployKernelAndMarket` hook, which selects a market config by name from the config file), wires every deployed
- *         contract into member vars (including the Day-only LT/lens/pool/hook/LDM topology the script's result omits), and
+ *         contract into member vars (including the Day-only LT/pool/hook/LDM topology the script's result omits), and
  *         funds the ST/JT providers. Concrete kernel tests then only supply the per-kernel `IKernelTestHooks` and the market
  *         name — mirroring the Royco Dawn "abstract kernel test per kernel type" pattern.
  * @dev No `test_*` methods live here yet; the shared test battery is added on top of this scaffolding later.
@@ -32,8 +32,6 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     // ── Day market-topology addresses the script's `DeploymentResult` does not surface ──
     /// @notice The liquidity tranche (holds the Gyro E-CLP BPT).
     IRoycoVaultTranche internal LT;
-    /// @notice The kernel lens (read-only preview/max surface) all tranches read from.
-    address internal LENS_ADDR;
     /// @notice The liquidity tranche's Gyro E-CLP pool (the BPT, == `KERNEL.LT_ASSET()`).
     address internal POOL;
     /// @notice The pool's kernel-bound hook (the upgraded `RoycoDayBalancerV3Hooks` proxy).
@@ -111,7 +109,6 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         if (testConfig.hasLiquidityTranche) {
             LT = IRoycoVaultTranche(KERNEL.LIQUIDITY_TRANCHE());
             POOL = KERNEL.LT_ASSET();
-            LENS_ADDR = ST.LENS();
             LT_YDM = ACCOUNTANT.getState().ltYDM;
             VAULT = IVault(address(GyroECLPPoolFactory(DEPLOY_SCRIPT.getChainConfig(block.chainid).gyroECLPPoolFactory).getVault()));
             BALANCER_HOOK = VAULT.getHooksConfig(POOL).hooksContract;

@@ -43,7 +43,13 @@ library AccountingSyncLogic {
      * @dev Values the reinvested shares against the freshly synced senior share rate, so a smaller amount can clear the venue's slippage gate when reinvesting the entire idle balance would not
      * @param _stShares The amount of idle liquidity-premium senior shares to reinvest, or type(uint256).max to reinvest the entire idle balance
      */
-    function reinvestLiquidityPremium(IRoycoDayKernel.RoycoDayKernelState storage $, IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables, uint256 _stShares) external {
+    function reinvestLiquidityPremium(
+        IRoycoDayKernel.RoycoDayKernelState storage $,
+        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
+        uint256 _stShares
+    )
+        external
+    {
         // Sync first so the reinvestment values the idle premium shares against fresh committed senior state (and stages any newly accrued premium)
         SyncedAccountingState memory state = _preOpSyncTrancheAccounting($, _immutables);
         // Reinvest the requested idle premium shares (type(uint256).max reinvests the entire idle balance) at this sync's post-mint senior share rate
@@ -78,12 +84,13 @@ library AccountingSyncLogic {
         // Return the requested tranche claims and total shares after the sync mints its premium and protocol fee shares
         if (_trancheType == TrancheType.SENIOR) {
             // Compute ST share supply after the liquidity premium and the ST protocol fee shares are minted
-            (,, totalTrancheShares) = FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(_immutables.seniorTranche).totalSupply());
+            (,, totalTrancheShares) =
+                FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(_immutables.seniorTranche).totalSupply());
         } else if (_trancheType == TrancheType.JUNIOR) {
             // Compute JT share supply after the JT protocol fee shares are minted
             uint256 jtTotalSupply = IERC20(_immutables.juniorTranche).totalSupply();
-            totalTrancheShares =
-                jtTotalSupply + ValuationLogic._convertToShares(state.jtProtocolFee, (state.jtEffectiveNAV - state.jtProtocolFee), jtTotalSupply, Math.Rounding.Floor);
+            totalTrancheShares = jtTotalSupply
+                + ValuationLogic._convertToShares(state.jtProtocolFee, (state.jtEffectiveNAV - state.jtProtocolFee), jtTotalSupply, Math.Rounding.Floor);
         } else {
             // Compute LT share supply after the LT protocol fee shares are minted
             (uint256 liquidityPremiumShares,, uint256 stTotalSupplyAfterMints) =
@@ -94,7 +101,8 @@ library AccountingSyncLogic {
             NAV_UNIT ltEffectiveNAV =
                 ValuationLogic._getLiquidityTrancheEffectiveNAV($, state.stEffectiveNAV, stTotalSupplyAfterMints, ltOwnedSeniorTrancheShares);
             uint256 ltTotalSupply = IERC20(_immutables.liquidityTranche).totalSupply();
-            totalTrancheShares = ltTotalSupply + ValuationLogic._convertToShares(state.ltProtocolFee, (ltEffectiveNAV - state.ltProtocolFee), ltTotalSupply, Math.Rounding.Floor);
+            totalTrancheShares = ltTotalSupply
+                + ValuationLogic._convertToShares(state.ltProtocolFee, (ltEffectiveNAV - state.ltProtocolFee), ltTotalSupply, Math.Rounding.Floor);
         }
     }
 
@@ -113,8 +121,8 @@ library AccountingSyncLogic {
         returns (SyncedAccountingState memory state)
     {
         // Preview a senior/junior accounting sync via the accountant
-        state =
-            IRoycoDayAccountant(_immutables.accountant).previewSyncTrancheAccounting(ValuationLogic._getSeniorTrancheRawNAV($), ValuationLogic._getJuniorTrancheRawNAV($));
+        state = IRoycoDayAccountant(_immutables.accountant)
+            .previewSyncTrancheAccounting(ValuationLogic._getSeniorTrancheRawNAV($), ValuationLogic._getJuniorTrancheRawNAV($));
         // Refresh the liquidity tranche raw NAV and utilization in memory so the preview mirrors execution
         state.ltRawNAV = ValuationLogic._getLiquidityTrancheRawNAV($);
         state.liquidityUtilizationWAD = UtilizationLogic._computeLiquidityUtilization(state.stEffectiveNAV, state.minLiquidityWAD, state.ltRawNAV);
@@ -133,7 +141,8 @@ library AccountingSyncLogic {
         returns (SyncedAccountingState memory state)
     {
         // Execute the pre-op PnL synchronization via the accountant
-        state = IRoycoDayAccountant(_immutables.accountant).preOpSyncTrancheAccounting(ValuationLogic._getSeniorTrancheRawNAV($), ValuationLogic._getJuniorTrancheRawNAV($));
+        state = IRoycoDayAccountant(_immutables.accountant)
+            .preOpSyncTrancheAccounting(ValuationLogic._getSeniorTrancheRawNAV($), ValuationLogic._getJuniorTrancheRawNAV($));
         // Mint the fee and liquidity premium shares accrued by this sync, caching the senior share rate for any liquidity venue before the premium is reinvested
         FeeAndLiquidityPremiumLogic._processFeesAndLiquidityPremium($, _immutables, state);
         // Commit the liquidity tranche's fresh raw NAV against the post-sync market state
@@ -158,7 +167,8 @@ library AccountingSyncLogic {
         returns (SyncedAccountingState memory state, AssetClaims memory claims, uint256 totalTrancheShares)
     {
         // Execute the pre-op PnL synchronization via the accountant
-        state = IRoycoDayAccountant(_immutables.accountant).preOpSyncTrancheAccounting(ValuationLogic._getSeniorTrancheRawNAV($), ValuationLogic._getJuniorTrancheRawNAV($));
+        state = IRoycoDayAccountant(_immutables.accountant)
+            .preOpSyncTrancheAccounting(ValuationLogic._getSeniorTrancheRawNAV($), ValuationLogic._getJuniorTrancheRawNAV($));
         // Mint the fee and liquidity premium shares accrued by this sync, caching the senior share rate for any liquidity venue before the premium is reinvested
         FeeAndLiquidityPremiumLogic._processFeesAndLiquidityPremium($, _immutables, state);
         // Commit the liquidity tranche's fresh raw NAV against the post-sync market state

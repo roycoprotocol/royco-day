@@ -11,7 +11,10 @@ import { IdenticalERC4626Shares_ST_JT_Oracle_Quoter } from "./base/IdenticalERC4
  * @dev The senior and junior tranches must have the same ERC4626 vault share as its tranche unit
  * @dev Use case: Convert sUSDe (Tranche unit) to USDe (base assets) using ERC4626's convertToAssets and convert USDe to USD (NAV unit) using an admin set rate
  */
-abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToAdminOracle_Quoter is IdenticalERC4626Shares_ST_JT_Oracle_Quoter, IdenticalAssets_ST_JT_AdminOracle_Quoter {
+abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToAdminOracle_Quoter is
+    IdenticalERC4626Shares_ST_JT_Oracle_Quoter,
+    IdenticalAssets_ST_JT_AdminOracle_Quoter
+{
     /// @notice The quoter-specific initialization parameters
     /// @custom:field initialConversionRateWAD - The initial conversion rate as defined by the oracle, scaled to WAD precision
     struct ST_JT_QuoterSpecificParams {

@@ -9,9 +9,9 @@ import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { MAX_NAV_UNITS, MAX_TRANCHE_UNITS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../Constants.sol";
 import { MarketState, Operation, SyncedAccountingState, TrancheType } from "../Types.sol";
 import { Math, NAV_UNIT, TRANCHE_UNIT } from "../Units.sol";
+import { AccountingSyncLogic } from "./AccountingSyncLogic.sol";
 import { BlacklistLogic } from "./BlacklistLogic.sol";
 import { FeeAndLiquidityPremiumLogic } from "./FeeAndLiquidityPremiumLogic.sol";
-import { AccountingSyncLogic } from "./AccountingSyncLogic.sol";
 import { ValuationLogic } from "./ValuationLogic.sol";
 
 /**
@@ -88,10 +88,7 @@ library DepositLogic {
         (uint256 liquidityPremiumShares,, uint256 stTotalSupplyAfterMints) =
             FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(stateBeforeDeposit, IERC20(_immutables.seniorTranche).totalSupply());
         navToMintSharesAt = ValuationLogic._getLiquidityTrancheEffectiveNAV(
-            $,
-            stateBeforeDeposit.stEffectiveNAV,
-            stTotalSupplyAfterMints,
-            ($.ltOwnedSeniorTrancheShares + liquidityPremiumShares)
+            $, stateBeforeDeposit.stEffectiveNAV, stTotalSupplyAfterMints, ($.ltOwnedSeniorTrancheShares + liquidityPremiumShares)
         );
     }
 
@@ -118,14 +115,16 @@ library DepositLogic {
         // During a fixed-term market state only a quote-only deposit is permitted; an ST-leg deposit reverts, so return zero before quoting the venue add to match it
         if (state.marketState == MarketState.FIXED_TERM && _stAssets != ZERO_TRANCHE_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS);
         // The NAV to mint LT shares at is the pre-deposit LT effective NAV (market-making depth plus the idle premium senior shares),
-        (uint256 liquidityPremiumShares,,) = FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(_immutables.seniorTranche).totalSupply());
-        navToMintSharesAt = ValuationLogic._getLiquidityTrancheEffectiveNAV(
-            $, state.stEffectiveNAV, totalSTShares, ($.ltOwnedSeniorTrancheShares + liquidityPremiumShares)
-        );
+        (uint256 liquidityPremiumShares,,) =
+            FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(_immutables.seniorTranche).totalSupply());
+        navToMintSharesAt =
+            ValuationLogic._getLiquidityTrancheEffectiveNAV($, state.stEffectiveNAV, totalSTShares, ($.ltOwnedSeniorTrancheShares + liquidityPremiumShares));
         // Size the senior shares the ST leg would mint (zero if no ST underlying is supplied), priced like the execution path
         uint256 stSharesToAdd = _stAssets == ZERO_TRANCHE_UNITS
             ? 0
-            : ValuationLogic._convertToShares(IRoycoDayKernel(address(this)).stConvertTrancheUnitsToNAVUnits(_stAssets), state.stEffectiveNAV, totalSTShares, Math.Rounding.Floor);
+            : ValuationLogic._convertToShares(
+                IRoycoDayKernel(address(this)).stConvertTrancheUnitsToNAVUnits(_stAssets), state.stEffectiveNAV, totalSTShares, Math.Rounding.Floor
+            );
         // Quote the venue add for the senior shares and quote assets (simulation only: no slippage gate, no settlement)
         ltAssetsOut = IRoycoDayKernel(address(this)).previewAddLiquidity(stSharesToAdd, _quoteAssets);
         // The value allocated is the value of the LT assets the add would mint
@@ -142,7 +141,15 @@ library DepositLogic {
      * @return assets The maximum amount of assets that can be deposited into the senior tranche, denominated in the senior tranche's tranche units
      * @dev ST deposits are allowed only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-deposit
      */
-    function stMaxDeposit(IRoycoDayKernel.RoycoDayKernelState storage $, IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables, address _receiver) external view returns (TRANCHE_UNIT assets) {
+    function stMaxDeposit(
+        IRoycoDayKernel.RoycoDayKernelState storage $,
+        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
+        address _receiver
+    )
+        external
+        view
+        returns (TRANCHE_UNIT assets)
+    {
         // If the receiver is blacklisted or the kernel is currently paused, return zero tranche units
         if (BlacklistLogic._isBlacklisted($, _receiver) || PausableUpgradeable(address(this)).paused()) return ZERO_TRANCHE_UNITS;
         SyncedAccountingState memory state = AccountingSyncLogic._previewSyncTrancheAccounting($, _immutables);
@@ -160,7 +167,15 @@ library DepositLogic {
      * @return assets The maximum amount of assets that can be deposited into the junior tranche, denominated in the junior tranche's tranche units
      * @dev JT deposits are allowed if the market is in a PERPETUAL state
      */
-    function jtMaxDeposit(IRoycoDayKernel.RoycoDayKernelState storage $, IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables, address _receiver) external view returns (TRANCHE_UNIT assets) {
+    function jtMaxDeposit(
+        IRoycoDayKernel.RoycoDayKernelState storage $,
+        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
+        address _receiver
+    )
+        external
+        view
+        returns (TRANCHE_UNIT assets)
+    {
         // If the receiver is blacklisted or the kernel is currently paused, return zero tranche units
         if (BlacklistLogic._isBlacklisted($, _receiver) || PausableUpgradeable(address(this)).paused()) return ZERO_TRANCHE_UNITS;
         // JT deposits are disabled during a fixed-term market state
@@ -193,7 +208,14 @@ library DepositLogic {
      * @return navToMintSharesAt The NAV at which the shares will be minted, exclusive of valueAllocated
      * @dev ST deposits are enabled only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-deposit
      */
-    function stDeposit(IRoycoDayKernel.RoycoDayKernelState storage $, IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables, TRANCHE_UNIT _assets) external returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt) {
+    function stDeposit(
+        IRoycoDayKernel.RoycoDayKernelState storage $,
+        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
+        TRANCHE_UNIT _assets
+    )
+        external
+        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt)
+    {
         // Execute an accounting sync to reconcile underlying PNL
         SyncedAccountingState memory state = AccountingSyncLogic._preOpSyncTrancheAccounting($, _immutables);
         // ST deposits are disabled during a fixed-term market state
@@ -222,7 +244,14 @@ library DepositLogic {
      * @return navToMintSharesAt The NAV at which the shares will be minted, exclusive of valueAllocated
      * @dev JT deposits are enabled if the market is in a PERPETUAL state
      */
-    function jtDeposit(IRoycoDayKernel.RoycoDayKernelState storage $, IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables, TRANCHE_UNIT _assets) external returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt) {
+    function jtDeposit(
+        IRoycoDayKernel.RoycoDayKernelState storage $,
+        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
+        TRANCHE_UNIT _assets
+    )
+        external
+        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt)
+    {
         // Execute an accounting sync to reconcile underlying PNL
         SyncedAccountingState memory state = AccountingSyncLogic._preOpSyncTrancheAccounting($, _immutables);
         // JT deposits are disabled during a fixed-term market state
@@ -251,7 +280,14 @@ library DepositLogic {
      * @return navToMintSharesAt The NAV at which the shares will be minted, exclusive of valueAllocated.
      * @dev An in-kind LT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state and enforces no requirements
      */
-    function ltDeposit(IRoycoDayKernel.RoycoDayKernelState storage $, IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables, TRANCHE_UNIT _assets) external returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt) {
+    function ltDeposit(
+        IRoycoDayKernel.RoycoDayKernelState storage $,
+        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
+        TRANCHE_UNIT _assets
+    )
+        external
+        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt)
+    {
         // Execute an accounting sync to reconcile underlying PNL
         SyncedAccountingState memory state = AccountingSyncLogic._preOpSyncTrancheAccounting($, _immutables);
         // The NAV to mint tranche shares at is the pre-deposit liquidity tranche effective NAV (its MM depth in addition to its idle liquidity-premium senior shares the kernel holds)

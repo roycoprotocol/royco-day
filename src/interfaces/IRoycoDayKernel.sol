@@ -575,7 +575,6 @@ interface IRoycoDayKernel {
      */
     function attemptLiquidityPremiumReinvestment(uint256 _stSharesToReinvest, NAV_UNIT _stEffectiveNAV, uint256 _totalSTShares) external;
 
-
     /**
      * @notice Pre-balance update hook for the tranche
      * @dev This function should revert if the balance update is invalid.
