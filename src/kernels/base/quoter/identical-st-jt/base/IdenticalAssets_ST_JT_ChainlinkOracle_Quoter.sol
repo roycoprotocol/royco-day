@@ -17,8 +17,14 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant IDENTICAL_ASSETS_ST_JT_CHAINLINK_ORACLE_QUOTER_STORAGE_SLOT = 0x8e7ed06a76894329325a62f314422440f9b1abd4bff8ec1da566b06f1d6e5900;
 
-    /// @dev Storage state for the Royco identical assets chainlink oracle quoter
-    /// @custom:storage-location erc7201:Royco.storage.IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState
+    /**
+     * @dev Storage state for the Royco identical assets chainlink oracle quoter
+     * @custom:storage-location erc7201:Royco.storage.IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState
+     * @custom:field oracle - The Chainlink (compatible) tranche asset to reference asset price oracle
+     * @custom:field stalenessThresholdSeconds - The maximum age in seconds an oracle price may have before it is considered stale
+     * @custom:field sequencerUptimeFeed - The L2 sequencer uptime feed used to gate price queries (the null address when not applicable)
+     * @custom:field gracePeriodSeconds - The grace period in seconds after the L2 sequencer is back up before oracle prices are trusted again
+     */
     struct IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState {
         address oracle;
         uint48 stalenessThresholdSeconds;
@@ -57,12 +63,14 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
      * @notice Initializes the identical assets chainlink oracle quoter
      * @param _oracle The chainlink (compatible) oracle used to price an asset
      * @param _stalenessThresholdSeconds The staleness threshold in seconds
+     * @param _sequencerUptimeFeed The L2 sequencer uptime feed to check before trusting the price (set to the null address to disable the check)
+     * @param _gracePeriodSeconds The grace period in seconds that must elapse after the L2 sequencer is restored before trusting the price
      */
     function __IdenticalAssets_ST_JT_ChainlinkOracle_Quoter_init_unchained(
         address _oracle,
+        uint48 _stalenessThresholdSeconds,
         address _sequencerUptimeFeed,
-        uint48 _gracePeriodSeconds,
-        uint48 _stalenessThresholdSeconds
+        uint48 _gracePeriodSeconds
     )
         internal
         onlyInitializing

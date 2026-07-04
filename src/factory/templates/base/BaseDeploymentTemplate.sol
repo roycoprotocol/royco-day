@@ -45,22 +45,36 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
     // DECLARATIVE ROLE BINDINGS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice One target's selector→role map.
-    /// @dev `selectors[i]` is bound to `roleIds[i]`. Lengths must match.
+    /**
+     * @notice One target's selector→role map.
+     * @dev `selectors[i]` is bound to `roleIds[i]`. Lengths must match.
+     * @custom:field target - The contract whose functions are being access-gated.
+     * @custom:field selectors - The function selectors on `target` to bind, index-aligned with `roleIds`.
+     * @custom:field roleIds - The role id required to call each corresponding selector, index-aligned with `selectors`.
+     */
     struct TargetBinding {
         address target;
         bytes4[] selectors;
         uint64[] roleIds;
     }
 
-    /// @notice A role grant applied after deployment (e.g. SYNC_ROLE → accountant).
+    /**
+     * @notice A role grant applied after deployment (e.g. SYNC_ROLE → accountant).
+     * @custom:field roleId - The role id to grant.
+     * @custom:field account - The account receiving the role.
+     * @custom:field executionDelay - The access-manager execution delay in seconds applied to the grant.
+     */
     struct RoleGrant {
         uint64 roleId;
         address account;
         uint32 executionDelay;
     }
 
-    /// @notice The full role-wiring config a template applies via `_applyRoleBindings`.
+    /**
+     * @notice The full role-wiring config a template applies via `_applyRoleBindings`.
+     * @custom:field targetBindings - The per-target selector→role maps to install.
+     * @custom:field postInitGrants - The role grants to apply after deployment and initialization.
+     */
     struct RoleBindings {
         TargetBinding[] targetBindings;
         RoleGrant[] postInitGrants;

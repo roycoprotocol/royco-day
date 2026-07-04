@@ -29,8 +29,11 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
     /// @dev Value representing the scale factor of the tranche unit: 10^(TRANCHE_UNIT_DECIMALS)
     uint256 internal immutable TRANCHE_UNIT_SCALE_FACTOR;
 
-    /// @dev Storage state for the Royco identical assets overridable oracle quoter
-    /// @custom:storage-location erc7201:Royco.storage.IdenticalAssets_ST_JT_Oracle_QuoterState
+    /**
+     * @dev Storage state for the Royco identical assets overridable oracle quoter
+     * @custom:storage-location erc7201:Royco.storage.IdenticalAssets_ST_JT_Oracle_QuoterState
+     * @custom:field conversionRateWAD - The tranche unit to NAV unit conversion rate scaled to WAD precision, or SENTINEL_CONVERSION_RATE (0) to query the oracle in real time
+     */
     struct IdenticalAssets_ST_JT_Oracle_QuoterState {
         uint256 conversionRateWAD;
     }

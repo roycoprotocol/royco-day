@@ -51,10 +51,12 @@ contract DayIdenticalERC4626ChainlinkDeploymentTemplate is BalancerV3DeploymentT
         return abi.encodeCall(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.initialize, (_kip, qp));
     }
 
-    /// @inheritdoc BalancerV3DeploymentTemplate
-    /// @dev Extends the base's LT-quoter setters with this kernel family's ST/JT Chainlink quoter setters, all bound
-    ///      to ADMIN_ORACLE_QUOTER_ROLE. (Every restricted selector must be explicitly bound: an unbound selector
-    ///      silently defaults to ADMIN_ROLE under OZ AccessManager.)
+    /**
+     * @inheritdoc BalancerV3DeploymentTemplate
+     * @dev Extends the base's LT-quoter setters with this kernel family's ST/JT Chainlink quoter setters, all bound
+     *      to ADMIN_ORACLE_QUOTER_ROLE. (Every restricted selector must be explicitly bound: an unbound selector
+     *      silently defaults to ADMIN_ROLE under OZ AccessManager.)
+     */
     function _kernelQuoterBinding(address _kernel) internal view override(BalancerV3DeploymentTemplate) returns (TargetBinding memory) {
         TargetBinding memory base = super._kernelQuoterBinding(_kernel);
 

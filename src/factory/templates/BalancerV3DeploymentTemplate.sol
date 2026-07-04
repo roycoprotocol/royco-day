@@ -83,7 +83,17 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     // PARAM STRUCTS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Gyro E-CLP pool params for the LT's `{ST_share, quote}` pool.
+    /**
+     * @notice Gyro E-CLP pool params for the LT's `{ST_share, quote}` pool.
+     * @custom:field name - The name of the Gyro E-CLP BPT.
+     * @custom:field symbol - The symbol of the Gyro E-CLP BPT.
+     * @custom:field eclpParams - The E-CLP curve parameters (price bounds and rotation) defining the pool's rate-scaled AMM.
+     * @custom:field derivedEclpParams - The high-precision derived E-CLP parameters computed off-chain from `eclpParams`.
+     * @custom:field swapFeePercentage - The pool's swap fee, scaled to WAD (1e18 = 100%).
+     * @custom:field enableDonation - Whether unbalanced donation-style adds are permitted on the pool.
+     * @custom:field disableUnbalancedLiquidity - Whether to disable unbalanced add/remove liquidity, forcing proportional-only.
+     * @custom:field quoteToken - The quote asset (stablecoin) paired against the senior tranche share in the pool.
+     */
     struct GyroECLPPoolParams {
         string name;
         string symbol;
@@ -95,7 +105,26 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         address quoteToken;
     }
 
-    /// @notice Top-level params struct passed to `deployMarket(bytes)`.
+    /**
+     * @notice Top-level params struct passed to `deployMarket(bytes)`.
+     * @custom:field marketId - A caller-supplied identifier for the market, mixed into the deterministic deployment salts.
+     * @custom:field stTranche - The senior tranche initialization params.
+     * @custom:field jtTranche - The junior tranche initialization params.
+     * @custom:field ltTranche - The liquidity tranche initialization params.
+     * @custom:field stAsset - The senior tranche's underlying yield-bearing asset.
+     * @custom:field jtAsset - The junior tranche's underlying asset (the same yield-bearing asset as ST or the RFR).
+     * @custom:field jtCoinvested - Whether the junior tranche is co-invested in the same yield-bearing asset as the senior tranche.
+     * @custom:field accountant - The accountant initialization params (coverage, premiums, and state machine config).
+     * @custom:field gyroECLPPoolParams - The Gyro E-CLP pool params for the liquidity tranche's `{ST_share, quote}` pool.
+     * @custom:field jtYDMTargetUtilizationWAD - The junior tranche YDM's target coverage utilization, scaled to WAD.
+     * @custom:field ltYDMTargetUtilizationWAD - The liquidity tranche LDM's target liquidity utilization, scaled to WAD.
+     * @custom:field protocolFeeRecipient - The market's protocol fee recipient.
+     * @custom:field stSelfLiquidationBonusWAD - The ST self-liquidation bonus remitted to redeeming ST LPs once the liquidation coverage threshold is breached, scaled to WAD.
+     * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables screening).
+     * @custom:field kernelSpecificParams - ABI-encoded kernel/quoter-specific initialization params.
+     * @custom:field enforceVaultSharesTransferWhitelist - Whether to enforce the vault shares transfer whitelist.
+     * @custom:field quoteTokenPriceFeed - The price feed for the pool's quote token consumed by the BPT oracle.
+     */
     struct DayParams {
         bytes32 marketId;
         IRoycoVaultTranche.RoycoTrancheInitParams stTranche;
@@ -116,7 +145,12 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         address quoteTokenPriceFeed;
     }
 
-    /// @notice Balancer V3-specific addresses recorded for verification.
+    /**
+     * @notice Balancer V3-specific addresses recorded for verification.
+     * @custom:field balancerPool - The deployed Gyro E-CLP pool (the liquidity tranche's BPT).
+     * @custom:field balancerHook - The deployed pool hook enforcing the kernel-only LP and same-block-swap rules.
+     * @custom:field bptOracle - The deployed BPT oracle adapter that reports ltRawNAV.
+     */
     struct ExtraContractsDeployedResult {
         address balancerPool;
         address balancerHook;
@@ -195,9 +229,11 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
     /// @dev Returns the SSTORE2 component ID that holds the Day kernel's creation code.
     function _kernelComponentId() internal pure virtual returns (bytes32);
 
-    /// @dev Returns the ABI-encoded kernel `initialize(...)` calldata for the concrete Day kernel.
-    /// @param _bptOracle The template-deployed E-CLP BPT oracle for this market's pool; the concrete template must
-    ///        inject it into the kernel's LT-quoter init params (overwriting any caller-supplied value).
+    /**
+     * @dev Returns the ABI-encoded kernel `initialize(...)` calldata for the concrete Day kernel.
+     * @param _bptOracle The template-deployed E-CLP BPT oracle for this market's pool; the concrete template must
+     *        inject it into the kernel's LT-quoter init params (overwriting any caller-supplied value).
+     */
     function _kernelInitData(
         IRoycoDayKernel.RoycoDayKernelInitParams memory _kip,
         bytes memory _kernelSpecificParams,
@@ -322,13 +358,15 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         _deployProxy(kernelImpl, _kernelInitData(kip, _p.kernelSpecificParams, _bptOracle), _kernelProxySalt);
     }
 
-    /// @notice Creates the Gyro E-CLP pool with tokens `{ST_share, quote}`:
-    /// @param _p The Gyro E-CLP pool parameters
-    /// @param _seniorTranche The senior tranche address
-    /// @param _rateProvider The rate provider address
-    /// @param _hook The hook address
-    /// @param _salt The salt for the pool
-    /// @return balancerV3Pool The address of the created Gyro E-CLP pool
+    /**
+     * @notice Creates the Gyro E-CLP pool with tokens `{ST_share, quote}`:
+     * @param _p The Gyro E-CLP pool parameters
+     * @param _seniorTranche The senior tranche address
+     * @param _rateProvider The rate provider address
+     * @param _hook The hook address
+     * @param _salt The salt for the pool
+     * @return balancerV3Pool The address of the created Gyro E-CLP pool
+     */
     function _createBalancerV3Pool(
         GyroECLPPoolParams memory _p,
         address _seniorTranche,

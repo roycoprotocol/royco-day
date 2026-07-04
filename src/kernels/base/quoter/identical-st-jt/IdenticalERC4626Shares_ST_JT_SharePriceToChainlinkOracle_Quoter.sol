@@ -37,7 +37,7 @@ abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quote
     function __IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter_init(ST_JT_QuoterSpecificParams calldata _params) internal onlyInitializing {
         __IdenticalAssets_ST_JT_Oracle_Quoter_init_unchained(_params.initialConversionRateWAD);
         __IdenticalAssets_ST_JT_ChainlinkOracle_Quoter_init_unchained(
-            _params.baseAssetToNavAssetOracle, _params.sequencerUptimeFeed, _params.gracePeriodSeconds, _params.stalenessThresholdSeconds
+            _params.baseAssetToNavAssetOracle, _params.stalenessThresholdSeconds, _params.sequencerUptimeFeed, _params.gracePeriodSeconds
         );
     }
 

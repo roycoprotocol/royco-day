@@ -27,9 +27,11 @@ contract RoycoDayBalancerV3HooksStandIn is BaseHooks, UUPSUpgradeable {
         return true;
     }
 
-    /// @inheritdoc BaseHooks
-    /// @dev MUST stay byte-for-byte identical to `RoycoDayBalancerV3Hooks.getHookFlags`: the Vault freezes these at
-    ///      registration and the real hook's callbacks only fire for flags captured here.
+    /**
+     * @inheritdoc BaseHooks
+     * @dev MUST stay byte-for-byte identical to `RoycoDayBalancerV3Hooks.getHookFlags`: the Vault freezes these at
+     *      registration and the real hook's callbacks only fire for flags captured here.
+     */
     function getHookFlags() public pure override(BaseHooks) returns (HookFlags memory) {
         return HookFlags({
             enableHookAdjustedAmounts: false,
