@@ -187,6 +187,19 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
 
     /**
      * @inheritdoc IRoycoDayKernel
+     * @dev Routes the removal through the Vault's query mode (`quote`) so it simulates the constituents withdrawn without settling balances or moving tokens
+     * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
+     */
+    function previewRemoveLiquidity(TRANCHE_UNIT _ltAssets) external override(IRoycoDayKernel) onlySelf returns (uint256 stShares, uint256 quoteAssets) {
+        bytes memory callbackReturnData = _vault.quote(abi.encodeCall(this.removeBalancerV3Liquidity, (true, _ltAssets, uint256(0), uint256(0), address(0))));
+        assembly ("memory-safe") {
+            stShares := mload(add(callbackReturnData, 0x20))
+            quoteAssets := mload(add(callbackReturnData, 0x40))
+        }
+    }
+
+    /**
+     * @inheritdoc IRoycoDayKernel
      * @dev Unlocks the Balancer V3 Vault and dispatches into the add liquidity callback above
      * @dev The vault is required to be unlocked with a callback in order to transition into a transient accounting state, expecting the callback to settle all credit and debt before returning
      * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
@@ -205,19 +218,6 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         bytes memory callbackReturnData = _vault.unlock(abi.encodeCall(this.addBalancerV3Liquidity, (false, _seniorShares, _quoteAssets, _minLTAssetsOut)));
         assembly ("memory-safe") {
             ltAssets := mload(add(callbackReturnData, 0x20))
-        }
-    }
-
-    /**
-     * @inheritdoc IRoycoDayKernel
-     * @dev Routes the removal through the Vault's query mode (`quote`) so it simulates the constituents withdrawn without settling balances or moving tokens
-     * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
-     */
-    function previewRemoveLiquidity(TRANCHE_UNIT _ltAssets) external override(IRoycoDayKernel) onlySelf returns (uint256 stShares, uint256 quoteAssets) {
-        bytes memory callbackReturnData = _vault.quote(abi.encodeCall(this.removeBalancerV3Liquidity, (true, _ltAssets, uint256(0), uint256(0), address(0))));
-        assembly ("memory-safe") {
-            stShares := mload(add(callbackReturnData, 0x20))
-            quoteAssets := mload(add(callbackReturnData, 0x40))
         }
     }
 
