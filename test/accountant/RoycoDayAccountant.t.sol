@@ -3,10 +3,10 @@ pragma solidity ^0.8.28;
 
 import { stdError } from "../../lib/forge-std/src/StdError.sol";
 import { Test, Vm } from "../../lib/forge-std/src/Test.sol";
+import { Initializable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import { Initializable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import { RoycoDayAccountant } from "../../src/accountant/RoycoDayAccountant.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
@@ -184,7 +184,7 @@ contract AccountantTest is Test {
     uint64 internal constant DEFAULT_PROTOCOL_FEE_WAD = 0.1e18;
 
     // Default flat seed used by the accrual tests
-    uint256 internal constant SEED_ST_RAW = 1_000e18;
+    uint256 internal constant SEED_ST_RAW = 1000e18;
     uint256 internal constant SEED_JT_RAW = 200e18;
     uint256 internal constant SEED_LT_RAW = 100e18;
     // Expected utilizations at the default flat seed, computed independently:
@@ -284,17 +284,7 @@ contract AccountantTest is Test {
      * requires targetState == FIXED_TERM (entry is forced by the loss sync), and jtEff == 0 with il > 0 is
      * unreachable (the wipeout disjunct erases IL). Route 3 requires g = p * WAD / maxJT to divide exactly
      */
-    function _seedState(
-        uint256 _stRaw,
-        uint256 _jtRaw,
-        uint256 _stEff,
-        uint256 _jtEff,
-        uint256 _il,
-        uint256 _ltRaw,
-        MarketState _targetState
-    )
-        internal
-    {
+    function _seedState(uint256 _stRaw, uint256 _jtRaw, uint256 _stEff, uint256 _jtEff, uint256 _il, uint256 _ltRaw, MarketState _targetState) internal {
         assertEq(_stRaw + _jtRaw, _stEff + _jtEff, "seed: conservation violated by target");
 
         if (_stEff >= _stRaw) {
@@ -847,7 +837,7 @@ contract AccountantTest is Test {
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(SEED_ST_RAW + 100e18), toNAVUnits(SEED_JT_RAW));
         assertEq(toUint256(state.jtEffectiveNAV), 210e18, "jt premium paid via instantaneous branch");
         assertEq(toUint256(state.ltLiquidityPremium), 5e18, "lt premium paid via instantaneous branch");
-        assertEq(toUint256(state.stEffectiveNAV), 1_090e18, "st retains residual plus lt premium carve-out");
+        assertEq(toUint256(state.stEffectiveNAV), 1090e18, "st retains residual plus lt premium carve-out");
     }
 
     /// C2: a same-block re-accrual is a no-op — the YDMs are not called and the accumulators and timestamp are unchanged
@@ -920,7 +910,7 @@ contract AccountantTest is Test {
      * Derivation: covUtil = ceil(900e18 * 0.1e18 / 200e18) = 0.45e18, liqUtil = ceil(1000e18 * 0.05e18 / 100e18) = 0.5e18
      */
     function test_Accrual_ydmSeesFixedTermStateAndCrossClaimUtilizations() public {
-        _seedState(900e18, 300e18, 1_000e18, 200e18, 100e18, SEED_LT_RAW, MarketState.FIXED_TERM);
+        _seedState(900e18, 300e18, 1000e18, 200e18, 100e18, SEED_LT_RAW, MarketState.FIXED_TERM);
         vm.warp(block.timestamp + 3600);
         kernel.doPreOp(toNAVUnits(uint256(900e18)), toNAVUnits(uint256(300e18)));
         assertEq(uint8(jtYDM.lastYieldShareMarketState()), uint8(MarketState.FIXED_TERM), "jt ydm sees FIXED_TERM");
@@ -1192,7 +1182,7 @@ contract AccountantTest is Test {
 
     /// I4: a nonzero duration update mid-FIXED_TERM changes only the duration, leaving IL, state, and end timestamp intact
     function test_SetFixedTermDuration_nonzeroKeepsFixedTermState() public {
-        _seedState(900e18, 300e18, 1_000e18, 200e18, 100e18, SEED_LT_RAW, MarketState.FIXED_TERM);
+        _seedState(900e18, 300e18, 1000e18, 200e18, 100e18, SEED_LT_RAW, MarketState.FIXED_TERM);
         uint32 endBefore = accountant.getState().fixedTermEndTimestamp;
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayAccountant.FixedTermDurationUpdated(uint24(1_209_600));
@@ -1206,7 +1196,7 @@ contract AccountantTest is Test {
 
     /// I4: a zero duration erases IL, forces PERPETUAL mid-FIXED_TERM, deletes the end timestamp, and the next sync stays perpetual
     function test_SetFixedTermDuration_zeroForcesPerpetualAndErasesIL() public {
-        _seedState(900e18, 300e18, 1_000e18, 200e18, 100e18, SEED_LT_RAW, MarketState.FIXED_TERM);
+        _seedState(900e18, 300e18, 1000e18, 200e18, 100e18, SEED_LT_RAW, MarketState.FIXED_TERM);
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayAccountant.JuniorTrancheCoverageImpermanentLossReset(toNAVUnits(uint256(100e18)));
         vm.expectEmit(true, true, true, true, address(accountant));
@@ -1451,7 +1441,7 @@ contract AccountantTest is Test {
      * @dev Claims: stClaimOnSTRaw = 900e18 (full), stClaimOnJTRaw = 100e18, so a JT delta d attributes floor(d / 3) to ST
      */
     function _seedMatrixLargeIL() internal {
-        _seedState(900e18, 300e18, 1_000e18, 200e18, 100e18, SEED_LT_RAW, MarketState.FIXED_TERM);
+        _seedState(900e18, 300e18, 1000e18, 200e18, 100e18, SEED_LT_RAW, MarketState.FIXED_TERM);
         jtYDM.setPreviewYieldShareReturn(0.1e18);
         ltYDM.setPreviewYieldShareReturn(0.05e18);
     }
@@ -1472,7 +1462,7 @@ contract AccountantTest is Test {
             950e18,
             180e18,
             ExpectedSync({
-                stEff: 1_000e18,
+                stEff: 1000e18,
                 jtEff: 130e18,
                 il: 50e18,
                 ltPrem: 0,
@@ -1495,7 +1485,7 @@ contract AccountantTest is Test {
             950e18,
             200e18,
             ExpectedSync({
-                stEff: 1_000e18,
+                stEff: 1000e18,
                 jtEff: 150e18,
                 il: 50e18,
                 ltPrem: 0,
@@ -1520,7 +1510,7 @@ contract AccountantTest is Test {
             950e18,
             220e18,
             ExpectedSync({
-                stEff: 1_000e18,
+                stEff: 1000e18,
                 jtEff: 170e18,
                 il: 50e18,
                 ltPrem: 0,
@@ -1540,19 +1530,9 @@ contract AccountantTest is Test {
     function test_Waterfall_matrixNoIL_stFlat_jtLoss() public {
         _seedMatrixNoIL();
         _runSyncVector(
-            1_000e18,
+            1000e18,
             180e18,
-            ExpectedSync({
-                stEff: 1_000e18,
-                jtEff: 180e18,
-                il: 0,
-                ltPrem: 0,
-                stFee: 0,
-                jtFee: 0,
-                ltFee: 0,
-                marketState: MarketState.PERPETUAL,
-                fixedTermEnd: 0
-            })
+            ExpectedSync({ stEff: 1000e18, jtEff: 180e18, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0 })
         );
     }
 
@@ -1560,22 +1540,12 @@ contract AccountantTest is Test {
     function test_Waterfall_matrixNoIL_stFlat_jtFlat() public {
         _seedMatrixNoIL();
         _runSyncVector(
-            1_000e18,
+            1000e18,
             200e18,
-            ExpectedSync({
-                stEff: 1_000e18,
-                jtEff: 200e18,
-                il: 0,
-                ltPrem: 0,
-                stFee: 0,
-                jtFee: 0,
-                ltFee: 0,
-                marketState: MarketState.PERPETUAL,
-                fixedTermEnd: 0
-            })
+            ExpectedSync({ stEff: 1000e18, jtEff: 200e18, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0 })
         );
         // Literal anchor for the independent ceil helper: 1000e18 * 0.1e18 / 200e18 divides exactly to 0.5e18
-        assertEq(_expectedCoverageUtilization(1_000e18, 200e18), 0.5e18, "anchor: exact-division coverage utilization");
+        assertEq(_expectedCoverageUtilization(1000e18, 200e18), 0.5e18, "anchor: exact-division coverage utilization");
     }
 
     /**
@@ -1585,18 +1555,10 @@ contract AccountantTest is Test {
     function test_Waterfall_matrixNoIL_stFlat_jtGain() public {
         _seedMatrixNoIL();
         _runSyncVector(
-            1_000e18,
+            1000e18,
             220e18,
             ExpectedSync({
-                stEff: 1_000e18,
-                jtEff: 220e18,
-                il: 0,
-                ltPrem: 0,
-                stFee: 0,
-                jtFee: 2e18,
-                ltFee: 0,
-                marketState: MarketState.PERPETUAL,
-                fixedTermEnd: 0
+                stEff: 1000e18, jtEff: 220e18, il: 0, ltPrem: 0, stFee: 0, jtFee: 2e18, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0
             })
         );
     }
@@ -1613,10 +1575,10 @@ contract AccountantTest is Test {
     function test_Waterfall_matrixNoIL_stGain_jtLoss() public {
         _seedMatrixNoIL();
         _runSyncVector(
-            1_050e18,
+            1050e18,
             180e18,
             ExpectedSync({
-                stEff: 1_045e18,
+                stEff: 1045e18,
                 jtEff: 185e18,
                 il: 0,
                 ltPrem: 2.5e18,
@@ -1636,10 +1598,10 @@ contract AccountantTest is Test {
     function test_Waterfall_matrixNoIL_stGain_jtFlat() public {
         _seedMatrixNoIL();
         _runSyncVector(
-            1_050e18,
+            1050e18,
             200e18,
             ExpectedSync({
-                stEff: 1_045e18,
+                stEff: 1045e18,
                 jtEff: 205e18,
                 il: 0,
                 ltPrem: 2.5e18,
@@ -1660,10 +1622,10 @@ contract AccountantTest is Test {
     function test_Waterfall_matrixNoIL_stGain_jtGain() public {
         _seedMatrixNoIL();
         _runSyncVector(
-            1_050e18,
+            1050e18,
             220e18,
             ExpectedSync({
-                stEff: 1_045e18,
+                stEff: 1045e18,
                 jtEff: 225e18,
                 il: 0,
                 ltPrem: 2.5e18,
@@ -1692,7 +1654,7 @@ contract AccountantTest is Test {
             950e18,
             180e18,
             ExpectedSync({
-                stEff: 1_000e18 + 5,
+                stEff: 1000e18 + 5,
                 jtEff: 130e18 - 5,
                 il: 50e18 + 5,
                 ltPrem: 0,
@@ -1715,7 +1677,7 @@ contract AccountantTest is Test {
             950e18,
             200e18,
             ExpectedSync({
-                stEff: 1_000e18 + 5,
+                stEff: 1000e18 + 5,
                 jtEff: 150e18 - 5,
                 il: 50e18 + 5,
                 ltPrem: 0,
@@ -1739,7 +1701,7 @@ contract AccountantTest is Test {
             950e18,
             220e18,
             ExpectedSync({
-                stEff: 1_000e18 + 5,
+                stEff: 1000e18 + 5,
                 jtEff: 170e18 - 5,
                 il: 50e18 + 5,
                 ltPrem: 0,
@@ -1759,18 +1721,10 @@ contract AccountantTest is Test {
     function test_Waterfall_matrixDustIL_stFlat_jtLoss() public {
         _seedMatrixDustIL();
         _runSyncVector(
-            1_000e18,
+            1000e18,
             180e18,
             ExpectedSync({
-                stEff: 1_000e18 + 5,
-                jtEff: 180e18 - 5,
-                il: 5,
-                ltPrem: 0,
-                stFee: 0,
-                jtFee: 0,
-                ltFee: 0,
-                marketState: MarketState.PERPETUAL,
-                fixedTermEnd: 0
+                stEff: 1000e18 + 5, jtEff: 180e18 - 5, il: 5, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0
             })
         );
     }
@@ -1779,18 +1733,10 @@ contract AccountantTest is Test {
     function test_Waterfall_matrixDustIL_stFlat_jtFlat() public {
         _seedMatrixDustIL();
         _runSyncVector(
-            1_000e18,
+            1000e18,
             200e18,
             ExpectedSync({
-                stEff: 1_000e18 + 5,
-                jtEff: 200e18 - 5,
-                il: 5,
-                ltPrem: 0,
-                stFee: 0,
-                jtFee: 0,
-                ltFee: 0,
-                marketState: MarketState.PERPETUAL,
-                fixedTermEnd: 0
+                stEff: 1000e18 + 5, jtEff: 200e18 - 5, il: 5, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0
             })
         );
     }
@@ -1802,18 +1748,10 @@ contract AccountantTest is Test {
     function test_Waterfall_matrixDustIL_stFlat_jtGain() public {
         _seedMatrixDustIL();
         _runSyncVector(
-            1_000e18,
+            1000e18,
             220e18,
             ExpectedSync({
-                stEff: 1_000e18 + 5,
-                jtEff: 220e18 - 5,
-                il: 5,
-                ltPrem: 0,
-                stFee: 0,
-                jtFee: 2e18,
-                ltFee: 0,
-                marketState: MarketState.PERPETUAL,
-                fixedTermEnd: 0
+                stEff: 1000e18 + 5, jtEff: 220e18 - 5, il: 5, ltPrem: 0, stFee: 0, jtFee: 2e18, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0
             })
         );
     }
@@ -1830,10 +1768,10 @@ contract AccountantTest is Test {
     function test_Waterfall_matrixDustIL_stGain_jtLoss() public {
         _seedMatrixDustIL();
         _runSyncVector(
-            1_050e18,
+            1050e18,
             180e18,
             ExpectedSync({
-                stEff: 1_045e18 + 1,
+                stEff: 1045e18 + 1,
                 jtEff: 185e18 - 1,
                 il: 0,
                 ltPrem: 2.5e18 - 1,
@@ -1853,10 +1791,10 @@ contract AccountantTest is Test {
     function test_Waterfall_matrixDustIL_stGain_jtFlat() public {
         _seedMatrixDustIL();
         _runSyncVector(
-            1_050e18,
+            1050e18,
             200e18,
             ExpectedSync({
-                stEff: 1_045e18 + 1,
+                stEff: 1045e18 + 1,
                 jtEff: 205e18 - 1,
                 il: 0,
                 ltPrem: 2.5e18 - 1,
@@ -1877,10 +1815,10 @@ contract AccountantTest is Test {
     function test_Waterfall_matrixDustIL_stGain_jtGain() public {
         _seedMatrixDustIL();
         _runSyncVector(
-            1_050e18,
+            1050e18,
             220e18,
             ExpectedSync({
-                stEff: 1_045e18 + 1,
+                stEff: 1045e18 + 1,
                 jtEff: 225e18 - 1,
                 il: 0,
                 ltPrem: 2.5e18 - 1,
@@ -1910,7 +1848,7 @@ contract AccountantTest is Test {
             850e18,
             280e18,
             ExpectedSync({
-                stEff: 1_000e18,
+                stEff: 1000e18,
                 jtEff: 130e18,
                 il: 156_666_666_666_666_666_666,
                 ltPrem: 0,
@@ -1933,7 +1871,7 @@ contract AccountantTest is Test {
             850e18,
             300e18,
             ExpectedSync({
-                stEff: 1_000e18,
+                stEff: 1000e18,
                 jtEff: 150e18,
                 il: 150e18,
                 ltPrem: 0,
@@ -1959,7 +1897,7 @@ contract AccountantTest is Test {
             850e18,
             320e18,
             ExpectedSync({
-                stEff: 1_000e18,
+                stEff: 1000e18,
                 jtEff: 170e18,
                 il: 143_333_333_333_333_333_334,
                 ltPrem: 0,
@@ -1983,7 +1921,7 @@ contract AccountantTest is Test {
             900e18,
             280e18,
             ExpectedSync({
-                stEff: 1_000e18,
+                stEff: 1000e18,
                 jtEff: 180e18,
                 il: 106_666_666_666_666_666_666,
                 ltPrem: 0,
@@ -2003,7 +1941,7 @@ contract AccountantTest is Test {
             900e18,
             300e18,
             ExpectedSync({
-                stEff: 1_000e18,
+                stEff: 1000e18,
                 jtEff: 200e18,
                 il: 100e18,
                 ltPrem: 0,
@@ -2028,7 +1966,7 @@ contract AccountantTest is Test {
             900e18,
             320e18,
             ExpectedSync({
-                stEff: 1_000e18,
+                stEff: 1000e18,
                 jtEff: 220e18,
                 il: 93_333_333_333_333_333_334,
                 ltPrem: 0,
@@ -2053,7 +1991,7 @@ contract AccountantTest is Test {
             950e18,
             280e18,
             ExpectedSync({
-                stEff: 1_000e18,
+                stEff: 1000e18,
                 jtEff: 230e18,
                 il: 56_666_666_666_666_666_666,
                 ltPrem: 0,
@@ -2076,7 +2014,7 @@ contract AccountantTest is Test {
             950e18,
             300e18,
             ExpectedSync({
-                stEff: 1_000e18,
+                stEff: 1000e18,
                 jtEff: 250e18,
                 il: 50e18,
                 ltPrem: 0,
@@ -2101,7 +2039,7 @@ contract AccountantTest is Test {
             950e18,
             320e18,
             ExpectedSync({
-                stEff: 1_000e18,
+                stEff: 1000e18,
                 jtEff: 270e18,
                 il: 43_333_333_333_333_333_334,
                 ltPrem: 0,
@@ -2126,7 +2064,7 @@ contract AccountantTest is Test {
      *   jtEff = 220e18 - 2e18 = 218e18, coverage = min(98e18, 218e18) = 98e18: jtEff = 120e18, il = 98e18, stEff = 980e18
      */
     function test_Waterfall_jtCrossClaimSharesSTRawLoss() public {
-        _seedState(1_000e18, 200e18, 980e18, 220e18, 0, SEED_LT_RAW, MarketState.PERPETUAL);
+        _seedState(1000e18, 200e18, 980e18, 220e18, 0, SEED_LT_RAW, MarketState.PERPETUAL);
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(900e18)), toNAVUnits(uint256(200e18)));
         assertEq(toUint256(state.stEffectiveNAV), 980e18, "st keeps its cross-claim NAV under full coverage");
         assertEq(toUint256(state.jtEffectiveNAV), 120e18, "jt bears its attributed share plus the coverage");
@@ -2142,11 +2080,11 @@ contract AccountantTest is Test {
      *   st residual = 98e18 - 9.8e18 - 4.9e18 = 83.3e18 -> stFee = 8.33e18, stEff = 980e18 + 83.3e18 + 4.9e18 = 1068.2e18
      */
     function test_Waterfall_jtCrossClaimSharesSTRawGain() public {
-        _seedState(1_000e18, 200e18, 980e18, 220e18, 0, SEED_LT_RAW, MarketState.PERPETUAL);
+        _seedState(1000e18, 200e18, 980e18, 220e18, 0, SEED_LT_RAW, MarketState.PERPETUAL);
         jtYDM.setPreviewYieldShareReturn(0.1e18);
         ltYDM.setPreviewYieldShareReturn(0.05e18);
-        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1_100e18)), toNAVUnits(uint256(200e18)));
-        assertEq(toUint256(state.stEffectiveNAV), 1_068.2e18, "st effective NAV from attributed gain and premium carve-outs");
+        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1100e18)), toNAVUnits(uint256(200e18)));
+        assertEq(toUint256(state.stEffectiveNAV), 1068.2e18, "st effective NAV from attributed gain and premium carve-outs");
         assertEq(toUint256(state.jtEffectiveNAV), 231.8e18, "jt effective NAV from residual gain plus risk premium");
         assertEq(toUint256(state.ltLiquidityPremium), 4.9e18, "lt premium on st's attributed gain only");
         assertEq(toUint256(state.stProtocolFee), 8.33e18, "st fee on the retained residual");
@@ -2185,8 +2123,8 @@ contract AccountantTest is Test {
 
     /// D1c: a zero delta on a cross-claim checkpoint short-circuits the attribution and the sync is a pure no-op
     function test_Waterfall_zeroDeltaShortCircuitsAttribution() public {
-        _seedState(1_000e18, 200e18, 980e18, 220e18, 0, SEED_LT_RAW, MarketState.PERPETUAL);
-        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1_000e18)), toNAVUnits(uint256(200e18)));
+        _seedState(1000e18, 200e18, 980e18, 220e18, 0, SEED_LT_RAW, MarketState.PERPETUAL);
+        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1000e18)), toNAVUnits(uint256(200e18)));
         assertEq(toUint256(state.stEffectiveNAV), 980e18, "st effective NAV unchanged");
         assertEq(toUint256(state.jtEffectiveNAV), 220e18, "jt effective NAV unchanged");
         assertEq(toUint256(state.stProtocolFee) + toUint256(state.jtProtocolFee) + toUint256(state.ltProtocolFee), 0, "no fees on a flat sync");
@@ -2198,9 +2136,9 @@ contract AccountantTest is Test {
      * stClaimOnJTRaw = stEff - stRaw = jtRaw - jtEff <= jtRaw, so a zero junior raw NAV forces a zero senior claim on it
      */
     function test_Waterfall_zeroLastJTRawShortCircuitsAttribution() public {
-        _seedState(1_000e18, 0, 1_000e18, 0, 0, SEED_LT_RAW, MarketState.PERPETUAL);
-        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1_000e18)), toNAVUnits(uint256(50e18)));
-        assertEq(toUint256(state.stEffectiveNAV), 1_000e18, "nothing attributed to st from the fresh junior value");
+        _seedState(1000e18, 0, 1000e18, 0, 0, SEED_LT_RAW, MarketState.PERPETUAL);
+        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1000e18)), toNAVUnits(uint256(50e18)));
+        assertEq(toUint256(state.stEffectiveNAV), 1000e18, "nothing attributed to st from the fresh junior value");
         assertEq(toUint256(state.jtEffectiveNAV), 50e18, "the junior delta lands wholly on jt");
         assertEq(toUint256(state.jtProtocolFee), 5e18, "junior net-gain fee taken");
     }
@@ -2214,7 +2152,7 @@ contract AccountantTest is Test {
         // liquidation disjunct, and the gain spans [0, 1e30] (the strategy magnitude bound); both uniform via bound
         _cross = bound(_cross, 0, 150e18);
         _gain = bound(_gain, 0, 1e30);
-        uint256 stRaw = 1_000e18;
+        uint256 stRaw = 1000e18;
         uint256 jtRaw = 300e18;
         _seedState(stRaw, jtRaw, stRaw + _cross, jtRaw - _cross, 0, SEED_LT_RAW, MarketState.PERPETUAL);
 
@@ -2242,7 +2180,7 @@ contract AccountantTest is Test {
         // raw NAV [0, jtRaw] to probe the exhaustion boundary; both uniform via bound
         _cross = bound(_cross, 0, 150e18);
         _loss = bound(_loss, 0, 300e18);
-        uint256 stRaw = 1_000e18;
+        uint256 stRaw = 1000e18;
         uint256 jtRaw = 300e18;
         _seedState(stRaw, jtRaw, stRaw + _cross, jtRaw - _cross, _cross, SEED_LT_RAW, _cross > 0 ? MarketState.FIXED_TERM : MarketState.PERPETUAL);
 
@@ -2379,7 +2317,7 @@ contract AccountantTest is Test {
      * Derivation: jtEff 0, st loss 100e18 lands entirely on st (stEff = 900e18), il stays 0
      */
     function test_Waterfall_zeroJTBufferProvidesNoCoverage() public {
-        _seedState(1_000e18, 0, 1_000e18, 0, 0, SEED_LT_RAW, MarketState.PERPETUAL);
+        _seedState(1000e18, 0, 1000e18, 0, 0, SEED_LT_RAW, MarketState.PERPETUAL);
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(900e18)), ZERO_NAV_UNITS);
         assertEq(toUint256(state.stEffectiveNAV), 900e18, "uncovered loss hits st in full");
         assertEq(toUint256(state.jtCoverageImpermanentLoss), 0, "no coverage so no il accrues");
@@ -2399,10 +2337,10 @@ contract AccountantTest is Test {
         _seedMatrixLargeIL();
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayAccountant.FixedTermEnded();
-        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1_000e18)), toNAVUnits(uint256(300e18)));
+        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1000e18)), toNAVUnits(uint256(300e18)));
         assertEq(toUint256(state.jtCoverageImpermanentLoss), 0, "il fully recovered");
         assertEq(toUint256(state.jtEffectiveNAV), 300e18, "recovery credited to jt");
-        assertEq(toUint256(state.stEffectiveNAV), 1_000e18, "st effective NAV unchanged");
+        assertEq(toUint256(state.stEffectiveNAV), 1000e18, "st effective NAV unchanged");
         assertEq(toUint256(state.jtProtocolFee) + toUint256(state.stProtocolFee) + toUint256(state.ltProtocolFee), 0, "no fee on pure recovery");
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "recovered market returns to perpetual");
     }
@@ -2418,11 +2356,11 @@ contract AccountantTest is Test {
         _seedMatrixLargeIL();
         vm.expectCall(address(jtYDM), abi.encodeCall(IYDM.previewYieldShare, (MarketState.FIXED_TERM, 0.45e18)));
         vm.expectCall(address(ltYDM), abi.encodeCall(IYDM.previewYieldShare, (MarketState.FIXED_TERM, 0.5e18)));
-        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1_050e18)), toNAVUnits(uint256(300e18)));
+        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1050e18)), toNAVUnits(uint256(300e18)));
         assertEq(toUint256(state.jtCoverageImpermanentLoss), 0, "il fully recovered first");
         assertEq(toUint256(state.jtEffectiveNAV), 305e18, "recovery plus the risk premium on the residual only");
         assertEq(toUint256(state.ltLiquidityPremium), 2.5e18, "liquidity premium on the residual only");
-        assertEq(toUint256(state.stEffectiveNAV), 1_045e18, "st retains residual plus the premium carve-out");
+        assertEq(toUint256(state.stEffectiveNAV), 1045e18, "st retains residual plus the premium carve-out");
         assertEq(toUint256(state.jtProtocolFee), 0.5e18, "jt yield-share fee kept in the resulting perpetual state");
         assertEq(toUint256(state.ltProtocolFee), 0.25e18, "lt fee kept");
         assertEq(toUint256(state.stProtocolFee), 4.25e18, "st fee on the retained residual");
@@ -2550,17 +2488,17 @@ contract AccountantTest is Test {
         // Side 1: jt rate 0, lt rate 0.05e18 on a 100e18 gain: ltPrem 5e18 (fee 0.5e18), stFee = floor(95e18 * 0.1) = 9.5e18
         jtYDM.setPreviewYieldShareReturn(0);
         ltYDM.setPreviewYieldShareReturn(0.05e18);
-        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1_100e18)), toNAVUnits(SEED_JT_RAW));
+        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1100e18)), toNAVUnits(SEED_JT_RAW));
         assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW, "zero jt premium leaves jt untouched");
         assertEq(toUint256(state.jtProtocolFee), 0, "no jt yield-share fee without a premium");
         assertEq(toUint256(state.ltLiquidityPremium), 5e18, "lt premium still paid");
         assertEq(toUint256(state.ltProtocolFee), 0.5e18, "lt fee on its premium");
         assertEq(toUint256(state.stProtocolFee), 9.5e18, "st fee on the retained gain");
-        assertEq(toUint256(state.stEffectiveNAV), 1_100e18, "st retains gain plus the lt carve-out");
+        assertEq(toUint256(state.stEffectiveNAV), 1100e18, "st retains gain plus the lt carve-out");
         // Side 2 (same block, fresh premium window): jt rate 0.1e18, lt rate 0 on another 100e18 gain
         jtYDM.setPreviewYieldShareReturn(0.1e18);
         ltYDM.setPreviewYieldShareReturn(0);
-        state = kernel.doPreOp(toNAVUnits(uint256(1_200e18)), toNAVUnits(SEED_JT_RAW));
+        state = kernel.doPreOp(toNAVUnits(uint256(1200e18)), toNAVUnits(SEED_JT_RAW));
         assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW + 10e18, "jt premium paid");
         assertEq(toUint256(state.jtProtocolFee), 1e18, "jt yield-share fee on its premium");
         assertEq(toUint256(state.ltLiquidityPremium), 0, "zero lt premium");
@@ -2574,14 +2512,14 @@ contract AccountantTest is Test {
      */
     function test_Waterfall_ltPremiumCoverageNeutralViaCounterfactual() public {
         _seedMatrixNoIL();
-        SyncedAccountingState memory withLT = kernel.doPreOp(toNAVUnits(uint256(1_050e18)), toNAVUnits(SEED_JT_RAW));
+        SyncedAccountingState memory withLT = kernel.doPreOp(toNAVUnits(uint256(1050e18)), toNAVUnits(SEED_JT_RAW));
 
         // Counterfactual: fresh identical deployment and seed with the lt share zeroed
         _deploy(false, _defaultParams());
         _seedAndInitAccrual();
         jtYDM.setPreviewYieldShareReturn(0.1e18);
         ltYDM.setPreviewYieldShareReturn(0);
-        SyncedAccountingState memory withoutLT = kernel.doPreOp(toNAVUnits(uint256(1_050e18)), toNAVUnits(SEED_JT_RAW));
+        SyncedAccountingState memory withoutLT = kernel.doPreOp(toNAVUnits(uint256(1050e18)), toNAVUnits(SEED_JT_RAW));
 
         assertEq(toUint256(withLT.stEffectiveNAV), toUint256(withoutLT.stEffectiveNAV), "st effective NAV identical: premium stays inside stEff");
         assertEq(toUint256(withLT.jtEffectiveNAV), toUint256(withoutLT.jtEffectiveNAV), "jt effective NAV untouched by the lt premium");
@@ -2658,9 +2596,7 @@ contract AccountantTest is Test {
         _stRaw1 = bound(_stRaw1, 0, _stRaw0 * 2);
         _jtRaw1 = bound(_jtRaw1, 0, _jtRaw0 * 2);
         _elapsed = bound(_elapsed, 0, 365 days);
-        _seedState(
-            _stRaw0, _jtRaw0, _stRaw0 + _cross, _jtRaw0 - _cross, _cross, SEED_LT_RAW, _cross > 0 ? MarketState.FIXED_TERM : MarketState.PERPETUAL
-        );
+        _seedState(_stRaw0, _jtRaw0, _stRaw0 + _cross, _jtRaw0 - _cross, _cross, SEED_LT_RAW, _cross > 0 ? MarketState.FIXED_TERM : MarketState.PERPETUAL);
         jtYDM.setRates(0.2e18);
         ltYDM.setRates(0.1e18);
         vm.warp(block.timestamp + _elapsed);
@@ -2761,7 +2697,7 @@ contract AccountantTest is Test {
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "liquidation breach forces perpetual");
         assertEq(toUint256(state.jtCoverageImpermanentLoss), 0, "il erased even mid fixed term");
         assertEq(toUint256(state.jtEffectiveNAV), 70e18, "coverage applied before the transition");
-        assertEq(toUint256(state.stEffectiveNAV), 1_000e18, "st fully covered");
+        assertEq(toUint256(state.stEffectiveNAV), 1000e18, "st fully covered");
         assertEq(state.fixedTermEndTimestamp, 0, "end timestamp deleted");
     }
 
@@ -2968,11 +2904,11 @@ contract AccountantTest is Test {
         jtYDM.setYieldShareReturn(0.05e18);
         ltYDM.setYieldShareReturn(0.02e18);
         vm.warp(block.timestamp + 500);
-        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1_050e18)), toNAVUnits(uint256(300e18)));
+        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1050e18)), toNAVUnits(uint256(300e18)));
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "recovered market exits the term");
         assertEq(toUint256(state.jtEffectiveNAV), 302.5e18, "recovery plus the time-weighted risk premium");
         assertEq(toUint256(state.ltLiquidityPremium), 1e18, "time-weighted liquidity premium");
-        assertEq(toUint256(state.stEffectiveNAV), 1_047.5e18, "st residual plus the premium carve-out");
+        assertEq(toUint256(state.stEffectiveNAV), 1047.5e18, "st residual plus the premium carve-out");
         assertEq(toUint256(state.jtProtocolFee), 0.25e18, "jt yield-share fee kept");
         assertEq(toUint256(state.ltProtocolFee), 0.1e18, "lt fee kept");
         assertEq(toUint256(state.stProtocolFee), 4.65e18, "st fee kept");

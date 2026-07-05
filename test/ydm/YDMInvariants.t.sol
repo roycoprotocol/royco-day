@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { Test } from "../../lib/forge-std/src/Test.sol";
 import { StdInvariant } from "../../lib/forge-std/src/StdInvariant.sol";
 import { StdUtils } from "../../lib/forge-std/src/StdUtils.sol";
+import { Test } from "../../lib/forge-std/src/Test.sol";
 import { Vm } from "../../lib/forge-std/src/Vm.sol";
 
-import { StaticCurveYDM } from "../../src/ydm/StaticCurveYDM.sol";
+import { WAD } from "../../src/libraries/Constants.sol";
+import { MarketState } from "../../src/libraries/Types.sol";
 import { AdaptiveCurveYDM_V1 } from "../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../../src/ydm/AdaptiveCurveYDM_V2.sol";
-import { MarketState } from "../../src/libraries/Types.sol";
-import { WAD } from "../../src/libraries/Constants.sol";
+import { StaticCurveYDM } from "../../src/ydm/StaticCurveYDM.sol";
 
 /**
  * @title YDMInvariants

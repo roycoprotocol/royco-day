@@ -1397,17 +1397,15 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
 
         // Independent two-leg recompute with the liquidity leg binding
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        uint256 liquidityHeadroomValue = Math.mulDiv(toUint256(a.lastLTRawNAV), WAD, a.minLiquidityWAD) - toUint256(a.lastSTEffectiveNAV)
-            - toUint256(a.stNAVDustTolerance);
+        uint256 liquidityHeadroomValue =
+            Math.mulDiv(toUint256(a.lastLTRawNAV), WAD, a.minLiquidityWAD) - toUint256(a.lastSTEffectiveNAV) - toUint256(a.stNAVDustTolerance);
         uint256 coverageHeadroomValue = Math.mulDiv(toUint256(a.lastJTEffectiveNAV), WAD, a.minCoverageWAD)
             - ((ACCOUNTANT.JT_COINVESTED() ? toUint256(a.lastJTRawNAV) : 0) + toUint256(a.jtNAVDustTolerance))
             - (toUint256(a.lastSTRawNAV) + toUint256(a.stNAVDustTolerance));
         assertLt(liquidityHeadroomValue, coverageHeadroomValue, "arrange: liquidity must be the binding leg");
         TRANCHE_UNIT maxAssets = ST.maxDeposit(ST_BOB_ADDRESS);
         assertEq(
-            maxAssets,
-            KERNEL.stConvertNAVUnitsToTrancheUnits(toNAVUnits(liquidityHeadroomValue)),
-            "stMaxDeposit must match the liquidity-leg F15 recompute"
+            maxAssets, KERNEL.stConvertNAVUnitsToTrancheUnits(toNAVUnits(liquidityHeadroomValue)), "stMaxDeposit must match the liquidity-leg F15 recompute"
         );
 
         uint256 snapshotId = vm.snapshotState();
@@ -1627,7 +1625,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         MarketSnapshot memory post = _snap();
         // The independent first-mint pin: shares equal the EXECUTED venue mint valued through the quoter (an input,
         // D2), so a shared preview/execution valuation bug cannot hide. The preview equality below is parity only
-        assertEq(shares, toUint256(KERNEL.ltConvertTrancheUnitsToNAVUnits(post.ltOwned - pre.ltOwned)), "the first LT mint must be 1:1 with the minted BPT value");
+        assertEq(
+            shares, toUint256(KERNEL.ltConvertTrancheUnitsToNAVUnits(post.ltOwned - pre.ltOwned)), "the first LT mint must be 1:1 with the minted BPT value"
+        );
         assertEq(shares, expectedShares, "the previewed valueAllocated must equal the executed mint (parity)");
         assertEq(LT.balanceOf(LT_ALICE_ADDRESS), shares, "receiver LT share balance");
         assertEq(post.ltOwned, pre.ltOwned + previewLtAssetsOut, "ltOwned must grow by exactly the previewed venue mint");
@@ -2024,8 +2024,16 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
                 "receiver must be paid the combined ST and JT asset claims exactly"
             );
         } else {
-            assertEq(IERC20(testConfig.stAsset).balanceOf(_receiver) - _stAssetBalPre, toUint256(_claims.stAssets), "receiver must be paid the ST asset claim exactly");
-            assertEq(IERC20(testConfig.jtAsset).balanceOf(_receiver) - _jtAssetBalPre, toUint256(_claims.jtAssets), "receiver must be paid the JT asset claim exactly");
+            assertEq(
+                IERC20(testConfig.stAsset).balanceOf(_receiver) - _stAssetBalPre,
+                toUint256(_claims.stAssets),
+                "receiver must be paid the ST asset claim exactly"
+            );
+            assertEq(
+                IERC20(testConfig.jtAsset).balanceOf(_receiver) - _jtAssetBalPre,
+                toUint256(_claims.jtAssets),
+                "receiver must be paid the JT asset claim exactly"
+            );
         }
     }
 
@@ -2875,9 +2883,8 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         // Counter any streaming drift so the window nets to no senior gain (a 0 percent move pins the rate)
         (NAV_UNIT stRawDrifted,,) = _measureFreshSyncInputs(ZERO_TRANCHE_UNITS);
         NAV_UNIT lastSTRawNAV = ACCOUNTANT.getState().lastSTRawNAV;
-        uint256 driftCounterPctWAD = stRawDrifted > lastSTRawNAV
-            ? Math.mulDiv(toUint256(stRawDrifted - lastSTRawNAV), WAD, toUint256(stRawDrifted), Math.Rounding.Ceil) + 0.0001e18
-            : 0;
+        uint256 driftCounterPctWAD =
+            stRawDrifted > lastSTRawNAV ? Math.mulDiv(toUint256(stRawDrifted - lastSTRawNAV), WAD, toUint256(stRawDrifted), Math.Rounding.Ceil) + 0.0001e18 : 0;
         simulateSTLoss(driftCounterPctWAD);
 
         SyncExpectation memory e = _buildSyncExpectation(false);
@@ -3275,9 +3282,8 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         _warpForward(1 days);
         (NAV_UNIT stRawDrifted,,) = _measureFreshSyncInputs(ZERO_TRANCHE_UNITS);
         NAV_UNIT lastSTRawNAV = ACCOUNTANT.getState().lastSTRawNAV;
-        uint256 driftCounterPctWAD = stRawDrifted > lastSTRawNAV
-            ? Math.mulDiv(toUint256(stRawDrifted - lastSTRawNAV), WAD, toUint256(stRawDrifted), Math.Rounding.Ceil) + 0.0001e18
-            : 0;
+        uint256 driftCounterPctWAD =
+            stRawDrifted > lastSTRawNAV ? Math.mulDiv(toUint256(stRawDrifted - lastSTRawNAV), WAD, toUint256(stRawDrifted), Math.Rounding.Ceil) + 0.0001e18 : 0;
         simulateSTLoss(driftCounterPctWAD);
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a1 = ACCOUNTANT.getState();
@@ -4575,7 +4581,9 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
             vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
             emit IRoycoDayAccountant.LiquidityUpdated(minLiquidityA);
             _executeScheduledAccountantOperation(liquidityData);
-            assertEq(uint256(ACCOUNTANT.getState().lastYieldShareAccrualTimestamp), block.timestamp, "the liquidity setter's inline sync must stamp the checkpoint");
+            assertEq(
+                uint256(ACCOUNTANT.getState().lastYieldShareAccrualTimestamp), block.timestamp, "the liquidity setter's inline sync must stamp the checkpoint"
+            );
             _sync();
             (, NAV_UNIT maxWithdrawableA,) = KERNEL.ltMaxWithdrawable(LT_ALICE_ADDRESS);
             assertEq(maxWithdrawableA, _expectedMaxLTWithdrawalNAV(), "ltMaxWithdrawable must match the F17 recompute");

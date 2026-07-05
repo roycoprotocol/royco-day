@@ -437,7 +437,8 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // The fraction of the JT's total NAV claims resting on the JT raw NAV
         uint256 jtClaimOnJTFractionWAD = jtClaimOnJTRawNAV.mulDiv(WAD, totalJTClaims, Math.Rounding.Floor);
         // Compute how much coverage the system retains per 1 nav unit of JT assets withdrawn scaled to WAD precision
-        uint256 coverageRetentionWAD = (WAD - state.minCoverageWAD.mulDiv((jtClaimOnSTFractionWAD + (state.jtCoinvested ? jtClaimOnJTFractionWAD : uint256(0))), WAD, Math.Rounding.Floor));
+        uint256 coverageRetentionWAD =
+            (WAD - state.minCoverageWAD.mulDiv((jtClaimOnSTFractionWAD + (state.jtCoinvested ? jtClaimOnJTFractionWAD : uint256(0))), WAD, Math.Rounding.Floor));
         // Calculate how much of the surplus can be withdrawn while satisfying the coverage requirement
         NAV_UNIT totalNAVClaimable = surplusJTValue.mulDiv(WAD, coverageRetentionWAD, Math.Rounding.Floor);
         if (totalNAVClaimable == ZERO_NAV_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS);

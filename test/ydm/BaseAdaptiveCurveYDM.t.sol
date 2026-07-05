@@ -3,12 +3,12 @@ pragma solidity ^0.8.28;
 
 import { Test } from "../../lib/forge-std/src/Test.sol";
 import { Vm } from "../../lib/forge-std/src/Vm.sol";
-import { BaseAdaptiveCurveYDM } from "../../src/ydm/base/BaseAdaptiveCurveYDM.sol";
+import { IYDM } from "../../src/interfaces/IYDM.sol";
+import { WAD } from "../../src/libraries/Constants.sol";
+import { MarketState } from "../../src/libraries/Types.sol";
 import { AdaptiveCurveYDM_V1 } from "../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../../src/ydm/AdaptiveCurveYDM_V2.sol";
-import { IYDM } from "../../src/interfaces/IYDM.sol";
-import { MarketState } from "../../src/libraries/Types.sol";
-import { WAD } from "../../src/libraries/Constants.sol";
+import { BaseAdaptiveCurveYDM } from "../../src/ydm/base/BaseAdaptiveCurveYDM.sol";
 
 /**
  * @title MockAdaptiveCurveYDM
@@ -25,14 +25,7 @@ contract MockAdaptiveCurveYDM is BaseAdaptiveCurveYDM {
     mapping(address => uint256) public yAtTarget;
     mapping(address => uint256) public lastTs;
 
-    constructor(
-        uint256 _target,
-        uint256 _minY,
-        uint256 _maxY,
-        uint256 _speed
-    )
-        BaseAdaptiveCurveYDM(_target, _minY, _maxY, _speed)
-    { }
+    constructor(uint256 _target, uint256 _minY, uint256 _maxY, uint256 _speed) BaseAdaptiveCurveYDM(_target, _minY, _maxY, _speed) { }
 
     /// @notice Seed a nonzero yield-share-at-target for msg.sender so the market reads as initialized.
     function initFor(uint256 _y) external {

@@ -5,8 +5,9 @@ import { IRouter } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/con
 import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
-import { IdenticalAssets_ST_JT_ChainlinkOracle_Quoter } from
-    "../../../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol";
+import {
+    IdenticalAssets_ST_JT_ChainlinkOracle_Quoter
+} from "../../../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol";
 import { AbstractKernelTestSuite } from "../../abstract/AbstractKernelTestSuite.sol";
 
 /// @dev The minimal Permit2 surface the Balancer Router's token pulls require (no permit2 lib is vendored).
