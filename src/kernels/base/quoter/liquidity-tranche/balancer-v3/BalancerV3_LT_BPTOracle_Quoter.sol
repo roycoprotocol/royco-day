@@ -165,8 +165,9 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         if (!cacheHit) {
             // NOTE: The accountant's preview is read directly so pricing the senior leg never recurses back into the liquidity tranche mark
             RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
-            SyncedAccountingState memory state = IRoycoDayAccountant(ACCOUNTANT)
-                .previewSyncTrancheAccounting(ValuationLogic._getSeniorTrancheRawNAV($), ValuationLogic._getJuniorTrancheRawNAV($));
+            SyncedAccountingState memory state = IRoycoDayAccountant(ACCOUNTANT).previewSyncTrancheAccounting(
+                ValuationLogic._getSeniorTrancheRawNAV($), ValuationLogic._getJuniorTrancheRawNAV($)
+            );
             (,, uint256 stTotalSupply) = FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(SENIOR_TRANCHE).totalSupply());
 
             // Compute the ST share rate
