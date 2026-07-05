@@ -251,7 +251,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _getRoycoFactoryStorage() private pure returns (IRoycoFactory.RoycoFactoryState storage $) {
-        assembly {
+        assembly ("memory-safe") {
             $.slot := ROYCO_FACTORY_STORAGE_SLOT
         }
     }

@@ -3,11 +3,11 @@ pragma solidity ^0.8.28;
 
 import { Test } from "../../lib/forge-std/src/Test.sol";
 import { Vm } from "../../lib/forge-std/src/Vm.sol";
-import { AdaptiveCurveYDM_V1 } from "../../src/ydm/AdaptiveCurveYDM_V1.sol";
-import { IYDM } from "../../src/interfaces/IYDM.sol";
-import { MarketState } from "../../src/libraries/Types.sol";
-import { WAD, WAD_INT } from "../../src/libraries/Constants.sol";
 import { FixedPointMathLib } from "../../lib/solady/src/utils/FixedPointMathLib.sol";
+import { IYDM } from "../../src/interfaces/IYDM.sol";
+import { WAD, WAD_INT } from "../../src/libraries/Constants.sol";
+import { MarketState } from "../../src/libraries/Types.sol";
+import { AdaptiveCurveYDM_V1 } from "../../src/ydm/AdaptiveCurveYDM_V1.sol";
 
 /**
  * @title AdaptiveCurveYDM_V1 unit + fuzz tests
@@ -78,7 +78,15 @@ contract AdaptiveCurveYDM_V1Test is Test {
     }
 
     /// Returns the yield share output and the newYT that the model would compute/persist.
-    function _mirror(uint256 target, uint256 S, uint256 initYT, uint256 lastTs, uint256 nowTs, MarketState state, uint256 util)
+    function _mirror(
+        uint256 target,
+        uint256 S,
+        uint256 initYT,
+        uint256 lastTs,
+        uint256 nowTs,
+        MarketState state,
+        uint256 util
+    )
         internal
         pure
         returns (uint256 out, uint256 newYT)
@@ -656,11 +664,7 @@ contract AdaptiveCurveYDM_V1Test is Test {
         AdaptiveCurveYDM_V1 ydm = _deploy(cfg.target);
         ydm.initializeYDMForMarket(cfg.yT, cfg.yFull);
         uOver = bound(uOver, WAD, type(uint256).max);
-        assertEq(
-            ydm.previewYieldShare(MarketState.FIXED_TERM, uOver),
-            ydm.previewYieldShare(MarketState.FIXED_TERM, WAD),
-            "saturates at WAD"
-        );
+        assertEq(ydm.previewYieldShare(MarketState.FIXED_TERM, uOver), ydm.previewYieldShare(MarketState.FIXED_TERM, WAD), "saturates at WAD");
     }
 
     /// Adaptation parity: after stamping and warping, preview==mirror and yieldShare persists newYT.

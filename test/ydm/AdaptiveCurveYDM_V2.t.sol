@@ -3,11 +3,11 @@ pragma solidity ^0.8.28;
 
 import { Test } from "../../lib/forge-std/src/Test.sol";
 import { Vm } from "../../lib/forge-std/src/Vm.sol";
-import { AdaptiveCurveYDM_V2 } from "../../src/ydm/AdaptiveCurveYDM_V2.sol";
-import { IYDM } from "../../src/interfaces/IYDM.sol";
-import { MarketState } from "../../src/libraries/Types.sol";
-import { WAD, WAD_INT } from "../../src/libraries/Constants.sol";
 import { FixedPointMathLib } from "../../lib/solady/src/utils/FixedPointMathLib.sol";
+import { IYDM } from "../../src/interfaces/IYDM.sol";
+import { WAD, WAD_INT } from "../../src/libraries/Constants.sol";
+import { MarketState } from "../../src/libraries/Types.sol";
+import { AdaptiveCurveYDM_V2 } from "../../src/ydm/AdaptiveCurveYDM_V2.sol";
 
 /**
  * @title AdaptiveCurveYDM_V2 unit + fuzz tests
@@ -66,11 +66,7 @@ contract AdaptiveCurveYDM_V2Test is Test {
         ydm.initializeYDMForMarket(1e17, 3e17, 9e17);
     }
 
-    function _readCurve(AdaptiveCurveYDM_V2 ydm, address acct)
-        internal
-        view
-        returns (uint64 yT, uint32 lastTs, uint64 discount, uint64 premium)
-    {
+    function _readCurve(AdaptiveCurveYDM_V2 ydm, address acct) internal view returns (uint64 yT, uint32 lastTs, uint64 discount, uint64 premium) {
         (yT, lastTs, discount, premium) = ydm.accountantToCurve(acct);
     }
 
@@ -86,7 +82,16 @@ contract AdaptiveCurveYDM_V2Test is Test {
     }
 
     /// Returns the yield share output and the newYT that the model would compute/persist.
-    function _mirror(uint256 target, uint256 FD, uint256 FP, uint256 initYT, uint256 lastTs, uint256 nowTs, MarketState state, uint256 util)
+    function _mirror(
+        uint256 target,
+        uint256 FD,
+        uint256 FP,
+        uint256 initYT,
+        uint256 lastTs,
+        uint256 nowTs,
+        MarketState state,
+        uint256 util
+    )
         internal
         pure
         returns (uint256 out, uint256 newYT)
@@ -209,7 +214,7 @@ contract AdaptiveCurveYDM_V2Test is Test {
     function test_init_flatCurve_zeroSpreads() public {
         AdaptiveCurveYDM_V2 ydm = _deploy(5e17);
         ydm.initializeYDMForMarket(3e17, 3e17, 3e17);
-        (, , uint64 discount, uint64 premium) = _readCurve(ydm, address(this));
+        (,, uint64 discount, uint64 premium) = _readCurve(ydm, address(this));
         assertEq(discount, 0, "FD == 0");
         assertEq(premium, 0, "FP == 0");
         assertEq(ydm.previewYieldShare(MarketState.FIXED_TERM, 0), 3e17, "flat @0");
@@ -221,7 +226,7 @@ contract AdaptiveCurveYDM_V2Test is Test {
     function test_init_y0Zero_ok() public {
         AdaptiveCurveYDM_V2 ydm = _deploy(5e17);
         ydm.initializeYDMForMarket(0, 3e17, 9e17);
-        (, , uint64 discount,) = _readCurve(ydm, address(this));
+        (,, uint64 discount,) = _readCurve(ydm, address(this));
         assertEq(discount, 3e17, "FD == yT when y0 == 0");
         assertEq(ydm.previewYieldShare(MarketState.FIXED_TERM, 0), 0, "Y(0) == y0 == 0");
     }
@@ -230,7 +235,7 @@ contract AdaptiveCurveYDM_V2Test is Test {
     function test_init_yfullWad_ok() public {
         AdaptiveCurveYDM_V2 ydm = _deploy(5e17);
         ydm.initializeYDMForMarket(1e17, 3e17, uint64(WAD));
-        (, , , uint64 premium) = _readCurve(ydm, address(this));
+        (,,, uint64 premium) = _readCurve(ydm, address(this));
         assertEq(premium, uint64(WAD - 3e17), "FP == WAD - yT");
         assertEq(ydm.previewYieldShare(MarketState.FIXED_TERM, WAD), WAD, "Y(WAD) == yFull == WAD");
     }
@@ -734,11 +739,7 @@ contract AdaptiveCurveYDM_V2Test is Test {
         AdaptiveCurveYDM_V2 ydm = _deploy(cfg.target);
         ydm.initializeYDMForMarket(cfg.y0, cfg.yT, cfg.yFull);
         uOver = bound(uOver, WAD, type(uint256).max);
-        assertEq(
-            ydm.previewYieldShare(MarketState.FIXED_TERM, uOver),
-            ydm.previewYieldShare(MarketState.FIXED_TERM, WAD),
-            "saturates at WAD"
-        );
+        assertEq(ydm.previewYieldShare(MarketState.FIXED_TERM, uOver), ydm.previewYieldShare(MarketState.FIXED_TERM, WAD), "saturates at WAD");
     }
 
     /// Adaptation parity: after stamping and warping, preview==mirror and yieldShare persists newYT.

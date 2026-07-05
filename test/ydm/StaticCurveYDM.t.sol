@@ -3,11 +3,11 @@ pragma solidity ^0.8.28;
 
 import { Test, stdError } from "../../lib/forge-std/src/Test.sol";
 import { Vm } from "../../lib/forge-std/src/Vm.sol";
-import { StaticCurveYDM } from "../../src/ydm/StaticCurveYDM.sol";
-import { IYDM } from "../../src/interfaces/IYDM.sol";
-import { MarketState } from "../../src/libraries/Types.sol";
-import { WAD } from "../../src/libraries/Constants.sol";
 import { SafeCast } from "../../lib/openzeppelin-contracts/contracts/utils/math/SafeCast.sol";
+import { IYDM } from "../../src/interfaces/IYDM.sol";
+import { WAD } from "../../src/libraries/Constants.sol";
+import { MarketState } from "../../src/libraries/Types.sol";
+import { StaticCurveYDM } from "../../src/ydm/StaticCurveYDM.sol";
 
 /**
  * @title StaticCurveYDM unit + fuzz tests
@@ -197,7 +197,7 @@ contract StaticCurveYDMTest is Test {
         StaticCurveYDM ydm = _deploy(6e16);
         ydm.initializeYDMForMarket(0, uint64(WAD), uint64(WAD));
         (, uint64 sLt,, uint64 sGte) = ydm.accountantToCurve(address(this));
-        assertEq(sLt, 16666666666666666666, "floor(1e36/6e16)");
+        assertEq(sLt, 16_666_666_666_666_666_666, "floor(1e36/6e16)");
         assertEq(sGte, 0, "yT==yFull => slopeGte 0");
         assertLe(sLt, UINT64_MAX, "within uint64");
     }
@@ -336,11 +336,11 @@ contract StaticCurveYDMTest is Test {
         _assertCurveAPoint(ydm, 1, 1e17); // A1 floor(0.5)=0
         _assertCurveAPoint(ydm, 1e17, 15e16); // A2 5e16+1e17
         _assertCurveAPoint(ydm, 4e17, 3e17); // A3 2e17+1e17
-        _assertCurveAPoint(ydm, 8e17 - 1, 499999999999999999); // A4 yT-1 (floor)
+        _assertCurveAPoint(ydm, 8e17 - 1, 499_999_999_999_999_999); // A4 yT-1 (floor)
         _assertCurveAPoint(ydm, 8e17, 5e17); // A5 == yT (kink continuity)
-        _assertCurveAPoint(ydm, 8e17 + 1, 500000000000000002); // A6 floor(2)+5e17
+        _assertCurveAPoint(ydm, 8e17 + 1, 500_000_000_000_000_002); // A6 floor(2)+5e17
         _assertCurveAPoint(ydm, 9e17, 7e17); // A7 2e17+5e17
-        _assertCurveAPoint(ydm, WAD - 1, 899999999999999998); // A8 yFull-2 (floor)
+        _assertCurveAPoint(ydm, WAD - 1, 899_999_999_999_999_998); // A8 yFull-2 (floor)
         _assertCurveAPoint(ydm, WAD, 9e17); // A9 == yFull
         _assertCurveAPoint(ydm, WAD + 1, 9e17); // A10 capped
         _assertCurveAPoint(ydm, 2e18, 9e17); // A11 capped
@@ -386,7 +386,7 @@ contract StaticCurveYDMTest is Test {
     function test_floor_oneWeiUnderFull() public {
         StaticCurveYDM ydm = _deploy(7e17);
         ydm.initializeYDMForMarket(0, 3e17, 4e17);
-        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, WAD), 399999999999999999, "4e17 - 1 (floor loss)");
+        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, WAD), 399_999_999_999_999_999, "4e17 - 1 (floor loss)");
     }
 
     /// Curve B symmetric: target=5e17, init(2e17,5e17,8e17) => slopeLt=slopeGte=6e17.
@@ -452,16 +452,8 @@ contract StaticCurveYDMTest is Test {
         StaticCurveYDM ydm = _curveA();
         uint256[6] memory us = [uint256(0), 25e16, 5e17, 75e16, WAD, 2 * WAD];
         for (uint256 i = 0; i < us.length; i++) {
-            assertEq(
-                ydm.previewYieldShare(MarketState.PERPETUAL, us[i]),
-                ydm.previewYieldShare(MarketState.FIXED_TERM, us[i]),
-                "state ignored (preview)"
-            );
-            assertEq(
-                ydm.yieldShare(MarketState.PERPETUAL, us[i]),
-                ydm.yieldShare(MarketState.FIXED_TERM, us[i]),
-                "state ignored (yieldShare)"
-            );
+            assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, us[i]), ydm.previewYieldShare(MarketState.FIXED_TERM, us[i]), "state ignored (preview)");
+            assertEq(ydm.yieldShare(MarketState.PERPETUAL, us[i]), ydm.yieldShare(MarketState.FIXED_TERM, us[i]), "state ignored (yieldShare)");
         }
     }
 
@@ -644,11 +636,7 @@ contract StaticCurveYDMTest is Test {
         ydm.initializeYDMForMarket(cfg.y0, cfg.yT, cfg.yFull);
 
         uOver = bound(uOver, WAD, type(uint256).max);
-        assertEq(
-            ydm.previewYieldShare(MarketState.PERPETUAL, uOver),
-            ydm.previewYieldShare(MarketState.PERPETUAL, WAD),
-            "P6: saturates at WAD"
-        );
+        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, uOver), ydm.previewYieldShare(MarketState.PERPETUAL, WAD), "P6: saturates at WAD");
     }
 
     /// P9: per-sender isolation under fuzzed distinct curves.
