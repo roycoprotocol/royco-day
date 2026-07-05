@@ -237,7 +237,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         NAV_UNIT jtCoverageImpermanentLoss = $.lastJTCoverageImpermanentLoss;
 
         // The raw NAV deltas live in a scoped block so their stack slots are released before the post-op state is marshaled below
-        {
         // Compute the deltas in the raw NAVs of each tranche
         int256 deltaSTRawNAV = RoycoUnitsMath.computeNAVDelta(_stRawNAV, $.lastSTRawNAV);
         int256 deltaJTRawNAV = RoycoUnitsMath.computeNAVDelta(_jtRawNAV, $.lastJTRawNAV);
@@ -282,7 +281,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
                     $.lastJTCoverageImpermanentLoss = jtCoverageImpermanentLoss;
                 }
             }
-        }
         }
 
         // Enforce the NAV conservation invariant
@@ -416,17 +414,15 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Get the surplus JT assets in NAV units
         // The exposure and requirement intermediates live in a scoped block so their stack slots are released before the fraction math below
         NAV_UNIT surplusJTValue;
-        {
-            // Compute the total covered exposure of the underlying investment, rounding in favor of senior protection
-            NAV_UNIT totalCoveredExposure = state.stRawNAV + (state.jtCoinvested ? state.jtRawNAV : ZERO_NAV_UNITS);
-            // Compute the minimum junior tranche assets required to cover the exposure as per the market's coverage requirement
-            NAV_UNIT requiredJTValue = totalCoveredExposure.mulDiv(state.minCoverageWAD, WAD, Math.Rounding.Ceil);
-            // Compute the surplus coverage currently provided by the junior tranche based on its currently remaining loss-absorption buffer
-            // Also account for the effective dust tolerance required to preclude reverts due to rounding after JT redemptions
-            // Additionally absorb the worst case inner-ceil rounding in the coverageUtilization computation
-            surplusJTValue = state.jtEffectiveNAV
-                .saturatingSub(requiredJTValue + $.stNAVDustTolerance + (state.jtCoinvested ? $.jtNAVDustTolerance : ZERO_NAV_UNITS) + toNAVUnits(uint256(2)));
-        }
+        // Compute the total covered exposure of the underlying investment, rounding in favor of senior protection
+        NAV_UNIT totalCoveredExposure = state.stRawNAV + (state.jtCoinvested ? state.jtRawNAV : ZERO_NAV_UNITS);
+        // Compute the minimum junior tranche assets required to cover the exposure as per the market's coverage requirement
+        NAV_UNIT requiredJTValue = totalCoveredExposure.mulDiv(state.minCoverageWAD, WAD, Math.Rounding.Ceil);
+        // Compute the surplus coverage currently provided by the junior tranche based on its currently remaining loss-absorption buffer
+        // Also account for the effective dust tolerance required to preclude reverts due to rounding after JT redemptions
+        // Additionally absorb the worst case inner-ceil rounding in the coverageUtilization computation
+        surplusJTValue = state.jtEffectiveNAV
+            .saturatingSub(requiredJTValue + $.stNAVDustTolerance + (state.jtCoinvested ? $.jtNAVDustTolerance : ZERO_NAV_UNITS) + toNAVUnits(uint256(2)));
         if (surplusJTValue == ZERO_NAV_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         // Compute the total JT claim on NAV and preemptively return if zero
