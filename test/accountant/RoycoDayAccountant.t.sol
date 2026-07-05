@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { stdError } from "../../lib/forge-std/src/StdError.sol";
 import { Test, Vm } from "../../lib/forge-std/src/Test.sol";
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
@@ -10,9 +11,9 @@ import { RoycoDayAccountant } from "../../src/accountant/RoycoDayAccountant.sol"
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
-import { MAX_PROTOCOL_FEE_WAD, WAD, ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
+import { MAX_NAV_UNITS, MAX_PROTOCOL_FEE_WAD, WAD, ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
 import { MarketState, Operation, SyncedAccountingState } from "../../src/libraries/Types.sol";
-import { NAV_UNIT, toNAVUnits, toUint256 } from "../../src/libraries/Units.sol";
+import { ASSETS_MUST_BE_NON_NEGATIVE, NAV_UNIT, toNAVUnits, toUint256 } from "../../src/libraries/Units.sol";
 
 /*//////////////////////////////////////////////////////////////////////////
                             HARNESS — IN-FILE MOCKS
@@ -2477,9 +2478,13 @@ contract AccountantTest is Test {
      * no fees and leaves the accrual window intact, while one wei more takes fees and resets the window
      * Derivation with dust 30 + 40 = 70, rates 0.1e18 / 0.05e18 over 100s (twJT 10e18, twLT 5e18):
      *   gain 70: jtPrem = floor(70 * 10e18 / (100 * 1e18)) = 7, ltPrem = floor(70 * 5e18 / 100e18) = 3, no fees, no reset
-     *   then over a further 50s (tw compounds to 15e18 / 7.5e18, window 150s), gain 71:
+     *   The 7 wei phase-one premium leaves jtEff = jtRaw + 7, a 7 wei JT cross-claim on the senior raw NAV, so the
+     *   next attribution floor skims 1 wei of the senior delta to JT: a raw gain of 72 attributes
+     *   floor(72 * ((1000e18 + 70) - 7) / (1000e18 + 70)) = 71 to ST (the dust + 1 senior gain) and 1 wei to JT
+     *   Then over a further 50s (tw compounds un-reset to 15e18 / 7.5e18, window 150s), senior gain 71:
      *   jtPrem = floor(71 * 15e18 / 150e18) = 7, ltPrem = floor(71 * 7.5e18 / 150e18) = 3, stFee = floor(61 * 0.1) = 6
-     *   (the jt and lt fee floors are 0 at this magnitude), accumulators reset and the premium clock advances
+     *   (the jt and lt fee floors are 0 at this magnitude, and the 1 wei jt gain is below dust so it takes no fee),
+     *   jtEff = jtRaw + 7 + 1 + 7 = jtRaw + 15, accumulators reset and the premium clock advances to windowStart + 150
      */
     function test_Waterfall_premiumsPaidDustGateBothSides() public {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
@@ -2502,14 +2507,16 @@ contract AccountantTest is Test {
         assertEq(s.lastPremiumPaymentTimestamp, windowStart, "premium clock untouched at the dust boundary");
 
         vm.warp(block.timestamp + 50);
-        state = kernel.doPreOp(toNAVUnits(SEED_ST_RAW + 141), toNAVUnits(SEED_JT_RAW));
-        assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW + 14, "compounded window premium on the second gain");
+        state = kernel.doPreOp(toNAVUnits(SEED_ST_RAW + 142), toNAVUnits(SEED_JT_RAW));
+        assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW + 15, "compounded window premium plus the attributed wei on the second gain");
         assertEq(toUint256(state.ltLiquidityPremium), 3, "compounded window lt premium");
         assertEq(toUint256(state.stProtocolFee), 6, "st fee taken one wei above dust");
         s = accountant.getState();
         assertEq(s.twJTYieldShareAccruedWAD, 0, "jt accumulator reset once premiums are paid");
         assertEq(s.twLTYieldShareAccruedWAD, 0, "lt accumulator reset once premiums are paid");
-        assertEq(s.lastPremiumPaymentTimestamp, uint32(block.timestamp), "premium clock advances on payment");
+        // The expected clock is derived from windowStart rather than read from block.timestamp: an identical
+        // pre-warp uint32(block.timestamp) read exists above and via-ir legally CSEs TIMESTAMP within a frame
+        assertEq(s.lastPremiumPaymentTimestamp, windowStart + 150, "premium clock advances on payment");
     }
 
     /**
@@ -2972,9 +2979,1255 @@ contract AccountantTest is Test {
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
         assertEq(s.twJTYieldShareAccruedWAD, 0, "jt accumulator reset on payment");
         assertEq(s.twLTYieldShareAccruedWAD, 0, "lt accumulator reset on payment");
-        assertEq(s.lastPremiumPaymentTimestamp, uint32(block.timestamp), "premium clock advances on payment");
+        // The expected clock is derived from windowStart rather than read from block.timestamp: the identical
+        // pre-warp uint32(block.timestamp) read above gets CSE'd with a post-warp read under via-ir (TIMESTAMP is
+        // frame-constant in the real EVM, so the optimizer may legally merge the reads across a vm.warp)
+        assertEq(s.lastPremiumPaymentTimestamp, windowStart + 500, "premium clock advances on payment");
         assertGt(uint256(s.lastPremiumPaymentTimestamp), uint256(windowStart), "the window genuinely moved");
     }
 
-    // Parts 3-4 append below this line, before the closing brace
+    /*//////////////////////////////////////////////////////////////////////
+                        HARNESS — PART 3 SHARED HELPERS
+    //////////////////////////////////////////////////////////////////////*/
+
+    /// @dev Ceiling division of a raw product, the test-local mirror for the ceil-rounded utilization formulas
+    function _ceilDiv(uint256 _num, uint256 _den) internal pure returns (uint256) {
+        return _num == 0 ? 0 : ((_num - 1) / _den) + 1;
+    }
+
+    /**
+     * @dev Independent mirror of the spec coverage utilization formula (testing-strategy F7):
+     * ceil((stRaw + (coinvested ? jtRaw : 0)) * minCoverage / jtEff), 0 when the minimum coverage or the
+     * exposure is zero, uint256 max when the junior buffer is zero against live exposure
+     */
+    function _specCoverageUtilization(
+        uint256 _stRaw,
+        uint256 _jtRaw,
+        bool _coinvested,
+        uint256 _minCoverageWAD,
+        uint256 _jtEff
+    )
+        internal
+        pure
+        returns (uint256)
+    {
+        uint256 exposure = _stRaw + (_coinvested ? _jtRaw : 0);
+        if (_minCoverageWAD == 0 || exposure == 0) return 0;
+        if (_jtEff == 0) return type(uint256).max;
+        return _ceilDiv(exposure * _minCoverageWAD, _jtEff);
+    }
+
+    /**
+     * @dev Independent mirror of the spec liquidity utilization formula (testing-strategy F8):
+     * ceil(stEff * minLiquidity / ltRaw), 0 when the senior effective NAV or the minimum liquidity is zero,
+     * uint256 max when the market-making inventory is zero against a live requirement
+     */
+    function _specLiquidityUtilization(uint256 _stEff, uint256 _minLiquidityWAD, uint256 _ltRaw) internal pure returns (uint256) {
+        if (_stEff == 0 || _minLiquidityWAD == 0) return 0;
+        if (_ltRaw == 0) return type(uint256).max;
+        return _ceilDiv(_stEff * _minLiquidityWAD, _ltRaw);
+    }
+
+    /**
+     * @dev Marshals the committed checkpoint into the synced accounting state the kernel would pass to the
+     * max* views, with both utilizations recomputed from the independent spec formulas
+     */
+    function _checkpointState() internal view returns (SyncedAccountingState memory st) {
+        IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
+        st.marketState = s.lastMarketState;
+        st.stRawNAV = s.lastSTRawNAV;
+        st.jtRawNAV = s.lastJTRawNAV;
+        st.ltRawNAV = s.lastLTRawNAV;
+        st.stEffectiveNAV = s.lastSTEffectiveNAV;
+        st.jtEffectiveNAV = s.lastJTEffectiveNAV;
+        st.jtCoverageImpermanentLoss = s.lastJTCoverageImpermanentLoss;
+        st.coverageUtilizationWAD = _specCoverageUtilization(
+            toUint256(s.lastSTRawNAV), toUint256(s.lastJTRawNAV), accountant.JT_COINVESTED(), s.minCoverageWAD, toUint256(s.lastJTEffectiveNAV)
+        );
+        st.liquidityUtilizationWAD = _specLiquidityUtilization(toUint256(s.lastSTEffectiveNAV), s.minLiquidityWAD, toUint256(s.lastLTRawNAV));
+        st.fixedTermEndTimestamp = s.fixedTermEndTimestamp;
+        st.minCoverageWAD = s.minCoverageWAD;
+        st.jtCoinvested = accountant.JT_COINVESTED();
+        st.coverageLiquidationUtilizationWAD = s.coverageLiquidationUtilizationWAD;
+        st.minLiquidityWAD = s.minLiquidityWAD;
+    }
+
+    /**
+     * @dev Builds a bare synced accounting state for direct max* closed-form probing
+     * @dev Only the fields the max* views read are populated, and the liquidation threshold defaults to the
+     * uint256 maximum so the maxLTWithdrawal liquidation shortcut stays un-triggered unless a test arms it
+     */
+    function _bareState(
+        uint256 _stRaw,
+        uint256 _jtRaw,
+        uint256 _ltRaw,
+        uint256 _stEff,
+        uint256 _jtEff,
+        bool _coinvested,
+        uint256 _minCoverageWAD,
+        uint256 _minLiquidityWAD
+    )
+        internal
+        pure
+        returns (SyncedAccountingState memory st)
+    {
+        st.stRawNAV = toNAVUnits(_stRaw);
+        st.jtRawNAV = toNAVUnits(_jtRaw);
+        st.ltRawNAV = toNAVUnits(_ltRaw);
+        st.stEffectiveNAV = toNAVUnits(_stEff);
+        st.jtEffectiveNAV = toNAVUnits(_jtEff);
+        st.jtCoinvested = _coinvested;
+        st.minCoverageWAD = _minCoverageWAD;
+        st.minLiquidityWAD = _minLiquidityWAD;
+        st.coverageLiquidationUtilizationWAD = type(uint256).max;
+    }
+
+    /// @dev Seeds the default flat 1000e18/200e18 market with the specified committed liquidity tranche raw NAV
+    function _seedFlatWithLT(uint256 _ltRaw) internal {
+        _seedState(SEED_ST_RAW, SEED_JT_RAW, SEED_ST_RAW, SEED_JT_RAW, 0, _ltRaw, MarketState.PERPETUAL);
+    }
+
+    /*//////////////////////////////////////////////////////////////////////
+                                F POST-OP
+    //////////////////////////////////////////////////////////////////////*/
+
+    /// F1: an ST deposit adds its senior raw NAV delta to the senior effective NAV and commits the checkpoint
+    function test_PostOp_stDeposit_addsDeltaToSTEffective() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + 123e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+        assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW + 123e18, "st effective NAV grows by the deposited value");
+        assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW, "jt effective NAV untouched");
+        IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
+        assertEq(toUint256(s.lastSTRawNAV), SEED_ST_RAW + 123e18, "st raw NAV committed");
+        assertEq(toUint256(s.lastSTEffectiveNAV), SEED_ST_RAW + 123e18, "st effective NAV committed");
+    }
+
+    /// F1: an ST deposit with a zero senior raw NAV delta violates the shape require
+    function test_PostOp_reverts_stDepositZeroSTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
+        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+    }
+
+    /// F1: an ST deposit with a negative senior raw NAV delta violates the shape require
+    function test_PostOp_reverts_stDepositNegativeSTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
+        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW - 1), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+    }
+
+    /// F1: an ST deposit with a positive junior raw NAV delta violates the shape require
+    function test_PostOp_reverts_stDepositPositiveJTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
+        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + 10e18), toNAVUnits(SEED_JT_RAW + 1), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+    }
+
+    /// F1: an ST deposit with a negative junior raw NAV delta violates the shape require
+    function test_PostOp_reverts_stDepositNegativeJTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
+        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + 10e18), toNAVUnits(SEED_JT_RAW - 1), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+    }
+
+    /// F1: an ST deposit with a nonzero liquidity raw NAV delta violates the shape require in both directions
+    function test_PostOp_reverts_stDepositNonzeroLTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
+        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW + 1), ZERO_NAV_UNITS, false);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
+        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW - 1), ZERO_NAV_UNITS, false);
+    }
+
+    /// F1: an ST deposit with a nonzero self-liquidation bonus value violates the shape require
+    function test_PostOp_reverts_stDepositNonzeroBonus() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
+        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), toNAVUnits(uint256(1)), false);
+    }
+
+    /// F2: a JT deposit adds its junior raw NAV delta to the junior effective NAV and commits the checkpoint
+    function test_PostOp_jtDeposit_addsDeltaToJTEffective() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW + 45e18), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+        assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW + 45e18, "jt effective NAV grows by the deposited value");
+        assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW, "st effective NAV untouched");
+        assertEq(toUint256(accountant.getState().lastJTEffectiveNAV), SEED_JT_RAW + 45e18, "jt effective NAV committed");
+    }
+
+    /// F2: a JT deposit with a zero junior raw NAV delta violates the shape require
+    function test_PostOp_reverts_jtDepositZeroJTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
+        kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+    }
+
+    /// F2: a JT deposit with a negative junior raw NAV delta violates the shape require
+    function test_PostOp_reverts_jtDepositNegativeJTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
+        kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW - 1), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+    }
+
+    /// F2: a JT deposit with a positive senior raw NAV delta violates the shape require
+    function test_PostOp_reverts_jtDepositPositiveSTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
+        kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_RAW + 1), toNAVUnits(SEED_JT_RAW + 10e18), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+    }
+
+    /// F2: a JT deposit with a negative senior raw NAV delta violates the shape require
+    function test_PostOp_reverts_jtDepositNegativeSTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
+        kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_RAW - 1), toNAVUnits(SEED_JT_RAW + 10e18), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+    }
+
+    /// F2: a JT deposit with a nonzero liquidity raw NAV delta violates the shape require in both directions
+    function test_PostOp_reverts_jtDepositNonzeroLTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
+        kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW + 10e18), toNAVUnits(SEED_LT_RAW + 1), ZERO_NAV_UNITS, false);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
+        kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW + 10e18), toNAVUnits(SEED_LT_RAW - 1), ZERO_NAV_UNITS, false);
+    }
+
+    /// F2: a JT deposit with a nonzero self-liquidation bonus value violates the shape require
+    function test_PostOp_reverts_jtDepositNonzeroBonus() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
+        kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW + 10e18), toNAVUnits(SEED_LT_RAW), toNAVUnits(uint256(1)), false);
+    }
+
+    /// F3: a BPT-only LT deposit (zero senior delta) books the liquidity raw NAV and leaves both effective NAVs untouched
+    function test_PostOp_ltDepositBPTOnly_leavesEffectiveNAVsUntouched() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW + 30e18), ZERO_NAV_UNITS, false);
+        assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW, "st effective NAV untouched by the pure BPT leg");
+        assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW, "jt effective NAV untouched");
+        assertEq(toUint256(state.ltRawNAV), SEED_LT_RAW + 30e18, "lt raw NAV reflects the deposit");
+        assertEq(toUint256(accountant.getState().lastLTRawNAV), SEED_LT_RAW + 30e18, "lt raw NAV committed");
+    }
+
+    /// F3: a multi-asset LT deposit (positive senior delta) adds the freshly minted senior value to the senior effective NAV
+    function test_PostOp_ltDepositMultiAsset_addsSTDeltaToSTEffective() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        SyncedAccountingState memory state = kernel.doPostOp(
+            Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW + 50e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW + 20e18), ZERO_NAV_UNITS, false
+        );
+        assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW + 50e18, "st effective NAV grows by the minted senior value");
+        assertEq(toUint256(state.ltRawNAV), SEED_LT_RAW + 20e18, "lt raw NAV reflects the joined BPT value");
+        assertEq(toUint256(accountant.getState().lastSTEffectiveNAV), SEED_ST_RAW + 50e18, "st effective NAV committed");
+    }
+
+    /// F3: an LT deposit with a zero liquidity raw NAV delta violates the shape require
+    function test_PostOp_reverts_ltDepositZeroLTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_DEPOSIT));
+        kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW + 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+    }
+
+    /// F3: an LT deposit with a negative liquidity raw NAV delta violates the shape require
+    function test_PostOp_reverts_ltDepositNegativeLTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_DEPOSIT));
+        kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW + 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW - 1), ZERO_NAV_UNITS, false);
+    }
+
+    /// F3: an LT deposit with a negative senior raw NAV delta violates the shape require
+    function test_PostOp_reverts_ltDepositNegativeSTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_DEPOSIT));
+        kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW - 1), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW + 10e18), ZERO_NAV_UNITS, false);
+    }
+
+    /// F3: an LT deposit with a nonzero junior raw NAV delta violates the shape require in both directions
+    function test_PostOp_reverts_ltDepositNonzeroJTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_DEPOSIT));
+        kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW + 1), toNAVUnits(SEED_LT_RAW + 10e18), ZERO_NAV_UNITS, false);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_DEPOSIT));
+        kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW - 1), toNAVUnits(SEED_LT_RAW + 10e18), ZERO_NAV_UNITS, false);
+    }
+
+    /// F3: an LT deposit with a nonzero self-liquidation bonus value violates the shape require
+    function test_PostOp_reverts_ltDepositNonzeroBonus() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_DEPOSIT));
+        kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW + 10e18), toNAVUnits(uint256(1)), false);
+    }
+
+    /// F4: an ST redemption without a bonus reduces the senior effective NAV by the full redeemed value
+    function test_PostOp_stRedeem_reducesSTEffectiveWithoutBonus() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.ST_REDEEM, toNAVUnits(SEED_ST_RAW - 50e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+        assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW - 50e18, "st effective NAV bears the full redemption");
+        assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW, "jt effective NAV untouched without a bonus");
+    }
+
+    /**
+     * F4: an ST redemption with a self-liquidation bonus reduces the junior effective NAV by exactly the bonus
+     * and the senior effective NAV by the total redeemed value minus the bonus
+     * Derivation: total = 50e18 + 5e18 = 55e18, jtEff = 200e18 - 5e18, stEff = 1000e18 - (55e18 - 5e18)
+     */
+    function test_PostOp_stRedeem_bonusSplitsAcrossJTAndST() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        SyncedAccountingState memory state = kernel.doPostOp(
+            Operation.ST_REDEEM, toNAVUnits(SEED_ST_RAW - 50e18), toNAVUnits(SEED_JT_RAW - 5e18), toNAVUnits(SEED_LT_RAW), toNAVUnits(uint256(5e18)), false
+        );
+        assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW - 5e18, "jt effective NAV funds exactly the bonus");
+        assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW - 50e18, "st effective NAV bears the redemption net of the bonus");
+        IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
+        assertEq(
+            toUint256(s.lastSTRawNAV) + toUint256(s.lastJTRawNAV),
+            toUint256(s.lastSTEffectiveNAV) + toUint256(s.lastJTEffectiveNAV),
+            "conservation holds through the bonus split"
+        );
+    }
+
+    /// F7: a bonus exactly equal to the total redeemed value draws everything from JT and leaves the senior effective NAV unchanged
+    function test_PostOp_stRedeem_bonusEqualToTotalDrawsAllFromJT() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        SyncedAccountingState memory state = kernel.doPostOp(
+            Operation.ST_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW - 10e18), toNAVUnits(SEED_LT_RAW), toNAVUnits(uint256(10e18)), false
+        );
+        assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW, "st effective NAV untouched when the bonus covers the total");
+        assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW - 10e18, "jt effective NAV funds the entire redemption");
+    }
+
+    /// F4: an ST redemption with a nonzero liquidity raw NAV delta violates the shape require in both directions
+    function test_PostOp_reverts_stRedeemNonzeroLTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_REDEEM));
+        kernel.doPostOp(Operation.ST_REDEEM, toNAVUnits(SEED_ST_RAW - 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW + 1), ZERO_NAV_UNITS, false);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_REDEEM));
+        kernel.doPostOp(Operation.ST_REDEEM, toNAVUnits(SEED_ST_RAW - 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW - 1), ZERO_NAV_UNITS, false);
+    }
+
+    /// F4: an ST redemption with a zero total redeemed value violates the shape require
+    function test_PostOp_reverts_stRedeemZeroTotal() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_REDEEM));
+        kernel.doPostOp(Operation.ST_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+    }
+
+    /**
+     * F4: a positive junior raw NAV delta during an ST redemption reverts inside toNAVUnits(int256) with
+     * ASSETS_MUST_BE_NON_NEGATIVE (Units.sol:94-98), NOT with INVALID_POST_OP_STATE — the total redeemed
+     * value is computed before the shape require can run
+     */
+    function test_PostOp_reverts_stRedeemPositiveJTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(ASSETS_MUST_BE_NON_NEGATIVE.selector);
+        kernel.doPostOp(Operation.ST_REDEEM, toNAVUnits(SEED_ST_RAW - 10e18), toNAVUnits(SEED_JT_RAW + 1), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+    }
+
+    /// F4: a positive senior raw NAV delta during an ST redemption reverts identically in toNAVUnits(int256)
+    function test_PostOp_reverts_stRedeemPositiveSTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(ASSETS_MUST_BE_NON_NEGATIVE.selector);
+        kernel.doPostOp(Operation.ST_REDEEM, toNAVUnits(SEED_ST_RAW + 1), toNAVUnits(SEED_JT_RAW - 10e18), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+    }
+
+    /**
+     * F7: a bonus exceeding the junior effective NAV underflows the raw NAV_UNIT subtraction at :267 with an
+     * arithmetic panic (0x11), not a custom error — the junior buffer is debited before the senior leg
+     */
+    function test_PostOp_reverts_stRedeemBonusExceedsJTEffective() public {
+        _seedState(SEED_ST_RAW, 5e18, SEED_ST_RAW, 5e18, 0, SEED_LT_RAW, MarketState.PERPETUAL);
+        vm.expectRevert(stdError.arithmeticError);
+        kernel.doPostOp(Operation.ST_REDEEM, toNAVUnits(SEED_ST_RAW - 10e18), toNAVUnits(uint256(5e18)), toNAVUnits(SEED_LT_RAW), toNAVUnits(uint256(6e18)), false);
+    }
+
+    /**
+     * F7: a bonus exceeding the total redeemed value (while within the junior buffer) underflows the
+     * total-minus-bonus subtraction at :269 with an arithmetic panic (0x11)
+     */
+    function test_PostOp_reverts_stRedeemBonusExceedsTotal() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(stdError.arithmeticError);
+        kernel.doPostOp(Operation.ST_REDEEM, toNAVUnits(SEED_ST_RAW - 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), toNAVUnits(uint256(11e18)), false);
+    }
+
+    /// F5: an in-kind LT redemption (negative liquidity delta alone, zero total) passes and books only the liquidity mark
+    function test_PostOp_ltRedeem_negativeLTDeltaAlonePasses() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW - 40e18), ZERO_NAV_UNITS, false);
+        assertEq(toUint256(state.ltRawNAV), SEED_LT_RAW - 40e18, "lt raw NAV reflects the burned BPT slice");
+        assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW, "st effective NAV untouched");
+        assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW, "jt effective NAV untouched");
+        assertEq(toUint256(accountant.getState().lastLTRawNAV), SEED_LT_RAW - 40e18, "lt raw NAV committed");
+    }
+
+    /**
+     * F5: an LT redemption with a zero liquidity delta but a positive total passes — the idle-premium-share-only
+     * leg, where the redeemer takes staged senior shares without touching the BPT
+     * NOTE: this pins the fix for the edge testing-strategy Appendix B flagged (a zero-BPT-slice in-kind LT
+     * redemption formerly tripped INVALID_POST_OP_STATE)
+     */
+    function test_PostOp_ltRedeem_zeroLTDeltaWithPositiveTotalPasses() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(SEED_ST_RAW - 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+        assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW - 10e18, "st effective NAV bears the idle-share redemption");
+        assertEq(toUint256(state.ltRawNAV), SEED_LT_RAW, "lt raw NAV untouched by the idle-share-only leg");
+    }
+
+    /// F5: a multi-asset LT redemption with both a negative liquidity delta and a positive total passes
+    function test_PostOp_ltRedeem_bothLegsPass() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        SyncedAccountingState memory state = kernel.doPostOp(
+            Operation.LT_REDEEM, toNAVUnits(SEED_ST_RAW - 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW - 40e18), ZERO_NAV_UNITS, false
+        );
+        assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW - 10e18, "st effective NAV bears the unwound senior leg");
+        assertEq(toUint256(state.ltRawNAV), SEED_LT_RAW - 40e18, "lt raw NAV reflects the burned BPT slice");
+    }
+
+    /// F5: an LT redemption with a zero liquidity delta and a zero total violates the shape require
+    function test_PostOp_reverts_ltRedeemZeroLTDeltaZeroTotal() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_REDEEM));
+        kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+    }
+
+    /// F5: an LT redemption with a positive liquidity delta violates the shape require
+    function test_PostOp_reverts_ltRedeemPositiveLTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_REDEEM));
+        kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW + 1), ZERO_NAV_UNITS, false);
+    }
+
+    /// F6: a JT redemption reduces the junior effective NAV by the total redeemed value and leaves a zero IL untouched
+    function test_PostOp_jtRedeem_reducesJTEffectiveWithZeroILUntouched() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW - 50e18), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+        assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW - 50e18, "jt effective NAV bears the redemption");
+        assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW, "st effective NAV untouched");
+        assertEq(toUint256(state.jtCoverageImpermanentLoss), 0, "zero il stays zero through the redemption");
+        assertEq(toUint256(accountant.getState().lastJTCoverageImpermanentLoss), 0, "committed il untouched");
+    }
+
+    /**
+     * F6: a JT redemption floor-scales a live coverage impermanent loss by the junior effective NAV ratio and
+     * persists it immediately, compounding across successive redemptions
+     * Derivation from the (900e18, 300e18, 1000e18, 200e18, il 100e18) fixed-term checkpoint:
+     *   redeem 60e18: jtEff = 140e18, il = floor(100e18 * 140e18 / 200e18) = 70e18
+     *   then redeem 7 wei: jtEff = 140e18 - 7, il = floor(70e18 * (140e18 - 7) / 140e18) = floor(70e18 - 3.5) = 70e18 - 4
+     */
+    function test_PostOp_jtRedeem_scalesILImmediatelyWithFloor() public {
+        _seedState(900e18, 300e18, 1_000e18, 200e18, 100e18, SEED_LT_RAW, MarketState.FIXED_TERM);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(uint256(900e18)), toNAVUnits(uint256(240e18)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+        assertEq(toUint256(state.jtEffectiveNAV), 140e18, "jt effective NAV bears the redemption");
+        assertEq(toUint256(state.jtCoverageImpermanentLoss), 70e18, "il floor-scaled by the effective NAV ratio");
+        assertEq(toUint256(accountant.getState().lastJTCoverageImpermanentLoss), 70e18, "scaled il persisted immediately");
+
+        state = kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(uint256(900e18)), toNAVUnits(uint256(240e18 - 7)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+        assertEq(toUint256(state.jtCoverageImpermanentLoss), 70e18 - 4, "second scaling floors the awkward wei ratio");
+        assertEq(toUint256(accountant.getState().lastJTCoverageImpermanentLoss), 70e18 - 4, "compounded il persisted immediately");
+    }
+
+    /// F6: a JT redemption with a nonzero liquidity raw NAV delta violates the shape require in both directions
+    function test_PostOp_reverts_jtRedeemNonzeroLTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_REDEEM));
+        kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW - 10e18), toNAVUnits(SEED_LT_RAW + 1), ZERO_NAV_UNITS, false);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_REDEEM));
+        kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW - 10e18), toNAVUnits(SEED_LT_RAW - 1), ZERO_NAV_UNITS, false);
+    }
+
+    /// F6: a JT redemption with a zero total redeemed value violates the shape require
+    function test_PostOp_reverts_jtRedeemZeroTotal() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_REDEEM));
+        kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+    }
+
+    /// F6: a JT redemption with a nonzero self-liquidation bonus value violates the shape require
+    function test_PostOp_reverts_jtRedeemNonzeroBonus() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_REDEEM));
+        kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW - 10e18), toNAVUnits(SEED_LT_RAW), toNAVUnits(uint256(1)), false);
+    }
+
+    /**
+     * F8: from any conserved flat checkpoint, every valid post-op shape commits without reverting and the
+     * committed checkpoint conserves NAV exactly — the NAV_CONSERVATION_VIOLATION arm at :286 is unreachable
+     * from conserved checkpoints (any revert or wei of drift here is a REAL finding)
+     */
+    function testFuzz_PostOp_conservationHoldsForValidShapes(uint256 _stRaw0, uint256 _jtRaw0, uint256 _lt0, uint256 _value, uint256 _opSeed) public {
+        // Bounds: checkpoint raw NAVs uniform in [1e18, 1e30] (the strategy magnitude bound), the committed
+        // liquidity value uniform in [2, 1e30] so an LT redemption always has a withdrawable wei, the op value
+        // uniform in [1, 1e18] so redemptions stay inside every tranche, and the op uniform across all six members
+        _stRaw0 = bound(_stRaw0, 1e18, 1e30);
+        _jtRaw0 = bound(_jtRaw0, 1e18, 1e30);
+        _lt0 = bound(_lt0, 2, 1e30);
+        _value = bound(_value, 1, 1e18);
+        Operation op = Operation(bound(_opSeed, 0, 5));
+        _seedState(_stRaw0, _jtRaw0, _stRaw0, _jtRaw0, 0, _lt0, MarketState.PERPETUAL);
+
+        uint256 stRaw1 = _stRaw0;
+        uint256 jtRaw1 = _jtRaw0;
+        uint256 lt1 = _lt0;
+        NAV_UNIT bonus = ZERO_NAV_UNITS;
+        if (op == Operation.ST_DEPOSIT) {
+            stRaw1 = _stRaw0 + _value;
+        } else if (op == Operation.ST_REDEEM) {
+            // Redeem the value from senior and half the value from junior, the junior slice provided as a bonus
+            stRaw1 = _stRaw0 - _value;
+            jtRaw1 = _jtRaw0 - (_value / 2);
+            bonus = toNAVUnits(_value / 2);
+        } else if (op == Operation.JT_DEPOSIT) {
+            jtRaw1 = _jtRaw0 + _value;
+        } else if (op == Operation.JT_REDEEM) {
+            jtRaw1 = _jtRaw0 - _value;
+        } else if (op == Operation.LT_DEPOSIT) {
+            lt1 = _lt0 + _value;
+            stRaw1 = _stRaw0 + (_value / 2);
+        } else {
+            lt1 = _lt0 - (_value < _lt0 ? _value : _lt0 - 1);
+        }
+        kernel.doPostOp(op, toNAVUnits(stRaw1), toNAVUnits(jtRaw1), toNAVUnits(lt1), bonus, false);
+
+        IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
+        assertEq(
+            toUint256(s.lastSTRawNAV) + toUint256(s.lastJTRawNAV),
+            toUint256(s.lastSTEffectiveNAV) + toUint256(s.lastJTEffectiveNAV),
+            "committed checkpoint conserves NAV exactly"
+        );
+        assertEq(toUint256(s.lastSTRawNAV), stRaw1, "st raw NAV committed");
+        assertEq(toUint256(s.lastJTRawNAV), jtRaw1, "jt raw NAV committed");
+        assertEq(toUint256(s.lastLTRawNAV), lt1, "lt raw NAV committed");
+    }
+
+    /**
+     * F9: the post-op writes all five NAV checkpoints including lastLTRawNAV, never touches the market state
+     * or the stored fixed-term end, performs no yield-share accrual, emits no sync event, and returns zero
+     * fees and premium with fresh utilizations plus the fixed-term end passthrough
+     */
+    function test_PostOp_writesAllCheckpointsAndPreservesMarketState() public {
+        _seedState(900e18, 300e18, 1_000e18, 200e18, 100e18, SEED_LT_RAW, MarketState.FIXED_TERM);
+        uint32 end = accountant.getState().fixedTermEndTimestamp;
+        assertGt(uint256(end), 0, "seed committed a live fixed-term end");
+        uint256 jtCallsBefore = jtYDM.yieldShareCallCount();
+        uint256 ltCallsBefore = ltYDM.yieldShareCallCount();
+        vm.recordLogs();
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(uint256(900e18)), toNAVUnits(uint256(300e18)), toNAVUnits(uint256(130e18)), ZERO_NAV_UNITS, false);
+
+        // Returned state: passthroughs, zero fees and premium, fresh utilizations
+        assertEq(uint8(state.marketState), uint8(MarketState.FIXED_TERM), "market state passthrough");
+        assertEq(toUint256(state.stRawNAV), 900e18, "st raw NAV passthrough");
+        assertEq(toUint256(state.jtRawNAV), 300e18, "jt raw NAV passthrough");
+        assertEq(toUint256(state.ltRawNAV), 130e18, "lt raw NAV passthrough");
+        assertEq(toUint256(state.stEffectiveNAV), 1_000e18, "st effective NAV unchanged by the BPT-only deposit");
+        assertEq(toUint256(state.jtEffectiveNAV), 200e18, "jt effective NAV unchanged");
+        assertEq(toUint256(state.jtCoverageImpermanentLoss), 100e18, "il passthrough");
+        assertEq(toUint256(state.ltLiquidityPremium), 0, "no premium accrues on an operation");
+        assertEq(toUint256(state.stProtocolFee), 0, "no st fee on an operation");
+        assertEq(toUint256(state.jtProtocolFee), 0, "no jt fee on an operation");
+        assertEq(toUint256(state.ltProtocolFee), 0, "no lt fee on an operation");
+        assertEq(
+            state.coverageUtilizationWAD,
+            _specCoverageUtilization(900e18, 300e18, false, DEFAULT_MIN_COVERAGE_WAD, 200e18),
+            "fresh coverage utilization, not a placeholder"
+        );
+        assertEq(
+            state.liquidityUtilizationWAD, _specLiquidityUtilization(1_000e18, DEFAULT_MIN_LIQUIDITY_WAD, 130e18), "fresh liquidity utilization on the new mark"
+        );
+        assertEq(state.fixedTermEndTimestamp, end, "fixed-term end passthrough");
+
+        // Committed checkpoints: all five NAVs written, market state and end timestamp untouched
+        IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
+        assertEq(toUint256(s.lastSTRawNAV), 900e18, "st raw NAV committed");
+        assertEq(toUint256(s.lastJTRawNAV), 300e18, "jt raw NAV committed");
+        assertEq(toUint256(s.lastLTRawNAV), 130e18, "lt raw NAV committed");
+        assertEq(toUint256(s.lastSTEffectiveNAV), 1_000e18, "st effective NAV committed");
+        assertEq(toUint256(s.lastJTEffectiveNAV), 200e18, "jt effective NAV committed");
+        assertEq(uint8(s.lastMarketState), uint8(MarketState.FIXED_TERM), "market state never changes in a post-op");
+        assertEq(s.fixedTermEndTimestamp, end, "stored fixed-term end untouched");
+        assertEq(jtYDM.yieldShareCallCount(), jtCallsBefore, "no jt accrual in a post-op");
+        assertEq(ltYDM.yieldShareCallCount(), ltCallsBefore, "no lt accrual in a post-op");
+        assertEq(_countAccountantLogs(vm.getRecordedLogs(), IRoycoDayAccountant.TrancheAccountingSynced.selector), 0, "post-op emits no sync event");
+    }
+
+    /**
+     * F10: enforce = false skips both gates for every operation from a doubly-breached market
+     * Breach seed: covUtil = ceil(1000e18 * 0.1e18 / 50e18) = 2e18 and liqUtil = ceil(1000e18 * 0.05e18 / 10e18) = 5e18
+     */
+    function test_PostOp_enforceFalseSkipsBothGatesForEveryOp() public {
+        _seedState(SEED_ST_RAW, 50e18, SEED_ST_RAW, 50e18, 0, 10e18, MarketState.PERPETUAL);
+        // ST_DEPOSIT deepens the coverage breach and still passes
+        SyncedAccountingState memory state = kernel.doPostOp(
+            Operation.ST_DEPOSIT, toNAVUnits(uint256(1_100e18)), toNAVUnits(uint256(50e18)), toNAVUnits(uint256(10e18)), ZERO_NAV_UNITS, false
+        );
+        assertGt(state.coverageUtilizationWAD, WAD, "coverage breached after the st deposit");
+        assertGt(state.liquidityUtilizationWAD, WAD, "liquidity breached after the st deposit");
+        // ST_REDEEM
+        state = kernel.doPostOp(Operation.ST_REDEEM, toNAVUnits(uint256(1_050e18)), toNAVUnits(uint256(50e18)), toNAVUnits(uint256(10e18)), ZERO_NAV_UNITS, false);
+        assertGt(state.coverageUtilizationWAD, WAD, "coverage still breached after the st redemption");
+        // JT_DEPOSIT
+        state = kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(uint256(1_050e18)), toNAVUnits(uint256(60e18)), toNAVUnits(uint256(10e18)), ZERO_NAV_UNITS, false);
+        assertGt(state.coverageUtilizationWAD, WAD, "coverage still breached after the jt deposit");
+        // JT_REDEEM deepens the coverage breach and still passes
+        state = kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(uint256(1_050e18)), toNAVUnits(uint256(50e18)), toNAVUnits(uint256(10e18)), ZERO_NAV_UNITS, false);
+        assertGt(state.coverageUtilizationWAD, WAD, "coverage still breached after the jt redemption");
+        // LT_DEPOSIT under a persisting liquidity breach still passes
+        state = kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(uint256(1_050e18)), toNAVUnits(uint256(50e18)), toNAVUnits(uint256(15e18)), ZERO_NAV_UNITS, false);
+        assertGt(state.liquidityUtilizationWAD, WAD, "liquidity still breached after the lt deposit");
+        // LT_REDEEM deepens the liquidity breach and still passes
+        state = kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(uint256(1_050e18)), toNAVUnits(uint256(50e18)), toNAVUnits(uint256(5e18)), ZERO_NAV_UNITS, false);
+        assertGt(state.coverageUtilizationWAD, WAD, "coverage still breached at the end");
+        assertGt(state.liquidityUtilizationWAD, WAD, "liquidity still breached at the end");
+    }
+
+    /**
+     * F10: the coverage gate for ST_DEPOSIT passes at coverage utilization exactly WAD and fires at WAD + 1
+     * Arithmetic: with jtEff 200e18 and minCoverage 0.1e18, depositing to stRaw 2000e18 gives
+     * covUtil = ceil(2000e18 * 0.1e18 / 200e18) = 1e18 exactly (exact division), while one more wei gives
+     * ceil((2000e18 + 1) * 0.1e18 / 200e18) = 1e18 + 1 since the product gains a 1e17 remainder
+     */
+    function test_PostOp_coverageGate_stDepositExactBoundary() public {
+        _seedFlatWithLT(200e18);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(2_000e18)), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(200e18)), ZERO_NAV_UNITS, true);
+        assertEq(state.coverageUtilizationWAD, WAD, "coverage utilization lands exactly on WAD and passes");
+        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(2_000e18 + 1)), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(200e18)), ZERO_NAV_UNITS, true);
+    }
+
+    /**
+     * F10: the coverage gate for LT_DEPOSIT (multi-asset, senior-minting) passes at exactly WAD and fires at WAD + 1
+     * Arithmetic: minting senior to stRaw 2000e18 against jtEff 200e18 gives covUtil exactly 1e18, the follow-up
+     * wei of senior against a fresh BPT wei gives ceil((2000e18 + 1) * 0.1e18 / 200e18) = 1e18 + 1
+     */
+    function test_PostOp_coverageGate_ltDepositExactBoundary() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        SyncedAccountingState memory state = kernel.doPostOp(
+            Operation.LT_DEPOSIT, toNAVUnits(uint256(2_000e18)), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(150e18)), ZERO_NAV_UNITS, true
+        );
+        assertEq(state.coverageUtilizationWAD, WAD, "coverage utilization lands exactly on WAD and passes");
+        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(uint256(2_000e18 + 1)), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(150e18 + 1)), ZERO_NAV_UNITS, true);
+    }
+
+    /**
+     * F10: the coverage gate for JT_REDEEM passes at exactly WAD and fires at WAD + 1
+     * Arithmetic: redeeming junior to jtEff 100e18 gives covUtil = 1e38 / 1e20 = 1e18 exactly, while one more
+     * wei gives ceil(1e38 / (1e20 - 1)) = 1e18 + 1 since 1e38 = (1e20 - 1) * 1e18 + 1e18
+     */
+    function test_PostOp_coverageGate_jtRedeemExactBoundary() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(uint256(100e18)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true);
+        assertEq(state.coverageUtilizationWAD, WAD, "coverage utilization lands exactly on WAD and passes");
+        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(uint256(100e18 - 1)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true);
+    }
+
+    /**
+     * F10: the liquidity gate for ST_DEPOSIT passes at liquidity utilization exactly WAD and fires at WAD + 1
+     * Arithmetic: with ltRaw 100e18 and minLiquidity 0.05e18, depositing to stEff 2000e18 gives
+     * liqUtil = ceil(2000e18 * 0.05e18 / 100e18) = 1e18 exactly, one more wei adds a 5e16 remainder so the
+     * ceil lands on 1e18 + 1 (the 300e18 junior buffer keeps covUtil at 666666666666666667, clear of its gate)
+     */
+    function test_PostOp_liquidityGate_stDepositExactBoundary() public {
+        _seedState(SEED_ST_RAW, 300e18, SEED_ST_RAW, 300e18, 0, 100e18, MarketState.PERPETUAL);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(2_000e18)), toNAVUnits(uint256(300e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true);
+        assertEq(state.liquidityUtilizationWAD, WAD, "liquidity utilization lands exactly on WAD and passes");
+        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(2_000e18 + 1)), toNAVUnits(uint256(300e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true);
+    }
+
+    /**
+     * F10: the liquidity gate for LT_DEPOSIT (multi-asset) passes at exactly WAD and fires at WAD + 1
+     * Arithmetic: minting senior to stEff 2020e18 against ltRaw 101e18 gives liqUtil = ceil(2020e18 * 0.05e18
+     * / 101e18) = 1e18 exactly. The follow-up deposit adds 21 wei of senior against one BPT wei, so the
+     * numerator grows by 21 * 5e16 = 1.05e18 while the denominator threshold grows by only 1e18, landing the
+     * ceil exactly on 1e18 + 1 (covUtil stays near 0.6733e18 against the 300e18 junior buffer)
+     */
+    function test_PostOp_liquidityGate_ltDepositExactBoundary() public {
+        _seedState(SEED_ST_RAW, 300e18, SEED_ST_RAW, 300e18, 0, 100e18, MarketState.PERPETUAL);
+        SyncedAccountingState memory state = kernel.doPostOp(
+            Operation.LT_DEPOSIT, toNAVUnits(uint256(2_020e18)), toNAVUnits(uint256(300e18)), toNAVUnits(uint256(101e18)), ZERO_NAV_UNITS, true
+        );
+        assertEq(state.liquidityUtilizationWAD, WAD, "liquidity utilization lands exactly on WAD and passes");
+        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        kernel.doPostOp(
+            Operation.LT_DEPOSIT, toNAVUnits(uint256(2_020e18 + 21)), toNAVUnits(uint256(300e18)), toNAVUnits(uint256(101e18 + 1)), ZERO_NAV_UNITS, true
+        );
+    }
+
+    /**
+     * F10: the liquidity gate for LT_REDEEM passes at exactly WAD and fires at WAD + 1
+     * Arithmetic: redeeming BPT down to ltRaw 50e18 gives liqUtil = ceil(1000e18 * 0.05e18 / 50e18) = 1e18
+     * exactly, one more redeemed wei gives ceil(5e37 / (5e19 - 1)) = 1e18 + 1 since 5e37 = (5e19 - 1) * 1e18 + 1e18
+     */
+    function test_PostOp_liquidityGate_ltRedeemExactBoundary() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(50e18)), ZERO_NAV_UNITS, true);
+        assertEq(state.liquidityUtilizationWAD, WAD, "liquidity utilization lands exactly on WAD and passes");
+        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(50e18 - 1)), ZERO_NAV_UNITS, true);
+    }
+
+    /**
+     * F10 + REAL FINDING (spec conflict, behavior pinned, adjudication needed): an in-kind BPT-only LT deposit
+     * that IMPROVES a breached liquidity utilization but does not fully heal it reverts under enforcement
+     *
+     * CLAUDE.md's redemption-gate section and invariants state "Deposits are never liquidity-gated ... an LT
+     * deposit only raises ltRawNAV ... so no deposit is ever blocked on liquidity", yet the implementation
+     * gates LT_DEPOSIT (and ST_DEPOSIT) on the liquidity requirement. CLAUDE.md is internally inconsistent:
+     * its own product-requirements section demands a "minimum percentage of liquidity required for senior
+     * tranche deposits" and maxSTDeposit's documented liquidity leg (testing-strategy F15) exists solely to
+     * bound deposits by liquidity. The sharp consequence pinned here is that enforcement blocks the exact
+     * restoring force (external LT deposits) the spec relies on to heal a breach, unless the kernel passes
+     * enforce = false for LT deposits. Severity rests on the kernel's flag choice — flagged for adjudication
+     */
+    function test_PostOp_liquidityGate_blocksHealingLTDepositUnderBreach() public {
+        _seedState(SEED_ST_RAW, SEED_JT_RAW, SEED_ST_RAW, SEED_JT_RAW, 0, 10e18, MarketState.PERPETUAL);
+        // A BPT-only deposit lifting ltRaw from 10e18 to 25e18 improves liqUtil from 5e18 to 2e18 yet reverts
+        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(25e18)), ZERO_NAV_UNITS, true);
+        // Healing the breach entirely (ltRaw 50e18 puts liqUtil at exactly WAD) is the only enforced way in
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(50e18)), ZERO_NAV_UNITS, true);
+        assertEq(state.liquidityUtilizationWAD, WAD, "a fully healing lt deposit passes at exactly WAD");
+    }
+
+    /**
+     * F10 exemptions: ST_REDEEM and JT_DEPOSIT pass BOTH breached gates with enforcement on
+     * NOTE an ST redemption with a bonus consumes the junior buffer and can worsen coverage, but the
+     * accountant exempts it by design — the kernel bounds the bonus to be utilization-neutral (F19)
+     */
+    function test_PostOp_gateExemptions_stRedeemAndJTDepositPassBothBreaches() public {
+        _seedState(SEED_ST_RAW, 50e18, SEED_ST_RAW, 50e18, 0, 10e18, MarketState.PERPETUAL);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.ST_REDEEM, toNAVUnits(uint256(990e18)), toNAVUnits(uint256(50e18)), toNAVUnits(uint256(10e18)), ZERO_NAV_UNITS, true);
+        assertGt(state.coverageUtilizationWAD, WAD, "coverage breached yet the st redemption passed");
+        assertGt(state.liquidityUtilizationWAD, WAD, "liquidity breached yet the st redemption passed");
+        state = kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(uint256(990e18)), toNAVUnits(uint256(51e18)), toNAVUnits(uint256(10e18)), ZERO_NAV_UNITS, true);
+        assertGt(state.coverageUtilizationWAD, WAD, "coverage breached yet the jt deposit passed");
+        assertGt(state.liquidityUtilizationWAD, WAD, "liquidity breached yet the jt deposit passed");
+    }
+
+    /// F10 exemption: JT_REDEEM passes an enforced liquidity breach because a junior redemption cannot reduce pooled depth
+    function test_PostOp_gateExemptions_jtRedeemPassesLiquidityBreach() public {
+        _seedFlatWithLT(10e18);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(uint256(150e18)), toNAVUnits(uint256(10e18)), ZERO_NAV_UNITS, true);
+        assertGt(state.liquidityUtilizationWAD, WAD, "liquidity breached yet the jt redemption passed");
+        assertLe(state.coverageUtilizationWAD, WAD, "its own coverage gate was satisfied");
+    }
+
+    /// F10 exemption: LT_REDEEM passes an enforced coverage breach because a liquidity redemption cannot add senior exposure
+    function test_PostOp_gateExemptions_ltRedeemPassesCoverageBreach() public {
+        _seedState(SEED_ST_RAW, 50e18, SEED_ST_RAW, 50e18, 0, SEED_LT_RAW, MarketState.PERPETUAL);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(uint256(50e18)), toNAVUnits(uint256(60e18)), ZERO_NAV_UNITS, true);
+        assertGt(state.coverageUtilizationWAD, WAD, "coverage breached yet the lt redemption passed");
+        assertLe(state.liquidityUtilizationWAD, WAD, "its own liquidity gate was satisfied");
+    }
+
+    /// F11: commitLiquidityTrancheRawNAV writes the committed liquidity raw NAV with its exact event
+    function test_Commit_writesLastLTRawNAVWithEvent() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectEmit(true, true, true, true, address(accountant));
+        emit IRoycoDayAccountant.LiquidityTrancheRawNAVCommitted(toNAVUnits(uint256(77e18)));
+        kernel.doCommit(toNAVUnits(uint256(77e18)));
+        assertEq(toUint256(accountant.getState().lastLTRawNAV), 77e18, "lt raw NAV committed");
+    }
+
+    /**
+     * F11: the committed liquidity raw NAV drives the next accrual's liquidity utilization and the
+     * maxSTDeposit liquidity leg
+     * Derivation: liqUtil = ceil(1000e18 * 0.05e18 / 77e18) = 649350649350649351 (remainder forces the ceil up)
+     * and the liquidity leg is floor(77e18 * 1e18 / 0.05e18) - 1000e18 = 540e18 against a 1000e18 coverage leg
+     */
+    function test_Commit_affectsNextAccrualUtilizationAndMaxSTDeposit() public {
+        _seedAndInitAccrual();
+        kernel.doCommit(toNAVUnits(uint256(77e18)));
+        vm.warp(block.timestamp + 100);
+        kernel.doPreOp(toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW));
+        assertEq(ltYDM.lastYieldShareUtilizationWAD(), 649_350_649_350_649_351, "lt ydm consulted with the committed-lt liquidity utilization");
+        assertEq(toUint256(accountant.maxSTDeposit(_checkpointState())), 540e18, "liquidity leg reflects the committed lt raw NAV");
+    }
+
+    /*//////////////////////////////////////////////////////////////////////
+                                G UTILIZATION
+    //////////////////////////////////////////////////////////////////////*/
+
+    /**
+     * G1 + G2: zero minimum requirements short-circuit both utilizations to 0 before any max edge can fire —
+     * a live senior exposure against a zero junior buffer and zero market-making inventory reads (0, 0), so
+     * the fully enforced deposit passes both gates
+     */
+    function test_Utilization_bothZeroWhenMinimumRequirementsZero() public {
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
+        p.minCoverageWAD = 0;
+        p.minLiquidityWAD = 0;
+        _deploy(false, p);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, true);
+        assertEq(state.coverageUtilizationWAD, 0, "zero minimum coverage short-circuits before the empty-buffer max edge");
+        assertEq(state.liquidityUtilizationWAD, 0, "zero minimum liquidity short-circuits before the empty-inventory max edge");
+    }
+
+    /**
+     * G1 + G2: a zero covered exposure reads a zero coverage utilization and a zero senior effective NAV reads
+     * a zero liquidity utilization, each taking precedence over its own zero-denominator max edge
+     */
+    function test_Utilization_zeroExposureAndZeroSTEffectivePrecedeMaxEdges() public {
+        SyncedAccountingState memory state = kernel.doPostOp(Operation.JT_DEPOSIT, ZERO_NAV_UNITS, toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS, true);
+        assertEq(state.coverageUtilizationWAD, 0, "no covered exposure so coverage utilization is zero despite the live buffer");
+        assertEq(state.liquidityUtilizationWAD, 0, "zero senior effective NAV precedes the zero-inventory max edge");
+    }
+
+    /**
+     * G1 + G2: live exposure against a zero junior buffer reads a uint256 max coverage utilization, and live
+     * senior value against a zero market-making inventory reads a uint256 max liquidity utilization — and the
+     * enforced gate then rejects the next senior deposit on the coverage side first
+     */
+    function test_Utilization_bothMaxWhenBuffersZero() public {
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
+        assertEq(state.coverageUtilizationWAD, type(uint256).max, "zero junior buffer against live exposure reads max");
+        assertEq(state.liquidityUtilizationWAD, type(uint256).max, "zero inventory against live senior value reads max");
+        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(100e18 + 1)), ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, true);
+    }
+
+    /**
+     * G1 + G2: ceil bias exactness on awkward values against independent math — each utilization matches the
+     * spec formula and satisfies util * denominator >= product > (util - 1) * denominator
+     */
+    function test_Utilization_ceilBiasExactness() public {
+        _seedState(SEED_ST_RAW, 300e18, SEED_ST_RAW, 300e18, 0, 100e18, MarketState.PERPETUAL);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + 7), toNAVUnits(uint256(300e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, false);
+        uint256 covUtil = state.coverageUtilizationWAD;
+        uint256 covProduct = (SEED_ST_RAW + 7) * uint256(DEFAULT_MIN_COVERAGE_WAD);
+        assertEq(covUtil, _specCoverageUtilization(SEED_ST_RAW + 7, 300e18, false, DEFAULT_MIN_COVERAGE_WAD, 300e18), "coverage matches the independent ceil");
+        assertGe(covUtil * 300e18, covProduct, "coverage ceil bias covers the exact product");
+        assertLt((covUtil - 1) * 300e18, covProduct, "coverage ceil tightness, one less would under-cover");
+        uint256 liqUtil = state.liquidityUtilizationWAD;
+        uint256 liqProduct = (SEED_ST_RAW + 7) * uint256(DEFAULT_MIN_LIQUIDITY_WAD);
+        assertEq(liqUtil, _specLiquidityUtilization(SEED_ST_RAW + 7, DEFAULT_MIN_LIQUIDITY_WAD, 100e18), "liquidity matches the independent ceil");
+        assertGe(liqUtil * 100e18, liqProduct, "liquidity ceil bias covers the exact product");
+        assertLt((liqUtil - 1) * 100e18, liqProduct, "liquidity ceil tightness, one less would under-cover");
+    }
+
+    /**
+     * G1: the JT_COINVESTED immutable toggles the junior raw NAV in the coverage numerator
+     * Derivation: after a 50e18 junior deposit, coinvested reads ceil((1000e18 + 250e18) * 0.1e18 / 250e18)
+     * = 0.5e18 while the risk-free-junior twin reads ceil(1000e18 * 0.1e18 / 250e18) = 0.4e18
+     */
+    function test_Utilization_coverageCoinvestedIncludesJTRaw() public {
+        _deploy(true, _defaultParams());
+        _seedFlatWithLT(SEED_LT_RAW);
+        SyncedAccountingState memory coinvested =
+            kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(uint256(250e18)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+        assertEq(coinvested.coverageUtilizationWAD, 0.5e18, "coinvested numerator includes the junior raw NAV");
+
+        _deploy(false, _defaultParams());
+        _seedFlatWithLT(SEED_LT_RAW);
+        SyncedAccountingState memory riskFree =
+            kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(uint256(250e18)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+        assertEq(riskFree.coverageUtilizationWAD, 0.4e18, "risk-free-junior numerator excludes the junior raw NAV");
+    }
+
+    /**
+     * G2: a zero minimum liquidity reads zero even against a zero market-making inventory, taking precedence
+     * over the zero-inventory max edge, so the enforced senior deposit passes its liquidity gate
+     */
+    function test_Utilization_liquidityZeroWhenMinLiquidityZero() public {
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
+        p.minLiquidityWAD = 0;
+        _deploy(false, p);
+        _seedFlatWithLT(0);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + 100e18), toNAVUnits(SEED_JT_RAW), ZERO_NAV_UNITS, ZERO_NAV_UNITS, true);
+        assertEq(state.liquidityUtilizationWAD, 0, "zero minimum liquidity precedes the zero-inventory max edge");
+        assertLe(state.coverageUtilizationWAD, WAD, "coverage gate satisfied on its own terms");
+    }
+
+    /// G2: a zero market-making inventory against a live requirement reads uint256 max and fires the enforced liquidity gate
+    function test_Utilization_liquidityMaxWhenLTRawZero() public {
+        _seedFlatWithLT(0);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + 10e18), toNAVUnits(SEED_JT_RAW), ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
+        assertEq(state.liquidityUtilizationWAD, type(uint256).max, "zero inventory against a live requirement reads max");
+        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + 11e18), toNAVUnits(SEED_JT_RAW), ZERO_NAV_UNITS, ZERO_NAV_UNITS, true);
+    }
+
+    /**
+     * G3: the pre-op returned state carries zero placeholders for the liquidity raw NAV and utilization (the
+     * kernel refreshes them after committing the fresh mark) without clobbering the committed liquidity mark,
+     * while the post-op returns the fresh real values
+     */
+    function test_Utilization_preOpPlaceholdersAndPostOpFreshValues() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        SyncedAccountingState memory preOpState = kernel.doPreOp(toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW));
+        assertEq(toUint256(preOpState.ltRawNAV), 0, "pre-op lt raw NAV is a zero placeholder");
+        assertEq(preOpState.liquidityUtilizationWAD, 0, "pre-op liquidity utilization is a zero placeholder");
+        assertEq(toUint256(accountant.getState().lastLTRawNAV), SEED_LT_RAW, "the placeholder never clobbers the committed lt mark");
+
+        // The post-op returns the freshly marked liquidity values: liqUtil = ceil(1010e18 * 0.05e18 / 100e18) = 0.505e18
+        SyncedAccountingState memory postOpState =
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+        assertEq(toUint256(postOpState.ltRawNAV), SEED_LT_RAW, "post-op returns the real lt raw NAV");
+        assertEq(postOpState.liquidityUtilizationWAD, 0.505e18, "post-op returns the fresh liquidity utilization");
+    }
+
+    /*//////////////////////////////////////////////////////////////////////
+                                H MAX OPERATIONS
+    //////////////////////////////////////////////////////////////////////*/
+
+    /// H1: with both minimum requirements zero the senior deposit capacity is unbounded (MAX_NAV_UNITS)
+    function test_MaxSTDeposit_unboundedWhenBothRequirementsZero() public view {
+        SyncedAccountingState memory st = _bareState(1_000e18, 200e18, 100e18, 1_000e18, 200e18, false, 0, 0);
+        assertEq(toUint256(accountant.maxSTDeposit(st)), toUint256(MAX_NAV_UNITS), "no requirement leaves senior capacity unbounded");
+    }
+
+    /**
+     * H1: with a zero minimum liquidity the result is the coverage leg alone:
+     * floor(jtEff * WAD / minCoverage) - ((coinvested ? jtRaw : 0) + jtDust + stRaw + stDust)
+     * Derivation: floor(200e18 * 1e18 / 0.1e18) = 2000e18, minus (0 + 7 + 1000e18 + 3) = 1000e18 - 10, and the
+     * 500e18 junior raw NAV is correctly excluded from the subtrahend when not coinvested
+     *
+     * Pinned quirk (map H1, RoycoDayAccountant.sol:367): jtNAVDustTolerance is subtracted REGARDLESS of
+     * state.jtCoinvested even though jtRaw itself is excluded when not coinvested. Judged against the F15 spec
+     * intent (dust slack rounds in the protocol's favor): the unconditional jtDust only shrinks reported
+     * capacity by at most jtDust wei and can never admit a deposit that would breach the enforced coverage
+     * gate, so it is intentional conservatism guarding junior-side NAV rounding drift in the jtEff denominator,
+     * not a defect. The cost is that the view under-reports senior capacity by jtDust when JT sits in the RFR
+     */
+    function test_MaxSTDeposit_coverageLegExactWithJTDustRegardlessOfCoinvestment() public {
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
+        p.stNAVDustTolerance = toNAVUnits(uint256(3));
+        p.jtNAVDustTolerance = toNAVUnits(uint256(7));
+        _deploy(false, p);
+        SyncedAccountingState memory st = _bareState(1_000e18, 500e18, 0, 1_000e18, 200e18, false, 0.1e18, 0);
+        assertEq(toUint256(accountant.maxSTDeposit(st)), 1_000e18 - 10, "coverage leg exact, jtDust included despite no coinvestment");
+    }
+
+    /**
+     * H1: the coinvested coverage leg additionally subtracts the junior raw NAV
+     * Derivation: 2000e18 - (500e18 + 7 + 1000e18 + 3) = 500e18 - 10
+     * NOTE the view honors state.jtCoinvested rather than the immutable — the kernel always marshals the state
+     * from the immutable so they coincide in production, pinned here by toggling only the state field
+     */
+    function test_MaxSTDeposit_coinvestedAddsJTRawToCoverageLeg() public {
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
+        p.stNAVDustTolerance = toNAVUnits(uint256(3));
+        p.jtNAVDustTolerance = toNAVUnits(uint256(7));
+        _deploy(false, p);
+        SyncedAccountingState memory st = _bareState(1_000e18, 500e18, 0, 1_000e18, 200e18, true, 0.1e18, 0);
+        assertEq(toUint256(accountant.maxSTDeposit(st)), 500e18 - 10, "coinvested coverage leg subtracts the junior raw NAV too");
+    }
+
+    /**
+     * H1: with a zero minimum coverage the result is the liquidity leg alone:
+     * floor(ltRaw * WAD / minLiquidity) - (stEff + stDust)
+     * Derivation with zero dust: floor(123e18 * 1e18 / 0.05e18) = 2460e18, minus (1000e18 + 7) = 1460e18 - 7
+     */
+    function test_MaxSTDeposit_liquidityLegExactWhenMinCoverageZero() public view {
+        SyncedAccountingState memory st = _bareState(900e18, 200e18, 123e18, 1_000e18 + 7, 200e18, false, 0, 0.05e18);
+        assertEq(toUint256(accountant.maxSTDeposit(st)), 1_460e18 - 7, "liquidity leg exact against the senior effective NAV");
+    }
+
+    /// H1: each leg saturates to zero instead of underflowing when the requirement already binds
+    function test_MaxSTDeposit_legsSaturateToZero() public view {
+        // Coverage leg: the junior buffer covers only 500e18 against a 1000e18 senior raw NAV
+        SyncedAccountingState memory covBound = _bareState(1_000e18, 0, 0, 1_000e18, 50e18, false, 0.1e18, 0);
+        assertEq(toUint256(accountant.maxSTDeposit(covBound)), 0, "over-deployed coverage saturates to zero");
+        // Liquidity leg: the inventory supports only 100e18 of senior value against a live 1000e18
+        SyncedAccountingState memory liqBound = _bareState(1_000e18, 0, 10e18, 1_000e18, 200e18, false, 0, 0.1e18);
+        assertEq(toUint256(accountant.maxSTDeposit(liqBound)), 0, "over-deployed liquidity saturates to zero");
+    }
+
+    /**
+     * H1: the result is the minimum of the two legs, exercised in both directions
+     * Derivation: the coverage leg is 2000e18 - 1000e18 = 1000e18 in both states, while the liquidity leg is
+     * floor(80e18 / 0.05) - 1000e18 = 600e18 in the first and floor(200e18 / 0.05) - 1000e18 = 3000e18 in the second
+     */
+    function test_MaxSTDeposit_returnsMinOfBothLegs() public view {
+        SyncedAccountingState memory liquidityBinds = _bareState(1_000e18, 0, 80e18, 1_000e18, 200e18, false, 0.1e18, 0.05e18);
+        assertEq(toUint256(accountant.maxSTDeposit(liquidityBinds)), 600e18, "liquidity leg binds");
+        SyncedAccountingState memory coverageBinds = _bareState(1_000e18, 0, 200e18, 1_000e18, 200e18, false, 0.1e18, 0.05e18);
+        assertEq(toUint256(accountant.maxSTDeposit(coverageBinds)), 1_000e18, "coverage leg binds");
+    }
+
+    /**
+     * H2: coverage-binding inversion with zero dust — depositing exactly maxSTDeposit passes the enforced
+     * gates landing coverage utilization exactly on WAD, and one more wei violates
+     * Legs at the seed: coverage = floor(200e18 * 1e18 / 0.1e18) - 1000e18 = 1000e18 and
+     * liquidity = floor(1000e18 * 1e18 / 0.05e18) - 1000e18 = 19000e18, so coverage binds with zero slack
+     */
+    function test_MaxSTDeposit_inversionCoverageBinding() public {
+        _seedFlatWithLT(1_000e18);
+        NAV_UNIT max = accountant.maxSTDeposit(_checkpointState());
+        assertEq(toUint256(max), 1_000e18, "coverage leg binds at the independently derived value");
+        SyncedAccountingState memory state = kernel.doPostOp(
+            Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + toUint256(max)), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(1_000e18)), ZERO_NAV_UNITS, true
+        );
+        assertEq(state.coverageUtilizationWAD, WAD, "the exact max lands coverage utilization on WAD");
+        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        kernel.doPostOp(
+            Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + toUint256(max) + 1), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(1_000e18)), ZERO_NAV_UNITS, true
+        );
+    }
+
+    /**
+     * H2: liquidity-binding inversion with zero dust — the exact max lands liquidity utilization on WAD and
+     * one more wei violates the liquidity requirement
+     * Legs at the seed: coverage = floor(300e18 / 0.1) - 1000e18 = 2000e18 and liquidity = floor(100e18 / 0.05)
+     * - 1000e18 = 1000e18, so liquidity binds with zero slack
+     */
+    function test_MaxSTDeposit_inversionLiquidityBinding() public {
+        _seedState(SEED_ST_RAW, 300e18, SEED_ST_RAW, 300e18, 0, 100e18, MarketState.PERPETUAL);
+        NAV_UNIT max = accountant.maxSTDeposit(_checkpointState());
+        assertEq(toUint256(max), 1_000e18, "liquidity leg binds at the independently derived value");
+        SyncedAccountingState memory state = kernel.doPostOp(
+            Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + toUint256(max)), toNAVUnits(uint256(300e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true
+        );
+        assertEq(state.liquidityUtilizationWAD, WAD, "the exact max lands liquidity utilization on WAD");
+        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        kernel.doPostOp(
+            Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + toUint256(max) + 1), toNAVUnits(uint256(300e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true
+        );
+    }
+
+    /**
+     * H2: the dust slack boundary — with st dust 3 and jt dust 7 the reported max under-shoots the true
+     * coverage boundary by exactly the 10 wei slack, so max passes, max + slack still passes (landing exactly
+     * on WAD), and max + slack + 1 violates
+     */
+    function test_MaxSTDeposit_inversionDustSlackBoundary() public {
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
+        p.stNAVDustTolerance = toNAVUnits(uint256(3));
+        p.jtNAVDustTolerance = toNAVUnits(uint256(7));
+        _deploy(false, p);
+        _seedFlatWithLT(1_000e18);
+        NAV_UNIT max = accountant.maxSTDeposit(_checkpointState());
+        assertEq(toUint256(max), 1_000e18 - 10, "coverage leg minus the combined dust slack");
+        // Deposit exactly the reported max
+        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + toUint256(max)), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(1_000e18)), ZERO_NAV_UNITS, true);
+        // Consume the 10 wei dust slack, landing coverage utilization exactly on WAD
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(2_000e18)), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(1_000e18)), ZERO_NAV_UNITS, true);
+        assertEq(state.coverageUtilizationWAD, WAD, "the slack consumed lands exactly on WAD");
+        // One wei beyond max + slack violates
+        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(2_000e18 + 1)), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(1_000e18)), ZERO_NAV_UNITS, true);
+    }
+
+    /**
+     * H3: the flat-market closed form with zero dust — surplus = jtEff - ceil(stRaw * minCoverage / WAD) - 2,
+     * the claim fractions are (0, WAD), retention is WAD when not coinvested, so the split is (0, surplus)
+     * Derivation: (0, 200e18 - 100e18 - 2)
+     */
+    function test_MaxJTWithdrawal_flatMarketClosedForm() public view {
+        SyncedAccountingState memory st = _bareState(1_000e18, 200e18, 100e18, 1_000e18, 200e18, false, 0.1e18, DEFAULT_MIN_LIQUIDITY_WAD);
+        (NAV_UNIT stW, NAV_UNIT jtW) = accountant.maxJTWithdrawal(st);
+        assertEq(toUint256(stW), 0, "flat market claims nothing from the senior raw NAV");
+        assertEq(toUint256(jtW), 100e18 - 2, "junior withdrawable equals the surplus minus the 2 wei fudge");
+    }
+
+    /**
+     * H3: the surplus early-out boundary — a junior buffer of exactly the required value plus the 2 wei fudge
+     * reports (0, 0), and one more wei reports (0, 1)
+     */
+    function test_MaxJTWithdrawal_zeroAtSurplusBoundary() public view {
+        SyncedAccountingState memory atBoundary = _bareState(1_000e18, 100e18 + 2, 0, 1_000e18, 100e18 + 2, false, 0.1e18, 0);
+        (NAV_UNIT stW, NAV_UNIT jtW) = accountant.maxJTWithdrawal(atBoundary);
+        assertEq(toUint256(stW) + toUint256(jtW), 0, "the 2 wei fudge makes the surplus exactly zero");
+        SyncedAccountingState memory oneAbove = _bareState(1_000e18, 100e18 + 3, 0, 1_000e18, 100e18 + 3, false, 0.1e18, 0);
+        (stW, jtW) = accountant.maxJTWithdrawal(oneAbove);
+        assertEq(toUint256(stW), 0, "still nothing from the senior raw NAV");
+        assertEq(toUint256(jtW), 1, "one wei above the fudge boundary is withdrawable");
+    }
+
+    /**
+     * H3: the totalJTClaims == 0 early-out returns (0, 0)
+     * NOTE (map correction): under NAV conservation totalJTClaims always equals jtEffectiveNAV, and a zero
+     * junior effective NAV is already caught by the surplus early-out, so this branch is reachable only with a
+     * non-conserved state — it is a defensive arm, exercised here with a deliberately non-conserved input.
+     * NOTE (map correction): the totalNAVClaimable == 0 early-out at :436 is fully unreachable — with a
+     * positive surplus, mulDiv(surplus, WAD, retention) >= surplus >= 1 because retention is in [1, WAD]
+     */
+    function test_MaxJTWithdrawal_zeroWhenTotalJTClaimsZero() public view {
+        SyncedAccountingState memory st = _bareState(0, 10e18, 0, 10e18, 10e18, false, 0.1e18, 0);
+        (NAV_UNIT stW, NAV_UNIT jtW) = accountant.maxJTWithdrawal(st);
+        assertEq(toUint256(stW) + toUint256(jtW), 0, "zero total junior claims early-outs to nothing withdrawable");
+    }
+
+    /**
+     * H3: the cross-claim fraction split matches the independent floor-by-floor mirror
+     * State: (stRaw 1000e18, jtRaw 200e18, stEff 980e18, jtEff 220e18) so the junior claims are 20e18 on the
+     * senior raw NAV and 200e18 on its own, not coinvested, minCoverage 0.1e18, zero dust
+     */
+    function test_MaxJTWithdrawal_crossClaimFractionSplitExact() public view {
+        SyncedAccountingState memory st = _bareState(1_000e18, 200e18, SEED_LT_RAW, 980e18, 220e18, false, 0.1e18, DEFAULT_MIN_LIQUIDITY_WAD);
+        (NAV_UNIT stW, NAV_UNIT jtW) = accountant.maxJTWithdrawal(st);
+        // Mirror: required = ceil(1000e18 * 0.1e18 / 1e18) = 100e18, surplus = 220e18 - 100e18 - 2
+        uint256 surplus = 220e18 - 100e18 - 2;
+        // Claims per F14: jtClaimOnST = satSub(220e18 - 200e18) = 20e18 and jtClaimOnJT = 200e18 - satSub(980e18 - 1000e18) = 200e18
+        uint256 fracST = (uint256(20e18) * WAD) / 220e18;
+        uint256 fracJT = (uint256(200e18) * WAD) / 220e18;
+        // Not coinvested, so only the senior-claim fraction erodes coverage per withdrawn NAV unit
+        uint256 retention = WAD - ((uint256(0.1e18) * fracST) / WAD);
+        uint256 claimable = (surplus * WAD) / retention;
+        assertEq(toUint256(stW), (claimable * fracST) / WAD, "senior-side withdrawable value floors exactly");
+        assertEq(toUint256(jtW), (claimable * fracJT) / WAD, "junior-side withdrawable value floors exactly");
+        assertLe(toUint256(stW) + toUint256(jtW), claimable, "compounded floors keep the split within the claimable total");
+    }
+
+    /**
+     * H3: coinvestment toggles the required value (adds jtRaw), the dust term (adds jtDust — note the mirror
+     * asymmetry with maxSTDeposit, which always includes jtDust), and the retention fraction (adds the
+     * junior-claim fraction), all pinned against the independent mirror on one deployment
+     */
+    function test_MaxJTWithdrawal_coinvestedTogglesRequiredDustAndRetention() public {
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
+        p.stNAVDustTolerance = toNAVUnits(uint256(3));
+        p.jtNAVDustTolerance = toNAVUnits(uint256(7));
+        _deploy(false, p);
+        // Coinvested flat state: required = ceil(1200e18 * 0.1) = 120e18, surplus = 200e18 - (120e18 + 3 + 7 + 2),
+        // retention = 1e18 - floor(0.1e18 * (0 + 1e18) / 1e18) = 0.9e18, claimable = floor(surplus * 1e18 / 0.9e18)
+        SyncedAccountingState memory coinvested = _bareState(1_000e18, 200e18, 0, 1_000e18, 200e18, true, 0.1e18, 0);
+        (NAV_UNIT stW, NAV_UNIT jtW) = accountant.maxJTWithdrawal(coinvested);
+        uint256 surplus = 200e18 - (120e18 + 3 + 7 + 2);
+        uint256 claimable = (surplus * WAD) / 0.9e18;
+        assertEq(toUint256(stW), 0, "flat claims put nothing on the senior raw NAV");
+        assertEq(toUint256(jtW), claimable, "coinvested junior withdrawable grossed up by the retention");
+        // Risk-free twin on the same deployment: required = 100e18, jtDust excluded, retention = WAD
+        SyncedAccountingState memory riskFree = _bareState(1_000e18, 200e18, 0, 1_000e18, 200e18, false, 0.1e18, 0);
+        (stW, jtW) = accountant.maxJTWithdrawal(riskFree);
+        assertEq(toUint256(stW), 0, "flat claims put nothing on the senior raw NAV");
+        assertEq(toUint256(jtW), 100e18 - 5, "risk-free junior withdrawable excludes jtDust from the slack");
+    }
+
+    /**
+     * H4: the +2 wei fudge boundary — redeeming exactly maxJTWithdrawal passes the enforced coverage gate, the
+     * two fudge wei can still be withdrawn one at a time (coverage utilization stays at WAD by ceil), and the
+     * third extra wei is the first to violate
+     * Arithmetic: max leaves jtEff at 1e20 + 2 where ceil(1e38 / (1e20 + k)) = 1e18 for k in {0, 1, 2} while
+     * ceil(1e38 / (1e20 - 1)) = 1e18 + 1
+     */
+    function test_MaxJTWithdrawal_inversionFudgeBoundary() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        (NAV_UNIT stW, NAV_UNIT jtW) = accountant.maxJTWithdrawal(_checkpointState());
+        assertEq(toUint256(stW), 0, "flat market withdraws from the junior raw NAV only");
+        assertEq(toUint256(jtW), 100e18 - 2, "max reported with the 2 wei fudge");
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW - toUint256(jtW)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true);
+        assertEq(state.coverageUtilizationWAD, WAD, "the exact max lands coverage utilization on WAD");
+        state = kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(uint256(100e18 + 1)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true);
+        assertEq(state.coverageUtilizationWAD, WAD, "max + 1 still passes inside the fudge");
+        state = kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(uint256(100e18)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true);
+        assertEq(state.coverageUtilizationWAD, WAD, "max + 2 exhausts the fudge exactly at WAD");
+        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(uint256(100e18 - 1)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true);
+    }
+
+    /**
+     * H4: cross-claim inversion — redeeming exactly the (stW, jtW) split from a JT-cross-claim checkpoint
+     * passes the enforced coverage gate, and a further 1000 wei violates
+     * Slack anatomy for this vector: the 2 wei fudge, up to ~3 wei of compounded mulDiv floors, and — the
+     * dominant term — the floored claim fractions summing to 1e18 - 1 rather than 1e18, which strands about
+     * claimable / 1e18 (~121 wei here) of the claimable total un-split, so the probe uses a 1000 wei margin
+     */
+    function test_MaxJTWithdrawal_inversionCrossClaim() public {
+        _seedState(1_000e18, 200e18, 980e18, 220e18, 0, SEED_LT_RAW, MarketState.PERPETUAL);
+        (NAV_UNIT stW, NAV_UNIT jtW) = accountant.maxJTWithdrawal(_checkpointState());
+        assertGt(toUint256(stW), 0, "the cross-claim state withdraws from the senior raw NAV too");
+        SyncedAccountingState memory state = kernel.doPostOp(
+            Operation.JT_REDEEM,
+            toNAVUnits(1_000e18 - toUint256(stW)),
+            toNAVUnits(200e18 - toUint256(jtW)),
+            toNAVUnits(SEED_LT_RAW),
+            ZERO_NAV_UNITS,
+            true
+        );
+        assertLe(state.coverageUtilizationWAD, WAD, "the exact cross-claim max clears the enforced coverage gate");
+        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        kernel.doPostOp(
+            Operation.JT_REDEEM,
+            toNAVUnits(1_000e18 - toUint256(stW)),
+            toNAVUnits(200e18 - toUint256(jtW) - 1000),
+            toNAVUnits(SEED_LT_RAW),
+            ZERO_NAV_UNITS,
+            true
+        );
+    }
+
+    /// H5: with a zero minimum liquidity the entire liquidity raw NAV is withdrawable
+    function test_MaxLTWithdrawal_fullLTRawWhenMinLiquidityZero() public view {
+        SyncedAccountingState memory st = _bareState(1_000e18, 200e18, 77e18, 1_000e18, 200e18, false, 0.1e18, 0);
+        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 77e18, "no requirement leaves the full inventory withdrawable");
+    }
+
+    /**
+     * H5: a coverage utilization at or above the liquidation threshold unlocks the entire liquidity raw NAV,
+     * inclusive at the exact boundary and at the uint256 max wipeout reading, while one below stays restricted
+     */
+    function test_MaxLTWithdrawal_fullLTRawAtLiquidationBoundary() public view {
+        SyncedAccountingState memory st = _bareState(1_000e18, 200e18, 100e18, 1_000e18, 200e18, false, 0.1e18, 0.05e18);
+        st.coverageLiquidationUtilizationWAD = DEFAULT_LIQUIDATION_UTILIZATION_WAD;
+        st.coverageUtilizationWAD = DEFAULT_LIQUIDATION_UTILIZATION_WAD;
+        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 100e18, "the exact liquidation boundary unlocks the full inventory");
+        st.coverageUtilizationWAD = type(uint256).max;
+        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 100e18, "a wipeout-grade utilization unlocks the full inventory");
+        st.coverageUtilizationWAD = DEFAULT_LIQUIDATION_UTILIZATION_WAD - 1;
+        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 50e18, "one below the boundary stays requirement-restricted");
+    }
+
+    /**
+     * H5: the closed form ceils the required depth and saturates to zero
+     * Derivation: required = ceil((1000e18 + 7) * 0.05e18 / 1e18) = 50e18 + 1 (the 0.35 wei product remainder
+     * rounds up), so 100e18 of inventory leaves 50e18 - 1 withdrawable, an inventory of 40e18 saturates to
+     * zero, and an st dust of 3 shrinks the withdrawable to 50e18 - 4
+     */
+    function test_MaxLTWithdrawal_closedFormCeilAndSaturation() public {
+        SyncedAccountingState memory st = _bareState(1_000e18, 200e18, 100e18, 1_000e18 + 7, 200e18, false, 0.1e18, 0.05e18);
+        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 50e18 - 1, "inner ceil rounds the required depth up");
+        st.ltRawNAV = toNAVUnits(uint256(40e18));
+        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 0, "under-provisioned inventory saturates to zero");
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
+        p.stNAVDustTolerance = toNAVUnits(uint256(3));
+        _deploy(false, p);
+        st.ltRawNAV = toNAVUnits(uint256(100e18));
+        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 50e18 - 4, "st dust tolerance shrinks the withdrawable depth");
+    }
+
+    /**
+     * H5: inversion against the LT_REDEEM liquidity gate — redeeming exactly maxLTWithdrawal passes with
+     * enforcement landing liquidity utilization exactly on WAD, and one more wei violates
+     * Derivation: max = 100e18 - ceil(1000e18 * 0.05e18 / 1e18) = 50e18 with zero dust
+     */
+    function test_MaxLTWithdrawal_inversionExactBoundary() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        NAV_UNIT max = accountant.maxLTWithdrawal(_checkpointState());
+        assertEq(toUint256(max), 50e18, "closed form at the flat seed");
+        SyncedAccountingState memory state = kernel.doPostOp(
+            Operation.LT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW - toUint256(max)), ZERO_NAV_UNITS, true
+        );
+        assertEq(state.liquidityUtilizationWAD, WAD, "the exact max lands liquidity utilization on WAD");
+        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        kernel.doPostOp(
+            Operation.LT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW - toUint256(max) - 1), ZERO_NAV_UNITS, true
+        );
+    }
+
+    // Part 4 appends below this line, before the closing brace
 }
