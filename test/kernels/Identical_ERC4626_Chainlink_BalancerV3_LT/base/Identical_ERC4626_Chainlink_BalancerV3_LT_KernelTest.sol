@@ -7,6 +7,7 @@ import { IERC20Metadata } from "../../../../lib/openzeppelin-contracts/contracts
 import { AggregatorV3Interface } from "../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
 import { IdenticalAssets_ST_JT_ChainlinkOracle_Quoter } from
     "../../../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol";
+import { BalancerV3_LT_BPTOracle_Quoter } from "../../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 import { AbstractKernelTestSuite } from "../../abstract/AbstractKernelTestSuite.sol";
 
 /// @dev The minimal Permit2 surface the Balancer Router's token pulls require (no permit2 lib is vendored).
@@ -172,5 +173,36 @@ abstract contract Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest is Abstra
             abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector),
             abi.encode(uint80(1), _mockedOracleAnswer, block.timestamp, block.timestamp, uint80(1))
         );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // BPT ORACLE SETTER — pool-consistency check
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice The BPT oracle setter rejects an oracle bound to a pool other than this market's registered liquidity
+     *         tranche pool (`LT_ASSET`).
+     * @dev Exercises the rejection branch of the pool-consistency check in `BalancerV3_LT_BPTOracle_Quoter._setBPTOracle`.
+     *      Every deployed oracle prices its own pool, so no other test reaches this branch; here a stand-in oracle whose
+     *      `pool()` is deliberately not `LT_ASSET` (which equals `POOL`) is wired in, and the setter must revert.
+     */
+    function test_setBPTOracle_reverts_whenOracleForDifferentPool() public whenLT {
+        address wrongPool = makeAddr("SOME_OTHER_BALANCER_POOL");
+        assertTrue(wrongPool != POOL, "arrange: the stand-in pool must differ from the registered LT pool");
+        MismatchedPoolOracleStub wrongOracle = new MismatchedPoolOracleStub(wrongPool);
+
+        vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
+        vm.expectRevert(BalancerV3_LT_BPTOracle_Quoter.BPT_ORACLE_POOL_MISMATCH.selector);
+        BalancerV3_LT_BPTOracle_Quoter(address(KERNEL)).setBPTOracle(address(wrongOracle), false);
+    }
+}
+
+/// @dev A minimal stand-in for a BPT oracle exposing only the `pool()` getter, so the pool-consistency check in
+///      `setBPTOracle` can be exercised with an oracle bound to a pool other than the market's `LT_ASSET`.
+contract MismatchedPoolOracleStub {
+    address public immutable pool;
+
+    constructor(address _pool) {
+        pool = _pool;
     }
 }
