@@ -260,17 +260,13 @@ abstract contract MarketDeploymentConfig {
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    yieldShareAtZeroUtilWAD: 0.11e18,
-                    yieldShareAtTargetUtilWAD: 0.11e18,
-                    yieldShareAtFullUtilWAD: 0.31e18
+                    yieldShareAtZeroUtilWAD: 0.11e18, yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18
                 })
             ),
             ltYdmSpecificParams: abi.encode(
                 DeployScript.AdaptiveCurveYDM_V2_Params({
-                    yieldShareAtZeroUtilWAD: 0.11e18,
-                    yieldShareAtTargetUtilWAD: 0.11e18,
-                    yieldShareAtFullUtilWAD: 0.31e18
-                })
+                        yieldShareAtZeroUtilWAD: 0.11e18, yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18
+                    })
             ),
             jtYdmTargetUtilizationWAD: 0.9e18,
             ltYdmTargetUtilizationWAD: 0.9e18,

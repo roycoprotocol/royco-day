@@ -93,8 +93,7 @@ contract SetYDM is ParameterUpdateBase {
                     MarketAddresses memory addrs = getMarketAddresses(cfg.marketName);
 
                     bytes memory ydmInitData = abi.encodeCall(
-                        AdaptiveCurveYDM_V2.initializeYDMForMarket,
-                        (cfg.yieldShareAtZeroUtilWAD, cfg.yieldShareAtTargetUtilWAD, cfg.yieldShareAtFullUtilWAD)
+                        AdaptiveCurveYDM_V2.initializeYDMForMarket, (cfg.yieldShareAtZeroUtilWAD, cfg.yieldShareAtTargetUtilWAD, cfg.yieldShareAtFullUtilWAD)
                     );
 
                     updates[idx] = UpdateParams({
@@ -124,8 +123,7 @@ contract SetYDM is ParameterUpdateBase {
         (address expectedYDM, bytes memory initData) = _decodeSetYDMCallData(_params.callData);
 
         // Decode `initializeYDMForMarket(uint64,uint64,uint64,uint64)` from initData
-        (uint64 expectedZeroUtilWAD, uint64 expectedTargetUtilWAD, uint64 expectedFullUtilWAD) =
-            _decodeInitializeYDMForMarketCallData(initData);
+        (uint64 expectedZeroUtilWAD, uint64 expectedTargetUtilWAD, uint64 expectedFullUtilWAD) = _decodeInitializeYDMForMarketCallData(initData);
 
         // Accountant must now point at the expected YDM
         IRoycoDayAccountant.RoycoDayAccountantState memory state = IRoycoDayAccountant(_params.target).getState();
@@ -136,12 +134,8 @@ contract SetYDM is ParameterUpdateBase {
         uint64 expectedDiscount = expectedTargetUtilWAD - expectedZeroUtilWAD;
         uint64 expectedPremium = expectedFullUtilWAD - expectedTargetUtilWAD;
 
-        (
-            uint64 yieldShareAtTargetWAD,
-            uint32 lastAdaptationTimestamp,
-            uint64 discountToTargetAtZeroUtilWAD,
-            uint64 premiumToTargetAtFullUtilWAD
-        ) = AdaptiveCurveYDM_V2(expectedYDM).accountantToCurve(_params.target);
+        (uint64 yieldShareAtTargetWAD, uint32 lastAdaptationTimestamp, uint64 discountToTargetAtZeroUtilWAD, uint64 premiumToTargetAtFullUtilWAD) =
+            AdaptiveCurveYDM_V2(expectedYDM).accountantToCurve(_params.target);
 
         require(yieldShareAtTargetWAD == expectedTargetUtilWAD, VerificationFailed("yieldShareAtTargetWAD mismatch"));
         require(discountToTargetAtZeroUtilWAD == expectedDiscount, VerificationFailed("discountToTargetAtZeroUtilWAD mismatch"));
@@ -164,11 +158,7 @@ contract SetYDM is ParameterUpdateBase {
     }
 
     /// @dev Strips the 4-byte selector and abi.decodes the 3 uint64 params of `initializeYDMForMarket`.
-    function _decodeInitializeYDMForMarketCallData(bytes memory _cd)
-        internal
-        pure
-        returns (uint64 zeroUtilWAD, uint64 targetUtilWAD, uint64 fullUtilWAD)
-    {
+    function _decodeInitializeYDMForMarketCallData(bytes memory _cd) internal pure returns (uint64 zeroUtilWAD, uint64 targetUtilWAD, uint64 fullUtilWAD) {
         bytes memory args = new bytes(_cd.length - 4);
         for (uint256 i = 0; i < args.length; i++) {
             args[i] = _cd[i + 4];
