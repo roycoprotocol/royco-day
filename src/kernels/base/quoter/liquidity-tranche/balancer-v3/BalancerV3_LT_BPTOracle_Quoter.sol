@@ -341,7 +341,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     }
 
     /// @notice Returns the Balancer V3 quoter configuration (the BPT oracle and the maximum reinvestment slippage tolerance)
-    function getBalancerQuoterConfiguration() external pure returns (BalancerV3_LT_BPTOracle_QuoterState memory) {
+    function getBalancerQuoterConfiguration() external view returns (BalancerV3_LT_BPTOracle_QuoterState memory) {
         return _getBalancerV3_LT_BPTOracle_QuoterStorage();
     }
 
