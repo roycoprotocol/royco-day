@@ -86,6 +86,9 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     /// @notice Thrown when the configured maximum reinvestment slippage is not strictly less than WAD (100%)
     error INVALID_MAX_REINVESTMENT_SLIPPAGE();
 
+    /// @notice Thrown when the BPT oracle prices a pool other than this market's registered liquidity tranche pool (`LT_ASSET`)
+    error BPT_ORACLE_POOL_MISMATCH();
+
     constructor(IVault _balancerV3Vault) VaultGuard(_balancerV3Vault) {
         // Ensure the passed vault is the one the pool (LT_ASSET) is registered with (LT_ASSET reads fine here in the body)
         require(address(BalancerPoolToken(LT_ASSET).getVault()) == address(_balancerV3Vault), INVALID_BALANCER_V3_VAULT());
@@ -349,6 +352,8 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     /// @param _bptOracle The new manipulation-resistant balancer pool token (BPT) oracle
     function _setBPTOracle(address _bptOracle) internal {
         require(_bptOracle != address(0), NULL_ADDRESS());
+        // Ensure the oracle values this market's registered liquidity tranche pool, not some other pool's BPT
+        require(address(LPOracleBase(_bptOracle).pool()) == LT_ASSET, BPT_ORACLE_POOL_MISMATCH());
         _getBalancerV3_LT_BPTOracle_QuoterStorage().bptOracle = _bptOracle;
         emit BPTOracleUpdated(_bptOracle);
     }
