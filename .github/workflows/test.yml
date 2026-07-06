@@ -44,11 +44,17 @@ jobs:
         id: build
 
       - name: Run Forge tests
-        # Fork suites need an archive-node RPC (the MAINNET_RPC_URL secret), not yet set on
-        # this repo. Exclude them so the PR gate runs the fork-free suite; when the secret is
-        # added, delete the --no-match-contract filter to re-enable Neutrl/factory/deploy forks.
+        # Fork suites (Neutrl_snUSD, Neutrl_snUSD_Senior, DayMarketDeploymentTest,
+        # RoycoFactoryTest) need an archive-node MAINNET_RPC_URL. When that secret is unset we skip
+        # them so the rest of the tests still run. Once the secret is added the fork tests run
+        # automatically.
         run: |
-          forge test -vvv --no-match-contract 'Neutrl_snUSD|DayMarketDeploymentTest|RoycoFactoryTest'
+          if [ -z "${MAINNET_RPC_URL}" ]; then
+            echo "MAINNET_RPC_URL not set: skipping fork suites"
+            forge test -vvv --no-match-contract 'Neutrl_snUSD|DayMarketDeploymentTest|RoycoFactoryTest'
+          else
+            forge test -vvv
+          fi
         id: test
         env:
           MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
