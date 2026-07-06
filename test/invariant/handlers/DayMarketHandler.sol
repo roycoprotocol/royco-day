@@ -64,6 +64,26 @@ contract DayMarketHandler is TrancheFixture {
      */
     uint256 internal constant PRICE_FLOOR_DUST_NAV_WEI_DERIVED_BOUND = 100;
 
+    /**
+     * @dev The campaign's tranche share-supply bound (testing-strategy I17: the zero-NAV mint edge is
+     *      "pinned by unit vectors and bounded in handler"). With the production mint-dilution clamp, one
+     *      wipe-and-deposit dilution cycle multiplies a supply by at most (WAD − ε)/ε (~1e12 at the default
+     *      ε = 1e6) instead of by the deposit's NAV value, but the residual cliff remains (Appendix B.4,
+     *      now clamped, no absolute ceiling by decision): the clamp's own cap computation overflows once
+     *      supply ≥ ~2^256·ε/(WAD − ε) ≈ 1.158e65, so ~4 unchecked cycles from 1e21 still reach a
+     *      Panic(0x11) — including inside the sync's fee mint, which would brick the market. Every deposit
+     *      op therefore clamps against this bound (the one venue-priced mint, the multi-asset LT share,
+     *      keeps the panic prediction only: the drained-pool dilution state it would need cannot recur
+     *      across successful adds), so campaign states stay provably overflow-free: unclamped supplies stop
+     *      at 1e45, a clamped one-unit deposit at most doubles the supply and run depths give far fewer
+     *      doublings than the ~65 that would matter, so the worst later cap computation is
+     *      ~1e52 × 1e12 ≈ 1e64 < 1.158e65 and the sync's fee mints add at most ~supply / 9 on top. Sync
+     *      liveness (I14) therefore cannot be lost to this edge inside a campaign, while the dilution
+     *      branch itself stays exercised at one-unit size. The cliff itself is pinned by
+     *      test_FINDING_11 in test/unit/findings/SpecDivergences.t.sol, not re-hunted by campaigns
+     */
+    uint256 internal constant TRANCHE_SUPPLY_CAMPAIGN_BOUND = 1e45;
+
     // =============================
     // Actors
     // =============================
@@ -277,6 +297,8 @@ contract DayMarketHandler is TrancheFixture {
         uint256 assets = bound(_assets, 1e12, 1e24);
         Snap memory s = _syncAndVerify("pre:stDeposit");
         if (s.ok) {
+            // The I17 in-handler bound: keep the mint from carrying the senior supply past the campaign bound
+            assets = _clampSupplySafeDeposit(assets, _quoteSTUnits(assets), s.stEff, s.stSupply);
             _execStDeposit(actor, assets, s);
             _syncAndVerify("post:stDeposit");
         }
@@ -303,8 +325,11 @@ contract DayMarketHandler is TrancheFixture {
         uint256 assets = bound(_assets, 1e12, 1e24);
         Snap memory s = _syncAndVerify("pre:jtDeposit");
         if (s.ok) {
+            // The I17 in-handler bound: keep the mint from carrying the junior supply past the campaign bound
+            assets = _clampSupplySafeDeposit(assets, _quoteSTUnits(assets), s.jtEff, s.jtSupply);
             Pred memory p;
             uint256 value = _quoteSTUnits(assets);
+            uint256 predShares;
             if (s.fixedTerm) {
                 _expect(p, SEL_DISABLED_FT);
             } else {
@@ -313,7 +338,11 @@ contract DayMarketHandler is TrancheFixture {
                     _expect(p, SEL_INVALID_POST_OP);
                     _expect(p, SEL_ZERO_VALUE);
                 }
-                if (RoycoTestMath.sharesFor(value, s.jtEff, s.jtSupply) == 0) _expect(p, SEL_ZERO_SHARES);
+                bool mintPanics;
+                (predShares, mintPanics) = _mirrorMintShares(value, s.jtEff, s.jtSupply);
+                // The Appendix B.4 cliff: past the supply-inflation point the mint itself must panic
+                if (mintPanics) _expect(p, SEL_PANIC);
+                else if (predShares == 0) _expect(p, SEL_ZERO_SHARES);
             }
             stJtVault.mintShares(actor, assets);
             vm.startPrank(actor);
@@ -321,7 +350,7 @@ contract DayMarketHandler is TrancheFixture {
             try juniorTranche.deposit(toTrancheUnits(assets), actor) returns (uint256 gotShares) {
                 _recordSuccess("jtDeposit");
                 ghost_transferredIn[address(stJtVault)] += assets;
-                _flag(gotShares == RoycoTestMath.sharesFor(value, s.jtEff, s.jtSupply), "jtDeposit minted shares diverge from the floor mirror");
+                _flag(gotShares == predShares, "jtDeposit minted shares diverge from the floor mirror");
             } catch (bytes memory err) {
                 _classify("jtDeposit", err, p);
             }
@@ -352,6 +381,8 @@ contract DayMarketHandler is TrancheFixture {
         uint256 bptAmt = _mintFairValueBpt(actor, quoteLeg);
         Snap memory s = _syncAndVerify("pre:ltDeposit");
         if (s.ok) {
+            // The I17 in-handler bound: any pool tokens the clamp strands with the actor are just an external holding
+            bptAmt = _clampSupplySafeDeposit(bptAmt, _quoteLTUnits(bptAmt), RoycoTestMath.ltEffNav(s.ltRaw, s.idle, s.stEff, s.stSupply), s.ltSupply);
             Pred memory p;
             uint256 value = _quoteLTUnits(bptAmt);
             uint256 navAt = RoycoTestMath.ltEffNav(s.ltRaw, s.idle, s.stEff, s.stSupply);
@@ -359,13 +390,16 @@ contract DayMarketHandler is TrancheFixture {
                 _expect(p, SEL_INVALID_POST_OP);
                 _expect(p, SEL_ZERO_VALUE);
             }
-            if (RoycoTestMath.sharesFor(value, navAt, s.ltSupply) == 0) _expect(p, SEL_ZERO_SHARES);
+            (uint256 predShares, bool mintPanics) = _mirrorMintShares(value, navAt, s.ltSupply);
+            // The Appendix B.4 cliff: past the supply-inflation point the mint itself must panic
+            if (mintPanics) _expect(p, SEL_PANIC);
+            else if (predShares == 0) _expect(p, SEL_ZERO_SHARES);
             vm.startPrank(actor);
             bpt.approve(address(liquidityTranche), bptAmt);
             try liquidityTranche.deposit(toTrancheUnits(bptAmt), actor) returns (uint256 gotShares) {
                 _recordSuccess("ltDeposit");
                 ghost_transferredIn[address(bpt)] += bptAmt;
-                _flag(gotShares == RoycoTestMath.sharesFor(value, navAt, s.ltSupply), "ltDeposit minted shares diverge from the floor mirror");
+                _flag(gotShares == predShares, "ltDeposit minted shares diverge from the floor mirror");
             } catch (bytes memory err) {
                 _classify("ltDeposit", err, p);
             }
@@ -382,6 +416,8 @@ contract DayMarketHandler is TrancheFixture {
         uint256 quoteAssets = bound(_quote, QUOTE_UNIT, QUOTE_UNIT * 1e6);
         Snap memory s = _syncAndVerify("pre:ltDepositMultiAsset");
         if (s.ok) {
+            // The I17 in-handler bound on the senior leg the venue add mints through the same share pricing
+            stAssets = _clampSupplySafeDeposit(stAssets, _quoteSTUnits(stAssets), s.stEff, s.stSupply);
             _execLtDepositMultiAsset(actor, stAssets, quoteAssets, s);
             _syncAndVerify("post:ltDepositMultiAsset");
         }
@@ -556,7 +592,10 @@ contract DayMarketHandler is TrancheFixture {
                 _execStDeposit(actor, 1e12, s);
             } else {
                 // Overflow guard only, the boundary case stays exact whenever capacity is below the cap
-                _execStDeposit(actor, maxAssets > 1e27 ? 1e27 : maxAssets, s);
+                uint256 assets = maxAssets > 1e27 ? 1e27 : maxAssets;
+                // The I17 in-handler bound: only binds in the dust-NAV states where the boundary is meaningless anyway
+                assets = _clampSupplySafeDeposit(assets, _quoteSTUnits(assets), s.stEff, s.stSupply);
+                _execStDeposit(actor, assets, s);
             }
             _syncAndVerify("post:aimedMaxST");
         }
@@ -660,6 +699,7 @@ contract DayMarketHandler is TrancheFixture {
     function _execStDeposit(address _actor, uint256 _assets, Snap memory s) internal {
         Pred memory p;
         uint256 value = _quoteSTUnits(_assets);
+        uint256 predShares;
         if (s.fixedTerm) {
             _expect(p, SEL_DISABLED_FT);
         } else {
@@ -671,7 +711,11 @@ contract DayMarketHandler is TrancheFixture {
             uint256 stEffAfter = s.stEff + (stRawAfter - s.stRaw);
             if (RoycoTestMath.covUtil(stRawAfter, s.jtRaw, JT_CO, s.minCov, s.jtEff) > WAD) _expect(p, SEL_COVERAGE);
             if (RoycoTestMath.liqUtil(stEffAfter, s.minLiq, s.ltRaw) > WAD) _expect(p, SEL_LIQUIDITY);
-            if (RoycoTestMath.sharesFor(value, s.stEff, s.stSupply) == 0) _expect(p, SEL_ZERO_SHARES);
+            bool mintPanics;
+            (predShares, mintPanics) = _mirrorMintShares(value, s.stEff, s.stSupply);
+            // The Appendix B.4 cliff: past the supply-inflation point the mint itself must panic
+            if (mintPanics) _expect(p, SEL_PANIC);
+            else if (predShares == 0) _expect(p, SEL_ZERO_SHARES);
         }
         stJtVault.mintShares(_actor, _assets);
         vm.startPrank(_actor);
@@ -679,7 +723,7 @@ contract DayMarketHandler is TrancheFixture {
         try seniorTranche.deposit(toTrancheUnits(_assets), _actor) returns (uint256 gotShares) {
             _recordSuccess("stDeposit");
             ghost_transferredIn[address(stJtVault)] += _assets;
-            _flag(gotShares == RoycoTestMath.sharesFor(value, s.stEff, s.stSupply), "stDeposit minted shares diverge from the floor mirror");
+            _flag(gotShares == predShares, "stDeposit minted shares diverge from the floor mirror");
         } catch (bytes memory err) {
             _classify("stDeposit", err, p);
         }
@@ -786,14 +830,18 @@ contract DayMarketHandler is TrancheFixture {
             _expect(p, SEL_DISABLED_FT);
         } else {
             VenueAdd memory v = _mirrorVenueAdd(s, _stAssets, _quoteAssets);
-            if (_stAssets > 0 && v.stSharesMinted == 0) _expect(p, SEL_ZERO_SHARES);
+            // The Appendix B.4 cliff on the senior leg: past the supply-inflation point the ST mint panics
+            if (v.stMintPanics) _expect(p, SEL_PANIC);
+            if (_stAssets > 0 && !v.stMintPanics && v.stSharesMinted == 0) _expect(p, SEL_ZERO_SHARES);
             if (v.valueAllocated == 0) {
                 _expect(p, SEL_ZERO_VALUE);
                 _expect(p, SEL_INVALID_POST_OP);
             }
             if (v.ltRawAfter <= s.ltRaw) _expect(p, SEL_INVALID_POST_OP);
             uint256 navAt = RoycoTestMath.ltEffNav(s.ltRaw, s.idle, s.stEff, s.stSupply);
-            if (RoycoTestMath.sharesFor(v.valueAllocated, navAt, s.ltSupply) == 0) _expect(p, SEL_ZERO_SHARES);
+            (uint256 predLtShares, bool ltMintPanics) = _mirrorMintShares(v.valueAllocated, navAt, s.ltSupply);
+            if (ltMintPanics) _expect(p, SEL_PANIC);
+            else if (predLtShares == 0) _expect(p, SEL_ZERO_SHARES);
             if (_stAssets > 0) {
                 uint256 stRawAfter = _quoteSTUnits(s.stOwned + _stAssets);
                 uint256 stEffAfter = s.stEff + (stRawAfter - s.stRaw);
@@ -854,6 +902,7 @@ contract DayMarketHandler is TrancheFixture {
     /// @dev Everything the multi-asset deposit prediction needs about the venue add's outcome
     struct VenueAdd {
         uint256 stSharesMinted;
+        bool stMintPanics;
         uint256 bptOut;
         uint256 ltRawAfter;
         uint256 valueAllocated;
@@ -862,7 +911,7 @@ contract DayMarketHandler is TrancheFixture {
     /// @dev Mirrors the unbalanced add: fair value at the vault's prices, the armed haircut, the oracle re-mark
     function _mirrorVenueAdd(Snap memory s, uint256 _stAssets, uint256 _quoteAssets) internal view returns (VenueAdd memory v) {
         uint256 rate = _mirrorSeniorRate(s.stEff, s.stSupply);
-        v.stSharesMinted = _stAssets == 0 ? 0 : RoycoTestMath.sharesFor(_quoteSTUnits(_stAssets), s.stEff, s.stSupply);
+        if (_stAssets != 0) (v.stSharesMinted, v.stMintPanics) = _mirrorMintShares(_quoteSTUnits(_stAssets), s.stEff, s.stSupply);
         uint256[2] memory balances = balancerVault.getPoolBalances(address(bpt));
         uint256 stBal = balances[stPoolTokenIndex];
         uint256 qBal = balances[1 - stPoolTokenIndex];
@@ -1091,7 +1140,7 @@ contract DayMarketHandler is TrancheFixture {
                 string.concat(_label, ": coverage-loss ledger replay diverges from the committed value")
             );
 
-            // The senior supply may grow only by the premium and fee carve-outs, both floor-priced
+            // The senior supply may grow only by the premium and fee carve-outs, both floor-priced (and mint-dilution clamped)
             uint256 feeShares;
             (premiumShares, feeShares,) = RoycoTestMath.carveOut(c.w.stEff, c.w.ltLiquidityPremium, c.w.stProtocolFee, c.stSupply0);
             _flag(
@@ -1301,6 +1350,13 @@ contract DayMarketHandler is TrancheFixture {
         return RoycoTestMath.waterfall(_in);
     }
 
+    /// @notice Runs the share-pricing floor mirror (mint-dilution clamp included), callable only by the handler itself
+    /// @dev External so its mulDiv overflow (the residual cliff's cap computation) reverts into the caller's try/catch instead of aborting the op
+    function runSharesForMirror(uint256 _value, uint256 _totalValue, uint256 _supply) external view returns (uint256) {
+        require(msg.sender == address(this), "only self");
+        return RoycoTestMath.sharesFor(_value, _totalValue, _supply);
+    }
+
     // =============================
     // Core-invariant view for the invariant contract
     // =============================
@@ -1389,6 +1445,42 @@ contract DayMarketHandler is TrancheFixture {
 
     function _quoteNAVToLTUnits(uint256 _nav) internal view returns (uint256) {
         return toUint256(kernel.ltConvertNAVUnitsToTrancheUnits(toNAVUnits(_nav)));
+    }
+
+    /**
+     * @dev Mirrors a tranche share mint for revert prediction, covering the two uint256 overflow cliffs
+     *      production retains once the zero-NAV dilution branch has inflated a supply (Appendix B.4, now
+     *      mint-dilution clamped): the clamp's cap computation supply × (WAD − ε)/ε no longer fitting in
+     *      uint256 (the residual cliff), and the ERC20 total-supply increment overflowing on the mint
+     *      itself. Production reverts both with Panic(0x11). The mirror routes its own identical,
+     *      identically-ordered math through an external self-call so the overflow is caught and returned
+     *      as a prediction instead of aborting the op
+     * @return shares The shares the mint would produce (zero when the mint must panic)
+     * @return mintPanics True when the production mint must revert with Panic(0x11)
+     */
+    function _mirrorMintShares(uint256 _value, uint256 _totalValue, uint256 _supply) internal view returns (uint256 shares, bool mintPanics) {
+        try this.runSharesForMirror(_value, _totalValue, _supply) returns (uint256 shares_) {
+            // The mint adds the shares to the tranche's total supply, which must itself stay within uint256
+            if (shares_ > type(uint256).max - _supply) return (0, true);
+            return (shares_, false);
+        } catch {
+            return (0, true);
+        }
+    }
+
+    /**
+     * @dev The I17 in-handler bound over deposit sizing: degrades a deposit to one tranche-unit wei
+     *      whenever its share mint would panic or carry the tranche supply past the campaign bound (see
+     *      TRANCHE_SUPPLY_CAMPAIGN_BOUND for the derivation). The one-unit deposit still exercises the
+     *      production path it degraded from - including the 1-wei-denominator dilution branch, whose
+     *      mint then at most doubles the supply - and its own reverts stay covered by the executors'
+     *      predictions, so nothing is skipped
+     */
+    function _clampSupplySafeDeposit(uint256 _assets, uint256 _value, uint256 _totalValue, uint256 _supply) internal view returns (uint256) {
+        (uint256 shares, bool mintPanics) = _mirrorMintShares(_value, _totalValue, _supply);
+        // No overflow risk in the sum: a non-panicking mint already guarantees supply + shares fits
+        if (mintPanics || _supply + shares > TRANCHE_SUPPLY_CAMPAIGN_BOUND) return 1;
+        return _assets;
     }
 
     /// @dev Saturating subtraction

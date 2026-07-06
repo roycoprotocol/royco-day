@@ -381,11 +381,19 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
      */
     uint256 internal constant ZERO_NAV_SHARE_PRICING_DENOMINATOR = 1;
 
+    /// @dev The mint-dilution residual, restated from Constants.sol (MINT_DILUTION_RESIDUAL_WAD = 1e6):
+    ///      a single mint owns at most (1 − 1e-12) of the post-mint supply
+    uint256 internal constant MINT_DILUTION_RESIDUAL = 1e6;
+
     /// @notice Expected shares minted for `_value` against `_supply` shares backed by `_totalNAV` (floor).
-    /// @dev Mirrors `ValuationLogic._convertToShares` including its zero-supply and zero-NAV boundaries.
+    /// @dev Mirrors `ValuationLogic._convertToShares` including its zero-supply and zero-NAV boundaries and
+    ///      the mint-dilution clamp (bind iff value·ε > denominator·(WAD − ε); products fit on the suite domain).
     function _expectedShares(NAV_UNIT _value, uint256 _supply, NAV_UNIT _totalNAV) internal pure returns (uint256) {
         if (_supply == 0) return toUint256(_value);
         uint256 denominator = toUint256(_totalNAV) == 0 ? ZERO_NAV_SHARE_PRICING_DENOMINATOR : toUint256(_totalNAV);
+        if (toUint256(_value) * MINT_DILUTION_RESIDUAL > denominator * (WAD - MINT_DILUTION_RESIDUAL)) {
+            return Math.mulDiv(_supply, WAD - MINT_DILUTION_RESIDUAL, MINT_DILUTION_RESIDUAL);
+        }
         return Math.mulDiv(toUint256(_value), _supply, denominator);
     }
 
@@ -3981,9 +3989,11 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
     }
 
     /**
-     * @notice PINS testing-strategy Appendix B.4: a JT deposit against a live supply with zero junior effective NAV
-     *         prices against the documented one-wei denominator, so the depositor takes over the tranche and the
-     *         pre-existing unbacked holder is diluted to its floor-scaled dust claim.
+     * @notice PINS testing-strategy Appendix B.4 (as amended by the mint-dilution clamp): a JT deposit against a
+     *         live supply with zero junior effective NAV prices against the documented one-wei denominator and
+     *         BINDS the clamp, so the depositor takes over the tranche up to the 1e-12 residual — the mint is
+     *         exactly cap = floor(supply x (WAD - eps) / eps) instead of the pre-clamp unbounded supply x value —
+     *         and the pre-existing unbacked holder is diluted to its floor-scaled dust claim.
      */
     function test_JTDeposit_zeroNAVLiveSupply_pinned() public {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 16);
@@ -4003,11 +4013,15 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         assertEq(_snap().covUtilWAD, type(uint256).max, "coverage utilization must saturate with an exhausted junior tranche");
         uint256 aliceShares = JT.balanceOf(JT_ALICE_ADDRESS);
 
-        // The zero-NAV denominator branch prices the deposit (ValuationLogic substitutes one NAV wei)
+        // The zero-NAV denominator branch prices the deposit (ValuationLogic substitutes one NAV wei) and the
+        // clamp binds: the deposit's NAV value dwarfs the 1-wei denominator's bind threshold (~1e12 wei)
         uint256 assets = testConfig.initialFunding / 1000;
         NAV_UNIT value = KERNEL.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets));
         uint256 expectedShares = _expectedShares(value, jtSupplyPre, ZERO_NAV_UNITS);
-        assertEq(expectedShares, toUint256(value) * jtSupplyPre, "the zero-NAV branch must price against the one-wei denominator");
+        assertGt(toUint256(value) * MINT_DILUTION_RESIDUAL, WAD - MINT_DILUTION_RESIDUAL, "arrange: the dilution deposit must bind the clamp");
+        assertEq(
+            expectedShares, Math.mulDiv(jtSupplyPre, WAD - MINT_DILUTION_RESIDUAL, MINT_DILUTION_RESIDUAL), "the zero-NAV branch must clamp to the dilution cap"
+        );
 
         OpReceipt memory r = _doDepositJT(JT_BOB_ADDRESS, assets);
         assertEq(r.shares, expectedShares, "deposit shares must match the zero-NAV denominator formula exactly");

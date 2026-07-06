@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { RoycoTestMath } from "../../base/math/RoycoTestMath.sol";
 import { MarketFuzzBase } from "./MarketFuzzBase.sol";
 
 /**
@@ -69,7 +70,10 @@ contract DepositPricingFuzz is MarketFuzzBase {
         uint256 value = assets.mulDiv(composedRate, 1e18);
         uint256 supplyBefore = seniorTranche.totalSupply();
         uint256 stEffBefore = toUint256(state.stEffectiveNAV);
-        uint256 expectedShares = supplyBefore.mulDiv(value, stEffBefore);
+        // The clamp-aware mirror: in these live bounded states the clamp never binds, and the mirror proves
+        // it rather than the test assuming it (a bind would diverge from the inline floor formula below)
+        uint256 expectedShares = RoycoTestMath.sharesFor(value, stEffBefore, supplyBefore);
+        assertEq(expectedShares, supplyBefore.mulDiv(value, stEffBefore), "clamp must be inert at live-market deposit sizes");
 
         uint256 minted = _depositSenior(assets);
         assertEq(minted, expectedShares, "senior deposit must mint exactly floor(value x supply / stEffectiveNAV)");
@@ -121,7 +125,9 @@ contract DepositPricingFuzz is MarketFuzzBase {
         uint256 value = assets.mulDiv(composedRate, 1e18);
         uint256 supplyBefore = juniorTranche.totalSupply();
         uint256 jtEffBefore = toUint256(state.jtEffectiveNAV);
-        uint256 expectedShares = supplyBefore.mulDiv(value, jtEffBefore);
+        // The clamp-aware mirror proves the clamp is inert at live-market deposit sizes (see the senior variant)
+        uint256 expectedShares = RoycoTestMath.sharesFor(value, jtEffBefore, supplyBefore);
+        assertEq(expectedShares, supplyBefore.mulDiv(value, jtEffBefore), "clamp must be inert at live-market deposit sizes");
 
         uint256 minted = _depositJunior(assets);
         assertEq(minted, expectedShares, "junior deposit must mint exactly floor(value x supply / jtEffectiveNAV)");
@@ -177,7 +183,9 @@ contract DepositPricingFuzz is MarketFuzzBase {
         uint256 ltOwnedBPT = toUint256(kernel.getState().ltOwnedYieldBearingAssets);
         uint256 ltEffBefore = poolTVL.mulDiv(ltOwnedBPT, bptSupply);
         uint256 supplyBefore = liquidityTranche.totalSupply();
-        uint256 expectedShares = supplyBefore.mulDiv(value, ltEffBefore);
+        // The clamp-aware mirror proves the clamp is inert at live-market deposit sizes (see the senior variant)
+        uint256 expectedShares = RoycoTestMath.sharesFor(value, ltEffBefore, supplyBefore);
+        assertEq(expectedShares, supplyBefore.mulDiv(value, ltEffBefore), "clamp must be inert at live-market deposit sizes");
 
         vm.startPrank(LT_PROVIDER);
         bpt.approve(address(liquidityTranche), bptIn);
