@@ -78,7 +78,11 @@ contract DepositPricingFuzz is MarketFuzzBase {
         assertLe(toUint256(seniorTranche.previewRedeem(minted).nav), value, "immediately redeeming the minted shares must never exceed the deposited value");
         // No-gain, incumbent side: NAV-per-share of pre-existing holders never decreases (cross-multiplied)
         uint256 stEffAfter = toUint256(accountant.getState().lastSTEffectiveNAV);
-        assertGe(stEffAfter * supplyBefore, stEffBefore * (supplyBefore + minted), "pre-existing senior holders must never be diluted below their prior NAV-per-share");
+        assertGe(
+            stEffAfter * supplyBefore,
+            stEffBefore * (supplyBefore + minted),
+            "pre-existing senior holders must never be diluted below their prior NAV-per-share"
+        );
     }
 
     /**
@@ -124,7 +128,11 @@ contract DepositPricingFuzz is MarketFuzzBase {
 
         assertLe(toUint256(juniorTranche.previewRedeem(minted).nav), value, "immediately redeeming the minted shares must never exceed the deposited value");
         uint256 jtEffAfter = toUint256(accountant.getState().lastJTEffectiveNAV);
-        assertGe(jtEffAfter * supplyBefore, jtEffBefore * (supplyBefore + minted), "pre-existing junior holders must never be diluted below their prior NAV-per-share");
+        assertGe(
+            jtEffAfter * supplyBefore,
+            jtEffBefore * (supplyBefore + minted),
+            "pre-existing junior holders must never be diluted below their prior NAV-per-share"
+        );
     }
 
     /**
@@ -180,6 +188,10 @@ contract DepositPricingFuzz is MarketFuzzBase {
         assertLe(toUint256(liquidityTranche.previewRedeem(minted).nav), value, "immediately redeeming the minted shares must never exceed the deposited value");
         // Incumbent side at the same oracle mark: the pot grew by at least the value the mint was priced on
         uint256 ltEffAfter = poolTVL.mulDiv(ltOwnedBPT + bptIn, bptSupply);
-        assertGe(ltEffAfter * supplyBefore, ltEffBefore * (supplyBefore + minted), "pre-existing liquidity holders must never be diluted below their prior NAV-per-share");
+        assertGe(
+            ltEffAfter * supplyBefore,
+            ltEffBefore * (supplyBefore + minted),
+            "pre-existing liquidity holders must never be diluted below their prior NAV-per-share"
+        );
     }
 }

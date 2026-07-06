@@ -15,6 +15,7 @@ import { UUPSUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/co
 import { ERC20BurnableUpgradeable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
 import { IAccessManaged } from "../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { SafeCast } from "../../lib/openzeppelin-contracts/contracts/utils/math/SafeCast.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
 import {
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
@@ -42,7 +43,7 @@ import { RoycoDayKernel } from "../../src/kernels/base/RoycoDayKernel.sol";
 import { BalancerV3_LT_BPTOracle_Quoter } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 import { RoycoDayBalancerV3Hooks } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3Hooks.sol";
 import { TrancheType } from "../../src/libraries/Types.sol";
-import { TRANCHE_UNIT } from "../../src/libraries/Units.sol";
+import { NAV_UNIT, TRANCHE_UNIT } from "../../src/libraries/Units.sol";
 import { RoycoLiquidityTranche } from "../../src/tranches/RoycoLiquidityTranche.sol";
 import { AdaptiveCurveYDM_V2 } from "../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { BaseTest } from "../base/BaseTest.sol";
@@ -389,6 +390,9 @@ contract DayMarketDeploymentTest is BaseTest {
         address eclpOracleFactory = DEPLOY_SCRIPT.getChainConfig(block.chainid).eclpLPOracleFactory;
         assertTrue(ILPOracleFactoryBase(eclpOracleFactory).isOracleFromFactory(ILPOracleBase(bptOracle)), "not from oracle factory");
 
+        // The oracle prices THIS market's pool (the same identity the kernel's setBPTOracle guard enforces).
+        assertEq(address(LPOracleBase(bptOracle).pool()), POOL, "oracle.pool() != market pool");
+
         // Both legs are priced by their rate providers (kernel NAV rate on the senior leg, the configured quote rate
         // provider — or an implicit rate of 1 when STANDARD — on the quote leg), so both use the constant-1.0 feed.
         IERC20[] memory tokens = VAULT.getPoolTokens(POOL);
@@ -399,6 +403,28 @@ contract DayMarketDeploymentTest is BaseTest {
             assertEq(answer, 1e18, "leg feed must answer 1.0");
             assertEq(feeds[i].decimals(), 18, "leg feed decimals");
         }
+    }
+
+    function test_bptOracle_computeTVL_revertsOnUnseededPool_butKernelShortCircuits() public {
+        // Pinned real-stack behavior: on the freshly deployed, UNSEEDED pool the E-CLP invariant math produces a small
+        // negative intermediate on zero balances, so a direct computeTVL() call reverts with a SafeCast int->uint
+        // overflow (argument value depends on the curve params, so only the selector is pinned). The kernel is immune:
+        // both ltConvert directions short-circuit to zero on a zero BPT supply BEFORE reading the oracle
+        // (BalancerV3_LT_BPTOracle_Quoter.sol:133-134,142-143) — asserted against the real oracle below.
+        address bptOracle = BalancerV3_LT_BPTOracle_Quoter(address(KERNEL)).getBalancerV3QuoterState().bptOracle;
+        vm.expectPartialRevert(SafeCast.SafeCastOverflowedIntToUint.selector);
+        LPOracleBase(bptOracle).computeTVL();
+
+        assertEq(
+            TRANCHE_UNIT.unwrap(BalancerV3_LT_BPTOracle_Quoter(address(KERNEL)).ltConvertNAVUnitsToTrancheUnits(NAV_UNIT.wrap(1e18))),
+            0,
+            "zero-supply short-circuit must protect the NAV->BPT direction"
+        );
+        assertEq(
+            NAV_UNIT.unwrap(BalancerV3_LT_BPTOracle_Quoter(address(KERNEL)).ltConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT.wrap(1e18))),
+            0,
+            "zero-supply short-circuit must protect the BPT->NAV direction"
+        );
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════

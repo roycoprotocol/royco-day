@@ -257,7 +257,9 @@ abstract contract TrancheFixtureSmoke is TrancheFixture {
         assertEq(seniorTranche.balanceOf(address(kernel)), 0, "deployed branch: the premium shares must sit in the pool, not the kernel");
         assertEq(toUint256(ks.ltOwnedYieldBearingAssets), POST_DEPLOY_LT_RAW_NAV, "deployed branch: the BPT ledger must grow by exactly REINVESTED_BPT");
         assertEq(bpt.balanceOf(address(kernel)), POST_DEPLOY_LT_RAW_NAV, "deployed branch: the kernel BPT balance must equal the owned ledger");
-        assertEq(balancerVault.getPoolBalances(address(bpt))[stPoolTokenIndex], LT_PREMIUM_SHARES, "deployed branch: the pool's senior leg must hold the premium");
+        assertEq(
+            balancerVault.getPoolBalances(address(bpt))[stPoolTokenIndex], LT_PREMIUM_SHARES, "deployed branch: the pool's senior leg must hold the premium"
+        );
         assertEq(toUint256(state.ltRawNAV), POST_DEPLOY_LT_RAW_NAV, "deployed branch: committed ltRawNAV must include the deployed depth");
         assertEq(toUint256(liquidityTranche.getRawNAV()), POST_DEPLOY_LT_RAW_NAV, "deployed branch: the live ltRawNAV read must match the committed mark");
 
@@ -265,9 +267,7 @@ abstract contract TrancheFixtureSmoke is TrancheFixture {
         assertEq(toUint256(ks.stOwnedYieldBearingAssets), ST_SEED_WHOLE * stUnit, "ST owned ledger must equal the seeded shares");
         assertEq(toUint256(ks.jtOwnedYieldBearingAssets), JT_SEED_WHOLE * stUnit, "JT owned ledger must equal the seeded shares");
         assertEq(
-            stJtVault.balanceOf(address(kernel)),
-            (ST_SEED_WHOLE + JT_SEED_WHOLE) * stUnit,
-            "kernel vault-share balance must equal stOwned + jtOwned exactly"
+            stJtVault.balanceOf(address(kernel)), (ST_SEED_WHOLE + JT_SEED_WHOLE) * stUnit, "kernel vault-share balance must equal stOwned + jtOwned exactly"
         );
     }
 

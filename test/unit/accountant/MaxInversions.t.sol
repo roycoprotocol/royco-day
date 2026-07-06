@@ -110,7 +110,8 @@ contract MaxInversionsTest is AccountantUnitHarness {
         );
         assertEq(state.liquidityUtilizationWAD, WAD, "the exact max lands liquidity utilization on WAD via the ceil");
         // Consume the 3 wei stDust slack, landing exactly on the algebraic boundary
-        state = kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(2000e18)), toNAVUnits(uint256(300e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true);
+        state =
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(2000e18)), toNAVUnits(uint256(300e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true);
         assertEq(state.liquidityUtilizationWAD, WAD, "the slack consumed lands exactly on WAD");
         // One wei beyond max + slack violates the liquidity requirement (slack = stDust only on this leg)
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
@@ -216,10 +217,14 @@ contract MaxInversionsTest is AccountantUnitHarness {
         );
         assertEq(state.coverageUtilizationWAD, WAD, "the exact max lands coverage utilization on WAD");
         // First fudge wei: jtEff' = 100e18 + 2, still WAD
-        state = kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(uint256(1000e18 + 7)), toNAVUnits(uint256(100e18 + 2)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true);
+        state = kernel.doPostOp(
+            Operation.JT_REDEEM, toNAVUnits(uint256(1000e18 + 7)), toNAVUnits(uint256(100e18 + 2)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true
+        );
         assertEq(state.coverageUtilizationWAD, WAD, "max + 1 still passes inside the fudge");
         // Second fudge wei: jtEff' = 100e18 + 1, the minimum passing buffer, still WAD
-        state = kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(uint256(1000e18 + 7)), toNAVUnits(uint256(100e18 + 1)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true);
+        state = kernel.doPostOp(
+            Operation.JT_REDEEM, toNAVUnits(uint256(1000e18 + 7)), toNAVUnits(uint256(100e18 + 1)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true
+        );
         assertEq(state.coverageUtilizationWAD, WAD, "max + 2 exhausts the fudge exactly at WAD");
         // One more wei crosses the algebraic boundary: covUtil = WAD + 1
         vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);

@@ -254,7 +254,9 @@ contract CarveOutTest is AccountantUnitHarness {
     function test_CarveOut_ltEffectiveNAV_idleLegAndEdges() public {
         flp.setLTOwnedYieldBearingAssets(100e18);
         flp.setLTOwnedSeniorTrancheShares(3e18);
-        assertEq(toUint256(flp.ltEffectiveNAV(toNAVUnits(uint256(1045e18)), 1004e18)), 100e18 + 3_122_509_960_159_362_549, "raw depth plus the floored idle leg");
+        assertEq(
+            toUint256(flp.ltEffectiveNAV(toNAVUnits(uint256(1045e18)), 1004e18)), 100e18 + 3_122_509_960_159_362_549, "raw depth plus the floored idle leg"
+        );
         assertEq(
             toUint256(flp.ltEffectiveNAV(toNAVUnits(uint256(1045e18)), 1004e18)),
             RoycoTestMath.ltEffNav(100e18, 3e18, 1045e18, 1004e18),

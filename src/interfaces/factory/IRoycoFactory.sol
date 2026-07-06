@@ -13,23 +13,22 @@ interface IRoycoFactory {
      * @notice Storage state for the template-driven factory.
      * @custom:storage-location erc7201:Royco.storage.RoycoFactoryV2State
      * @custom:field isTemplateEnabled - Whether a template is registered + enabled.
-     * @custom:field seniorTrancheToJuniorTranche - Maps a market's senior tranche to its junior tranche.
-     * @custom:field juniorTrancheToSeniorTranche - Maps a market's junior tranche to its senior tranche.
+     * @custom:field trancheToKernel - Maps each of a market's tranches (senior, junior, and liquidity) to the market's
+     *                kernel. The kernel's immutables carry the full tranche set, so any one tranche resolves the whole
+     *                market via `getMarket` without a three-way mapping. Also serves as the "is this a factory-deployed
+     *                Royco tranche" registry check (zero for unknown addresses).
      */
     struct RoycoFactoryState {
         mapping(address template => bool enabled) isTemplateEnabled;
-        mapping(address seniorTranche => address juniorTranche) seniorTrancheToJuniorTranche;
-        mapping(address juniorTranche => address seniorTranche) juniorTrancheToSeniorTranche;
+        mapping(address tranche => address kernel) trancheToKernel;
     }
 
     /// @notice Emitted when a template is registered and enabled.
     event TemplateRegistered(address indexed template);
     /// @notice Emitted when a template is disabled.
     event TemplateDisabled(address indexed template);
-    /// @notice Emitted when a market deployment window is opened for a template.
-    event MarketDeploymentStarted(address indexed template, address indexed deployer);
-    /// @notice Emitted when a market deployment completes and is verified.
-    event MarketDeploymentCompleted(address indexed template, IRoycoProtocolTemplate.DeploymentResult result);
+    /// @notice Emitted when a market deployment completes.
+    event MarketDeploymentCompleted(address indexed template, address indexed deployer, IRoycoProtocolTemplate.DeploymentResult result);
 
     /// @notice Thrown when a factory primitive is called by anything other than the active template.
     error ONLY_ACTIVE_TEMPLATE();
@@ -102,9 +101,16 @@ interface IRoycoFactory {
     /// @notice Forwards an arbitrary call as the factory. Callable only by the active template.
     function executeAsFactory(address _target, bytes calldata _data) external returns (bytes memory result);
 
-    /// @notice Returns the junior tranche paired with a senior tranche.
-    function seniorTrancheToJuniorTranche(address _seniorTranche) external view returns (address juniorTranche);
+    /// @notice Returns the kernel a factory-deployed tranche belongs to (zero for unknown addresses).
+    function trancheToKernel(address _tranche) external view returns (address kernel);
 
-    /// @notice Returns the senior tranche paired with a junior tranche.
-    function juniorTrancheToSeniorTranche(address _juniorTranche) external view returns (address seniorTranche);
+    /**
+     * @notice Resolves a whole market from ANY one of its three tranches.
+     * @param _tranche Any of the market's senior, junior, or liquidity tranche addresses.
+     * @return seniorTranche The market's senior tranche (zero if `_tranche` is unknown).
+     * @return juniorTranche The market's junior tranche (zero if `_tranche` is unknown).
+     * @return liquidityTranche The market's liquidity tranche (zero if `_tranche` is unknown).
+     * @return kernel The market's kernel (zero if `_tranche` is unknown).
+     */
+    function getMarket(address _tranche) external view returns (address seniorTranche, address juniorTranche, address liquidityTranche, address kernel);
 }

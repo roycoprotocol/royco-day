@@ -49,8 +49,8 @@ contract RoycoTestMathTest is Test {
 
     /// A full claim (claim == lastRaw) attributes the whole delta exactly, both signs.
     function test_Attribute_fullClaim_exact() public pure {
-        assertEq(RoycoTestMath.attribute(-123456789, 1e18, 1e18), -123456789, "full claim on loss");
-        assertEq(RoycoTestMath.attribute(987654321, 55e18, 55e18), 987654321, "full claim on gain");
+        assertEq(RoycoTestMath.attribute(-123_456_789, 1e18, 1e18), -123_456_789, "full claim on loss");
+        assertEq(RoycoTestMath.attribute(987_654_321, 55e18, 55e18), 987_654_321, "full claim on gain");
     }
 
     /// 1-wei boundary: ⌊1·1/1e30⌋ = 0 and -⌊(1e30-1)·1/1e30⌋ = 0 (dust vanishes to the complement).
@@ -108,13 +108,13 @@ contract RoycoTestMathTest is Test {
 
     /// Ceil engaged: ⌈10·1e17 / 3⌉ = ⌈1e18/3⌉ = ⌈333333333333333333.33…⌉ = 333333333333333334.
     function test_CovUtil_ceilRounding_favorsSenior() public pure {
-        assertEq(RoycoTestMath.covUtil(10, 0, false, 1e17, 3), 333333333333333334, "ceil(1e18/3)");
+        assertEq(RoycoTestMath.covUtil(10, 0, false, 1e17, 3), 333_333_333_333_333_334, "ceil(1e18/3)");
     }
 
     /// Beta off vs on: same NAVs as the WAD-boundary vector but jtCoinvested == false drops jtRaw from the
     /// numerator: ⌈100e18·1e17 / 15e18⌉ = ⌈1e37/1.5e19⌉ = ⌈666666666666666666.66…⌉ = 666666666666666667.
     function test_CovUtil_coinvestmentBeta_excludesJtRaw() public pure {
-        assertEq(RoycoTestMath.covUtil(100e18, 50e18, false, 1e17, 15e18), 666666666666666667, "ceil(1e37/1.5e19)");
+        assertEq(RoycoTestMath.covUtil(100e18, 50e18, false, 1e17, 15e18), 666_666_666_666_666_667, "ceil(1e37/1.5e19)");
     }
 
     /// Max realistic: ⌈(1e30 + 1e30)·1e18 / 1⌉ = 2e48 exact (no overflow through mulDiv).
@@ -154,7 +154,7 @@ contract RoycoTestMathTest is Test {
 
     /// Ceil engaged: ⌈10·1e17 / 3⌉ = ⌈1e18/3⌉ = 333333333333333334.
     function test_LiqUtil_ceilRounding_favorsSenior() public pure {
-        assertEq(RoycoTestMath.liqUtil(10, 1e17, 3), 333333333333333334, "ceil(1e18/3)");
+        assertEq(RoycoTestMath.liqUtil(10, 1e17, 3), 333_333_333_333_333_334, "ceil(1e18/3)");
     }
 
     /// 1-wei boundary: ⌈1·1 / 1e30⌉ = ⌈1e-30⌉ = 1, the ceil bias never reads a positive requirement as zero.
@@ -164,7 +164,7 @@ contract RoycoTestMathTest is Test {
 
     /// Max realistic, exact division: ⌈1e30·(1e18−1) / 1e30⌉ = 1e18 − 1 = 999999999999999999.
     function test_LiqUtil_maxRealistic() public pure {
-        assertEq(RoycoTestMath.liqUtil(MAX_NAV, WAD - 1, MAX_NAV), 999999999999999999, "(1e30*(1e18-1))/1e30 exact");
+        assertEq(RoycoTestMath.liqUtil(MAX_NAV, WAD - 1, MAX_NAV), 999_999_999_999_999_999, "(1e30*(1e18-1))/1e30 exact");
     }
 
     /*//////////////////////////////////////////////////////////////////////////
@@ -401,12 +401,12 @@ contract RoycoTestMathTest is Test {
 
     /// Below target: 1e16 + ⌊112500000000000000·4e17/1e18⌋ = 1e16 + 45000000000000000 = 55000000000000000.
     function test_StaticYdm_belowTarget_lowerSegment() public pure {
-        assertEq(RoycoTestMath.staticYdm(4e17, 1e16, 1e17, 1e18, 8e17), 55000000000000000, "y(0.4) = 5.5%");
+        assertEq(RoycoTestMath.staticYdm(4e17, 1e16, 1e17, 1e18, 8e17), 55_000_000_000_000_000, "y(0.4) = 5.5%");
     }
 
     /// Above target: 1e17 + ⌊4500000000000000000·(9e17−8e17)/1e18⌋ = 1e17 + 45e16 = 550000000000000000.
     function test_StaticYdm_aboveTarget_upperSegment() public pure {
-        assertEq(RoycoTestMath.staticYdm(9e17, 1e16, 1e17, 1e18, 8e17), 550000000000000000, "y(0.9) = 55%");
+        assertEq(RoycoTestMath.staticYdm(9e17, 1e16, 1e17, 1e18, 8e17), 550_000_000_000_000_000, "y(0.9) = 55%");
     }
 
     /// At full utilization: 1e17 + ⌊4500000000000000000·2e17/1e18⌋ = 1e17 + 9e17 = 1e18 = yFull.
@@ -448,7 +448,7 @@ contract RoycoTestMathTest is Test {
         assertEq(RoycoTestMath.staticYdm(1e18, 1e16, 1e17, 999e18, 1e18), 1e17, "u capped to WAD == target");
         // Below the target the lower segment interpolates: slope = ⌊9e16·1e18/1e18⌋ = 9e16,
         // y(5e17) = 1e16 + ⌊9e16·5e17/1e18⌋ = 1e16 + 4.5e16 = 5.5e16.
-        assertEq(RoycoTestMath.staticYdm(5e17, 1e16, 1e17, 999e18, 1e18), 55000000000000000, "lower segment midpoint");
+        assertEq(RoycoTestMath.staticYdm(5e17, 1e16, 1e17, 999e18, 1e18), 55_000_000_000_000_000, "lower segment midpoint");
     }
 
     /// A flat curve returns the constant everywhere (both slopes are 0).
@@ -552,9 +552,8 @@ contract RoycoTestMathTest is Test {
      *   covUtil = ⌈1050e18·0.1e18/225e18⌉ = ⌈0.46666…e18⌉ = 466666666666666667.
      *   liqUtil = ⌈1045e18·0.05e18/100e18⌉ = 5.225e17 exact.
      */
-    function test_Waterfall_gainGain_bothJtFeeParts_instantaneousPremium() public pure {
-        RoycoTestMath.WaterfallIn memory in_ =
-            _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 1050e18, 220e18);
+    function test_Waterfall_W9_gainGain_bothJtFeeParts_instantaneousPremium() public pure {
+        RoycoTestMath.WaterfallIn memory in_ = _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 1050e18, 220e18);
         RoycoTestMath.WaterfallOut memory expected;
         expected.stRaw = 1050e18;
         expected.jtRaw = 220e18;
@@ -567,8 +566,8 @@ contract RoycoTestMathTest is Test {
         expected.stProtocolFee = 4.25e18;
         expected.jtProtocolFee = 2.5e18;
         expected.ltProtocolFee = 0.25e18;
-        expected.coverageUtilizationWAD = 466666666666666667;
-        expected.liquidityUtilizationWAD = 522500000000000000;
+        expected.coverageUtilizationWAD = 466_666_666_666_666_667;
+        expected.liquidityUtilizationWAD = 522_500_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
         expected.fixedTermEnd = 0;
         expected.premiumsPaid = true;
@@ -588,9 +587,8 @@ contract RoycoTestMathTest is Test {
      *   covUtil = ⌈950e18·0.1e18/170e18⌉ = ⌈558823529411764705.88⌉ = 558823529411764706.
      *   liqUtil = ⌈1000e18·0.05e18/100e18⌉ = 5e17.
      */
-    function test_Waterfall_stLossJtGain_coverageAndFeeRecompute_fixedTermEntry() public pure {
-        RoycoTestMath.WaterfallIn memory in_ =
-            _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 950e18, 220e18);
+    function test_Waterfall_W3_stLossJtGain_coverageAndFeeRecompute_ftEntry() public pure {
+        RoycoTestMath.WaterfallIn memory in_ = _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 950e18, 220e18);
         RoycoTestMath.WaterfallOut memory expected;
         expected.stRaw = 950e18;
         expected.jtRaw = 220e18;
@@ -598,8 +596,8 @@ contract RoycoTestMathTest is Test {
         expected.stEff = 1000e18;
         expected.jtEff = 170e18;
         expected.jtCoverageIL = 50e18;
-        expected.coverageUtilizationWAD = 558823529411764706;
-        expected.liquidityUtilizationWAD = 500000000000000000;
+        expected.coverageUtilizationWAD = 558_823_529_411_764_706;
+        expected.liquidityUtilizationWAD = 500_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.FIXED_TERM;
         expected.fixedTermEnd = T0 + DURATION;
         _assertWaterfall(RoycoTestMath.waterfall(in_), expected);
@@ -612,9 +610,8 @@ contract RoycoTestMathTest is Test {
      * Sync (1000e18, 220e18): jtNetGain 20e18 ⇒ jtFee 2e18, jtEff 220e18, no ST leg.
      * IL 0 ⇒ PERPETUAL. covUtil = ⌈1000e18·0.1e18/220e18⌉ = ⌈454545454545454545.45⌉ = 454545454545454546.
      */
-    function test_Waterfall_jtOnlyGain_feeSurvivesPerpetual() public pure {
-        RoycoTestMath.WaterfallIn memory in_ =
-            _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 1000e18, 220e18);
+    function test_Waterfall_W6_jtOnlyGain_feeSurvivesPerpetual() public pure {
+        RoycoTestMath.WaterfallIn memory in_ = _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 1000e18, 220e18);
         RoycoTestMath.WaterfallOut memory expected;
         expected.stRaw = 1000e18;
         expected.jtRaw = 220e18;
@@ -622,8 +619,8 @@ contract RoycoTestMathTest is Test {
         expected.stEff = 1000e18;
         expected.jtEff = 220e18;
         expected.jtProtocolFee = 2e18;
-        expected.coverageUtilizationWAD = 454545454545454546;
-        expected.liquidityUtilizationWAD = 500000000000000000;
+        expected.coverageUtilizationWAD = 454_545_454_545_454_546;
+        expected.liquidityUtilizationWAD = 500_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
         _assertWaterfall(RoycoTestMath.waterfall(in_), expected);
     }
@@ -637,9 +634,8 @@ contract RoycoTestMathTest is Test {
      * which also satisfies the liquidation disjunct. Forced PERPETUAL: ilErased = 200e18, IL = 0, end 0.
      * Conservation 700 + 200 = 900 + 0. liqUtil = ⌈900e18·0.05e18/100e18⌉ = 4.5e17.
      */
-    function test_Waterfall_lossPastJtExhaustion_wipeoutErasesIL() public pure {
-        RoycoTestMath.WaterfallIn memory in_ =
-            _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 700e18, 200e18);
+    function test_Waterfall_W55_lossPastJtExhaustion_wipeoutErasesIL() public pure {
+        RoycoTestMath.WaterfallIn memory in_ = _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 700e18, 200e18);
         RoycoTestMath.WaterfallOut memory expected;
         expected.stRaw = 700e18;
         expected.jtRaw = 200e18;
@@ -648,7 +644,7 @@ contract RoycoTestMathTest is Test {
         expected.jtEff = 0;
         expected.jtCoverageIL = 0;
         expected.coverageUtilizationWAD = type(uint256).max;
-        expected.liquidityUtilizationWAD = 450000000000000000;
+        expected.liquidityUtilizationWAD = 450_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
         expected.ilErased = 200e18;
         _assertWaterfall(RoycoTestMath.waterfall(in_), expected);
@@ -662,9 +658,8 @@ contract RoycoTestMathTest is Test {
      * Sync (800e18, 200e18): stLoss 200e18 == jtEff ⇒ coverage 200e18, jtEff 0, residual 0,
      * stEff intact at 1000e18, IL 200e18 ⇒ wipeout disjunct ⇒ PERPETUAL, IL erased.
      */
-    function test_Waterfall_exhaustionAtBoundary_stEffIntact() public pure {
-        RoycoTestMath.WaterfallIn memory in_ =
-            _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 800e18, 200e18);
+    function test_Waterfall_W56_exhaustionAtBoundary_stEffIntact() public pure {
+        RoycoTestMath.WaterfallIn memory in_ = _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 800e18, 200e18);
         RoycoTestMath.WaterfallOut memory expected;
         expected.stRaw = 800e18;
         expected.jtRaw = 200e18;
@@ -672,7 +667,7 @@ contract RoycoTestMathTest is Test {
         expected.stEff = 1000e18;
         expected.jtEff = 0;
         expected.coverageUtilizationWAD = type(uint256).max;
-        expected.liquidityUtilizationWAD = 500000000000000000;
+        expected.liquidityUtilizationWAD = 500_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
         expected.ilErased = 200e18;
         _assertWaterfall(RoycoTestMath.waterfall(in_), expected);
@@ -687,18 +682,17 @@ contract RoycoTestMathTest is Test {
      * covUtil = ⌈(1000e18−1)·0.1e18/(100e18−1)⌉ = 1000000000000000001 (remainder 9e17 forces
      * the ceil past the exact 1e18). liqUtil = 5e17.
      */
-    function test_Waterfall_flatSync_exitsFixedTerm() public pure {
-        RoycoTestMath.WaterfallIn memory in_ = _cellIn(
-            1000e18 - 1, 100e18, 1000e18, 100e18 - 1, 0, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 1000e18 - 1, 100e18
-        );
+    function test_Waterfall_W14_flatSync_exitsFixedTerm() public pure {
+        RoycoTestMath.WaterfallIn memory in_ =
+            _cellIn(1000e18 - 1, 100e18, 1000e18, 100e18 - 1, 0, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 1000e18 - 1, 100e18);
         RoycoTestMath.WaterfallOut memory expected;
         expected.stRaw = 1000e18 - 1;
         expected.jtRaw = 100e18;
         expected.ltRaw = 100e18;
         expected.stEff = 1000e18;
         expected.jtEff = 100e18 - 1;
-        expected.coverageUtilizationWAD = 1000000000000000001;
-        expected.liquidityUtilizationWAD = 500000000000000000;
+        expected.coverageUtilizationWAD = 1_000_000_000_000_000_001;
+        expected.liquidityUtilizationWAD = 500_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
         expected.fixedTermEnd = 0;
         _assertWaterfall(RoycoTestMath.waterfall(in_), expected);
@@ -731,8 +725,8 @@ contract RoycoTestMathTest is Test {
         expected.stProtocolFee = 4.25e18;
         expected.jtProtocolFee = 0.5e18;
         expected.ltProtocolFee = 0.25e18;
-        expected.coverageUtilizationWAD = 1235294117647058824;
-        expected.liquidityUtilizationWAD = 522500000000000001;
+        expected.coverageUtilizationWAD = 1_235_294_117_647_058_824;
+        expected.liquidityUtilizationWAD = 522_500_000_000_000_001;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
         expected.premiumsPaid = true;
         _assertWaterfall(RoycoTestMath.waterfall(in_), expected);
@@ -751,9 +745,8 @@ contract RoycoTestMathTest is Test {
      *   jtEff = 180e18 + (5e18−1) = 185e18−1. Conservation 1050+180 = (1045e18+1)+(185e18−1). IL 0 ⇒ PERPETUAL.
      *   covUtil = ⌈1050e18·0.1e18/(185e18−1)⌉ = 567567567567567568. liqUtil = ⌈(1045e18+1)/2000⌉ = 522500000000000001.
      */
-    function test_Waterfall_dustIL_recoveryThenAwkwardPremiumFloors() public pure {
-        RoycoTestMath.WaterfallIn memory in_ =
-            _cellIn(1000e18, 200e18, 1000e18 + 5, 200e18 - 5, 5, RoycoTestMath.MarketState.PERPETUAL, 0, 7, 1050e18, 180e18);
+    function test_Waterfall_W25_dustIL_recoveryThenAwkwardPremiumFloors() public pure {
+        RoycoTestMath.WaterfallIn memory in_ = _cellIn(1000e18, 200e18, 1000e18 + 5, 200e18 - 5, 5, RoycoTestMath.MarketState.PERPETUAL, 0, 7, 1050e18, 180e18);
         RoycoTestMath.WaterfallOut memory expected;
         expected.stRaw = 1050e18;
         expected.jtRaw = 180e18;
@@ -765,8 +758,8 @@ contract RoycoTestMathTest is Test {
         expected.stProtocolFee = 4.25e18 - 1;
         expected.jtProtocolFee = 0.5e18 - 1;
         expected.ltProtocolFee = 0.25e18 - 1;
-        expected.coverageUtilizationWAD = 567567567567567568;
-        expected.liquidityUtilizationWAD = 522500000000000001;
+        expected.coverageUtilizationWAD = 567_567_567_567_567_568;
+        expected.liquidityUtilizationWAD = 522_500_000_000_000_001;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
         expected.premiumsPaid = true;
         _assertWaterfall(RoycoTestMath.waterfall(in_), expected);
@@ -780,10 +773,9 @@ contract RoycoTestMathTest is Test {
      * end T0+D. covUtil = ⌈(1000e18−5)·0.1e18/(200e18−5)⌉ = 500000000000000001 (the −5 offsets leave a
      * fractional part).
      */
-    function test_Waterfall_dustIL_fixedTermStickiness() public pure {
-        RoycoTestMath.WaterfallIn memory in_ = _cellIn(
-            1000e18 - 5, 200e18, 1000e18, 200e18 - 5, 5, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 7, 1000e18 - 5, 200e18
-        );
+    function test_Waterfall_W32_dustIL_fixedTermStickiness() public pure {
+        RoycoTestMath.WaterfallIn memory in_ =
+            _cellIn(1000e18 - 5, 200e18, 1000e18, 200e18 - 5, 5, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 7, 1000e18 - 5, 200e18);
         RoycoTestMath.WaterfallOut memory expected;
         expected.stRaw = 1000e18 - 5;
         expected.jtRaw = 200e18;
@@ -791,8 +783,8 @@ contract RoycoTestMathTest is Test {
         expected.stEff = 1000e18;
         expected.jtEff = 200e18 - 5;
         expected.jtCoverageIL = 5;
-        expected.coverageUtilizationWAD = 500000000000000001;
-        expected.liquidityUtilizationWAD = 500000000000000000;
+        expected.coverageUtilizationWAD = 500_000_000_000_000_001;
+        expected.liquidityUtilizationWAD = 500_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.FIXED_TERM;
         expected.fixedTermEnd = T0 + DURATION;
         _assertWaterfall(RoycoTestMath.waterfall(in_), expected);
@@ -808,10 +800,9 @@ contract RoycoTestMathTest is Test {
      * sticky FIXED_TERM zeroes the fee.
      * covUtil = ⌈(1000e18−5)·0.1e18/(220e18−5)⌉ = 454545454545454546.
      */
-    function test_Waterfall_stickyBranch_zeroesLiveJtFee() public pure {
-        RoycoTestMath.WaterfallIn memory in_ = _cellIn(
-            1000e18 - 5, 200e18, 1000e18, 200e18 - 5, 5, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 7, 1000e18 - 5, 220e18
-        );
+    function test_Waterfall_W33_stickyBranch_zeroesLiveJtFee() public pure {
+        RoycoTestMath.WaterfallIn memory in_ =
+            _cellIn(1000e18 - 5, 200e18, 1000e18, 200e18 - 5, 5, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 7, 1000e18 - 5, 220e18);
         RoycoTestMath.WaterfallOut memory expected;
         expected.stRaw = 1000e18 - 5;
         expected.jtRaw = 220e18;
@@ -820,8 +811,8 @@ contract RoycoTestMathTest is Test {
         expected.jtEff = 220e18 - 5;
         expected.jtCoverageIL = 5;
         expected.jtProtocolFee = 0;
-        expected.coverageUtilizationWAD = 454545454545454546;
-        expected.liquidityUtilizationWAD = 500000000000000000;
+        expected.coverageUtilizationWAD = 454_545_454_545_454_546;
+        expected.liquidityUtilizationWAD = 500_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.FIXED_TERM;
         expected.fixedTermEnd = T0 + DURATION;
         _assertWaterfall(RoycoTestMath.waterfall(in_), expected);
@@ -835,9 +826,8 @@ contract RoycoTestMathTest is Test {
      * end = T0 + D. covUtil = ⌈1000e18·0.1e18/(200e18−5)⌉ = 500000000000000001.
      * liqUtil = ⌈(1000e18+5)/2000⌉ = 500000000000000001.
      */
-    function test_Waterfall_flatSync_tipsPerpetualToFixedTerm() public pure {
-        RoycoTestMath.WaterfallIn memory in_ =
-            _cellIn(1000e18, 200e18, 1000e18 + 5, 200e18 - 5, 5, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 1000e18, 200e18);
+    function test_Waterfall_W41_flatSync_tipsPerpetualToFixedTerm() public pure {
+        RoycoTestMath.WaterfallIn memory in_ = _cellIn(1000e18, 200e18, 1000e18 + 5, 200e18 - 5, 5, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 1000e18, 200e18);
         RoycoTestMath.WaterfallOut memory expected;
         expected.stRaw = 1000e18;
         expected.jtRaw = 200e18;
@@ -845,8 +835,8 @@ contract RoycoTestMathTest is Test {
         expected.stEff = 1000e18 + 5;
         expected.jtEff = 200e18 - 5;
         expected.jtCoverageIL = 5;
-        expected.coverageUtilizationWAD = 500000000000000001;
-        expected.liquidityUtilizationWAD = 500000000000000001;
+        expected.coverageUtilizationWAD = 500_000_000_000_000_001;
+        expected.liquidityUtilizationWAD = 500_000_000_000_000_001;
         expected.marketState = RoycoTestMath.MarketState.FIXED_TERM;
         expected.fixedTermEnd = T0 + DURATION;
         _assertWaterfall(RoycoTestMath.waterfall(in_), expected);
@@ -873,9 +863,9 @@ contract RoycoTestMathTest is Test {
         expected.ltRaw = 100e18;
         expected.stEff = 1000e18;
         expected.jtEff = 180e18;
-        expected.jtCoverageIL = 106666666666666666666;
-        expected.coverageUtilizationWAD = 500000000000000000;
-        expected.liquidityUtilizationWAD = 500000000000000000;
+        expected.jtCoverageIL = 106_666_666_666_666_666_666;
+        expected.coverageUtilizationWAD = 500_000_000_000_000_000;
+        expected.liquidityUtilizationWAD = 500_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.FIXED_TERM;
         expected.fixedTermEnd = T0 + DURATION;
         _assertWaterfall(RoycoTestMath.waterfall(in_), expected);
@@ -901,9 +891,9 @@ contract RoycoTestMathTest is Test {
         expected.ltRaw = 100e18;
         expected.stEff = 1000e18;
         expected.jtEff = 230e18;
-        expected.jtCoverageIL = 56666666666666666666;
-        expected.coverageUtilizationWAD = 413043478260869566;
-        expected.liquidityUtilizationWAD = 500000000000000000;
+        expected.jtCoverageIL = 56_666_666_666_666_666_666;
+        expected.coverageUtilizationWAD = 413_043_478_260_869_566;
+        expected.liquidityUtilizationWAD = 500_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.FIXED_TERM;
         expected.fixedTermEnd = T0 + DURATION;
         _assertWaterfall(RoycoTestMath.waterfall(in_), expected);
@@ -926,8 +916,8 @@ contract RoycoTestMathTest is Test {
         expected.ltRaw = 100e18;
         expected.stEff = 1000e18;
         expected.jtEff = 300e18;
-        expected.coverageUtilizationWAD = 333333333333333334;
-        expected.liquidityUtilizationWAD = 500000000000000000;
+        expected.coverageUtilizationWAD = 333_333_333_333_333_334;
+        expected.liquidityUtilizationWAD = 500_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
         _assertWaterfall(RoycoTestMath.waterfall(in_), expected);
     }
@@ -949,8 +939,8 @@ contract RoycoTestMathTest is Test {
         expected.ltRaw = 100e18;
         expected.stEff = 1000e18 + 1;
         expected.jtEff = 300e18;
-        expected.coverageUtilizationWAD = 333333333333333334;
-        expected.liquidityUtilizationWAD = 500000000000000001;
+        expected.coverageUtilizationWAD = 333_333_333_333_333_334;
+        expected.liquidityUtilizationWAD = 500_000_000_000_000_001;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
         expected.premiumsPaid = true;
         _assertWaterfall(RoycoTestMath.waterfall(in_), expected);
@@ -966,9 +956,8 @@ contract RoycoTestMathTest is Test {
      * ltFee 0.25e18, residual 42.5e18 ⇒ stFee 4.25e18, stEff 1045e18, jtEff 205e18, PERPETUAL.
      * covUtil = ⌈1050e18·0.1e18/205e18⌉ = ⌈512195121951219512.19⌉ = 512195121951219513.
      */
-    function test_Waterfall_timeWeightedTwin_instInputsIgnored() public pure {
-        RoycoTestMath.WaterfallIn memory in_ =
-            _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 1050e18, 200e18);
+    function test_Waterfall_W59_timeWeightedTwin_instInputsIgnored() public pure {
+        RoycoTestMath.WaterfallIn memory in_ = _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 1050e18, 200e18);
         in_.elapsedSincePremiumPayment = 86_400;
         in_.jtTwYieldShareAccrual = 8640e18;
         in_.ltTwYieldShareAccrual = 4320e18;
@@ -986,8 +975,8 @@ contract RoycoTestMathTest is Test {
         expected.stProtocolFee = 4.25e18;
         expected.jtProtocolFee = 0.5e18;
         expected.ltProtocolFee = 0.25e18;
-        expected.coverageUtilizationWAD = 512195121951219513;
-        expected.liquidityUtilizationWAD = 522500000000000000;
+        expected.coverageUtilizationWAD = 512_195_121_951_219_513;
+        expected.liquidityUtilizationWAD = 522_500_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
         expected.premiumsPaid = true;
         _assertWaterfall(RoycoTestMath.waterfall(in_), expected);
@@ -1005,9 +994,8 @@ contract RoycoTestMathTest is Test {
      * covUtil = ⌈1050e18·0.1e18/207.5e18⌉ = ⌈506024096385542168.67⌉ = 506024096385542169.
      * liqUtil = 1042.5e18/2000 = 521250000000000000 exact.
      */
-    function test_Waterfall_twoWindowTimeWeightedAveraging() public pure {
-        RoycoTestMath.WaterfallIn memory in_ =
-            _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 1050e18, 200e18);
+    function test_Waterfall_W60_twoWindowTwAveraging() public pure {
+        RoycoTestMath.WaterfallIn memory in_ = _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 1050e18, 200e18);
         in_.elapsedSincePremiumPayment = 86_400;
         in_.jtTwYieldShareAccrual = 12_960e18;
         in_.ltTwYieldShareAccrual = 4320e18;
@@ -1023,8 +1011,8 @@ contract RoycoTestMathTest is Test {
         expected.stProtocolFee = 4e18;
         expected.jtProtocolFee = 0.75e18;
         expected.ltProtocolFee = 0.25e18;
-        expected.coverageUtilizationWAD = 506024096385542169;
-        expected.liquidityUtilizationWAD = 521250000000000000;
+        expected.coverageUtilizationWAD = 506_024_096_385_542_169;
+        expected.liquidityUtilizationWAD = 521_250_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
         expected.premiumsPaid = true;
         _assertWaterfall(RoycoTestMath.waterfall(in_), expected);
@@ -1040,8 +1028,7 @@ contract RoycoTestMathTest is Test {
      * jtEff = 210e18. Conservation 1050 + 200 = 1040 + 210. covUtil = ⌈1050e18·0.1e18/210e18⌉ = 5e17 exact.
      */
     function test_Waterfall_instantaneousHostilePreview_cappedAtMaxYieldShare() public pure {
-        RoycoTestMath.WaterfallIn memory in_ =
-            _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 1050e18, 200e18);
+        RoycoTestMath.WaterfallIn memory in_ = _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 1050e18, 200e18);
         in_.jtInstYieldShareWAD = type(uint256).max;
         RoycoTestMath.WaterfallOut memory expected;
         expected.stRaw = 1050e18;
@@ -1054,8 +1041,8 @@ contract RoycoTestMathTest is Test {
         expected.stProtocolFee = 3.75e18;
         expected.jtProtocolFee = 1e18;
         expected.ltProtocolFee = 0.25e18;
-        expected.coverageUtilizationWAD = 500000000000000000;
-        expected.liquidityUtilizationWAD = 520000000000000000;
+        expected.coverageUtilizationWAD = 500_000_000_000_000_000;
+        expected.liquidityUtilizationWAD = 520_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
         expected.premiumsPaid = true;
         _assertWaterfall(RoycoTestMath.waterfall(in_), expected);
@@ -1071,8 +1058,7 @@ contract RoycoTestMathTest is Test {
      * liqUtil = ⌈50e18·0.05e18/100e18⌉ = 2.5e16.
      */
     function test_Waterfall_zeroLastSTRaw_routesDeltaToSTWhenStEffPositive() public pure {
-        RoycoTestMath.WaterfallIn memory in_ =
-            _cellIn(0, 100e18, 50e18, 50e18, 50e18, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 10e18, 100e18);
+        RoycoTestMath.WaterfallIn memory in_ = _cellIn(0, 100e18, 50e18, 50e18, 50e18, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 10e18, 100e18);
         RoycoTestMath.WaterfallOut memory expected;
         expected.stRaw = 10e18;
         expected.jtRaw = 100e18;
@@ -1080,8 +1066,8 @@ contract RoycoTestMathTest is Test {
         expected.stEff = 50e18;
         expected.jtEff = 60e18;
         expected.jtCoverageIL = 40e18;
-        expected.coverageUtilizationWAD = 16666666666666667;
-        expected.liquidityUtilizationWAD = 25000000000000000;
+        expected.coverageUtilizationWAD = 16_666_666_666_666_667;
+        expected.liquidityUtilizationWAD = 25_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.FIXED_TERM;
         expected.fixedTermEnd = T0 + DURATION;
         _assertWaterfall(RoycoTestMath.waterfall(in_), expected);
@@ -1103,7 +1089,7 @@ contract RoycoTestMathTest is Test {
         expected.stEff = 0;
         expected.jtEff = 110e18;
         expected.jtProtocolFee = 1e18;
-        expected.coverageUtilizationWAD = 9090909090909091;
+        expected.coverageUtilizationWAD = 9_090_909_090_909_091;
         expected.liquidityUtilizationWAD = 0;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
         _assertWaterfall(RoycoTestMath.waterfall(in_), expected);
@@ -1196,7 +1182,7 @@ contract RoycoTestMathTest is Test {
     function test_MaxJTWithdrawal_coinvested_retentionDenominator() public pure {
         (uint256 stW, uint256 jtW) = RoycoTestMath.maxJTWithdrawal(1000e18, 200e18, 1000e18, 200e18, true, 1e17, 0, 0);
         assertEq(stW, 0, "no cross claim");
-        assertEq(jtW, 88888888888888888886, "surplus grossed up by 10/9 retention");
+        assertEq(jtW, 88_888_888_888_888_888_886, "surplus grossed up by 10/9 retention");
     }
 
     /**
@@ -1209,8 +1195,8 @@ contract RoycoTestMathTest is Test {
      */
     function test_MaxJTWithdrawal_crossClaimSplit() public pure {
         (uint256 stW, uint256 jtW) = RoycoTestMath.maxJTWithdrawal(1000e18, 200e18, 950e18, 250e18, false, 1e17, 0, 0);
-        assertEq(stW, 30612244897959183673, "ST-sourced slice, floored");
-        assertEq(jtW, 122448979591836734692, "JT-sourced slice, floored");
+        assertEq(stW, 30_612_244_897_959_183_673, "ST-sourced slice, floored");
+        assertEq(jtW, 122_448_979_591_836_734_692, "JT-sourced slice, floored");
     }
 
     /**
@@ -1298,7 +1284,7 @@ contract RoycoTestMathTest is Test {
      * 40e18 ⇒ maxNeutral = case1 ⇒ bonus = min(100e18, 140e18, 32558139534883720930).
      */
     function test_SelfLiqBonus_atThresholdExactly_case1STSourced() public pure {
-        assertEq(RoycoTestMath.selfLiqBonus(_bonusIn(200e18, 200e18, false)), 32558139534883720930, "case 1 floors 28000/860");
+        assertEq(RoycoTestMath.selfLiqBonus(_bonusIn(200e18, 200e18, false)), 32_558_139_534_883_720_930, "case 1 floors 28000/860");
     }
 
     /**
@@ -1409,7 +1395,7 @@ contract RoycoTestMathTest is Test {
         in_.startYieldShareAtTargetWAD = 5e17;
         RoycoTestMath.AdaptiveYdmOut memory out = RoycoTestMath.adaptiveYdm(in_);
         assertEq(out.endYieldShareAtTargetWAD, 1e18, "end clamped to max");
-        assertEq(out.yieldShareWAD, 975000000000000000, "(5e17 + 3e18)/4 + 1e17");
+        assertEq(out.yieldShareWAD, 975_000_000_000_000_000, "(5e17 + 3e18)/4 + 1e17");
     }
 
     /**
@@ -1422,7 +1408,7 @@ contract RoycoTestMathTest is Test {
         in_.startYieldShareAtTargetWAD = 1e18;
         RoycoTestMath.AdaptiveYdmOut memory out = RoycoTestMath.adaptiveYdm(in_);
         assertEq(out.endYieldShareAtTargetWAD, 1e14, "end clamped to the 1bp floor");
-        assertEq(out.yieldShareWAD, 200075000000000000, "(1e18 + 3e14)/4 - 5e16");
+        assertEq(out.yieldShareWAD, 200_075_000_000_000_000, "(1e18 + 3e14)/4 - 5e16");
     }
 
     /// Utilization above WAD is capped before evaluation: u = 2e18 behaves exactly like u = 1e18.
@@ -1443,7 +1429,7 @@ contract RoycoTestMathTest is Test {
         in_.targetUtilizationWAD = 3e17;
         in_.discountToTargetAtZeroUtilWAD = 3e16;
         RoycoTestMath.AdaptiveYdmOut memory out = RoycoTestMath.adaptiveYdm(in_);
-        assertEq(out.yieldShareWAD, 80000000000000001, "double truncation keeps 1 wei");
+        assertEq(out.yieldShareWAD, 80_000_000_000_000_001, "double truncation keeps 1 wei");
         assertEq(out.endYieldShareAtTargetWAD, 1e17, "no adaptation at zero elapsed");
     }
 

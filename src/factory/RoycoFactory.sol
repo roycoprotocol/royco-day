@@ -7,6 +7,7 @@ import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { CREATE3 } from "../../lib/solady/src/utils/CREATE3.sol";
 import { RoycoBase } from "../base/RoycoBase.sol";
+import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
 import { IBaseTemplate } from "../interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../interfaces/factory/IRoycoProtocolTemplate.sol";
@@ -139,7 +140,6 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
 
         // Bind the active template.
         _activeTemplate = _template;
-        emit MarketDeploymentStarted(_template, msg.sender);
 
         // Deploy the market.
         result = IBaseTemplate(_template).deployMarket(_params);
@@ -147,11 +147,12 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         // Explicit clear for clarity; transient storage auto-clears at tx-end as a backstop.
         _activeTemplate = address(0);
 
-        // Store the senior and junior tranche addresses in the factory storage.
-        $.seniorTrancheToJuniorTranche[result.seniorTranche] = result.juniorTranche;
-        $.juniorTrancheToSeniorTranche[result.juniorTranche] = result.seniorTranche;
+        // Register each tranche against the market's kernel.
+        $.trancheToKernel[result.seniorTranche] = result.kernel;
+        $.trancheToKernel[result.juniorTranche] = result.kernel;
+        $.trancheToKernel[result.liquidityTranche] = result.kernel;
 
-        emit MarketDeploymentCompleted(_template, result);
+        emit MarketDeploymentCompleted(_template, msg.sender, result);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -237,13 +238,23 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @inheritdoc IRoycoFactory
-    function seniorTrancheToJuniorTranche(address _seniorTranche) external view override(IRoycoFactory) returns (address juniorTranche) {
-        return _getRoycoFactoryStorage().seniorTrancheToJuniorTranche[_seniorTranche];
+    function trancheToKernel(address _tranche) external view override(IRoycoFactory) returns (address kernel) {
+        return _getRoycoFactoryStorage().trancheToKernel[_tranche];
     }
 
     /// @inheritdoc IRoycoFactory
-    function juniorTrancheToSeniorTranche(address _juniorTranche) external view override(IRoycoFactory) returns (address seniorTranche) {
-        return _getRoycoFactoryStorage().juniorTrancheToSeniorTranche[_juniorTranche];
+    function getMarket(address _tranche)
+        external
+        view
+        override(IRoycoFactory)
+        returns (address seniorTranche, address juniorTranche, address liquidityTranche, address kernel)
+    {
+        kernel = _getRoycoFactoryStorage().trancheToKernel[_tranche];
+        // Unknown tranche: every component resolves to zero.
+        if (kernel == address(0)) return (address(0), address(0), address(0), address(0));
+        // The kernel's immutables are the single source of truth for the market's tranche set.
+        IRoycoDayKernel dayKernel = IRoycoDayKernel(kernel);
+        return (dayKernel.SENIOR_TRANCHE(), dayKernel.JUNIOR_TRANCHE(), dayKernel.LIQUIDITY_TRANCHE(), kernel);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

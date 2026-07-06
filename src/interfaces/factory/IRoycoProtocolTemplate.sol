@@ -4,8 +4,9 @@ pragma solidity ^0.8.28;
 /**
  * @title IRoycoProtocolTemplate
  * @author Ankur Dubey, Shivaansh Kapoor
- * @notice Interface every Royco market deployment template implements. The factory drives a template through
- *         `initialize` (once, at registration), then `deployMarket` + `verify` inside an `executeMarketDeployment` window.
+ * @notice Interface every Royco market deployment template implements. The deployer initializes the template once
+ *         (loading its component creation codes) before registering it with the factory; the factory then drives it
+ *         through `deployMarket` inside an `executeMarketDeployment` window.
  */
 interface IRoycoProtocolTemplate {
     /**
@@ -17,7 +18,7 @@ interface IRoycoProtocolTemplate {
      * @custom:field accountant - The accountant proxy.
      * @custom:field ydm - The junior tranche's (possibly shared) YDM singleton.
      * @custom:field ltYdm - The liquidity tranche's (possibly shared) LDM singleton (zero for markets without a liquidity tranche).
-     * @custom:field extras - ABI-encoded template-specific addenda consumed by `verify` and downstream tooling.
+     * @custom:field extras - ABI-encoded template-specific addenda consumed by downstream tooling.
      */
     struct DeploymentResult {
         address seniorTranche;
@@ -34,7 +35,8 @@ interface IRoycoProtocolTemplate {
     error INVALID_PARAMS();
 
     /**
-     * @notice Loads the template's SSTORE2-backed component creation codes. Called once by the factory at registration.
+     * @notice Loads the template's SSTORE2-backed component creation codes. Called once by the deployer before the
+     *         template is registered with the factory.
      * @param _componentIds The component IDs to populate.
      * @param _creationCodes The creation code for each component, index-aligned with `_componentIds`.
      */

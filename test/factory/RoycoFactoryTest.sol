@@ -2,6 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { ILPOracleFactoryBase } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleFactoryBase.sol";
+import { IVault } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
+import { TokenInfo, TokenType } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
 import { GyroECLPPoolFactory } from "../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import { Test } from "../../lib/forge-std/src/Test.sol";
 import { Initializable } from "../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
@@ -10,11 +12,13 @@ import { PausableUpgradeable } from "../../lib/openzeppelin-contracts-upgradeabl
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ROLE, ADMIN_UPGRADER_ROLE, DEPLOYER_ROLE } from "../../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { DayIdenticalERC4626ChainlinkDeploymentTemplate } from "../../src/factory/templates/DayIdenticalERC4626ChainlinkDeploymentTemplate.sol";
-import { COMPONENT_ID_SENIOR_TRANCHE_IMPL } from "../../src/factory/templates/base/Components.sol";
+import { COMPONENT_ID_SENIOR_TRANCHE_IMPL, TAG_ST_PROXY } from "../../src/factory/templates/base/Components.sol";
+import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoFactory } from "../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 
@@ -44,8 +48,7 @@ contract RoycoFactoryTest is Test {
     // Mirrors of the factory's events, for `vm.expectEmit`.
     event TemplateRegistered(address indexed template);
     event TemplateDisabled(address indexed template);
-    event MarketDeploymentStarted(address indexed template, address indexed deployer);
-    event MarketDeploymentCompleted(address indexed template, IRoycoProtocolTemplate.DeploymentResult result);
+    event MarketDeploymentCompleted(address indexed template, address indexed deployer, IRoycoProtocolTemplate.DeploymentResult result);
 
     function setUp() public {
         string memory rpc = vm.envString("MAINNET_RPC_URL");
@@ -257,10 +260,10 @@ contract RoycoFactoryTest is Test {
         _register();
         bytes memory p = _encodedParams(keccak256("snUSD-market-A"));
 
+        // Single completion event: topics carry (template, deployer); the result payload is checked below via the
+        // returned struct + the market registry.
         vm.expectEmit(true, true, false, false, address(factory));
-        emit MarketDeploymentStarted(address(template), DEPLOYER);
-        vm.expectEmit(true, false, false, false, address(factory));
-        emit MarketDeploymentCompleted(address(template), _emptyResult());
+        emit MarketDeploymentCompleted(address(template), DEPLOYER, _emptyResult());
 
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
@@ -273,9 +276,13 @@ contract RoycoFactoryTest is Test {
         assertGt(r.accountant.code.length, 0, "accountant live");
         assertTrue(r.ydm != address(0) && r.ltYdm != address(0) && r.ydm != r.ltYdm, "distinct YDM + LDM");
 
-        // The factory recorded the senior<->junior tranche pairing.
-        assertEq(factory.seniorTrancheToJuniorTranche(r.seniorTranche), r.juniorTranche, "s->j mapping");
-        assertEq(factory.juniorTrancheToSeniorTranche(r.juniorTranche), r.seniorTranche, "j->s mapping");
+        // The registry resolves the WHOLE market from ANY of the three tranches.
+        _assertGetMarketResolves(r, r.seniorTranche, "via senior");
+        _assertGetMarketResolves(r, r.juniorTranche, "via junior");
+        _assertGetMarketResolves(r, r.liquidityTranche, "via liquidity");
+        assertEq(factory.trancheToKernel(r.seniorTranche), r.kernel, "st->kernel");
+        assertEq(factory.trancheToKernel(r.juniorTranche), r.kernel, "jt->kernel");
+        assertEq(factory.trancheToKernel(r.liquidityTranche), r.kernel, "lt->kernel");
     }
 
     function test_execute_clearsActiveTemplate_allowsSequentialDeploys() external {
@@ -286,7 +293,73 @@ contract RoycoFactoryTest is Test {
         IRoycoProtocolTemplate.DeploymentResult memory b = _deploy(keccak256("seq-B"));
 
         assertTrue(a.kernel != b.kernel, "distinct markets");
-        assertEq(factory.seniorTrancheToJuniorTranche(b.seniorTranche), b.juniorTranche, "second mapping");
+        // Each market's tranches resolve only to their own market — no cross-market bleed in the registry.
+        _assertGetMarketResolves(a, a.seniorTranche, "market A via senior");
+        _assertGetMarketResolves(b, b.seniorTranche, "market B via senior");
+        assertTrue(factory.trancheToKernel(a.seniorTranche) != factory.trancheToKernel(b.seniorTranche), "registries distinct");
+    }
+
+    /// B9: Balancer requires pool tokens registered in ascending address order, so the senior leg's position depends
+    /// on how the CREATE3 ST proxy address sorts against the quote asset. Both orderings must land the WITH_RATE +
+    /// kernel-rate-provider config on the SENIOR leg (and STANDARD/no-provider on the quote leg) — a sort-dependent
+    /// mis-assignment would price the pool off the wrong token. MarketIds are searched by predicting the ST proxy
+    /// address (no deployment) until each ordering has a witness, then one market per ordering is actually deployed.
+    function test_execute_poolTokenSort_bothOrderings_seniorLegAlwaysWithRate() external {
+        _register();
+        address quoteAsset =
+            deployScript.buildDayParams(deployScript.getMarketConfig("snUSD"), bytes32(0), PROTOCOL_FEE_RECIPIENT, address(0)).gyroECLPPoolParams.quoteAsset;
+
+        // Search deterministic marketIds for one ST-proxy prediction on each side of the quote asset. Each try is a
+        // fair ~50/50 coin flip on the hashed address, so 64 tries bounds the miss probability at 2^-63 per side.
+        bytes32 seniorFirstId;
+        bytes32 seniorSecondId;
+        for (uint256 i; seniorFirstId == bytes32(0) || seniorSecondId == bytes32(0); ++i) {
+            require(i < 64, "no witness for both token orderings within 64 marketIds");
+            bytes32 id = keccak256(abi.encodePacked("B9_TOKEN_SORT_", i));
+            address predictedST = factory.predictDeterministicAddress(keccak256(abi.encodePacked("ROYCO_MARKET_", id, TAG_ST_PROXY)));
+            if (uint160(predictedST) < uint160(quoteAsset)) {
+                if (seniorFirstId == bytes32(0)) seniorFirstId = id;
+            } else if (seniorSecondId == bytes32(0)) {
+                seniorSecondId = id;
+            }
+        }
+
+        _assertSeniorLegWithRate(_deploy(seniorFirstId), quoteAsset, 0, "senior sorts below quote");
+        _assertSeniorLegWithRate(_deploy(seniorSecondId), quoteAsset, 1, "senior sorts above quote");
+    }
+
+    /// @dev Asserts the deployed market's pool has the senior tranche at `_expectedSeniorIndex` configured WITH_RATE
+    ///      and rate-provided by the kernel, and the quote leg STANDARD with no rate provider.
+    function _assertSeniorLegWithRate(
+        IRoycoProtocolTemplate.DeploymentResult memory _r,
+        address _quoteAsset,
+        uint256 _expectedSeniorIndex,
+        string memory _ctx
+    )
+        internal
+        view
+    {
+        address pool = IRoycoDayKernel(_r.kernel).LT_ASSET();
+        IVault vault = IVault(address(GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY).getVault()));
+        (IERC20[] memory tokens, TokenInfo[] memory info,,) = vault.getPoolTokenInfo(pool);
+
+        assertEq(tokens.length, 2, string.concat(_ctx, ": pool token count"));
+        assertEq(address(tokens[_expectedSeniorIndex]), _r.seniorTranche, string.concat(_ctx, ": senior leg position"));
+        assertEq(address(tokens[1 - _expectedSeniorIndex]), _quoteAsset, string.concat(_ctx, ": quote leg position"));
+
+        assertTrue(info[_expectedSeniorIndex].tokenType == TokenType.WITH_RATE, string.concat(_ctx, ": senior leg not WITH_RATE"));
+        assertEq(address(info[_expectedSeniorIndex].rateProvider), _r.kernel, string.concat(_ctx, ": senior rate provider != kernel"));
+        assertTrue(info[1 - _expectedSeniorIndex].tokenType == TokenType.STANDARD, string.concat(_ctx, ": quote leg not STANDARD"));
+        assertEq(address(info[1 - _expectedSeniorIndex].rateProvider), address(0), string.concat(_ctx, ": quote leg has a rate provider"));
+    }
+
+    /// @dev Asserts `getMarket(key)` returns exactly the deployed market's full component set.
+    function _assertGetMarketResolves(IRoycoProtocolTemplate.DeploymentResult memory _r, address _key, string memory _ctx) internal view {
+        (address st, address jt, address lt, address kernel) = factory.getMarket(_key);
+        assertEq(st, _r.seniorTranche, string.concat(_ctx, ": senior"));
+        assertEq(jt, _r.juniorTranche, string.concat(_ctx, ": junior"));
+        assertEq(lt, _r.liquidityTranche, string.concat(_ctx, ": liquidity"));
+        assertEq(kernel, _r.kernel, string.concat(_ctx, ": kernel"));
     }
 
     function test_execute_revertsForNonDeployer() external {
@@ -345,8 +418,12 @@ contract RoycoFactoryTest is Test {
     // ═══════════════════════════════════════════════════════════════════════════
 
     function test_getters_zeroForUnknownTranche() external {
-        assertEq(factory.seniorTrancheToJuniorTranche(makeAddr("UNKNOWN_S")), address(0), "unknown s->j");
-        assertEq(factory.juniorTrancheToSeniorTranche(makeAddr("UNKNOWN_J")), address(0), "unknown j->s");
+        assertEq(factory.trancheToKernel(makeAddr("UNKNOWN")), address(0), "unknown tranche->kernel");
+        (address st, address jt, address lt, address kernel) = factory.getMarket(makeAddr("UNKNOWN"));
+        assertEq(st, address(0), "unknown senior");
+        assertEq(jt, address(0), "unknown junior");
+        assertEq(lt, address(0), "unknown liquidity");
+        assertEq(kernel, address(0), "unknown kernel");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

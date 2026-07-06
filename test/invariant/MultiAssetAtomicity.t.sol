@@ -37,7 +37,7 @@ contract MultiAssetAtomicityTest is TrancheFixture {
         _deployMarket(cellA(), defaultParams());
         QUOTE_UNIT = 10 ** uint256(cell.quoteAsset.decimals);
         _seedMarket(100_000e18, 30_000e18);
-        _seedLT(10_000e18, 2_000e18, 8_000 * QUOTE_UNIT);
+        _seedLT(10_000e18, 2000e18, 8000 * QUOTE_UNIT);
         _sync();
     }
 
