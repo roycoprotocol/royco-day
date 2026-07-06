@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -21,6 +23,8 @@ jobs:
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: "1.7.1"
 
       - name: Show Forge version
         run: |
@@ -30,6 +34,9 @@ jobs:
         run: |
           forge fmt --check
         id: fmt
+        # Blocking on PRs (enforce style on contributions); advisory on push to main and
+        # manual dispatch, so a formatting diff never hides build/test breakage on main.
+        continue-on-error: ${{ github.event_name != 'pull_request' }}
 
       - name: Run Forge build
         run: |
