@@ -76,15 +76,6 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
     }
 
     /// @inheritdoc IRoycoLiquidityTranche
-    function previewDepositMultiAsset(uint256 _stAssets, uint256 _quoteAssets) external virtual override(IRoycoLiquidityTranche) returns (uint256 shares) {
-        // Simulate the kernel's multi-asset deposit for the value allocated, the pre-deposit LT effective NAV per share, and the LT supply the pre-op sync will have minted
-        (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt,, uint256 ltTotalSupplyAfterMints) =
-            IRoycoDayKernel(KERNEL).ltPreviewDepositMultiAsset(toTrancheUnits(_stAssets), _quoteAssets);
-        // Mint LT shares at the pre-deposit LT effective NAV per share against that post-sync supply — identical to depositMultiAsset's share math
-        shares = ValuationLogic._convertToShares(valueAllocated, navToMintSharesAt, ltTotalSupplyAfterMints, Math.Rounding.Floor);
-    }
-
-    /// @inheritdoc IRoycoLiquidityTranche
     function redeemMultiAsset(
         uint256 _shares,
         uint256 _minSTSharesOut,
@@ -114,6 +105,19 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         _burn(_owner, _shares);
 
         emit MultiAssetRedeem(msg.sender, _receiver, _owner, _shares, stClaims, quoteAssets);
+    }
+
+    // =============================
+    // Multi-Asset Preview Deposit and Redeem Functions
+    // =============================
+
+    /// @inheritdoc IRoycoLiquidityTranche
+    function previewDepositMultiAsset(uint256 _stAssets, uint256 _quoteAssets) external virtual override(IRoycoLiquidityTranche) returns (uint256 shares) {
+        // Simulate the kernel's multi-asset deposit for the value allocated, the pre-deposit LT effective NAV per share, and the LT supply the pre-op sync will have minted
+        (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt,, uint256 ltTotalSupplyAfterMints) =
+            IRoycoDayKernel(KERNEL).ltPreviewDepositMultiAsset(toTrancheUnits(_stAssets), _quoteAssets);
+        // Mint LT shares at the pre-deposit LT effective NAV per share against that post-sync supply — identical to depositMultiAsset's share math
+        shares = ValuationLogic._convertToShares(valueAllocated, navToMintSharesAt, ltTotalSupplyAfterMints, Math.Rounding.Floor);
     }
 
     /// @inheritdoc IRoycoLiquidityTranche

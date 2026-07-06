@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.28;
+
+/**
+ * @title FixtureTypes
+ * @notice Shared configuration structs for the parameterized market fixture (testing-strategy.md §2.2, §2.3)
+ * @dev Declared file-level so TokenConfigs, MarketParams, and TrancheFixture share one definition
+ */
+
+/// @notice Full description of one token slot (ST asset, JT asset, or quote asset)
+/// @dev Behavior flags come from MockBehaviors, decimals is the share decimals when erc4626 is true
+struct TokenConfig {
+    uint8 decimals;
+    uint256 behaviors;
+    uint16 feeBps;
+    bool erc4626;
+    uint8 underlyingDecimals;
+    uint256 initialRateWAD;
+}
+
+/**
+ * @notice Full market parameterization, mirroring the accountant and kernel init params 1:1
+ * @dev jtCoinvested must be true for any kernel-layer deployment: the shipped kernel family requires identical
+ *      ST/JT assets and its constructor enforces JT_COINVESTED for identical assets (RoycoDayKernel.sol:121).
+ *      The jtCoinvested=false axis is exercisable only at the accountant-harness layer
+ * @dev ydmKind values: 0 = MockYDM (pinned share), 1 = StaticCurveYDM, 2 = AdaptiveCurveYDM_V2
+ */
+struct MarketParamsConfig {
+    // coverage / liquidity
+    uint64 minCoverageWAD;
+    uint256 coverageLiquidationUtilizationWAD;
+    uint64 minLiquidityWAD;
+    bool jtCoinvested;
+    // premiums
+    uint64 maxJTYieldShareWAD;
+    uint64 maxLTYieldShareWAD;
+    // fees
+    uint64 stProtocolFeeWAD;
+    uint64 jtProtocolFeeWAD;
+    uint64 jtYieldShareProtocolFeeWAD;
+    uint64 ltYieldShareProtocolFeeWAD;
+    // state machine / dust
+    uint24 fixedTermDurationSeconds;
+    uint256 stNAVDustTolerance;
+    uint256 jtNAVDustTolerance;
+    // kernel
+    uint64 stSelfLiquidationBonusWAD;
+    uint64 maxReinvestmentSlippageWAD;
+    bool enforceWhitelistOnTransfer;
+    // ydm wiring
+    uint8 jtYdmKind;
+    uint8 ltYdmKind;
+    uint64[3] jtCurve;
+    uint64[3] ltCurve;
+    uint64 targetUtilizationWAD;
+}
+
+/// @notice One cell of the token matrix (testing-strategy.md §2.3, cells A..I)
+struct FixtureCell {
+    string name;
+    TokenConfig stAsset;
+    TokenConfig jtAsset;
+    TokenConfig quoteAsset;
+}

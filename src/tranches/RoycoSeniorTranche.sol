@@ -21,6 +21,11 @@ contract RoycoSeniorTranche is RoycoVaultTranche, IRoycoSeniorTranche {
         __RoycoTranche_init(_stParams);
     }
 
+    /// @inheritdoc RoycoVaultTranche
+    function TRANCHE_TYPE() public pure virtual override(RoycoVaultTranche, IRoycoVaultTranche) returns (TrancheType) {
+        return TrancheType.SENIOR;
+    }
+
     /// @inheritdoc IRoycoSeniorTranche
     function mintLiquidityPremiumShares(
         address _to,
@@ -37,10 +42,5 @@ contract RoycoSeniorTranche is RoycoVaultTranche, IRoycoSeniorTranche {
 
         totalTrancheShares = totalSupply();
         emit LiquidityPremiumSharesMinted(_to, _liquidityPremiumShares, totalTrancheShares);
-    }
-
-    /// @inheritdoc RoycoVaultTranche
-    function TRANCHE_TYPE() public pure virtual override(RoycoVaultTranche, IRoycoVaultTranche) returns (TrancheType) {
-        return TrancheType.SENIOR;
     }
 }

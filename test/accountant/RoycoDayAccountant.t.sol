@@ -14,6 +14,7 @@ import { IYDM } from "../../src/interfaces/IYDM.sol";
 import { MAX_NAV_UNITS, MAX_PROTOCOL_FEE_WAD, WAD, ZERO_NAV_UNITS } from "../../src/libraries/Constants.sol";
 import { MarketState, Operation, SyncedAccountingState } from "../../src/libraries/Types.sol";
 import { ASSETS_MUST_BE_NON_NEGATIVE, NAV_UNIT, toNAVUnits, toUint256 } from "../../src/libraries/Units.sol";
+import { RoycoTestMath } from "../base/math/RoycoTestMath.sol";
 
 /*//////////////////////////////////////////////////////////////////////////
                             HARNESS — IN-FILE MOCKS
@@ -1370,6 +1371,7 @@ contract AccountantTest is Test {
      * evaluated with test-local math on the hand-derived jt effective NAV (JT_COINVESTED is false in every matrix deployment)
      */
     function _runSyncVector(uint256 _stRawNew, uint256 _jtRawNew, ExpectedSync memory _e) internal {
+        IRoycoDayAccountant.RoycoDayAccountantState memory pre = accountant.getState();
         SyncedAccountingState memory previewed = accountant.previewSyncTrancheAccounting(toNAVUnits(_stRawNew), toNAVUnits(_jtRawNew));
         SyncedAccountingState memory executed = kernel.doPreOp(toNAVUnits(_stRawNew), toNAVUnits(_jtRawNew));
         assertEq(keccak256(abi.encode(previewed)), keccak256(abi.encode(executed)), "vector: preview must match execution exactly");
@@ -1400,6 +1402,116 @@ contract AccountantTest is Test {
         assertEq(toUint256(s.lastJTCoverageImpermanentLoss), _e.il, "vector: committed il");
         assertEq(uint8(s.lastMarketState), uint8(_e.marketState), "vector: committed market state");
         assertEq(s.fixedTermEndTimestamp, _e.fixedTermEnd, "vector: committed fixed term end");
+
+        _crossAssertWaterfallMirror(pre, _stRawNew, _jtRawNew, executed);
+    }
+
+    /**
+     * @dev Builds the RoycoTestMath.WaterfallIn for one sync from the pre-sync committed checkpoint, mirroring
+     * the P0 accrual test-side: when time elapsed since the last accrual, the mock YDMs' MUTATING rates (capped
+     * at the configured maxima) are accrued onto the stored accumulators exactly as production does before the
+     * waterfall consumes them. Same-block syncs pass the stored accumulators through unchanged
+     */
+    function _buildWaterfallIn(
+        IRoycoDayAccountant.RoycoDayAccountantState memory _pre,
+        uint256 _stRawNew,
+        uint256 _jtRawNew
+    )
+        internal
+        view
+        returns (RoycoTestMath.WaterfallIn memory in_)
+    {
+        in_.stRawLast = toUint256(_pre.lastSTRawNAV);
+        in_.jtRawLast = toUint256(_pre.lastJTRawNAV);
+        in_.stEffLast = toUint256(_pre.lastSTEffectiveNAV);
+        in_.jtEffLast = toUint256(_pre.lastJTEffectiveNAV);
+        in_.jtCoverageILLast = toUint256(_pre.lastJTCoverageImpermanentLoss);
+        in_.marketStateLast = RoycoTestMath.MarketState(uint8(_pre.lastMarketState));
+        in_.fixedTermEndLast = _pre.fixedTermEndTimestamp;
+        in_.stRawDelta = int256(_stRawNew) - int256(in_.stRawLast);
+        in_.jtRawDelta = int256(_jtRawNew) - int256(in_.jtRawLast);
+        // The kernel re-commits the unchanged LT mark after the sync in this harness
+        in_.ltRawNew = toUint256(_pre.lastLTRawNAV);
+        // Mirror-side P0 accrual: stored accumulators plus one capped mutating-rate window (first-ever accrual
+        // initializes the clock and contributes nothing)
+        in_.jtTwYieldShareAccrual = _pre.twJTYieldShareAccruedWAD;
+        in_.ltTwYieldShareAccrual = _pre.twLTYieldShareAccruedWAD;
+        if (_pre.lastYieldShareAccrualTimestamp != 0 && block.timestamp > _pre.lastYieldShareAccrualTimestamp) {
+            uint256 elapsed = block.timestamp - _pre.lastYieldShareAccrualTimestamp;
+            uint256 jtRate = jtYDM.yieldShareReturn();
+            uint256 ltRate = ltYDM.yieldShareReturn();
+            in_.jtTwYieldShareAccrual += (jtRate > _pre.maxJTYieldShareWAD ? _pre.maxJTYieldShareWAD : jtRate) * elapsed;
+            in_.ltTwYieldShareAccrual += (ltRate > _pre.maxLTYieldShareWAD ? _pre.maxLTYieldShareWAD : ltRate) * elapsed;
+        }
+        // A first-ever accrual stamps lastPremiumPaymentTimestamp to now, so the premium window reads 0
+        in_.elapsedSincePremiumPayment = _pre.lastYieldShareAccrualTimestamp == 0 ? 0 : block.timestamp - _pre.lastPremiumPaymentTimestamp;
+        in_.jtInstYieldShareWAD = jtYDM.previewYieldShareReturn();
+        in_.ltInstYieldShareWAD = ltYDM.previewYieldShareReturn();
+        in_.maxJTYieldShareWAD = _pre.maxJTYieldShareWAD;
+        in_.maxLTYieldShareWAD = _pre.maxLTYieldShareWAD;
+        in_.stProtocolFeeWAD = _pre.stProtocolFeeWAD;
+        in_.jtProtocolFeeWAD = _pre.jtProtocolFeeWAD;
+        in_.jtYieldShareProtocolFeeWAD = _pre.jtYieldShareProtocolFeeWAD;
+        in_.ltYieldShareProtocolFeeWAD = _pre.ltYieldShareProtocolFeeWAD;
+        in_.nowTimestamp = block.timestamp;
+        in_.fixedTermDuration = _pre.fixedTermDurationSeconds;
+        in_.minCoverageWAD = _pre.minCoverageWAD;
+        in_.jtCoinvested = accountant.JT_COINVESTED();
+        in_.coverageLiquidationUtilizationWAD = _pre.coverageLiquidationUtilizationWAD;
+        in_.effectiveDust = toUint256(_pre.effectiveNAVDustTolerance);
+        in_.minLiquidityWAD = _pre.minLiquidityWAD;
+    }
+
+    /**
+     * @dev Cross-asserts one executed sync against the independent RoycoTestMath.waterfall mirror field-by-field,
+     * so every matrix vector is pinned by three sources at once: production, the hand-derived literal, and the
+     * spec-12 mirror. Also asserts the premiumsPaid side effects (accumulator reset and premium-payment stamp)
+     * against the committed state, then commits the unchanged LT mark and asserts the mirror's post-commit
+     * ltRaw / liquidity-utilization view per spec 12 section 2.3
+     */
+    function _crossAssertWaterfallMirror(
+        IRoycoDayAccountant.RoycoDayAccountantState memory _pre,
+        uint256 _stRawNew,
+        uint256 _jtRawNew,
+        SyncedAccountingState memory _executed
+    )
+        internal
+    {
+        RoycoTestMath.WaterfallIn memory in_ = _buildWaterfallIn(_pre, _stRawNew, _jtRawNew);
+        RoycoTestMath.WaterfallOut memory m = RoycoTestMath.waterfall(in_);
+
+        assertEq(m.stRaw, toUint256(_executed.stRawNAV), "mirror: st raw NAV");
+        assertEq(m.jtRaw, toUint256(_executed.jtRawNAV), "mirror: jt raw NAV");
+        assertEq(m.stEff, toUint256(_executed.stEffectiveNAV), "mirror: st effective NAV");
+        assertEq(m.jtEff, toUint256(_executed.jtEffectiveNAV), "mirror: jt effective NAV");
+        assertEq(m.jtCoverageIL, toUint256(_executed.jtCoverageImpermanentLoss), "mirror: jt coverage impermanent loss");
+        assertEq(m.ltLiquidityPremium, toUint256(_executed.ltLiquidityPremium), "mirror: lt liquidity premium");
+        assertEq(m.stProtocolFee, toUint256(_executed.stProtocolFee), "mirror: st protocol fee");
+        assertEq(m.jtProtocolFee, toUint256(_executed.jtProtocolFee), "mirror: jt protocol fee");
+        assertEq(m.ltProtocolFee, toUint256(_executed.ltProtocolFee), "mirror: lt protocol fee");
+        assertEq(m.coverageUtilizationWAD, _executed.coverageUtilizationWAD, "mirror: coverage utilization");
+        assertEq(uint8(m.marketState), uint8(_executed.marketState), "mirror: market state");
+        assertEq(m.fixedTermEnd, uint256(_executed.fixedTermEndTimestamp), "mirror: fixed term end");
+
+        // premiumsPaid side effects (RDA:164-169): reset both accumulators and stamp the payment timestamp,
+        // otherwise the post-accrual accumulators persist and the payment window keeps running
+        IRoycoDayAccountant.RoycoDayAccountantState memory post = accountant.getState();
+        if (m.premiumsPaid) {
+            assertEq(uint256(post.twJTYieldShareAccruedWAD), 0, "mirror: jt accumulator reset on premium payment");
+            assertEq(uint256(post.twLTYieldShareAccruedWAD), 0, "mirror: lt accumulator reset on premium payment");
+            assertEq(uint256(post.lastPremiumPaymentTimestamp), block.timestamp, "mirror: premium payment stamped");
+        } else {
+            assertEq(uint256(post.twJTYieldShareAccruedWAD), in_.jtTwYieldShareAccrual, "mirror: jt accumulator persists unpaid");
+            assertEq(uint256(post.twLTYieldShareAccruedWAD), in_.ltTwYieldShareAccrual, "mirror: lt accumulator persists unpaid");
+            uint256 expectedStamp = _pre.lastYieldShareAccrualTimestamp == 0 ? block.timestamp : _pre.lastPremiumPaymentTimestamp;
+            assertEq(uint256(post.lastPremiumPaymentTimestamp), expectedStamp, "mirror: premium payment stamp unchanged");
+        }
+
+        // Post-commit view (spec 12 section 2.3): commit the unchanged LT mark, then the committed lastLTRawNAV
+        // must equal the mirror's pass-through and the mirror's liquidity utilization is the RTM.liqUtil view
+        kernel.doCommit(_pre.lastLTRawNAV);
+        assertEq(toUint256(accountant.getState().lastLTRawNAV), m.ltRaw, "mirror: committed lt raw NAV pass-through");
+        assertEq(m.liquidityUtilizationWAD, RoycoTestMath.liqUtil(m.stEff, in_.minLiquidityWAD, in_.ltRawNew), "mirror: post-commit liquidity utilization");
     }
 
     /// @dev Independent coverage utilization math: ceil(stRaw * 0.1e18 / jtEff) with the default minimum coverage and no co-investment
@@ -1444,6 +1556,103 @@ contract AccountantTest is Test {
         _seedState(900e18, 300e18, 1000e18, 200e18, 100e18, SEED_LT_RAW, MarketState.FIXED_TERM);
         jtYDM.setPreviewYieldShareReturn(0.1e18);
         ltYDM.setPreviewYieldShareReturn(0.05e18);
+    }
+
+    /**
+     * @dev Matrix seed, regime R2 (IL == 0, FIXED_TERM): checkpoint stRaw 1000e18-1, jtRaw 100e18, stEff 1000e18,
+     * jtEff 100e18-1, il 0, zero dust, FIXED_TERM with end = seeding block + default duration (spec 12 section 4.2)
+     *
+     * Staging (accountant surface, all in this block): (1) symmetric 1000e18/200e18 seed with lastLTRawNAV 0,
+     * (2) covered 1-wei loss sync enters FIXED_TERM (il 1 > dust 0) and initializes both premium timestamps,
+     * (3) JT_REDEEM post-op of 100e18 floors the il to 0 via the RDA:279-282 scaling floor(1 * (100e18-1) /
+     * (200e18-1)) = 0 while the market state stays FIXED_TERM (post-op never changes it), (4) commit lt 100e18.
+     * Step 3 passes ltRaw 0 against the still-zero lastLTRawNAV so deltaLTRawNAV == 0 (POC item 2 of spec 12
+     * section 4.7: the ordering commit-after-redeem does not trip INVALID_POST_OP_STATE, verified loud here)
+     */
+    function _seedMatrixNoILFixedTerm() internal {
+        _seedState(SEED_ST_RAW, SEED_JT_RAW, SEED_ST_RAW, SEED_JT_RAW, 0, 0, MarketState.PERPETUAL);
+        kernel.doPreOp(toNAVUnits(SEED_ST_RAW - 1), toNAVUnits(SEED_JT_RAW));
+        kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW - 1), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
+        kernel.doCommit(toNAVUnits(SEED_LT_RAW));
+
+        // Self-verify the landed R2 checkpoint so staging misuse is loud
+        IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
+        assertEq(toUint256(s.lastSTRawNAV), 1000e18 - 1, "seed R2: stRaw");
+        assertEq(toUint256(s.lastJTRawNAV), 100e18, "seed R2: jtRaw");
+        assertEq(toUint256(s.lastSTEffectiveNAV), 1000e18, "seed R2: stEff");
+        assertEq(toUint256(s.lastJTEffectiveNAV), 100e18 - 1, "seed R2: jtEff");
+        assertEq(toUint256(s.lastJTCoverageImpermanentLoss), 0, "seed R2: il floored to 0");
+        assertEq(toUint256(s.lastLTRawNAV), SEED_LT_RAW, "seed R2: ltRaw");
+        assertEq(uint8(s.lastMarketState), uint8(MarketState.FIXED_TERM), "seed R2: market state");
+        assertEq(s.fixedTermEndTimestamp, uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS), "seed R2: fixed term end");
+
+        jtYDM.setPreviewYieldShareReturn(0.1e18);
+        ltYDM.setPreviewYieldShareReturn(0.05e18);
+    }
+
+    /**
+     * @dev Matrix seed, regime R4 (0 < IL <= dust, FIXED_TERM): dust tolerances (st 3, jt 4, effective 7) and
+     * checkpoint stRaw 1000e18-5, jtRaw 200e18, stEff 1000e18, jtEff 200e18-5, il 5, FIXED_TERM, end kept from
+     * the entry sync (spec 12 section 4.4)
+     *
+     * Staging (all in this block): deploy with dust (3,4), symmetric seed, covered loss of 12 (> dust 7) enters
+     * FIXED_TERM, then a partial-recovery sync of +7 is fully consumed by il recovery (rec = min(7, 12) = 7, no
+     * premium block) leaving il 5 in (0, 7] with the initial state FIXED_TERM: the sticky-dust branch keeps the
+     * term and the original end (RDA:688-696)
+     */
+    function _seedMatrixDustILFixedTerm() internal {
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
+        p.stNAVDustTolerance = toNAVUnits(uint256(3));
+        p.jtNAVDustTolerance = toNAVUnits(uint256(4));
+        _deploy(false, p);
+        _seedState(SEED_ST_RAW, SEED_JT_RAW, SEED_ST_RAW, SEED_JT_RAW, 0, SEED_LT_RAW, MarketState.PERPETUAL);
+        kernel.doPreOp(toNAVUnits(SEED_ST_RAW - 12), toNAVUnits(SEED_JT_RAW));
+        kernel.doPreOp(toNAVUnits(SEED_ST_RAW - 5), toNAVUnits(SEED_JT_RAW));
+        kernel.doCommit(toNAVUnits(SEED_LT_RAW));
+
+        // Self-verify the landed R4 checkpoint so staging misuse is loud
+        IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
+        assertEq(toUint256(s.lastSTRawNAV), 1000e18 - 5, "seed R4: stRaw");
+        assertEq(toUint256(s.lastJTRawNAV), 200e18, "seed R4: jtRaw");
+        assertEq(toUint256(s.lastSTEffectiveNAV), 1000e18, "seed R4: stEff");
+        assertEq(toUint256(s.lastJTEffectiveNAV), 200e18 - 5, "seed R4: jtEff");
+        assertEq(toUint256(s.lastJTCoverageImpermanentLoss), 5, "seed R4: sticky dust il");
+        assertEq(uint8(s.lastMarketState), uint8(MarketState.FIXED_TERM), "seed R4: market state");
+        assertEq(s.fixedTermEndTimestamp, uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS), "seed R4: original end kept");
+
+        jtYDM.setPreviewYieldShareReturn(0.1e18);
+        ltYDM.setPreviewYieldShareReturn(0.05e18);
+    }
+
+    /**
+     * @dev Matrix seed, regime R5 (IL > dust, PERPETUAL): the R3 dust-IL checkpoint (1000e18 / 200e18 /
+     * 1000e18+5 / 200e18-5, il 5, PERPETUAL) with both dust tolerances then shrunk to 0 via the setters, the
+     * only reachable route to a committed PERPETUAL checkpoint whose persisted il exceeds the effective dust
+     * (spec 12 sections 1.1-3 and 4.5). The kernel sync mode is NONE so withSyncedAccounting is a no-op
+     *
+     * Resolves POC item 1 of spec 12 section 4.7 empirically: the two dust setters must leave the committed
+     * checkpoint (NAVs, il, market state, end, accrual and premium timestamps, accumulators) byte-identical,
+     * changing only the dust fields
+     */
+    function _seedMatrixShrunkDustIL() internal {
+        _seedMatrixDustIL();
+        IRoycoDayAccountant.RoycoDayAccountantState memory before = accountant.getState();
+        accountant.setSeniorTrancheDustTolerance(ZERO_NAV_UNITS);
+        accountant.setJuniorTrancheDustTolerance(ZERO_NAV_UNITS);
+        IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
+        assertEq(toUint256(s.lastSTRawNAV), toUint256(before.lastSTRawNAV), "seed R5: stRaw untouched");
+        assertEq(toUint256(s.lastJTRawNAV), toUint256(before.lastJTRawNAV), "seed R5: jtRaw untouched");
+        assertEq(toUint256(s.lastSTEffectiveNAV), toUint256(before.lastSTEffectiveNAV), "seed R5: stEff untouched");
+        assertEq(toUint256(s.lastJTEffectiveNAV), toUint256(before.lastJTEffectiveNAV), "seed R5: jtEff untouched");
+        assertEq(toUint256(s.lastJTCoverageImpermanentLoss), 5, "seed R5: il 5 persists");
+        assertEq(toUint256(s.lastLTRawNAV), toUint256(before.lastLTRawNAV), "seed R5: ltRaw untouched");
+        assertEq(uint8(s.lastMarketState), uint8(MarketState.PERPETUAL), "seed R5: market state untouched");
+        assertEq(s.fixedTermEndTimestamp, before.fixedTermEndTimestamp, "seed R5: fixed term end untouched");
+        assertEq(s.lastYieldShareAccrualTimestamp, before.lastYieldShareAccrualTimestamp, "seed R5: accrual timestamp untouched");
+        assertEq(s.lastPremiumPaymentTimestamp, before.lastPremiumPaymentTimestamp, "seed R5: premium payment timestamp untouched");
+        assertEq(uint256(s.twJTYieldShareAccruedWAD), uint256(before.twJTYieldShareAccruedWAD), "seed R5: jt accumulator untouched");
+        assertEq(uint256(s.twLTYieldShareAccruedWAD), uint256(before.twLTYieldShareAccruedWAD), "seed R5: lt accumulator untouched");
+        assertEq(toUint256(s.effectiveNAVDustTolerance), 0, "seed R5: effective dust shrunk to 0");
     }
 
     /*----------------------------------------------------------------------
@@ -2048,6 +2257,827 @@ contract AccountantTest is Test {
                 ltFee: 0,
                 marketState: MarketState.FIXED_TERM,
                 fixedTermEnd: uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS)
+            })
+        );
+    }
+
+    /*----------------------------------------------------------------------
+        D2 matrix, regime R2: IL == 0, FIXED_TERM (9 cells, W10-W18)
+    ----------------------------------------------------------------------*/
+
+    /*
+     * Checkpoint stRaw 1000e18-1, jtRaw 100e18, stEff 1000e18, jtEff 100e18-1, il 0, zero dust, FIXED_TERM with
+     * end T0+D. Claims: stClaimOnJTRaw = 1 wei, stClaimOnSTRaw = 1000e18-1 (= lastRaw so ST deltas attribute 1:1),
+     * and a 20e18 JT delta attributes floor(20e18 * 1 / 100e18) = 0 to ST, so dSTEff = dST and dJTEff = dJT.
+     */
+
+    /**
+     * W10 (ST loss, JT loss, IL 0, FIXED_TERM): coverage on top of a JT loss tips the small JT buffer past the
+     * liquidation threshold, forcing PERPETUAL with full il erasure
+     * Derivation: dST = -(50e18-1), dJT = -20e18. P4: jtEff = 100e18-1 - 20e18 = 80e18-1. P5: coverage
+     * = min(50e18-1, 80e18-1) = 50e18-1 so jtEff = 30e18, would-be il = 50e18-1, stEff unchanged 1000e18.
+     * P8: covUtil = ceil(950e18 * 0.1e18 / 30e18) = 3166666666666666667 >= liqThreshold 1.1e18 so the FORCED
+     * PERPETUAL disjunct fires (spec 12 section 1 P8 disjunct 3): il ERASED (reset event 50e18-1), end deleted.
+     * NOTE spec 12 section 4.2 erratum: its table says FT with end kept, missing its own section 1 P8
+     * liquidation disjunct — the normative pipeline (which production and the RTM mirror both follow) governs
+     */
+    function test_Waterfall_matrixNoILFixedTerm_stLoss_jtLoss() public {
+        _seedMatrixNoILFixedTerm();
+        vm.expectEmit(true, true, true, true, address(accountant));
+        emit IRoycoDayAccountant.FixedTermEnded();
+        vm.expectEmit(true, true, true, true, address(accountant));
+        emit IRoycoDayAccountant.JuniorTrancheCoverageImpermanentLossReset(toNAVUnits(uint256(50e18 - 1)));
+        _runSyncVector(
+            950e18,
+            80e18,
+            ExpectedSync({ stEff: 1000e18, jtEff: 30e18, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0 })
+        );
+    }
+
+    /**
+     * W11 (ST loss, JT flat, IL 0, FIXED_TERM): liquidation-forced PERPETUAL (spec 12 section 4.2 erratum, as W10)
+     * Derivation: coverage = min(50e18-1, 100e18-1) = 50e18-1 so jtEff = 50e18, would-be il = 50e18-1, stEff
+     * unchanged. P8: covUtil = ceil(950e18 * 0.1e18 / 50e18) = 1.9e18 >= 1.1e18 forces PERPETUAL, il erased
+     */
+    function test_Waterfall_matrixNoILFixedTerm_stLoss_jtFlat() public {
+        _seedMatrixNoILFixedTerm();
+        _runSyncVector(
+            950e18,
+            100e18,
+            ExpectedSync({ stEff: 1000e18, jtEff: 50e18, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0 })
+        );
+    }
+
+    /**
+     * W12 (ST loss, JT gain, IL 0, FIXED_TERM): fee-recompute arm plus the liquidation-forced PERPETUAL
+     * (spec 12 section 4.2 erratum, as W10)
+     * Derivation: P4 gain 20e18 books provisional jtFee 2e18, jtEff = 120e18-1. P5 coverage = 50e18-1 recomputes
+     * jtNetGain = satSub(20e18 - (50e18-1)) = 0 <= dust so jtFee = 0, jtEff = 70e18, would-be il = 50e18-1.
+     * P8: covUtil = ceil(950e18 * 0.1e18 / 70e18) = 1357142857142857143 >= 1.1e18 forces PERPETUAL, il erased
+     */
+    function test_Waterfall_matrixNoILFixedTerm_stLoss_jtGain() public {
+        _seedMatrixNoILFixedTerm();
+        _runSyncVector(
+            950e18,
+            120e18,
+            ExpectedSync({ stEff: 1000e18, jtEff: 70e18, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0 })
+        );
+    }
+
+    /**
+     * W13 (ST flat, JT loss, IL 0, FIXED_TERM): liquidation-forced PERPETUAL, not the il == 0 branch (spec 12
+     * section 4.2 non-erratum note: W13 routes through the forced disjunct with an outcome identical to the table)
+     * Derivation: dJT = -20e18 attributes 0 to the 1-wei cross-claim so jtEff = 80e18-1, il stays 0. P8 evaluates
+     * the forced disjuncts first (RDA:666-669): covUtil = ceil((1000e18-1) * 0.1e18 / (80e18-1)) = 1.25e18 + 1 wei
+     * >= 1.1e18, so PERPETUAL is FORCED with IL erasure before the il == 0 branch (RDA:683) is ever reached, the
+     * erased il is already 0 (so no reset event), end deleted
+     */
+    function test_Waterfall_matrixNoILFixedTerm_stFlat_jtLoss() public {
+        _seedMatrixNoILFixedTerm();
+        _runSyncVector(
+            1000e18 - 1,
+            80e18,
+            ExpectedSync({
+                stEff: 1000e18, jtEff: 80e18 - 1, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0
+            })
+        );
+    }
+
+    /**
+     * W14 (ST flat, JT flat, IL 0, FIXED_TERM): the pure state-machine cell — a flat sync exits the term
+     * Derivation: zero deltas so no waterfall legs run, initial FIXED_TERM with il == 0 lands PERPETUAL
+     * (RDA:683-686), end deleted, FixedTermEnded emitted, and NO il-reset event (nothing was erased)
+     */
+    function test_Waterfall_matrixNoILFixedTerm_stFlat_jtFlat() public {
+        _seedMatrixNoILFixedTerm();
+        vm.recordLogs();
+        vm.expectEmit(true, true, true, true, address(accountant));
+        emit IRoycoDayAccountant.FixedTermEnded();
+        _runSyncVector(
+            1000e18 - 1,
+            100e18,
+            ExpectedSync({
+                stEff: 1000e18, jtEff: 100e18 - 1, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0
+            })
+        );
+        assertEq(
+            _countAccountantLogs(vm.getRecordedLogs(), IRoycoDayAccountant.JuniorTrancheCoverageImpermanentLossReset.selector),
+            0,
+            "flat term exit erases nothing"
+        );
+    }
+
+    /**
+     * W15 (ST flat, JT gain, IL 0, FIXED_TERM): the JT net-gain fee SURVIVES the term exit
+     * Derivation: jtNetGain 20e18 > dust 0 books jtFee 2e18, jtEff = 120e18-1. il stays 0 so the market exits to
+     * PERPETUAL, whose branch does NOT zero fees — pins that fee zeroing is a property of FIXED_TERM-committing
+     * syncs only (spec 12 section 4.2 W15)
+     */
+    function test_Waterfall_matrixNoILFixedTerm_stFlat_jtGain() public {
+        _seedMatrixNoILFixedTerm();
+        _runSyncVector(
+            1000e18 - 1,
+            120e18,
+            ExpectedSync({
+                stEff: 1000e18, jtEff: 120e18 - 1, il: 0, ltPrem: 0, stFee: 0, jtFee: 2e18, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0
+            })
+        );
+    }
+
+    /**
+     * W16 (ST gain, JT loss, IL 0, FIXED_TERM): a +1 wei gain floor rides through the premium math intact
+     * Derivation: dST = +(50e18+1) so stGain = 50e18+1 (no il to recover). Instantaneous premiums:
+     *   jtRiskPremium = floor((50e18+1) * 0.1e18 / 1e18) = 5e18, ltLiquidityPremium = floor((50e18+1) * 0.05) = 2.5e18
+     *   jtFee = floor(5e18 * 0.1) = 0.5e18, ltFee = 0.25e18, residual = 42.5e18+1, stFee = floor((42.5e18+1) * 0.1) = 4.25e18
+     *   stEff = 1000e18 + (42.5e18+1) + 2.5e18 = 1045e18+1, jtEff = (100e18-1) - 20e18 + 5e18 = 85e18-1
+     * Conservation: 1050e18 + 80e18 == (1045e18+1) + (85e18-1). il 0 exits to PERPETUAL with premiums and fees intact
+     */
+    function test_Waterfall_matrixNoILFixedTerm_stGain_jtLoss() public {
+        _seedMatrixNoILFixedTerm();
+        _runSyncVector(
+            1050e18,
+            80e18,
+            ExpectedSync({
+                stEff: 1045e18 + 1,
+                jtEff: 85e18 - 1,
+                il: 0,
+                ltPrem: 2.5e18,
+                stFee: 4.25e18,
+                jtFee: 0.5e18,
+                ltFee: 0.25e18,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEnd: 0
+            })
+        );
+    }
+
+    /**
+     * W17 (ST gain, JT flat, IL 0, FIXED_TERM)
+     * Derivation: identical premium math to W16, jtEff = (100e18-1) + 5e18 = 105e18-1, stEff = 1045e18+1
+     */
+    function test_Waterfall_matrixNoILFixedTerm_stGain_jtFlat() public {
+        _seedMatrixNoILFixedTerm();
+        _runSyncVector(
+            1050e18,
+            100e18,
+            ExpectedSync({
+                stEff: 1045e18 + 1,
+                jtEff: 105e18 - 1,
+                il: 0,
+                ltPrem: 2.5e18,
+                stFee: 4.25e18,
+                jtFee: 0.5e18,
+                ltFee: 0.25e18,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEnd: 0
+            })
+        );
+    }
+
+    /**
+     * W18 (ST gain, JT gain, IL 0, FIXED_TERM): both JT fee parts accrue and survive the term exit
+     * Derivation: P4 gain 20e18 books jtFee 2e18 (jtEff 120e18-1), premium math as W16 adds 0.5e18 so
+     * jtFee = 2.5e18 total, jtEff = 125e18-1, stEff = 1045e18+1. Premiums imply PERPETUAL (spec 12 section 1.1)
+     */
+    function test_Waterfall_matrixNoILFixedTerm_stGain_jtGain() public {
+        _seedMatrixNoILFixedTerm();
+        _runSyncVector(
+            1050e18,
+            120e18,
+            ExpectedSync({
+                stEff: 1045e18 + 1,
+                jtEff: 125e18 - 1,
+                il: 0,
+                ltPrem: 2.5e18,
+                stFee: 4.25e18,
+                jtFee: 2.5e18,
+                ltFee: 0.25e18,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEnd: 0
+            })
+        );
+    }
+
+    /*----------------------------------------------------------------------
+        D2 matrix, regime R4: 0 < IL <= dust, FIXED_TERM (9 cells, W28-W36)
+    ----------------------------------------------------------------------*/
+
+    /*
+     * Checkpoint stRaw 1000e18-5, jtRaw 200e18, stEff 1000e18, jtEff 200e18-5, il 5, dust (st 3, jt 4, effective
+     * 7), FIXED_TERM with end T0+D. Claims: stClaimOnJTRaw = 5, stClaimOnSTRaw = 1000e18-5 (= lastRaw so ST
+     * deltas attribute 1:1), and a 20e18 JT delta attributes floor(20e18 * 5 / 200e18) = 0 to ST.
+     */
+
+    /**
+     * W28 (ST loss, JT loss, dust IL, FIXED_TERM): staging offsets cancel to round outputs
+     * Derivation: dST = -(50e18-5), dJT = -20e18. P4: jtEff = 180e18-5. P5: coverage = 50e18-5 so
+     * jtEff = 130e18, il = 5 + (50e18-5) = 50e18, stEff unchanged. il 50e18 > dust 7: stays FIXED_TERM, end kept
+     */
+    function test_Waterfall_matrixDustILFixedTerm_stLoss_jtLoss() public {
+        _seedMatrixDustILFixedTerm();
+        _runSyncVector(
+            950e18,
+            180e18,
+            ExpectedSync({
+                stEff: 1000e18,
+                jtEff: 130e18,
+                il: 50e18,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.FIXED_TERM,
+                fixedTermEnd: uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS)
+            })
+        );
+    }
+
+    /**
+     * W29 (ST loss, JT flat, dust IL, FIXED_TERM)
+     * Derivation: coverage = 50e18-5 so jtEff = (200e18-5) - (50e18-5) = 150e18, il = 50e18, stEff unchanged
+     */
+    function test_Waterfall_matrixDustILFixedTerm_stLoss_jtFlat() public {
+        _seedMatrixDustILFixedTerm();
+        _runSyncVector(
+            950e18,
+            200e18,
+            ExpectedSync({
+                stEff: 1000e18,
+                jtEff: 150e18,
+                il: 50e18,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.FIXED_TERM,
+                fixedTermEnd: uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS)
+            })
+        );
+    }
+
+    /**
+     * W30 (ST loss, JT gain, dust IL, FIXED_TERM): fee recompute saturates to zero inside the sticky term
+     * Derivation: P4 gain 20e18 > dust 7 books jtFee 2e18 (jtEff 220e18-5), coverage 50e18-5 recomputes
+     * jtNetGain = satSub(20e18 - (50e18-5)) = 0 so jtFee = 0, jtEff = 170e18, il = 50e18
+     */
+    function test_Waterfall_matrixDustILFixedTerm_stLoss_jtGain() public {
+        _seedMatrixDustILFixedTerm();
+        _runSyncVector(
+            950e18,
+            220e18,
+            ExpectedSync({
+                stEff: 1000e18,
+                jtEff: 170e18,
+                il: 50e18,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.FIXED_TERM,
+                fixedTermEnd: uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS)
+            })
+        );
+    }
+
+    /**
+     * W31 (ST flat, JT loss, dust IL, FIXED_TERM): dust il sticks and the term persists through a JT loss
+     * Derivation: dJTEff = -20e18 (zero attribution to the 5-wei claim) so jtEff = 180e18-5, il stays 5 in
+     * (0, dust 7] with initial FIXED_TERM: sticky branch keeps the term and the original end (RDA:688-696)
+     */
+    function test_Waterfall_matrixDustILFixedTerm_stFlat_jtLoss() public {
+        _seedMatrixDustILFixedTerm();
+        _runSyncVector(
+            1000e18 - 5,
+            180e18,
+            ExpectedSync({
+                stEff: 1000e18,
+                jtEff: 180e18 - 5,
+                il: 5,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.FIXED_TERM,
+                fixedTermEnd: uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS)
+            })
+        );
+    }
+
+    /**
+     * W32 (ST flat, JT flat, dust IL, FIXED_TERM): the pure dust-IL stickiness cell (spec 12 section 4.4)
+     * Derivation: zero deltas, il 5 in (0, 7] with initial FIXED_TERM stays FIXED_TERM with the ORIGINAL end,
+     * all fee and premium fields zero (nothing accrued). Pins RDA:688-696 in isolation
+     */
+    function test_Waterfall_matrixDustILFixedTerm_stFlat_jtFlat() public {
+        _seedMatrixDustILFixedTerm();
+        _runSyncVector(
+            1000e18 - 5,
+            200e18,
+            ExpectedSync({
+                stEff: 1000e18,
+                jtEff: 200e18 - 5,
+                il: 5,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.FIXED_TERM,
+                fixedTermEnd: uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS)
+            })
+        );
+    }
+
+    /**
+     * W33 (ST flat, JT gain, dust IL, FIXED_TERM): the sticky branch zeroes a LIVE jt fee — the only live arm
+     * of the FIXED_TERM fee zeroing (spec 12 section 1.1)
+     * Derivation: jtNetGain 20e18 > dust 7 books provisional jtFee 2e18, no ST move so il stays 5 and the
+     * sticky-dust branch ZEROES the fee (RDA:694). jtEff = 220e18-5 (the gain NAV is kept, only the fee drops)
+     */
+    function test_Waterfall_matrixDustILFixedTerm_stFlat_jtGain() public {
+        _seedMatrixDustILFixedTerm();
+        _runSyncVector(
+            1000e18 - 5,
+            220e18,
+            ExpectedSync({
+                stEff: 1000e18,
+                jtEff: 220e18 - 5,
+                il: 5,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.FIXED_TERM,
+                fixedTermEnd: uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS)
+            })
+        );
+    }
+
+    /**
+     * W34 (ST gain, JT loss, dust IL, FIXED_TERM): recovery-to-zero then premiums, exiting the term
+     * Derivation: dST = +(50e18+5). P4: jtEff = 180e18-5. P6a: rec = min(50e18+5, 5) = 5 so il = 0,
+     * jtEff = 180e18, stGain = 50e18 exactly (offsets cancel). Premiums and fees identical to W7:
+     * jtPrem 5e18, ltPrem 2.5e18, jtFee 0.5e18, ltFee 0.25e18, stFee 4.25e18, stEff = 1045e18, jtEff = 185e18.
+     * Conservation: 1050e18 + 180e18 == 1045e18 + 185e18. il 0 with initial FIXED_TERM: PERPETUAL, end deleted
+     */
+    function test_Waterfall_matrixDustILFixedTerm_stGain_jtLoss() public {
+        _seedMatrixDustILFixedTerm();
+        vm.expectEmit(true, true, true, true, address(accountant));
+        emit IRoycoDayAccountant.FixedTermEnded();
+        _runSyncVector(
+            1050e18,
+            180e18,
+            ExpectedSync({
+                stEff: 1045e18,
+                jtEff: 185e18,
+                il: 0,
+                ltPrem: 2.5e18,
+                stFee: 4.25e18,
+                jtFee: 0.5e18,
+                ltFee: 0.25e18,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEnd: 0
+            })
+        );
+    }
+
+    /**
+     * W35 (ST gain, JT flat, dust IL, FIXED_TERM)
+     * Derivation: rec 5 restores jtEff to 200e18, then jtPrem 5e18 lands jtEff = 205e18, stEff = 1045e18
+     */
+    function test_Waterfall_matrixDustILFixedTerm_stGain_jtFlat() public {
+        _seedMatrixDustILFixedTerm();
+        _runSyncVector(
+            1050e18,
+            200e18,
+            ExpectedSync({
+                stEff: 1045e18,
+                jtEff: 205e18,
+                il: 0,
+                ltPrem: 2.5e18,
+                stFee: 4.25e18,
+                jtFee: 0.5e18,
+                ltFee: 0.25e18,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEnd: 0
+            })
+        );
+    }
+
+    /**
+     * W36 (ST gain, JT gain, dust IL, FIXED_TERM): both JT fee parts with recovery, exiting the term
+     * Derivation: P4 gain 20e18 > 7 books jtFee 2e18 (jtEff 220e18-5), rec 5 lands 220e18, jtPrem 5e18 adds
+     * 0.5e18 fee so jtFee = 2.5e18, jtEff = 225e18, stEff = 1045e18, PERPETUAL exit
+     */
+    function test_Waterfall_matrixDustILFixedTerm_stGain_jtGain() public {
+        _seedMatrixDustILFixedTerm();
+        _runSyncVector(
+            1050e18,
+            220e18,
+            ExpectedSync({
+                stEff: 1045e18,
+                jtEff: 225e18,
+                il: 0,
+                ltPrem: 2.5e18,
+                stFee: 4.25e18,
+                jtFee: 2.5e18,
+                ltFee: 0.25e18,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEnd: 0
+            })
+        );
+    }
+
+    /*----------------------------------------------------------------------
+        D2 matrix, regime R5: IL > dust, PERPETUAL (9 cells, W37-W45)
+    ----------------------------------------------------------------------*/
+
+    /*
+     * The R3 checkpoint (1000e18 / 200e18 / 1000e18+5 / 200e18-5, il 5, PERPETUAL) with both dust tolerances
+     * shrunk to 0 by the setters, so the SAME persisted il 5 now EXCEEDS the effective dust. Claims and
+     * attribution identical to R3 (dSTEff = dST, dJTEff = dJT). Fee dust gates now trigger at > 0 instead of
+     * > 7 — same fee outcomes at these magnitudes.
+     */
+
+    /**
+     * W37 (ST loss, JT loss, IL > dust, PERPETUAL)
+     * Derivation: as W19 — jtEff = 200e18-5 - 20e18, coverage 50e18: jtEff = 130e18-5, il = 50e18+5,
+     * stEff = 1000e18+5, FIXED_TERM entry (end = now + duration)
+     */
+    function test_Waterfall_matrixShrunkDustIL_stLoss_jtLoss() public {
+        _seedMatrixShrunkDustIL();
+        _runSyncVector(
+            950e18,
+            180e18,
+            ExpectedSync({
+                stEff: 1000e18 + 5,
+                jtEff: 130e18 - 5,
+                il: 50e18 + 5,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.FIXED_TERM,
+                fixedTermEnd: uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS)
+            })
+        );
+    }
+
+    /**
+     * W38 (ST loss, JT flat, IL > dust, PERPETUAL)
+     * Derivation: coverage 50e18 on top of the persisted il 5: jtEff = 150e18-5, il = 50e18+5, FIXED_TERM entry
+     */
+    function test_Waterfall_matrixShrunkDustIL_stLoss_jtFlat() public {
+        _seedMatrixShrunkDustIL();
+        _runSyncVector(
+            950e18,
+            200e18,
+            ExpectedSync({
+                stEff: 1000e18 + 5,
+                jtEff: 150e18 - 5,
+                il: 50e18 + 5,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.FIXED_TERM,
+                fixedTermEnd: uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS)
+            })
+        );
+    }
+
+    /**
+     * W39 (ST loss, JT gain, IL > dust, PERPETUAL): fee recompute saturates to zero on the FIXED_TERM entry
+     * Derivation: P4 gain 20e18 > dust 0 books jtFee 2e18, coverage 50e18 recomputes it to 0,
+     * jtEff = 170e18-5, il = 50e18+5, FIXED_TERM entry
+     */
+    function test_Waterfall_matrixShrunkDustIL_stLoss_jtGain() public {
+        _seedMatrixShrunkDustIL();
+        _runSyncVector(
+            950e18,
+            220e18,
+            ExpectedSync({
+                stEff: 1000e18 + 5,
+                jtEff: 170e18 - 5,
+                il: 50e18 + 5,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.FIXED_TERM,
+                fixedTermEnd: uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS)
+            })
+        );
+    }
+
+    /**
+     * W40 (ST flat, JT loss, IL > dust, PERPETUAL): the re-classified il 5 tips the market into FIXED_TERM
+     * Derivation: jtEff = 180e18-5, il stays 5 which now EXCEEDS dust 0, so the else-FIXED_TERM branch fires
+     * from PERPETUAL: end = now + duration (contrast W22, where the same il 5 persisted in PERPETUAL)
+     */
+    function test_Waterfall_matrixShrunkDustIL_stFlat_jtLoss() public {
+        _seedMatrixShrunkDustIL();
+        _runSyncVector(
+            1000e18,
+            180e18,
+            ExpectedSync({
+                stEff: 1000e18 + 5,
+                jtEff: 180e18 - 5,
+                il: 5,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.FIXED_TERM,
+                fixedTermEnd: uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS)
+            })
+        );
+    }
+
+    /**
+     * W41 (ST flat, JT flat, IL > dust, PERPETUAL): the regime's distinctive cell — a FLAT sync flips the state
+     * Derivation: zero deltas, post-waterfall il 5 > dust 0 lands the else-FIXED_TERM branch, entering FROM
+     * PERPETUAL so end = now + duration and FixedTermCommenced is emitted (RDA:697-706). The market flips on NO
+     * PnL, purely because the dust setters re-classified the persisted il (spec 12 section 4.5)
+     */
+    function test_Waterfall_matrixShrunkDustIL_stFlat_jtFlat() public {
+        _seedMatrixShrunkDustIL();
+        vm.expectEmit(true, true, true, true, address(accountant));
+        emit IRoycoDayAccountant.FixedTermCommenced(uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS));
+        _runSyncVector(
+            1000e18,
+            200e18,
+            ExpectedSync({
+                stEff: 1000e18 + 5,
+                jtEff: 200e18 - 5,
+                il: 5,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.FIXED_TERM,
+                fixedTermEnd: uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS)
+            })
+        );
+    }
+
+    /**
+     * W42 (ST flat, JT gain, IL > dust, PERPETUAL): the FIXED_TERM entry zeroes a live jt fee
+     * Derivation: jtNetGain 20e18 > dust 0 books provisional jtFee 2e18, il stays 5 > 0 so the else-FIXED_TERM
+     * branch zeroes it on entry. jtEff = 220e18-5 (gain NAV kept, fee dropped)
+     */
+    function test_Waterfall_matrixShrunkDustIL_stFlat_jtGain() public {
+        _seedMatrixShrunkDustIL();
+        _runSyncVector(
+            1000e18,
+            220e18,
+            ExpectedSync({
+                stEff: 1000e18 + 5,
+                jtEff: 220e18 - 5,
+                il: 5,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.FIXED_TERM,
+                fixedTermEnd: uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS)
+            })
+        );
+    }
+
+    /**
+     * W43 (ST gain, JT loss, IL > dust, PERPETUAL): recovery then the R3-identical awkward premium floors
+     * Derivation: numbers match W25 exactly — the dust change is invisible since stGain 50e18-5 > 7 > 0:
+     * rec 5 (il 0, jtEff 180e18), jtPrem = floor((50e18-5) * 0.1) = 5e18-1, ltPrem = 2.5e18-1,
+     * jtFee = 0.5e18-1, ltFee = 0.25e18-1, residual 42.5e18-3, stFee = 4.25e18-1,
+     * stEff = 1045e18+1, jtEff = 185e18-1, PERPETUAL
+     */
+    function test_Waterfall_matrixShrunkDustIL_stGain_jtLoss() public {
+        _seedMatrixShrunkDustIL();
+        _runSyncVector(
+            1050e18,
+            180e18,
+            ExpectedSync({
+                stEff: 1045e18 + 1,
+                jtEff: 185e18 - 1,
+                il: 0,
+                ltPrem: 2.5e18 - 1,
+                stFee: 4.25e18 - 1,
+                jtFee: 0.5e18 - 1,
+                ltFee: 0.25e18 - 1,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEnd: 0
+            })
+        );
+    }
+
+    /**
+     * W44 (ST gain, JT flat, IL > dust, PERPETUAL)
+     * Derivation: as W26 — rec 5 restores jtEff to 200e18, premiums as W43, jtEff = 205e18-1, stEff = 1045e18+1
+     */
+    function test_Waterfall_matrixShrunkDustIL_stGain_jtFlat() public {
+        _seedMatrixShrunkDustIL();
+        _runSyncVector(
+            1050e18,
+            200e18,
+            ExpectedSync({
+                stEff: 1045e18 + 1,
+                jtEff: 205e18 - 1,
+                il: 0,
+                ltPrem: 2.5e18 - 1,
+                stFee: 4.25e18 - 1,
+                jtFee: 0.5e18 - 1,
+                ltFee: 0.25e18 - 1,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEnd: 0
+            })
+        );
+    }
+
+    /**
+     * W45 (ST gain, JT gain, IL > dust, PERPETUAL)
+     * Derivation: as W27 — jt gain fee 2e18 plus the premium fee 0.5e18-1 so jtFee = 2.5e18-1,
+     * jtEff = 225e18-1, stEff = 1045e18+1, PERPETUAL
+     */
+    function test_Waterfall_matrixShrunkDustIL_stGain_jtGain() public {
+        _seedMatrixShrunkDustIL();
+        _runSyncVector(
+            1050e18,
+            220e18,
+            ExpectedSync({
+                stEff: 1045e18 + 1,
+                jtEff: 225e18 - 1,
+                il: 0,
+                ltPrem: 2.5e18 - 1,
+                stFee: 4.25e18 - 1,
+                jtFee: 2.5e18 - 1,
+                ltFee: 0.25e18 - 1,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEnd: 0
+            })
+        );
+    }
+
+    /*----------------------------------------------------------------------
+        D2 auxiliary golden vectors W55-W60 (spec 12 section 4.8)
+    ----------------------------------------------------------------------*/
+
+    /**
+     * W55 (loss past JT exhaustion with an uncovered residual + wipeout erasure): from the R1 checkpoint,
+     * sync (700e18, 200e18)
+     * Derivation: stLoss 300e18, coverage = min(300e18, 200e18) = 200e18 so jtEff = 0, would-be il 200e18,
+     * residual 100e18 hits senior: stEff = 900e18. covUtil = uint256 max (jtEff == 0 against a positive
+     * requirement), and the wipeout disjunct (jtEff == 0 with stEff > 0) forces PERPETUAL with the full il
+     * ERASED (reset event 200e18), end 0. Conservation: 700e18 + 200e18 == 900e18 + 0.
+     * Pins the spec 12 section 1 P5 lemma: an uncovered loss implies wipeout and can never commit FIXED_TERM
+     */
+    function test_Waterfall_W55_uncoveredResidualLossWipeoutForcesPerpetual() public {
+        _seedMatrixNoIL();
+        vm.expectEmit(true, true, true, true, address(accountant));
+        emit IRoycoDayAccountant.JuniorTrancheCoverageImpermanentLossReset(toNAVUnits(uint256(200e18)));
+        _runSyncVector(
+            700e18,
+            200e18,
+            ExpectedSync({ stEff: 900e18, jtEff: 0, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0 })
+        );
+    }
+
+    /**
+     * W56 (exhaustion exactly at the boundary): from the R1 checkpoint, sync (800e18, 200e18)
+     * Derivation: stLoss 200e18 == jtEff so coverage = 200e18, jtEff = 0, residual 0, stEff stays 1000e18,
+     * would-be il 200e18 erased by the wipeout disjunct, PERPETUAL, end 0. Distinguishes "fully covered but
+     * buffer emptied" (stEff intact) from W55's residual case
+     */
+    function test_Waterfall_W56_exhaustionAtExactBoundaryFullyCoveredWipeout() public {
+        _seedMatrixNoIL();
+        vm.expectEmit(true, true, true, true, address(accountant));
+        emit IRoycoDayAccountant.JuniorTrancheCoverageImpermanentLossReset(toNAVUnits(uint256(200e18)));
+        _runSyncVector(
+            800e18,
+            200e18,
+            ExpectedSync({ stEff: 1000e18, jtEff: 0, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0 })
+        );
+    }
+
+    /**
+     * W57 (gain exactly == il, the recovery boundary with no premiums): from the R6 checkpoint,
+     * sync (1000e18, 300e18)
+     * Derivation: dST = +100e18, rec = min(100e18, il 100e18) = 100e18 so il = 0, jtEff = 300e18, stGain = 0
+     * and the premium block is SKIPPED (premiumsPaid false, accumulators NOT reset — asserted by the runner's
+     * premiumsPaid side-effect check). il 0 with initial FIXED_TERM: PERPETUAL, end 0, FixedTermEnded
+     */
+    function test_Waterfall_W57_gainExactlyEqualToILRecoveryBoundary() public {
+        _seedMatrixLargeIL();
+        vm.expectEmit(true, true, true, true, address(accountant));
+        emit IRoycoDayAccountant.FixedTermEnded();
+        _runSyncVector(
+            1000e18,
+            300e18,
+            ExpectedSync({ stEff: 1000e18, jtEff: 300e18, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0 })
+        );
+    }
+
+    /**
+     * W58 (gain == il + 1 wei: 1-wei premium floors with premiumsPaid true): from the R6 checkpoint,
+     * sync (1000e18 + 1, 300e18)
+     * Derivation: rec = 100e18 leaves stGain = 1. premiumsPaid = (1 > dust 0) = true, yet every carve floors
+     * to zero: jtPrem = floor(1 * 0.1) = 0, ltPrem = 0, stFee = floor(1 * 0.1) = 0. stEff = 1000e18+1,
+     * jtEff = 300e18, PERPETUAL. Pins that premiumsPaid true with all-zero premiums and fees still resets the
+     * accumulators and stamps lastPremiumPaymentTimestamp (RDA:164-169) — the runner's side-effect check
+     * asserts the reset path was taken, and the mirror's premiumsPaid flag is pinned true below
+     */
+    function test_Waterfall_W58_gainOneWeiAboveILZeroPremiumsStillPay() public {
+        _seedMatrixLargeIL();
+        IRoycoDayAccountant.RoycoDayAccountantState memory pre = accountant.getState();
+        _runSyncVector(
+            1000e18 + 1,
+            300e18,
+            ExpectedSync({
+                stEff: 1000e18 + 1, jtEff: 300e18, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0
+            })
+        );
+        // Pin the mirror's dust-gate outcome explicitly: the 1-wei gain clears the zero dust tolerance
+        RoycoTestMath.WaterfallOut memory m = RoycoTestMath.waterfall(_buildWaterfallIn(pre, 1000e18 + 1, 300e18));
+        assertTrue(m.premiumsPaid, "one-wei gain above zero dust pays premiums");
+    }
+
+    /**
+     * W59 (time-weighted twin of W8): R1 seed, mutating rates jt 0.1e18 / lt 0.05e18, warp +1 day, sync
+     * (1050e18, 200e18) — identical outputs to W8 through the OTHER premium branch (real elapsed, RDA:624-625)
+     * Derivation: accrual twJT = 0.1e18 * 86400 = 8640e18 and twLT = 0.05e18 * 86400 = 4320e18 (both events
+     * asserted), elapsed = 86400 so jtPrem = floor(50e18 * 8640e18 / (86400 * 1e18)) = 5e18 and ltPrem = 2.5e18.
+     * Fees as W8: jtFee 0.5e18, ltFee 0.25e18, stFee 4.25e18, stEff 1045e18, jtEff 205e18, PERPETUAL.
+     * The runner's premiumsPaid check asserts both accumulators reset and the payment stamped at the warped time
+     */
+    function test_Waterfall_W59_timeWeightedPremiumBranchTwinOfW8() public {
+        _seedMatrixNoIL();
+        jtYDM.setYieldShareReturn(0.1e18);
+        ltYDM.setYieldShareReturn(0.05e18);
+        vm.warp(block.timestamp + 86_400);
+        vm.expectEmit(true, true, true, true, address(accountant));
+        emit IRoycoDayAccountant.JuniorTrancheYieldShareAccrued(0.1e18, 8640e18);
+        vm.expectEmit(true, true, true, true, address(accountant));
+        emit IRoycoDayAccountant.LiquidityTrancheYieldShareAccrued(0.05e18, 4320e18);
+        _runSyncVector(
+            1050e18,
+            200e18,
+            ExpectedSync({
+                stEff: 1045e18,
+                jtEff: 205e18,
+                il: 0,
+                ltPrem: 2.5e18,
+                stFee: 4.25e18,
+                jtFee: 0.5e18,
+                ltFee: 0.25e18,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEnd: 0
+            })
+        );
+    }
+
+    /**
+     * W60 (two-window time-weighted averaging + the accrual-side cap): R1 seed, 12h at rate jt 0.1e18 accrued
+     * by a flat sync (which pays nothing and does NOT reset), then 12h at a hostile jt rate 0.5e18 CAPPED to
+     * maxJT 0.2e18 at accrual (RDA:759), then sync (1050e18, 200e18)
+     * Derivation: twJT = 0.1e18 * 43200 + 0.2e18 * 43200 = 12960e18 over elapsed 86400 since the last payment
+     * (the flat sync never stamps one), so jtPrem = floor(50e18 * 12960e18 / (86400 * 1e18)) = floor(50e18 * 0.15)
+     * = 7.5e18. twLT = 0.05e18 * 86400 = 4320e18 so ltPrem = 2.5e18. jtFee = 0.75e18, ltFee = 0.25e18,
+     * residual = 40e18 so stFee = 4e18, stEff = 1000e18 + 40e18 + 2.5e18 = 1042.5e18, jtEff = 207.5e18.
+     * Conservation: 1050e18 + 200e18 == 1042.5e18 + 207.5e18. Pins the sum(share * dt) / elapsed averaging (F23)
+     */
+    function test_Waterfall_W60_twoWindowTimeWeightedAveragingWithAccrualCap() public {
+        _seedMatrixNoIL();
+        // Mutating and preview rates aligned so the preview-path accrual matches execution byte-for-byte
+        jtYDM.setRates(0.1e18);
+        ltYDM.setRates(0.05e18);
+        // t0 read through an external call: a plain block.timestamp local is rematerialized at use-site by
+        // via-ir and would read the warped time (the seed stamped this to the current block's timestamp)
+        uint256 t0 = accountant.getState().lastPremiumPaymentTimestamp;
+        assertEq(t0, block.timestamp, "seed stamped the premium payment clock this block");
+        vm.warp(t0 + 43_200);
+        kernel.doPreOp(toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW));
+        // The flat sync accrues window 1 without paying or resetting: the payment window keeps running from t0
+        IRoycoDayAccountant.RoycoDayAccountantState memory mid = accountant.getState();
+        assertEq(uint256(mid.twJTYieldShareAccruedWAD), 0.1e18 * 43_200, "window 1 accrued");
+        assertEq(uint256(mid.twLTYieldShareAccruedWAD), 0.05e18 * 43_200, "lt window 1 accrued");
+        assertEq(uint256(mid.lastPremiumPaymentTimestamp), t0, "flat sync never stamps a premium payment");
+        // Window 2 at a hostile mutating rate, clamped to the 0.2e18 max at accrual
+        jtYDM.setRates(0.5e18);
+        vm.warp(t0 + 86_400);
+        vm.expectEmit(true, true, true, true, address(accountant));
+        emit IRoycoDayAccountant.JuniorTrancheYieldShareAccrued(0.2e18, 12_960e18);
+        _runSyncVector(
+            1050e18,
+            200e18,
+            ExpectedSync({
+                stEff: 1042.5e18,
+                jtEff: 207.5e18,
+                il: 0,
+                ltPrem: 2.5e18,
+                stFee: 4e18,
+                jtFee: 0.75e18,
+                ltFee: 0.25e18,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEnd: 0
             })
         );
     }
