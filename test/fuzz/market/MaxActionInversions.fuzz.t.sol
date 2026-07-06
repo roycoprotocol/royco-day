@@ -61,9 +61,7 @@ contract MaxActionInversionsFuzz is MarketFuzzBase {
         _depositSenior(reportedMax);
         IRoycoDayAccountant.RoycoDayAccountantState memory acct = accountant.getState();
         assertEq(toUint256(acct.lastSTRawNAV), st + reportedMax, "the max deposit must land wei-exactly on the senior raw mark");
-        assertLe(
-            RoycoTestMath.covUtil(st + reportedMax, jt, true, 0.2e18, jt), WAD, "coverage utilization must hold at or below 100% after filling the max"
-        );
+        assertLe(RoycoTestMath.covUtil(st + reportedMax, jt, true, 0.2e18, jt), WAD, "coverage utilization must hold at or below 100% after filling the max");
         assertLe(RoycoTestMath.liqUtil(st + reportedMax, 0.05e18, depth), WAD, "liquidity utilization must hold at or below 100% after filling the max");
 
         // Consuming the dust slack lands exactly on the algebraic boundary and still passes
@@ -130,9 +128,7 @@ contract MaxActionInversionsFuzz is MarketFuzzBase {
         juniorTranche.redeem(slack, JT_PROVIDER, JT_PROVIDER);
         assertEq(toUint256(accountant.getState().lastJTRawNAV), jt - boundary, "the slack redemption must land exactly on the algebraic boundary");
         assertLe(
-            RoycoTestMath.covUtil(st, jt - boundary, true, 0.2e18, jt - boundary),
-            WAD,
-            "coverage utilization must sit at or below 100% exactly at the boundary"
+            RoycoTestMath.covUtil(st, jt - boundary, true, 0.2e18, jt - boundary), WAD, "coverage utilization must sit at or below 100% exactly at the boundary"
         );
 
         // One share past the boundary makes 4w > 4jt - st and violates the coverage requirement
@@ -175,9 +171,7 @@ contract MaxActionInversionsFuzz is MarketFuzzBase {
         vm.prank(LT_PROVIDER);
         liquidityTranche.redeem(reportedMax, LT_PROVIDER, LT_PROVIDER);
         assertEq(toUint256(accountant.getState().lastLTRawNAV), depth - reportedMax, "the max redemption must land wei-exactly on the LT raw mark");
-        assertLe(
-            RoycoTestMath.liqUtil(st, 0.05e18, depth - reportedMax), WAD, "liquidity utilization must hold at or below 100% after the max redemption"
-        );
+        assertLe(RoycoTestMath.liqUtil(st, 0.05e18, depth - reportedMax), WAD, "liquidity utilization must hold at or below 100% after the max redemption");
 
         // Consume the single wei of ST dust slack, landing exactly on the algebraic floor depth == ceil(st/20)
         vm.prank(LT_PROVIDER);

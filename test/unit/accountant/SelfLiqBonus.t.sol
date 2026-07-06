@@ -65,15 +65,7 @@ contract SelfLiqBonusTest is AccountantUnitHarness {
     }
 
     /// @dev Builds the matching RoycoTestMath F19 input set (weighted = stAssets + (coinvested ? jtAssets : 0) under identity conversion)
-    function _rtmIn(
-        SyncedAccountingState memory _s,
-        uint256 _bonusWAD,
-        AssetClaims memory _c
-    )
-        internal
-        pure
-        returns (RoycoTestMath.SelfLiqBonusIn memory in_)
-    {
+    function _rtmIn(SyncedAccountingState memory _s, uint256 _bonusWAD, AssetClaims memory _c) internal pure returns (RoycoTestMath.SelfLiqBonusIn memory in_) {
         in_.stRaw = toUint256(_s.stRawNAV);
         in_.jtRaw = toUint256(_s.jtRawNAV);
         in_.jtEff = toUint256(_s.jtEffectiveNAV);

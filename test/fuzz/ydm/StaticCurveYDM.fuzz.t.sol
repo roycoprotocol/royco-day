@@ -124,15 +124,7 @@ contract StaticCurveYDMFuzz is Test {
      * above WAD by the caller and must saturate rather than extrapolate, so the whole over-capacity range
      * collapses onto the single full-utilization output, which itself never exceeds 100%
      */
-    function testFuzz_StaticCurve_overCapacityUtilizationReadsAsFull(
-        uint256 _targetU,
-        uint256 _yT,
-        uint256 _riseLt,
-        uint256 _riseGte,
-        uint256 _u
-    )
-        public
-    {
+    function testFuzz_StaticCurve_overCapacityUtilizationReadsAsFull(uint256 _targetU, uint256 _yT, uint256 _riseLt, uint256 _riseGte, uint256 _u) public {
         (uint256 targetU, uint256 y0, uint256 yT, uint256 yFull) = _boundCurve(_targetU, _yT, _riseLt, _riseGte);
         uint256 u = bound(_u, WAD, type(uint256).max); // the entire over-capacity range up to the absolute maximum input
 

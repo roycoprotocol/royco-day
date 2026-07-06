@@ -29,7 +29,15 @@ contract RedemptionClaimsFuzz is MarketFuzzBase {
      * shares (the junior cross-claim carved out) and no junior-asset leg. The redeemer receives the floor-scaled
      * slice of each leg and its wallet delta must match the claims exactly.
      */
-    function testFuzz_SeniorRedemption_paysExactProRataClaims(uint256 _stSeed, uint256 _jtSeed, uint256 _vaultBps, uint256 _elapsed, uint256 _sharesSeed) public {
+    function testFuzz_SeniorRedemption_paysExactProRataClaims(
+        uint256 _stSeed,
+        uint256 _jtSeed,
+        uint256 _vaultBps,
+        uint256 _elapsed,
+        uint256 _sharesSeed
+    )
+        public
+    {
         uint256 st = bound(_stSeed, 1e18, 1e26); // uniform over 8 orders of magnitude of senior seed size
         uint256 jt = bound(_jtSeed, st / 2, 2 * st); // uniform coverage ratios from 2:1 to 1:2
         uint256 vb = bound(_vaultBps, 1, 10_000); // strictly positive yield so the risk-premium cross-claim is live
@@ -76,7 +84,15 @@ contract RedemptionClaimsFuzz is MarketFuzzBase {
      * gate. The junior tranche's claims span both raw pools: its own full raw NAV plus the risk-premium
      * cross-claim on senior raw NAV, each converted to vault shares at the accrued rate and floor-scaled.
      */
-    function testFuzz_JuniorRedemption_paysExactProRataClaims(uint256 _stSeed, uint256 _jtSeed, uint256 _vaultBps, uint256 _elapsed, uint256 _sharesSeed) public {
+    function testFuzz_JuniorRedemption_paysExactProRataClaims(
+        uint256 _stSeed,
+        uint256 _jtSeed,
+        uint256 _vaultBps,
+        uint256 _elapsed,
+        uint256 _sharesSeed
+    )
+        public
+    {
         uint256 st = bound(_stSeed, 1e18, 1e26); // uniform over 8 orders of magnitude of senior seed size
         uint256 jt = bound(_jtSeed, st / 2, 2 * st); // uniform coverage ratios from 2:1 to 1:2, ample surplus for redemption
         uint256 vb = bound(_vaultBps, 1, 10_000); // strictly positive yield so the cross-claim leg is live
@@ -175,6 +191,8 @@ contract RedemptionClaimsFuzz is MarketFuzzBase {
         assertEq(seniorTranche.balanceOf(LT_PROVIDER) - stSharesBefore, claims.stShares, "the staged premium shares must be sent directly to the redeemer");
 
         assertLe(toUint256(claims.nav) * supply, ltEff * shares, "the floor-scaled payout can never exceed the exact pro-rata slice");
-        assertGe((ltEff - toUint256(claims.nav)) * supply, ltEff * (supply - shares), "remaining liquidity holders must keep at least their prior NAV-per-share");
+        assertGe(
+            (ltEff - toUint256(claims.nav)) * supply, ltEff * (supply - shares), "remaining liquidity holders must keep at least their prior NAV-per-share"
+        );
     }
 }

@@ -259,17 +259,7 @@ library RoycoTestMath {
      * @param jtEff The junior effective NAV
      * @return utilizationWAD The coverage utilization in WAD
      */
-    function covUtil(
-        uint256 stRaw,
-        uint256 jtRaw,
-        bool jtCoinvested,
-        uint256 minCovWAD,
-        uint256 jtEff
-    )
-        internal
-        pure
-        returns (uint256 utilizationWAD)
-    {
+    function covUtil(uint256 stRaw, uint256 jtRaw, bool jtCoinvested, uint256 minCovWAD, uint256 jtEff) internal pure returns (uint256 utilizationWAD) {
         uint256 exposure = jtCoinvested ? stRaw + jtRaw : stRaw;
         if (minCovWAD == 0 || exposure == 0) return 0;
         if (jtEff == 0) return type(uint256).max;
@@ -524,8 +514,7 @@ library RoycoTestMath {
 
         // P8 — state machine on the fresh raws and the post-waterfall jtEff
         out.coverageUtilizationWAD = covUtil(out.stRaw, out.jtRaw, in_.jtCoinvested, in_.minCoverageWAD, jtEff);
-        bool forcedPerpetual = in_.fixedTermDuration == 0
-            || (in_.marketStateLast == MarketState.FIXED_TERM && in_.fixedTermEndLast <= in_.nowTimestamp)
+        bool forcedPerpetual = in_.fixedTermDuration == 0 || (in_.marketStateLast == MarketState.FIXED_TERM && in_.fixedTermEndLast <= in_.nowTimestamp)
             || out.coverageUtilizationWAD >= in_.coverageLiquidationUtilizationWAD || (jtEff == 0 && stEff > 0);
         if (forcedPerpetual) {
             // Forced PERPETUAL erases the IL and clears the term
@@ -546,8 +535,7 @@ library RoycoTestMath {
             // FIXED_TERM commit: zero the four fields, stamp the end only on the PERPETUAL -> FIXED_TERM edge
             out.marketState = MarketState.FIXED_TERM;
             (out.ltLiquidityPremium, out.stProtocolFee, out.jtProtocolFee, out.ltProtocolFee) = (0, 0, 0, 0);
-            out.fixedTermEnd =
-                in_.marketStateLast == MarketState.PERPETUAL ? uint256(uint32(in_.nowTimestamp + in_.fixedTermDuration)) : in_.fixedTermEndLast;
+            out.fixedTermEnd = in_.marketStateLast == MarketState.PERPETUAL ? uint256(uint32(in_.nowTimestamp + in_.fixedTermDuration)) : in_.fixedTermEndLast;
         }
 
         out.stEff = stEff;

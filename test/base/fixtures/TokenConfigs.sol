@@ -26,12 +26,7 @@ function _plainToken(uint8 _decimals) pure returns (TokenConfig memory) {
 /// @dev Builds a 4626 vault-share token config at a 1.0 WAD initial rate with no underlying behaviors
 function _vaultToken(uint8 _shareDecimals, uint8 _underlyingDecimals) pure returns (TokenConfig memory) {
     return TokenConfig({
-        decimals: _shareDecimals,
-        behaviors: MockBehaviors.BEHAVIOR_NONE,
-        feeBps: 0,
-        erc4626: true,
-        underlyingDecimals: _underlyingDecimals,
-        initialRateWAD: WAD
+        decimals: _shareDecimals, behaviors: MockBehaviors.BEHAVIOR_NONE, feeBps: 0, erc4626: true, underlyingDecimals: _underlyingDecimals, initialRateWAD: WAD
     });
 }
 

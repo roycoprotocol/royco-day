@@ -2,14 +2,12 @@
 pragma solidity ^0.8.28;
 
 import { IVault } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
+import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
+import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
 import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
-import {
-    ERC20BurnableUpgradeable
-} from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
 import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
@@ -41,12 +39,8 @@ import {
 import {
     IdenticalAssets_ST_JT_ChainlinkOracle_Quoter
 } from "../../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol";
-import {
-    IdenticalAssets_ST_JT_Oracle_Quoter
-} from "../../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_Oracle_Quoter.sol";
-import {
-    BalancerV3_LT_BPTOracle_Quoter
-} from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
+import { IdenticalAssets_ST_JT_Oracle_Quoter } from "../../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_Oracle_Quoter.sol";
+import { BalancerV3_LT_BPTOracle_Quoter } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
@@ -295,7 +289,12 @@ abstract contract TrancheFixture is Assertions {
         vm.label(address(liquidityTranche), "LT");
 
         accountant = RoycoDayAccountant(
-            address(new ERC1967Proxy(address(accImpl), abi.encodeCall(RoycoDayAccountant.initialize, (_buildAccountantInitParams(_params, jtYdmInitData, ltYdmInitData), address(accessManager)))))
+            address(
+                new ERC1967Proxy(
+                    address(accImpl),
+                    abi.encodeCall(RoycoDayAccountant.initialize, (_buildAccountantInitParams(_params, jtYdmInitData, ltYdmInitData), address(accessManager)))
+                )
+            )
         );
         vm.label(address(accountant), "Accountant");
 
@@ -305,9 +304,8 @@ abstract contract TrancheFixture is Assertions {
         //    so the senior tranche can land at index 1 and the quoter's tokens[1] == SENIOR_TRANCHE branch is real
         bool stSortsFirst = address(seniorTranche) < address(quoteToken);
         stPoolTokenIndex = stSortsFirst ? 0 : 1;
-        IERC20[2] memory poolTokens = stSortsFirst
-            ? [IERC20(address(seniorTranche)), IERC20(address(quoteToken))]
-            : [IERC20(address(quoteToken)), IERC20(address(seniorTranche))];
+        IERC20[2] memory poolTokens =
+            stSortsFirst ? [IERC20(address(seniorTranche)), IERC20(address(quoteToken))] : [IERC20(address(quoteToken)), IERC20(address(seniorTranche))];
         balancerVault.registerPool(address(bpt), poolTokens);
         // Documenting assertion: the recorded index must resolve the senior share in the registered order. Under
         // the deterministic forge test deployer every smoke cell A-D sorts the quote token below the tranche
@@ -355,8 +353,7 @@ abstract contract TrancheFixture is Assertions {
                         gracePeriodSeconds: ORACLE_GRACE_PERIOD_SECONDS
                     }),
                     ltQuoterParams: BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams({
-                        bptOracle: address(bptOracle),
-                        maxReinvestmentSlippageWAD: _params.maxReinvestmentSlippageWAD
+                        bptOracle: address(bptOracle), maxReinvestmentSlippageWAD: _params.maxReinvestmentSlippageWAD
                     })
                 })
             )
@@ -805,7 +802,9 @@ abstract contract TrancheFixture is Assertions {
             ADMIN_PROTOCOL_FEE_SETTER_ROLE
         );
         accessManager.setTargetFunctionRole(
-            a, _sels(IRoycoDayAccountant.setSeniorTrancheDustTolerance.selector, IRoycoDayAccountant.setJuniorTrancheDustTolerance.selector), ADMIN_MARKET_OPS_ROLE
+            a,
+            _sels(IRoycoDayAccountant.setSeniorTrancheDustTolerance.selector, IRoycoDayAccountant.setJuniorTrancheDustTolerance.selector),
+            ADMIN_MARKET_OPS_ROLE
         );
         accessManager.setTargetFunctionRole(a, _sels(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         accessManager.setTargetFunctionRole(a, _sels(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
@@ -815,8 +814,12 @@ abstract contract TrancheFixture is Assertions {
     /// @notice Binds one tranche's selector surface (deposit/redeem/admin/burn, plus the LT multi-asset pair)
     function _bindTranche(address _tranche, uint64 _depositRole, uint64 _redeemRole, bool _isLiquidity) internal {
         if (_isLiquidity) {
-            accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoVaultTranche.deposit.selector, RoycoLiquidityTranche.depositMultiAsset.selector), _depositRole);
-            accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoVaultTranche.redeem.selector, RoycoLiquidityTranche.redeemMultiAsset.selector), _redeemRole);
+            accessManager.setTargetFunctionRole(
+                _tranche, _sels(IRoycoVaultTranche.deposit.selector, RoycoLiquidityTranche.depositMultiAsset.selector), _depositRole
+            );
+            accessManager.setTargetFunctionRole(
+                _tranche, _sels(IRoycoVaultTranche.redeem.selector, RoycoLiquidityTranche.redeemMultiAsset.selector), _redeemRole
+            );
         } else {
             accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoVaultTranche.deposit.selector), _depositRole);
             accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoVaultTranche.redeem.selector), _redeemRole);

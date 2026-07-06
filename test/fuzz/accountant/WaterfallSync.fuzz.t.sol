@@ -133,11 +133,9 @@ contract WaterfallSyncFuzz is AccountantFuzzHarness {
         uint256 jtClaimOnSTRaw = in_.jtEffLast > in_.jtRawLast ? in_.jtEffLast - in_.jtRawLast : 0;
         uint256 stClaimOnSTRaw = in_.stRawLast - jtClaimOnSTRaw;
         // A zero senior raw pool routes the whole senior delta to the senior claim only if it has live value
-        int256 deltaSTEff = (
-            in_.stRawLast == 0
-                ? (in_.stEffLast > 0 ? in_.stRawDelta : int256(0))
-                : RoycoTestMath.attribute(in_.stRawDelta, stClaimOnSTRaw, in_.stRawLast)
-        ) + RoycoTestMath.attribute(in_.jtRawDelta, stClaimOnJTRaw, in_.jtRawLast);
+        int256 deltaSTEff =
+            (in_.stRawLast == 0 ? (in_.stEffLast > 0 ? in_.stRawDelta : int256(0)) : RoycoTestMath.attribute(in_.stRawDelta, stClaimOnSTRaw, in_.stRawLast))
+                + RoycoTestMath.attribute(in_.jtRawDelta, stClaimOnJTRaw, in_.jtRawLast);
         int256 deltaJTEff = (in_.stRawDelta + in_.jtRawDelta) - deltaSTEff;
 
         if (deltaSTEff < 0) {
@@ -150,9 +148,7 @@ contract WaterfallSyncFuzz is AccountantFuzzHarness {
             // Every covered wei becomes a senior liability to the junior tranche, unless a forced wind-down erased it
             if (out.ilErased == 0) {
                 assertEq(
-                    toUint256(st.jtCoverageImpermanentLoss),
-                    in_.jtCoverageILLast + coverageApplied,
-                    "loss priority: coverage applied books as impermanent loss"
+                    toUint256(st.jtCoverageImpermanentLoss), in_.jtCoverageILLast + coverageApplied, "loss priority: coverage applied books as impermanent loss"
                 );
             } else {
                 assertEq(toUint256(st.jtCoverageImpermanentLoss), 0, "loss priority: a forced wind-down erases the impermanent loss");
