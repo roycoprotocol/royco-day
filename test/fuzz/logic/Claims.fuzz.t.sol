@@ -9,14 +9,15 @@ import { RoycoTestMath } from "../../base/math/RoycoTestMath.sol";
 
 /**
  * @title ClaimsFuzz
- * @notice Phase C fuzz properties for the F13 claim scaling (testing-strategy.md §4.2 row `redeem claims`):
- *         exact five-field equality against the independent RoycoTestMath mirror, the pro-rata ceiling, and the
- *         floor-dust conservation of a full-supply redemption partition
+ * @notice Fuzz properties for the pro-rata claim scaling a redemption applies to all five claim legs
+ *         (ST assets, JT assets, LT assets, idle-premium ST shares, NAV): exact five-field equality
+ *         against the independent RoycoTestMath mirror, the pro-rata ceiling, and floor-dust conservation
+ *         when the whole supply redeems in parts
  * @dev Pure-library layer, no market deploy. Production is asserted against RoycoTestMath or a hand-derived
  *      bound, never against a second call of the function under test
  */
 contract ClaimsFuzz is Test {
-    /// @notice Suite-wide NAV, tranche-unit, and share-supply ceiling (testing-strategy.md §4.2 global bounds)
+    /// @notice Suite-wide NAV, tranche-unit, and share-supply ceiling
     uint256 internal constant MAX_NAV = 1e30;
 
     /// @dev Wraps five raw claim totals into the production AssetClaims struct
@@ -38,8 +39,10 @@ contract ClaimsFuzz is Test {
     }
 
     /**
-     * Property (F13, TrancheClaimsLogic:117-131): every one of the five claim fields scales as
-     *   scaled == floor(claim * shares / totalShares) == RoycoTestMath.scaleClaims(...)   [exact, all five fields]
+     * A redeemer burning `shares` of a `totalShares` supply is owed the same fraction of every claim leg,
+     * floored — including the idle-premium ST-share leg an LT redeemer receives directly — so no leg can
+     * be scaled by a different rule and quietly favor one side. Property (TrancheClaimsLogic.sol:117-131):
+     *   scaled == floor(claim * shares / totalShares) == RoycoTestMath.scaleClaims(...)  [exact, all five]
      * and the floor direction caps the redeemer at pro-rata: scaled <= total per field whenever
      * shares <= totalShares (the redeemer cannot extract more than its slice)
      */
@@ -60,7 +63,7 @@ contract ClaimsFuzz is Test {
         _lt = bound(_lt, 0, MAX_NAV); // uniform over the full tranche-unit range incl. the 0 edge
         _stShares = bound(_stShares, 0, MAX_NAV); // uniform over the full idle-share range incl. the 0 edge
         _nav = bound(_nav, 0, MAX_NAV); // uniform over the full NAV range incl. the 0 edge
-        _totalShares = bound(_totalShares, 1, MAX_NAV); // F13 precondition: a redeemer only exists against a live supply
+        _totalShares = bound(_totalShares, 1, MAX_NAV); // a redeemer only exists against a live supply
         _shares = bound(_shares, 0, _totalShares); // full redeemer slice range: 0 through the entire supply
 
         AssetClaims memory total = _claims(_st, _jt, _lt, _stShares, _nav);
@@ -69,23 +72,24 @@ contract ClaimsFuzz is Test {
         RoycoTestMath.Claims memory want = RoycoTestMath.scaleClaims(
             RoycoTestMath.Claims({ stAssets: _st, jtAssets: _jt, ltAssets: _lt, stShares: _stShares, nav: _nav }), _shares, _totalShares
         );
-        _assertFieldsEq(scaled, want, "F13");
+        _assertFieldsEq(scaled, want, "scaled slice");
 
         // Floor direction: the scaled slice never exceeds the total on any field (shares <= totalShares)
-        assertLe(toUint256(scaled.stAssets), _st, "F13 pro-rata cap: stAssets");
-        assertLe(toUint256(scaled.jtAssets), _jt, "F13 pro-rata cap: jtAssets");
-        assertLe(toUint256(scaled.ltAssets), _lt, "F13 pro-rata cap: ltAssets");
-        assertLe(scaled.stShares, _stShares, "F13 pro-rata cap: stShares");
-        assertLe(toUint256(scaled.nav), _nav, "F13 pro-rata cap: nav");
+        assertLe(toUint256(scaled.stAssets), _st, "pro-rata cap: stAssets");
+        assertLe(toUint256(scaled.jtAssets), _jt, "pro-rata cap: jtAssets");
+        assertLe(toUint256(scaled.ltAssets), _lt, "pro-rata cap: ltAssets");
+        assertLe(scaled.stShares, _stShares, "pro-rata cap: stShares");
+        assertLe(toUint256(scaled.nav), _nav, "pro-rata cap: nav");
     }
 
     /**
-     * Property (§4.2 full-supply redemption): partition the entire tranche supply into three redemptions
-     * s1 + s2 + s3 == totalShares. Per field, the redeemed sum obeys
-     *   total - 2 <= Σ scaled <= total
-     * Upper side: each slice floors, so the sum of exact pro-rata terms (which telescopes to exactly the total)
-     * only shrinks. Lower side (derived floor-dust bound): each of the three floors loses strictly less than
-     * one unit, so the integer sum loses at most 3 - 1 = 2 units
+     * Three redeemers together burning the entire supply (s1 + s2 + s3 == totalShares) must collectively
+     * receive the whole pot minus at most floor dust — over-payment would drain the tranche and a larger
+     * shortfall would strand claims with no shares left to redeem them. Per field the redeemed sum obeys
+     *   total - 2 <= sum of the three slices <= total
+     * Upper side: each slice floors, so the sum of exact pro-rata terms (which telescopes to exactly the
+     * total) only shrinks. Lower side (derived floor-dust bound): each of the three floors loses strictly
+     * less than one unit, so the integer sum loses at most 3 - 1 = 2 units
      */
     function testFuzz_ScaleClaims_fullSupplyPartitionFloorDust(
         uint256 _st,
@@ -105,7 +109,7 @@ contract ClaimsFuzz is Test {
         _lt = bound(_lt, 0, MAX_NAV); // uniform over the full tranche-unit range incl. the 0 edge
         _stShares = bound(_stShares, 0, MAX_NAV); // uniform over the full idle-share range incl. the 0 edge
         _nav = bound(_nav, 0, MAX_NAV); // uniform over the full NAV range incl. the 0 edge
-        _totalShares = bound(_totalShares, 1, MAX_NAV); // F13 precondition: a redeemer only exists against a live supply
+        _totalShares = bound(_totalShares, 1, MAX_NAV); // a redeemer only exists against a live supply
         _sharesA = bound(_sharesA, 0, _totalShares); // first slice: uniform over the whole supply incl. both edges
         _sharesB = bound(_sharesB, 0, _totalShares - _sharesA); // second slice: uniform over the remainder incl. both edges
         uint256 sharesC = _totalShares - _sharesA - _sharesB; // third slice completes the exact partition
@@ -115,7 +119,7 @@ contract ClaimsFuzz is Test {
         AssetClaims memory b = TrancheClaimsLogic._scaleAssetClaims(total, _sharesB, _totalShares);
         AssetClaims memory c = TrancheClaimsLogic._scaleAssetClaims(total, sharesC, _totalShares);
 
-        // Derived floor-dust bound for a 3-way partition: 3 floors each lose < 1 unit, integer total loss <= 2
+        // Derived floor-dust bound for a 3-way partition: 3 floors each lose < 1 unit, integer total loss <= 3 - 1 = 2
         uint256 partitionFloorDustDerivedBound = 2;
 
         _assertPartitionField(toUint256(a.stAssets) + toUint256(b.stAssets) + toUint256(c.stAssets), _st, partitionFloorDustDerivedBound, "stAssets");

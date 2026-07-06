@@ -62,6 +62,11 @@ contract MockBPTOracle {
     // LPOracleBase Surface
     // =============================
 
+    /// @notice Returns the pool this oracle values, the LPOracleBase surface the kernel quoter validates when the oracle is wired
+    function pool() external view returns (address) {
+        return POOL;
+    }
+
     /**
      * @notice Returns the 18-decimal NAV of the whole pool, the LPOracleBase surface the kernel quoter consumes
      * @dev MANUAL returns the pinned value, AUTO sums each pool balance at its effective WAD price read live from the mock vault
