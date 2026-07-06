@@ -11,9 +11,9 @@ import { TrancheFixture } from "../../base/fixtures/TrancheFixture.sol";
 
 /**
  * @title TrancheFixtureSmoke
- * @notice Phase A smoke battery run against every token-matrix cell (09-phase-a-spec.md §5)
+ * @notice Smoke battery run against every token-matrix cell
  * @dev One concrete per cell A-D supplies the cell and the hand-derived quoter expectation. Every expected number
- *      is derived from the spec (CLAUDE.md, testing-strategy.md §1.3) BEFORE execution, never read back from the
+ *      is derived from the product spec (CLAUDE.md) BEFORE execution, never read back from the
  *      code: raw NAVs are `shares x rateWAD x oraclePrice` scaled to WAD, conservation is the exact two-term
  *      identity, and the premium, fee, and redemption expectations are the floor-arithmetic derivations shown at
  *      the constants below
@@ -80,7 +80,7 @@ abstract contract TrancheFixtureSmoke is TrancheFixture {
     uint256 internal constant JT_CLAIM_ON_ST_RAW_NAV = 0.2e18;
 
     /**
-     * @dev Senior carve-out share mints (the F11 joint price): the premium and the ST fee both price against the
+     * @dev Senior carve-out share mints (jointly priced): the premium and the ST fee both price against the
      *      pre-sync 100e18 supply over the retained NAV 100.8e18 - 0.1e18 - 0.07e18 = 100.63e18, each floored:
      *      LT_PREMIUM_SHARES = floor(100e18 x 0.1e18 / 100.63e18) = 99373944151843386
      *      ST_FEE_SHARES = floor(100e18 x 0.07e18 / 100.63e18) = 69561760906290370
@@ -233,7 +233,7 @@ abstract contract TrancheFixtureSmoke is TrancheFixture {
         assertEq(toUint256(state.jtRawNAV), 30.3e18, "jtRawNAV must be 30 whole shares x 1.01 x 1.0 = 30.3e18");
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "an up-only sync must stay PERPETUAL");
 
-        // The full yield split lands exactly per the derivation at the constants (F4 premium math)
+        // The full yield split lands exactly per the derivation at the constants
         assertEq(toUint256(state.stEffectiveNAV), POST_SYNC_ST_EFF_NAV, "stEff must be 100e18 + 0.7e18 residual + 0.1e18 LT premium");
         assertEq(toUint256(state.jtEffectiveNAV), POST_SYNC_JT_EFF_NAV, "jtEff must be 30e18 + 0.3e18 gain + 0.2e18 risk premium");
         assertEq(toUint256(state.ltLiquidityPremium), LT_LIQUIDITY_PREMIUM_NAV, "liqShare must be floor(1e18 x 0.1e18 x 1d / (1d x WAD)) = 0.1e18");
@@ -246,7 +246,7 @@ abstract contract TrancheFixtureSmoke is TrancheFixture {
         IRoycoDayAccountant.RoycoDayAccountantState memory acct = accountant.getState();
         assertNAVConservation(acct.lastSTRawNAV, acct.lastJTRawNAV, acct.lastSTEffectiveNAV, acct.lastJTEffectiveNAV, "persisted checkpoint");
 
-        // The premium and ST fee mints land exactly per the F11 carve-out
+        // The premium and ST fee mints land exactly per the carve-out derivation at the constants
         assertEq(seniorTranche.totalSupply(), POST_SYNC_ST_SUPPLY, "ST supply must be 100e18 + premium shares + fee shares exactly");
 
         // Branch pin: the sync's inline add must DEPLOY (live fair-value pricing, see REINVESTED_BPT): the idle

@@ -7,22 +7,21 @@ import { RoycoTestMath } from "../../base/math/RoycoTestMath.sol";
 /**
  * @title RoycoTestMathTest
  * @notice Self-validation golden vectors for the independent expected-value library. Every expected value is
- *         a hand-derived literal with the arithmetic shown in a comment, per the UnitExemplar standard.
- *         Waterfall vectors copy the derivations of docs/testing/agent-notes/12-waterfall-golden-matrix-spec.md
- *         §4 and cite their W-cell ids.
- * @dev Boundary set per formula (testing-strategy.md §4.1): 0, 1 wei, max realistic (1e30), exact thresholds,
- *      zero-supply and zero-NAV edges. No sign-only asserts, no early returns.
+ *         a hand-derived literal with the arithmetic shown in a comment, so a regression in the mirror is
+ *         caught here before it can silently agree with a production bug.
+ * @dev Boundary set per formula: 0, 1 wei, max realistic (1e30), exact thresholds, zero-supply and zero-NAV
+ *      edges. No sign-only asserts, no early returns.
  */
 contract RoycoTestMathTest is Test {
     uint256 private constant WAD = 1e18;
     uint256 private constant MAX_NAV = 1e30;
 
-    // Spec 12 §4.0 matrix conventions: T0 base timestamp and the 7-day fixed-term duration.
+    // Shared waterfall-vector conventions: T0 base timestamp and the 7-day fixed-term duration.
     uint256 private constant T0 = 1_700_000_000;
     uint256 private constant DURATION = 604_800;
 
     /*//////////////////////////////////////////////////////////////////////////
-                                F1 — attribute
+                                attribute
     //////////////////////////////////////////////////////////////////////////*/
 
     /// Zero delta attributes nothing regardless of claim shape.
@@ -66,7 +65,7 @@ contract RoycoTestMathTest is Test {
         assertEq(RoycoTestMath.attribute(-int256(MAX_NAV), MAX_NAV, MAX_NAV), -int256(MAX_NAV), "full-claim loss at scale");
     }
 
-    /// The two-way split floors each part so the residual favors the complement (the §1.3 Favors column):
+    /// The two-way split floors each part so the rounding residual favors the complementary tranche:
     /// delta 7 over lastRaw 3 split as claims {1, 2}: ⌊7/3⌋ = 2 and ⌊14/3⌋ = 4, sum 6 = delta − 1.
     function test_Attribute_complementarySplit_residualDustDropped() public pure {
         int256 stPart = RoycoTestMath.attribute(7, 1, 3);
@@ -77,7 +76,7 @@ contract RoycoTestMathTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////////////////
-                                F7 — covUtil
+                                covUtil
     //////////////////////////////////////////////////////////////////////////*/
 
     /// minCov == 0 means no requirement: utilization is 0 whatever the NAVs.
@@ -124,7 +123,7 @@ contract RoycoTestMathTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////////////////
-                                F8 — liqUtil
+                                liqUtil
     //////////////////////////////////////////////////////////////////////////*/
 
     /// No senior value means nothing to provide liquidity for.
@@ -169,7 +168,7 @@ contract RoycoTestMathTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////////////////
-                                F9 — sharesFor
+                                sharesFor
     //////////////////////////////////////////////////////////////////////////*/
 
     /// First mint (supply == 0) is 1:1 with the contributed value, totalValue ignored.
@@ -210,7 +209,7 @@ contract RoycoTestMathTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////////////////
-                                F10 — valueFor
+                                valueFor
     //////////////////////////////////////////////////////////////////////////*/
 
     /// Zero supply values everything at 0 (no holders to owe).
@@ -241,10 +240,10 @@ contract RoycoTestMathTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////////////////
-                                F11 — carveOut
+                                carveOut
     //////////////////////////////////////////////////////////////////////////*/
 
-    /// Clean division (UnitExemplar vector 1):
+    /// Clean division:
     ///   retained      = 1050e18 − 30e18 − 20e18 = 1000e18
     ///   premiumShares = ⌊1000e18·30e18/1000e18⌋ = 30e18
     ///   feeShares     = ⌊1000e18·20e18/1000e18⌋ = 20e18
@@ -256,7 +255,7 @@ contract RoycoTestMathTest is Test {
         assertEq(supplyAfter, 1050e18, "supply after both mints");
     }
 
-    /// Floor engaged (UnitExemplar vector 2, wei scale):
+    /// Floor engaged (wei scale):
     ///   retained      = 10 − 3 − 2 = 5
     ///   premiumShares = ⌊3·3/5⌋ = ⌊9/5⌋ = ⌊1.8⌋ = 1
     ///   feeShares     = ⌊3·2/5⌋ = ⌊6/5⌋ = ⌊1.2⌋ = 1
@@ -268,7 +267,7 @@ contract RoycoTestMathTest is Test {
         assertEq(supplyAfter, 5, "3 + 1 + 1");
     }
 
-    /// Degenerate carve-out consuming all of stEff routes through F9's 1-wei denominator:
+    /// Degenerate carve-out consuming all of stEff routes through sharesFor's 1-wei denominator:
     ///   retained = 10 − 7 − 3 = 0 ⇒ denom 1: premiumShares = ⌊100·7/1⌋ = 700, feeShares = ⌊100·3/1⌋ = 300.
     function test_CarveOut_retainedZero_oneWeiDenominator() public pure {
         (uint256 premiumShares, uint256 feeShares, uint256 supplyAfter) = RoycoTestMath.carveOut(10, 7, 3, 100);
@@ -277,7 +276,7 @@ contract RoycoTestMathTest is Test {
         assertEq(supplyAfter, 1100, "100 + 700 + 300");
     }
 
-    /// Pre-sync supply 0 routes through F9's first-mint branch: both legs mint 1:1 with their value.
+    /// Pre-sync supply 0 routes through sharesFor's first-mint branch: both legs mint 1:1 with their value.
     ///   retained = 100 − 30 − 20 = 50 is ignored at zero supply: premiumShares = 30, feeShares = 20.
     function test_CarveOut_zeroPreSupply_mintsOneToOne() public pure {
         (uint256 premiumShares, uint256 feeShares, uint256 supplyAfter) = RoycoTestMath.carveOut(100, 30, 20, 0);
@@ -304,7 +303,7 @@ contract RoycoTestMathTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////////////////
-                                F13 — scaleClaims
+                                scaleClaims
     //////////////////////////////////////////////////////////////////////////*/
 
     /// All five fields floor independently at shares 2 of 3:
@@ -353,7 +352,7 @@ contract RoycoTestMathTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////////////////
-                                F12 — ltEffNav
+                                ltEffNav
     //////////////////////////////////////////////////////////////////////////*/
 
     /// No idle shares: effective NAV is the pool leg alone.
@@ -371,7 +370,7 @@ contract RoycoTestMathTest is Test {
         assertEq(RoycoTestMath.ltEffNav(5, 3, 7, 2), 15, "5 + floor(21/2) = 15");
     }
 
-    /// Zero ST supply values the idle leg at 0 (F10 edge): effective NAV falls back to ltRaw.
+    /// Zero ST supply values the idle leg at 0 (the valueFor edge): effective NAV falls back to ltRaw.
     function test_LtEffNav_zeroStSupply_idleLegIsZero() public pure {
         assertEq(RoycoTestMath.ltEffNav(42, 999, 1e18, 0), 42, "idle leg zero at zero supply");
     }
@@ -382,7 +381,7 @@ contract RoycoTestMathTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////////////////
-                                F24 (static) — staticYdm
+                                staticYdm
     //////////////////////////////////////////////////////////////////////////*/
 
     // Reference curve for the vectors below: y0 = 1e16 (1%), yTarget = 1e17 (10%), yFull = 1e18 (100%),
@@ -459,11 +458,11 @@ contract RoycoTestMathTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////////////////
-                    WATERFALL — helpers (spec 12 §4.0 conventions)
+                            WATERFALL — helpers
     //////////////////////////////////////////////////////////////////////////*/
 
     /**
-     * Builds a WaterfallIn under the spec 12 §4.0 matrix conventions: minCoverage 0.1e18, liquidation
+     * Builds a WaterfallIn under the shared vector conventions: minCoverage 0.1e18, liquidation
      * threshold 1.1e18, minLiquidity 0.05e18, all four fee rates 0.1e18, jtCoinvested false, fixed-term
      * duration 7 days, ltRawNew 100e18, sync at T0 on the instantaneous branch (elapsed 0) with pinned
      * preview rates jt 0.1e18 / lt 0.05e18 and caps jt 0.2e18 / lt 0.1e18.
@@ -536,14 +535,16 @@ contract RoycoTestMathTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////////////////
-            WATERFALL — golden vectors (spec 12 §4 exemplars, W-cell cited)
+                        WATERFALL — golden vectors
     //////////////////////////////////////////////////////////////////////////*/
 
     /**
-     * W9 (spec 12 §4.1) — gain+gain with both JT fee parts, instantaneous premium branch.
-     * Checkpoint R1: 1000e18/200e18/1000e18/200e18, IL 0, dust 0, PERPETUAL. Sync (1050e18, 220e18).
-     *   P4: jtNetGain 20e18 > dust 0 ⇒ provisional jtFee = ⌊20e18·0.1⌋ = 2e18, jtEff = 220e18.
-     *   P6: stGain 50e18, no IL. premiumsPaid (50e18 > 0). Instantaneous (elapsed forced 1):
+     * Both tranches gain in the same sync, so the JT fee takes both parts (own gain plus risk premium) and
+     * the premiums resolve through the instantaneous branch. Pins the full up-path fee and premium plumbing.
+     * Checkpoint (stRaw/jtRaw/stEff/jtEff): 1000e18/200e18/1000e18/200e18, IL 0, dust 0, PERPETUAL.
+     * Sync (1050e18, 220e18).
+     *   JT leg: jtNetGain 20e18 > dust 0 ⇒ provisional jtFee = ⌊20e18·0.1⌋ = 2e18, jtEff = 220e18.
+     *   ST gain leg: stGain 50e18, no IL. premiumsPaid (50e18 > 0). Instantaneous (elapsed forced 1):
      *     jtPrem = ⌊50e18·0.1e18/(1·1e18)⌋ = 5e18, ltPrem = ⌊50e18·0.05e18/1e18⌋ = 2.5e18 (7.5e18 <= 50e18 ok).
      *     jtFee += ⌊5e18·0.1⌋ = 0.5e18 ⇒ 2.5e18 total, jtEff = 225e18, ltFee = ⌊2.5e18·0.1⌋ = 0.25e18.
      *     Residual 50e18 − 5e18 − 2.5e18 = 42.5e18 ⇒ stFee = 4.25e18, stEff = 1000e18 + 42.5e18 + 2.5e18 = 1045e18.
@@ -551,7 +552,7 @@ contract RoycoTestMathTest is Test {
      *   covUtil = ⌈1050e18·0.1e18/225e18⌉ = ⌈0.46666…e18⌉ = 466666666666666667.
      *   liqUtil = ⌈1045e18·0.05e18/100e18⌉ = 5.225e17 exact.
      */
-    function test_Waterfall_W9_gainGain_bothJtFeeParts_instantaneousPremium() public pure {
+    function test_Waterfall_gainGain_bothJtFeeParts_instantaneousPremium() public pure {
         RoycoTestMath.WaterfallIn memory in_ =
             _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 1050e18, 220e18);
         RoycoTestMath.WaterfallOut memory expected;
@@ -576,16 +577,18 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * W3 (spec 12 §4.1) — ST loss + JT gain: coverage from the post-P4 buffer and the jt-fee recompute.
-     * Checkpoint R1, sync (950e18, 220e18).
-     *   P4: gain 20e18 ⇒ provisional fee 2e18, jtEff 220e18.
-     *   P5: stLoss 50e18, coverage = min(50e18, 220e18) = 50e18. Recompute: jtNetGain = sat(20e18 − 50e18) = 0
+     * ST loses while JT gains: coverage draws from the post-gain JT buffer and the JT fee is recomputed on the
+     * net, so a fee never books on gain that coverage immediately consumed.
+     * Checkpoint (stRaw/jtRaw/stEff/jtEff): 1000e18/200e18/1000e18/200e18, IL 0, dust 0, PERPETUAL.
+     * Sync (950e18, 220e18).
+     *   JT leg: gain 20e18 ⇒ provisional fee 2e18, jtEff 220e18.
+     *   ST loss leg: stLoss 50e18, coverage = min(50e18, 220e18) = 50e18. Recompute: jtNetGain = sat(20e18 − 50e18) = 0
      *   <= dust ⇒ jtFee = 0. jtEff = 170e18, IL = 50e18, stEff unchanged 1000e18.
      *   IL 50e18 > dust 0 ⇒ FIXED_TERM entry from PERPETUAL: end = T0 + D, fees zeroed (only jtFee was live).
      *   covUtil = ⌈950e18·0.1e18/170e18⌉ = ⌈558823529411764705.88⌉ = 558823529411764706.
      *   liqUtil = ⌈1000e18·0.05e18/100e18⌉ = 5e17.
      */
-    function test_Waterfall_W3_stLossJtGain_coverageAndFeeRecompute_ftEntry() public pure {
+    function test_Waterfall_stLossJtGain_coverageAndFeeRecompute_fixedTermEntry() public pure {
         RoycoTestMath.WaterfallIn memory in_ =
             _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 950e18, 220e18);
         RoycoTestMath.WaterfallOut memory expected;
@@ -603,11 +606,13 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * W6 (spec 12 §4.1) — JT-only gain in PERPETUAL: the fee survives (fee zeroing belongs to FT commits only).
-     * Checkpoint R1, sync (1000e18, 220e18): jtNetGain 20e18 ⇒ jtFee 2e18, jtEff 220e18, no ST leg.
+     * A JT-only gain in a PERPETUAL commit keeps its fee: fee zeroing belongs to FIXED_TERM commits only,
+     * so this pins that a healthy market never drops an earned fee.
+     * Checkpoint (stRaw/jtRaw/stEff/jtEff): 1000e18/200e18/1000e18/200e18, IL 0, dust 0, PERPETUAL.
+     * Sync (1000e18, 220e18): jtNetGain 20e18 ⇒ jtFee 2e18, jtEff 220e18, no ST leg.
      * IL 0 ⇒ PERPETUAL. covUtil = ⌈1000e18·0.1e18/220e18⌉ = ⌈454545454545454545.45⌉ = 454545454545454546.
      */
-    function test_Waterfall_W6_jtOnlyGain_feeSurvivesPerpetual() public pure {
+    function test_Waterfall_jtOnlyGain_feeSurvivesPerpetual() public pure {
         RoycoTestMath.WaterfallIn memory in_ =
             _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 1000e18, 220e18);
         RoycoTestMath.WaterfallOut memory expected;
@@ -624,14 +629,15 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * W55 (spec 12 §4.8) — loss past JT exhaustion: wipeout forces PERPETUAL and erases the IL.
-     * Checkpoint R1, sync (700e18, 200e18): stLoss 300e18, coverage = min(300e18, 200e18) = 200e18 ⇒ jtEff 0,
+     * A loss past JT exhaustion wipes the junior buffer out, which forces PERPETUAL and erases the IL: an
+     * uncovered loss can never land the market in FIXED_TERM, because the wipeout disjunct always fires first.
+     * Checkpoint (stRaw/jtRaw/stEff/jtEff): 1000e18/200e18/1000e18/200e18, IL 0, dust 0, PERPETUAL.
+     * Sync (700e18, 200e18): stLoss 300e18, coverage = min(300e18, 200e18) = 200e18 ⇒ jtEff 0,
      * IL 200e18, residual 100e18 ⇒ stEff 900e18. covUtil = uint256 max (jtEff 0 against exposure 700e18),
      * which also satisfies the liquidation disjunct. Forced PERPETUAL: ilErased = 200e18, IL = 0, end 0.
-     * Conservation 700 + 200 = 900 + 0. Pins the P5 lemma: uncovered loss ⇒ wipeout ⇒ never FIXED_TERM.
-     * liqUtil = ⌈900e18·0.05e18/100e18⌉ = 4.5e17.
+     * Conservation 700 + 200 = 900 + 0. liqUtil = ⌈900e18·0.05e18/100e18⌉ = 4.5e17.
      */
-    function test_Waterfall_W55_lossPastJtExhaustion_wipeoutErasesIL() public pure {
+    function test_Waterfall_lossPastJtExhaustion_wipeoutErasesIL() public pure {
         RoycoTestMath.WaterfallIn memory in_ =
             _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 700e18, 200e18);
         RoycoTestMath.WaterfallOut memory expected;
@@ -649,12 +655,14 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * W56 (spec 12 §4.8) — exhaustion exactly at the boundary: fully covered but the buffer empties.
-     * Checkpoint R1, sync (800e18, 200e18): stLoss 200e18 == jtEff ⇒ coverage 200e18, jtEff 0, residual 0,
-     * stEff intact at 1000e18, IL 200e18 ⇒ wipeout disjunct ⇒ PERPETUAL, IL erased. Distinguishes the
-     * covered-boundary case from W55's residual case.
+     * Exhaustion exactly at the boundary: the loss is fully covered but the junior buffer empties to zero,
+     * so senior keeps its full effective NAV while the wipeout disjunct still fires. Distinguishes the
+     * covered-boundary case from the residual-loss wipeout above.
+     * Checkpoint (stRaw/jtRaw/stEff/jtEff): 1000e18/200e18/1000e18/200e18, IL 0, dust 0, PERPETUAL.
+     * Sync (800e18, 200e18): stLoss 200e18 == jtEff ⇒ coverage 200e18, jtEff 0, residual 0,
+     * stEff intact at 1000e18, IL 200e18 ⇒ wipeout disjunct ⇒ PERPETUAL, IL erased.
      */
-    function test_Waterfall_W56_exhaustionAtBoundary_stEffIntact() public pure {
+    function test_Waterfall_exhaustionAtBoundary_stEffIntact() public pure {
         RoycoTestMath.WaterfallIn memory in_ =
             _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 800e18, 200e18);
         RoycoTestMath.WaterfallOut memory expected;
@@ -671,13 +679,15 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * W14 (spec 12 §4.2) — flat sync exits FIXED_TERM: the pure state-machine cell of the R2 regime.
-     * Checkpoint R2: stRaw 1000e18−1, jtRaw 100e18, stEff 1000e18, jtEff 100e18−1, IL 0, dust 0, FIXED_TERM,
-     * end T0+D. Zero deltas run no waterfall legs. IL == 0 with initial FIXED_TERM ⇒ PERPETUAL, end deleted,
-     * no IL erased. covUtil = ⌈(1000e18−1)·0.1e18/(100e18−1)⌉ = 1000000000000000001 (remainder 9e17 forces
+     * A flat sync (zero deltas) on a FIXED_TERM market whose IL has already cleared exits back to PERPETUAL:
+     * the pure state-machine transition, with no waterfall leg running and nothing erased.
+     * Checkpoint: stRaw 1000e18−1, jtRaw 100e18, stEff 1000e18, jtEff 100e18−1 (a 1-wei cross-claim), IL 0,
+     * dust 0, FIXED_TERM, end T0+D. Zero deltas run no waterfall legs. IL == 0 with initial FIXED_TERM ⇒
+     * PERPETUAL, end deleted, no IL erased.
+     * covUtil = ⌈(1000e18−1)·0.1e18/(100e18−1)⌉ = 1000000000000000001 (remainder 9e17 forces
      * the ceil past the exact 1e18). liqUtil = 5e17.
      */
-    function test_Waterfall_W14_flatSync_exitsFixedTerm() public pure {
+    function test_Waterfall_flatSync_exitsFixedTerm() public pure {
         RoycoTestMath.WaterfallIn memory in_ = _cellIn(
             1000e18 - 1, 100e18, 1000e18, 100e18 - 1, 0, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 1000e18 - 1, 100e18
         );
@@ -695,8 +705,10 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * W16 (spec 12 §4.2) — gain with a +1 wei floor exits FIXED_TERM with premiums and fees intact.
-     * Checkpoint R2 (1-wei cross-claim: stClaimOnJT = 1). Sync (1050e18, 80e18):
+     * A gain carrying a +1 wei attribution floor exits FIXED_TERM with premiums and fees intact, pinning
+     * that the exit commit does not zero fees the way a FIXED_TERM commit does.
+     * Checkpoint: stRaw 1000e18−1, jtRaw 100e18, stEff 1000e18, jtEff 100e18−1 (1-wei cross-claim:
+     * stClaimOnJT = 1), IL 0, dust 0, FIXED_TERM, end T0+D. Sync (1050e18, 80e18):
      *   dST = +(50e18+1) attributes 1:1 (stClaimOnST = stRawLast), the JT-delta attribution to ST floors to 0
      *   (⌊20e18·1/100e18⌋ = 0) ⇒ deltaSTEff = 50e18+1, deltaJTEff = −20e18 ⇒ jtEff = 80e18−1.
      *   stGain 50e18+1: jtPrem = ⌊(50e18+1)·0.1⌋ = 5e18, ltPrem = ⌊(50e18+1)·0.05⌋ = 2.5e18,
@@ -705,7 +717,7 @@ contract RoycoTestMathTest is Test {
      *   Conservation 1050e18 + 80e18 = (1045e18+1) + (85e18−1). IL 0 ⇒ PERPETUAL exit (premiums imply PERPETUAL).
      *   covUtil = ⌈1050e18·0.1e18/(85e18−1)⌉ = 1235294117647058824. liqUtil = ⌈(1045e18+1)/2000⌉ = 522500000000000001.
      */
-    function test_Waterfall_W16_gainPlusOneWeiFloors_exitsFixedTerm() public pure {
+    function test_Waterfall_gainPlusOneWeiFloors_exitsFixedTerm() public pure {
         RoycoTestMath.WaterfallIn memory in_ =
             _cellIn(1000e18 - 1, 100e18, 1000e18, 100e18 - 1, 0, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 1050e18, 80e18);
         RoycoTestMath.WaterfallOut memory expected;
@@ -727,18 +739,19 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * W25 (spec 12 §4.3) — partial-then-full IL recovery plus awkward premium floors (dust-IL PERPETUAL regime).
-     * Checkpoint R3: 1000e18/200e18/(1000e18+5)/(200e18−5), IL 5, effectiveDust 7, PERPETUAL. Sync (1050e18, 180e18):
+     * A gain first recovers the dust-sized IL in full, then pays premiums whose inputs carry awkward −5 wei
+     * offsets, pinning every floor in the premium chain at once.
+     * Checkpoint: 1000e18/200e18/(1000e18+5)/(200e18−5), IL 5, effectiveDust 7, PERPETUAL. Sync (1050e18, 180e18):
      *   Attribution: stClaimOnJT = 5 floors out of the JT delta (⌊20e18·5/200e18⌋ = 0) ⇒ deltaSTEff = +50e18,
      *   deltaJTEff = −20e18 ⇒ jtEff = 180e18−5.
-     *   P6a: rec = min(50e18, 5) = 5 ⇒ IL 0, jtEff 180e18, stGain = 50e18−5.
-     *   P6b: premiumsPaid (> 7). jtPrem = ⌊(50e18−5)·0.1⌋ = 5e18−1, ltPrem = ⌊(50e18−5)·0.05⌋ = 2.5e18−1,
+     *   IL recovery: rec = min(50e18, 5) = 5 ⇒ IL 0, jtEff 180e18, stGain = 50e18−5.
+     *   Premium block: premiumsPaid (> 7). jtPrem = ⌊(50e18−5)·0.1⌋ = 5e18−1, ltPrem = ⌊(50e18−5)·0.05⌋ = 2.5e18−1,
      *   jtFee = ⌊(5e18−1)·0.1⌋ = 0.5e18−1, ltFee = 0.25e18−1, residual (50e18−5)−(5e18−1)−(2.5e18−1) = 42.5e18−3,
      *   stFee = ⌊(42.5e18−3)·0.1⌋ = 4.25e18−1, stEff = (1000e18+5) + (42.5e18−3) + (2.5e18−1) = 1045e18+1,
      *   jtEff = 180e18 + (5e18−1) = 185e18−1. Conservation 1050+180 = (1045e18+1)+(185e18−1). IL 0 ⇒ PERPETUAL.
      *   covUtil = ⌈1050e18·0.1e18/(185e18−1)⌉ = 567567567567567568. liqUtil = ⌈(1045e18+1)/2000⌉ = 522500000000000001.
      */
-    function test_Waterfall_W25_dustIL_recoveryThenAwkwardPremiumFloors() public pure {
+    function test_Waterfall_dustIL_recoveryThenAwkwardPremiumFloors() public pure {
         RoycoTestMath.WaterfallIn memory in_ =
             _cellIn(1000e18, 200e18, 1000e18 + 5, 200e18 - 5, 5, RoycoTestMath.MarketState.PERPETUAL, 0, 7, 1050e18, 180e18);
         RoycoTestMath.WaterfallOut memory expected;
@@ -760,12 +773,14 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * W32 (spec 12 §4.4) — dust-IL FIXED_TERM stickiness, the pure cell: zero deltas, IL 5 in (0, dust 7],
-     * initial FIXED_TERM ⇒ stays FIXED_TERM with the ORIGINAL end, nothing accrued to zero.
-     * Checkpoint R4: stRaw 1000e18−5, jtRaw 200e18, stEff 1000e18, jtEff 200e18−5, IL 5, dust 7, FT, end T0+D.
-     * covUtil = ⌈(1000e18−5)·0.1e18/(200e18−5)⌉ = 500000000000000001 (the −5 offsets leave a fractional part).
+     * Dust-IL FIXED_TERM stickiness, the pure case: with zero deltas and an IL of 5 wei inside the dust
+     * tolerance of 7, an initially FIXED_TERM market stays FIXED_TERM with its ORIGINAL end — dust-sized IL
+     * never silently releases a term.
+     * Checkpoint: stRaw 1000e18−5, jtRaw 200e18, stEff 1000e18, jtEff 200e18−5, IL 5, dust 7, FIXED_TERM,
+     * end T0+D. covUtil = ⌈(1000e18−5)·0.1e18/(200e18−5)⌉ = 500000000000000001 (the −5 offsets leave a
+     * fractional part).
      */
-    function test_Waterfall_W32_dustIL_fixedTermStickiness() public pure {
+    function test_Waterfall_dustIL_fixedTermStickiness() public pure {
         RoycoTestMath.WaterfallIn memory in_ = _cellIn(
             1000e18 - 5, 200e18, 1000e18, 200e18 - 5, 5, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 7, 1000e18 - 5, 200e18
         );
@@ -784,13 +799,16 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * W33 (spec 12 §4.4) — the sticky branch zeroes a LIVE JT fee, the only live arm of the FT fee-zeroing.
-     * Checkpoint R4, sync (1000e18−5, 220e18): the JT-delta attribution to ST floors to 0 (⌊20e18·5/200e18⌋ = 0)
+     * The sticky FIXED_TERM branch zeroes a LIVE JT fee: a JT gain books its provisional fee, but the commit
+     * lands in the dust-IL sticky state, which zeroes fees like any FIXED_TERM commit. The gain NAV itself is
+     * kept, only the fee is dropped.
+     * Checkpoint: stRaw 1000e18−5, jtRaw 200e18, stEff 1000e18, jtEff 200e18−5, IL 5, dust 7, FIXED_TERM,
+     * end T0+D. Sync (1000e18−5, 220e18): the JT-delta attribution to ST floors to 0 (⌊20e18·5/200e18⌋ = 0)
      * so deltaJTEff = +20e18 > dust 7 ⇒ provisional jtFee 2e18, jtEff = 220e18−5. No ST move ⇒ IL stays 5 ⇒
-     * sticky FIXED_TERM zeroes the fee. The gain NAV is kept, only the fee is dropped.
+     * sticky FIXED_TERM zeroes the fee.
      * covUtil = ⌈(1000e18−5)·0.1e18/(220e18−5)⌉ = 454545454545454546.
      */
-    function test_Waterfall_W33_stickyBranch_zeroesLiveJtFee() public pure {
+    function test_Waterfall_stickyBranch_zeroesLiveJtFee() public pure {
         RoycoTestMath.WaterfallIn memory in_ = _cellIn(
             1000e18 - 5, 200e18, 1000e18, 200e18 - 5, 5, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 7, 1000e18 - 5, 220e18
         );
@@ -810,13 +828,14 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * W41 (spec 12 §4.5) — a flat sync tips PERPETUAL into FIXED_TERM purely because the persisted IL now
-     * exceeds the (shrunk) dust tolerance. Checkpoint R5: same NAV shape as R3 but effectiveDust 0.
+     * A flat sync tips PERPETUAL into FIXED_TERM purely because the persisted IL now exceeds the (shrunk)
+     * dust tolerance: the state machine re-evaluates carried IL on every commit, not only on new losses.
+     * Checkpoint: 1000e18/200e18/(1000e18+5)/(200e18−5), IL 5, effectiveDust 0, PERPETUAL.
      * Zero deltas, post-waterfall IL 5 > dust 0, no forced disjunct ⇒ FIXED_TERM entry from PERPETUAL with
      * end = T0 + D. covUtil = ⌈1000e18·0.1e18/(200e18−5)⌉ = 500000000000000001.
      * liqUtil = ⌈(1000e18+5)/2000⌉ = 500000000000000001.
      */
-    function test_Waterfall_W41_flatSync_tipsPerpetualToFixedTerm() public pure {
+    function test_Waterfall_flatSync_tipsPerpetualToFixedTerm() public pure {
         RoycoTestMath.WaterfallIn memory in_ =
             _cellIn(1000e18, 200e18, 1000e18 + 5, 200e18 - 5, 5, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 1000e18, 200e18);
         RoycoTestMath.WaterfallOut memory expected;
@@ -834,16 +853,18 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * W49 (spec 12 §4.6) — cross-claim regime: a JT-only loss bleeds into ST via ST's claim on JT raw and is
-     * immediately re-covered. Checkpoint R6: 900e18/300e18/1000e18/200e18, IL 100e18, dust 0, FT, end T0+D.
+     * Cross-claim state: after prior coverage, ST holds a claim on JT raw, so a JT-only loss bleeds into ST
+     * through that claim and is immediately re-covered from the remaining JT buffer — the IL grows by exactly
+     * the re-covered amount while stEff never moves.
+     * Checkpoint: 900e18/300e18/1000e18/200e18, IL 100e18, dust 0, FIXED_TERM, end T0+D.
      * Sync (900e18, 280e18) with k = ⌊20e18·100e18/300e18⌋ = 6666666666666666666:
      *   deltaSTEff = −k, deltaJTEff = −20e18 + k = −13333333333333333334.
-     *   P4: jtEff = 200e18 − 13333333333333333334 = 186666666666666666666.
-     *   P5: coverage = k ⇒ jtEff = 180e18 exact, IL = 100e18 + k = 106666666666666666666, stEff unchanged.
+     *   JT leg: jtEff = 200e18 − 13333333333333333334 = 186666666666666666666.
+     *   ST loss leg: coverage = k ⇒ jtEff = 180e18 exact, IL = 100e18 + k = 106666666666666666666, stEff unchanged.
      *   Conservation 900 + 280 = 1000 + 180. FIXED_TERM stays, end kept.
      *   covUtil = ⌈900e18·0.1e18/180e18⌉ = 5e17 exact.
      */
-    function test_Waterfall_W49_crossClaim_jtLossBleedsIntoSTAndIsRecovered() public pure {
+    function test_Waterfall_crossClaim_jtLossBleedsIntoSTAndIsRecovered() public pure {
         RoycoTestMath.WaterfallIn memory in_ =
             _cellIn(900e18, 300e18, 1000e18, 200e18, 100e18, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 900e18, 280e18);
         RoycoTestMath.WaterfallOut memory expected;
@@ -861,15 +882,17 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * W52 (spec 12 §4.6) — a gain fully consumed by partial IL recovery: no premium block, no reset.
-     * Checkpoint R6, sync (950e18, 280e18) with k = 6666666666666666666:
+     * A gain fully consumed by partial IL recovery: every wei of senior gain repays coverage debt, so the
+     * premium block never runs and the premium accumulators do not reset.
+     * Checkpoint: 900e18/300e18/1000e18/200e18, IL 100e18, dust 0, FIXED_TERM, end T0+D.
+     * Sync (950e18, 280e18) with k = ⌊20e18·100e18/300e18⌋ = 6666666666666666666:
      *   deltaSTEff = 50e18 − k = 43333333333333333334, deltaJTEff = 30e18 − deltaSTEff = −13333333333333333334.
-     *   P4 loss ⇒ jtEff 186666666666666666666. P6a: rec = min(gain, 100e18) = gain ⇒
-     *   IL = 100e18 − 43333333333333333334 = 56666666666666666666, jtEff = 230e18 exact, stGain = 0 ⇒ P6b
-     *   skipped, premiumsPaid false. stEff 1000e18. FIXED_TERM stays, end kept.
+     *   JT leg loss ⇒ jtEff 186666666666666666666. IL recovery: rec = min(gain, 100e18) = gain ⇒
+     *   IL = 100e18 − 43333333333333333334 = 56666666666666666666, jtEff = 230e18 exact, stGain = 0 ⇒ premium
+     *   block skipped, premiumsPaid false. stEff 1000e18. FIXED_TERM stays, end kept.
      *   covUtil = ⌈950e18·0.1e18/230e18⌉ = ⌈413043478260869565.2⌉ = 413043478260869566.
      */
-    function test_Waterfall_W52_gainFullyConsumedByPartialRecovery() public pure {
+    function test_Waterfall_gainFullyConsumedByPartialRecovery() public pure {
         RoycoTestMath.WaterfallIn memory in_ =
             _cellIn(900e18, 300e18, 1000e18, 200e18, 100e18, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 950e18, 280e18);
         RoycoTestMath.WaterfallOut memory expected;
@@ -887,12 +910,14 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * W57 (spec 12 §4.8) — gain exactly equals the IL (recovery boundary): no premiums, premiumsPaid false,
-     * and the IL-cleared market exits FIXED_TERM. Checkpoint R6, sync (1000e18, 300e18):
-     * rec = min(100e18, 100e18) = 100e18 ⇒ IL 0, jtEff 300e18, stGain 0 ⇒ P6b skipped.
-     * IL 0 with initial FIXED_TERM ⇒ PERPETUAL, end 0. covUtil = ⌈1000e18·0.1e18/300e18⌉ = 333333333333333334.
+     * A gain exactly equal to the IL sits on the recovery boundary: recovery consumes all of it, no premiums
+     * pay, premiumsPaid stays false, and the now-IL-free market exits FIXED_TERM.
+     * Checkpoint: 900e18/300e18/1000e18/200e18, IL 100e18, dust 0, FIXED_TERM, end T0+D.
+     * Sync (1000e18, 300e18): rec = min(100e18, 100e18) = 100e18 ⇒ IL 0, jtEff 300e18, stGain 0 ⇒ premium
+     * block skipped. IL 0 with initial FIXED_TERM ⇒ PERPETUAL, end 0.
+     * covUtil = ⌈1000e18·0.1e18/300e18⌉ = 333333333333333334.
      */
-    function test_Waterfall_W57_gainExactlyEqualsIL_noPremiums() public pure {
+    function test_Waterfall_gainExactlyEqualsIL_noPremiums() public pure {
         RoycoTestMath.WaterfallIn memory in_ =
             _cellIn(900e18, 300e18, 1000e18, 200e18, 100e18, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 1000e18, 300e18);
         RoycoTestMath.WaterfallOut memory expected;
@@ -908,13 +933,14 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * W58 (spec 12 §4.8) — gain == IL + 1 wei: premiumsPaid fires TRUE while every premium and fee floors to 0.
-     * Checkpoint R6, sync (1000e18+1, 300e18): rec = 100e18 ⇒ IL 0, stGain = 1 > dust 0 ⇒ premiumsPaid.
+     * A gain of IL + 1 wei: premiumsPaid fires TRUE while every premium and fee floors to 0, pinning that
+     * even a 1-wei paid sync resets the premium accumulators (the premiumsPaid observable).
+     * Checkpoint: 900e18/300e18/1000e18/200e18, IL 100e18, dust 0, FIXED_TERM, end T0+D.
+     * Sync (1000e18+1, 300e18): rec = 100e18 ⇒ IL 0, stGain = 1 > dust 0 ⇒ premiumsPaid.
      * jtPrem = ⌊1·0.1⌋ = 0, ltPrem = 0, stFee = ⌊1·0.1⌋ = 0. stEff = 1000e18+1, jtEff = 300e18, PERPETUAL.
-     * Pins that a 1-wei paid sync still resets the accumulators (the premiumsPaid observable).
      * covUtil = ⌈(1000e18+1)·0.1e18/300e18⌉ = 333333333333333334. liqUtil = ⌈(1000e18+1)/2000⌉ = 500000000000000001.
      */
-    function test_Waterfall_W58_gainILPlusOneWei_premiumsPaidWithZeroPremiums() public pure {
+    function test_Waterfall_gainILPlusOneWei_premiumsPaidWithZeroPremiums() public pure {
         RoycoTestMath.WaterfallIn memory in_ =
             _cellIn(900e18, 300e18, 1000e18, 200e18, 100e18, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 1000e18 + 1, 300e18);
         RoycoTestMath.WaterfallOut memory expected;
@@ -931,14 +957,16 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * W59 (spec 12 §4.8) — the time-weighted twin of W8: identical outputs through the OTHER premium branch.
-     * Checkpoint R1, warp 1 day: elapsed = 86400, twJT = 0.1e18·86400 = 8640e18, twLT = 0.05e18·86400 = 4320e18.
-     * The instantaneous inputs are set hostile (uint256 max) to pin that the tw path ignores them.
+     * The time-weighted premium branch produces the same premiums as an instantaneous sync at the same rates:
+     * a 1-day window whose accruals encode the identical constant rates must land identical outputs, and the
+     * instantaneous inputs are set hostile (uint256 max) to pin that the time-weighted path ignores them.
+     * Checkpoint (stRaw/jtRaw/stEff/jtEff): 1000e18/200e18/1000e18/200e18, IL 0, dust 0, PERPETUAL.
+     * Warp 1 day: elapsed = 86400, twJT = 0.1e18·86400 = 8640e18, twLT = 0.05e18·86400 = 4320e18.
      * Sync (1050e18, 200e18): jtPrem = ⌊50e18·8640e18/(86400·1e18)⌋ = 5e18, ltPrem = 2.5e18, jtFee 0.5e18,
      * ltFee 0.25e18, residual 42.5e18 ⇒ stFee 4.25e18, stEff 1045e18, jtEff 205e18, PERPETUAL.
      * covUtil = ⌈1050e18·0.1e18/205e18⌉ = ⌈512195121951219512.19⌉ = 512195121951219513.
      */
-    function test_Waterfall_W59_timeWeightedTwin_instInputsIgnored() public pure {
+    function test_Waterfall_timeWeightedTwin_instInputsIgnored() public pure {
         RoycoTestMath.WaterfallIn memory in_ =
             _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 1050e18, 200e18);
         in_.elapsedSincePremiumPayment = 86_400;
@@ -966,7 +994,9 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * W60 (spec 12 §4.8) — two-window tw averaging over the FULL premium window (F23).
+     * Time-weighted averaging over a premium window whose rate changed mid-window: two half-day accrual
+     * windows at different JT rates must average to the exact blended premium over the FULL window.
+     * Checkpoint (stRaw/jtRaw/stEff/jtEff): 1000e18/200e18/1000e18/200e18, IL 0, dust 0, PERPETUAL.
      * Accruals 0.1e18·43200 + 0.2e18·43200 = 12960e18 (the second window's 0.5e18 rate was capped to 0.2e18
      * at accrual, so the input already carries the cap), twLT = 0.05e18·86400 = 4320e18, elapsed = 86400.
      * Sync (1050e18, 200e18): jtPrem = ⌊50e18·12960e18/(86400·1e18)⌋ = ⌊50e18·0.15⌋ = 7.5e18, ltPrem = 2.5e18,
@@ -975,7 +1005,7 @@ contract RoycoTestMathTest is Test {
      * covUtil = ⌈1050e18·0.1e18/207.5e18⌉ = ⌈506024096385542168.67⌉ = 506024096385542169.
      * liqUtil = 1042.5e18/2000 = 521250000000000000 exact.
      */
-    function test_Waterfall_W60_twoWindowTwAveraging() public pure {
+    function test_Waterfall_twoWindowTimeWeightedAveraging() public pure {
         RoycoTestMath.WaterfallIn memory in_ =
             _cellIn(1000e18, 200e18, 1000e18, 200e18, 0, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 1050e18, 200e18);
         in_.elapsedSincePremiumPayment = 86_400;
@@ -1001,8 +1031,10 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * A2 cap seam — a hostile preview (uint256 max) on the instantaneous branch is clamped to maxJTYieldShareWAD.
-     * Checkpoint R1, sync (1050e18, 200e18) with jtInst = uint256 max, maxJT = 0.2e18:
+     * The instantaneous-branch cap: a hostile preview yield share (uint256 max) is clamped to
+     * maxJTYieldShareWAD before it can price a premium, so a misbehaving yield model cannot drain the gain.
+     * Checkpoint (stRaw/jtRaw/stEff/jtEff): 1000e18/200e18/1000e18/200e18, IL 0, dust 0, PERPETUAL.
+     * Sync (1050e18, 200e18) with jtInst = uint256 max, maxJT = 0.2e18:
      * jtPrem = ⌊50e18·0.2e18/1e18⌋ = 10e18, ltPrem = 2.5e18 (lt preview 0.05e18 below its cap), jtFee 1e18,
      * ltFee 0.25e18, residual 37.5e18 ⇒ stFee 3.75e18, stEff = 1000e18 + 37.5e18 + 2.5e18 = 1040e18,
      * jtEff = 210e18. Conservation 1050 + 200 = 1040 + 210. covUtil = ⌈1050e18·0.1e18/210e18⌉ = 5e17 exact.
@@ -1030,7 +1062,7 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * Zero-lastSTRaw attribution special case, live-ST arm (spec 12 §1 P3): stRawLast == 0 with stEffLast > 0
+     * Zero-lastSTRaw attribution special case, live-ST arm: stRawLast == 0 with stEffLast > 0
      * routes the whole senior delta to ST. Checkpoint: stRaw 0, jtRaw 100e18, stEff 50e18, jtEff 50e18
      * (post-coverage cross-claim, IL 50e18), FIXED_TERM. Sync (10e18, 100e18): deltaSTEff = +10e18,
      * deltaJTEff = 0, rec = min(10e18, 50e18) = 10e18 ⇒ IL 40e18, jtEff 60e18, stGain 0 (no premium block).
@@ -1078,7 +1110,7 @@ contract RoycoTestMathTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////////////////
-                                F15 — maxSTDeposit
+                                maxSTDeposit
     //////////////////////////////////////////////////////////////////////////*/
 
     /**
@@ -1103,7 +1135,7 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * Dust slack with co-investment (V3.1 slack shape): covLeg = ⌊200e18·1e18/1e17⌋ − (jtRaw 200e18 + jtDust 4
+     * Dust slack with co-investment: covLeg = ⌊200e18·1e18/1e17⌋ − (jtRaw 200e18 + jtDust 4
      * + stRaw 1000e18 + stDust 3) = 2000e18 − 1200e18 − 7 = 800e18 − 7. The jtDust term applies regardless of
      * co-investment, verified by the non-coinvested twin: 2000e18 − (0 + 4 + 1000e18 + 3) = 1000e18 − 7.
      */
@@ -1125,7 +1157,7 @@ contract RoycoTestMathTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////////////////
-                                F16 — maxJTWithdrawal
+                                maxJTWithdrawal
     //////////////////////////////////////////////////////////////////////////*/
 
     /**
@@ -1142,7 +1174,7 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * Fudge boundary (V3.4 shape): with jtEff exactly required + 2 the surplus saturates to 0 and the closed
+     * Fudge boundary: with jtEff exactly required + 2 the surplus saturates to 0 and the closed
      * form returns (0, 0), while one more wei of buffer yields exactly 1 wei withdrawable.
      *   required = ⌈1000e18·1e17/1e18⌉ = 100e18, jtEff = 100e18 + 2 ⇒ surplus 0, jtEff = 100e18 + 3 ⇒ surplus 1,
      *   retention 1e18 ⇒ totalClaimable = 1 ⇒ jtW = ⌊1·1e18/1e18⌋ = 1.
@@ -1168,7 +1200,7 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * Cross-claim split (V3.6): state 1000e18/200e18/950e18/250e18 (JT holds a 50e18 premium claim on ST).
+     * Cross-claim split: state 1000e18/200e18/950e18/250e18 (JT holds a 50e18 premium claim on ST).
      *   jtClaimOnST = 50e18, jtClaimOnJT = 200e18, total 250e18 ⇒ stFrac 2e17, jtFrac 8e17 (both exact).
      *   required = 100e18, surplus = 250e18 − 100e18 − 2 = 150e18 − 2.
      *   retention = 1e18 − ⌊1e17·2e17/1e18⌋ = 98e16 (not coinvested, only stFrac counts).
@@ -1200,7 +1232,7 @@ contract RoycoTestMathTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////////////////
-                                F17 — maxLTWithdrawal
+                                maxLTWithdrawal
     //////////////////////////////////////////////////////////////////////////*/
 
     /// Nominal: required = ⌈1000e18·5e16/1e18⌉ = 50e18 exact, withdrawable = 100e18 − 50e18 = 50e18.
@@ -1223,7 +1255,7 @@ contract RoycoTestMathTest is Test {
         assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18, 0, 0, 5e17, 1.1e18), 100e18, "no liquidity requirement");
     }
 
-    /// Liquidation breach at the EXACT threshold bypasses (the comparison is >=, V3.8): full ltRaw.
+    /// Liquidation breach at the EXACT threshold bypasses (the comparison is >=): full ltRaw.
     function test_MaxLTWithdrawal_liquidationBreachExactThreshold_fullLtRaw() public pure {
         assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18, 5e16, 0, 1.1e18, 1.1e18), 100e18, "exact threshold bypasses");
         assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18, 5e16, 0, 1.1e18 - 1, 1.1e18), 50e18, "one wei below gates");
@@ -1235,7 +1267,7 @@ contract RoycoTestMathTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////////////////
-                                F19 — selfLiqBonus
+                                selfLiqBonus
     //////////////////////////////////////////////////////////////////////////*/
 
     /// Builds a SelfLiqBonusIn with the shared reference state: stRaw 1000e18, jtRaw 100e18, jtEff 140e18
@@ -1260,7 +1292,7 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * Active at the EXACT threshold (V4.2, the gate is covUtil >= liqThreshold), U-neutral max binding in
+     * Active at the EXACT threshold (the gate is covUtil >= liqThreshold), U-neutral max binding in
      * case 1: desired = ⌊200e18·5e17/1e18⌋ = 100e18, jtEff = 140e18,
      * case1 = ⌊200e18·140e18/(1000e18 − 140e18)⌋ = ⌊28000e36/860e18⌋ = 32558139534883720930 <= jtClaimOnST
      * 40e18 ⇒ maxNeutral = case1 ⇒ bonus = min(100e18, 140e18, 32558139534883720930).
@@ -1270,7 +1302,7 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * Case 2, not co-invested (V4.6): weighted 300e18 pushes case1 = ⌊42000e36/860e18⌋ = 48837209302325581395
+     * Case 2, not co-invested: weighted 300e18 pushes case1 = ⌊42000e36/860e18⌋ = 48837209302325581395
      * past jtClaimOnST 40e18 ⇒ case2 = ⌊(300e18 + 40e18)·140e18/1000e18⌋ = 47.6e18.
      * desired 150e18 and jtEff 140e18 do not bind ⇒ bonus = 47.6e18.
      */
@@ -1279,7 +1311,7 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * Case 2, co-invested (V4.6 twin): exposure = 1100e18 ⇒ case1 = ⌊300e18·140e18/960e18⌋ = 43.75e18 exact,
+     * Case 2, co-invested (the twin of the vector above): exposure = 1100e18 ⇒ case1 = ⌊300e18·140e18/960e18⌋ = 43.75e18 exact,
      * above jtClaimOnST 40e18 ⇒ case2 = ⌊300e18·140e18/(1100e18 − 140e18)⌋ = 43.75e18 (no ST-source adjustment
      * and the jtEff-reduced denominator when co-invested) ⇒ bonus = 43.75e18.
      */
@@ -1295,7 +1327,7 @@ contract RoycoTestMathTest is Test {
     }
 
     /**
-     * The jtEff term binds (V4.4): stRaw 100e18, jtRaw 20e18, jtEff 60e18 (jtClaimOnST 40e18), weighted 70e18:
+     * The jtEff term binds: stRaw 100e18, jtRaw 20e18, jtEff 60e18 (jtClaimOnST 40e18), weighted 70e18:
      * case1 = ⌊70e18·60e18/(100e18 − 60e18)⌋ = 105e18 > jtClaimOnST 40e18 ⇒
      * case2 = ⌊(70e18 + 40e18)·60e18/100e18⌋ = 66e18, desired = ⌊130e18·5e17/1e18⌋ = 65e18 ⇒
      * bonus = min(65e18, 60e18, 66e18) = 60e18, capped by the remaining JT buffer.
@@ -1317,7 +1349,7 @@ contract RoycoTestMathTest is Test {
     }
 
     /*//////////////////////////////////////////////////////////////////////////
-                            F24 (adaptive) — adaptiveYdm
+                                adaptiveYdm
     //////////////////////////////////////////////////////////////////////////*/
 
     /// Builds an AdaptiveYdmIn with the shared reference curve: target 8e17, start 1e17, FD_T 5e16, FP_T 1e17,

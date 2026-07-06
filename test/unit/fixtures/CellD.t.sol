@@ -6,8 +6,8 @@ import { cellD } from "../../base/fixtures/TokenConfigs.sol";
 import { TrancheFixtureSmoke } from "./TrancheFixtureSmoke.sol";
 
 /// @title CellDSmokeTest
-/// @notice Phase A smoke battery on cell D: 8-decimal 4626(8,8) ST/JT shares against a 6-decimal quote stable
-/// @dev Cell D contributes the 8-decimal-shares axis only, jtCoinvested stays true at the kernel layer (09-phase-a-spec.md §1.2)
+/// @notice Smoke battery on cell D: 8-decimal 4626(8,8) ST/JT shares against a 6-decimal quote stable
+/// @dev Cell D contributes the 8-decimal-shares axis only, jtCoinvested stays true at the kernel layer (identical ST/JT assets force co-investment)
 contract CellDSmokeTest is TrancheFixtureSmoke {
     function _smokeCell() internal pure override returns (FixtureCell memory) {
         return cellD();

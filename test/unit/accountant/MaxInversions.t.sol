@@ -11,15 +11,15 @@ import { AccountantUnitHarness } from "./AccountantUnitHarness.sol";
 
 /**
  * @title MaxInversionsTest
- * @notice Phase B block 3 golden vectors (testing-strategy.md §4.1 block 3, spec 12 §6 V3.1-V3.8): the F15-F17
- *         max* closed forms cross-asserted against the independent RoycoTestMath mirrors, plus the inversion
- *         probes the existing accountant suite does not cover — the liquidity-binding deposit with an ST dust
- *         slack, the JT-withdrawal fudge boundary on a non-exact ceil'd required value, and the LT-withdrawal
+ * @notice Golden vectors for the maxSTDeposit / maxJTWithdrawal / maxLTWithdrawal closed forms,
+ *         cross-asserted against the independent RoycoTestMath mirrors, plus the inversion probes the
+ *         existing accountant suite does not cover — the liquidity-binding deposit with an ST dust slack,
+ *         the JT-withdrawal fudge boundary on a non-exact ceil'd required value, and the LT-withdrawal
  *         ST dust slack boundary
- * @dev Existing coverage NOT duplicated here (spec 12 §6 V3.x EXISTS notes): the zero-dust coverage-binding and
- *      liquidity-binding maxSTDeposit inversions, the coverage-side dust-slack boundary, the flat-market
- *      maxJTWithdrawal fudge boundary on an exactly-divisible required value, the cross-claim probe, and the
- *      maxLTWithdrawal zero-dust exact boundary all live in test/accountant/RoycoDayAccountant.t.sol H1-H5
+ * @dev Existing coverage NOT duplicated here: the zero-dust coverage-binding and liquidity-binding
+ *      maxSTDeposit inversions, the coverage-side dust-slack boundary, the flat-market maxJTWithdrawal
+ *      fudge boundary on an exactly-divisible required value, the cross-claim probe, and the
+ *      maxLTWithdrawal zero-dust exact boundary all live in test/accountant/RoycoDayAccountant.t.sol
  */
 contract MaxInversionsTest is AccountantUnitHarness {
     function setUp() public {
@@ -27,11 +27,12 @@ contract MaxInversionsTest is AccountantUnitHarness {
     }
 
     /*//////////////////////////////////////////////////////////////////////
-                    F15 — maxSTDeposit RTM PARITY AND INVERSION
+                    maxSTDeposit RTM PARITY AND INVERSION
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * V3.3 + F15 mirror parity at zero dust, both legs live, each leg disabled, and saturation.
+     * Mirror parity at zero dust across the closed form's whole branch set: both legs live, each leg
+     * disabled, and saturation, so production and RoycoTestMath cannot drift apart on any branch.
      * Cell 1 (coverage binds, coinvested): coverage = floor(120e18 / 0.15) - (100e18 + 0 + 500e18 + 0) = 200e18,
      *   liquidity = floor(60e18 / 0.08) - 480e18 = 270e18 -> min = 200e18
      * Cell 2 (minCoverage 0 disables the coverage leg): max = liquidity leg = 270e18
@@ -67,10 +68,10 @@ contract MaxInversionsTest is AccountantUnitHarness {
     }
 
     /**
-     * F15 mirror parity with live dust tolerances (st 3, jt 7), not coinvested.
+     * Mirror parity with live dust tolerances (st 3, jt 7), not coinvested.
      * Coverage leg = floor(200e18 / 0.1) - (0 + 7 + 1000e18 + 3) = 1000e18 - 10 (jtDust applies REGARDLESS of
-     * co-investment per RDA:368, the pinned H1 quirk), liquidity leg = floor(100e18 / 0.05) - (900e18 + 3)
-     * = 1100e18 - 3 -> coverage binds at 1000e18 - 10
+     * co-investment per RoycoDayAccountant.sol:368, a deliberate production quirk both sides pin),
+     * liquidity leg = floor(100e18 / 0.05) - (900e18 + 3) = 1100e18 - 3 -> coverage binds at 1000e18 - 10
      */
     function test_MaxSTDeposit_matchesRTM_withDustTolerances() public {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
@@ -83,8 +84,8 @@ contract MaxInversionsTest is AccountantUnitHarness {
     }
 
     /**
-     * V3.2 (F15, RDA:376-384): liquidity-binding inversion with a live ST dust tolerance — the slack on the
-     * liquidity leg is stDust ONLY (no jt term).
+     * Liquidity-binding inversion with a live ST dust tolerance (RoycoDayAccountant.sol:376-384) — the slack
+     * on the liquidity leg is stDust ONLY (no jt term), and the reported max is exact against the real gate.
      * Seed 1000e18/300e18 flat with 100e18 of LT depth, dust (st 3, jt 7):
      *   coverage leg = floor(300e18 / 0.1) - (0 + 7 + 1000e18 + 3) = 2000e18 - 10
      *   liquidity leg = floor(100e18 / 0.05) - (1000e18 + 3) = 1000e18 - 3 -> liquidity binds
@@ -117,11 +118,12 @@ contract MaxInversionsTest is AccountantUnitHarness {
     }
 
     /*//////////////////////////////////////////////////////////////////////
-                    F16 — maxJTWithdrawal RTM PARITY AND INVERSION
+                    maxJTWithdrawal RTM PARITY AND INVERSION
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * V3.6 (F16, RDA:429-444): the cross-claim split at both co-investment values, RTM parity plus hand literals.
+     * The cross-claim split at both co-investment values (RoycoDayAccountant.sol:429-444), RTM parity plus
+     * hand literals.
      * State (1000e18, 200e18, stEff 980e18, jtEff 220e18): jtClaimOnST = 20e18, jtClaimOnJT = 200e18,
      * fracST = floor(20e18 * WAD / 220e18) = 90_909_090_909_090_909 and fracJT = 909_090_909_090_909_090.
      * Not coinvested: required = ceil(1000e18 * 0.1) = 100e18, surplus = 120e18 - 2,
@@ -144,7 +146,7 @@ contract MaxInversionsTest is AccountantUnitHarness {
         assertEq(toUint256(stW), rtmST, "RTM senior side, not coinvested");
         assertEq(toUint256(jtW), rtmJT, "RTM junior side, not coinvested");
 
-        // Coinvested (the view honors state.jtCoinvested, the pinned H1 note)
+        // Coinvested (the view honors state.jtCoinvested rather than the immutable, pinned deliberately)
         st = _bareState(1000e18, 200e18, 100e18, 980e18, 220e18, true, 0.1e18, 0.05e18);
         (stW, jtW) = accountant.maxJTWithdrawal(st);
         assertEq(toUint256(stW), 10_101_010_101_010_100_988, "senior-side withdrawable, coinvested");
@@ -155,8 +157,8 @@ contract MaxInversionsTest is AccountantUnitHarness {
     }
 
     /**
-     * V3.5 (F16, RDA:426-440): the early-outs, RTM parity on both sides of the surplus boundary and on the
-     * defensive zero-claims arm.
+     * The early-outs (RoycoDayAccountant.sol:426-440): RTM parity on both sides of the surplus boundary and
+     * on the defensive zero-claims arm.
      * Surplus boundary: required = ceil(400e18 * 0.1) = 40e18, so jtEff = 40e18 + 2 zeroes the surplus through
      * the +2 fudge -> (0, 0), and jtEff = 40e18 + 3 leaves surplus 1 -> claimable 1 -> split (0, 1).
      * Zero-claims arm: (stRaw 0, jtRaw 8e18, stEff 8e18, jtEff 8e18) is non-conserved (defensive input): both
@@ -188,8 +190,9 @@ contract MaxInversionsTest is AccountantUnitHarness {
     }
 
     /**
-     * V3.4 (F16, RDA:424-425): the +2 wei fudge boundary on a NON-exact required value, where the inner ceil of
-     * the coverage requirement absorbs the fractional boundary and the fudge is pure protocol-favoring slack.
+     * The +2 wei fudge boundary on a NON-exact required value (RoycoDayAccountant.sol:424-425), where the
+     * inner ceil of the coverage requirement absorbs the fractional boundary and the fudge is pure
+     * protocol-favoring slack.
      * Seed (1000e18 + 7, 200e18) flat, zero dust: required = ceil((1000e18 + 7) * 0.1) = 100e18 + 1 (the 0.7 wei
      * product remainder rounds up), surplus = 200e18 - (100e18 + 1) - 2 = 100e18 - 3, split (0, 100e18 - 3).
      * The algebraic gate is jtEff' * WAD >= (1000e18 + 7) * 0.1e18 = 1e38 + 7e17, so the minimum passing
@@ -224,12 +227,12 @@ contract MaxInversionsTest is AccountantUnitHarness {
     }
 
     /*//////////////////////////////////////////////////////////////////////
-                    F17 — maxLTWithdrawal RTM PARITY AND INVERSION
+                    maxLTWithdrawal RTM PARITY AND INVERSION
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * V3.8 + F17 mirror parity: the ceil'd required depth, both bypasses (zero requirement, liquidation breach
-     * at the EXACT threshold per the >= comparison), and saturation.
+     * Mirror parity across the closed form's branch set: the ceil'd required depth, both bypasses (zero
+     * requirement, liquidation breach at the EXACT threshold per the >= comparison), and saturation.
      * Required depth = ceil((600e18 + 11) * 0.03) = 18e18 + 1 (the 0.33 wei remainder rounds up):
      *   max = 40e18 - (18e18 + 1) = 22e18 - 1
      * minLiquidity 0 -> full 40e18. covUtil == liqThreshold (1.1e18) exactly -> full 40e18, one below -> restricted.
@@ -265,7 +268,8 @@ contract MaxInversionsTest is AccountantUnitHarness {
     }
 
     /**
-     * V3.7 (F17, RDA:459-462): the LT-withdrawal inversion with a live ST dust tolerance — slack = stDust.
+     * The LT-withdrawal inversion with a live ST dust tolerance (RoycoDayAccountant.sol:459-462) — the
+     * slack is stDust, and the reported max is exact against the real post-op liquidity gate.
      * Seed 1000e18/200e18 flat with 100e18 of LT depth, stDust 3: required = ceil(1000e18 * 0.05) = 50e18 exact,
      * max = 100e18 - (50e18 + 3) = 50e18 - 3.
      * Redeeming max leaves ltRaw = 50e18 + 3: liqUtil = ceil(5e37 / (5e19 + 3)) = WAD (ceil absorbs the

@@ -67,7 +67,7 @@ import { FixtureCell, MarketParamsConfig, TokenConfig } from "./FixtureTypes.sol
 
 /**
  * @title TrancheFixture
- * @notice The single parameterized market fixture every mock-market test layer inherits (testing-strategy.md §2.2)
+ * @notice The single parameterized market fixture every mock-market test layer inherits
  * @dev Deploys a full Day market — tokens per FixtureCell, mocks for every external surface, the five contracts
  *      (ST, JT, LT, kernel, accountant) behind ERC1967 proxies, and production-shaped role bindings mirroring
  *      BalancerV3DeploymentTemplate._buildRoleBindings minus the Balancer-governance targets

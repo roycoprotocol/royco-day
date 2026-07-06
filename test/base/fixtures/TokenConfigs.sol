@@ -7,7 +7,7 @@ import { FixtureCell, TokenConfig } from "./FixtureTypes.sol";
 
 /**
  * @title TokenConfigs
- * @notice Canonical token-matrix cells A..I for the parameterized market fixture (testing-strategy.md §2.3, 09-phase-a-spec.md §3)
+ * @notice Canonical token-matrix cells A..I for the parameterized market fixture
  * @dev Hard rule, no test instantiates token mocks directly, tokens come exclusively from these cells
  * @dev Every shipped ST/JT quoter is in the IdenticalAssets family (the quoter base constructor requires ST_ASSET == JT_ASSET,
  *      IdenticalAssets_ST_JT_Oracle_Quoter.sol:52), so every cell uses ONE MockERC4626C instance for both ST and JT and the

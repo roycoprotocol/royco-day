@@ -6,14 +6,14 @@ import { MarketParamsConfig } from "./FixtureTypes.sol";
 
 /**
  * @title MarketParams
- * @notice Canonical MarketParamsConfig presets for the parameterized market fixture (testing-strategy.md §2.2)
- * @dev No-frozen-parameters sweep map (testing-strategy.md §2.2). Every field must be exercised at more than one
+ * @notice Canonical MarketParamsConfig presets for the parameterized market fixture
+ * @dev No-frozen-parameters sweep map. Every field must be exercised at more than one
  *      value somewhere in the suite, CI greps this checklist for totality. Format: field | mandated sweep set | test file
  *
  *      SWEEP-MAP:
  *      minCoverageWAD                     | {0, 0.1e18, WAD-1}                          | test/unit/accountant/CoverageConfigSweep.t.sol (Phase B)
  *      coverageLiquidationUtilizationWAD  | {WAD+1, 1.0009e18, 5e18}                    | test/unit/accountant/LiquidationThresholdSweep.t.sol (Phase B)
- *      minLiquidityWAD                    | {0, 0.05e18, WAD-1}                         | test/unit/accountant/LiquiditySweep.t.sol (Phase B, 0 = I21 reduction)
+ *      minLiquidityWAD                    | {0, 0.05e18, WAD-1}                         | test/unit/accountant/LiquiditySweep.t.sol (Phase B, 0 = zero-liquidity reduction)
  *      jtCoinvested                       | {true, false}                               | kernel layer pinned true (RoycoDayKernel.sol:122), false at test/accountant harness (Phase B)
  *      maxJTYieldShareWAD                 | {0, sum == WAD exactly}                     | test/unit/accountant/YieldShareCapSweep.t.sol (Phase B)
  *      maxLTYieldShareWAD                 | {0, sum == WAD exactly}                     | test/unit/accountant/YieldShareCapSweep.t.sol (Phase B)
@@ -70,8 +70,9 @@ function defaultParams() pure returns (MarketParamsConfig memory) {
 }
 
 /**
- * @notice The I21 reduction market, zero minimum liquidity and zero LT yield share
- * @dev A Day market at zero minimum liquidity must behave like a plain ST/JT market (CLAUDE.md P1 acceptance)
+ * @notice The zero-liquidity reduction market, zero minimum liquidity and zero LT yield share
+ * @dev A Day market at zero minimum liquidity must behave exactly like a plain ST/JT market, the core
+ *      reduction property the LT overlay promises, so this preset backs every reduction-equivalence suite
  */
 function zeroLiquidityParams() pure returns (MarketParamsConfig memory) {
     MarketParamsConfig memory p = defaultParams();

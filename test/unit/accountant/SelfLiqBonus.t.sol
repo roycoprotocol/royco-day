@@ -10,15 +10,15 @@ import { AccountantUnitHarness } from "./AccountantUnitHarness.sol";
 
 /**
  * @title SelfLiqBonusTest
- * @notice Phase B block 4 golden vectors (testing-strategy.md §4.1 block 4, spec 12 §6 V4.1-V4.9): the F19
- *         self-liquidation bonus through the SelfLiquidationLogic harness — the strict-less threshold gate, the
- *         bonus clamped by each of the three min-terms in turn, both U-neutral sourcing cases at both
- *         co-investment values, the early-outs, the denominator-positivity boundary, and the covUtil
- *         non-increase invariant through a real accountant post-op
+ * @notice Golden vectors for the self-liquidation bonus through the SelfLiquidationLogic harness — the
+ *         strict-less threshold gate, the bonus clamped by each of the three min-terms in turn, both
+ *         U-neutral sourcing cases at both co-investment values, the early-outs, the
+ *         denominator-positivity boundary, and the covUtil non-increase invariant through a real
+ *         accountant post-op
  * @dev The harness converts tranche units to NAV units 1:1, so every tranche-unit literal doubles as its NAV
  *      value. Every vector hand-derives its expected values and cross-asserts RoycoTestMath.selfLiqBonus.
- *      Existing coverage NOT duplicated (spec 12 §5.5): the post-op bonus split shapes, the bonus == total edge,
- *      and the bonus-exceeds-buffer panics live in test/accountant/RoycoDayAccountant.t.sol F4-F7
+ *      Existing coverage NOT duplicated: the post-op bonus split shapes, the bonus == total edge, and the
+ *      bonus-exceeds-buffer panics live in test/accountant/RoycoDayAccountant.t.sol
  */
 contract SelfLiqBonusTest is AccountantUnitHarness {
     uint256 internal constant WAD_ = 1e18;
@@ -64,7 +64,7 @@ contract SelfLiqBonusTest is AccountantUnitHarness {
         c.nav = toNAVUnits(_nav);
     }
 
-    /// @dev Builds the matching RoycoTestMath F19 input set (weighted = stAssets + (coinvested ? jtAssets : 0) under identity conversion)
+    /// @dev Builds the matching RoycoTestMath selfLiqBonus input set (weighted = stAssets + (coinvested ? jtAssets : 0) under identity conversion)
     function _rtmIn(
         SyncedAccountingState memory _s,
         uint256 _bonusWAD,
@@ -95,14 +95,15 @@ contract SelfLiqBonusTest is AccountantUnitHarness {
     }
 
     /*//////////////////////////////////////////////////////////////////////
-                        V4.1 / V4.2 — THE THRESHOLD GATE
+                            THE THRESHOLD GATE
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * V4.1 (SLL:41): one wei below the liquidation threshold the bonus is inactive — zero bonus and byte-exact
-     * claim passthrough, no matter how large the desired bonus is
+     * One wei below the liquidation threshold the bonus is inactive (SelfLiquidationLogic.sol:41) — zero
+     * bonus and byte-exact claim passthrough, no matter how large the desired bonus is, so a healthy market
+     * can never leak a bonus
      */
-    function test_SelfLiqBonus_V41_inactiveOneBelowThreshold() public {
+    function test_SelfLiqBonus_inactiveOneBelowThreshold() public {
         sll.setSelfLiquidationBonusWAD(0.05e18);
         SyncedAccountingState memory s = _bonusState(1000e18, 90e18, 1000e18, 90e18, false, LIQ_THRESHOLD - 1);
         AssetClaims memory c = _claims(100e18, 0, 100e18);
@@ -115,14 +116,14 @@ contract SelfLiqBonusTest is AccountantUnitHarness {
     }
 
     /**
-     * V4.2 (SLL:41): the gate is a strict less-than, so a coverage utilization EXACTLY at the liquidation
-     * threshold activates the bonus.
+     * The gate is a strict less-than (SelfLiquidationLogic.sol:41), so a coverage utilization EXACTLY at the
+     * liquidation threshold activates the bonus.
      * desired = floor(100e18 * 0.01) = 1e18, jtEff = 90e18, U-neutral: jtClaimOnST = sat(90e18 - 90e18) = 0,
      * case 1 = floor(100e18 * 90e18 / (1000e18 - 90e18)) = 9_890_109_890_109_890_109 > 0 -> case 2
      * = floor(100e18 * 90e18 / 1000e18) = 9e18 -> bonus = min(1e18, 90e18, 9e18) = 1e18, sourced entirely from
      * JT's self-claim (jtClaimOnST is 0), so jtAssets carries the whole bonus
      */
-    function test_SelfLiqBonus_V42_activeAtExactThreshold() public {
+    function test_SelfLiqBonus_activeAtExactThreshold() public {
         sll.setSelfLiquidationBonusWAD(0.01e18);
         SyncedAccountingState memory s = _bonusState(1000e18, 90e18, 1000e18, 90e18, false, LIQ_THRESHOLD);
         AssetClaims memory c = _claims(100e18, 0, 100e18);
@@ -135,16 +136,16 @@ contract SelfLiqBonusTest is AccountantUnitHarness {
     }
 
     /*//////////////////////////////////////////////////////////////////////
-                V4.3 / V4.4 — DESIRED AND JT-BUFFER MIN-TERMS
+                    DESIRED AND JT-BUFFER MIN-TERMS
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * V4.3 (SLL:44, :53): the desired bonus binds when it undercuts both caps.
+     * The desired bonus binds when it undercuts both caps (SelfLiquidationLogic.sol:44, :53).
      * covUtil at these marks = ceil(1000e18 * 0.1e18 / 90e18) = 1_111_111_111_111_111_112 (breached).
-     * desired = floor(100e18 * 0.05) = 5e18, jtEff = 90e18, U-neutral max = 9e18 (case 2, as in V4.2)
-     * -> bonus = min(5e18, 90e18, 9e18) = 5e18, all from the JT self-claim
+     * desired = floor(100e18 * 0.05) = 5e18, jtEff = 90e18, U-neutral max = 9e18 (case 2, as in the
+     * exact-threshold vector above) -> bonus = min(5e18, 90e18, 9e18) = 5e18, all from the JT self-claim
      */
-    function test_SelfLiqBonus_V43_desiredBonusBinds() public {
+    function test_SelfLiqBonus_desiredBonusBinds() public {
         uint256 covUtil = RoycoTestMath.covUtil(1000e18, 90e18, false, 0.1e18, 90e18);
         assertEq(covUtil, 1_111_111_111_111_111_112, "hand-derived breached coverage utilization");
         sll.setSelfLiquidationBonusWAD(0.05e18);
@@ -159,7 +160,7 @@ contract SelfLiqBonusTest is AccountantUnitHarness {
     }
 
     /**
-     * V4.4 (SLL:53): the jtEff min-term binds at a tiny JT buffer. Derived lemma on its reachability: in a
+     * The jtEff min-term binds at a tiny JT buffer (SelfLiquidationLogic.sol:53). Derived lemma on its reachability: in a
      * conserved state the U-neutral max never exceeds jtEff (not coinvested: case 2 = (weighted + jtClaimOnST)
      * * jtEff / exposure with weighted <= stClaimOnST, so the numerator factor is <= exposure), with equality
      * exactly at the whole-tranche redeemer — so min-term 2 binds at that tie, pinned here.
@@ -168,7 +169,7 @@ contract SelfLiqBonusTest is AccountantUnitHarness {
      * <= jtClaimOnST -> U-neutral = 5e18 -> bonus = min(47.5e18, 5e18, 5e18) = 5e18 == jtEff, and the whole
      * bonus sources from JT's claim on ST assets
      */
-    function test_SelfLiqBonus_V44_jtBufferBindsAtWholeTrancheRedeemerTie() public {
+    function test_SelfLiqBonus_jtBufferBindsAtWholeTrancheRedeemerTie() public {
         sll.setSelfLiquidationBonusWAD(0.5e18);
         SyncedAccountingState memory s = _bonusState(100e18, 0, 95e18, 5e18, false, 1.2e18);
         AssetClaims memory c = _claims(95e18, 0, 95e18);
@@ -181,17 +182,17 @@ contract SelfLiqBonusTest is AccountantUnitHarness {
     }
 
     /*//////////////////////////////////////////////////////////////////////
-                V4.5 / V4.6 — THE U-NEUTRAL MAX AND ITS TWO CASES
+                THE U-NEUTRAL MAX AND ITS TWO CASES
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * V4.5 (SLL:118-121): U-neutral case 1 binds — the bonus fits entirely inside JT's claim on ST assets.
+     * U-neutral case 1 binds (SelfLiquidationLogic.sol:118-121) — the bonus fits entirely inside JT's claim on ST assets.
      * State (stRaw 100e18, jtRaw 20e18, stEff 60e18, jtEff 60e18): jtClaimOnST = 40e18, not coinvested.
      * desired = floor(40e18 * 1.0) = 40e18, case 1 = floor(20e18 * 60e18 / (100e18 - 60e18)) = 30e18
      * <= jtClaimOnST 40e18 -> U-neutral = 30e18 -> bonus = min(40e18, 60e18, 30e18) = 30e18, sourced entirely
      * from JT's claim on ST assets (stAssets leg)
      */
-    function test_SelfLiqBonus_V45_uNeutralCase1Binds_stAssetSourced() public {
+    function test_SelfLiqBonus_uNeutralCase1Binds_stAssetSourced() public {
         sll.setSelfLiquidationBonusWAD(1e18);
         SyncedAccountingState memory s = _bonusState(100e18, 20e18, 60e18, 60e18, false, 1.2e18);
         AssetClaims memory c = _claims(20e18, 0, 40e18);
@@ -204,13 +205,13 @@ contract SelfLiqBonusTest is AccountantUnitHarness {
     }
 
     /**
-     * V4.6 (SLL:123-128), not coinvested: case 1 overflows JT's claim on ST, so the bonus crosses into the JT
-     * self-claim with the jtClaimOnST adjustment in the numerator.
-     * Same state as V4.5 with weighted = 50e18: case 1 = floor(50e18 * 60e18 / 40e18) = 75e18 > jtClaimOnST
+     * U-neutral case 2 (SelfLiquidationLogic.sol:123-128), not coinvested: case 1 overflows JT's claim on ST,
+     * so the bonus crosses into the JT self-claim with the jtClaimOnST adjustment in the numerator.
+     * Same state as case 1 above with weighted = 50e18: case 1 = floor(50e18 * 60e18 / 40e18) = 75e18 > jtClaimOnST
      * 40e18 -> case 2 = floor((50e18 + 40e18) * 60e18 / 100e18) = 54e18 -> bonus = min(60e18, 60e18, 54e18)
      * = 54e18, sourced 40e18 from JT's claim on ST (maxed) and 14e18 from the JT self-claim
      */
-    function test_SelfLiqBonus_V46_uNeutralCase2_notCoinvested() public {
+    function test_SelfLiqBonus_uNeutralCase2_notCoinvested() public {
         sll.setSelfLiquidationBonusWAD(1e18);
         SyncedAccountingState memory s = _bonusState(100e18, 20e18, 60e18, 60e18, false, 1.2e18);
         AssetClaims memory c = _claims(50e18, 0, 60e18);
@@ -223,13 +224,13 @@ contract SelfLiqBonusTest is AccountantUnitHarness {
     }
 
     /**
-     * V4.6 (SLL:123-128), coinvested: the exposure includes jtRaw, the case-2 numerator drops the jtClaimOnST
+     * U-neutral case 2, coinvested: the exposure includes jtRaw, the case-2 numerator drops the jtClaimOnST
      * adjustment, and the denominator subtracts jtEff.
      * Same raws (exposure = 120e18), weighted = 50e18: case 1 = floor(50e18 * 60e18 / (120e18 - 60e18)) = 50e18
      * > jtClaimOnST 40e18 -> case 2 = floor((50e18 + 0) * 60e18 / (120e18 - 60e18)) = 50e18 -> bonus
      * = min(60e18, 60e18, 50e18) = 50e18, sourced 40e18 from JT's claim on ST and 10e18 from the self-claim
      */
-    function test_SelfLiqBonus_V46_uNeutralCase2_coinvested() public {
+    function test_SelfLiqBonus_uNeutralCase2_coinvested() public {
         sll.setSelfLiquidationBonusWAD(1e18);
         SyncedAccountingState memory s = _bonusState(100e18, 20e18, 60e18, 60e18, true, 1.2e18);
         AssetClaims memory c = _claims(50e18, 0, 60e18);
@@ -242,14 +243,15 @@ contract SelfLiqBonusTest is AccountantUnitHarness {
     }
 
     /*//////////////////////////////////////////////////////////////////////
-                V4.7 / V4.8 — EARLY-OUTS AND THE DENOMINATOR LEMMA
+                EARLY-OUTS AND THE DENOMINATOR LEMMA
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * V4.7 (SLL:107, :116): the two U-neutral early-outs zero the bonus with claim passthrough — an exhausted
-     * junior buffer (jtEff 0, the wipeout covUtil reading) and a zero weighted claim against a positive NAV claim
+     * The two U-neutral early-outs (SelfLiquidationLogic.sol:107, :116) zero the bonus with claim
+     * passthrough — an exhausted junior buffer (jtEff 0, the wipeout covUtil reading) and a zero weighted
+     * claim against a positive NAV claim
      */
-    function test_SelfLiqBonus_V47_earlyOuts_jtEffZeroAndWeightedZero() public {
+    function test_SelfLiqBonus_earlyOuts_jtEffZeroAndWeightedZero() public {
         sll.setSelfLiquidationBonusWAD(0.5e18);
 
         // jtEff == 0: desired = 25e18 but every source cap is zero
@@ -270,16 +272,16 @@ contract SelfLiqBonusTest is AccountantUnitHarness {
     }
 
     /**
-     * V4.8 (SLL:120): the denominator-positivity lemma at its nearest constructible boundary. For any real
-     * market an active bonus implies exposure > jtEff: activation needs covUtil >= liqThreshold > WAD (the
-     * threshold is validated > WAD at initialize) while covUtil = ceil(exposure * minCov / jtEff) with
-     * minCov < WAD, so exposure * minCov > jtEff forces exposure > jtEff — a state violating SLL:120's
+     * The denominator-positivity lemma at its nearest constructible boundary (SelfLiquidationLogic.sol:120).
+     * For any real market an active bonus implies exposure > jtEff: activation needs covUtil >= liqThreshold
+     * > WAD (the threshold is validated > WAD at initialize) while covUtil = ceil(exposure * minCov / jtEff)
+     * with minCov < WAD, so exposure * minCov > jtEff forces exposure > jtEff — a state violating the
      * (exposure - jtEff) subtraction is unreachable. Pinned at the boundary exposure - jtEff = 1 wei:
      * state (stRaw 100e18, jtRaw 0, stEff 1, jtEff 100e18 - 1), weighted = stClaimOnST = 1, desired = 1.
      * case 1 = floor(1 * (100e18 - 1) / 1) = 100e18 - 1 <= jtClaimOnST 100e18 - 1 -> U-neutral = 100e18 - 1
      * -> bonus = min(1, 100e18 - 1, 100e18 - 1) = 1, no revert against the 1-wei denominator
      */
-    function test_SelfLiqBonus_V48_denominatorPositivityBoundary() public {
+    function test_SelfLiqBonus_denominatorPositivityBoundary() public {
         sll.setSelfLiquidationBonusWAD(1e18);
         SyncedAccountingState memory s = _bonusState(100e18, 0, 1, 100e18 - 1, false, 1.2e18);
         AssetClaims memory c = _claims(1, 0, 1);
@@ -292,20 +294,22 @@ contract SelfLiqBonusTest is AccountantUnitHarness {
     }
 
     /*//////////////////////////////////////////////////////////////////////
-            V4.9 — COVUTIL NON-INCREASE THROUGH A REAL POST-OP
+            COVUTIL NON-INCREASE THROUGH A REAL POST-OP
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * V4.9 (SLL:73-89 derivation, RDA:260-270): a bonus-carrying ST redemption never increases the coverage
-     * utilization. Seed 1000e18/90e18 flat with 100e18 of LT depth:
+     * A bonus-carrying ST redemption never increases the coverage utilization (derivation at
+     * SelfLiquidationLogic.sol:73-89, post-op at RoycoDayAccountant.sol:260-270) — the bonus is sized to be
+     * utilization-neutral, so paying it can never worsen the market it is winding down.
+     * Seed 1000e18/90e18 flat with 100e18 of LT depth:
      *   covUtil_pre = ceil(1000e18 * 0.1e18 / 90e18) = 1_111_111_111_111_111_112 >= 1.1e18 (bonus active)
      * The redeeming user claims (100e18, 0, nav 100e18) at bonusWAD 0.05e18: bonus = min(5e18, 90e18, 9e18)
-     * = 5e18 (the V4.3 vector), sourced from the JT self-claim, so the post-op raws are (900e18, 85e18) and the
-     * redemption reduces jtEff by exactly the bonus and stEff by the user claim:
+     * = 5e18 (the desired-bound vector above), sourced from the JT self-claim, so the post-op raws are
+     * (900e18, 85e18) and the redemption reduces jtEff by exactly the bonus and stEff by the user claim:
      *   covUtil_post = ceil(900e18 * 0.1e18 / 85e18) = 1_058_823_529_411_764_706 <= covUtil_pre
-     * Production, the SLL harness, and RoycoTestMath must all agree on the bonus and both utilizations
+     * Production, the harness, and RoycoTestMath must all agree on the bonus and both utilizations
      */
-    function test_SelfLiqBonus_V49_covUtilNonIncreasingThroughPostOp() public {
+    function test_SelfLiqBonus_covUtilNonIncreasingThroughPostOp() public {
         _seedSymmetric(1000e18, 90e18, 100e18);
         SyncedAccountingState memory pre = _checkpointState();
         assertEq(pre.coverageUtilizationWAD, 1_111_111_111_111_111_112, "hand-derived pre covUtil, breached");

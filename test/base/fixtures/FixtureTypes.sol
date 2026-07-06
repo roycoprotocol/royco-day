@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 /**
  * @title FixtureTypes
- * @notice Shared configuration structs for the parameterized market fixture (testing-strategy.md §2.2, §2.3)
+ * @notice Shared configuration structs for the parameterized market fixture
  * @dev Declared file-level so TokenConfigs, MarketParams, and TrancheFixture share one definition
  */
 
@@ -55,7 +55,7 @@ struct MarketParamsConfig {
     uint64 targetUtilizationWAD;
 }
 
-/// @notice One cell of the token matrix (testing-strategy.md §2.3, cells A..I)
+/// @notice One cell of the token matrix (cells A..I, constructed in TokenConfigs.sol)
 struct FixtureCell {
     string name;
     TokenConfig stAsset;

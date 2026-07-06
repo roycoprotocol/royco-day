@@ -118,7 +118,7 @@ contract FeeAndLiquidityPremiumHarness {
         FeeAndLiquidityPremiumLogic._processFeesAndLiquidityPremium(kernelState, _immutables(), _state);
     }
 
-    /// @notice The F12 LT effective NAV view: LT raw NAV plus the staged premium shares valued at the senior share price
+    /// @notice The LT effective NAV view: LT raw NAV plus the staged premium shares valued at the senior share price
     function ltEffectiveNAV(NAV_UNIT _stEffectiveNAV, uint256 _totalSeniorTrancheShares) external view returns (NAV_UNIT) {
         return ValuationLogic._getLiquidityTrancheEffectiveNAV(kernelState, _stEffectiveNAV, _totalSeniorTrancheShares);
     }

@@ -13,12 +13,13 @@ import { RoycoTestMath } from "../../base/math/RoycoTestMath.sol";
 
 /**
  * @title AccountantUnitHarness
- * @notice Shared mock-kernel accountant harness for the Phase B block 2-4 unit vectors, mirroring the deploy and
- *         seeding surface of test/accountant/RoycoDayAccountant.t.sol without inheriting its test functions
+ * @notice Shared mock-kernel accountant harness for the carve-out, max-inversion, and self-liquidation unit
+ *         vectors, mirroring the deploy and seeding surface of test/accountant/RoycoDayAccountant.t.sol
+ *         without inheriting its test functions
  * @dev MockKernel, MockYDM, and the uninitialized proxy are imported from the accountant suite (import, not copy).
  *      Only the helpers these unit files need are mirrored: the default init params, the deploy path, a symmetric
  *      same-block seed, a bare state builder for the max* closed-form views, and the committed-checkpoint
- *      marshaller whose utilizations are recomputed through the Phase-A-validated RoycoTestMath formulas
+ *      marshaller whose utilizations are recomputed through the independently validated RoycoTestMath formulas
  */
 abstract contract AccountantUnitHarness is Test {
     // Default init params, identical to the accountant suite defaults so derivations carry over

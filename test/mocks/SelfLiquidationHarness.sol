@@ -9,7 +9,7 @@ import { SelfLiquidationLogic } from "../../src/libraries/logic/SelfLiquidationL
 /**
  * @title SelfLiquidationHarness
  * @notice Thin external-call wrapper around the kernel-side SelfLiquidationLogic so unit tests can drive
- *         applySeniorTrancheSelfLiquidationBonus (F19) against a real RoycoDayKernelState storage struct
+ *         applySeniorTrancheSelfLiquidationBonus against a real RoycoDayKernelState storage struct
  * @dev The library calls IRoycoDayKernel(address(this)) back for the four tranche-unit conversions, so this
  *      harness implements them as identity conversions: 1 tranche unit equals 1 NAV unit, which keeps every
  *      test vector's tranche-unit and NAV-unit literals identical
@@ -22,7 +22,7 @@ contract SelfLiquidationHarness {
         kernelState.stSelfLiquidationBonusWAD = _bonusWAD;
     }
 
-    /// @notice Drives the F19 bonus computation and claim application against the harness state
+    /// @notice Drives the self-liquidation bonus computation and claim application against the harness state
     function applyBonus(
         SyncedAccountingState memory _state,
         AssetClaims memory _stUserClaims

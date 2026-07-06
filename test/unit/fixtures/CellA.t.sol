@@ -6,7 +6,7 @@ import { cellA } from "../../base/fixtures/TokenConfigs.sol";
 import { TrancheFixtureSmoke } from "./TrancheFixtureSmoke.sol";
 
 /// @title CellASmokeTest
-/// @notice Phase A smoke battery on cell A: 4626(18,18) ST/JT shares against a 6-decimal quote stable
+/// @notice Smoke battery on cell A: 4626(18,18) ST/JT shares against a 6-decimal quote stable
 contract CellASmokeTest is TrancheFixtureSmoke {
     function _smokeCell() internal pure override returns (FixtureCell memory) {
         return cellA();

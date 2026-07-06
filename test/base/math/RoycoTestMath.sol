@@ -7,17 +7,16 @@ import { FixedPointMathLib } from "../../../lib/solady/src/utils/FixedPointMathL
 /**
  * @title RoycoTestMath
  * @notice Independent expected-value library for the Royco Day test suite. Every formula is re-derived
- *         from testing-strategy.md §1.3 (rows F1–F24) and the normative pipeline spec in
- *         docs/testing/agent-notes/12-waterfall-golden-matrix-spec.md, NOT imported from the production
- *         code, so unit and fuzz assertions can compare production output against a genuinely independent
- *         second derivation.
+ *         from the written product and accounting rules, NOT imported from the production code, so unit
+ *         and fuzz assertions can compare production output against a genuinely independent second
+ *         derivation.
  * @dev Conventions (binding across the suite):
  *      - All amounts are plain uint256. NAVs are WAD-normalized NAV units, share supplies are share wei,
  *        percentages and utilizations are WAD fractions (1e18 == 100%).
  *      - Every function is pure and stateless. Rounding direction and who keeps the dust are stated per
- *        function, copied from the §1.3 table's Rounding and Favors columns.
+ *        function.
  *      - Forbidden imports: anything under src/libraries/logic/ or src/accountant/. Allowed: OZ Math
- *        (mulDiv and Rounding) and solady FixedPointMathLib.expWad for the adaptive YDM.
+ *        (mulDiv and Rounding) and solady FixedPointMathLib.expWad for the adaptive yield model.
  */
 library RoycoTestMath {
     /// @notice Raised when a waterfall input set violates the two-term conservation identity after the sync.
@@ -29,7 +28,7 @@ library RoycoTestMath {
     /// @notice WAD fixed-point unit, 1e18 == 100%.
     uint256 internal constant WAD = 1e18;
 
-    /// @notice One below solady expWad's overflow threshold, the clamp on the linear adaptation (F24 adaptive).
+    /// @notice One below solady expWad's overflow threshold, the clamp on the adaptive yield model's linear adaptation.
     int256 internal constant MAX_LINEAR_ADAPTATION_WAD = 135_305_999_368_893_231_589 - 1;
 
     /// @notice Mirror of the production market-state enum with identical ordinals (PERPETUAL = 0, FIXED_TERM = 1).
@@ -40,7 +39,7 @@ library RoycoTestMath {
 
     /**
      * @title WaterfallIn
-     * @notice Complete input set for one sync of the two-term loss waterfall (spec 12 §1 P1–P8).
+     * @notice Complete input set for one sync of the two-term loss waterfall.
      * @custom:field stRawLast - Senior raw NAV at the last committed checkpoint
      * @custom:field jtRawLast - Junior raw NAV at the last committed checkpoint
      * @custom:field stEffLast - Senior effective NAV at the last committed checkpoint
@@ -48,27 +47,27 @@ library RoycoTestMath {
      * @custom:field jtCoverageILLast - JT coverage impermanent loss carried from the last checkpoint
      * @custom:field marketStateLast - Market state committed at the last checkpoint
      * @custom:field fixedTermEndLast - Fixed-term end timestamp committed at the last checkpoint (0 if none)
-     * @custom:field stRawDelta - Signed senior raw-NAV delta since the last checkpoint (the F1 attribution input)
+     * @custom:field stRawDelta - Signed senior raw-NAV delta since the last checkpoint (the attribution input)
      * @custom:field jtRawDelta - Signed junior raw-NAV delta since the last checkpoint
-     * @custom:field ltRawNew - Fresh LT raw NAV mark, committed outside the two-term waterfall (§1.5), pass-through only
-     * @custom:field jtTwYieldShareAccrual - Time-weighted JT yield-share accrual Σ shareWAD·Δt over the window (F4/F23)
-     * @custom:field ltTwYieldShareAccrual - Time-weighted LT yield-share accrual Σ shareWAD·Δt over the window
+     * @custom:field ltRawNew - Fresh LT raw NAV mark, committed outside the two-term waterfall, pass-through only
+     * @custom:field jtTwYieldShareAccrual - Time-weighted JT yield-share accrual Σ shareWAD·Δt over the premium window
+     * @custom:field ltTwYieldShareAccrual - Time-weighted LT yield-share accrual Σ shareWAD·Δt over the premium window
      * @custom:field elapsedSincePremiumPayment - Seconds since the last premium payment (0 selects the instantaneous branch)
-     * @custom:field jtInstYieldShareWAD - Raw JT previewYieldShare output consumed only by the instantaneous branch (A2)
-     * @custom:field ltInstYieldShareWAD - Raw LT previewYieldShare output consumed only by the instantaneous branch (A2)
-     * @custom:field maxJTYieldShareWAD - Cap applied to the instantaneous JT share (A2), ignored on the tw path
-     * @custom:field maxLTYieldShareWAD - Cap applied to the instantaneous LT share (A2), ignored on the tw path
-     * @custom:field stProtocolFeeWAD - Protocol fee fraction applied to the residual ST gain (F5)
-     * @custom:field jtProtocolFeeWAD - Protocol fee fraction applied to JT net gain, recomputed after coverage (F5)
-     * @custom:field jtYieldShareProtocolFeeWAD - Protocol fee fraction applied to the JT risk premium (A1, distinct rate)
-     * @custom:field ltYieldShareProtocolFeeWAD - Protocol fee fraction applied to the LT liquidity premium (F5)
-     * @custom:field nowTimestamp - Block timestamp of the sync (state-machine predicate input, §1.4)
+     * @custom:field jtInstYieldShareWAD - Raw JT previewYieldShare output consumed only by the instantaneous branch
+     * @custom:field ltInstYieldShareWAD - Raw LT previewYieldShare output consumed only by the instantaneous branch
+     * @custom:field maxJTYieldShareWAD - Cap applied to the instantaneous JT share, ignored on the time-weighted path
+     * @custom:field maxLTYieldShareWAD - Cap applied to the instantaneous LT share, ignored on the time-weighted path
+     * @custom:field stProtocolFeeWAD - Protocol fee fraction applied to the residual ST gain
+     * @custom:field jtProtocolFeeWAD - Protocol fee fraction applied to JT net gain, recomputed after coverage
+     * @custom:field jtYieldShareProtocolFeeWAD - Protocol fee fraction applied to the JT risk premium (a distinct rate)
+     * @custom:field ltYieldShareProtocolFeeWAD - Protocol fee fraction applied to the LT liquidity premium
+     * @custom:field nowTimestamp - Block timestamp of the sync (state-machine predicate input)
      * @custom:field fixedTermDuration - Configured fixed-term duration (0 forces PERPETUAL)
-     * @custom:field minCoverageWAD - Minimum coverage fraction (F7 input for the post-sync utilization)
-     * @custom:field jtCoinvested - Whether JT raw NAV counts toward coverage exposure (the F7 beta)
-     * @custom:field coverageLiquidationUtilizationWAD - Liquidation threshold on coverage utilization (§1.4)
-     * @custom:field effectiveDust - Dust tolerance used by the fee gates and the state machine (§1.4)
-     * @custom:field minLiquidityWAD - Minimum liquidity fraction (F8 input for the mirror-side liquidity utilization)
+     * @custom:field minCoverageWAD - Minimum coverage fraction (input for the post-sync coverage utilization)
+     * @custom:field jtCoinvested - Whether JT raw NAV counts toward coverage exposure (the exposure beta)
+     * @custom:field coverageLiquidationUtilizationWAD - Liquidation threshold on coverage utilization
+     * @custom:field effectiveDust - Dust tolerance used by the fee gates and the state machine
+     * @custom:field minLiquidityWAD - Minimum liquidity fraction (input for the mirror-side liquidity utilization)
      */
     struct WaterfallIn {
         uint256 stRawLast;
@@ -115,12 +114,12 @@ library RoycoTestMath {
      * @custom:field stProtocolFee - Protocol fee taken on ST gain on this sync
      * @custom:field jtProtocolFee - Protocol fee taken on JT gain and the JT risk premium on this sync
      * @custom:field ltProtocolFee - Protocol fee taken on the LT liquidity premium on this sync
-     * @custom:field coverageUtilizationWAD - Coverage utilization at the post-sync marks (F7)
-     * @custom:field liquidityUtilizationWAD - Liquidity utilization at the post-sync marks (F8, post-commit view)
-     * @custom:field marketState - Post-sync market state per the §1.4 predicate
+     * @custom:field coverageUtilizationWAD - Coverage utilization at the post-sync marks
+     * @custom:field liquidityUtilizationWAD - Liquidity utilization at the post-sync marks (post-commit view)
+     * @custom:field marketState - Post-sync market state per the state-machine predicate
      * @custom:field fixedTermEnd - Post-sync fixed-term end timestamp (0 outside FIXED_TERM)
-     * @custom:field premiumsPaid - Whether the premium dust gate cleared, driving the accumulator reset (A3)
-     * @custom:field ilErased - The JT coverage IL erased by a forced-PERPETUAL commit, the exact reset-event arg (A3)
+     * @custom:field premiumsPaid - Whether the premium dust gate cleared, driving the accumulator reset
+     * @custom:field ilErased - The JT coverage IL erased by a forced-PERPETUAL commit, the exact reset-event arg
      */
     struct WaterfallOut {
         uint256 stRaw;
@@ -144,7 +143,7 @@ library RoycoTestMath {
 
     /**
      * @title Claims
-     * @notice Plain-uint256 mirror of the production five-field asset-claims struct (F13/F14).
+     * @notice Plain-uint256 mirror of the production five-field asset-claims struct.
      * @custom:field stAssets - Claim on senior tranche assets in ST tranche units
      * @custom:field jtAssets - Claim on junior tranche assets in JT tranche units
      * @custom:field ltAssets - Claim on liquidity tranche assets in LT tranche units
@@ -161,7 +160,7 @@ library RoycoTestMath {
 
     /**
      * @title SelfLiqBonusIn
-     * @notice Input set for the F19 self-liquidation bonus mirror.
+     * @notice Input set for the self-liquidation bonus mirror.
      * @custom:field stRaw - Senior raw NAV at the synced marks
      * @custom:field jtRaw - Junior raw NAV at the synced marks
      * @custom:field jtEff - Junior effective NAV at the synced marks (the bonus source cap)
@@ -186,7 +185,7 @@ library RoycoTestMath {
 
     /**
      * @title AdaptiveYdmIn
-     * @notice Input set for the adaptive-curve YDM mirror (F24 adaptive, AdaptiveCurveYDM_V2 shape).
+     * @notice Input set for the adaptive-curve yield model mirror (the AdaptiveCurveYDM_V2 shape).
      * @custom:field utilizationWAD - Driving utilization, capped at WAD before evaluation
      * @custom:field targetUtilizationWAD - Utilization at the kink, precondition 0 < targetU <= WAD
      * @custom:field startYieldShareAtTargetWAD - Yield share at target from the last committed adaptation
@@ -213,7 +212,7 @@ library RoycoTestMath {
 
     /**
      * @title AdaptiveYdmOut
-     * @notice Output of the adaptive-curve YDM mirror (F24 adaptive).
+     * @notice Output of the adaptive-curve yield model mirror.
      * @custom:field yieldShareWAD - Curve output at the trapezoid-averaged share at target, clamped to [0, WAD]
      * @custom:field endYieldShareAtTargetWAD - Adapted share at target after expWad and the [min, max] clamp
      */
@@ -223,11 +222,11 @@ library RoycoTestMath {
     }
 
     /*//////////////////////////////////////////////////////////////////////////
-                            IMPLEMENTED — PHASE A
+                            SINGLE-FORMULA MIRRORS
     //////////////////////////////////////////////////////////////////////////*/
 
     /**
-     * @notice F1 — PnL attribution: attributed = ⌊|deltaRaw| · claim / lastRaw⌋ with the sign of deltaRaw re-applied.
+     * @notice PnL attribution: attributed = ⌊|deltaRaw| · claim / lastRaw⌋ with the sign of deltaRaw re-applied.
      * @dev Rounding: Floor on the magnitude (a negative delta attributes toward zero, never away from it).
      *      Favors: the complementary tranche (JT absorbs the flooring residual of the split).
      *      Preconditions: claim <= lastRaw, and lastRaw > 0 whenever deltaRaw != 0 and claim != 0.
@@ -247,7 +246,7 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice F7 — coverage utilization: ⌈(stRaw + beta·jtRaw) · minCovWAD / jtEff⌉ where beta is 1 if JT is
+     * @notice Coverage utilization: ⌈(stRaw + beta·jtRaw) · minCovWAD / jtEff⌉ where beta is 1 if JT is
      *         co-invested and 0 otherwise.
      * @dev Edges (zero edges take precedence): 0 if minCovWAD == 0 or the exposure is 0, then uint256 max if
      *      jtEff == 0 against a positive requirement.
@@ -277,7 +276,7 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice F8 — liquidity utilization: ⌈stEff · minLiqWAD / ltRaw⌉.
+     * @notice Liquidity utilization: ⌈stEff · minLiqWAD / ltRaw⌉.
      * @dev Edges (zero edges take precedence): 0 if stEff == 0 or minLiqWAD == 0, then uint256 max if
      *      ltRaw == 0 against a positive requirement.
      *      Rounding: Ceil. Favors: senior (utilization reads high, gating LT redemptions earlier).
@@ -293,7 +292,7 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice F9 — shares minted for a value contribution: ⌊supply · value / totalValue⌋.
+     * @notice Shares minted for a value contribution: ⌊supply · value / totalValue⌋.
      * @dev Edges: supply == 0 mints value 1:1 (totalValue ignored), and totalValue == 0 with a live supply
      *      pins the denominator to 1 wei.
      *      Rounding: Floor. Favors: existing holders.
@@ -309,7 +308,7 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice F10 — value redeemed for shares: ⌊totalValue · shares / supply⌋.
+     * @notice Value redeemed for shares: ⌊totalValue · shares / supply⌋.
      * @dev Edge: supply == 0 returns 0. Rounding: Floor. Favors: remaining holders.
      * @param shares The shares being valued
      * @param totalValue The total value backing the supply
@@ -322,9 +321,9 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice F11 — the ST fee / liquidity-premium carve-out share mints, both computed at the pre-sync supply
+     * @notice The ST fee / liquidity-premium carve-out share mints, both computed at the pre-sync supply
      *         over the retained denominator stEff − premium − fee.
-     * @dev Each mint is an F9 share computation over the retained NAV, so the F9 edges apply per leg
+     * @dev Each mint is a sharesFor computation over the retained NAV, so the sharesFor edges apply per leg
      *      (pre-sync supply 0 mints 1:1, retained NAV 0 pins the denominator to 1 wei).
      *      Rounding: Floor on both mints. Favors: pre-existing ST shares.
      *      Precondition: premium + fee <= stEff (guaranteed upstream by the waterfall).
@@ -353,7 +352,7 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice F13 — claim scaling: every one of the five claim fields scales as ⌊claim · shares / totalShares⌋.
+     * @notice Claim scaling: every one of the five claim fields scales as ⌊claim · shares / totalShares⌋.
      * @dev Rounding: Floor on all five fields. Favors: remaining LPs.
      *      Precondition: totalShares > 0 (production scales a redeemer's slice of a live tranche supply).
      * @param total The total claims being sliced
@@ -370,9 +369,9 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice F12 — LT effective NAV: ltRaw + ⌊idleShares · stEff / stSupply⌋, the BPT depth plus the claimable
+     * @notice LT effective NAV: ltRaw + ⌊idleShares · stEff / stSupply⌋, the BPT depth plus the claimable
      *         idle-premium leg valued at the senior share price.
-     * @dev The idle leg is an F10 valuation, so stSupply == 0 values it at 0.
+     * @dev The idle leg is a valueFor valuation, so stSupply == 0 values it at 0.
      *      Rounding: Floor on the idle leg. Favors: pool leg.
      * @param ltRaw The LT raw NAV (BPT only)
      * @param idleShares The staged, not-yet-deployed premium ST shares held for the LT
@@ -385,7 +384,7 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice F24 (static) — piecewise-linear 3-point yield curve through (0, y0), (targetU, yTarget) and
+     * @notice Static yield model: a piecewise-linear 3-point yield curve through (0, y0), (targetU, yTarget) and
      *         (WAD, yFull), evaluated as ⌊slope · u / WAD⌋ + intercept per segment.
      * @dev The driving utilization is capped at WAD before evaluation and the result is capped at WAD after.
      *      Each segment slope is itself a floored WAD division of the segment rise over its run, mirroring a
@@ -416,15 +415,15 @@ library RoycoTestMath {
     }
 
     /*//////////////////////////////////////////////////////////////////////////
-                            IMPLEMENTED — PHASE B
+                        COMPOSED MIRRORS AND INVERSIONS
     //////////////////////////////////////////////////////////////////////////*/
 
     /**
-     * @notice F1–F6, F23 composed — the full two-term sync mirror, implemented exactly per spec 12 §1 (P1–P8).
+     * @notice The full two-term sync mirror, composing attribution, coverage, premiums, fees, and the state machine.
      * @dev Pipeline: claims decomposition, attribution (with the zero-lastSTRaw special case), the JT leg with
      *      its dust-gated fee, the ST loss leg with coverage and the JT-fee recompute, the ST gain leg with IL
      *      recovery first and the premium block (instantaneous branch when elapsedSincePremiumPayment == 0),
-     *      the byte-exact conservation check, and the §1.4 state machine including dust-IL FIXED_TERM
+     *      the byte-exact conservation check, and the state machine including dust-IL FIXED_TERM
      *      stickiness and the FIXED_TERM fee zeroing.
      *      Mirror-side extras vs the raw production return: out.ltRaw echoes in.ltRawNew and
      *      out.liquidityUtilizationWAD is the post-commit view (production returns (0, 0) placeholders).
@@ -434,17 +433,17 @@ library RoycoTestMath {
      * @return out The complete expected post-sync state
      */
     function waterfall(WaterfallIn memory in_) internal pure returns (WaterfallOut memory out) {
-        // P1 — claims decomposition from the last committed checkpoint (at most one cross-claim is nonzero)
+        // Claims decomposition from the last committed checkpoint (at most one cross-claim is nonzero)
         uint256 stClaimOnJTRaw = _sat(in_.stEffLast, in_.stRawLast);
         uint256 jtClaimOnSTRaw = _sat(in_.jtEffLast, in_.jtRawLast);
         uint256 stClaimOnSTRaw = in_.stRawLast - jtClaimOnSTRaw;
 
-        // P2 — fresh raws from the signed deltas
+        // Fresh raws from the signed deltas
         out.stRaw = _applyDelta(in_.stRawLast, in_.stRawDelta);
         out.jtRaw = _applyDelta(in_.jtRawLast, in_.jtRawDelta);
         out.ltRaw = in_.ltRawNew;
 
-        // P3 — attribution: floors on the magnitude, JT absorbs all rounding drift on both signs
+        // Attribution: floors on the magnitude, JT absorbs all rounding drift on both signs
         int256 deltaSTClaimOnSTRaw;
         if (in_.stRawLast == 0) {
             // Zero-lastSTRaw special case: route the whole senior delta to ST iff ST has effective value
@@ -460,7 +459,7 @@ library RoycoTestMath {
         uint256 il = in_.jtCoverageILLast;
         uint256 jtNetGain;
 
-        // P4 — JT leg first: losses are unfee'd, gains take the dust-gated jtProtocolFeeWAD fee (Floor)
+        // JT leg first: losses are unfee'd, gains take the dust-gated jtProtocolFeeWAD fee (Floor)
         if (deltaJTEff < 0) {
             jtEff -= uint256(-deltaJTEff);
         } else if (deltaJTEff > 0) {
@@ -470,7 +469,7 @@ library RoycoTestMath {
         }
 
         if (deltaSTEff < 0) {
-            // P5 — ST loss: coverage from the post-P4 jtEff, then the JT-fee recompute, residual loss to ST
+            // ST loss: coverage from the post-JT-leg jtEff, then the JT-fee recompute, residual loss to ST
             uint256 stLoss = uint256(-deltaSTEff);
             uint256 coverageApplied = Math.min(stLoss, jtEff);
             if (coverageApplied != 0 && out.jtProtocolFee != 0) {
@@ -482,7 +481,7 @@ library RoycoTestMath {
             stLoss -= coverageApplied;
             if (stLoss != 0) stEff -= stLoss;
         } else if (deltaSTEff > 0) {
-            // P6a — IL recovery FIRST, exact and never fee'd
+            // ST gain: IL recovery FIRST, exact and never fee'd
             uint256 stGain = uint256(deltaSTEff);
             uint256 recovered = Math.min(stGain, il);
             il -= recovered;
@@ -490,7 +489,7 @@ library RoycoTestMath {
             stGain -= recovered;
 
             if (stGain != 0) {
-                // P6b — premium block: the dust gate drives fees and the accumulator reset, not the premiums
+                // Premium block: the dust gate drives fees and the accumulator reset, not the premiums
                 out.premiumsPaid = stGain > in_.effectiveDust;
                 uint256 elapsed = in_.elapsedSincePremiumPayment;
                 uint256 twJT = in_.jtTwYieldShareAccrual;
@@ -519,10 +518,10 @@ library RoycoTestMath {
             }
         }
 
-        // P7 — two-term conservation at wei precision
+        // Two-term conservation at wei precision
         require(out.stRaw + out.jtRaw == stEff + jtEff, CONSERVATION_VIOLATED());
 
-        // P8 — state machine on the fresh raws and the post-waterfall jtEff
+        // State machine on the fresh raws and the post-waterfall jtEff
         out.coverageUtilizationWAD = covUtil(out.stRaw, out.jtRaw, in_.jtCoinvested, in_.minCoverageWAD, jtEff);
         bool forcedPerpetual = in_.fixedTermDuration == 0
             || (in_.marketStateLast == MarketState.FIXED_TERM && in_.fixedTermEndLast <= in_.nowTimestamp)
@@ -557,7 +556,7 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice F15 — max ST deposit: min of the coverage-leg and liquidity-leg inversions, each minus dust slack.
+     * @notice Max ST deposit: min of the coverage-leg and liquidity-leg inversions, each minus dust slack.
      * @dev Coverage leg: ⌊jtEff · WAD / minCovWAD⌋ − ((jtCoinvested ? jtRaw : 0) + jtDust + stRaw + stDust),
      *      saturating. The jtDust term applies regardless of co-investment. Liquidity leg:
      *      ⌊ltRaw · WAD / minLiqWAD⌋ − (stEff + stDust), saturating. A zero requirement disables its leg
@@ -604,7 +603,7 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice F16 — max JT withdrawal: the coverage-surplus inversion with claim-fraction floors, the coverage
+     * @notice Max JT withdrawal: the coverage-surplus inversion with claim-fraction floors, the coverage
      *         retention denominator, and the +2 wei fudge, split into per-tranche withdrawable NAVs.
      * @dev surplus = sat(jtEff − (⌈exposure · minCovWAD / WAD⌉ + stDust + (jtCoinvested ? jtDust : 0) + 2)),
      *      where the +2 wei absorbs the worst-case inner-ceil rounding of the coverage utilization check.
@@ -658,7 +657,7 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice F17 — max LT withdrawal: ltRaw − (⌈stEff · minLiqWAD / WAD⌉ + stDust), saturating.
+     * @notice Max LT withdrawal: ltRaw − (⌈stEff · minLiqWAD / WAD⌉ + stDust), saturating.
      * @dev Bypasses (full ltRaw): minLiqWAD == 0, or covUtilWAD >= covLiqUtilWAD (liquidation breached, the
      *      comparison is >= so the exact threshold bypasses).
      *      Rounding: Ceil on the required depth. Favors: senior (the max reads low).
@@ -688,7 +687,7 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice F19 — self-liquidation bonus: min(⌊userClaimNAV · bonusWAD / WAD⌋, jtEff, U-neutral max), active
+     * @notice Self-liquidation bonus: min(⌊userClaimNAV · bonusWAD / WAD⌋, jtEff, U-neutral max), active
      *         only once coverage utilization is at or above the liquidation threshold.
      * @dev The U-neutral max sources ST-claim capital first. Case 1 (entirely from JT's claim on ST):
      *      ⌊weighted · jtEff / (exposure − jtEff)⌋, taken iff it fits within jtClaimOnSTRaw = sat(jtEff − jtRaw).
@@ -709,7 +708,7 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice F24 (adaptive) — the AdaptiveCurveYDM_V2 mirror: expWad adaptation of the share at target,
+     * @notice Adaptive yield model, the AdaptiveCurveYDM_V2 mirror: expWad adaptation of the share at target,
      *         trapezoid averaging (y0 + y1 + 2·ymid) / 4, and the fixed-spread curve output.
      * @dev Utilization is capped at WAD. The normalized delta is a truncating signed division over the
      *      region's max delta. Adaptation runs only when perpetual: linear = speed · elapsed with
@@ -761,7 +760,7 @@ library RoycoTestMath {
     }
 
     /**
-     * @dev The F19 U-neutral max bonus, ST-claim sourced first (case 1) then crossing into the JT self-claim
+     * @dev The U-neutral max bonus, ST-claim sourced first (case 1) then crossing into the JT self-claim
      *      (case 2), with the jtEff == 0 and weighted == 0 early-outs. Floor on both divisions.
      */
     function _maxCoverageUtilizationNeutralBonus(SelfLiqBonusIn memory in_, uint256 jtClaimOnSTRaw) private pure returns (uint256) {
@@ -775,7 +774,7 @@ library RoycoTestMath {
     }
 
     /**
-     * @dev One adapted point of the F24 curve: clamp the linear adaptation at MAX_LINEAR_ADAPTATION_WAD, apply
+     * @dev One adapted point of the adaptive curve: clamp the linear adaptation at MAX_LINEAR_ADAPTATION_WAD, apply
      *      expWad multiplicatively (Floor), then clamp the result to [min, max].
      */
     function _adaptYieldShareAtTarget(AdaptiveYdmIn memory in_, int256 linearAdaptationWAD) private pure returns (uint256 yieldShareAtTargetWAD) {

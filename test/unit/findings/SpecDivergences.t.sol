@@ -154,7 +154,7 @@ contract SpecDivergencesTest is TrancheFixture {
      *         withSyncedAccounting modifier (RoycoDayAccountant.sol:42-45) calls the kernel's whenNotPaused
      *         syncTrancheAccounting (RoycoDayKernel.sol:309-320), which reverts EnforcedPause
      * @dev Divergence from the operational expectation that governance can remediate parameters during an
-     *      emergency pause (testing-strategy.md Appendix B.8) — during a pause governance cannot adjust fees,
+     *      emergency pause — during a pause governance cannot adjust fees,
      *      coverage, liquidity, the liquidation threshold, term duration, or dust tolerances (only the two YDM
      *      swap setters survive, via a tolerated raw call). SPEC-EXPECTED (operational): the setters succeed,
      *      or at minimum a remediation path exists while paused. ACTUAL: EnforcedPause across all three admin
