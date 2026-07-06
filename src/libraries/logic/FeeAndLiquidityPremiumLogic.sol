@@ -81,6 +81,9 @@ library FeeAndLiquidityPremiumLogic {
      *      leave), so minting them is NAV-neutral and coverage-neutral: the premium reassigns senior appreciation to the LT and the fee to the protocol
      * @dev Both are priced over the same pre-sync supply against one shared denominator, the NAV the pre-existing shares retain net of the
      *      premium and fee (stEffectiveNAV - premium - fee), so neither dilutes the other. Both round down, so floor dust accrues to the pre-existing shares
+     * @dev The mint-dilution clamp (ValuationLogic._convertToShares) applies PER MINT at the shared pre-sync supply: in the degenerate
+     *      zero-retained state both legs clamp to the same cap, so the pair together may own up to 2·cap/(supply + 2·cap) of the
+     *      post-mint supply — the residual guarantee is per mint, not per sync
      * @param _state The synced accounting state carrying the senior effective NAV, the liquidity premium, and the ST protocol fee
      * @param _stTotalSupply The total senior tranche share supply before this sync mints the premium and fee shares
      * @return liquidityPremiumShares The senior shares to mint as the LT liquidity premium, rounded down

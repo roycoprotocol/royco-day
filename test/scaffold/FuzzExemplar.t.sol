@@ -78,15 +78,31 @@ contract FuzzExemplar is Test {
         // I7 fragment: supply identity, exact.
         assertEq(supplyAfter, _supply + premiumShares + feeShares, "supply identity");
 
-        // Independent expected shares: floor over the retained denominator (zero-NAV denominator branch
-        // pins to 1 wei per ValuationLogic.sol:106 — reproduced independently here).
+        // Independent expected shares: floor over the retained denominator (zero-NAV denominator branch pins
+        // to 1 wei) clamped per mint by the dilution cap (MINT_DILUTION_RESIDUAL_WAD = 1e6, a 1e-12 residual;
+        // ValuationLogic._convertToShares) — both reproduced independently here. The bind predicate is the
+        // integer-equivalent product form legNAV * eps > denom * (WAD - eps); products fit (<= 1e30 * 1e18).
         uint256 retained = _stEff - _prem - _fee;
         uint256 denom = retained == 0 ? 1 : retained;
-        assertEq(premiumShares, Math.mulDiv(_supply, _prem, denom, Math.Rounding.Floor), "premium shares floored over retained NAV");
-        assertEq(feeShares, Math.mulDiv(_supply, _fee, denom, Math.Rounding.Floor), "fee shares floored over retained NAV");
+        bool premBinds = _prem * 1e6 > denom * (WAD - 1e6);
+        bool feeBinds = _fee * 1e6 > denom * (WAD - 1e6);
+        uint256 cap = Math.mulDiv(_supply, WAD - 1e6, 1e6);
+        assertEq(
+            premiumShares,
+            premBinds ? cap : Math.mulDiv(_supply, _prem, denom, Math.Rounding.Floor),
+            "premium shares floored over retained NAV, capped at the dilution clamp"
+        );
+        assertEq(
+            feeShares,
+            feeBinds ? cap : Math.mulDiv(_supply, _fee, denom, Math.Rounding.Floor),
+            "fee shares floored over retained NAV, capped at the dilution clamp"
+        );
 
-        // I8: realized premium value within the derived two-sided floor-dust bound.
-        if (premiumShares != 0) {
+        // I8: realized premium value within the derived two-sided floor-dust bound. A FAIR-pricing property:
+        // it only holds when NEITHER leg binds the clamp (a binding leg deliberately mints less than its
+        // carved NAV, and a binding sibling shrinks supplyAfter so this leg's value inflates) — the binding
+        // arms are pinned exactly by the share equalities above, so nothing is silently skipped.
+        if (premiumShares != 0 && !premBinds && !feeBinds) {
             uint256 value = Math.mulDiv(_stEff, premiumShares, supplyAfter, Math.Rounding.Floor);
             uint256 epsDerived = 2 * ((_stEff + supplyAfter - 1) / supplyAfter) + 2; // 2*ceil(stEff/supplyAfter) + 2
             assertLe(value, _prem + epsDerived, "fee-dust uplift bounded by derived floor dust");

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
-import { ONE_NAV_UNIT, ZERO_NAV_UNITS } from "../Constants.sol";
+import { MINT_DILUTION_RESIDUAL_WAD, ONE_NAV_UNIT, WAD, ZERO_NAV_UNITS } from "../Constants.sol";
 import { Math, NAV_UNIT, RoycoUnitsMath, toUint256 } from "../Units.sol";
 
 /**
@@ -102,19 +102,30 @@ library ValuationLogic {
     }
 
     /**
-     * @notice Returns the number of shares that have a claim on the specified value
+     * @notice Returns the number of shares that have a claim on the specified value, clamped by the protocol's mint-dilution residual
      * @dev The single share-conversion primitive, shared by the tranches and the kernel-side mint sizing so both resolve identical share counts
+     * @dev The mint-dilution clamp: any single mint may own at most (1 − ε/WAD) of the POST-mint supply, where
+     *      ε = MINT_DILUTION_RESIDUAL_WAD. The minted shares therefore never exceed cap = ⌊supply · (WAD − ε) / ε⌋ (derivation: m·WAD ≤ (WAD − ε)·(supply + m)
+     *      ⟺ m·ε ≤ supply·(WAD − ε)).
+     * @dev With no shares outstanding the conversion stays 1:1 (a bootstrap mint dilutes nobody, so the clamp is exempt)
      * @param _value The value to convert in NAV units
      * @param _totalValue The total tranche controlled value in NAV units
      * @param _totalSupply The total supply of tranche shares (including any marginally minted fee shares)
-     * @param _rounding The rounding mode to use
+     * @param _rounding The rounding mode to use for the fair-priced (unclamped) branch
      * @return shares The number of shares that have a claim on the specified value
      */
     function _convertToShares(NAV_UNIT _value, NAV_UNIT _totalValue, uint256 _totalSupply, Math.Rounding _rounding) internal pure returns (uint256 shares) {
         // With no shares outstanding the conversion is 1:1 with the value, mirroring the tranche's first mint
         if (_totalSupply == 0) return toUint256(_value);
         // When the total value is zero, assume all existing shares are backed by a single NAV unit so new depositors dilute the existing unbacked holders
-        return _totalSupply.mulDiv(_value, (_totalValue == ZERO_NAV_UNITS ? ONE_NAV_UNIT : _totalValue), _rounding);
+        NAV_UNIT denominator = (_totalValue == ZERO_NAV_UNITS ? ONE_NAV_UNIT : _totalValue);
+        // The overflow-free bind test, run before the fair-shares division
+        // fair > cap ⟺ value·ε > denominator·(WAD − ε) ⟺ ⌈value·ε/(WAD − ε)⌉ > denominator
+        if (_value.mulDiv(MINT_DILUTION_RESIDUAL_WAD, (WAD - MINT_DILUTION_RESIDUAL_WAD), Math.Rounding.Ceil) > denominator) {
+            // The mint binds the clamp: pre-existing holders retain at least the residual of the post-mint supply
+            return Math.mulDiv(_totalSupply, (WAD - MINT_DILUTION_RESIDUAL_WAD), MINT_DILUTION_RESIDUAL_WAD);
+        }
+        return _totalSupply.mulDiv(_value, denominator, _rounding);
     }
 
     /**
