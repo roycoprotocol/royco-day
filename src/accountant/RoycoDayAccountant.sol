@@ -421,8 +421,9 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Compute the surplus coverage currently provided by the junior tranche based on its currently remaining loss-absorption buffer
         // Also account for the effective dust tolerance required to preclude reverts due to rounding after JT redemptions
         // Additionally absorb the worst case inner-ceil rounding in the coverageUtilization computation
-        surplusJTValue = state.jtEffectiveNAV
-            .saturatingSub(requiredJTValue + $.stNAVDustTolerance + (state.jtCoinvested ? $.jtNAVDustTolerance : ZERO_NAV_UNITS) + toNAVUnits(uint256(2)));
+        surplusJTValue = state.jtEffectiveNAV.saturatingSub(
+            requiredJTValue + $.stNAVDustTolerance + (state.jtCoinvested ? $.jtNAVDustTolerance : ZERO_NAV_UNITS) + toNAVUnits(uint256(2))
+        );
         if (surplusJTValue == ZERO_NAV_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         // Compute the total JT claim on NAV and preemptively return if zero
@@ -602,21 +603,17 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
                     elapsedSinceLastPremiumPayments = 1 seconds;
                     // Query the instantaneous yield shares for the JT and LT
                     _twJTYieldShareAccruedWAD = Math.min(
-                        IYDM($.jtYDM)
-                            .previewYieldShare(
-                                initialMarketState,
-                                UtilizationLogic._computeCoverageUtilization(
-                                    $.lastSTRawNAV, $.lastJTRawNAV, JT_COINVESTED, $.minCoverageWAD, $.lastJTEffectiveNAV
-                                )
-                            ),
+                        IYDM($.jtYDM).previewYieldShare(
+                            initialMarketState,
+                            UtilizationLogic._computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, JT_COINVESTED, $.minCoverageWAD, $.lastJTEffectiveNAV)
+                        ),
                         $.maxJTYieldShareWAD
                     );
                     // The LT YDM is driven by the market's liquidity utilization: the LT liquidity premium scales with how utilized the LT market-making inventory is
                     _twLTYieldShareAccruedWAD = Math.min(
-                        IYDM($.ltYDM)
-                            .previewYieldShare(
-                                initialMarketState, UtilizationLogic._computeLiquidityUtilization($.lastSTEffectiveNAV, $.minLiquidityWAD, $.lastLTRawNAV)
-                            ),
+                        IYDM($.ltYDM).previewYieldShare(
+                            initialMarketState, UtilizationLogic._computeLiquidityUtilization($.lastSTEffectiveNAV, $.minLiquidityWAD, $.lastLTRawNAV)
+                        ),
                         $.maxLTYieldShareWAD
                     );
                 }

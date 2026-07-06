@@ -71,17 +71,16 @@ library BalancerV3VenueLogic {
         exactAmountsIn[_venue.quoteAssetPoolIndex] = _quoteAssets;
 
         // Credit this kernel with the BPT minted by the unbalanced add of the specified senior tranche shares and quote assets
-        (, ltAssets,) = _venue.vault
-            .addLiquidity(
-                AddLiquidityParams({
-                    pool: _venue.ltAsset, // The Balancer pool to add liquidity to is the liquidity tranche's asset (BPT)
-                    to: address(this), // The kernel custodies the BPT balance of the entire liquidity tranche, so the minted BPT is credited to it
-                    maxAmountsIn: exactAmountsIn, // For UNBALANCED adds the Vault treats these as the exact amounts in (not upper bounds)
-                    minBptAmountOut: toUint256(_minLTAssetsOut), // The Vault reverts the add if it would mint fewer BPT than this, bounding the add's slippage
-                    kind: AddLiquidityKind.UNBALANCED, // Unbalanced add: the Vault charges the pool's swap fee on the imbalanced portion
-                    userData: "" // UNBALANCED adds skip the pool's compute callback and this kernel's hooks do not consume userData
-                })
-            );
+        (, ltAssets,) = _venue.vault.addLiquidity(
+            AddLiquidityParams({
+                pool: _venue.ltAsset, // The Balancer pool to add liquidity to is the liquidity tranche's asset (BPT)
+                to: address(this), // The kernel custodies the BPT balance of the entire liquidity tranche, so the minted BPT is credited to it
+                maxAmountsIn: exactAmountsIn, // For UNBALANCED adds the Vault treats these as the exact amounts in (not upper bounds)
+                minBptAmountOut: toUint256(_minLTAssetsOut), // The Vault reverts the add if it would mint fewer BPT than this, bounding the add's slippage
+                kind: AddLiquidityKind.UNBALANCED, // Unbalanced add: the Vault charges the pool's swap fee on the imbalanced portion
+                userData: "" // UNBALANCED adds skip the pool's compute callback and this kernel's hooks do not consume userData
+             })
+        );
 
         // If this is not a preview call, the credit and debt created must be settled with the vault
         if (!_isPreview) {
@@ -128,17 +127,16 @@ library BalancerV3VenueLogic {
         minAmountsOut[_venue.quoteAssetPoolIndex] = _minQuoteAssetsOut;
 
         // Debit this kernel with the proportional constituent claims tied to the specified amount of LT assets
-        (, uint256[] memory amountsOut,) = _venue.vault
-            .removeLiquidity(
-                RemoveLiquidityParams({
-                    pool: _venue.ltAsset, // The Balancer pool to remove liquidity from is the liquidity tranche's asset (BPT)
-                    from: address(this), // The kernel custodies the BPT balance of the entire liquidity tranche, so the BPT constituents are debited from its claims
-                    maxBptAmountIn: toUint256(_ltAssets), // For PROPORTIONAL removals the Vault treats this as the exact BPT amount to burn (not an upper bound)
-                    minAmountsOut: minAmountsOut, // The Vault reverts the removal if any constituent comes out below these floors, bounding the removal's slippage
-                    kind: RemoveLiquidityKind.PROPORTIONAL, // Proportional removals preserve the pool's composition, so the unwrap requires no pricing
-                    userData: "" // PROPORTIONAL removals skip the pool's compute callback and this kernel's hooks do not consume userData
-                })
-            );
+        (, uint256[] memory amountsOut,) = _venue.vault.removeLiquidity(
+            RemoveLiquidityParams({
+                pool: _venue.ltAsset, // The Balancer pool to remove liquidity from is the liquidity tranche's asset (BPT)
+                from: address(this), // The kernel custodies the BPT balance of the entire liquidity tranche, so the BPT constituents are debited from its claims
+                maxBptAmountIn: toUint256(_ltAssets), // For PROPORTIONAL removals the Vault treats this as the exact BPT amount to burn (not an upper bound)
+                minAmountsOut: minAmountsOut, // The Vault reverts the removal if any constituent comes out below these floors, bounding the removal's slippage
+                kind: RemoveLiquidityKind.PROPORTIONAL, // Proportional removals preserve the pool's composition, so the unwrap requires no pricing
+                userData: "" // PROPORTIONAL removals skip the pool's compute callback and this kernel's hooks do not consume userData
+             })
+        );
 
         // Set the amounts out to be returned to the caller
         stShares = amountsOut[_venue.stSharePoolIndex];
@@ -180,18 +178,17 @@ library BalancerV3VenueLogic {
         // Value the ST shares that need to be reinvested in NAV units at the synced senior share rate (effective NAV over the post-mint supply)
         NAV_UNIT stSharesToReinvestNAV = ValuationLogic._convertToValue(stSharesToReinvest, _totalSTShares, _stEffectiveNAV, Math.Rounding.Floor);
         // Mark that senior NAV to its fair BPT at the manipulation-resistant oracle, discounted by the max tolerated slippage
-        TRANCHE_UNIT minLTAssetsOut = IRoycoDayKernel(address(this)).ltConvertNAVUnitsToTrancheUnits(stSharesToReinvestNAV)
-            .mulDiv((WAD - _maxReinvestmentSlippageWAD), WAD, Math.Rounding.Ceil);
+        TRANCHE_UNIT minLTAssetsOut = IRoycoDayKernel(address(this)).ltConvertNAVUnitsToTrancheUnits(stSharesToReinvestNAV).mulDiv(
+            (WAD - _maxReinvestmentSlippageWAD), WAD, Math.Rounding.Ceil
+        );
 
         // Single-sided add the ST shares through a low-level call into the Vault's callback
         // The inner unlock dispatches addBalancerV3Liquidity, which mints the BPT bounded by minLTAssetsOut and settles the shares in
-        (bool reinvestmentSucceeded, bytes memory callbackReturnData) = address(_venue.vault)
-            .call(
-                abi.encodeCall(
-                    _venue.vault.unlock,
-                    (abi.encodeCall(IBalancerV3VenueCallbacks.addBalancerV3Liquidity, (false, stSharesToReinvest, uint256(0), minLTAssetsOut)))
-                )
-            );
+        (bool reinvestmentSucceeded, bytes memory callbackReturnData) = address(_venue.vault).call(
+            abi.encodeCall(
+                _venue.vault.unlock, (abi.encodeCall(IBalancerV3VenueCallbacks.addBalancerV3Liquidity, (false, stSharesToReinvest, uint256(0), minLTAssetsOut)))
+            )
+        );
         // On a breached gate (or any add revert) the premium shares remain idle: no state mutated here, the inner frame rolled back
         if (!reinvestmentSucceeded) return;
 

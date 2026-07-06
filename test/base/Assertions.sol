@@ -109,7 +109,17 @@ contract Assertions is Test {
     /// @notice Asserts NAV conservation within an explicit, justified wei tolerance.
     /// @dev Prefer `assertNAVConservation` (exact). This overload exists only for paths with a documented
     ///      rounding bound; callers must pass the smallest defensible `maxAbsDelta` and name the reason in `ctx`.
-    function assertNAVConservationApprox(NAV_UNIT stRaw, NAV_UNIT jtRaw, NAV_UNIT stEff, NAV_UNIT jtEff, uint256 maxAbsDelta, string memory ctx) internal pure {
+    function assertNAVConservationApprox(
+        NAV_UNIT stRaw,
+        NAV_UNIT jtRaw,
+        NAV_UNIT stEff,
+        NAV_UNIT jtEff,
+        uint256 maxAbsDelta,
+        string memory ctx
+    )
+        internal
+        pure
+    {
         assertApproxEqAbs(
             toUint256(stRaw) + toUint256(jtRaw),
             toUint256(stEff) + toUint256(jtEff),

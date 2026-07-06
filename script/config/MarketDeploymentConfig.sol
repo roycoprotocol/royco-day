@@ -4,9 +4,8 @@ pragma solidity ^0.8.28;
 import { IGyroECLPPool } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
 import { IERC20Metadata } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { BalancerV3DeploymentTemplate } from "../../src/factory/templates/BalancerV3DeploymentTemplate.sol";
-import {
-    IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
-} from "../../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
+import { IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter } from
+    "../../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
 import { BalancerV3_LT_BPTOracle_Quoter } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 import { DeployScript } from "../Deploy.s.sol";
 
@@ -245,7 +244,7 @@ abstract contract MarketDeploymentConfig {
                     ltQuoterParams: BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams({
                         bptOracle: address(0), // This is deployed by the template after the pool is created and ignored here
                         maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
-                    })
+                     })
                 })
             ),
             enforceVaultSharesTransferWhitelist: false,
@@ -259,14 +258,10 @@ abstract contract MarketDeploymentConfig {
             fixedTermDurationSeconds: 0, // stable market, no fixed term
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
-                DeployScript.AdaptiveCurveYDM_V2_Params({
-                    yieldShareAtZeroUtilWAD: 0.11e18, yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18
-                })
+                DeployScript.AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.11e18, yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18 })
             ),
             ltYdmSpecificParams: abi.encode(
-                DeployScript.AdaptiveCurveYDM_V2_Params({
-                        yieldShareAtZeroUtilWAD: 0.11e18, yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18
-                    })
+                DeployScript.AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.11e18, yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18 })
             ),
             jtYdmTargetUtilizationWAD: 0.9e18,
             ltYdmTargetUtilizationWAD: 0.9e18,
@@ -281,12 +276,8 @@ abstract contract MarketDeploymentConfig {
                     lambda: 4_000_000_000_000_000_000_000
                 }),
                 derivedEclpParams: IGyroECLPPool.DerivedEclpParams({
-                    tauAlpha: IGyroECLPPool.Vector2({
-                        x: -94_861_212_813_096_057_289_512_505_574_275_160_547, y: 31_644_119_574_235_279_926_451_292_677_567_331_630
-                    }),
-                    tauBeta: IGyroECLPPool.Vector2({
-                        x: 37_142_269_533_113_549_537_591_131_345_643_981_951, y: 92_846_388_265_400_743_995_957_747_409_218_517_601
-                    }),
+                    tauAlpha: IGyroECLPPool.Vector2({ x: -94_861_212_813_096_057_289_512_505_574_275_160_547, y: 31_644_119_574_235_279_926_451_292_677_567_331_630 }),
+                    tauBeta: IGyroECLPPool.Vector2({ x: 37_142_269_533_113_549_537_591_131_345_643_981_951, y: 92_846_388_265_400_743_995_957_747_409_218_517_601 }),
                     u: 66_001_741_173_104_803_338_721_745_994_955_553_010,
                     v: 62_245_253_919_818_011_890_633_399_060_291_020_887,
                     w: 30_601_134_345_582_732_000_058_913_853_921_008_022,
@@ -298,7 +289,7 @@ abstract contract MarketDeploymentConfig {
                 disableUnbalancedLiquidity: false,
                 quoteAsset: USDC[block.chainid],
                 quoteAssetRateProvider: address(0) // USDC is a pegged quote: register STANDARD (rate = 1)
-            })
+             })
         });
     }
 

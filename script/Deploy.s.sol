@@ -51,12 +51,10 @@ import { IYDM } from "../src/interfaces/IYDM.sol";
 import { IBaseTemplate } from "../src/interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../src/interfaces/factory/IRoycoProtocolTemplate.sol";
-import {
-    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel
-} from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
-import {
-    IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
-} from "../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
+import { Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel } from
+    "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
+import { IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter } from
+    "../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
 import { BalancerV3_LT_BPTOracle_Quoter } from "../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 import { RoycoDayBalancerV3Hooks } from "../src/kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3Hooks.sol";
 import { toNAVUnits } from "../src/libraries/Units.sol";
@@ -495,7 +493,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         params.jtTranche =
             IRoycoVaultTranche.RoycoTrancheInitParams({ name: _config.juniorTrancheName, symbol: _config.juniorTrancheSymbol, initialAuthority: address(0) });
         params.ltTranche = IRoycoVaultTranche.RoycoTrancheInitParams({
-            name: _config.liquidityTrancheName, symbol: _config.liquidityTrancheSymbol, initialAuthority: address(0)
+            name: _config.liquidityTrancheName,
+            symbol: _config.liquidityTrancheSymbol,
+            initialAuthority: address(0)
         });
         params.stAsset = _config.seniorAsset;
         params.jtAsset = _config.juniorAsset;

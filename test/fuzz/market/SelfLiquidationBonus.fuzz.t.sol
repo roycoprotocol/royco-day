@@ -89,7 +89,9 @@ contract SelfLiquidationBonusFuzz is MarketFuzzBase {
         // entirely on its own raw NAV here (it holds no cross-claim on senior raw NAV to source from first)
         assertEq(toUint256(claims.nav), baseNav + expectedBonus, "the redeemed NAV must be the pro-rata slice plus exactly the derived bonus");
         assertEq(toUint256(claims.stAssets), baseSTAssets, "the senior-asset leg must be the unboosted pro-rata slice");
-        assertEq(toUint256(claims.jtAssets), baseJTAssets + expectedBonus.mulDiv(1e18, rate), "the junior-asset leg must carry the bonus at the drawn-down rate");
+        assertEq(
+            toUint256(claims.jtAssets), baseJTAssets + expectedBonus.mulDiv(1e18, rate), "the junior-asset leg must carry the bonus at the drawn-down rate"
+        );
         assertEq(
             stJtVault.balanceOf(ST_PROVIDER) - balBefore,
             toUint256(claims.stAssets) + toUint256(claims.jtAssets),

@@ -294,7 +294,10 @@ contract MockBalancerVault {
      * @dev amountsOut[i] = poolBalance[i] * bptIn / supply with floor rounding
      * @dev Reverts AmountOutBelowMin with the real vault's error shape when a constituent falls under its floor
      */
-    function removeLiquidity(RemoveLiquidityParams memory params) external returns (uint256 bptAmountIn, uint256[] memory amountsOut, bytes memory returnData) {
+    function removeLiquidity(RemoveLiquidityParams memory params)
+        external
+        returns (uint256 bptAmountIn, uint256[] memory amountsOut, bytes memory returnData)
+    {
         _ensureUnlocked();
         require(_registered[params.pool], IVaultErrors.PoolNotRegistered(params.pool));
         require(revertMode != RevertMode.REMOVE && revertMode != RevertMode.ALL, FORCED_REMOVE_REVERT());

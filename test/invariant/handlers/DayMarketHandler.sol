@@ -914,7 +914,11 @@ contract DayMarketHandler is TrancheFixture {
     }
 
     /// @dev Mirrors a senior redemption's asset claims (scaled slice plus any liquidation exit bonus)
-    function _mirrorSeniorRedeemClaims(Snap memory s, uint256 _shares, uint256 _totalShares)
+    function _mirrorSeniorRedeemClaims(
+        Snap memory s,
+        uint256 _shares,
+        uint256 _totalShares
+    )
         internal
         view
         returns (uint256 stA, uint256 jtA, uint256 bonusNAV)

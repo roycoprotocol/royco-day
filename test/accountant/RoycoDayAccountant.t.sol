@@ -1767,7 +1767,15 @@ contract AccountantTest is Test {
             1000e18,
             220e18,
             ExpectedSync({
-                stEff: 1000e18, jtEff: 220e18, il: 0, ltPrem: 0, stFee: 0, jtFee: 2e18, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0
+                stEff: 1000e18,
+                jtEff: 220e18,
+                il: 0,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 2e18,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEnd: 0
             })
         );
     }
@@ -1933,7 +1941,15 @@ contract AccountantTest is Test {
             1000e18,
             180e18,
             ExpectedSync({
-                stEff: 1000e18 + 5, jtEff: 180e18 - 5, il: 5, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0
+                stEff: 1000e18 + 5,
+                jtEff: 180e18 - 5,
+                il: 5,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEnd: 0
             })
         );
     }
@@ -1945,7 +1961,15 @@ contract AccountantTest is Test {
             1000e18,
             200e18,
             ExpectedSync({
-                stEff: 1000e18 + 5, jtEff: 200e18 - 5, il: 5, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0
+                stEff: 1000e18 + 5,
+                jtEff: 200e18 - 5,
+                il: 5,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEnd: 0
             })
         );
     }
@@ -1960,7 +1984,15 @@ contract AccountantTest is Test {
             1000e18,
             220e18,
             ExpectedSync({
-                stEff: 1000e18 + 5, jtEff: 220e18 - 5, il: 5, ltPrem: 0, stFee: 0, jtFee: 2e18, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0
+                stEff: 1000e18 + 5,
+                jtEff: 220e18 - 5,
+                il: 5,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 2e18,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEnd: 0
             })
         );
     }
@@ -2338,7 +2370,15 @@ contract AccountantTest is Test {
             1000e18 - 1,
             80e18,
             ExpectedSync({
-                stEff: 1000e18, jtEff: 80e18 - 1, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0
+                stEff: 1000e18,
+                jtEff: 80e18 - 1,
+                il: 0,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEnd: 0
             })
         );
     }
@@ -2357,7 +2397,15 @@ contract AccountantTest is Test {
             1000e18 - 1,
             100e18,
             ExpectedSync({
-                stEff: 1000e18, jtEff: 100e18 - 1, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0
+                stEff: 1000e18,
+                jtEff: 100e18 - 1,
+                il: 0,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEnd: 0
             })
         );
         assertEq(
@@ -2379,7 +2427,15 @@ contract AccountantTest is Test {
             1000e18 - 1,
             120e18,
             ExpectedSync({
-                stEff: 1000e18, jtEff: 120e18 - 1, il: 0, ltPrem: 0, stFee: 0, jtFee: 2e18, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0
+                stEff: 1000e18,
+                jtEff: 120e18 - 1,
+                il: 0,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 2e18,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEnd: 0
             })
         );
     }
@@ -2992,7 +3048,15 @@ contract AccountantTest is Test {
             1000e18 + 1,
             300e18,
             ExpectedSync({
-                stEff: 1000e18 + 1, jtEff: 300e18, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEnd: 0
+                stEff: 1000e18 + 1,
+                jtEff: 300e18,
+                il: 0,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEnd: 0
             })
         );
         // Pin the mirror's dust-gate outcome explicitly: the 1-wei gain clears the zero dust tolerance
@@ -4535,9 +4599,8 @@ contract AccountantTest is Test {
     function test_PostOp_enforceFalseSkipsBothGatesForEveryOp() public {
         _seedState(SEED_ST_RAW, 50e18, SEED_ST_RAW, 50e18, 0, 10e18, MarketState.PERPETUAL);
         // ST_DEPOSIT deepens the coverage breach and still passes
-        SyncedAccountingState memory state = kernel.doPostOp(
-            Operation.ST_DEPOSIT, toNAVUnits(uint256(1100e18)), toNAVUnits(uint256(50e18)), toNAVUnits(uint256(10e18)), ZERO_NAV_UNITS, false
-        );
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(1100e18)), toNAVUnits(uint256(50e18)), toNAVUnits(uint256(10e18)), ZERO_NAV_UNITS, false);
         assertGt(state.coverageUtilizationWAD, WAD, "coverage breached after the st deposit");
         assertGt(state.liquidityUtilizationWAD, WAD, "liquidity breached after the st deposit");
         // ST_REDEEM
@@ -4613,9 +4676,8 @@ contract AccountantTest is Test {
      */
     function test_PostOp_liquidityGate_stDepositExactBoundary() public {
         _seedState(SEED_ST_RAW, 300e18, SEED_ST_RAW, 300e18, 0, 100e18, MarketState.PERPETUAL);
-        SyncedAccountingState memory state = kernel.doPostOp(
-            Operation.ST_DEPOSIT, toNAVUnits(uint256(2000e18)), toNAVUnits(uint256(300e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true
-        );
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(2000e18)), toNAVUnits(uint256(300e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true);
         assertEq(state.liquidityUtilizationWAD, WAD, "liquidity utilization lands exactly on WAD and passes");
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(2000e18 + 1)), toNAVUnits(uint256(300e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true);
@@ -4630,9 +4692,8 @@ contract AccountantTest is Test {
      */
     function test_PostOp_liquidityGate_ltDepositExactBoundary() public {
         _seedState(SEED_ST_RAW, 300e18, SEED_ST_RAW, 300e18, 0, 100e18, MarketState.PERPETUAL);
-        SyncedAccountingState memory state = kernel.doPostOp(
-            Operation.LT_DEPOSIT, toNAVUnits(uint256(2020e18)), toNAVUnits(uint256(300e18)), toNAVUnits(uint256(101e18)), ZERO_NAV_UNITS, true
-        );
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(uint256(2020e18)), toNAVUnits(uint256(300e18)), toNAVUnits(uint256(101e18)), ZERO_NAV_UNITS, true);
         assertEq(state.liquidityUtilizationWAD, WAD, "liquidity utilization lands exactly on WAD and passes");
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         kernel.doPostOp(

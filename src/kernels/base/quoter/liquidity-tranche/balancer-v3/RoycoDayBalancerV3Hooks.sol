@@ -116,7 +116,10 @@ contract RoycoDayBalancerV3Hooks is RoycoBase, BaseHooks, VaultGuard {
     }
 
     /// @inheritdoc IHooks
-    function onBeforeSwap(PoolSwapParams calldata, address _pool)
+    function onBeforeSwap(
+        PoolSwapParams calldata,
+        address _pool
+    )
         public
         override(BaseHooks)
         onlyVault

@@ -108,7 +108,10 @@ contract AdaptiveCurveYDM_V1 is BaseAdaptiveCurveYDM {
      * Steepness (S) is fixed at initialization and determines the curve's shape (ratio between yield share target and full utilization)
      * Y_T is the single adaptive parameter that shifts the curve vertically in response to market forces
      */
-    function _computeYieldShare(int256 _normalizedDeltaFromTargetWAD, uint256 _avgYieldShareAtTargetWAD)
+    function _computeYieldShare(
+        int256 _normalizedDeltaFromTargetWAD,
+        uint256 _avgYieldShareAtTargetWAD
+    )
         internal
         view
         override
@@ -117,7 +120,7 @@ contract AdaptiveCurveYDM_V1 is BaseAdaptiveCurveYDM {
         // Compute the coefficient based on the region of the curve that the market is currently in
         int256 steepnessWAD = int256(uint256(accountantToCurve[msg.sender].steepnessAfterTargetWAD));
         int256 coefficient = (_normalizedDeltaFromTargetWAD < 0)
-            ? (WAD_INT - ((WAD_INT ** 2) / steepnessWAD))  // 1 - 1/S if below the target utilization
+            ? (WAD_INT - ((WAD_INT ** 2) / steepnessWAD)) // 1 - 1/S if below the target utilization
             : (steepnessWAD - WAD_INT); // S - 1 if at or above the target utilization
 
         yieldShareWAD = uint256((((coefficient * _normalizedDeltaFromTargetWAD / WAD_INT) + WAD_INT) * int256(_avgYieldShareAtTargetWAD)) / WAD_INT);

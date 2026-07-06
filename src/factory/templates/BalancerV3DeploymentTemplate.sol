@@ -18,9 +18,8 @@ import { ConstantPriceFeed } from "../../../lib/balancer-v3-monorepo/pkg/oracles
 import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import { BalancerPoolToken } from "../../../lib/balancer-v3-monorepo/pkg/vault/contracts/BalancerPoolToken.sol";
 import { SingletonAuthentication } from "../../../lib/balancer-v3-monorepo/pkg/vault/contracts/SingletonAuthentication.sol";
-import {
-    AggregatorV3Interface as BalancerAggregatorV3Interface
-} from "../../../lib/chainlink-brownie-contracts/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import { AggregatorV3Interface as BalancerAggregatorV3Interface } from
+    "../../../lib/chainlink-brownie-contracts/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import { AccessManagedUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/access/manager/AccessManagedUpgradeable.sol";
 import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
@@ -320,7 +319,10 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
 
         return address(
             ECLP_LP_ORACLE_FACTORY.create({
-                pool: IBasePool(_balancerPool), shouldUseBlockTimeForOldestFeedUpdate: false, shouldRevertIfVaultUnlocked: false, feeds: feeds
+                pool: IBasePool(_balancerPool),
+                shouldUseBlockTimeForOldestFeedUpdate: false,
+                shouldRevertIfVaultUnlocked: false,
+                feeds: feeds
             })
         );
     }

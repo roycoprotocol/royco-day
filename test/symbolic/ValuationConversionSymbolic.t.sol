@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { Test } from "../../lib/forge-std/src/Test.sol";
-import { ValuationLogic } from "../../src/libraries/logic/ValuationLogic.sol";
+import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+
 import { toNAVUnits, toUint256 } from "../../src/libraries/Units.sol";
+import { ValuationLogic } from "../../src/libraries/logic/ValuationLogic.sol";
 
 /**
  * @title ValuationConversionSymbolic
@@ -34,9 +35,7 @@ contract ValuationConversionSymbolicSpec is Test {
 
     /// @dev External wrapper so the totality checks can observe a revert through try/catch
     function convertToValueWrapped(uint256 _shares, uint256 _totalSupply, uint256 _totalValue, bool _roundUp) external pure returns (uint256) {
-        return toUint256(
-            ValuationLogic._convertToValue(_shares, _totalSupply, toNAVUnits(_totalValue), _roundUp ? Math.Rounding.Ceil : Math.Rounding.Floor)
-        );
+        return toUint256(ValuationLogic._convertToValue(_shares, _totalSupply, toNAVUnits(_totalValue), _roundUp ? Math.Rounding.Ceil : Math.Rounding.Floor));
     }
 
     /*//////////////////////////////////////////////////////////////////////
@@ -95,8 +94,7 @@ contract ValuationConversionSymbolicSpec is Test {
     function check_firstMintIsExactlyOneToOneWithValue(uint256 value, uint256 totalValue, bool roundUp) external pure {
         vm.assume(value <= MAX_NAV && totalValue <= MAX_NAV);
 
-        uint256 shares =
-            ValuationLogic._convertToShares(toNAVUnits(value), toNAVUnits(totalValue), 0, roundUp ? Math.Rounding.Ceil : Math.Rounding.Floor);
+        uint256 shares = ValuationLogic._convertToShares(toNAVUnits(value), toNAVUnits(totalValue), 0, roundUp ? Math.Rounding.Ceil : Math.Rounding.Floor);
         assert(shares == value);
     }
 
@@ -105,8 +103,7 @@ contract ValuationConversionSymbolicSpec is Test {
     function check_valueOfSharesAgainstEmptySupplyIsZero(uint256 shares, uint256 totalValue, bool roundUp) external pure {
         vm.assume(shares <= MAX_SHARES && totalValue <= MAX_NAV);
 
-        uint256 value =
-            toUint256(ValuationLogic._convertToValue(shares, 0, toNAVUnits(totalValue), roundUp ? Math.Rounding.Ceil : Math.Rounding.Floor));
+        uint256 value = toUint256(ValuationLogic._convertToValue(shares, 0, toNAVUnits(totalValue), roundUp ? Math.Rounding.Ceil : Math.Rounding.Floor));
         assert(value == 0);
     }
 

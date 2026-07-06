@@ -2,8 +2,9 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "../../lib/forge-std/src/Test.sol";
-import { UtilizationLogic } from "../../src/libraries/logic/UtilizationLogic.sol";
+
 import { toNAVUnits } from "../../src/libraries/Units.sol";
+import { UtilizationLogic } from "../../src/libraries/logic/UtilizationLogic.sol";
 
 /**
  * @title UtilizationSymbolic

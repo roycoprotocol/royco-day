@@ -168,7 +168,14 @@ abstract contract UpgradeBase is UpgradeConfig, AccessManagerConfigUtils, Create
     // SIMULATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function _simulateBatchedUpgrades(address _factory, PreparedUpgrade[] memory _ups, address[] memory _modules, address[] memory _syncKernelBefore) internal {
+    function _simulateBatchedUpgrades(
+        address _factory,
+        PreparedUpgrade[] memory _ups,
+        address[] memory _modules,
+        address[] memory _syncKernelBefore
+    )
+        internal
+    {
         _scheduleAll(_factory, _ups);
         console2.log("  [OK] Scheduled", _ups.length, "upgrades");
 
@@ -335,7 +342,16 @@ abstract contract UpgradeBase is UpgradeConfig, AccessManagerConfigUtils, Create
     /// @dev Serializes a `factory.execute(kernel, syncTrancheAccounting())` Safe TX. Used only in
     ///      the execute phase. The pre-upgrade sync flushes any pending PNL / fees through the
     ///      current accountant before its impl is swapped.
-    function _serializeSyncTx(uint256 _i, address _factory, string memory _marketName, address _kernel, string memory _suffix) private returns (string memory) {
+    function _serializeSyncTx(
+        uint256 _i,
+        address _factory,
+        string memory _marketName,
+        address _kernel,
+        string memory _suffix
+    )
+        private
+        returns (string memory)
+    {
         SafeTransaction memory syncTx =
             SafeTransaction({ to: _factory, value: 0, data: abi.encodeCall(IAccessManager.execute, (_kernel, _buildSyncCallData())) });
         string memory key = string.concat("tx", vm.toString(_i));

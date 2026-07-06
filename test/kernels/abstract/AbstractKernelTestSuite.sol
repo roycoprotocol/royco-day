@@ -290,7 +290,10 @@ abstract contract AbstractKernelTestSuite is BaseTest, IKernelTestHooks {
         s.actors = new ActorShares[](_actors.length);
         for (uint256 i = 0; i < _actors.length; ++i) {
             s.actors[i] = ActorShares({
-                actor: _actors[i], stShares: ST.balanceOf(_actors[i]), jtShares: JT.balanceOf(_actors[i]), ltShares: hasLT ? LT.balanceOf(_actors[i]) : 0
+                actor: _actors[i],
+                stShares: ST.balanceOf(_actors[i]),
+                jtShares: JT.balanceOf(_actors[i]),
+                ltShares: hasLT ? LT.balanceOf(_actors[i]) : 0
             });
         }
     }

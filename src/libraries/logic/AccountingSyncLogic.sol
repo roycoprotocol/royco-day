@@ -107,8 +107,8 @@ library AccountingSyncLogic {
             NAV_UNIT ltEffectiveNAV =
                 ValuationLogic._getLiquidityTrancheEffectiveNAV($, state.stEffectiveNAV, stTotalSupplyAfterMints, ltOwnedSeniorTrancheShares);
             uint256 ltTotalSupply = IERC20(_immutables.liquidityTranche).totalSupply();
-            totalTrancheShares = ltTotalSupply
-                + ValuationLogic._convertToShares(state.ltProtocolFee, (ltEffectiveNAV - state.ltProtocolFee), ltTotalSupply, Math.Rounding.Floor);
+            totalTrancheShares =
+                ltTotalSupply + ValuationLogic._convertToShares(state.ltProtocolFee, (ltEffectiveNAV - state.ltProtocolFee), ltTotalSupply, Math.Rounding.Floor);
         }
     }
 
@@ -131,8 +131,9 @@ library AccountingSyncLogic {
         returns (SyncedAccountingState memory state)
     {
         // Preview a senior/junior accounting sync via the accountant
-        state = IRoycoDayAccountant(_immutables.accountant)
-            .previewSyncTrancheAccounting(ValuationLogic._getSeniorTrancheRawNAV($), ValuationLogic._getJuniorTrancheRawNAV($));
+        state = IRoycoDayAccountant(_immutables.accountant).previewSyncTrancheAccounting(
+            ValuationLogic._getSeniorTrancheRawNAV($), ValuationLogic._getJuniorTrancheRawNAV($)
+        );
         // Refresh the liquidity tranche raw NAV and utilization in memory so the preview mirrors execution
         state.ltRawNAV = ValuationLogic._getLiquidityTrancheRawNAV($);
         state.liquidityUtilizationWAD = UtilizationLogic._computeLiquidityUtilization(state.stEffectiveNAV, state.minLiquidityWAD, state.ltRawNAV);
@@ -153,8 +154,9 @@ library AccountingSyncLogic {
         returns (SyncedAccountingState memory state)
     {
         // Execute the pre-op PnL synchronization via the accountant
-        state = IRoycoDayAccountant(_immutables.accountant)
-            .preOpSyncTrancheAccounting(ValuationLogic._getSeniorTrancheRawNAV($), ValuationLogic._getJuniorTrancheRawNAV($));
+        state = IRoycoDayAccountant(_immutables.accountant).preOpSyncTrancheAccounting(
+            ValuationLogic._getSeniorTrancheRawNAV($), ValuationLogic._getJuniorTrancheRawNAV($)
+        );
         // Mint the fee and liquidity premium shares accrued by this sync, caching the senior share rate for any liquidity venue before the premium is reinvested
         FeeAndLiquidityPremiumLogic._processFeesAndLiquidityPremium($, _immutables, state);
         // Commit the liquidity tranche's fresh raw NAV against the post-sync market state
@@ -181,8 +183,9 @@ library AccountingSyncLogic {
         returns (SyncedAccountingState memory state, AssetClaims memory claims, uint256 totalTrancheShares)
     {
         // Execute the pre-op PnL synchronization via the accountant
-        state = IRoycoDayAccountant(_immutables.accountant)
-            .preOpSyncTrancheAccounting(ValuationLogic._getSeniorTrancheRawNAV($), ValuationLogic._getJuniorTrancheRawNAV($));
+        state = IRoycoDayAccountant(_immutables.accountant).preOpSyncTrancheAccounting(
+            ValuationLogic._getSeniorTrancheRawNAV($), ValuationLogic._getJuniorTrancheRawNAV($)
+        );
         // Mint the fee and liquidity premium shares accrued by this sync, caching the senior share rate for any liquidity venue before the premium is reinvested
         FeeAndLiquidityPremiumLogic._processFeesAndLiquidityPremium($, _immutables, state);
         // Commit the liquidity tranche's fresh raw NAV against the post-sync market state
@@ -218,15 +221,14 @@ library AccountingSyncLogic {
         returns (SyncedAccountingState memory state)
     {
         // Execute the post-op sync on the accountant, committing the final state of the accounting and enforcing the market's requirements if specified
-        state = IRoycoDayAccountant(_immutables.accountant)
-            .postOpSyncTrancheAccounting(
-                _op,
-                ValuationLogic._getSeniorTrancheRawNAV($),
-                ValuationLogic._getJuniorTrancheRawNAV($),
-                ValuationLogic._getLiquidityTrancheRawNAV($),
-                _stSelfLiquidationBonusNAV,
-                _enforceCoverageAndLiquidityRequirements
-            );
+        state = IRoycoDayAccountant(_immutables.accountant).postOpSyncTrancheAccounting(
+            _op,
+            ValuationLogic._getSeniorTrancheRawNAV($),
+            ValuationLogic._getJuniorTrancheRawNAV($),
+            ValuationLogic._getLiquidityTrancheRawNAV($),
+            _stSelfLiquidationBonusNAV,
+            _enforceCoverageAndLiquidityRequirements
+        );
     }
 
     /**

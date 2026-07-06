@@ -48,11 +48,7 @@ contract CellGFeeOnTransferNightlyCells is TrancheFixture {
         assertEq(stJtUnderlying.balanceOf(address(stJtVault)), 99.9e18, "10bps of the deposit burned in transit");
         // Broken invariant: booked assets exceed real holdings by exactly the 0.1e18 transit fee
         assertEq(stJtVault.totalAssets(), 100e18, "totalAssets books the phantom pre-fee amount");
-        assertEq(
-            stJtVault.totalAssets() - stJtUnderlying.balanceOf(address(stJtVault)),
-            0.1e18,
-            "the vault's insolvency equals the 10bps transit fee exactly"
-        );
+        assertEq(stJtVault.totalAssets() - stJtUnderlying.balanceOf(address(stJtVault)), 0.1e18, "the vault's insolvency equals the 10bps transit fee exactly");
 
         // The shortfall lands on the last holder out: a full redemption owes convertToAssets(100e18) = 100e18
         // underlying from a 99.9e18 balance, so the payout transfer must revert

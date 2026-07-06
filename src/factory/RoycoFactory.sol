@@ -256,4 +256,3 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         }
     }
 }
-

@@ -127,4 +127,3 @@ enum TrancheType {
     JUNIOR,
     LIQUIDITY
 }
-

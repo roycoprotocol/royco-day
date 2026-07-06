@@ -8,9 +8,8 @@ import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { AssetClaims, MarketState, SyncedAccountingState, TrancheType } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
-import {
-    Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest
-} from "../../kernels/Identical_ERC4626_Chainlink_BalancerV3_LT/base/Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest.sol";
+import { Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest } from
+    "../../kernels/Identical_ERC4626_Chainlink_BalancerV3_LT/base/Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest.sol";
 
 /**
  * @title SeniorTrancheDepositWithdrawSuite

@@ -35,6 +35,7 @@ abstract contract DayMarketHandler is TrancheFixture {
     uint256 internal ghost_premiumSharesReinvested;
     uint256 internal ghost_idleSharesPaidToRedeemers;
     // I5 IL event log: signed deltas with cause tags, replayed against committed IL
+
     enum ILCause {
         COVERAGE_APPLIED,
         RECOVERY,

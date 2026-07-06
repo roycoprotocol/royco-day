@@ -137,7 +137,14 @@ abstract contract BaseAdaptiveCurveYDM is BaseYDM {
      * @param _linearAdaptationWAD The linear adaptation to apply to the curve based on the normalized delta, time elapsed, and speed of adaptation
      * @return yieldShareAtTargetWAD The yield share at target utilization after applying the adaptation
      */
-    function _computeYieldShareAtTarget(uint256 _lastYieldShareAtTargetWAD, int256 _linearAdaptationWAD) internal view returns (uint256 yieldShareAtTargetWAD) {
+    function _computeYieldShareAtTarget(
+        uint256 _lastYieldShareAtTargetWAD,
+        int256 _linearAdaptationWAD
+    )
+        internal
+        view
+        returns (uint256 yieldShareAtTargetWAD)
+    {
         // Compute the new yield share at the target by applying the exponentiated linear adaptation to the previous yield share
         // Exponentiation ensures that the yield share is always non-negative
         // Clamp the linear adaptation to the maximum value to prevent overflows when applying expWAD
@@ -155,7 +162,14 @@ abstract contract BaseAdaptiveCurveYDM is BaseYDM {
      * @param _avgYieldShareAtTargetWAD The time-averaged yield share at target over the elapsed period, scaled to WAD precision
      * @return yieldShareWAD The curve's yield share output at the current utilization, scaled to WAD precision and bounded to WAD
      */
-    function _computeYieldShare(int256 _normalizedDeltaFromTargetWAD, uint256 _avgYieldShareAtTargetWAD) internal view virtual returns (uint256 yieldShareWAD);
+    function _computeYieldShare(
+        int256 _normalizedDeltaFromTargetWAD,
+        uint256 _avgYieldShareAtTargetWAD
+    )
+        internal
+        view
+        virtual
+        returns (uint256 yieldShareWAD);
 
     /**
      * @notice Reads the concrete model's yield share at target and last adaptation timestamp for a market

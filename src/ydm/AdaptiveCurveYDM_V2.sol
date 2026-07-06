@@ -116,7 +116,10 @@ contract AdaptiveCurveYDM_V2 is BaseAdaptiveCurveYDM {
      * FD_T and FP_T are fixed at initialization. The spreads from Y_T remain constant
      * Y_T is the single adaptive parameter that shifts the curve vertically in response to market forces
      */
-    function _computeYieldShare(int256 _normalizedDeltaFromTargetWAD, uint256 _avgYieldShareAtTargetWAD)
+    function _computeYieldShare(
+        int256 _normalizedDeltaFromTargetWAD,
+        uint256 _avgYieldShareAtTargetWAD
+    )
         internal
         view
         override
