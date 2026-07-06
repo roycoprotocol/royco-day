@@ -24,7 +24,7 @@ import { ValuationLogic } from "./ValuationLogic.sol";
  */
 library RedemptionLogic {
     // =============================
-    // Senior Tranche Redeem Functions
+    // Tranche Redeem Functions
     // =============================
 
     /**
@@ -66,10 +66,6 @@ library RedemptionLogic {
         AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.ST_REDEEM, stSelfLiquidationBonusNAV, false);
     }
 
-    // =============================
-    // Junior Tranche Redeem Functions
-    // =============================
-
     /**
      * @notice Processes the redemption of a specified number of shares from the junior tranche
      * @dev The function is expected to transfer the senior and junior assets directly to the receiver, based on the redemption claims
@@ -104,10 +100,6 @@ library RedemptionLogic {
         // Execute a post-redeem sync on accounting, enforcing the market's coverage requirement post-redemption
         AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.JT_REDEEM, ZERO_NAV_UNITS, true);
     }
-
-    // =============================
-    // Liquidity Tranche Redeem Functions
-    // =============================
 
     /**
      * @notice Processes the redemption of a specified number of shares from the liquidity tranche.
@@ -145,10 +137,6 @@ library RedemptionLogic {
             $, _immutables, Operation.LT_REDEEM, ZERO_NAV_UNITS, (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD)
         );
     }
-
-    // =============================
-    // Liquidity Tranche Multi-Asset Redeem Functions
-    // =============================
 
     /**
      * @notice Atomically exits the liquidity tranche to the LT assets' constituent assets: proportionally removes the LT-asset slice,

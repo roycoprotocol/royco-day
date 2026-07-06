@@ -23,6 +23,8 @@ library FeeAndLiquidityPremiumLogic {
      *      liquidity tranche, leaving the senior raw NAV (and thus coverage) unchanged, so the mint is coverage-neutral
      * @dev The premium and ST protocol fee are priced jointly against the pre-sync senior supply, so neither dilutes the other. The
      *      LT protocol fee is minted last and so values against the post-carve-out senior supply and owned shares
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _state The synced accounting state whose accrued liquidity premium and protocol fees are minted
      */
     function _processFeesAndLiquidityPremium(

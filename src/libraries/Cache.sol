@@ -42,7 +42,7 @@ library Cache {
      * @dev View-safe: it never writes, so it is callable on the static read path
      * @param _key The key in this cache to read from
      * @return cacheHit Whether the slot holds a populated value
-     * @return value The cached value when cacheHit is true, otherwise zero
+     * @return value The cached value if this was a cache hit, otherwise zero
      */
     function _read(CacheKey _key) internal view returns (bool cacheHit, uint256 value) {
         uint256 slotValue = _getTransientStorageSlot(_key).asUint256().tload();

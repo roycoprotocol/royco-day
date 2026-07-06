@@ -25,6 +25,8 @@ library AccountingSyncLogic {
     /**
      * @notice Synchronizes and persists the raw and effective NAVs of both tranches
      * @dev Only executes a pre-op sync because there is no operation being executed in the same call as this sync
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function syncTrancheAccounting(
@@ -41,6 +43,8 @@ library AccountingSyncLogic {
     /**
      * @notice Syncs the tranche accounting and attempts to reinvest the liquidity tranche's idle liquidity-premium senior shares into its market-making inventory
      * @dev Values the reinvested shares against the freshly synced senior share rate, so a smaller amount can clear the venue's slippage gate when reinvesting the entire idle balance would not
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _stShares The amount of idle liquidity-premium senior shares to reinvest, or type(uint256).max to reinvest the entire idle balance
      */
     function reinvestLiquidityPremium(
@@ -61,6 +65,8 @@ library AccountingSyncLogic {
     /**
      * @notice Previews a synchronization of the raw and effective NAVs of both tranches
      * @dev Does not mutate any state
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _trancheType An enumerator indicating which tranche to execute this preview for
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      * @return claims The claims on ST and JT assets that the specified tranche has denominated in tranche-native units
@@ -110,8 +116,12 @@ library AccountingSyncLogic {
     // Internal Tranche Accounting Synchronization Functions
     // =============================
 
-    /// @notice Previews an accounting sync via the accountant
-    /// @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
+    /**
+     * @notice Previews an accounting sync via the accountant
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
+     */
     function _previewSyncTrancheAccounting(
         IRoycoDayKernel.RoycoDayKernelState storage $,
         IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables
@@ -131,6 +141,8 @@ library AccountingSyncLogic {
     /**
      * @notice Invokes the accountant to do a pre-operation (deposit and withdrawal) NAV sync and mints any protocol fee shares accrued
      * @dev A sync must be executed before every NAV mutating operation (deposit and withdrawal)
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      */
     function _preOpSyncTrancheAccounting(
@@ -153,6 +165,8 @@ library AccountingSyncLogic {
      * @notice Invokes the accountant to do a NAV sync and mints any protocol fee shares accrued
      * @dev A sync must be executed before every NAV mutating operation (deposit and withdrawal)
      * @notice Returns the asset claims and total tranche shares after minting any fees for the specified tranche
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _trancheType An enumerator indicating which tranche to return claims and total tranche shares for
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      * @return claims The cumulative asset claims that the specified tranche is entitled to
@@ -186,6 +200,8 @@ library AccountingSyncLogic {
     /**
      * @notice The single post-operation accounting entrypoint for every deposit and redeem path
      * @notice Commits the final state of the accounting after the operation has executed and checks the market's coverage and liquidity requirements
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _op The operation being executed in between the pre and post synchronizations
      * @param _stSelfLiquidationBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions (only nonzero if _op == ST_REDEEM || LT_REDEEM)
      * @param _enforceCoverageAndLiquidityRequirements Whether to enforce the market's coverage and liquidity requirements applicable to the operation

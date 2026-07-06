@@ -13,6 +13,7 @@ library BlacklistLogic {
     /**
      * @notice Returns whether an account is blacklisted by the market's configured blacklist
      * @dev Returns false when no blacklist is configured (the null address disables screening)
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _account The address of the account to check
      * @return Whether the account is blacklisted by the market's configured blacklist
      */
@@ -23,7 +24,9 @@ library BlacklistLogic {
 
     /**
      * @notice Batch-screens the accounts involved in a tranche share balance update against the market's configured blacklist
-     * @dev No-op when no blacklist is configured (the null address disables screening). Reverts if any involved account is blacklisted
+     * @dev No-op when no blacklist is configured (the null address disables screening)
+     * @dev Reverts if any specified account is blacklisted
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _caller The address that initiated the balance update
      * @param _from The address the shares are moving from
      * @param _to The address the shares are moving to

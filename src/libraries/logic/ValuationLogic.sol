@@ -15,22 +15,31 @@ library ValuationLogic {
     using RoycoUnitsMath for NAV_UNIT;
     using RoycoUnitsMath for uint256;
 
-    /// @notice Returns the raw net asset value of the senior tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
-    /// @return stRawNAV The pure net asset value of the senior tranche invested assets
+    /**
+     * @notice Returns the raw net asset value of the senior tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @return stRawNAV The pure net asset value of the senior tranche invested assets
+     */
     function _getSeniorTrancheRawNAV(IRoycoDayKernel.RoycoDayKernelState storage $) internal view returns (NAV_UNIT stRawNAV) {
         // Get the yield bearing assets owned by ST and convert them to NAV units via the configured quoter
         return IRoycoDayKernel(address(this)).stConvertTrancheUnitsToNAVUnits($.stOwnedYieldBearingAssets);
     }
 
-    /// @notice Returns the raw net asset value of the junior tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
-    /// @return jtRawNAV The pure net asset value of the junior tranche invested assets
+    /**
+     * @notice Returns the raw net asset value of the junior tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @return jtRawNAV The pure net asset value of the junior tranche invested assets
+     */
     function _getJuniorTrancheRawNAV(IRoycoDayKernel.RoycoDayKernelState storage $) internal view returns (NAV_UNIT jtRawNAV) {
         // Get the yield bearing assets owned by JT and convert them to NAV units via the configured quoter
         return IRoycoDayKernel(address(this)).jtConvertTrancheUnitsToNAVUnits($.jtOwnedYieldBearingAssets);
     }
 
-    /// @notice Returns the raw net asset value of the liquidity tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
-    /// @return ltRawNAV The pure net asset value of the liquidity tranche invested assets
+    /**
+     * @notice Returns the raw net asset value of the liquidity tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @return ltRawNAV The pure net asset value of the liquidity tranche invested assets
+     */
     function _getLiquidityTrancheRawNAV(IRoycoDayKernel.RoycoDayKernelState storage $) internal view returns (NAV_UNIT ltRawNAV) {
         // Get the yield bearing assets owned by LT and convert them to NAV units via the configured quoter
         return IRoycoDayKernel(address(this)).ltConvertTrancheUnitsToNAVUnits($.ltOwnedYieldBearingAssets);
@@ -44,6 +53,7 @@ library ValuationLogic {
      *      the overload below to inject the post-mint count that storage does not yet reflect
      * @dev The senior NAV and share supply must be mutually consistent: the post-sync effective NAV against the
      *      post-carve-out-mint total supply, so the held senior shares are valued at the correct NAV per share
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _stEffectiveNAV The senior tranche's post-sync effective NAV: the total NAV backing all senior shares after reconciling unrealized PnL
      * @param _totalSeniorTrancheShares The total senior tranche shares outstanding after minting the premium and protocol fee shares
      * @return ltEffectiveNAV The effective net asset value of the liquidity tranche
@@ -65,6 +75,7 @@ library ValuationLogic {
      * @notice Returns the effective net asset value of the liquidity tranche for an explicitly supplied held senior-share count
      * @dev The preview path supplies the post-mint held-share count (current storage plus this sync's premium shares) before the
      *      premium mint commits it to storage, so the previewed LT effective NAV matches the value execution computes from storage
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _stEffectiveNAV The senior tranche's post-sync effective NAV: the total NAV backing all senior shares after reconciling unrealized PnL
      * @param _totalSeniorTrancheShares The total senior tranche shares outstanding after minting the premium and protocol fee shares
      * @param _ltOwnedSeniorTrancheShares The senior tranche shares held by the liquidity tranche from accumulated liquidity premium payments

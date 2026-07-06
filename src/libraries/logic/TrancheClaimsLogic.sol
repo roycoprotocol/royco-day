@@ -28,6 +28,8 @@ library TrancheClaimsLogic {
 
     /**
      * @notice Derives the cumulative asset claims that the specified tranche is entitled to
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _trancheType An enumerator indicating which tranche to return cumulative claims for
      * @param _state The synced NAV, impermanent loss, and fee accounting containing all mark to market accounting data
      * @return claims The cumulative asset claims that the specified tranche is entitled to
@@ -68,6 +70,8 @@ library TrancheClaimsLogic {
 
     /**
      * @notice Withdraws any specified assets from each tranche and transfer them to the receiver
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _claims The ST and JT assets to withdraw and transfer to the specified receiver
      * @param _receiver The receiver of the tranche asset claims
      */

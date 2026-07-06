@@ -16,13 +16,13 @@ library SelfLiquidationLogic {
     using RoycoUnitsMath for NAV_UNIT;
 
     /**
-     * @notice Computes and applies the self-liquidation bonus for ST redemptions when the liquidation coverageUtilization threshold is breached, sourced from JT asset claims
+     * @notice Computes and applies the self-liquidation bonus for ST redemptions when the liquidation coverage utilization threshold is breached, sourced from JT asset claims
      * @dev The bonus incentivizes ST to self-liquidate by redeeming to delever the market
      * @dev After exiting the market, the bonus affords ST LPs the ability to:
      *      1. Absorb discounts/losses on secondary markets when liquidating the withdrawn exposure
      *      2. Absorb any duration risk associated with liquidating the withdrawn exposure
      * @dev The bonus is computed on the NAV being redeemed by the senior tranche
-     * @dev The bonus is capped to ensure coverageUtilization does not increase, preventing bank run dynamics where one LP's bonus eats into coverage for remaining LPs
+     * @dev The bonus is capped to ensure coverage utilization does not increase, preventing bank run dynamics where one LP's bonus eats into coverage for remaining LPs
      * @param _state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      * @param _stUserClaims The claims of the redeeming ST user
      * @return stUserClaimsWithBonus The claims of the redeeming ST user after applying the self-liquidation bonus
@@ -67,13 +67,13 @@ library SelfLiquidationLogic {
     }
 
     /**
-     * @notice Computes the maximum self-liquidation bonus that doesn't increase coverageUtilization (market's leverage)
+     * @notice Computes the maximum self-liquidation bonus that doesn't increase coverage utilization (market's leverage)
      * @dev Prevents bank run dynamics by ensuring one LP's bonus doesn't reduce coverage for remaining LPs
      * @dev Derivation:
-     *      Post-redemption coverageUtilization must not exceed original coverageUtilization:
-     *      U = Current coverageUtilization = ((ST_RAW_NAV + (JT_COINVESTED ? JT_RAW_NAV : 0)) * MIN_COVERAGE) / JT_EFFECTIVE_NAV
-     *      U' = Post-redemption coverageUtilization (including bonus)
-     *      Post-redemption coverageUtilization:
+     *      Post-redemption coverage utilization must not exceed original coverage utilization:
+     *      U = Current coverage utilization = ((ST_RAW_NAV + (JT_COINVESTED ? JT_RAW_NAV : 0)) * MIN_COVERAGE) / JT_EFFECTIVE_NAV
+     *      U' = Post-redemption coverage utilization (including bonus)
+     *      Post-redemption coverage utilization:
      *      U' = (((ST_RAW_NAV - ST_REDEMPTION_ST_RAW_NAV - BONUS_ST_RAW_NAV) + (JT_COINVESTED ? (JT_RAW_NAV - ST_REDEMPTION_JT_RAW_NAV - BONUS_JT_RAW_NAV) : 0)) * MIN_COVERAGE) / (JT_EFFECTIVE_NAV - BONUS_ST_RAW_NAV - BONUS_JT_RAW_NAV)
      *
      *      NOTE: INVARIANT: U' <= U
@@ -91,7 +91,7 @@ library SelfLiquidationLogic {
      * @param _state The synced accounting state
      * @param _stUserClaims The ST user's base claims before bonus
      * @param _jtClaimOnSTRawNAV JT's cross-tranche claim on ST assets
-     * @return maxCoverageUtilizationNeutralBonusNAV The maximum bonus NAV that maintains coverageUtilization neutrality
+     * @return maxCoverageUtilizationNeutralBonusNAV The maximum bonus NAV that maintains coverage utilization neutrality
      */
     function _computeMaxCoverageUtilizationNeutralBonus(
         SyncedAccountingState memory _state,

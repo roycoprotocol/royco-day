@@ -8,17 +8,19 @@ import { NAV_UNIT, TRANCHE_UNIT } from "./Units.sol";
  * @notice Defines the operational state of a Royco market
  * @custom:state PERPETUAL
  *      Normal operating state where market forces govern behavior
- *      - The market is healthy (no losses over dust tolerance) or it is severely undercollateralized (liquidation coverageUtilization breach) or uncollateralized (JT_EFFECTIVE_NAV == 0 while ST_EFFECTIVE_NAV > 0)
- *      - Both tranches liquid (within coverage constraints)
- *      - Adaptive curve YDM adapts based on coverageUtilization
+ *      - The market is healthy (no losses over dust tolerance) or it is severely undercollateralized (liquidation coverage utilization breach) or uncollateralized (no remaining JT NAV with non-zero ST NAV)
+ *      - All three tranches are liquid (within coverage and liquidity constraints)
+ *      - In an under/uncollateralized state, the LT is treated identically to the ST with regard to its liquidity profile (liquidity requirement is exempt from being fulfilled)
+ *      - Adaptive curve YDMs adapt based on the coverage and liquidity utilization of this market
  * @custom:state FIXED_TERM
  *      Temporary recovery state triggered when JT provides coverage for ST drawdown
- *      - ST experienced a fully covered drawdown but the market is still healthy in terms of its liquidation coverageUtilization threshold
- *      - Fixed term that starts when JT coverage impermanent loss is first incurred
- *      - ST redemptions blocked: protects existing JT from realizing losses by ST withdrawing coverage on arbitrary volatility
- *      - JT deposits blocked: protects existing JT from realizing losses by new JT diluting them on arbitrary volatility
- *      - Adaptive curve YDM does not adapt (prevents adaptation during recovery since market forces aren't influencing coverageUtilization, underlying PNL is)
- *      - Automatically transitions to PERPETUAL when term elapses, clearing JT coverage impermanent losses
+ *      - ST experienced a fully covered drawdown but the market is still healthy in terms of its liquidation coverage utilization threshold
+ *      - The fixed-term starts when (non-dust) JT coverage impermanent loss is first incurred
+ *      - ST deposits/redemptions blocked: protects existing JT from realizing losses by ST withdrawing coverage on arbitrary volatility
+ *      - JT deposits/redemptions blocked: protects existing JT from realizing losses by new JT diluting them on arbitrary volatility
+ *      - LT redemptions blocked: Guarantees that the LT continues market making the ST when secondary liquidity is most valuable
+ *      - Adaptive curve YDM does not adapt (prevents adaptation during recovery since market forces aren't influencing coverage or liquidity utilization, underlying PNL is
+ *      - Automatically transitions to PERPETUAL when losses are recovered or the term elapses, clearing JT coverage impermanent losses
  */
 enum MarketState {
     PERPETUAL,
@@ -118,8 +120,7 @@ enum Operation {
  * @dev Defines the types of Royco tranches deployed per market.
  * @custom:type SENIOR - The identifier for the senior tranche (protected capital)
  * @custom:type JUNIOR - The identifier for the junior tranche (first-loss capital)
- * @custom:type LIQUIDITY - The identifier for the liquidity tranche (market-making capital, Royco Day markets only)
- * @dev Appended to preserve existing ordinals (SENIOR=0, JUNIOR=1) for storage/ABI compatibility with live markets.
+ * @custom:type LIQUIDITY - The identifier for the liquidity tranche (market-making capital)
  */
 enum TrancheType {
     SENIOR,
