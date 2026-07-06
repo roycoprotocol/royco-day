@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import { MINT_DILUTION_RESIDUAL_WAD, WAD } from "../../../src/libraries/Constants.sol";
 import { SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { FeeAndLiquidityPremiumLogic } from "../../../src/libraries/logic/FeeAndLiquidityPremiumLogic.sol";
@@ -52,13 +53,14 @@ contract CarveOutFuzz is Test {
         // The supply grows by exactly the two carve-out mints, nothing else
         assertEq(supplyAfter, _preSupply + premiumShares + feeShares, "supply grows by exactly the two mints");
 
-        // Exact equality with the independent mirror over the entire input space
+        // Exact equality with the independent mirror over the entire input space (clamped branches included)
         (uint256 rtmPrem, uint256 rtmFee, uint256 rtmSupply) = RoycoTestMath.carveOut(_stEff, _prem, _fee, _preSupply);
         assertEq(premiumShares, rtmPrem, "premium shares == RoycoTestMath.carveOut");
         assertEq(feeShares, rtmFee, "fee shares == RoycoTestMath.carveOut");
         assertEq(supplyAfter, rtmSupply, "supply after == RoycoTestMath.carveOut");
 
         // First-mint edge re-pinned independently of the mirror: both carve-outs mint 1:1 with their NAV values
+        // (the bootstrap mint is exempt from the dilution clamp)
         if (_preSupply == 0) {
             assertEq(premiumShares, _prem, "zero pre-supply mints the premium 1:1");
             assertEq(feeShares, _fee, "zero pre-supply mints the fee 1:1");
@@ -83,7 +85,19 @@ contract CarveOutFuzz is Test {
      * preSupply >= 1 because the derivation prices both legs against pre-existing shares retaining the
      * retained NAV. The zero-supply first-mint edge mints 1:1 and is pinned exactly in the shares property
      * above. Each leg is asserted whenever its mint is nonzero (a zero mint has value below one share's
-     * worth, which the shares property already pins exactly via the mirror)
+     * worth, which the shares property already pins exactly via the mirror).
+     *
+     * The I8 value bound is a FAIR-pricing property, so it is conditioned on the mint-dilution clamp
+     * (never an early return: every arm carries its own exact assertion):
+     *   - a binding leg deliberately mints less than its carved NAV is worth (the clamp's whole point),
+     *     so it asserts shares == cap = floor(preSupply * (WAD - eps) / eps) exactly;
+     *   - a fair leg whose SIBLING binds cannot use the value bound either — the sibling's under-mint
+     *     shrinks supplyAfter, so every post-mint share (including this leg's) is worth more than the
+     *     fair derivation assumed — so it asserts its exact floor formula shares == floor(S*leg/denom);
+     *   - only when NEITHER leg binds does the two-sided value bound apply, with its original derivation.
+     * The bind predicate is recomputed here from first principles at the protocol constant eps =
+     * MINT_DILUTION_RESIDUAL_WAD: leg binds iff legNAV * eps > denom * (WAD - eps), with denom the
+     * retained NAV pinned to 1 wei when zero (the integer-equivalent form of production's ordering)
      */
     function testFuzz_CarveOut_mintedValueMatchesCarvedNAVWithinDerivedDust(uint256 _stEff, uint256 _prem, uint256 _fee, uint256 _preSupply) public pure {
         _stEff = bound(_stEff, 1, MAX_NAV); // positive senior NAV: the carve-out is only reached on gain syncs
@@ -97,15 +111,39 @@ contract CarveOutFuzz is Test {
         // Derived per state, never a literal: 2*ceil(stEff/supplyAfter) + 2 (derivation in the property comment)
         uint256 mintValueDustDerivedBound = 2 * Math.ceilDiv(_stEff, supplyAfter) + 2;
 
+        // The bind predicate per leg, recomputed from first principles (see the property comment)
+        uint256 denom = (_stEff - _prem - _fee) == 0 ? 1 : (_stEff - _prem - _fee);
+        // No overflow: legNAV, denom <= 1e30 and eps = 1e6, so both products stay below 1e48
+        bool premBinds = _prem * MINT_DILUTION_RESIDUAL_WAD > denom * (WAD - MINT_DILUTION_RESIDUAL_WAD);
+        bool feeBinds = _fee * MINT_DILUTION_RESIDUAL_WAD > denom * (WAD - MINT_DILUTION_RESIDUAL_WAD);
+        // cap <= 1e30 * (1e12 - 1) < 1e43: the fuzz domain sits far below the residual cliff
+        uint256 cap = Math.mulDiv(_preSupply, WAD - MINT_DILUTION_RESIDUAL_WAD, MINT_DILUTION_RESIDUAL_WAD);
+
         if (premiumShares != 0) {
-            uint256 premValue = toUint256(ValuationLogic._convertToValue(premiumShares, supplyAfter, toNAVUnits(_stEff), Math.Rounding.Floor));
-            assertLe(premValue, _prem + mintValueDustDerivedBound, "premium value uplift within the derived floor-dust bound");
-            assertGe(premValue + mintValueDustDerivedBound, _prem, "premium value shortfall within the derived floor-dust bound");
+            if (premBinds) {
+                assertEq(premiumShares, cap, "a binding premium leg mints exactly the dilution cap");
+            } else if (feeBinds) {
+                // The sibling's under-mint invalidates the value derivation; the fair floor formula stays exact
+                assertEq(
+                    premiumShares, Math.mulDiv(_preSupply, _prem, denom, Math.Rounding.Floor), "a fair premium leg beside a binding sibling floors exactly"
+                );
+            } else {
+                uint256 premValue = toUint256(ValuationLogic._convertToValue(premiumShares, supplyAfter, toNAVUnits(_stEff), Math.Rounding.Floor));
+                assertLe(premValue, _prem + mintValueDustDerivedBound, "premium value uplift within the derived floor-dust bound");
+                assertGe(premValue + mintValueDustDerivedBound, _prem, "premium value shortfall within the derived floor-dust bound");
+            }
         }
         if (feeShares != 0) {
-            uint256 feeValue = toUint256(ValuationLogic._convertToValue(feeShares, supplyAfter, toNAVUnits(_stEff), Math.Rounding.Floor));
-            assertLe(feeValue, _fee + mintValueDustDerivedBound, "fee value uplift within the derived floor-dust bound");
-            assertGe(feeValue + mintValueDustDerivedBound, _fee, "fee value shortfall within the derived floor-dust bound");
+            if (feeBinds) {
+                assertEq(feeShares, cap, "a binding fee leg mints exactly the dilution cap");
+            } else if (premBinds) {
+                // The sibling's under-mint invalidates the value derivation; the fair floor formula stays exact
+                assertEq(feeShares, Math.mulDiv(_preSupply, _fee, denom, Math.Rounding.Floor), "a fair fee leg beside a binding sibling floors exactly");
+            } else {
+                uint256 feeValue = toUint256(ValuationLogic._convertToValue(feeShares, supplyAfter, toNAVUnits(_stEff), Math.Rounding.Floor));
+                assertLe(feeValue, _fee + mintValueDustDerivedBound, "fee value uplift within the derived floor-dust bound");
+                assertGe(feeValue + mintValueDustDerivedBound, _fee, "fee value shortfall within the derived floor-dust bound");
+            }
         }
     }
 }

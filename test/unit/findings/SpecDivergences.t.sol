@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { stdError } from "../../../lib/forge-std/src/StdError.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
+import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
-import { WAD } from "../../../src/libraries/Constants.sol";
+import { MINT_DILUTION_RESIDUAL_WAD, WAD } from "../../../src/libraries/Constants.sol";
 import { AssetClaims, MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { ValuationLogic } from "../../../src/libraries/logic/ValuationLogic.sol";
 import { defaultParams } from "../../base/fixtures/MarketParams.sol";
 import { cellA } from "../../base/fixtures/TokenConfigs.sol";
 import { TrancheFixture } from "../../base/fixtures/TrancheFixture.sol";
@@ -273,5 +276,40 @@ contract SpecDivergencesTest is TrancheFixture {
         // The matrix's two success legs must leave the committed state in FIXED_TERM with the depth credited
         assertEq(uint8(accountant.getState().lastMarketState), uint8(MarketState.FIXED_TERM), "market must remain FIXED_TERM");
         assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), SEEDED_LT_RAW_NAV + 2e18, "ltOwned must be the 6e18 seed plus both 1e18 legs");
+    }
+
+    // =============================
+    // FINDING 11 — the mint-dilution clamp's residual overflow cliff
+    // =============================
+
+    /// @dev External probe so the cliff's Panic(0x11) is observable through expectRevert (findings 8-10b live in the fork suite)
+    function convertToSharesCliffProbe(uint256 _value, uint256 _totalValue, uint256 _supply) external pure returns (uint256) {
+        return ValuationLogic._convertToShares(toNAVUnits(_value), toNAVUnits(_totalValue), _supply, Math.Rounding.Floor);
+    }
+
+    /**
+     * @notice FINDING 11: the mint-dilution clamp (MINT_DILUTION_RESIDUAL_WAD = 1e6) bounds the zero-NAV
+     *         dilution mint per cycle but, with an absolute supply ceiling explicitly declined (user
+     *         decision), the cap computation floor(supply x (WAD - eps) / eps) itself overflows uint256 once
+     *         supply > floor((2^256 - 1) x eps / (WAD - eps)) — so repeated total-wipe dilution cycles (each
+     *         growing the supply by up to x(WAD - eps)/eps ~ 1e12) still terminate in a Panic(0x11) after ~4
+     *         cycles, including inside the sync's fee mint where it bricks the market.
+     *         SPEC-EXPECTED (Appendix B.4 resolution): a bounded, legible failure; ACTUAL: an arithmetic panic
+     *         at the cliff. Pinned exactly: the boundary supply floor((2^256 - 1)/((WAD - eps)/eps)) succeeds
+     *         and one share-wei past it panics ((WAD - eps)/eps = 1e12 - 1 exactly at eps = 1e6, so the cap
+     *         multiply is exact and the floor identity max - S_ok x k < k gives the crisp +1 boundary)
+     */
+    function test_FINDING_11_mintDilutionClamp_residualOverflowCliff() public {
+        uint256 k = (WAD - MINT_DILUTION_RESIDUAL_WAD) / MINT_DILUTION_RESIDUAL_WAD; // 1e12 - 1, exact division
+        uint256 supplyAtCliff = type(uint256).max / k; // the largest supply whose cap still fits in uint256
+        uint256 bindingValue = 1e18; // over a 1-wei denominator this always binds: ceil(1e18 x 1e6 / (1e18 - 1e6)) > 1
+
+        // Just below the cliff the clamped mint succeeds and returns the exact cap
+        uint256 minted = this.convertToSharesCliffProbe(bindingValue, 0, supplyAtCliff);
+        assertEq(minted, Math.mulDiv(supplyAtCliff, WAD - MINT_DILUTION_RESIDUAL_WAD, MINT_DILUTION_RESIDUAL_WAD), "at the boundary the cap still fits");
+
+        // One share-wei past the cliff the cap computation overflows uint256 and the mint panics
+        vm.expectRevert(stdError.arithmeticError);
+        this.convertToSharesCliffProbe(bindingValue, 0, supplyAtCliff + 1);
     }
 }

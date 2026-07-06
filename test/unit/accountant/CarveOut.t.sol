@@ -43,7 +43,9 @@ contract CarveOutTest is AccountantUnitHarness {
 
     /**
      * Nominal carve-out at realistic post-sync outputs (FeeAndLiquidityPremiumLogic.sol:88-104): the premium
-     * and fee mints price jointly against the retained senior NAV, never against each other.
+     * and fee mints price jointly against the retained senior NAV, never against each other. At the default
+     * residual eps = 1e6 the mint-dilution clamp is provably inert here (bind iff 2.5e18 * 1e6 > 1038.25e18 *
+     * (1e18 - 1e6), i.e. 2.5e24 > ~1.038e39, false for both legs), so the literals hold unchanged.
      * retained = 1045e18 - 2.5e18 - 4.25e18 = 1038.25e18 (shared denominator, joint pricing)
      * premShares = floor(1000e18 * 2.5e18 / 1038.25e18)  = 2_407_897_905_128_822_537
      * feeShares  = floor(1000e18 * 4.25e18 / 1038.25e18) = 4_093_426_438_718_998_314
@@ -74,19 +76,22 @@ contract CarveOutTest is AccountantUnitHarness {
     /**
      * Degenerate premium + fee == stEff (100% of the sync's senior effective NAV carved out, e.g. maximal
      * fees on a pure-gain sync from zero retained base) routes through the share-mint math's 1-wei
-     * denominator branch (ValuationLogic.sol:106, FeeAndLiquidityPremiumLogic.sol:98) instead of reverting.
-     * retained = 10e18 - 4e18 - 6e18 = 0 -> the 1-wei denominator branch
-     * premShares = floor(1e18 * 4e18 / 1) = 4e36 and feeShares = floor(1e18 * 6e18 / 1) = 6e36 (huge, no revert)
-     * supplyAfter = 1e18 + 4e36 + 6e36 = 1e37 + 1e18 — the pre-existing 1e18 shares retain nothing, which is
-     * exactly the intended dilution of unbacked holders, and NAV conservation is untouched because share
-     * mints move no NAV
+     * denominator branch (ValuationLogic.sol, FeeAndLiquidityPremiumLogic.sol:98), and at the default residual
+     * eps = 1e6 both legs BIND the mint-dilution clamp instead of minting unbounded shares.
+     * retained = 10e18 - 4e18 - 6e18 = 0 -> the 1-wei denominator branch, and both legs bind:
+     *   bind: ceil(4e18 * 1e6 / (1e18 - 1e6)) = ceil(~4.000004e6) > 1 (and likewise for the fee leg)
+     *   cap  = floor(1e18 * (1e18 - 1e6) / 1e6) = 1e18 * 999_999_999_999 = 999_999_999_999e18
+     * premShares = feeShares = cap (each mint may own at most (1 - 1e-12) of the post-mint supply)
+     * supplyAfter = 1e18 + 2 * cap = 1_999_999_999_998e18 + 1e18
+     * The pre-existing 1e18 shares retain ~1e-12 of the tranche per mint — the intended near-total dilution
+     * of unbacked holders, now bounded so repeated wipe cycles cannot race the supply to uint256
      */
-    function test_CarveOut_degeneratePremiumPlusFeeEqualsSTEff() public pure {
+    function test_CarveOut_degeneratePremiumPlusFeeEqualsSTEff_clampsBothLegs() public pure {
         (uint256 premShares, uint256 feeShares, uint256 supplyAfter) =
             FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(_carveState(10e18, 4e18, 6e18), 1e18);
-        assertEq(premShares, 4e36, "premium shares against the 1-wei pinned denominator");
-        assertEq(feeShares, 6e36, "fee shares against the 1-wei pinned denominator");
-        assertEq(supplyAfter, 1e37 + 1e18, "supply after the degenerate mints");
+        assertEq(premShares, 999_999_999_999e18, "premium shares clamp to the dilution cap");
+        assertEq(feeShares, 999_999_999_999e18, "fee shares clamp to the same dilution cap");
+        assertEq(supplyAfter, 1_999_999_999_998e18 + 1e18, "supply after the two capped mints");
 
         (uint256 rtmPrem, uint256 rtmFee, uint256 rtmSupply) = RoycoTestMath.carveOut(10e18, 4e18, 6e18, 1e18);
         assertEq(premShares, rtmPrem, "RTM premium shares");
@@ -100,6 +105,7 @@ contract CarveOutTest is AccountantUnitHarness {
      * premShares = 2.5e18 and feeShares = 4.25e18 exactly (first-mint semantics), supplyAfter = 6.75e18
      */
     function test_CarveOut_zeroPreSupplyMintsOneToOne() public pure {
+        // The bootstrap mint is exempt from the dilution clamp (a first mint dilutes nobody)
         (uint256 premShares, uint256 feeShares, uint256 supplyAfter) =
             FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(_carveState(1045e18, 2.5e18, 4.25e18), 0);
         assertEq(premShares, 2.5e18, "premium shares 1:1 with NAV at zero supply");
@@ -145,7 +151,10 @@ contract CarveOutTest is AccountantUnitHarness {
      * - delta staged idle pile == premShares - reinvested = premShares - 0
      * - the reinvestment attempt is called once with (uint256 max, stEff, post-mint supply) so the staged shares
      *   are valued at the synced senior share rate
-     * The premium mint lands on the kernel (the harness) and the fee mint on the protocol fee recipient
+     * The premium mint lands on the kernel (the harness) and the fee mint on the protocol fee recipient.
+     * Run at the default residual 1e6: I7 holds under the clamp (the mint still moves no assets and the supply
+     * delta is exactly the two carve-outs), and at these nominal inputs the clamp is inert (see V2.1), so the
+     * literals are the historical ones
      */
     function test_CarveOut_coverageNeutralMint_stagedWhenReinvestmentDefers() public {
         flp.ST_LEDGER().setTotalSupply(1000e18);
@@ -204,9 +213,18 @@ contract CarveOutTest is AccountantUnitHarness {
      * @dev The two-sided mint-value bound: |valueFor(premShares, S_post, stEff) - prem| <= 2*ceil(stEff/S_post) + 2,
      *      and the same bound for the fee leg. The tolerance is DERIVED per state (downward slack: the share-mint
      *      floor, upward slack: the sibling carve-out's floor dust accruing pro-rata to post-mint shares, plus the
-     *      valuation floor), never an arbitrary literal
+     *      valuation floor), never an arbitrary literal. The value bound is a FAIR-pricing property, so callers
+     *      supply tuples where neither leg binds the mint-dilution clamp (eps = MINT_DILUTION_RESIDUAL_WAD = 1e6)
+     *      — the helper re-derives the bind predicate and requires it false, so a tuple drifting onto the bind is
+     *      a loud failure rather than a silently weakened assertion. Binding tuples are asserted separately
+     *      (shares == cap exactly; a clamped mint's value diverges from its carved NAV by design)
      */
     function _assertMintValueBound(uint256 _stEff, uint256 _prem, uint256 _fee, uint256 _preSupply) internal pure {
+        // Precondition, re-derived from first principles: neither leg may bind at the protocol residual
+        uint256 denom = (_stEff - _prem - _fee) == 0 ? 1 : (_stEff - _prem - _fee);
+        assertTrue(_prem * 1e6 <= denom * (WAD - 1e6), "precondition: the premium leg must not bind");
+        assertTrue(_fee * 1e6 <= denom * (WAD - 1e6), "precondition: the fee leg must not bind");
+
         (uint256 premShares, uint256 feeShares, uint256 supplyAfter) =
             FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(_carveState(_stEff, _prem, _fee), _preSupply);
         uint256 mintValueDerivedBound = 2 * Math.ceilDiv(_stEff, supplyAfter) + 2;
@@ -223,22 +241,46 @@ contract CarveOutTest is AccountantUnitHarness {
     }
 
     /**
-     * The two-sided mint-value bound at adversarial (stEff, prem, fee, supply) tuples: what each minted leg
-     * is WORTH after both mints must track the NAV it was carved for, within the derived rounding bound.
-     * Hand-derived worked exemplars:
+     * The two-sided mint-value bound at adversarial non-binding (stEff, prem, fee, supply) tuples: what each
+     * minted leg is WORTH after both mints must track the NAV it was carved for, within the derived rounding
+     * bound. Hand-derived worked exemplars (all provably below the bind: legNAV * 1e6 <= denom * (1e18 - 1e6)):
      * - (7, 3, 3, 5): retained 1 -> premShares 15, feeShares 15, S_post 35, value floor(7*15/35) = 3,
      *   diff 0 <= 2*ceil(7/35)+2 = 4
-     * - (1e30, 1e30-2, 1, 3): retained 1 -> premShares 3*(1e30-2), feeShares 3, S_post 3e30 exactly,
-     *   premValue = floor(1e30*(3e30-6)/3e30) = 1e30-2, diff 0 <= 4
      * - (1045e18, 2.5e18, 4.25e18, 1000e18): premValue = 2.5e18 - 1 (one wei of downward floor slack),
      *   diff 1 <= 2*ceil(1045e18/1006501324343847820851)+2 = 6
      * - (3, 1, 1, 1e24): retained 1 -> both mints 1e24 shares, S_post 3e24, value floor(3*1e24/3e24) = 1, diff 0
      */
     function test_CarveOut_twoSidedMintValueBound() public pure {
         _assertMintValueBound(7, 3, 3, 5);
-        _assertMintValueBound(1e30, 1e30 - 2, 1, 3);
         _assertMintValueBound(1045e18, 2.5e18, 4.25e18, 1000e18);
         _assertMintValueBound(3, 1, 1, 1e24);
+    }
+
+    /**
+     * I8 (binding arm): on a bind the fair value bound is REPLACED by cap exactness — the clamp deliberately
+     * mints less than the carved NAV is worth, and what it mints is exactly
+     * cap = floor(preSupply * (WAD - eps) / eps) at eps = 1e6.
+     * Tuple (10e18, 4e18, 6e18, 1e18) (the V2.2 state): both legs bind (retained 0 -> 1-wei denominator,
+     * bind since ceil(4e18 * 1e6 / (1e18 - 1e6)) > 1), cap = 1e18 * (1e12 - 1) = 999_999_999_999e18.
+     * Tuple (1e30, 1e30 - 2, 1, 3) (retained 1): the PREMIUM leg binds ((1e30 - 2) * 1e6 > 1 * (1e18 - 1e6))
+     * and clamps to cap = 3 * (1e12 - 1) = 2_999_999_999_997, while the FEE leg stays fair
+     * (1 * 1e6 <= 1e18 - 1e6) and floors to floor(3 * 1 / 1) = 3 — the mixed case
+     */
+    function test_CarveOut_I8_bindingLegsMintExactlyTheCap() public pure {
+        (uint256 premShares, uint256 feeShares, uint256 supplyAfter) =
+            FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(_carveState(10e18, 4e18, 6e18), 1e18);
+        uint256 cap = Math.mulDiv(1e18, WAD - 1e6, 1e6);
+        assertEq(cap, 999_999_999_999e18, "hand-derived cap literal");
+        assertEq(premShares, cap, "binding premium leg mints exactly the cap");
+        assertEq(feeShares, cap, "binding fee leg mints exactly the cap");
+        assertEq(supplyAfter, 1e18 + 2 * cap, "supply identity across two capped mints");
+
+        // The mixed case: one binding leg beside one fair leg
+        (uint256 premMixed, uint256 feeMixed, uint256 supplyMixed) =
+            FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(_carveState(1e30, 1e30 - 2, 1), 3);
+        assertEq(premMixed, 2_999_999_999_997, "binding premium leg clamps to 3*(1e12-1)");
+        assertEq(feeMixed, 3, "fair fee leg floors to floor(3*1/1) beside the binding sibling");
+        assertEq(supplyMixed, 3 + 2_999_999_999_997 + 3, "supply identity across the mixed mints");
     }
 
     /*//////////////////////////////////////////////////////////////////////
@@ -276,11 +318,13 @@ contract CarveOutTest is AccountantUnitHarness {
     /**
      * An LT protocol fee equal to the entire LT effective NAV (the 100% fee ceiling,
      * FeeAndLiquidityPremiumLogic.sol:66-72) drives the fee-share denominator ltEff - fee to zero, which
-     * routes through the share-mint math's 1-wei branch (ValuationLogic.sol:106) instead of reverting.
+     * routes through the share-mint math's 1-wei branch (ValuationLogic.sol) instead of reverting, and at the
+     * default residual eps = 1e6 the mint BINDS the dilution clamp.
      * ltEff = ltRaw 10e18 + idle 0 = 10e18, fee = 10e18 -> denominator 0 -> 1 wei
-     * feeShares = floor(50e18 * 10e18 / 1) = 5e38, minted to the protocol fee recipient
+     * bind: ceil(10e18 * 1e6 / (1e18 - 1e6)) > 1 -> feeShares = cap = floor(50e18 * (1e18 - 1e6) / 1e6)
+     *     = 50e18 * 999_999_999_999 = 49_999_999_999_950e18, minted to the protocol fee recipient
      */
-    function test_CarveOut_ltFeeMintAtFullFee_routesThroughOneWeiDenominator() public {
+    function test_CarveOut_ltFeeMintAtFullFee_clampsThroughOneWeiDenominator() public {
         flp.ST_LEDGER().setTotalSupply(1000e18);
         flp.LT_LEDGER().setTotalSupply(50e18);
         flp.setLTOwnedYieldBearingAssets(10e18);
@@ -290,9 +334,9 @@ contract CarveOutTest is AccountantUnitHarness {
         flp.processFeesAndLiquidityPremium(s);
 
         assertEq(flp.LT_LEDGER().feeMintCallCount(), 1, "one liquidity fee mint");
-        assertEq(flp.LT_LEDGER().lastFeeSharesMinted(), 5e38, "fee shares against the 1-wei pinned denominator");
+        assertEq(flp.LT_LEDGER().lastFeeSharesMinted(), 49_999_999_999_950e18, "fee shares clamp to the dilution cap");
         assertEq(flp.LT_LEDGER().lastFeeMintTo(), flp.PROTOCOL_FEE_RECIPIENT(), "fee shares mint to the recipient");
-        // The 1-wei branch matches the RTM mirror: sharesFor(10e18, 0, 50e18) = floor(50e18 * 10e18 / 1)
+        // The clamped 1-wei branch matches the RTM mirror at the same residual
         assertEq(flp.LT_LEDGER().lastFeeSharesMinted(), RoycoTestMath.sharesFor(10e18, 0, 50e18), "RTM sharesFor cross-assert");
     }
 

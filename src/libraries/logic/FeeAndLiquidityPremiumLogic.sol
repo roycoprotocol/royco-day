@@ -21,8 +21,8 @@ library FeeAndLiquidityPremiumLogic {
      * @notice Mints the protocol fee shares and the liquidity premium shares accrued by a pre-op sync
      * @dev The liquidity premium is senior yield routed to the LT: it is minted as senior tranche shares the kernel holds for the
      *      liquidity tranche, leaving the senior raw NAV (and thus coverage) unchanged, so the mint is coverage-neutral
-     * @dev The premium and ST protocol fee are priced jointly against the pre-sync senior supply, so neither dilutes the other. The
-     *      LT protocol fee is minted last and so values against the post-carve-out senior supply and owned shares
+     * @dev The premium and ST protocol fee are priced jointly against the pre-sync senior supply, so neither dilutes the other
+     * @dev The LT protocol fee is minted last to value the fee against the final ST share supply and LT owned ST shares
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _state The synced accounting state whose accrued liquidity premium and protocol fees are minted
@@ -67,9 +67,11 @@ library FeeAndLiquidityPremiumLogic {
         }
         // If LT fees were accrued, price them against the post-fee LT effective NAV (its market-making depth plus the idle premium) and mint to the recipient
         if (_state.ltProtocolFee != ZERO_NAV_UNITS) {
-            NAV_UNIT ltEffectiveNAV = ValuationLogic._getLiquidityTrancheEffectiveNAV($, _state.stEffectiveNAV, stTotalSupplyAfterMints);
             uint256 ltProtocolFeeShares = ValuationLogic._convertToShares(
-                _state.ltProtocolFee, (ltEffectiveNAV - _state.ltProtocolFee), IERC20(_immutables.liquidityTranche).totalSupply(), Math.Rounding.Floor
+                _state.ltProtocolFee,
+                (ValuationLogic._getLiquidityTrancheEffectiveNAV($, _state.stEffectiveNAV, stTotalSupplyAfterMints) - _state.ltProtocolFee),
+                IERC20(_immutables.liquidityTranche).totalSupply(),
+                Math.Rounding.Floor
             );
             IRoycoVaultTranche(_immutables.liquidityTranche).mintProtocolFeeShares(protocolFeeRecipient, ltProtocolFeeShares);
         }
@@ -79,8 +81,7 @@ library FeeAndLiquidityPremiumLogic {
      * @notice Computes the senior tranche shares minted for this sync's senior yield split: the LT liquidity premium and the ST protocol fee
      * @dev Both the premium and the fee are reallocations of value already booked into the senior effective NAV (no assets enter or
      *      leave), so minting them is NAV-neutral and coverage-neutral: the premium reassigns senior appreciation to the LT and the fee to the protocol
-     * @dev Both are priced over the same pre-sync supply against one shared denominator, the NAV the pre-existing shares retain net of the
-     *      premium and fee (stEffectiveNAV - premium - fee), so neither dilutes the other. Both round down, so floor dust accrues to the pre-existing shares
+     * @dev Both are priced over the same pre-sync supply against one shared denominator, the NAV the pre-existing shares retain net of the premium and fee, so neither dilutes the other
      * @param _state The synced accounting state carrying the senior effective NAV, the liquidity premium, and the ST protocol fee
      * @param _stTotalSupply The total senior tranche share supply before this sync mints the premium and fee shares
      * @return liquidityPremiumShares The senior shares to mint as the LT liquidity premium, rounded down

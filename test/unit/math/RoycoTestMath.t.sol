@@ -171,7 +171,8 @@ contract RoycoTestMathTest is Test {
                                 sharesFor
     //////////////////////////////////////////////////////////////////////////*/
 
-    /// First mint (supply == 0) is 1:1 with the contributed value, totalValue ignored.
+    /// First mint (supply == 0) is 1:1 with the contributed value, totalValue ignored. Historical pins run at
+    /// residual 0 (the clamp-disabled reduction: identical literals to the pre-clamp F9).
     function test_SharesFor_zeroSupply_mintsOneToOne() public pure {
         assertEq(RoycoTestMath.sharesFor(123e18, 0, 0), 123e18, "first depositor 1:1");
         assertEq(RoycoTestMath.sharesFor(5, 999, 0), 5, "totalValue ignored at zero supply");
@@ -206,6 +207,40 @@ contract RoycoTestMathTest is Test {
     /// Max realistic at par: ⌊1e30·1e30/1e30⌋ = 1e30.
     function test_SharesFor_maxRealistic() public pure {
         assertEq(RoycoTestMath.sharesFor(MAX_NAV, MAX_NAV, MAX_NAV), MAX_NAV, "par at scale");
+    }
+
+    /*//////////////////////////////////////////////////////////////////////////
+                            the mint-dilution clamp
+    //////////////////////////////////////////////////////////////////////////*/
+
+    /// Bind boundary, exact (continuity): at d = 1e18, S = 1e18, ε = 1e6 the bind threshold is
+    ///   threshold = ⌊d·(WAD−ε)/ε⌋ = 1e18 · 999_999_999_999 = 1e30 − 1e18   ((WAD−ε)/ε is the exact integer 1e12−1)
+    /// At v = threshold the bind test is exactly at equality (⌈v·ε/(WAD−ε)⌉ = 1e18 = d, not >), so the mint is
+    /// fair-priced: ⌊1e18·(1e30−1e18)/1e18⌋ = 1e30 − 1e18 — which EQUALS the cap ⌊1e18·(WAD−ε)/ε⌋, so the clamp
+    /// is continuous at the boundary.
+    function test_SharesFor_clampBindBoundary_fairEqualsCapExactly() public pure {
+        uint256 threshold = 1e30 - 1e18;
+        assertEq(RoycoTestMath.sharesFor(threshold, 1e18, 1e18), threshold, "at the boundary the fair mint equals the cap");
+    }
+
+    /// Bind boundary + 1 wei: v = threshold + 1 trips the bind (⌈v·ε/(WAD−ε)⌉ = 1e18 + 1 > d) and returns the
+    /// cap = 1e30 − 1e18 — the same output as the boundary itself (the clamp plateaus, it does not jump).
+    function test_SharesFor_clampBindBoundaryPlusOne_returnsSameCap() public pure {
+        assertEq(RoycoTestMath.sharesFor(1e30 - 1e18 + 1, 1e18, 1e18), 1e30 - 1e18, "one wei past the boundary mints the identical cap");
+    }
+
+    /// Zero-NAV composition min(S·v, cap): the 1-wei branch stays unclamped for small values
+    /// (bind iff ⌈3·1e6/(1e18−1e6)⌉ = 1 > 1 is false ⇒ ⌊7·3/1⌋ = 21 unchanged), and clamps for large ones
+    /// (v = 1e12: ⌈1e12·1e6/(1e18−1e6)⌉ = 2 > 1 ⇒ cap = ⌊7·(1e18−1e6)/1e6⌋ = 7·(1e12−1) = 6_999_999_999_993).
+    function test_SharesFor_clampOverZeroNAV_composesWithOneWeiDenominator() public pure {
+        assertEq(RoycoTestMath.sharesFor(3, 0, 7), 21, "small dilution mint stays fair-priced");
+        assertEq(RoycoTestMath.sharesFor(1e12, 0, 7), 6_999_999_999_993, "large dilution mint clamps to 7*(1e12-1)");
+    }
+
+    /// Bootstrap exemption: supply == 0 mints 1:1 no matter how large the value — a first mint dilutes
+    /// nobody, so the clamp has nothing to protect (1e40 over a live supply would bind hard).
+    function test_SharesFor_clampBootstrapExemption() public pure {
+        assertEq(RoycoTestMath.sharesFor(1e40, 0, 0), 1e40, "bootstrap mints 1:1, exempt from the clamp");
     }
 
     /*//////////////////////////////////////////////////////////////////////////
@@ -276,7 +311,8 @@ contract RoycoTestMathTest is Test {
         assertEq(supplyAfter, 1100, "100 + 700 + 300");
     }
 
-    /// Pre-sync supply 0 routes through sharesFor's first-mint branch: both legs mint 1:1 with their value.
+    /// Pre-sync supply 0 routes through sharesFor's first-mint branch: both legs mint 1:1 with their value,
+    /// exempt from the dilution clamp (a bootstrap mint dilutes nobody).
     ///   retained = 100 − 30 − 20 = 50 is ignored at zero supply: premiumShares = 30, feeShares = 20.
     function test_CarveOut_zeroPreSupply_mintsOneToOne() public pure {
         (uint256 premiumShares, uint256 feeShares, uint256 supplyAfter) = RoycoTestMath.carveOut(100, 30, 20, 0);
@@ -293,13 +329,24 @@ contract RoycoTestMathTest is Test {
         assertEq(supplyAfter, 77, "supply unchanged");
     }
 
-    /// Max realistic, clean: retained = 1e30 − 5e29 = 5e29, premiumShares = ⌊1e30·5e29/5e29⌋ = 1e30,
+    /// Max realistic, clean (clamp inert: 5e29·1e6 ≤ 5e29·(1e18−1e6) at the protocol residual):
+    /// retained = 1e30 − 5e29 = 5e29, premiumShares = ⌊1e30·5e29/5e29⌋ = 1e30,
     /// supplyAfter = 1e30 + 1e30 = 2e30 (a 100%-of-retained premium doubles the supply).
     function test_CarveOut_maxRealistic() public pure {
         (uint256 premiumShares, uint256 feeShares, uint256 supplyAfter) = RoycoTestMath.carveOut(1e30, 5e29, 0, 1e30);
         assertEq(premiumShares, 1e30, "floor(1e30*5e29/5e29) = 1e30");
         assertEq(feeShares, 0, "no fee");
         assertEq(supplyAfter, 2e30, "1e30 + 1e30");
+    }
+
+    /// Degenerate carve-out under the clamp (the V2.2 shape at mirror level): retained = 0 pins the 1-wei
+    /// denominator, both legs bind (⌈4e18·1e6/(1e18−1e6)⌉ > 1 at the protocol residual), and each clamps to
+    /// cap = ⌊1e18·(1e18−1e6)/1e6⌋ = 999_999_999_999e18 — the per-mint residual guarantee.
+    function test_CarveOut_retainedZero_clampsBothLegsToCap() public pure {
+        (uint256 premiumShares, uint256 feeShares, uint256 supplyAfter) = RoycoTestMath.carveOut(10e18, 4e18, 6e18, 1e18);
+        assertEq(premiumShares, 999_999_999_999e18, "premium leg clamps to the cap");
+        assertEq(feeShares, 999_999_999_999e18, "fee leg clamps to the same cap");
+        assertEq(supplyAfter, 1e18 + 2 * 999_999_999_999e18, "supply identity across two capped mints");
     }
 
     /*//////////////////////////////////////////////////////////////////////////

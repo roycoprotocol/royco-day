@@ -28,6 +28,12 @@ library RoycoTestMath {
     /// @notice WAD fixed-point unit, 1e18 == 100%.
     uint256 internal constant WAD = 1e18;
 
+    /// @notice Independent restatement of the protocol's mint-dilution residual (Constants.sol
+    ///         MINT_DILUTION_RESIDUAL_WAD = 1e6, a 1e-12 residual): a single mint owns at most
+    ///         (1 − 1e-12) of the post-mint supply. Deliberately NOT imported from src so a silent
+    ///         production change diverges from this mirror and fails every cross-assert loudly.
+    uint256 internal constant MINT_DILUTION_RESIDUAL = 1e6;
+
     /// @notice One below solady expWad's overflow threshold, the clamp on the adaptive yield model's linear adaptation.
     int256 internal constant MAX_LINEAR_ADAPTATION_WAD = 135_305_999_368_893_231_589 - 1;
 
@@ -282,10 +288,18 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice Shares minted for a value contribution: ⌊supply · value / totalValue⌋.
-     * @dev Edges: supply == 0 mints value 1:1 (totalValue ignored), and totalValue == 0 with a live supply
-     *      pins the denominator to 1 wei.
-     *      Rounding: Floor. Favors: existing holders.
+     * @notice F9 — shares minted for a value contribution: min(⌊supply · value / totalValue⌋, dilution cap).
+     * @dev Edges: supply == 0 mints value 1:1 (totalValue ignored, no clamp — a bootstrap mint dilutes nobody),
+     *      and totalValue == 0 with a live supply pins the denominator to 1 wei.
+     *      The mint-dilution clamp (amendment to F9): a single mint may own at most (1 − ε/WAD) of the
+     *      post-mint supply, ε = MINT_DILUTION_RESIDUAL (this library's own restatement of the protocol
+     *      constant — if Constants.sol changes without this mirror, every cross-assert fails loudly). The
+     *      shares therefore never exceed cap = ⌊supply · (WAD − ε) / ε⌋. The bind test runs BEFORE the
+     *      fair-shares division in its overflow-free form (⌈value·ε/(WAD − ε)⌉ > denominator,
+     *      integer-equivalent to fair > cap), mirroring production's ordering exactly — including the panic
+     *      surface: the cap mulDiv overflows uint256 once supply ≥ ⌈2^256·ε/(WAD − ε)⌉, exactly when
+     *      production's does (load-bearing for the invariant handler's revert prediction).
+     *      Rounding: Floor on both branches (the cap floor favors existing holders).
      * @param value The value being contributed
      * @param totalValue The pre-contribution total value backing the supply
      * @param supply The pre-contribution share supply
@@ -294,6 +308,9 @@ library RoycoTestMath {
     function sharesFor(uint256 value, uint256 totalValue, uint256 supply) internal pure returns (uint256 shares) {
         if (supply == 0) return value;
         uint256 denominator = totalValue == 0 ? 1 : totalValue;
+        if (Math.mulDiv(value, MINT_DILUTION_RESIDUAL, WAD - MINT_DILUTION_RESIDUAL, Math.Rounding.Ceil) > denominator) {
+            return Math.mulDiv(supply, WAD - MINT_DILUTION_RESIDUAL, MINT_DILUTION_RESIDUAL);
+        }
         shares = Math.mulDiv(supply, value, denominator);
     }
 
@@ -313,8 +330,11 @@ library RoycoTestMath {
     /**
      * @notice The ST fee / liquidity-premium carve-out share mints, both computed at the pre-sync supply
      *         over the retained denominator stEff − premium − fee.
-     * @dev Each mint is a sharesFor computation over the retained NAV, so the sharesFor edges apply per leg
-     *      (pre-sync supply 0 mints 1:1, retained NAV 0 pins the denominator to 1 wei).
+     * @dev Each mint is an F9 share computation over the retained NAV, so the F9 edges apply per leg
+     *      (pre-sync supply 0 mints 1:1, retained NAV 0 pins the denominator to 1 wei) — including the
+     *      mint-dilution clamp, which applies PER MINT at the shared pre-sync supply: in the degenerate
+     *      zero-retained state both legs clamp to the same cap, so the pair may own up to 2·cap/(preSupply + 2·cap)
+     *      of the post-mint supply (the residual guarantee is per mint, not per sync).
      *      Rounding: Floor on both mints. Favors: pre-existing ST shares.
      *      Precondition: premium + fee <= stEff (guaranteed upstream by the waterfall).
      * @param stEff The post-waterfall senior effective NAV
