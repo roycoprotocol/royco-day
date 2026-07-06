@@ -577,9 +577,9 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     /**
      * @notice Builds the immutables carrier threaded into the kernel's delegatecall logic libraries
      * @dev A delegatecalled library cannot read the kernel's immutables directly, so they are passed in via this struct
-     * @return The kernel context carrying the senior, junior, and liquidity tranche addresses, their assets, and the accountant
+     * @return immutables The kernel's senior, junior, and liquidity tranche addresses, their respective assets, and the accountant
      */
-    function _getRoycoDayKernelImmutableState() internal view returns (RoycoDayKernelImmutableState memory) {
+    function _getRoycoDayKernelImmutableState() internal view returns (RoycoDayKernelImmutableState memory immutables) {
         return RoycoDayKernelImmutableState({
             seniorTranche: SENIOR_TRANCHE,
             stAsset: ST_ASSET,

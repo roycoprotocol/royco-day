@@ -71,7 +71,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     /// @param maxReinvestmentSlippageWAD The new maximum slippage tolerated when single-sided reinvesting the liquidity premium into the BPT, scaled to WAD precision
     event MaxReinvestmentSlippageUpdated(uint64 maxReinvestmentSlippageWAD);
 
-    /// @notice Thrown when the Balancer V3 Vault passed to the constructor is not the one the pool (`LT_ASSET`) is registered with
+    /// @notice Thrown when the Balancer V3 Vault passed to the constructor is not the one the pool is registered with
     error INVALID_BALANCER_V3_VAULT();
 
     /// @notice Thrown when the Balancer pool is not registered with the Balancer V3 Vault
@@ -86,10 +86,14 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     /// @notice Thrown when the configured maximum reinvestment slippage is not strictly less than WAD (100%)
     error INVALID_MAX_REINVESTMENT_SLIPPAGE();
 
+    /// @notice Thrown when the BPT oracle prices a pool other than this market's registered liquidity tranche pool
+    error BPT_ORACLE_POOL_MISMATCH();
+
+    /// @notice Constructs the Balancer V3 liquidity tranche quoter
+    /// @param _balancerV3Vault The instance of the singleton Balancer V3 Vault
     constructor(IVault _balancerV3Vault) VaultGuard(_balancerV3Vault) {
         // Ensure the passed vault is the one the pool (LT_ASSET) is registered with (LT_ASSET reads fine here in the body)
         require(address(BalancerPoolToken(LT_ASSET).getVault()) == address(_balancerV3Vault), INVALID_BALANCER_V3_VAULT());
-
         // Ensure that the Balancer V3 Pool is registered with the vault
         require(_vault.isPoolRegistered(LT_ASSET), POOL_NOT_REGISTERED());
 
@@ -271,7 +275,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     {
         BalancerV3VenueLogic.attemptLiquidityPremiumReinvestment(
             _getRoycoDayKernelStorage(),
-            _balancerV3VenueImmutableState(),
+            _getBalancerV3VenueImmutableState(),
             _getBalancerV3_LT_BPTOracle_QuoterStorage().maxReinvestmentSlippageWAD,
             _stSharesToReinvest,
             _stEffectiveNAV,
@@ -295,7 +299,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         onlyVault
         returns (uint256 ltAssets)
     {
-        return BalancerV3VenueLogic.addBalancerV3Liquidity(_balancerV3VenueImmutableState(), _isPreview, _seniorShares, _quoteAssets, _minLTAssetsOut);
+        return BalancerV3VenueLogic.addBalancerV3Liquidity(_getBalancerV3VenueImmutableState(), _isPreview, _seniorShares, _quoteAssets, _minLTAssetsOut);
     }
 
     /// @inheritdoc IBalancerV3VenueCallbacks
@@ -312,7 +316,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         returns (uint256 stShares, uint256 quoteAssets)
     {
         return BalancerV3VenueLogic.removeBalancerV3Liquidity(
-            _balancerV3VenueImmutableState(), _isPreview, _ltAssets, _minSTSharesOut, _minQuoteAssetsOut, _quoteAssetsReceiver
+            _getBalancerV3VenueImmutableState(), _isPreview, _ltAssets, _minSTSharesOut, _minQuoteAssetsOut, _quoteAssetsReceiver
         );
     }
 
@@ -340,15 +344,10 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         _setMaxReinvestmentSlippage(_maxReinvestmentSlippageWAD);
     }
 
-    /// @notice Returns the Balancer V3 quoter configuration (the BPT oracle and the maximum reinvestment slippage tolerance)
-    function getBalancerQuoterConfiguration() external pure returns (BalancerV3_LT_BPTOracle_QuoterState memory) {
-        return _getBalancerV3_LT_BPTOracle_QuoterStorage();
-    }
-
     /// @notice Sets the new BPT oracle
     /// @param _bptOracle The new manipulation-resistant balancer pool token (BPT) oracle
     function _setBPTOracle(address _bptOracle) internal {
-        require(_bptOracle != address(0), NULL_ADDRESS());
+        require(address(LPOracleBase(_bptOracle).pool()) == LT_ASSET, BPT_ORACLE_POOL_MISMATCH());
         _getBalancerV3_LT_BPTOracle_QuoterStorage().bptOracle = _bptOracle;
         emit BPTOracleUpdated(_bptOracle);
     }
@@ -362,18 +361,11 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     }
 
     /**
-     * @notice Returns a storage pointer to the BalancerV3_LT_BPTOracle_QuoterState storage
-     * @dev Uses ERC-7201 storage slot pattern for collision-resistant storage
-     * @return $ Storage pointer to the quoter's state
+     * @notice Builds the immutables carrier threaded into the Balancer V3 venue's delegatecall logic library
+     * @dev A delegatecalled library cannot read the quoter's immutables directly, so they are passed in via this struct
+     * @return immutables The quoter's Balancer V3 vault, required asset and tranche addresses, and the corresponding asset indexes in the pool
      */
-    function _getBalancerV3_LT_BPTOracle_QuoterStorage() internal pure returns (BalancerV3_LT_BPTOracle_QuoterState storage $) {
-        assembly ("memory-safe") {
-            $.slot := BALANCER_V3_LT_BPTORACLE_QUOTER_STORAGE_SLOT
-        }
-    }
-
-    /// @notice Builds the immutable liquidity venue configuration the externalized venue logic library needs
-    function _balancerV3VenueImmutableState() internal view returns (BalancerV3VenueImmutableState memory) {
+    function _getBalancerV3VenueImmutableState() internal view returns (BalancerV3VenueImmutableState memory immutables) {
         return BalancerV3VenueImmutableState({
             vault: _vault,
             ltAsset: LT_ASSET,
@@ -382,5 +374,21 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
             stSharePoolIndex: ST_SHARE_POOL_INDEX,
             quoteAssetPoolIndex: QUOTE_ASSET_POOL_INDEX
         });
+    }
+
+    /// @notice Returns the Balancer V3 quoter configuration (the BPT oracle and the maximum reinvestment slippage tolerance)
+    function getBalancerV3QuoterState() external view returns (BalancerV3_LT_BPTOracle_QuoterState memory) {
+        return _getBalancerV3_LT_BPTOracle_QuoterStorage();
+    }
+
+    /**
+     * @notice Returns a storage pointer to the BalancerV3_LT_BPTOracle_QuoterState storage
+     * @dev Uses ERC-7201 storage slot pattern for collision-resistant storage
+     * @return $ Storage pointer to the quoter's state
+     */
+    function _getBalancerV3_LT_BPTOracle_QuoterStorage() internal pure returns (BalancerV3_LT_BPTOracle_QuoterState storage $) {
+        assembly ("memory-safe") {
+            $.slot := BALANCER_V3_LT_BPTORACLE_QUOTER_STORAGE_SLOT
+        }
     }
 }

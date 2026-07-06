@@ -383,7 +383,7 @@ contract DayMarketDeploymentTest is BaseTest {
 
     function test_bptOracle_deployedByTemplateAndWired() public view {
         // The template deployed the BPT oracle through Balancer's E-CLP LP oracle factory and injected it into the kernel.
-        address bptOracle = BalancerV3_LT_BPTOracle_Quoter(address(KERNEL)).getBalancerQuoterConfiguration().bptOracle;
+        address bptOracle = BalancerV3_LT_BPTOracle_Quoter(address(KERNEL)).getBalancerV3QuoterState().bptOracle;
         assertTrue(bptOracle != address(0), "bptOracle unset");
         assertGt(bptOracle.code.length, 0, "bptOracle has no code");
         address eclpOracleFactory = DEPLOY_SCRIPT.getChainConfig(block.chainid).eclpLPOracleFactory;
