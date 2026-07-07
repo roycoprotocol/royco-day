@@ -167,12 +167,13 @@ contract Test_TemplateInitialization is Test {
         template.initialize(ids, codes);
         factory.registerTemplate(address(template));
 
-        // The factory requires a non-zero kernel in the deployment result; this test only exercises the YDM path,
-        // so hand back a minimal result carrying a kernel (tranches may be zero — those registry writes are skipped).
+        // The factory requires a kernel, a senior tranche, and at least one subordinate tranche in the deployment
+        // result; this test only exercises the YDM path, so hand back the minimal valid result (no liquidity
+        // tranche — that registry write is skipped)
         template.setDeploymentResult(
             IRoycoProtocolTemplate.DeploymentResult({
-                seniorTranche: address(0),
-                juniorTranche: address(0),
+                seniorTranche: makeAddr("YDM_TEST_ST"),
+                juniorTranche: makeAddr("YDM_TEST_JT"),
                 liquidityTranche: address(0),
                 kernel: makeAddr("YDM_TEST_KERNEL"),
                 accountant: address(0),

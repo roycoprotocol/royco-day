@@ -8,9 +8,9 @@ import { Operation, SyncedAccountingState } from "../../../src/libraries/Types.s
 import { NAV_UNIT, toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { FeeAndLiquidityPremiumLogic } from "../../../src/libraries/logic/FeeAndLiquidityPremiumLogic.sol";
 import { ValuationLogic } from "../../../src/libraries/logic/ValuationLogic.sol";
-import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 import { FeeAndLiquidityPremiumHarness } from "../../mocks/FeeAndLiquidityPremiumHarness.sol";
 import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
+import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 
 /**
  * @title Test_FeeAndLiquidityPremium_Accountant
@@ -214,7 +214,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
      *      and the same bound for the fee leg. The tolerance is DERIVED per state (downward slack: the share-mint
      *      floor, upward slack: the sibling share mint's floor dust accruing pro-rata to post-mint shares, plus the
      *      valuation floor), never an arbitrary literal. The value bound is a FAIR-pricing property, so callers
-     *      supply tuples where neither leg binds the mint-dilution clamp (eps = MINT_DILUTION_RESIDUAL_WAD = 1e6)
+     *      supply tuples where neither leg binds the mint-dilution clamp (MAX_MINT_DILUTION_WAD)
      *      — the helper re-derives the bind predicate and requires it false, so a tuple drifting onto the bind is
      *      a loud failure rather than a silently weakened assertion. Binding tuples are asserted separately
      *      (shares == cap exactly; a clamped mint's value diverges from its minted NAV by design)

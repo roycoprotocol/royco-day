@@ -82,12 +82,12 @@ The **Accountant** maintains the financial state of each market. Before and afte
 
 1. Reconciling any unrealized PnL since the last accounting sync via the deltas between the current and last checkpointed raw NAVs of each tranche
 2. Applying coverage obligations on losses
-3. Tracking impermanent losses (temporary losses that may recover)
-4. Distributing yield from senior to junior (risk premium) as instructed by the market's YDM
+3. Tracking junior's impermanent losses (temporary losses that may recover) from providing coverage
+4. Distributing yield from senior to the junior tranche (risk premium) as instructed by the market's YDM
 5. Distributing yield from senior to the liquidity tranche (liquidity premium) as instructed by the liquidity-driven YDM instance
 6. Accruing protocol fees
 
-The junior risk premium is a reallocation of senior appreciation into junior effective NAV. The liquidity premium is minted as senior tranche shares credited to the liquidity tranche and then reinvested, and protocol fees are minted as shares, both against value already in the market. Minting the liquidity premium as senior shares reassigns appreciation without adding senior exposure, so it stays coverage-neutral and preserves the two-term conservation identity at wei precision, where senior raw NAV plus junior raw NAV equals senior effective NAV plus junior effective NAV.
+The junior risk premium is a reallocation of senior appreciation into junior effective NAV. The liquidity premium is minted as senior tranche shares credited to the liquidity tranche and then reinvested, and protocol fees are minted as shares, both against value already in the market. Minting the liquidity premium as senior shares reassigns appreciation without adding senior exposure, so it stays coverage-neutral and preserves the NAV conservation property, where the sum of the raw NAVs equals the sum of the effective NAVs.
 
 ### Yield Distribution Model (YDM)
 

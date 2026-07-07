@@ -24,14 +24,14 @@ contract TestFuzz_AdaptiveTargetAtFullUtilization is Test {
     /// @dev The configured upper bound on the adaptive yield share at target: 100%
     uint256 internal constant MAX_YT = 1e18;
 
-    /// @dev The deploy-time ceiling on the max adaptation speed: floor(100e18 / 365 days)
-    uint256 internal constant MAX_SPEED = 100e18 / uint256(365 days);
+    /// @dev The boundary adaptation speed, set at the deploy-time ceiling: floor(100e18 / 365 days)
+    uint256 internal constant BOUNDARY_SPEED = 100e18 / uint256(365 days);
 
     /// @dev Echo instance with the target at exactly 100%, so the above-target region is empty
     EchoAdaptiveCurveYDM internal echoTargetAtFull;
 
     function setUp() public {
-        echoTargetAtFull = new EchoAdaptiveCurveYDM(WAD, MIN_YT, MAX_YT, MAX_SPEED);
+        echoTargetAtFull = new EchoAdaptiveCurveYDM(WAD, MIN_YT, MAX_YT, BOUNDARY_SPEED);
         echoTargetAtFull.setEchoMode(EchoAdaptiveCurveYDM.EchoMode.NORMALIZED_DELTA_SHIFTED);
         vm.warp(4_000_000_000);
     }

@@ -154,10 +154,10 @@ contract Test_AdaptiveCurveYDM_V1 is Test {
         AdaptiveCurveYDM_V1 ydm = _deploy(5e17);
         assertEq(ydm.MIN_YIELD_SHARE_AT_TARGET_WAD(), MIN_YT, "min yT == 1e14");
         assertEq(ydm.MAX_YIELD_SHARE_AT_TARGET_WAD(), MAX_YT, "max yT == WAD");
-        assertEq(ydm.MAX_ADAPTATION_SPEED_WAD(), SPEED_V1, "V1 speed == 50e18/365days");
-        assertEq(ydm.MAX_ADAPTATION_SPEED_LIMIT_WAD(), SPEED_LIMIT, "speed limit == 100e18/365days");
+        assertEq(ydm.ADAPTATION_SPEED_AT_BOUNDARY_WAD(), SPEED_V1, "V1 speed == 50e18/365days");
+        assertEq(ydm.MAX_ADAPTATION_SPEED_WAD(), SPEED_LIMIT, "speed limit == 100e18/365days");
         // V1 sits at exactly half the deploy-time limit.
-        assertEq(ydm.MAX_ADAPTATION_SPEED_WAD() * 2, ydm.MAX_ADAPTATION_SPEED_LIMIT_WAD(), "V1 speed is half the limit");
+        assertEq(ydm.ADAPTATION_SPEED_AT_BOUNDARY_WAD() * 2, ydm.MAX_ADAPTATION_SPEED_WAD(), "V1 speed is half the limit");
     }
 
     // =====================================================================

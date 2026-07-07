@@ -17,11 +17,16 @@ import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
  * @title RoycoLiquidityTranche
  * @author Ankur Dubey, Shivaansh Kapoor
  * @notice Liquidity tranche implementation for Royco markets
- * @dev In addition to the standard LT asset deposit/redeem flows, it exposes multi-asset entrypoints that let an LP enter/exit with ST and quote assets directly (ST assets are used to mint ST shares)
+ * @dev In addition to the standard LT asset deposit/redeem flows, it exposes multi-asset entrypoints that let an LP enter/exit with ST and quote assets directly (ST assets are involved in minting/redeeming ST shares)
  */
 contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
     using SafeERC20 for IERC20;
 
+    /**
+     * @notice Constructs the Royco liquidity tranche vault
+     * @param _asset The underlying asset for the tranche
+     * @param _kernel The kernel that handles the core market logic and accounting synchronization
+     */
     constructor(address _asset, address _kernel) RoycoVaultTranche(_asset, _kernel) { }
 
     /// @notice Initializes the Royco liquidity tranche.

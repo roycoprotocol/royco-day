@@ -6,14 +6,14 @@ import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgrade
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
-import { MINT_DILUTION_RESIDUAL_WAD, WAD } from "../../../src/libraries/Constants.sol";
+import { MAX_MINT_DILUTION_WAD, WAD } from "../../../src/libraries/Constants.sol";
 import { AssetClaims, MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { ValuationLogic } from "../../../src/libraries/logic/ValuationLogic.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_SpecDivergences_DayMarket
@@ -295,25 +295,26 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
     }
 
     /**
-     * @notice DIVERGENCE 11: the mint-dilution clamp (MINT_DILUTION_RESIDUAL_WAD = 1e6) bounds the zero-NAV
+     * @notice DIVERGENCE 11: the mint-dilution clamp (MAX_MINT_DILUTION_WAD = WAD - 1e6) bounds the zero-NAV
      *         dilution mint per cycle but, with an absolute supply ceiling explicitly declined (user
-     *         decision), the cap computation floor(supply x (WAD - eps) / eps) itself overflows uint256 once
-     *         supply > floor((2^256 - 1) x eps / (WAD - eps)) — so repeated total-wipe dilution cycles (each
-     *         growing the supply by up to x(WAD - eps)/eps ~ 1e12) still terminate in a Panic(0x11) after ~4
-     *         cycles, including inside the sync's fee mint where it bricks the market.
-     *         SPEC-EXPECTED: a bounded, legible failure; ACTUAL: an arithmetic panic
-     *         at the cliff. Pinned exactly: the boundary supply floor((2^256 - 1)/((WAD - eps)/eps)) succeeds
-     *         and one share-wei past it panics ((WAD - eps)/eps = 1e12 - 1 exactly at eps = 1e6, so the cap
+     *         decision), the cap computation floor(supply x MAX_MINT_DILUTION_WAD / (WAD - MAX_MINT_DILUTION_WAD))
+     *         itself overflows uint256 once supply > floor((2^256 - 1) x (WAD - MAX_MINT_DILUTION_WAD) / MAX_MINT_DILUTION_WAD)
+     *         — so repeated total-wipe dilution cycles (each growing the supply by up to
+     *         xMAX_MINT_DILUTION_WAD/(WAD - MAX_MINT_DILUTION_WAD) ~ 1e12) still terminate in a Panic(0x11)
+     *         after ~4 cycles, including inside the sync's fee mint where it bricks the market.
+     *         SPEC-EXPECTED: a bounded, legible failure; ACTUAL: an arithmetic panic at the cliff.
+     *         Pinned exactly: the boundary supply floor((2^256 - 1)/k) succeeds and one share-wei past it
+     *         panics (k = MAX_MINT_DILUTION_WAD/(WAD - MAX_MINT_DILUTION_WAD) = 1e12 - 1 exactly, so the cap
      *         multiply is exact and the floor identity max - S_ok x k < k gives the crisp +1 boundary)
      */
     function test_DIVERGENCE_11_mintDilutionClamp_residualOverflowCliff() public {
-        uint256 k = (WAD - MINT_DILUTION_RESIDUAL_WAD) / MINT_DILUTION_RESIDUAL_WAD; // 1e12 - 1, exact division
+        uint256 k = MAX_MINT_DILUTION_WAD / (WAD - MAX_MINT_DILUTION_WAD); // 1e12 - 1, exact division
         uint256 supplyAtCliff = type(uint256).max / k; // the largest supply whose cap still fits in uint256
         uint256 bindingValue = 1e18; // over a 1-wei denominator this always binds: ceil(1e18 x 1e6 / (1e18 - 1e6)) > 1
 
         // Just below the cliff the clamped mint succeeds and returns the exact cap
         uint256 minted = this.convertToSharesCliffProbe(bindingValue, 0, supplyAtCliff);
-        assertEq(minted, Math.mulDiv(supplyAtCliff, WAD - MINT_DILUTION_RESIDUAL_WAD, MINT_DILUTION_RESIDUAL_WAD), "at the boundary the cap still fits");
+        assertEq(minted, Math.mulDiv(supplyAtCliff, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD), "at the boundary the cap still fits");
 
         // One share-wei past the cliff the cap computation overflows uint256 and the mint panics
         vm.expectRevert(stdError.arithmeticError);
@@ -417,6 +418,10 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
             940_733_772_342_427_093 - 927_294_718_451_820_991,
             "the idle pile must drop by exactly the redeemed pro-rata slice"
         );
-        assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), SEEDED_LT_RAW_NAV, "the pooled BPT must remain in kernel custody, untouched by the skipped removal");
+        assertEq(
+            toUint256(kernel.getState().ltOwnedYieldBearingAssets),
+            SEEDED_LT_RAW_NAV,
+            "the pooled BPT must remain in kernel custody, untouched by the skipped removal"
+        );
     }
 }

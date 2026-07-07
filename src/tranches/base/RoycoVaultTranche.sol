@@ -20,7 +20,7 @@ import { ValuationLogic } from "../../libraries/logic/ValuationLogic.sol";
  * @title RoycoVaultTranche
  * @author Ankur Dubey, Shivaansh Kapoor
  * @notice Abstract base contract implementing core vault functionality for Royco tranches (ST, JT, and LT)
- * @dev Tranches interact with the kernel for asset operations and the accountant for NAV synchronizations
+ * @dev Tranches interact with the kernel to execute all operations based on the current holistic state of the Royco market
  */
 abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20PausableUpgradeable, ERC20BurnableUpgradeable, ERC20PermitUpgradeable {
     using Math for uint256;
@@ -212,8 +212,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 trancheTotalShares) =
             IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
         if (TRANCHE_TYPE() == TrancheType.LIQUIDITY) {
-            // We exclude any idle (not reinvested) ST shares from the LT claims in order to ensure that its share price is up only for any oracles
-            // NOTE: This is required since any reinvestment can incur some slippage
+            // We exclude any idle (not reinvested) ST shares from the LT claims in order to ensure that its share price does not drop due to slippage incurred on reinvestment
             trancheClaims.stShares = 0;
             trancheClaims.nav = state.ltRawNAV;
         }
@@ -222,15 +221,18 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @inheritdoc IRoycoVaultTranche
     function convertToShares(TRANCHE_UNIT _assets) public view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
-        // Get the post-sync tranche state: applying NAV reconciliation.
+        // Value the assets specified in NAV units
         NAV_UNIT value;
         if (TRANCHE_TYPE() == TrancheType.SENIOR) value = IRoycoDayKernel(KERNEL).stConvertTrancheUnitsToNAVUnits(_assets);
         else if (TRANCHE_TYPE() == TrancheType.JUNIOR) value = IRoycoDayKernel(KERNEL).jtConvertTrancheUnitsToNAVUnits(_assets);
         else value = IRoycoDayKernel(KERNEL).ltConvertTrancheUnitsToNAVUnits(_assets);
+
+        // Get the post-sync tranche state
         (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 trancheTotalShares) =
             IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
-        // The LT converts against the BPT-only raw NAV; ST/JT convert against their effective NAV claims
-        NAV_UNIT navBasis = TRANCHE_TYPE() == TrancheType.LIQUIDITY ? state.ltRawNAV : trancheClaims.nav;
+
+        // We exclude any idle (not reinvested) ST shares from the LT NAV basis in order to ensure that its NAV per share does not drop due to slippage incurred on reinvestment
+        NAV_UNIT navBasis = ((TRANCHE_TYPE() == TrancheType.LIQUIDITY) ? state.ltRawNAV : trancheClaims.nav);
         shares = ValuationLogic._convertToShares(value, navBasis, trancheTotalShares, Math.Rounding.Floor);
     }
 
@@ -306,18 +308,18 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         else return state.ltRawNAV;
     }
 
-    /**
-     * @inheritdoc IERC20Metadata
-     * @dev The Kernel always uses WAD precision for NAV units
-     * @dev Shares are minted using NAV_UNIT values units instead of TRANCHE_UNIT values, so they have identical precision to NAV_UNIT (WAD precision)
-     */
-    function decimals() public view virtual override(ERC20Upgradeable, IERC20Metadata) returns (uint8) {
-        return uint8(WAD_DECIMALS);
-    }
-
     /// @inheritdoc IRoycoVaultTranche
     function asset() external view virtual override(IRoycoVaultTranche) returns (address) {
         return ASSET;
+    }
+
+    /**
+     * @inheritdoc IERC20Metadata
+     * @dev The kernel always uses WAD precision for NAV units
+     * @dev Shares are minted using NAV_UNIT values instead of TRANCHE_UNIT values, so they have identical precision to NAV_UNIT values (WAD precision)
+     */
+    function decimals() public view virtual override(ERC20Upgradeable, IERC20Metadata) returns (uint8) {
+        return uint8(WAD_DECIMALS);
     }
 
     /// @dev Returns the type of the tranche (Senior or Junior)
