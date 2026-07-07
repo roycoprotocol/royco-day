@@ -13,14 +13,19 @@ import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/acc
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { CREATE3 } from "../../../lib/solady/src/utils/CREATE3.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
+import { MarketDeploymentConfig } from "../../../script/config/MarketDeploymentConfig.sol";
 import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ROLE, ADMIN_UPGRADER_ROLE, DEPLOYER_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { DayIdenticalERC4626ChainlinkDeploymentTemplate } from "../../../src/factory/templates/DayIdenticalERC4626ChainlinkDeploymentTemplate.sol";
-import { COMPONENT_ID_SENIOR_TRANCHE_IMPL, TAG_ST_PROXY } from "../../../src/factory/templates/base/Components.sol";
+import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
+import { COMPONENT_ID_SENIOR_TRANCHE_IMPL, TAG_ST_IMPL, TAG_ST_PROXY } from "../../../src/factory/templates/base/Components.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
+import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
+import { StaticCurveYDM } from "../../../src/ydm/StaticCurveYDM.sol";
 
 /// @title Test_RoycoFactory
 /// @notice Fork tests for `RoycoFactory` driven by the REAL Day market template

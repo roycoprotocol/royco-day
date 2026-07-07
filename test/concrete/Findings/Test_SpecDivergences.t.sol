@@ -10,6 +10,7 @@ import { MINT_DILUTION_RESIDUAL_WAD, WAD } from "../../../src/libraries/Constant
 import { AssetClaims, MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { ValuationLogic } from "../../../src/libraries/logic/ValuationLogic.sol";
+import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
@@ -314,5 +315,105 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
         // One share-wei past the cliff the cap computation overflows uint256 and the mint panics
         vm.expectRevert(stdError.arithmeticError);
         this.convertToSharesCliffProbe(bindingValue, 0, supplyAtCliff + 1);
+    }
+
+    // =============================
+    // FINDING 28 — the multi-asset LT redemption ignores the caller's slippage floors when the venue slice is zero
+    // =============================
+
+    /**
+     * @notice FINDING 28: `redeemMultiAsset(shares, _minSTSharesOut, _minQuoteAssetsOut, ...)` promises the caller
+     *         a slippage contract — return at least the requested minimums or revert — but the only enforcer of
+     *         those minimums is the proportional venue removal, which is skipped entirely whenever the redeemer's
+     *         venue-asset slice is zero (RedemptionLogic.sol:181-185 guards removeLiquidity behind
+     *         `userAssetClaims.ltAssets != 0`). In the idle-only LT state the call therefore SUCCEEDS while
+     *         returning 0 quote assets against a positive `_minQuoteAssetsOut`.
+     *         EXPECTED-CORRECT: the caller's floor is an unconditional postcondition — any redemption returning
+     *         less quote than `_minQuoteAssetsOut` (or fewer venue senior shares than `_minSTSharesOut`) reverts.
+     *         ACTUAL: both minimums are silently ignored, breaking the slippage contract exactly in the degraded
+     *         states (a collapsed pool mark) where a caller most needs it. No funds are lost — the fair idle
+     *         premium slice is still paid — the violation is a contract-breaking success, not a theft
+     * @dev Idle-only construction: venue slippage is armed so a +10% senior gain's liquidity premium mints as
+     *      senior shares to the LT but the gated reinvestment defers, staging the premium idle in the kernel.
+     *      Then the BPT oracle is pinned to a zero mark (a worthless pool), so ltRawNAV = 0 and every redeemer's
+     *      venue-asset slice is exactly zero: the LT share's only remaining value is the idle premium leg.
+     *      Governance retires the liquidity requirement first (setMinLiquidity(0)) so the post-redemption
+     *      liquidity gate cannot mask the missing slippage check — with a positive minimum and zero pool depth
+     *      every LT redemption would revert LIQUIDITY_REQUIREMENT_VIOLATED instead
+     * @dev Idle pile derivation (+10% on the seeded 100/30 market, same block so the instantaneous yield shares
+     *      apply): stRaw 100e18 -> 110e18 gives stGain = 10e18; JT risk premium = 10e18 x 0.2 = 2e18 and LT
+     *      liquidity premium = 10e18 x 0.1 = 1e18 (the fixture's pinned yield shares); ST protocol fee =
+     *      (10 - 2 - 1)e18 x 0.1 = 0.7e18; stEffectiveNAV = 100e18 + 7e18 + 1e18 = 108e18. The premium mints
+     *      against the retained senior NAV 108e18 - 1e18 - 0.7e18 = 106.3e18 over the 100e18 pre-sync supply:
+     *      idleShares = floor(100e18 x 1e18 / 106.3e18) = 940733772342427093. The ST fee mint is
+     *      floor(100e18 x 0.7e18 / 106.3e18) = 658513640639698965, so the senior supply lands at
+     *      101599247412982126058
+     * @dev Redemption slice derivation: the gain sync also mints LT protocol fee shares — the 0.1e18 LT fee is
+     *      priced on the LT effective NAV 6e18 + floor(940733772342427093 x 108e18 / 101599247412982126058) =
+     *      6e18 + 999999999999999999, so ltFeeShares = floor(6e18 x 0.1e18 / 6899999999999999999) =
+     *      86956521739130434 and the LT supply is 6086956521739130434. Redeeming the provider's full 6e18 shares
+     *      takes the pro-rata idle slice floor(940733772342427093 x 6e18 / 6086956521739130434) =
+     *      927294718451820991 senior shares, unwound to the yield-bearing asset: the total senior claim is
+     *      floor(108e18 / 1.1) = 98181818181818181818 vault shares, so the redeemer receives
+     *      floor(98181818181818181818 x 927294718451820991 / 101599247412982126058) = 896103896103896103
+     */
+    function test_FINDING_28_ltRedeemMultiAsset_minQuoteAssetsOut_ignoredWhenVenueSliceIsZero() public {
+        _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
+
+        // Stage the idle premium: armed venue slippage defers the gated reinvestment, so the +10% gain's premium
+        // stays as kernel-held senior shares instead of deploying into the pool
+        setVenueSlippageMode(true);
+        applySTPnL(1000);
+        _sync();
+        uint256 idleShares = kernel.getState().ltOwnedSeniorTrancheShares;
+        assertEq(idleShares, 940_733_772_342_427_093, "the staged premium must be floor(100e18 x 1e18 / 106.3e18) senior shares");
+
+        // Retire the liquidity requirement so the redemption reaches the missing slippage check instead of the
+        // post-op liquidity gate (with zero pool depth and a positive minimum, every LT redemption would revert
+        // LIQUIDITY_REQUIREMENT_VIOLATED and the ignored minimum would be unobservable)
+        vm.prank(ACCOUNTANT_ADMIN);
+        accountant.setMinLiquidity(0);
+
+        // Collapse the pool mark to zero (a worthless BPT): the LT's deployed depth is now worth nothing and the
+        // idle premium senior shares are the LT share's only remaining value
+        bptOracle.setMode(MockBPTOracle.Mode.MANUAL);
+        bptOracle.setTVL(0);
+        SyncedAccountingState memory pre = _sync();
+        assertEq(toUint256(pre.ltRawNAV), 0, "the committed LT mark must read the pinned zero pool value");
+        assertEq(uint8(pre.marketState), uint8(MarketState.PERPETUAL), "a collapsed pool mark must not move the state machine");
+
+        // The provider still holds its full 6e18 seed shares; the gain sync's LT protocol fee shares went to the
+        // fee recipient, growing the supply to 6e18 + 86956521739130434
+        assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 6e18, "the provider must still hold its full LT seed shares");
+        assertEq(liquidityTranche.totalSupply(), 6_086_956_521_739_130_434, "the LT supply must be the 6e18 seed plus the gain sync's fee shares");
+
+        // ACTUAL production behavior: the redemption SUCCEEDS with quoteAssets = 0 against _minQuoteAssetsOut = 1
+        // (and zero venue senior shares against _minSTSharesOut = 1). Both floors sit inside the proportional
+        // venue removal, and a zero venue-asset slice skips that removal entirely.
+        // EXPECTED-CORRECT: revert — a positive minimum against a guaranteed-zero output can never be satisfied
+        vm.prank(LT_PROVIDER);
+        (AssetClaims memory stClaims, uint256 quoteAssets) = liquidityTranche.redeemMultiAsset(6e18, 1, 1, LT_PROVIDER, LT_PROVIDER);
+
+        // The caller's quote floor was violated by a successful call: 0 returned against a minimum of 1
+        assertEq(quoteAssets, 0, "the redemption must return zero quote assets below the caller's 1-wei minimum");
+        assertEq(quoteToken.balanceOf(LT_PROVIDER), 0, "no quote assets may reach the redeemer, its floor notwithstanding");
+        assertEq(bpt.balanceOf(LT_PROVIDER), 0, "the worthless pool position pays out no BPT either");
+
+        // The fair idle premium slice IS paid (the divergence is a broken slippage contract, not a loss of funds):
+        // the idle senior shares are unwound to the yield-bearing asset at the 1.1 rate
+        assertEq(toUint256(stClaims.stAssets), 896_103_896_103_896_103, "the idle slice must unwind to its pro-rata vault shares");
+        assertEq(toUint256(stClaims.jtAssets), 0, "a healthy market's senior claim has no junior-asset leg");
+        assertEq(stJtVault.balanceOf(LT_PROVIDER), 896_103_896_103_896_103, "the unwound vault shares must land on the redeemer");
+
+        // The shares are burned and the kernel state reflects a completed redemption: the idle pile drops by the
+        // redeemed slice while the (worthless) pooled BPT never left kernel custody
+        assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 0, "the redeemed LT shares must be burned");
+        assertEq(liquidityTranche.totalSupply(), 86_956_521_739_130_434, "only the fee recipient's LT shares may remain outstanding");
+        assertEq(
+            kernel.getState().ltOwnedSeniorTrancheShares,
+            940_733_772_342_427_093 - 927_294_718_451_820_991,
+            "the idle pile must drop by exactly the redeemed pro-rata slice"
+        );
+        assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), SEEDED_LT_RAW_NAV, "the pooled BPT must remain in kernel custody, untouched by the skipped removal");
     }
 }

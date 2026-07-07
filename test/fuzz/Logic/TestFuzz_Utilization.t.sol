@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
-import { ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
+import { WAD, ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
 import { toNAVUnits } from "../../../src/libraries/Units.sol";
 import { UtilizationLogic } from "../../../src/libraries/logic/UtilizationLogic.sol";
 import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
@@ -17,9 +17,6 @@ import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
  *      the suite NAV/WAD bounds, derived per property below
  */
 contract TestFuzz_Utilization_Logic is Test {
-    /// @notice WAD fixed-point unit, 1e18 == 100%
-    uint256 internal constant WAD = 1e18;
-
     /// @notice Suite-wide NAV ceiling
     uint256 internal constant MAX_NAV = 1e30;
 

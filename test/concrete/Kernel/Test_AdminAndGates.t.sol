@@ -61,6 +61,32 @@ contract Test_AdminAndGates_Kernel is DayMarketTestBase {
         assertEq(kernel.getState().stSelfLiquidationBonusWAD, newBonusWAD, "the senior tranche self-liquidation bonus must be replaced in kernel storage");
     }
 
+    /**
+     * @notice Pins that the self-liquidation bonus setter accepts any uint64, including values far above 100%
+     *         of the redeemed NAV, where every sibling WAD-fraction setter rejects out-of-range inputs
+     * @dev The bonus is a WAD fraction of the NAV a self-liquidating senior holder redeems: 1e18 means the
+     *      holder is paid their entire redemption over again as a bonus out of the junior tranche's buffer.
+     *      The accountant's WAD-fraction setters all validate (protocol fees are capped, minCoverage and
+     *      minLiquidity must stay below WAD), but this setter stores the raw input with no bound, so an admin
+     *      typo or compromised key can configure a bonus of type(uint64).max = 18446744073709551615, roughly
+     *      18.4467e18, an 1844% bonus. The redemption-side clamps are then the only thing standing between
+     *      that config and draining the junior buffer. Expected behavior: reject any bonus above WAD (1e18)
+     */
+    function test_FINDING_29_SelfLiquidationBonusSetterAcceptsAboveOneHundredPercent() public {
+        // type(uint64).max = 2^64 - 1 = 18446744073709551615, which as a WAD fraction is
+        // 18446744073709551615 / 1e18 = 18.446744073709551615, i.e. ~1844.67% of the redeemed NAV
+        uint64 absurdBonusWAD = type(uint64).max;
+        vm.expectEmit(address(kernel));
+        emit IRoycoDayKernel.SeniorTrancheSelfLiquidationBonusUpdated(absurdBonusWAD);
+        vm.prank(KERNEL_ADMIN);
+        kernel.setSeniorTrancheSelfLiquidationBonus(absurdBonusWAD);
+        assertEq(
+            kernel.getState().stSelfLiquidationBonusWAD,
+            18_446_744_073_709_551_615,
+            "the setter must have stored the unvalidated ~1844% bonus verbatim"
+        );
+    }
+
     /// @notice The market ops admin can wire and unwire the blacklist contract, and each change lands with its event
     function test_SetRoycoBlacklist_WiresAndUnwiresScreening() public {
         address blacklist = makeAddr("BLACKLIST_STAND_IN");

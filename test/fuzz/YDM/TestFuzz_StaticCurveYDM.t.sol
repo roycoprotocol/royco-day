@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
+import { WAD } from "../../../src/libraries/Constants.sol";
 import { MarketState } from "../../../src/libraries/Types.sol";
 import { StaticCurveYDM } from "../../../src/ydm/StaticCurveYDM.sol";
 import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
@@ -15,9 +16,6 @@ import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
  *      the share back for that same key, exactly as a production accountant would
  */
 contract TestFuzz_YieldShare_StaticCurveYDM is Test {
-    /// @notice WAD fixed-point unit, 1e18 == 100%
-    uint256 internal constant WAD = 1e18;
-
     /**
      * @notice Bounds a fuzzed parameter tuple into a curve the production contract can actually store
      * @dev targetU stays in [1, WAD - 1]: the slope of each region divides its rise by the region's run

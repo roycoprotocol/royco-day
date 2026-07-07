@@ -363,6 +363,42 @@ contract Test_AdaptiveCurveYDM_V2 is Test {
         assertEq(ydm.previewYieldShare(MarketState.FIXED_TERM, 9e17), 6e17, "above midpoint");
     }
 
+    /**
+     * @notice Extra wei-exact literal anchors on both sides of the canonical kink, worked out with plain
+     *         arithmetic (never the model's fixed-point ops), so an arithmetic bug shared between the contract
+     *         and the fuzz mirror still trips a hand number
+     */
+    function test_PreviewYieldShare_CanonicalCurveExtraLiteralAnchors() public {
+        AdaptiveCurveYDM_V2 ydm = _canonical();
+        // Below the kink the discount leg applies: Y = yT + Δ*FD with FD = 2e17:
+        //   U=2e17: Δ = (0.2-0.5)/0.5 = -0.6 => 3e17 - 1.2e17 = 1.8e17
+        //   U=4e17: Δ = -0.2                 => 3e17 - 0.4e17 = 2.6e17
+        _assertBothStatesFirstCall(ydm, 2e17, 18e16);
+        _assertBothStatesFirstCall(ydm, 4e17, 26e16);
+        // Above the kink the premium leg applies: Y = yT + Δ*FP with FP = 6e17:
+        //   U=6e17: Δ = (0.6-0.5)/(1-0.5) = 0.2 => 3e17 + 1.2e17 = 4.2e17
+        //   U=8e17: Δ = 0.6                     => 3e17 + 3.6e17 = 6.6e17
+        _assertBothStatesFirstCall(ydm, 6e17, 42e16);
+        _assertBothStatesFirstCall(ydm, 8e17, 66e16);
+    }
+
+    /**
+     * @notice A low-kink curve (target well below half) pins the kink and one point per region as hand literals,
+     *         so the additive shape is anchored where the two normalization denominators are far apart (0.2 below,
+     *         0.8 above) and a swapped-denominator bug cannot cancel out
+     */
+    function test_PreviewYieldShare_LowKinkCurveLiteralAnchors() public {
+        // target=0.2, y0=5e16, yT=25e16, yFull=85e16 => FD=2e17, FP=6e17
+        AdaptiveCurveYDM_V2 ydm = _deploy(2e17);
+        ydm.initializeYDMForMarket(5e16, 25e16, 85e16);
+        // Kink: Y(target) == yT with no adaptation possible on a first call
+        _assertBothStatesFirstCall(ydm, 2e17, 25e16);
+        // Below: U=1e17: Δ = (0.1-0.2)/0.2 = -0.5 => 25e16 - 0.5*2e17 = 15e16
+        _assertBothStatesFirstCall(ydm, 1e17, 15e16);
+        // Above: U=6e17: Δ = (0.6-0.2)/0.8 = 0.5 => 25e16 + 0.5*6e17 = 55e16
+        _assertBothStatesFirstCall(ydm, 6e17, 55e16);
+    }
+
     // =====================================================================
     // Target-utilization boundary coverage (fresh model per target)
     // =====================================================================
@@ -570,6 +606,60 @@ contract Test_AdaptiveCurveYDM_V2 is Test {
         assertEq(ydm.yieldShare(MarketState.PERPETUAL, WAD), WAD, "yieldShare clamped to WAD");
         (uint64 yT,,,) = _readCurve(ydm, address(this));
         assertEq(yT, MAX_YT, "yT saturated to MAX");
+    }
+
+    /**
+     * @notice Down-dormancy clamp literals: ten years parked at zero utilization lands the persisted yield share
+     *         at target exactly on the MIN clamp, zero-floors the clamping call's payout, and afterwards the fixed
+     *         spreads ride on the clamped floor — all hand numbers, derivable without the exponential because e^x
+     *         underflows to zero wei at this horizon
+     * @dev Economically: the additive discount FD = 2e17 dwarfs the clamped floor 1e14 at zero utilization, so the
+     *      pool earns nothing while idle, yet the moment utilization crosses the kink the full fixed premium is
+     *      restored on top of the floor — the spread never decays with the curve
+     */
+    function test_YieldShare_DormancyDownClampLiteralAnchors() public {
+        AdaptiveCurveYDM_V2 ydm = _canonical();
+        uint256 start = 1_000_000;
+        vm.warp(start);
+        ydm.yieldShare(MarketState.PERPETUAL, 0); // stamp only (elapsed 0, curve untouched)
+        vm.warp(start + 3650 days);
+        // Δ = -1 => the linear factor is about -5.0e20 and its half about -2.5e20, both far below expWad's
+        // zero-underflow threshold, so the end and midpoint yield-shares-at-target both clamp to MIN = 1e14.
+        // Trapezoid blend: (3e17 + 1e14 + 2*1e14) / 4 = 300300000000000000 / 4 = 75075000000000000.
+        // Payout at U=0: 75075000000000000 - FD (2e17) is negative => zero-floored output.
+        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 0), 0, "the clamping call zero-floors the payout");
+        assertEq(ydm.yieldShare(MarketState.PERPETUAL, 0), 0, "yieldShare pays the same zero-floored literal");
+        (uint64 yT,,,) = _readCurve(ydm, address(this));
+        assertEq(yT, 1e14, "the persisted yield share at target lands exactly on the MIN clamp");
+        // Same block (elapsed 0, no further adaptation): the kink pays exactly the clamp floor, and above the
+        // kink the FIXED premium spread rides on it: U=75e16 => 1e14 + 0.5*6e17 = 300100000000000000
+        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 5e17), 1e14, "the kink now pays exactly MIN");
+        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 75e16), 300_100_000_000_000_000, "above the kink the fixed spread rides on the clamped floor");
+    }
+
+    /**
+     * @notice Up-dormancy clamp literals: ten years parked at full utilization lands the persisted yield share at
+     *         target exactly on the MAX clamp (WAD) and WAD-caps the payout — hand numbers, since the clamped
+     *         exponent e^{135.3} dwarfs 1/0.3 and saturates both trapezoid samples to MAX
+     * @dev Economically: even a maximally adapted curve cannot promise more than 100% of the senior gain, and
+     *      below the kink the fixed discount still bites, so zero utilization pays exactly WAD - FD
+     */
+    function test_YieldShare_DormancyUpClampLiteralAnchors() public {
+        AdaptiveCurveYDM_V2 ydm = _canonical();
+        uint256 start = 1_000_000;
+        vm.warp(start);
+        ydm.yieldShare(MarketState.PERPETUAL, WAD); // stamp only
+        vm.warp(start + 3650 days);
+        // Both trapezoid samples clamp to MAX = WAD, so the blend is (3e17 + 1e18 + 2e18) / 4 = 825000000000000000.
+        // Payout at U=WAD: 825000000000000000 + FP (6e17) = 1.425e18 >= WAD => capped to WAD exactly.
+        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, WAD), WAD, "the clamping call caps the payout at WAD");
+        assertEq(ydm.yieldShare(MarketState.PERPETUAL, WAD), WAD, "yieldShare pays the same capped literal");
+        (uint64 yT,,,) = _readCurve(ydm, address(this));
+        assertEq(uint256(yT), WAD, "the persisted yield share at target lands exactly on the MAX clamp");
+        // Same block: the kink pays exactly the clamp ceiling, and below the kink the fixed discount still
+        // bites: U=0 => 1e18 - 2e17 = 8e17
+        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 5e17), WAD, "the kink now pays exactly MAX");
+        assertEq(ydm.previewYieldShare(MarketState.PERPETUAL, 0), 8e17, "zero utilization pays exactly WAD minus the fixed discount");
     }
 
     /// Extremely long dormancy still returns and stays bounded (mirror parity at the clamp regime).

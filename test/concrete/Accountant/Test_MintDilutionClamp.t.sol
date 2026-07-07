@@ -64,7 +64,7 @@ contract Test_MintDilutionClamp_JuniorTranche is DayMarketTestBase {
     }
 
     /**
-     * @notice (ii) The I17 dilution state: the junior tranche is wiped to exactly zero effective NAV with its
+     * @notice (ii) The dilution edge the clamp exists for: the junior tranche is wiped to exactly zero effective NAV with its
      *         supply outstanding, then a depositor enters. The mint is exactly the cap
      *         floor(supply x (WAD - eps) / eps) = supply x (1e12 - 1): the depositor captures all but one
      *         part in 1e12 of the tranche, and the supply grows by a bounded factor instead of x value

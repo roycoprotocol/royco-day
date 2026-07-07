@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { IVaultErrors } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultErrors.sol";
 import { IERC20Errors } from "../../../lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
@@ -79,9 +80,9 @@ contract DayMarketHandler is DayMarketTestBase {
      *      doublings than the ~65 that would matter, so the worst later cap computation is
      *      ~1e52 × 1e12 ≈ 1e64 < 1.158e65 and the sync's fee mints add at most ~supply / 9 on top. Sync
      *      liveness therefore cannot be lost to this edge inside a campaign, while the dilution branch
-     *      itself stays exercised at one-unit size. The cliff itself is pinned by
-     *      test_FINDING_11_mintDilutionClamp_residualOverflowCliff in
-     *      test/concrete/Findings/Test_SpecDivergences.t.sol, not re-hunted by campaigns
+     *      itself stays exercised at one-unit size. The cliff itself (the cap computation's Panic(0x11)
+     *      once a supply crosses ~1.158e65) is pinned by the concrete test
+     *      test_FINDING_11_mintDilutionClamp_residualOverflowCliff, not re-hunted by campaigns
      */
     uint256 internal constant TRANCHE_SUPPLY_CAMPAIGN_BOUND = 1e45;
 
@@ -194,6 +195,10 @@ contract DayMarketHandler is DayMarketTestBase {
     uint256 public ghost_syncCount;
     uint256 public ghost_uncoveredLossRealized;
 
+    /// @notice Times a multi-asset redemption succeeded under a positive quote floor because its zero venue
+    ///         slice skipped the proportional removal, the only place the caller's quote floor is checked
+    uint256 public ghost_quoteFloorBypassObserved;
+
     /// @notice Invocations per op label, the anti-vacuity ledger: a run that never scheduled an op is visible here
     mapping(bytes32 op => uint256) public ghost_opCalls;
 
@@ -224,6 +229,7 @@ contract DayMarketHandler is DayMarketTestBase {
     bytes4 internal constant SEL_ZERO_VALUE = IRoycoVaultTranche.INVALID_VALUE_ALLOCATED.selector;
     bytes4 internal constant SEL_ZERO_REDEEM = IRoycoVaultTranche.MUST_REQUEST_NON_ZERO_SHARES.selector;
     bytes4 internal constant SEL_ERC20_BALANCE = IERC20Errors.ERC20InsufficientBalance.selector;
+    bytes4 internal constant SEL_AMOUNT_OUT_BELOW_MIN = IVaultErrors.AmountOutBelowMin.selector;
     bytes4 internal constant SEL_PANIC = bytes4(0x4e487b71);
 
     // =============================
@@ -474,7 +480,11 @@ contract DayMarketHandler is DayMarketTestBase {
             uint256 bal = liquidityTranche.balanceOf(actor);
             // Uniform over the actor's holding, degraded to a single share on an empty balance
             uint256 shares = bound(_shares, 1, bal == 0 ? 1 : bal);
-            _execLtRedeemMultiAsset(actor, shares, s);
+            // One call in four probes the caller's quote slippage floor instead of exiting unbounded, so
+            // both floor regimes stay exercised: a nonzero venue slice must reject an unmeetable floor,
+            // and a zero venue slice silently skips the floor check (that bypass is pinned, not skipped)
+            bool probeQuoteMin = _actorSeed % 4 == 3;
+            _execLtRedeemMultiAsset(actor, shares, probeQuoteMin, s);
             _syncAndVerify("post:ltRedeemMultiAsset");
         }
     }
@@ -951,21 +961,58 @@ contract DayMarketHandler is DayMarketTestBase {
         }
         stJtVault.mintShares(_actor, _stAssets);
         quoteToken.mint(_actor, _quoteAssets);
+        TokenFlows memory f = _snapTokenFlows();
+        uint256 idleLedgerBefore = kernel.getState().ltOwnedSeniorTrancheShares;
         vm.startPrank(_actor);
         stJtVault.approve(address(liquidityTranche), _stAssets);
         quoteToken.approve(address(liquidityTranche), _quoteAssets);
         try liquidityTranche.depositMultiAsset(_stAssets, _quoteAssets, 0, _actor) {
             _recordSuccess("ltDepositMultiAsset");
             ghost_transferredIn[address(stJtVault)] += _stAssets;
+            // Reconcile the venue's ACTUAL token movements, independently of the pricing mirror above,
+            // so a pricing bug shared by the mock venue and its mirror still surfaces as a token flow
+            // that does not balance. A multi-asset deposit moves value one way only: the quote leg must
+            // land in the pool in full, every senior share the deposit minted must land in the pool
+            // (none stranded with the kernel or the depositor), a deposit must never touch the idle
+            // liquidity premium ledger, and every pool token the add minted must sit in kernel custody
+            _flag(
+                quoteToken.balanceOf(address(balancerVault)) == f.venueQuote0 + _quoteAssets,
+                "ltDepositMultiAsset: the deposited quote leg did not land in the pool in full"
+            );
+            _flag(
+                seniorTranche.totalSupply() + f.venueSenior0 == f.stSupply0 + seniorTranche.balanceOf(address(balancerVault)),
+                "ltDepositMultiAsset: minted senior shares do not reconcile with the pool's senior inflow"
+            );
+            _flag(
+                kernel.getState().ltOwnedSeniorTrancheShares == idleLedgerBefore,
+                "ltDepositMultiAsset: a deposit moved the idle liquidity premium ledger"
+            );
+            _flag(
+                bpt.balanceOf(address(kernel)) + f.bptSupply0 == f.kernelBpt0 + bpt.totalSupply(),
+                "ltDepositMultiAsset: pool tokens minted by the add do not reconcile with the kernel's custody"
+            );
         } catch (bytes memory err) {
             _classify("ltDepositMultiAsset", err, p);
         }
         vm.stopPrank();
     }
 
-    /// @dev Runs one multi-asset liquidity redemption under a full mirror of the proportional removal
-    function _execLtRedeemMultiAsset(address _actor, uint256 _shares, Snap memory s) internal {
+    /**
+     * @dev Runs one multi-asset liquidity redemption under a full mirror of the proportional removal.
+     *      With _probeQuoteMin set, the call carries a quote floor one wei above the venue's guaranteed
+     *      proportional output, an amount the redeemer can never receive, so an honestly enforced
+     *      slippage bound must reject the call. When the mirrored venue slice is nonzero the removal
+     *      actually runs and its per-token floor check fires before the share burn, the senior unwind,
+     *      and every post-op gate, so the venue's floor rejection is the only admissible outcome. When
+     *      the mirrored venue slice is zero the kernel skips the removal entirely, and with it the only
+     *      place the caller's quote floor is checked: the call succeeds paying zero quote below the
+     *      stated minimum. That bypass is pinned here (success, zero quote out, counted in
+     *      ghost_quoteFloorBypassObserved) so it stays visible to campaigns instead of being skipped
+     */
+    function _execLtRedeemMultiAsset(address _actor, uint256 _shares, bool _probeQuoteMin, Snap memory s) internal {
         Pred memory p;
+        uint256 minQuoteOut;
+        bool probeMustRevert;
         if (s.fixedTerm) {
             _expect(p, SEL_DISABLED_FT);
         } else if (s.ltSupply == 0 || s.stSupply == 0) {
@@ -979,25 +1026,90 @@ contract DayMarketHandler is DayMarketTestBase {
             uint256 stEffAfter = s.stEffectiveNAV - (r.totalRedeemed - r.bonusNAV);
             if (enforced && RoycoTestMath.computeLiquidityUtilization(stEffAfter, s.minLiquidityWAD, r.ltRawAfter) > WAD) _expect(p, SEL_LIQUIDITY);
             if (_shares > liquidityTranche.balanceOf(_actor)) _expect(p, SEL_ERC20_BALANCE);
+            if (_probeQuoteMin) {
+                // The unmeetable floor: one wei above the proportional removal's guaranteed quote output
+                minQuoteOut = r.quoteOut + 1;
+                if (r.venueLtUnits != 0) {
+                    // A nonzero venue slice reaches the removal, whose floor check pre-empts the share
+                    // burn (so an oversized-shares balance revert cannot fire first) and every post-op
+                    // gate: narrow the prediction set to exactly the venue's floor rejection, making a
+                    // success or any other revert a recorded violation
+                    Pred memory onlyFloorRejection;
+                    p = onlyFloorRejection;
+                    _expect(p, SEL_AMOUNT_OUT_BELOW_MIN);
+                    probeMustRevert = true;
+                }
+            }
         }
+        TokenFlows memory f = _snapTokenFlows();
         uint256 vaultSharesBefore = stJtVault.balanceOf(_actor);
         uint256 quoteBefore = quoteToken.balanceOf(_actor);
         uint256 idleLedgerBefore = kernel.getState().ltOwnedSeniorTrancheShares;
         vm.prank(_actor);
-        try liquidityTranche.redeemMultiAsset(_shares, 0, 0, _actor, _actor) {
+        try liquidityTranche.redeemMultiAsset(_shares, 0, minQuoteOut, _actor, _actor) {
+            // A caller's slippage floor is a postcondition: an exit that cannot pay it must not settle
+            _flag(!probeMustRevert, "ltRedeemMultiAsset: the venue removal accepted a quote floor above its guaranteed output");
+            if (_probeQuoteMin && !probeMustRevert) {
+                // The zero-venue-slice bypass, pinned as current behavior: no removal ran, so the caller's
+                // positive quote floor was never checked and the exit settled with zero quote below it,
+                // handing over only the idle premium slice claims. The counter keeps the bypass visible
+                ghost_quoteFloorBypassObserved++;
+                _flag(quoteToken.balanceOf(_actor) == quoteBefore, "ltRedeemMultiAsset: a zero venue slice paid quote despite skipping the removal");
+            }
             _recordSuccess("ltRedeemMultiAsset");
             ghost_transferredOut[address(stJtVault)] += stJtVault.balanceOf(_actor) - vaultSharesBefore;
             ghost_transferredOut[address(quoteToken)] += quoteToken.balanceOf(_actor) - quoteBefore;
             // The redeemer's slice of the idle liquidity premium senior shares is unwound on its behalf rather than handed over as shares
-            ghost_idlePremiumSeniorSharesPaidToRedeemers += idleLedgerBefore - kernel.getState().ltOwnedSeniorTrancheShares;
+            uint256 idleUnwound = idleLedgerBefore - kernel.getState().ltOwnedSeniorTrancheShares;
+            ghost_idlePremiumSeniorSharesPaidToRedeemers += idleUnwound;
+            // Reconcile the venue's ACTUAL token movements, independently of the pricing mirror above,
+            // so a pricing bug shared by the mock venue and its mirror still surfaces as a token flow
+            // that does not balance. Written additively so a flow moving the wrong way fails the check
+            // instead of underflowing: the pool's quote outflow must all land with the redeemer, every
+            // senior share pulled from the pool or the idle pile must be burned (none parked with the
+            // kernel), and the burned pool tokens must come exclusively from the kernel's custody
+            _flag(
+                quoteToken.balanceOf(address(balancerVault)) + quoteToken.balanceOf(_actor) == f.venueQuote0 + quoteBefore,
+                "ltRedeemMultiAsset: the pool's quote outflow does not reconcile with the redeemer's quote gain"
+            );
+            _flag(
+                seniorTranche.totalSupply() + f.venueSenior0 + idleUnwound == f.stSupply0 + seniorTranche.balanceOf(address(balancerVault)),
+                "ltRedeemMultiAsset: burned senior shares do not reconcile with the pool withdrawal plus the idle slice"
+            );
+            _flag(
+                bpt.totalSupply() + f.kernelBpt0 == f.bptSupply0 + bpt.balanceOf(address(kernel)),
+                "ltRedeemMultiAsset: burned pool tokens do not reconcile with the kernel's custody outflow"
+            );
         } catch (bytes memory err) {
             _classify("ltRedeemMultiAsset", err, p);
         }
     }
 
     // =============================
-    // Venue mirrors (exact reproductions of the mock venue's pricing for gate prediction)
+    // Venue mirrors (exact reproductions of the mock venue's pricing for gate prediction). Because the
+    // mirror and the mock share their pricing formulas, the multi-asset executors additionally reconcile
+    // the venue's ACTUAL token transfers (balance and supply deltas) after every successful op, so a
+    // pricing defect common to both sides still surfaces as a token flow that does not balance
     // =============================
+
+    /// @dev Token balances captured around a multi-asset op so its actual transfers can be reconciled
+    ///      independently of the pricing mirror
+    struct TokenFlows {
+        uint256 venueQuote0;
+        uint256 venueSenior0;
+        uint256 stSupply0;
+        uint256 kernelBpt0;
+        uint256 bptSupply0;
+    }
+
+    /// @dev Captures the balances the venue-flow reconciliation compares against after a multi-asset op
+    function _snapTokenFlows() internal view returns (TokenFlows memory f) {
+        f.venueQuote0 = quoteToken.balanceOf(address(balancerVault));
+        f.venueSenior0 = seniorTranche.balanceOf(address(balancerVault));
+        f.stSupply0 = seniorTranche.totalSupply();
+        f.kernelBpt0 = bpt.balanceOf(address(kernel));
+        f.bptSupply0 = bpt.totalSupply();
+    }
 
     /// @dev Everything the multi-asset deposit prediction needs about the venue add's outcome
     struct VenueAdd {
@@ -1034,17 +1146,23 @@ contract DayMarketHandler is DayMarketTestBase {
         uint256 ltRawAfter;
         uint256 totalRedeemed;
         uint256 bonusNAV;
+        /// @dev The redeemer's pool-token slice, zero means the kernel skips the removal (and its floors) entirely
+        uint256 venueLtUnits;
+        /// @dev The quote leg the proportional removal pays the receiver, the reference for the quote-floor probe
+        uint256 quoteOut;
     }
 
     /// @dev Mirrors the proportional removal, the senior unwind, and the exit bonus for gate prediction
     function _mirrorVenueRemoval(Snap memory s, uint256 _shares) internal view returns (RemovalMirror memory r) {
         uint256 ltClaimUnits = s.ltRawNAV == 0 ? 0 : _quoteNAVToLTUnits(s.ltRawNAV);
         uint256 userLt = ltClaimUnits.mulDiv(_shares, s.ltSupply);
+        r.venueLtUnits = userLt;
         uint256 idleSlice = s.ltOwnedSeniorTrancheShares.mulDiv(_shares, s.ltSupply);
         uint256[2] memory balances = balancerVault.getPoolBalances(address(bpt));
         uint256 bptSupply = bpt.totalSupply();
         uint256 stOut = balances[stPoolTokenIndex].mulDiv(userLt, bptSupply);
         uint256 qOut = balances[1 - stPoolTokenIndex].mulDiv(userLt, bptSupply);
+        r.quoteOut = qOut;
         {
             uint256 rate = _mirrorSeniorRate(s.stEffectiveNAV, s.stSupply);
             uint256 oracleQuotePrice = bptOracle.getPriceWAD(address(quoteToken));
@@ -1627,26 +1745,39 @@ contract DayMarketHandler is DayMarketTestBase {
         return r == 0 ? 1 : r;
     }
 
+    /// @dev Values senior vault shares in NAV units at the kernel quoter's committed senior rate. Every
+    ///      prediction prices assets at the exact per-block rate production applies, the independence of
+    ///      a mirror lives in its surrounding arithmetic, never in a re-derived price
     function _quoteSTUnits(uint256 _units) internal view returns (uint256) {
         return toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(_units)));
     }
 
+    /// @dev Values junior vault shares in NAV units at the kernel quoter's committed junior rate, the
+    ///      same per-block price source the junior deposit and redemption paths read
     function _quoteJTUnits(uint256 _units) internal view returns (uint256) {
         return toUint256(kernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(_units)));
     }
 
+    /// @dev Values pool tokens in NAV units at the kernel quoter's committed pool mark, so liquidity-gate
+    ///      predictions and the removal mirror price depth exactly as the accountant marks it
     function _quoteLTUnits(uint256 _units) internal view returns (uint256) {
         return toUint256(kernel.ltConvertTrancheUnitsToNAVUnits(toTrancheUnits(_units)));
     }
 
+    /// @dev The backward conversion, NAV units to senior vault shares, sizing the senior leg of a claim
+    ///      the way production scales a redeemer's proportional slice
     function _quoteNAVToSTUnits(uint256 _nav) internal view returns (uint256) {
         return toUint256(kernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(_nav)));
     }
 
+    /// @dev The backward conversion, NAV units to junior vault shares, sizing the junior leg of a
+    ///      redemption claim at the same committed rate production uses
     function _quoteNAVToJTUnits(uint256 _nav) internal view returns (uint256) {
         return toUint256(kernel.jtConvertNAVUnitsToTrancheUnits(toNAVUnits(_nav)));
     }
 
+    /// @dev The backward conversion, NAV units to pool tokens, sizing the venue slice a liquidity
+    ///      redemption burns at the committed pool mark
     function _quoteNAVToLTUnits(uint256 _nav) internal view returns (uint256) {
         return toUint256(kernel.ltConvertNAVUnitsToTrancheUnits(toNAVUnits(_nav)));
     }

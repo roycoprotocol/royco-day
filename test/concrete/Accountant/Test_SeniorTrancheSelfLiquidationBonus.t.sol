@@ -11,8 +11,8 @@ import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
 /**
  * @title Test_SeniorTrancheSelfLiquidationBonus_Accountant
  * @notice Hand-derived scenarios for the senior tranche self-liquidation bonus through the SelfLiquidationHarness mock — the
- *         strict-less threshold gate, the bonus clamped by each of the three min-terms in turn, both
- *         U-neutral sourcing cases at both co-investment values, the early-outs, the
+ *         strict-less threshold gate, the bonus clamped by each of the three min-terms in turn, the above-WAD
+ *         config clamp, both U-neutral sourcing cases at both co-investment values, the early-outs, the
  *         denominator-positivity boundary, and the coverageUtilization non-increase invariant through a real
  *         accountant post-op
  * @dev The mock converts tranche units to NAV units 1:1, so every tranche-unit literal doubles as its NAV
@@ -171,6 +171,65 @@ contract Test_SeniorTrancheSelfLiquidationBonus_Accountant is AccountantTestBase
         assertEq(toUint256(bonus), 5e18, "the entire junior buffer is the bonus");
         _assertClaims(out, 100e18, 0, 100e18, "bonus from JT's claim on ST assets");
         assertEq(RoycoTestMath.seniorTrancheSelfLiquidationBonus(_rtmIn(s, 0.5e18, c)), 5e18, "RTM jtEffectiveNAV-bound bonus");
+    }
+
+    /**
+     * A bonus configuration above 100% of the redeemed NAV — the config slot is a raw uint64 with no
+     * upper-bound validation, so 200% and even the ~1844% ceiling are storable — can never pay past the
+     * junior buffer or the coverage-utilization-neutral cap (SelfLiquidationLogic.sol:53 clamps by both).
+     * The oversized desired term drops out of the min entirely, so both expected caps below are derived from
+     * the junior buffer and the U' <= U inequality alone, never from the configured multiple.
+     * State (stRawNAV 100e18, jtRawNAV 20e18, stEffectiveNAV 60e18, jtEffectiveNAV 60e18, not coinvested):
+     * jtClaimOnST = 60e18 - 20e18 = 40e18. Breached: minCoverage 0.72e18 gives
+     * coverageUtilization = ceil(100e18 * 0.72e18 / 60e18) = 1.2e18 >= the 1.1e18 liquidation threshold.
+     * The redeemer claims (stAssets 50e18, jtAssets 0, nav 60e18).
+     * Cap A, the junior buffer: jtEffectiveNAV = 60e18 — JT cannot fund a bonus it does not hold.
+     * Cap B, the U-neutral max, from BONUS_ST * (exposure - jtEff) + BONUS_JT * exposure <= jtEff * redemptionSTLeg:
+     *   budget = 60e18 * 50e18 = 3000e36. ST-asset sourcing first: BONUS_ST <= 3000e36 / (100e18 - 60e18)
+     *   = 75e18, but JT's claim on ST assets is only 40e18, so BONUS_ST = 40e18 (spending 40e18 * 40e18
+     *   = 1600e36 of the budget); then BONUS_JT <= (3000e36 - 1600e36) / 100e18 = 14e18.
+     *   Cap B = 40e18 + 14e18 = 54e18.
+     * Paid bonus = min(60e18, 54e18) = 54e18 at BOTH oversized configs, riding 40e18 on the stAssets leg and
+     * 14e18 on the jtAssets leg. Post-redemption marks: stRaw = 100e18 - 50e18 - 40e18 = 10e18 and
+     * jtRaw = jtEff = 20e18 - 14e18 = 6e18, so U' = ceil(10e18 * 0.72e18 / 6e18) = 1.2e18 == U exactly —
+     * the clamp is tight, and one more bonus wei (jtEff 6e18 - 1) would give ceil(7.2e36 / (6e18 - 1))
+     * = 1.2e18 + 1 > U. An above-WAD config therefore cannot eat past the junior buffer or worsen the
+     * coverage of the LPs who stay behind
+     */
+    function test_SeniorTrancheSelfLiquidationBonus_AboveWADBonusClampedToJuniorBufferAndNeutralCap() public {
+        uint256 coverageUtilizationPre = RoycoTestMath.computeCoverageUtilization(100e18, 20e18, false, 0.72e18, 60e18);
+        assertEq(coverageUtilizationPre, 1.2e18, "hand-derived breached coverage utilization");
+        SyncedAccountingState memory s = _bonusState(100e18, 20e18, 60e18, 60e18, false, coverageUtilizationPre);
+        AssetClaims memory c = _claims(50e18, 0, 60e18);
+
+        // 200% of the redeemed NAV: desired = 120e18 dwarfs both caps, paid = min(60e18, 54e18) = 54e18
+        sll.setSelfLiquidationBonusWAD(2e18);
+        (AssetClaims memory out, NAV_UNIT bonus) = sll.applyBonus(s, c);
+        assertEq(toUint256(bonus), 54e18, "200% config clamps to the smaller of the two caps");
+        _assertClaims(out, 90e18, 14e18, 114e18, "clamped bonus split across both source legs");
+        assertEq(RoycoTestMath.seniorTrancheSelfLiquidationBonus(_rtmIn(s, 2e18, c)), 54e18, "RTM 200% clamp");
+
+        // The largest storable config (~1844% of the redeemed NAV) pays exactly the same clamped bonus
+        sll.setSelfLiquidationBonusWAD(type(uint64).max);
+        (out, bonus) = sll.applyBonus(s, c);
+        assertEq(toUint256(bonus), 54e18, "max-uint64 config clamps identically");
+        _assertClaims(out, 90e18, 14e18, 114e18, "identical clamped claim legs at the max config");
+        assertEq(RoycoTestMath.seniorTrancheSelfLiquidationBonus(_rtmIn(s, type(uint64).max, c)), 54e18, "RTM max-uint64 clamp");
+
+        // Recompute coverage utilization on the post-redemption marks (stRaw 10e18 after the 50e18 redemption
+        // leg and the 40e18 ST-sourced bonus leave, jtRaw = jtEff = 6e18 after the 14e18 JT-sourced bonus
+        // leaves): U' == U byte-exact, so paying the clamped bonus is utilization-neutral even under an
+        // above-WAD config
+        uint256 coverageUtilizationPost = RoycoTestMath.computeCoverageUtilization(10e18, 6e18, false, 0.72e18, 6e18);
+        assertEq(coverageUtilizationPost, 1.2e18, "hand-derived post coverage utilization, exactly neutral");
+        assertLe(coverageUtilizationPost, coverageUtilizationPre, "an above-WAD config never increases coverage utilization");
+        // The cap is maximally tight: one extra bonus wei out of the JT self-claim would leave jtEff at
+        // 6e18 - 1 and push utilization to ceil(7.2e36 / (6e18 - 1)) = 1.2e18 + 1, strictly above U
+        assertEq(
+            RoycoTestMath.computeCoverageUtilization(10e18, 6e18 - 1, false, 0.72e18, 6e18 - 1),
+            1.2e18 + 1,
+            "one more bonus wei would increase coverage utilization"
+        );
     }
 
     /*//////////////////////////////////////////////////////////////////////

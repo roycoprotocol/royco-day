@@ -19,13 +19,12 @@ import { MarketFuzzTestBase } from "../../utils/MarketFuzzTestBase.sol";
  *      family). The dust slacks between the reported max and the algebraic gate boundary are therefore:
  *      - senior deposit, coverage leg: stDust + jtDust = 2 wei of slack
  *      - senior deposit, liquidity leg: stDust = 1 wei of slack
- *      - junior redemption: stDust + jtDust + the 2 wei rounding fudge, all amplified by the 1/0.8 coverage
- *        retention, so the slack is computed as (algebraic bound - reported max) and consumed explicitly
+ *      - junior redemption: the two dust tolerances plus a 2 wei guard for the gate's internal ceil, all
+ *        amplified by the 1/0.8 coverage retention into a slack of exactly 5 or 6 shares (derived and
+ *        bracketed in the test), consumed explicitly down to the algebraic boundary
  *      - liquidity redemption: stDust = 1 wei of slack
  */
 contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
-    using Math for uint256;
-
     /**
      * Scenario: a flat seeded market reports its max senior deposit, the depositor fills exactly that capacity,
      * then consumes the dust slack up to the algebraic gate boundary, and the very next wei reverts on the gate
@@ -92,24 +91,35 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
      * Derivation (flat marks, JT holds no cross-claim so shares, NAV, and withdrawn value are all 1:1):
      *   post-redemption coverage gate for a total withdrawal w:
      *     ceil((st + jt - w) * 0.2e18 / (jt - w)) <= WAD  <=>  4w <= 4*jt - st  <=>  w <= floor((4jt - st)/4)
-     *   production max: surplus = jt - ceil((st + jt)/5) - stDust - jtDust - 2 (the 2 wei rounding fudge),
-     *     scaled by the 1/(1 - 0.2) coverage retention: max = floor(surplus * 1e18 / 0.8e18), which sits at
-     *     least 4 wei under the boundary, so the slack is computed and consumed explicitly
+     *   the view holds back a safety margin before inverting that gate. Rounding the required 20% coverage
+     *   up against the redeemer costs k/5 wei of coverage surplus, where k = (5 - (st + jt) % 5) % 5 pads
+     *   st + jt to the next multiple of 5; the market's two 1-wei NAV dust tolerances plus a 2-wei guard for
+     *   the gate's internal ceil cost 4 more wei. A withdrawn wei frees only 0.8 wei of surplus (it shrinks
+     *   the required coverage by 0.2 as it leaves), so the 4 + k/5 wei holdback prices at
+     *   (4 + k/5) / 0.8 = 5 + k/4 shares of headroom, i.e. always 5 or 6 whole shares:
+     *     reportedMax = floor((4*jt - st - k - 20) / 4)
      */
     function testFuzz_MaxJuniorRedemption_DrainsCoverageSurplusAndOneMoreShareReverts(uint256 _stSeed, uint256 _jtSeed) public {
         uint256 st = bound(_stSeed, 1e18, 1e27); // uniform over 9 orders of magnitude of senior seed size
         uint256 jt = bound(_jtSeed, st / 2, 2 * st); // uniform coverage ratios from 2:1 to 1:2, surplus always positive
         _seedFlatMarket(st, jt, 0);
 
-        // The production closed form restated: required coverage, the fudged surplus, and the retention scale-up
-        uint256 required = (st + jt).ceilDiv(5);
-        uint256 surplus = jt - required - 4;
-        uint256 expectedMax = surplus.mulDiv(1e18, 0.8e18);
+        // The hand-derived closed form (derivation above) in plain checked integer arithmetic: k pads the
+        // flat exposure st + jt up to the next multiple of 5 (the ceil in the required 20% coverage)
+        uint256 k = (5 - (st + jt) % 5) % 5;
+        uint256 expectedMax = (4 * jt - st - k - 20) / 4;
         uint256 reportedMax = juniorTranche.maxRedeem(JT_PROVIDER);
-        assertEq(reportedMax, expectedMax, "reported max junior redemption must equal floor((jt - ceil((st + jt)/5) - 4) / 0.8)");
+        assertEq(reportedMax, expectedMax, "reported max junior redemption must equal floor((4jt - st - k - 20) / 4)");
         (uint256 rtmST, uint256 rtmJT) = RoycoTestMath.maxJTWithdrawal(st, jt, st, jt, true, 0.2e18, 1, 1);
         assertEq(rtmST, 0, "a flat market withdraws nothing from the senior raw NAV");
         assertEq(rtmJT, expectedMax, "independent mirror must agree with the reported max");
+
+        // Independent bracket that needs no closed form at all: the view must never advertise a redemption
+        // past the algebraic coverage boundary (or executing the advertised max could revert on the gate),
+        // and its safety holdback is at most 6 shares (or the view would sandbag the junior LP's exit)
+        uint256 boundary = (4 * jt - st) / 4;
+        assertLe(reportedMax + 5, boundary, "the reported max must hold back at least 5 shares of gate headroom");
+        assertGe(reportedMax + 6, boundary, "the reported max may hold back at most 6 shares of gate headroom");
 
         // Redeeming exactly the reported max must succeed and leave the coverage gate at or below 100%
         vm.prank(JT_PROVIDER);
@@ -122,7 +132,6 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         );
 
         // Consume the slack to the algebraic boundary w <= floor((4jt - st)/4), still passing
-        uint256 boundary = (4 * jt - st) / 4;
         uint256 slack = boundary - reportedMax;
         vm.prank(JT_PROVIDER);
         juniorTranche.redeem(slack, JT_PROVIDER, JT_PROVIDER);
@@ -145,7 +154,8 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
      * Derivation (flat marks, NAV-per-BPT exactly 1.0 so shares == BPT == NAV):
      *   post-redemption liquidity gate for a total withdrawal w:
      *     ceil(st * 0.05e18 / (depth - w)) <= WAD  <=>  ceil(st/20) <= depth - w  <=>  w <= depth - ceil(st/20)
-     *   production max = depth - ceil(st/20) - stDust = boundary - 1, so the slack is exactly 1 share
+     *   the view holds back one extra share, the market's 1-wei ST NAV dust tolerance:
+     *     reportedMax = depth - ceil(st/20) - 1, so the slack to the boundary is exactly 1 share
      */
     function testFuzz_MaxLiquidityRedemption_DrainsToLiquidityFloorAndOneMoreShareReverts(uint256 _stSeed, uint256 _jtSeed, uint256 _extraQuoteSeed) public {
         uint256 st = bound(_stSeed, 1e18, 1e27); // uniform over 9 orders of magnitude of senior seed size
@@ -154,15 +164,29 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         uint256 extraQuote = bound(_extraQuoteSeed, 1, 4 * st / QUOTE_TO_NAV_SCALE);
         uint256 depth = _seedFlatMarket(st, jt, extraQuote);
 
-        // The production closed form restated: withdrawable = depth - ceil'd required floor - 1 wei of ST dust
-        uint256 requiredFloor = st.ceilDiv(20);
+        // The hand-derived closed form (derivation above) in plain checked integer arithmetic: the pool must
+        // keep at least 5% of the senior effective NAV, rounded up against the redeemer, plus 1 wei of ST dust
+        uint256 requiredFloor = (st + 19) / 20;
         uint256 expectedMax = depth - requiredFloor - 1;
         uint256 reportedMax = liquidityTranche.maxRedeem(LT_PROVIDER);
         assertEq(reportedMax, expectedMax, "reported max liquidity redemption must equal depth - ceil(st/20) - 1");
-        // Flat coverage utilization ceil((st + jt) * 0.2e18 / jt) is far below the 6.4667e18 liquidation
-        // threshold at these seed ratios, so no liquidation bypass is active
+
+        // Independent conjunct that needs no closed form: the view must never advertise depth past the
+        // required liquidity floor, or executing the advertised max would breach the no-run guarantee
+        assertLe(reportedMax + requiredFloor, depth, "the reported max must leave the required liquidity floor in the pool");
+
+        // A breached liquidation threshold would bypass the liquidity gate and unlock the full depth, so
+        // prove the bypass is inactive rather than assume it: with the market's 20% minimum coverage and
+        // jt >= floor(st/2), the flat coverage utilization ceil((st + jt) * 0.2e18 / jt) is at most
+        // 0.6e18 + 1 wei (since (st + jt) / jt <= 3 up to the flooring in jt's lower bound), while the
+        // deployed liquidation threshold must exceed WAD -- a market cannot be declared in liquidation
+        // before its coverage is even fully utilized
+        uint256 flatCoverageUtilizationWAD = RoycoTestMath.computeCoverageUtilization(st, jt, true, 0.2e18, jt);
+        uint256 liquidationThresholdWAD = accountant.getState().coverageLiquidationUtilizationWAD;
+        assertLe(flatCoverageUtilizationWAD, 0.6e18 + 1, "flat 2:1-to-1:2 seeds mark at most 60% coverage utilization");
+        assertGt(liquidationThresholdWAD, WAD, "the deployed liquidation threshold must sit above full coverage utilization");
         assertEq(
-            RoycoTestMath.maxLTWithdrawal(depth, st, 0.05e18, 1, RoycoTestMath.computeCoverageUtilization(st, jt, true, 0.2e18, jt), 6.4667e18),
+            RoycoTestMath.maxLTWithdrawal(depth, st, 0.05e18, 1, flatCoverageUtilizationWAD, liquidationThresholdWAD),
             expectedMax,
             "independent mirror must agree with the reported max"
         );
