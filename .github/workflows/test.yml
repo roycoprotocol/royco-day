@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -21,6 +23,8 @@ jobs:
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: "1.7.1"
 
       - name: Show Forge version
         run: |
@@ -30,6 +34,9 @@ jobs:
         run: |
           forge fmt --check
         id: fmt
+        # Blocking on PRs (enforce style on contributions); advisory on push to main and
+        # manual dispatch, so a formatting diff never hides build/test breakage on main.
+        continue-on-error: ${{ github.event_name != 'pull_request' }}
 
       - name: Run Forge build
         run: |
@@ -37,12 +44,21 @@ jobs:
         id: build
 
       - name: Run Forge tests
+        # Fork suites (Neutrl_snUSD, Neutrl_snUSD_Senior, DayMarketDeploymentTest,
+        # RoycoFactoryTest) need an archive-node MAINNET_RPC_URL. When that secret is unset we skip
+        # them so the rest of the tests still run. Once the secret is added the fork tests run
+        # automatically.
         run: |
-          forge test -vvv
+          if [ -z "${MAINNET_RPC_URL}" ]; then
+            echo "MAINNET_RPC_URL not set: skipping fork suites"
+            forge test -vvv --no-match-contract 'Neutrl_snUSD|DayMarketDeploymentTest|RoycoFactoryTest'
+          else
+            forge test -vvv
+          fi
         id: test
         env:
           MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
           AVALANCHE_RPC_URL: ${{ secrets.AVALANCHE_RPC_URL }}
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
           ARBITRUM_RPC_URL: ${{ secrets.ARBITRUM_RPC_URL }}
-          FOUNDRY_FUZZ_RUNS: ${{ secrets.FOUNDRY_FUZZ_RUNS }}
+          FOUNDRY_FUZZ_RUNS: ${{ secrets.FOUNDRY_FUZZ_RUNS || 200 }}
