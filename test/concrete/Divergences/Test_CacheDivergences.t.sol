@@ -22,7 +22,7 @@ contract Test_CacheDivergences is Test {
     uint256 internal constant TOP_BIT = 57896044618658097711785492504343953926634992332820282019728792003956564819968;
 
     /**
-     * @notice FINDING 26: writing a value with the top bit set does not revert; the value silently reads back
+     * @notice DIVERGENCE 26: writing a value with the top bit set does not revert; the value silently reads back
      *         with the top bit stripped, breaking read-after-write identity
      * @dev The top bit doubles as the populated marker, so a stored slot cannot tell "value 2^255 + x" apart
      *      from "value x". EXPECTED-CORRECT: `_write` reverts on any value >= 2^255 — a cache that silently
@@ -32,7 +32,7 @@ contract Test_CacheDivergences is Test {
      *      write 2^255:     stored = 2^255 | 2^255 = 2^255 (marker only), read = 2^255 ^ 2^255 = 0
      *      write 2^255 + 7: stored = (2^255 + 7) | 2^255 = 2^255 + 7,     read = (2^255 + 7) ^ 2^255 = 7
      */
-    function test_FINDING_26_writeValueWithTopBitSet_SilentlyReadsBackTopBitStripped() public {
+    function test_DIVERGENCE_26_writeValueWithTopBitSet_SilentlyReadsBackTopBitStripped() public {
         // Exactly the marker bit: the write is indistinguishable from caching zero. A consumer that stored
         // 2^255 gets back 0 on a "hit" — e.g. a rate cache would price everything at zero without any revert.
         Cache._write(CacheKey.ST_SHARE_RATE, TOP_BIT); // does NOT revert (the divergence)

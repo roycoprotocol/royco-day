@@ -109,7 +109,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
      *      LT the most relative to what it receives. Expected behavior: a zero floor should defer the add and leave
      *      the shares idle and claimable, exactly as a breached gate does
      */
-    function test_FINDING_23_ReinvestLiquidityPremium_ZeroMinOutFloor_AddExecutesWithoutSlippageProtection() public {
+    function test_DIVERGENCE_23_ReinvestLiquidityPremium_ZeroMinOutFloor_AddExecutesWithoutSlippageProtection() public {
         uint256 idleShares = _accrueIdlePremiumSeniorShares();
         _assertSeededGateFixture(idleShares);
 
@@ -153,7 +153,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
      *      fully bricked: no sync, no deposit, no redemption. Expected behavior: tolerated deferral — the sync
      *      commits, the premium stays idle and claimable, and only the reinvestment waits for a sane oracle
      */
-    function test_FINDING_23_SyncTrancheAccounting_BricksWhenOracleTVLZeroWithBPTSupply() public {
+    function test_DIVERGENCE_23_SyncTrancheAccounting_BricksWhenOracleTVLZeroWithBPTSupply() public {
         _seedMarket(100e18, 50e18);
 
         // The first sync initializes the premium accrual clock

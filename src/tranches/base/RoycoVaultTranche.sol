@@ -212,7 +212,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 trancheTotalShares) =
             IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
         if (TRANCHE_TYPE() == TrancheType.LIQUIDITY) {
-            // Re-base the LT claims to the BPT leg only
+            // We exclude any idle (not reinvested) ST shares from the LT claims in order to ensure that its share price is up only for any oracles
+            // NOTE: This is required since any reinvestment can incur some slippage
             trancheClaims.stShares = 0;
             trancheClaims.nav = state.ltRawNAV;
         }

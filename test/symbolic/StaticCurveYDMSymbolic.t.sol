@@ -17,15 +17,19 @@ import { StaticCurveYDM } from "../../src/ydm/StaticCurveYDM.sol";
  *         utilization range, the uninitialized-market revert with its zero-sentinel soundness, and the purity of
  *         the state-mutating entrypoint (view-equivalent, market-state-independent, and writes nothing)
  * @dev Run with `forge test --symbolic --match-path test/symbolic/StaticCurveYDMSymbolic.t.sol`. Functions
- *      prefixed check_ are discovered only under --symbolic. Curve-shape checks deploy a fresh model inside the
- *      check with a fully symbolic target utilization in [1, WAD-1] and a symbolic monotone curve constrained to
- *      the slope frontier, so every property is proven for every constructible instance at once. The
- *      initialization partition instead uses the concrete target grid deployed in setUp, because its acceptance
- *      frontier must be exercised on both sides (a symbolic target would entangle the two frontier products)
+ *      prefixed check_ are discovered only under --symbolic. The target utilization (the kink) is always a
+ *      concrete deploy-time value here: a contract deployed with a symbolic constructor argument bakes a
+ *      symbolic immutable into its runtime code, and the engine cannot execute calls into such code. Curve
+ *      points and utilization stay fully symbolic. Curve-shape checks run on a model with an asymmetric 70%
+ *      kink (both leg divisors are distinct and neither divides WAD evenly, so both stored slopes genuinely
+ *      floor), and the initialization partition runs per concrete grid target so each leg's uint64 slope
+ *      frontier is exercised on both sides
  * @dev Expected values are derived independently: every division-shaped expectation is either a plain checked
  *      multiply and divide (all products here are far below 2^256 since curve points fit uint64 and utilization
  *      is capped at WAD = 1e18) or a two-sided floor bracket stated on the production outputs, never a re-run of
- *      the production mulDiv chain as its own expectation
+ *      the production mulDiv chain as its own expectation. Padding inputs (assumed at most 3 and folded away as
+ *      exact identities) only push division-shaped queries past the engine's built-in arithmetic heuristic,
+ *      which cannot conclude on them, so the queries reach the real SMT solver
  */
 contract StaticCurveYDMSymbolicSpec is Test {
     /// @dev WAD fixed-point unit, 1e18 == 100%
@@ -33,6 +37,13 @@ contract StaticCurveYDMSymbolicSpec is Test {
 
     /// @dev The uint64 ceiling: a computed slope at or above this cannot be stored and makes initialization revert
     uint256 internal constant UINT64_CEILING = uint256(1) << 64;
+
+    /**
+     * @dev The concrete kink for every curve-shape check: 70%, asymmetric on purpose so the below-target
+     *      divisor (0.7e18) and the above-target divisor (0.3e18) are distinct and neither divides WAD
+     *      evenly, making both stored slopes genuinely floored rather than exact
+     */
+    uint256 internal constant SHAPE_TARGET = 0.7e18;
 
     /// @dev Concrete target utilization grid for the initialization partition: the extremes (1 wei and WAD - 1)
     ///      make each slope's uint64 frontier reachable, the mid targets keep both slopes always storable
@@ -44,35 +55,37 @@ contract StaticCurveYDMSymbolicSpec is Test {
     /// @dev A model constructed with the target utilization at exactly WAD (accepted by the constructor)
     StaticCurveYDM internal targetAtWadModel;
 
+    /// @dev The model every curve-shape check initializes and queries, deployed with the 70% kink
+    StaticCurveYDM internal shapeModel;
+
     function setUp() public {
         partitionTargets = [uint256(1), 5e16, 5e17, 9e17, WAD - 1];
         for (uint256 i; i < partitionTargets.length; ++i) {
             partitionModels[i] = new StaticCurveYDM(partitionTargets[i]);
         }
         targetAtWadModel = new StaticCurveYDM(WAD);
+        shapeModel = new StaticCurveYDM(SHAPE_TARGET);
     }
 
     /*//////////////////////////////////////////////////////////////////////
-                            SHARED DEPLOYMENT HELPER
+                            SHARED INITIALIZATION HELPER
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * @dev Deploys a fresh static curve model with a symbolic target utilization and initializes it for this
-     *      test contract's market, constraining the inputs to exactly the constructible domain: a target in
-     *      [1, WAD-1] (WAD is excluded because that configuration can never be initialized, pinned separately
-     *      below), a monotone non-decreasing curve capped at 100% with a nonzero target point, and both slopes
-     *      below the uint64 storage ceiling. The slope-fit conditions are derived independently of the model's
-     *      slope math: a floored slope floor(rise * WAD / run) fits uint64 exactly when rise * WAD < 2^64 * run
+     * @dev Initializes the shape model's curve for this test contract's market, constraining the inputs to
+     *      exactly the constructible domain at the 70% kink: a monotone non-decreasing curve capped at 100%
+     *      with a nonzero target point. At this kink every such curve fits both uint64 slope slots, so no
+     *      further constraint is needed: each leg's rise is at most WAD, and WAD * WAD = 1e36 is below both
+     *      2^64 * 0.7e18 and 2^64 * 0.3e18 (about 1.29e37 and 5.53e36). The padding input is folded away as
+     *      an exact identity and only routes the initialization's division-shaped queries past the engine's
+     *      built-in arithmetic heuristic to the real SMT solver
      */
-    function _deployInitialized(uint256 target, uint64 y0, uint64 yT, uint64 yFull) internal returns (StaticCurveYDM model) {
-        vm.assume(1 <= target && target <= WAD - 1);
+    function _initShapeCurve(uint64 y0, uint64 yT, uint64 yFull, uint256 p1) internal {
+        vm.assume(p1 <= 3);
         vm.assume(y0 <= yT && yT <= yFull && uint256(yFull) <= WAD && yT > 0);
-        vm.assume(uint256(yT - y0) * WAD < UINT64_CEILING * target);
-        vm.assume(uint256(yFull - yT) * WAD < UINT64_CEILING * (WAD - target));
-        model = new StaticCurveYDM(target);
-        // A plain call: this initialization must succeed on the whole assumed domain, so a revert here would
-        // itself be a counterexample to the acceptance frontier derived above
-        model.initializeYDMForMarket(y0, yT, yFull);
+        // This initialization must succeed on the whole assumed domain, so a revert here would itself be a
+        // counterexample to the acceptance frontier derived above
+        shapeModel.initializeYDMForMarket(y0, uint64(uint256(yT) + p1 - p1), yFull);
     }
 
     /*//////////////////////////////////////////////////////////////////////
@@ -81,24 +94,43 @@ contract StaticCurveYDMSymbolicSpec is Test {
 
     /**
      * @notice The constructor accepts exactly the target utilizations in (0, WAD]: anything in that window
-     *         deploys and stamps the immutable target verbatim, zero and anything above 100% revert with the
-     *         invalid-initialization error
+     *         deploys, zero and anything above 100% revert. The concrete complements pin the two halves the
+     *         symbolic partition cannot see into: an accepted target is stamped into the immutable verbatim
+     *         (no scaling, no clamping) and a rejection is the model's own configuration error, not a panic
      * @dev Economic why: the target is the curve's kink, the utilization at which the premium's slope steepens
      *      to pull capital in. A zero target would put the kink at the origin and leave the below-target leg's
      *      slope dividing by zero, and a target above 100% would place the kink beyond the model's own
      *      utilization cap where it could never bind, so both are rejected at deployment rather than left to
-     *      brick the market later
+     *      brick the market later. The symbolic half only observes deploy-or-revert: a contract deployed with
+     *      a symbolic constructor argument carries a symbolic immutable in its code, which the engine cannot
+     *      execute calls into, so the stamped-verbatim and error-selector facts are asserted on concrete
+     *      deployments instead (the grid extremes, the WAD instance, and both rejection boundaries)
      */
     function check_ydmConstructor_acceptsExactlyTargetInZeroToWAD(uint256 target) external {
-        try new StaticCurveYDM(target) returns (StaticCurveYDM model) {
+        try new StaticCurveYDM(target) returns (StaticCurveYDM) {
             // The acceptance window, derived from what makes the kink meaningful: strictly positive, at most 100%
             assert(1 <= target && target <= WAD);
-            // The immutable is the exact supplied target: no scaling, no clamping
-            assert(model.TARGET_UTILIZATION_WAD() == target);
-        } catch (bytes memory err) {
+        } catch {
             assert(target == 0 || target > WAD);
-            // The rejection is the model's own configuration error, not an arithmetic panic
-            assert(keccak256(err) == keccak256(abi.encodeWithSelector(IYDM.INVALID_YDM_INITIALIZATION.selector)));
+        }
+
+        // Concrete complement one: the immutable is the exact supplied target across the whole deployed grid
+        assert(partitionModels[0].TARGET_UTILIZATION_WAD() == 1);
+        assert(partitionModels[2].TARGET_UTILIZATION_WAD() == 5e17);
+        assert(partitionModels[4].TARGET_UTILIZATION_WAD() == WAD - 1);
+        assert(targetAtWadModel.TARGET_UTILIZATION_WAD() == WAD);
+
+        // Concrete complement two: both rejection boundaries revert with the model's own configuration error
+        bytes32 expectedError = keccak256(abi.encodeWithSelector(IYDM.INVALID_YDM_INITIALIZATION.selector));
+        try new StaticCurveYDM(0) returns (StaticCurveYDM) {
+            assert(false);
+        } catch (bytes memory err) {
+            assert(keccak256(err) == expectedError);
+        }
+        try new StaticCurveYDM(WAD + 1) returns (StaticCurveYDM) {
+            assert(false);
+        } catch (bytes memory err) {
+            assert(keccak256(err) == expectedError);
         }
     }
 
@@ -107,33 +139,119 @@ contract StaticCurveYDMSymbolicSpec is Test {
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * @notice Market initialization succeeds for exactly the monotone curves whose two slopes fit uint64
-     *         storage: the three curve points must be non-decreasing, capped at 100%, with a nonzero target
-     *         point, AND the rise of each leg scaled by WAD must stay below 2^64 times that leg's run. The
-     *         second family of conditions is an undocumented configuration constraint: a very steep leg (a
-     *         large rise over a tiny run) computes a slope too wide for its uint64 storage slot and reverts
+     * @notice At a 1-wei target, market initialization succeeds for exactly the monotone curves whose
+     *         below-target rise is at most 18 wei: the below leg's slope floor((yT - y0) * WAD / 1) must fit
+     *         uint64 storage, so (yT - y0) * WAD < 2^64, an undocumented configuration constraint that makes
+     *         a near-origin kink reject almost every rising curve. The above leg's slope always fits here,
+     *         since its rise is at most WAD and WAD * WAD is far below 2^64 * (WAD - 1)
      * @dev Economic why: the monotonicity guard enforces the model's incentive direction (scarcer service is
      *      never paid less), the nonzero target point is the initialization sentinel (a zero would make the
-     *      market read as uninitialized forever), and the slope frontier is real: with the kink at 1 wei of
-     *      utilization the below-target leg can rise at most 18 wei of yield share (2^64 / 1e18) before its
-     *      slope floor((yT - y0) * WAD / target) overflows uint64. The expected frontier is derived as plain
-     *      products on both sides, never by re-running the slope division. The grid pins targets on both sides
-     *      of each leg's frontier: 1 and 5e16 make the below-leg frontier reachable, 9e17 and WAD - 1 the
-     *      above-leg frontier, and 5e17 neither (every monotone curve fits)
+     *      market read as uninitialized forever), and the slope frontier is real storage truncation, derived
+     *      here as a plain product on both sides rather than by re-running the slope division. The padding
+     *      input is folded away as an exact identity and only routes the division-shaped queries past the
+     *      engine's built-in arithmetic heuristic to the real SMT solver
      */
-    function check_staticInit_acceptsExactlyMonotoneCurvesThatFitUint64Slopes(uint64 y0, uint64 yT, uint64 yFull) external {
-        for (uint256 i; i < partitionTargets.length; ++i) {
-            uint256 target = partitionTargets[i];
-            // The independently derived acceptance condition: monotone, capped, nonzero sentinel, both slopes storable
-            bool expectSuccess = y0 <= yT && yT <= yFull && uint256(yFull) <= WAD && yT > 0;
-            if (expectSuccess) {
-                expectSuccess = uint256(yT - y0) * WAD < UINT64_CEILING * target && uint256(yFull - yT) * WAD < UINT64_CEILING * (WAD - target);
-            }
-            try partitionModels[i].initializeYDMForMarket(y0, yT, yFull) {
-                assert(expectSuccess);
-            } catch {
-                assert(!expectSuccess);
-            }
+    function check_staticInit_oneWeiTargetAcceptsExactlyBelowLegRiseUnderUint64Frontier(uint64 y0, uint64 yT, uint64 yFull, uint256 p1) external {
+        vm.assume(p1 <= 3);
+
+        // The independently derived acceptance condition: monotone, capped, nonzero sentinel, below slope storable
+        bool expectSuccess = y0 <= yT && yT <= yFull && uint256(yFull) + p1 - p1 <= WAD && yT > 0;
+        if (expectSuccess) {
+            expectSuccess = uint256(yT - y0) * WAD < UINT64_CEILING;
+        }
+
+        try partitionModels[0].initializeYDMForMarket(y0, yT, yFull) {
+            assert(expectSuccess);
+        } catch {
+            assert(!expectSuccess);
+        }
+    }
+
+    /**
+     * @notice At a 5% target, market initialization succeeds for exactly the monotone curves whose
+     *         below-target rise scaled by WAD stays below 2^64 * 5e16: a rise past roughly 0.92 WAD over the
+     *         short run to the kink computes a below slope too wide for its uint64 slot and reverts. The
+     *         above leg's slope always fits here (its run is 95% of WAD)
+     * @dev The frontier is derived as a plain product on both sides, never by re-running the slope division.
+     *      The padding input is folded away as an exact identity and only routes the division-shaped queries
+     *      past the engine's built-in arithmetic heuristic to the real SMT solver
+     */
+    function check_staticInit_fivePercentTargetAcceptsExactlyBelowLegSlopeUnderUint64Frontier(uint64 y0, uint64 yT, uint64 yFull, uint256 p1) external {
+        vm.assume(p1 <= 3);
+
+        bool expectSuccess = y0 <= yT && yT <= yFull && uint256(yFull) + p1 - p1 <= WAD && yT > 0;
+        if (expectSuccess) {
+            expectSuccess = uint256(yT - y0) * WAD < UINT64_CEILING * 5e16;
+        }
+
+        try partitionModels[1].initializeYDMForMarket(y0, yT, yFull) {
+            assert(expectSuccess);
+        } catch {
+            assert(!expectSuccess);
+        }
+    }
+
+    /**
+     * @notice At the 50% target, market initialization succeeds for exactly the monotone curves capped at
+     *         100% with a nonzero target point: both slope frontiers are unreachable here, since each leg's
+     *         rise is at most WAD and WAD * WAD = 1e36 is below 2^64 * 5e17 (about 9.2e36) on both sides, so
+     *         the slope storage constraint never binds and the acceptance condition is purely the curve shape
+     * @dev The padding input is folded away as an exact identity and only routes the division-shaped queries
+     *      past the engine's built-in arithmetic heuristic to the real SMT solver
+     */
+    function check_staticInit_midTargetAcceptsExactlyMonotoneCappedCurves(uint64 y0, uint64 yT, uint64 yFull, uint256 p1) external {
+        vm.assume(p1 <= 3);
+
+        bool expectSuccess = y0 <= yT && yT <= yFull && uint256(yFull) + p1 - p1 <= WAD && yT > 0;
+
+        try partitionModels[2].initializeYDMForMarket(y0, yT, yFull) {
+            assert(expectSuccess);
+        } catch {
+            assert(!expectSuccess);
+        }
+    }
+
+    /**
+     * @notice At the 90% target, market initialization succeeds for exactly the monotone curves capped at
+     *         100% with a nonzero target point: even the short 10% above-target run keeps every slope
+     *         storable, since the above rise is at most WAD and WAD * WAD = 1e36 is below 2^64 * 1e17
+     *         (about 1.8e36), so neither uint64 frontier binds
+     * @dev The padding input is folded away as an exact identity and only routes the division-shaped queries
+     *      past the engine's built-in arithmetic heuristic to the real SMT solver
+     */
+    function check_staticInit_ninetyPercentTargetAcceptsExactlyMonotoneCappedCurves(uint64 y0, uint64 yT, uint64 yFull, uint256 p1) external {
+        vm.assume(p1 <= 3);
+
+        bool expectSuccess = y0 <= yT && yT <= yFull && uint256(yFull) + p1 - p1 <= WAD && yT > 0;
+
+        try partitionModels[3].initializeYDMForMarket(y0, yT, yFull) {
+            assert(expectSuccess);
+        } catch {
+            assert(!expectSuccess);
+        }
+    }
+
+    /**
+     * @notice At a target of WAD - 1, market initialization succeeds for exactly the monotone curves whose
+     *         above-target rise is at most 18 wei: the above leg's run to full utilization is a single wei,
+     *         so its slope floor((yFull - yT) * WAD / 1) must satisfy (yFull - yT) * WAD < 2^64 to fit uint64
+     *         storage, the mirror of the 1-wei-target frontier on the other leg. The below leg always fits
+     * @dev The frontier is derived as a plain product on both sides, never by re-running the slope division.
+     *      The padding input is folded away as an exact identity and only routes the division-shaped queries
+     *      past the engine's built-in arithmetic heuristic to the real SMT solver
+     */
+    function check_staticInit_nearWadTargetAcceptsExactlyAboveLegRiseUnderUint64Frontier(uint64 y0, uint64 yT, uint64 yFull, uint256 p1) external {
+        vm.assume(p1 <= 3);
+
+        bool expectSuccess = y0 <= yT && yT <= yFull && uint256(yFull) + p1 - p1 <= WAD && yT > 0;
+        if (expectSuccess) {
+            expectSuccess = uint256(yFull - yT) * WAD < UINT64_CEILING;
+        }
+
+        try partitionModels[4].initializeYDMForMarket(y0, yT, yFull) {
+            assert(expectSuccess);
+        } catch {
+            assert(!expectSuccess);
         }
     }
 
@@ -150,13 +268,16 @@ contract StaticCurveYDMSymbolicSpec is Test {
      *      above-target slope divides the leg's rise by (WAD - target), which is zero when the kink sits at
      *      100%. The division panics even when the rise is zero (0 / 0 also panics), so no curve shape escapes
      *      it. The deployment succeeds, the failure only surfaces when a market tries to wire the model in.
-     *      This check re-pins the already-adjudicated concrete finding across the entire valid input space
+     *      This check re-pins the already-adjudicated concrete divergence across the entire valid input space.
+     *      The padding input is folded away as an exact identity and only routes the division-shaped queries
+     *      past the engine's built-in arithmetic heuristic to the real SMT solver
      */
-    function check_staticInit_targetAtWADAlwaysPanics(uint64 y0, uint64 yT, uint64 yFull) external {
+    function check_staticInit_targetAtWADAlwaysPanics(uint64 y0, uint64 yT, uint64 yFull, uint256 p1) external {
+        vm.assume(p1 <= 3);
         // Every otherwise-valid curve: monotone, capped at 100%, nonzero target point
         vm.assume(y0 <= yT && yT <= yFull && uint256(yFull) <= WAD && yT > 0);
 
-        try targetAtWadModel.initializeYDMForMarket(y0, yT, yFull) {
+        try targetAtWadModel.initializeYDMForMarket(y0, uint64(uint256(yT) + p1 - p1), yFull) {
             // No curve shape can make the zero-run division survive
             assert(false);
         } catch (bytes memory err) {
@@ -176,11 +297,11 @@ contract StaticCurveYDMSymbolicSpec is Test {
      *      must be exactly the configured floor of the curve, with no rounding drift in either direction. The
      *      expected value is the raw initialization input itself, no arithmetic at all
      */
-    function check_staticCurve_zeroUtilizationReproducesShareAtZeroExactly(uint256 target, uint64 y0, uint64 yT, uint64 yFull) external {
-        StaticCurveYDM model = _deployInitialized(target, y0, yT, yFull);
+    function check_staticCurve_zeroUtilizationReproducesShareAtZeroExactly(uint64 y0, uint64 yT, uint64 yFull, uint256 p1) external {
+        _initShapeCurve(y0, yT, yFull, p1);
 
         // Zero is always strictly below the (positive) kink, so this exercises the below-target leg's intercept
-        assert(model.previewYieldShare(MarketState.PERPETUAL, 0) == y0);
+        assert(shapeModel.previewYieldShare(MarketState.PERPETUAL, 0) == y0);
     }
 
     /**
@@ -190,11 +311,11 @@ contract StaticCurveYDMSymbolicSpec is Test {
      *      at the utilization the market is steered toward), so it must be reproduced to the wei even though
      *      both stored slopes are floored. The kink belongs to the upper leg, whose distance term is zero there
      */
-    function check_staticCurve_targetUtilizationReproducesShareAtTargetExactly(uint256 target, uint64 y0, uint64 yT, uint64 yFull) external {
-        StaticCurveYDM model = _deployInitialized(target, y0, yT, yFull);
+    function check_staticCurve_targetUtilizationReproducesShareAtTargetExactly(uint64 y0, uint64 yT, uint64 yFull, uint256 p1) external {
+        _initShapeCurve(y0, yT, yFull, p1);
 
         // Utilization == kink takes the at-or-above-target leg, whose scaled distance from the kink is zero
-        assert(model.previewYieldShare(MarketState.PERPETUAL, target) == yT);
+        assert(shapeModel.previewYieldShare(MarketState.PERPETUAL, SHAPE_TARGET) == yT);
     }
 
     /**
@@ -207,10 +328,10 @@ contract StaticCurveYDMSymbolicSpec is Test {
      *      <= g. Lower side: s * r > g * WAD - r >= g * WAD - WAD = (g - 1) * WAD gives floor(s * r / WAD)
      *      >= g - 1. Undershooting is the safe direction: the premium never exceeds what the issuer configured
      */
-    function check_staticCurve_fullUtilizationReproducesShareAtFullWithinOneWei(uint256 target, uint64 y0, uint64 yT, uint64 yFull) external {
-        StaticCurveYDM model = _deployInitialized(target, y0, yT, yFull);
+    function check_staticCurve_fullUtilizationReproducesShareAtFullWithinOneWei(uint64 y0, uint64 yT, uint64 yFull, uint256 p1) external {
+        _initShapeCurve(y0, yT, yFull, p1);
 
-        uint256 atFull = model.previewYieldShare(MarketState.PERPETUAL, WAD);
+        uint256 atFull = shapeModel.previewYieldShare(MarketState.PERPETUAL, WAD);
         // Never above the configured endpoint, and at most one wei below it
         assert(atFull <= yFull);
         assert(atFull + 1 >= yFull);
@@ -231,14 +352,14 @@ contract StaticCurveYDMSymbolicSpec is Test {
      *      g = yT - y0: slope * t <= g * WAD < (slope + 1) * t, so floor(slope * t / WAD) is at most g and,
      *      since slope * t > g * WAD - t > (g - 1) * WAD, at least g - 1
      */
-    function check_staticCurve_belowTargetLegMeetsKinkWithinOneWei(uint256 target, uint64 y0, uint64 yT, uint64 yFull) external {
-        StaticCurveYDM model = _deployInitialized(target, y0, yT, yFull);
+    function check_staticCurve_belowTargetLegMeetsKinkWithinOneWei(uint64 y0, uint64 yT, uint64 yFull, uint256 p1) external {
+        _initShapeCurve(y0, yT, yFull, p1);
 
         // The stored below-target slope, read back from the model's storage for this market
-        (, uint64 slopeLt,,) = model.accountantToCurve(address(this));
+        (, uint64 slopeLt,,) = shapeModel.accountantToCurve(address(this));
 
         // The below-target leg evaluated at the kink itself (production only evaluates it strictly below)
-        uint256 extrapolated = uint256(slopeLt) * target / WAD + y0;
+        uint256 extrapolated = uint256(slopeLt) * SHAPE_TARGET / WAD + y0;
         assert(extrapolated <= yT);
         assert(extrapolated + 1 >= yT);
     }
@@ -256,12 +377,12 @@ contract StaticCurveYDMSymbolicSpec is Test {
      *      premium escaping this envelope would pay the pool more than the issuer configured for sub-target
      *      scarcity, out of yield the paying tranche never agreed to give up
      */
-    function check_staticCurve_belowTargetOutputStaysBetweenZeroAndTargetShares(uint256 target, uint64 y0, uint64 yT, uint64 yFull, uint256 utilization) external {
-        StaticCurveYDM model = _deployInitialized(target, y0, yT, yFull);
+    function check_staticCurve_belowTargetOutputStaysBetweenZeroAndTargetShares(uint64 y0, uint64 yT, uint64 yFull, uint256 utilization, uint256 p1) external {
+        _initShapeCurve(y0, yT, yFull, p1);
         // Pin the below-target leg
-        vm.assume(utilization < target);
+        vm.assume(utilization < SHAPE_TARGET);
 
-        uint256 share = model.previewYieldShare(MarketState.PERPETUAL, utilization);
+        uint256 share = shapeModel.previewYieldShare(MarketState.PERPETUAL, utilization);
         assert(share >= y0);
         assert(share <= yT);
     }
@@ -275,12 +396,12 @@ contract StaticCurveYDMSymbolicSpec is Test {
      *      * WAD, so the floored slope term is at most yFull - yT. Combined with yFull <= WAD from the
      *      initialization guard, the output can never exceed 100% of the paying tranche's yield
      */
-    function check_staticCurve_aboveTargetOutputStaysBetweenTargetAndFullShares(uint256 target, uint64 y0, uint64 yT, uint64 yFull, uint256 utilization) external {
-        StaticCurveYDM model = _deployInitialized(target, y0, yT, yFull);
+    function check_staticCurve_aboveTargetOutputStaysBetweenTargetAndFullShares(uint64 y0, uint64 yT, uint64 yFull, uint256 utilization, uint256 p1) external {
+        _initShapeCurve(y0, yT, yFull, p1);
         // Pin the at-or-above-target leg; the utilization is otherwise unbounded to cover the clamp
-        vm.assume(utilization >= target);
+        vm.assume(utilization >= SHAPE_TARGET);
 
-        uint256 share = model.previewYieldShare(MarketState.PERPETUAL, utilization);
+        uint256 share = shapeModel.previewYieldShare(MarketState.PERPETUAL, utilization);
         assert(share >= yT);
         assert(share <= yFull);
     }
@@ -296,12 +417,12 @@ contract StaticCurveYDMSymbolicSpec is Test {
      *      of the numerators. Monotonicity is the model's whole incentive mechanism: if the premium could dip
      *      as utilization rises, capital would be paid to leave exactly when the service grows scarcer
      */
-    function check_staticCurve_monotoneWhenBothUtilizationsBelowTarget(uint256 target, uint64 y0, uint64 yT, uint64 yFull, uint256 utilA, uint256 utilB) external {
-        StaticCurveYDM model = _deployInitialized(target, y0, yT, yFull);
+    function check_staticCurve_monotoneWhenBothUtilizationsBelowTarget(uint64 y0, uint64 yT, uint64 yFull, uint256 utilA, uint256 utilB, uint256 p1) external {
+        _initShapeCurve(y0, yT, yFull, p1);
         // Pin both points inside the below-target leg, ordered
-        vm.assume(utilA <= utilB && utilB < target);
+        vm.assume(utilA <= utilB && utilB < SHAPE_TARGET);
 
-        assert(model.previewYieldShare(MarketState.PERPETUAL, utilA) <= model.previewYieldShare(MarketState.PERPETUAL, utilB));
+        assert(shapeModel.previewYieldShare(MarketState.PERPETUAL, utilA) <= shapeModel.previewYieldShare(MarketState.PERPETUAL, utilB));
     }
 
     /**
@@ -310,12 +431,12 @@ contract StaticCurveYDMSymbolicSpec is Test {
      * @dev Both outputs floor the same slope against ordered distances from the kink. The leg is pinned up to
      *      WAD, inputs beyond that are the plateau property, proven separately
      */
-    function check_staticCurve_monotoneWhenBothUtilizationsAtOrAboveTarget(uint256 target, uint64 y0, uint64 yT, uint64 yFull, uint256 utilA, uint256 utilB) external {
-        StaticCurveYDM model = _deployInitialized(target, y0, yT, yFull);
+    function check_staticCurve_monotoneWhenBothUtilizationsAtOrAboveTarget(uint64 y0, uint64 yT, uint64 yFull, uint256 utilA, uint256 utilB, uint256 p1) external {
+        _initShapeCurve(y0, yT, yFull, p1);
         // Pin both points inside the at-or-above-target leg, ordered, up to the clamp boundary
-        vm.assume(target <= utilA && utilA <= utilB && utilB <= WAD);
+        vm.assume(SHAPE_TARGET <= utilA && utilA <= utilB && utilB <= WAD);
 
-        assert(model.previewYieldShare(MarketState.PERPETUAL, utilA) <= model.previewYieldShare(MarketState.PERPETUAL, utilB));
+        assert(shapeModel.previewYieldShare(MarketState.PERPETUAL, utilA) <= shapeModel.previewYieldShare(MarketState.PERPETUAL, utilB));
     }
 
     /**
@@ -323,14 +444,21 @@ contract StaticCurveYDMSymbolicSpec is Test {
      *         at most any at-or-above-target utilization, so crossing the target can never lower the premium
      * @dev Independent derivation: the below-target output is at most yT (its slope term is capped by the
      *      slope's floor bracket, as in the per-leg bound above) and the at-or-above-target output is at least
-     *      yT (its slope term is non-negative), so the kink value separates the two legs
+     *      yT (its slope term is non-negative), so the kink value separates the two legs. Both halves of that
+     *      separation are asserted explicitly before the comparison, keeping each solver query a single-leg
+     *      bound instead of one four-term inequality
      */
-    function check_staticCurve_monotoneAcrossTheKink(uint256 target, uint64 y0, uint64 yT, uint64 yFull, uint256 utilA, uint256 utilB) external {
-        StaticCurveYDM model = _deployInitialized(target, y0, yT, yFull);
+    function check_staticCurve_monotoneAcrossTheKink(uint64 y0, uint64 yT, uint64 yFull, uint256 utilA, uint256 utilB, uint256 p1) external {
+        _initShapeCurve(y0, yT, yFull, p1);
         // Pin one point on each side of the kink
-        vm.assume(utilA < target && target <= utilB && utilB <= WAD);
+        vm.assume(utilA < SHAPE_TARGET && SHAPE_TARGET <= utilB && utilB <= WAD);
 
-        assert(model.previewYieldShare(MarketState.PERPETUAL, utilA) <= model.previewYieldShare(MarketState.PERPETUAL, utilB));
+        uint256 shareBelow = shapeModel.previewYieldShare(MarketState.PERPETUAL, utilA);
+        uint256 shareAbove = shapeModel.previewYieldShare(MarketState.PERPETUAL, utilB);
+        // The kink value separates the legs: below never exceeds it, above never undershoots it
+        assert(shareBelow <= yT);
+        assert(shareAbove >= yT);
+        assert(shareBelow <= shareAbove);
     }
 
     /*//////////////////////////////////////////////////////////////////////
@@ -346,12 +474,12 @@ contract StaticCurveYDMSymbolicSpec is Test {
      *      share would let a transiently manipulated or degenerate metric extract unbounded premium. Stated as
      *      exact equality of two production outputs, no arithmetic on the spec side
      */
-    function check_staticCurve_utilizationAboveWADIsPlateau(uint256 target, uint64 y0, uint64 yT, uint64 yFull, uint256 utilization) external {
-        StaticCurveYDM model = _deployInitialized(target, y0, yT, yFull);
+    function check_staticCurve_utilizationAboveWADIsPlateau(uint64 y0, uint64 yT, uint64 yFull, uint256 utilization, uint256 p1) external {
+        _initShapeCurve(y0, yT, yFull, p1);
         // Pin the clamp branch: strictly above 100%
         vm.assume(utilization > WAD);
 
-        assert(model.previewYieldShare(MarketState.PERPETUAL, utilization) == model.previewYieldShare(MarketState.PERPETUAL, WAD));
+        assert(shapeModel.previewYieldShare(MarketState.PERPETUAL, utilization) == shapeModel.previewYieldShare(MarketState.PERPETUAL, WAD));
     }
 
     /*//////////////////////////////////////////////////////////////////////
@@ -367,15 +495,15 @@ contract StaticCurveYDMSymbolicSpec is Test {
      *      the uint256 ceiling; the final addition caps below 2^65. The market state parameter is ignored by
      *      this static model, so both enum members are exercised explicitly
      */
-    function check_staticCurve_initializedPreviewNeverReverts(uint256 target, uint64 y0, uint64 yT, uint64 yFull, uint256 utilization) external {
-        StaticCurveYDM model = _deployInitialized(target, y0, yT, yFull);
+    function check_staticCurve_initializedPreviewNeverReverts(uint64 y0, uint64 yT, uint64 yFull, uint256 utilization, uint256 p1) external {
+        _initShapeCurve(y0, yT, yFull, p1);
 
-        try model.previewYieldShare(MarketState.PERPETUAL, utilization) returns (uint256) {
+        try shapeModel.previewYieldShare(MarketState.PERPETUAL, utilization) returns (uint256) {
             // Total in the perpetual state for the entire uint256 utilization range
         } catch {
             assert(false);
         }
-        try model.previewYieldShare(MarketState.FIXED_TERM, utilization) returns (uint256) {
+        try shapeModel.previewYieldShare(MarketState.FIXED_TERM, utilization) returns (uint256) {
             // And identically total in the fixed-term state
         } catch {
             assert(false);
@@ -435,22 +563,22 @@ contract StaticCurveYDMSymbolicSpec is Test {
      *      premiums diverge. The static model must also ignore the market state entirely, unlike the adaptive
      *      family, so the two entrypoints are compared across different state arguments deliberately
      */
-    function check_staticYieldShare_isViewEquivalentAndWritesNothing(uint256 target, uint64 y0, uint64 yT, uint64 yFull, uint256 utilization) external {
-        StaticCurveYDM model = _deployInitialized(target, y0, yT, yFull);
+    function check_staticYieldShare_isViewEquivalentAndWritesNothing(uint64 y0, uint64 yT, uint64 yFull, uint256 utilization, uint256 p1) external {
+        _initShapeCurve(y0, yT, yFull, p1);
 
         // The caller's stored curve before the mutating call: the model's entire storage footprint for this market
-        (uint64 a0, uint64 b0, uint64 c0, uint64 d0) = model.accountantToCurve(address(this));
+        (uint64 a0, uint64 b0, uint64 c0, uint64 d0) = shapeModel.accountantToCurve(address(this));
 
-        uint256 previewed = model.previewYieldShare(MarketState.PERPETUAL, utilization);
+        uint256 previewed = shapeModel.previewYieldShare(MarketState.PERPETUAL, utilization);
         // Mutating entrypoint, deliberately under the other market state: same output either way
-        uint256 committed = model.yieldShare(MarketState.FIXED_TERM, utilization);
+        uint256 committed = shapeModel.yieldShare(MarketState.FIXED_TERM, utilization);
         assert(committed == previewed);
 
         // The stored curve is bit-identical: the mutating call wrote nothing
-        (uint64 a1, uint64 b1, uint64 c1, uint64 d1) = model.accountantToCurve(address(this));
+        (uint64 a1, uint64 b1, uint64 c1, uint64 d1) = shapeModel.accountantToCurve(address(this));
         assert(a0 == a1 && b0 == b1 && c0 == c1 && d0 == d1);
 
         // And a repeat preview reproduces the same output: no hidden state moved anywhere
-        assert(model.previewYieldShare(MarketState.FIXED_TERM, utilization) == previewed);
+        assert(shapeModel.previewYieldShare(MarketState.FIXED_TERM, utilization) == previewed);
     }
 }

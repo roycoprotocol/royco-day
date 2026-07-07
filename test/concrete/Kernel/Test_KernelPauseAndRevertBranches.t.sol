@@ -174,7 +174,7 @@ contract Test_KernelPauseAndRevertBranches is DayMarketTestBase {
     /// @dev A sum that overflows uint64 panics (0x11) in the checked `_maxJT + _maxLT` addition BEFORE the
     ///      intended INVALID_MAX_YIELD_SHARE_CONFIG can be raised — an error-quality edge (documented, unpinned
     ///      until now). Pins current behavior.
-    function test_FINDING_MaxYieldShareSum_overflowsUint64_panicsBeforeNamedError() public {
+    function test_DIVERGENCE_MaxYieldShareSum_overflowsUint64_panicsBeforeNamedError() public {
         vm.prank(ACCOUNTANT_ADMIN);
         vm.expectRevert(stdError.arithmeticError);
         accountant.setMaxYieldShares(type(uint64).max, 1);

@@ -72,7 +72,7 @@ contract Test_AdminAndGates_Kernel is DayMarketTestBase {
      *      18.4467e18, an 1844% bonus. The redemption-side clamps are then the only thing standing between
      *      that config and draining the junior buffer. Expected behavior: reject any bonus above WAD (1e18)
      */
-    function test_FINDING_29_SelfLiquidationBonusSetterRejectsAboveOneHundredPercent() public {
+    function test_DIVERGENCE_29_SelfLiquidationBonusSetterRejectsAboveOneHundredPercent() public {
         // Fixed: a bonus above WAD (1e18 = 100%) is rejected. type(uint64).max would have been ~1844%.
         vm.prank(KERNEL_ADMIN);
         vm.expectRevert(IRoycoDayKernel.INVALID_SELF_LIQUIDATION_BONUS.selector);

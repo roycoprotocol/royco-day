@@ -341,11 +341,11 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     }
 
     /*//////////////////////////////////////////////////////////////////////
-                ZERO-BPT-SLICE LT REDEMPTION (FINDING PIN)
+                ZERO-BPT-SLICE LT REDEMPTION (DIVERGENCE PIN)
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * FINDING 3: an in-kind LT redemption whose proportional BPT slice floors to zero NAV while the idle
+     * DIVERGENCE 3: an in-kind LT redemption whose proportional BPT slice floors to zero NAV while the idle
      * premium ST-share slice is positive still reverts. Handing idle ST shares to the redeemer moves no raw
      * NAV — only share ownership shifts, no assets leave the vault — so the accountant sees deltaLTRawNAV == 0
      * AND totalSTAndJTRedemptionNAV == 0, and the LT_REDEEM op-shape require (RoycoDayAccountant.sol:263)
@@ -357,7 +357,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
      * zero should still succeed and receive its pro-rata idle ST shares directly, so no premium is stranded.
      * Pinned here as the current (diverging) revert
      */
-    function test_FINDING_3_ltRedeemZeroBPTSliceWithIdleShares_revertsInvalidPostOpState() public {
+    function test_DIVERGENCE_3_ltRedeemZeroBPTSliceWithIdleShares_revertsInvalidPostOpState() public {
         _seedSymmetric(1000e18, 200e18, 100e18);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_REDEEM));
         kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(uint256(1000e18)), toNAVUnits(uint256(200e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, false);

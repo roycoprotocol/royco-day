@@ -20,11 +20,11 @@ contract Test_PremiumDivergences_Accountant is AccountantTestBase {
     uint256 internal constant WAD = 1e18;
 
     // =============================
-    // FINDING 13 — a dust-sized senior gain pays premiums but skips every protocol fee
+    // DIVERGENCE 13 — a dust-sized senior gain pays premiums but skips every protocol fee
     // =============================
 
     /**
-     * @notice FINDING 13: when a senior gain is at or below the effective dust tolerance, production still pays the
+     * @notice DIVERGENCE 13: when a senior gain is at or below the effective dust tolerance, production still pays the
      *         JT risk premium and LT liquidity premium, but suppresses ALL protocol fees, because the fee gate keys
      *         on `stGain > effectiveNAVDustTolerance` (RoycoDayAccountant.sol:594) rather than on the premium being
      *         nonzero. So a premium is distributed with no protocol fee taken on it
@@ -37,7 +37,7 @@ contract Test_PremiumDivergences_Accountant is AccountantTestBase {
      *      jtRiskPremium = 5e11 x 0.1e18 / 1e18 = 5e10, their sum 1e11 <= the 5e11 gain. Every fee is gated on
      *      premiumsPaid, so all three protocol fees are zero
      */
-    function test_FINDING_13_dustGain_paysPremiumButSkipsProtocolFee() public {
+    function test_DIVERGENCE_13_dustGain_paysPremiumButSkipsProtocolFee() public {
         // Deploy with a 1e12-wei effective dust tolerance so a sub-dust gain is easy to construct
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.stNAVDustTolerance = toNAVUnits(uint256(1e12));
@@ -64,11 +64,11 @@ contract Test_PremiumDivergences_Accountant is AccountantTestBase {
     }
 
     // =============================
-    // FINDING 14 — zero LT depth against a positive minimum liquidity reads liquidityUtilization as uint256 max
+    // DIVERGENCE 14 — zero LT depth against a positive minimum liquidity reads liquidityUtilization as uint256 max
     // =============================
 
     /**
-     * @notice FINDING 14 (SPLIT — needs human judgment): with a positive minimum liquidity and zero LT raw NAV but
+     * @notice DIVERGENCE 14 (SPLIT — needs human judgment): with a positive minimum liquidity and zero LT raw NAV but
      *         positive senior effective NAV, production's liquidity utilization is `type(uint256).max`
      *         (UtilizationLogic.sol:72), so every liquidity-gated operation reads the market as infinitely
      *         under-provisioned. One reviewer reads this as a code bug (a divide-by-zero sentinel that bricks the
@@ -79,7 +79,7 @@ contract Test_PremiumDivergences_Accountant is AccountantTestBase {
      * @dev Derivation: a committed checkpoint with stEffectiveNAV = 1000e18, minLiquidity 0.05e18, ltRawNAV = 0.
      *      _computeLiquidityUtilization takes the ltRawNAV == 0 branch and returns type(uint256).max
      */
-    function test_FINDING_14_zeroLTDepth_readsLiquidityUtilizationAsMax() public {
+    function test_DIVERGENCE_14_zeroLTDepth_readsLiquidityUtilizationAsMax() public {
         _deploy(true, _defaultParams());
 
         // Seed a checkpoint with senior/junior depth but ZERO liquidity-tranche depth
@@ -95,11 +95,11 @@ contract Test_PremiumDivergences_Accountant is AccountantTestBase {
     }
 
     // =============================
-    // FINDING 15 — the fixed-term end timestamp truncates to uint32 and can wrap into the past
+    // DIVERGENCE 15 — the fixed-term end timestamp truncates to uint32 and can wrap into the past
     // =============================
 
     /**
-     * @notice FINDING 15: entering FIXED_TERM near the uint32 timestamp ceiling truncates the fixed-term end to
+     * @notice DIVERGENCE 15: entering FIXED_TERM near the uint32 timestamp ceiling truncates the fixed-term end to
      *         uint32 (RoycoDayAccountant.sol:705, `uint32(block.timestamp + fixedTermDurationSeconds)`), wrapping
      *         it to a value in the past, so the market enters FIXED_TERM already elapsed
      * @dev SPEC-EXPECTED: the fixed-term end is `block.timestamp + fixedTermDurationSeconds` in the future.
@@ -108,7 +108,7 @@ contract Test_PremiumDivergences_Accountant is AccountantTestBase {
      *      senior loss on a 100e18/30e18 seed enters FIXED_TERM. The true end is bigT + 604800 = 4295571995, which
      *      overflows uint32 (max 4294967295) and wraps to 4295571995 - 4294967296 = 604699, far below bigT
      */
-    function test_FINDING_15_fixedTermEndTimestamp_truncatesToUint32AndWrapsIntoPast() public {
+    function test_DIVERGENCE_15_fixedTermEndTimestamp_truncatesToUint32AndWrapsIntoPast() public {
         _deploy(true, _defaultParams());
 
         // Seed a healthy PERPETUAL checkpoint

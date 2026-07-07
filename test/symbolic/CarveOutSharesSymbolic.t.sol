@@ -23,7 +23,7 @@ import { LTEffectiveNAVDriver } from "../mocks/LTEffectiveNAVDriver.sol";
  *      for the extended totality check). Every expected value is derived independently: plain checked
  *      multiply-and-divide where the product provably fits uint256, or two-sided product brackets stated on
  *      the production outputs, never by re-running the production mulDiv chain as its own expectation
- * @dev Two checks are FINDING candidates: they pin that the LT protocol fee can exceed the LT effective NAV
+ * @dev Two checks are DIVERGENCE candidates: they pin that the LT protocol fee can exceed the LT effective NAV
  *      when the premium share mint is starved (or floor-shorted) at a 100% LT yield share fee, which makes
  *      the checked subtraction that prices the LT fee shares against the fee-net LT effective NAV underflow
  *      and brick the whole sync
@@ -403,7 +403,7 @@ contract CarveOutSharesSymbolicSpec is Test {
      * @dev Identical floor-bracket derivation as the junior leg with the LT effective NAV (market-making
      *      depth plus idle premium) as the pricing NAV. Kept as its own check because the LT mint is a
      *      distinct production call site whose NAV leg is assembled differently, and whose fee-net
-     *      subtraction has its own reachability question (pinned by the FINDING candidates below)
+     *      subtraction has its own reachability question (pinned by the DIVERGENCE candidates below)
      */
     function check_liquidityFeeSharesMintedAgainstPostFeeNAVAreWorthAtMostTheFee(uint256 fee, uint256 nav, uint256 supply, uint256 p1, uint256 p2) external view {
         // A live liquidity tranche whose effective NAV strictly contains the accrued fee, on the fair branch
@@ -420,7 +420,7 @@ contract CarveOutSharesSymbolicSpec is Test {
     }
 
     /*//////////////////////////////////////////////////////////////////////
-        FINDING CANDIDATES: THE LT FEE CAN EXCEED THE LT EFFECTIVE NAV
+        DIVERGENCE CANDIDATES: THE LT FEE CAN EXCEED THE LT EFFECTIVE NAV
     //////////////////////////////////////////////////////////////////////*/
 
     /**
@@ -439,7 +439,7 @@ contract CarveOutSharesSymbolicSpec is Test {
      *      Witness: retained 2, premium 1, supply 1. Each draw is wei-scale, but the revert is a full sync
      *      DoS in whatever market state reaches it, not a value leak
      */
-    function check_FINDING_candidate_starvedPremiumMintLeavesLtFeeAboveLtEffectiveNAV(uint256 retained, uint256 premium, uint256 supply, uint256 p1) external {
+    function check_DIVERGENCE_candidate_starvedPremiumMintLeavesLtFeeAboveLtEffectiveNAV(uint256 retained, uint256 premium, uint256 supply, uint256 p1) external {
         // The premium is real but worth less than one senior share at the current price: its floored mint
         // sizes zero shares. The bind test cannot trip first because the bind threshold is above one share's
         // NAV: ceil(premium * EPS / (WAD - EPS)) <= premium <= premium * supply < retained
@@ -485,7 +485,7 @@ contract CarveOutSharesSymbolicSpec is Test {
      *      starvation arm this needs no extreme share price, only a remainder, so it is the generic
      *      reachability of the underflow at any 100%-fee market whose LT has no deployed inventory yet
      */
-    function check_FINDING_candidate_flooredPremiumValueLeavesLtFeeAboveLtEffectiveNAV(uint256 retained, uint256 premium, uint256 supply, uint256 p1) external {
+    function check_DIVERGENCE_candidate_flooredPremiumValueLeavesLtFeeAboveLtEffectiveNAV(uint256 retained, uint256 premium, uint256 supply, uint256 p1) external {
         // A live fair-branch premium mint that sizes at least one share but with a division remainder
         vm.assume(1 <= retained && retained <= MAX_NAV);
         vm.assume(1 <= premium && premium <= MAX_NAV);

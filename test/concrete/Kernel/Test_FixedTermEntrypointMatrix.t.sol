@@ -13,7 +13,7 @@ import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
  * @notice The DEPOSIT half of the FIXED_TERM per-entrypoint matrix, always-running (mock, no RPC). The redemption
  *         half is pinned by Test_FixedTermRedemptionGates_Kernel; the deposit matrix previously lived only in the
  *         RPC-gated fork kernel suite, so a CI run without an RPC left it unverified.
- * @dev Production implements a coherent middle ground (Finding 7): nothing that mints senior shares is allowed
+ * @dev Production implements a coherent middle ground (Divergence 7): nothing that mints senior shares is allowed
  *      mid-term, everything that only deepens liquidity is. So stDeposit/jtDeposit and an ST-leg multi-asset LT
  *      deposit revert DISABLED_IN_FIXED_TERM_STATE, while an in-kind BPT LT deposit and a quote-only multi-asset
  *      LT deposit succeed.

@@ -287,7 +287,7 @@ contract WaterfallGainArmSymbolicSpec is Test {
     }
 
     /*//////////////////////////////////////////////////////////////////////
-            FINDING CANDIDATE: DUST GAIN PAYS PREMIUMS WITHOUT A RESET
+            DIVERGENCE CANDIDATE: DUST GAIN PAYS PREMIUMS WITHOUT A RESET
     //////////////////////////////////////////////////////////////////////*/
 
     /**
@@ -305,7 +305,7 @@ contract WaterfallGainArmSymbolicSpec is Test {
      *      gain. This check pins the current behavior exactly, including all three protocol fees staying at
      *      zero because every fee is gated on the paid flag
      */
-    function check_FINDING_candidate_dustGainPaysPremiumsButLeavesAccrualWindowUnreset(
+    function check_DIVERGENCE_candidate_dustGainPaysPremiumsButLeavesAccrualWindowUnreset(
         uint256 stNAV,
         uint256 jtNAV,
         uint256 dust,

@@ -69,18 +69,18 @@ contract Test_QuoterZeroRateDivergences_DayMarket is DayMarketTestBase {
     }
 
     // =============================
-    // FINDING 27 — forward conversion silently accepts the zero composed rate
+    // DIVERGENCE 27 — forward conversion silently accepts the zero composed rate
     // =============================
 
     /**
-     * @notice FINDING 27 (silent half): with the composed rate floored to zero, the quoter reports the rate as a
+     * @notice DIVERGENCE 27 (silent half): with the composed rate floored to zero, the quoter reports the rate as a
      *         plain zero and forward conversion values whole shares of BOTH tranches at 0 NAV, no revert
      * @dev EXPECTED-CORRECT: a resolved conversion rate of zero means pricing is broken — every senior and junior
      *      share in existence would be marked worthless by an oracle artifact, so the quoter should reject it
      *      with a typed error exactly as the feed hop rejects a zero answer one hop earlier. ACTUAL: the zero
      *      flows through as an ordinary number and every downstream NAV mark silently becomes zero
      */
-    function test_FINDING_27_ZeroCompositeConversionRate_ForwardConversionSilentlyZeroesBothTrancheNAVs() public {
+    function test_DIVERGENCE_27_ZeroCompositeConversionRate_ForwardConversionSilentlyZeroesBothTrancheNAVs() public {
         _collapseToComposedZeroRate();
 
         // The composed rate is exactly zero: floor(1 x 0.99e18 / 1e18) = 0 — accepted where the feed's own
@@ -94,11 +94,11 @@ contract Test_QuoterZeroRateDivergences_DayMarket is DayMarketTestBase {
     }
 
     // =============================
-    // FINDING 27 — backward conversion panics on the same zero rate
+    // DIVERGENCE 27 — backward conversion panics on the same zero rate
     // =============================
 
     /**
-     * @notice FINDING 27 (loud half): the SAME zero composed rate that forward conversion silently accepts makes
+     * @notice DIVERGENCE 27 (loud half): the SAME zero composed rate that forward conversion silently accepts makes
      *         backward conversion panic with division-by-zero — one broken price, two contradictory behaviors
      * @dev Backward conversion computes floor(nav x 1e18 / composedRate), so a zero rate is a zero denominator:
      *      floor(1e18 x 1e18 / 0) hits Solidity's division-by-zero check, Panic(0x12). EXPECTED-CORRECT: both
@@ -106,7 +106,7 @@ contract Test_QuoterZeroRateDivergences_DayMarket is DayMarketTestBase {
      *      ACTUAL: the direction of the conversion decides between a silent zero and a raw panic, and every
      *      caller that backward-converts (previews, max views, redemption sizing) bricks with an untyped panic
      */
-    function test_FINDING_27_ZeroCompositeConversionRate_BackwardConversionPanicsWithDivisionByZero() public {
+    function test_DIVERGENCE_27_ZeroCompositeConversionRate_BackwardConversionPanicsWithDivisionByZero() public {
         _collapseToComposedZeroRate();
 
         // Senior direction: floor(1e18 NAV x 1e18 / 0) divides by the zero composed rate, Panic(0x12)
@@ -119,11 +119,11 @@ contract Test_QuoterZeroRateDivergences_DayMarket is DayMarketTestBase {
     }
 
     // =============================
-    // FINDING 27 — a sync commits a total wipe off the pricing artifact, then the max-deposit view panics
+    // DIVERGENCE 27 — a sync commits a total wipe off the pricing artifact, then the max-deposit view panics
     // =============================
 
     /**
-     * @notice FINDING 27 (committed damage): a sync at the zero composed rate marks stRaw and jtRaw to zero and
+     * @notice DIVERGENCE 27 (committed damage): a sync at the zero composed rate marks stRaw and jtRaw to zero and
      *         the waterfall commits a checkpoint that wipes both effective NAVs — 130 whole shares of real
      *         deposited capital erased by a pricing artifact — while BOTH risk metrics read a healthy zero.
      *         The senior max-deposit view then panics instead of returning a number
@@ -144,7 +144,7 @@ contract Test_QuoterZeroRateDivergences_DayMarket is DayMarketTestBase {
      *      backward-converts it at the live composed rate: floor(0 x 1e18 / 0) divides by zero, Panic(0x12).
      *      A max-deposit view exists to tell integrators what is safe to attempt, it should never revert
      */
-    function test_FINDING_27_ZeroCompositeConversionRate_SyncCommitsFullLossAndMaxDepositViewPanics() public {
+    function test_DIVERGENCE_27_ZeroCompositeConversionRate_SyncCommitsFullLossAndMaxDepositViewPanics() public {
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
         _collapseToComposedZeroRate();
 

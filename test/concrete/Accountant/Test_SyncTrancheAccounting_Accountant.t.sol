@@ -1782,7 +1782,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
 
     /**
      * junior raw losses never underflow the junior effective NAV from any cross-claim
-     * checkpoint — a panic anywhere in this sweep is a REAL finding — and the final NAVs match an independent
+     * checkpoint — a panic anywhere in this sweep is a REAL divergence — and the final NAVs match an independent
      * floor-and-min coverage model
      */
     function testFuzz_Sync_jtLossAttributionNeverUnderflows(uint256 _cross, uint256 _loss) public {
@@ -2159,7 +2159,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     /**
      * PREMIUMS_EXCEED_SENIOR_YIELD is unreachable — with the yield shares capped at accrual and the caps
      * summing to exactly WAD, hostile YDM outputs (up to uint256 max) can never push the combined premiums past
-     * the senior gain on either the time-weighted or the instantaneous branch. Any revert here is a REAL finding
+     * the senior gain on either the time-weighted or the instantaneous branch. Any revert here is a REAL divergence
      */
     function testFuzz_Sync_premiumsNeverExceedSeniorYield(uint256 _rateJT, uint256 _rateLT, uint256 _elapsed, uint256 _gain1, uint256 _gain2) public {
         // Deploy at the joint cap maxJT + maxLT == WAD, the tightest legal configuration
@@ -2193,7 +2193,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     /**
      * exact two-term NAV conservation on every committed sync from any reachable cross-claim checkpoint —
      * the NAV_CONSERVATION_VIOLATION revert arm is unreachable from conserved checkpoints (a revert or a drift
-     * of even one wei here is a REAL finding)
+     * of even one wei here is a REAL divergence)
      */
     function testFuzz_Sync_conservationOnEveryCommittedSync(
         uint256 _stRaw0,

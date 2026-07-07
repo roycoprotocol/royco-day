@@ -32,11 +32,11 @@ contract Test_PremiumMintDivergences_DayMarket is DayMarketTestBase {
     }
 
     // =============================
-    // FINDING 11 — a whitelist-transfer market bricks on the first senior gain
+    // DIVERGENCE 11 — a whitelist-transfer market bricks on the first senior gain
     // =============================
 
     /**
-     * @notice FINDING 11: in a market that enforces the tranche-transfer whitelist, the liquidity-premium mint
+     * @notice DIVERGENCE 11: in a market that enforces the tranche-transfer whitelist, the liquidity-premium mint
      *         reverts ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(kernel), because the premium is minted as senior shares to
      *         the kernel and the mint's _update hook screens the kernel as an un-whitelisted recipient
      *         (RoycoDayKernel.preTrancheBalanceUpdateHook, the ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER branch)
@@ -49,7 +49,7 @@ contract Test_PremiumMintDivergences_DayMarket is DayMarketTestBase {
     /// @dev FIXED: the deployment now grants the kernel and the protocol fee recipient the tranche LP roles, so the
     ///      premium/fee mints pass the tranche `_update` whitelist screen. A whitelist-enforcing market no longer
     ///      bricks on the first senior gain.
-    function test_FINDING_11_whitelistMarket_syncsCleanlyAfterSeniorGain() public {
+    function test_DIVERGENCE_11_whitelistMarket_syncsCleanlyAfterSeniorGain() public {
         // Redeploy the market with the tranche-transfer whitelist enforced
         MarketParamsConfig memory p = defaultParams();
         p.enforceWhitelistOnTransfer = true;
@@ -76,11 +76,11 @@ contract Test_PremiumMintDivergences_DayMarket is DayMarketTestBase {
     }
 
     // =============================
-    // FINDING 12 — a griefed reinvestment leaves the premium staged and claimable, not forfeited
+    // DIVERGENCE 12 — a griefed reinvestment leaves the premium staged and claimable, not forfeited
     // =============================
 
     /**
-     * @notice FINDING 12 (intended behavior): when the single-sided reinvestment fails the slippage gate, the
+     * @notice DIVERGENCE 12 (intended behavior): when the single-sided reinvestment fails the slippage gate, the
      *         premium mint still succeeds and the freshly minted senior shares stay idle in the kernel
      *         (ltOwnedSeniorTrancheShares), NOT deployed into ltRawNAV and NOT forfeited. This matches the intended
      *         design: the un-deployed premium is held by the kernel as idle liquidity premium senior shares,
@@ -90,7 +90,7 @@ contract Test_PremiumMintDivergences_DayMarket is DayMarketTestBase {
      *      slippage only DEFERS deployment; the metric keeps reading under-provisioned (ltRawNAV excludes the
      *      idle shares) so the LDM keeps paying
      */
-    function test_FINDING_12_griefedReinvestment_stagesPremiumClaimableNotForfeited() public {
+    function test_DIVERGENCE_12_griefedReinvestment_stagesPremiumClaimableNotForfeited() public {
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
 
         // Arm persistent venue slippage so the single-sided reinvestment deterministically fails its min-BPT-out

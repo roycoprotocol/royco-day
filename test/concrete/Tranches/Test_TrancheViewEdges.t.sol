@@ -41,7 +41,7 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
      *      bricks on exactly the pre-bootstrap and fully-exited states where an integrator probes it. Expected
      *      behavior: return zero claims without reverting
      */
-    function test_FINDING_24_ConvertToAssets_EmptyTrancheReturnsZeroClaims() public {
+    function test_DIVERGENCE_24_ConvertToAssets_EmptyTrancheReturnsZeroClaims() public {
         // A freshly deployed, never-seeded market: every tranche has zero share supply
         _deployMarket(cellA(), defaultParams());
         assertEq(juniorTranche.totalSupply(), 0, "the fresh junior tranche must start with zero share supply");
@@ -77,7 +77,7 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
      *      0 whenever the BPT marks zero and underreports the true maximum. Expected behavior: maxRedeem reports
      *      the largest amount a redemption accepts, here the full balance
      */
-    function test_FINDING_25_LTMaxRedeem_ReportsZeroOnIdleOnlyNAVWhileFullBalanceRedeems() public {
+    function test_DIVERGENCE_25_LTMaxRedeem_ReportsZeroOnIdleOnlyNAVWhileFullBalanceRedeems() public {
         _deployZeroMinLiquidityMarketWithPremium();
         uint256 idleShares = _accrueIdlePremiumSeniorShares();
 

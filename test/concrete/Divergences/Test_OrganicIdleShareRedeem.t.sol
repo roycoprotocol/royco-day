@@ -9,8 +9,8 @@ import { cellA } from "../../utils/TokenConfigs.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
- * @title Test_Finding3OrganicIdleShareRedeem
- * @notice Reproduces Finding 3 (in-kind LT redemption reverts when the BPT slice floors to zero while the idle
+ * @title Test_Divergence3OrganicIdleShareRedeem
+ * @notice Reproduces Divergence 3 (in-kind LT redemption reverts when the BPT slice floors to zero while the idle
  *         premium ST-share slice is positive) reaching the triggering state ENTIRELY through public functions —
  *         no manual storage seeding or direct doPostOp calls (the existing pin in Test_FeeAndLiquidityPremium
  *         builds the state with the mock-kernel doPostOp).
@@ -26,7 +26,7 @@ import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
  *         totalSTAndJTRedemptionNAV == 0 — the LT_REDEEM op-shape require (RoycoDayAccountant.sol:263) reverts,
  *         even though the redeemer was owed a positive slice of staged premium.
  */
-contract Test_Finding3OrganicIdleShareRedeem is DayMarketTestBase {
+contract Test_Divergence3OrganicIdleShareRedeem is DayMarketTestBase {
     uint256 internal stUnit;
 
     function setUp() public {
@@ -51,7 +51,7 @@ contract Test_Finding3OrganicIdleShareRedeem is DayMarketTestBase {
         return kernel.getState().ltOwnedSeniorTrancheShares;
     }
 
-    function test_FINDING_3_organic_zeroBPTSliceWithIdleShares_revertsThroughPublicFlows() public {
+    function test_DIVERGENCE_3_organic_zeroBPTSliceWithIdleShares_revertsThroughPublicFlows() public {
         // Accrue senior yield and sync until the idle premium pile and the LT-fee-diluted supply overtake the
         // frozen BPT count. Big up-only yields keep the market PERPETUAL and make the LDM pay a large premium.
         uint256 supply;
@@ -89,7 +89,7 @@ contract Test_Finding3OrganicIdleShareRedeem is DayMarketTestBase {
 
         // Redeeming that single LT share in-kind reverts: the op moves no marked NAV (zero BPT delta, zero
         // ST/JT redemption), so the LT_REDEEM op-shape invariant rejects it — the staged premium is stranded on
-        // the in-kind path, exactly as Finding 3 documents.
+        // the in-kind path, exactly as Divergence 3 documents.
         vm.prank(LT_PROVIDER);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_REDEEM));
         liquidityTranche.redeem(1, LT_PROVIDER, LT_PROVIDER);

@@ -111,7 +111,7 @@ contract Test_AdminAndOracleGates_STJTChainlinkQuoter is DayMarketTestBase {
      *      so the accepted and rejected configurations are swapped. The staleness gate is updatedAt + threshold >= now, so with
      *      threshold 0 a fresh answer (updatedAt == now) passes only until the next second ticks
      */
-    function test_FINDING_19_SetChainlinkOracle_RejectsLiveFeedWithZeroStalenessThreshold() public {
+    function test_DIVERGENCE_19_SetChainlinkOracle_RejectsLiveFeedWithZeroStalenessThreshold() public {
         // Fixed: when the oracle is set (non-null), a zero staleness threshold is rejected — it would brick every
         // read (updatedAt + 0 >= now requires a same-second update). The guard now enforces staleness > 0 iff the
         // oracle is set.
@@ -319,84 +319,68 @@ contract Test_AdminAndOracleGates_STJTChainlinkQuoter is DayMarketTestBase {
 }
 
 /**
- * @title Test_ZeroStalenessBrick_STJTChainlinkQuoter
- * @notice From a seeded market that landed a live feed with a zero staleness threshold, exercises the market-wide
- *         pricing and sync DoS one second later and pins exactly which admin paths can and cannot repair it
- * @dev Seeding and the hazardous config land in setUp DELIBERATELY: Foundry clears transient storage between setUp
- *      and the test body, so the quoter rate cache written by the seeding deposits and by the setter's own
- *      post-update sync cannot mask the live oracle query each test exercises
+ * @title Test_ZeroStalenessGuard_STJTChainlinkQuoter
+ * @notice A live feed paired with a zero staleness threshold is rejected at the setter, so the config that would
+ *         brick every pricing view and sync one second later (a 1-second-old answer fails updatedAt + 0 >= now,
+ *         a market-wide pricing and sync DoS until the feed pushes a new round) is unreachable from the admin surface
+ * @dev The null-oracle arm stays settable with a zero threshold: upstream quoters may price from an admin-set
+ *      stored rate with the chainlink oracle as an optional fallback, and no staleness gate runs without a feed
  */
-contract Test_ZeroStalenessBrick_STJTChainlinkQuoter is DayMarketTestBase {
+contract Test_ZeroStalenessGuard_STJTChainlinkQuoter is DayMarketTestBase {
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        // A real market with senior and junior capital, so a bricked quoter is a bricked market, not a bricked view
+        // A real market with senior and junior capital, so the survival assertions exercise the market, not a view
         _seedMarket(100e18, 50e18);
-
-        // Land the accepted-but-hazardous config: a live feed with a zero staleness threshold. The answer is
-        // refreshed to this very second so the setter's own post-update sync still prices (updatedAt + 0 == now)
+        // A fresh answer, so only the guard (never a stale price) can reject the sets below
         priceFeed.setUpdatedAt(block.timestamp);
-        vm.prank(ORACLE_QUOTER_ADMIN);
-        kernel.setChainlinkOracle(address(priceFeed), 0, false);
-
-        // One second later the answer is 1 second old, so the zero-threshold gate updatedAt + 0 >= now fails
-        vm.warp(block.timestamp + 1);
     }
 
     /**
-     * @notice CURRENT BEHAVIOR (divergence): one second after a live feed lands with a zero staleness threshold,
-     *         pricing views and the accounting sync all revert STALE_PRICE, a market-wide pricing and sync DoS
-     * @dev Expected from first principles: the (live feed, zero threshold) pair should have been rejected at the
-     *      setter with INVALID_STALENESS_THRESHOLD_SECONDS, making this state unreachable. The staleness gate is
-     *      updatedAt + threshold >= now, so a 1-second-old answer against threshold 0 fails for every caller until
-     *      the feed pushes a new round, and every kernel operation that opens the quoter cache dies on the same gate
+     * @notice Setting a live feed with a zero staleness threshold reverts through both setter arms, and the
+     *         market still prices and syncs one second later under its untouched pre-existing config
+     * @dev The guard sits in the shared internal setter, so the pre-update-sync arm cannot smuggle the pair in
+     *      either: its pre-sync prices under the healthy old config and the guard still rejects before the write
      */
-    function test_FINDING_19_ZeroStalenessThresholdBricksPricingAndSyncNextSecond() public {
-        // The answer is 1 second old: updatedAt + 0 < now, so the direct pricing view is dead
-        vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.STALE_PRICE.selector);
-        kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
+    function test_RevertIf_LiveFeedSetWithZeroStalenessThreshold() public {
+        // Without the pre-update sync
+        vm.prank(ORACLE_QUOTER_ADMIN);
+        vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.INVALID_STALENESS_THRESHOLD_SECONDS.selector);
+        kernel.setChainlinkOracle(address(priceFeed), 0, false);
 
-        // The sync opens the quoter rate cache through the same live query, so P&L can no longer be committed either
+        // With the pre-update sync
+        vm.prank(ORACLE_QUOTER_ADMIN);
+        vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.INVALID_STALENESS_THRESHOLD_SECONDS.selector);
+        kernel.setChainlinkOracle(address(priceFeed), 0, true);
+
+        // One second later the market is alive: the DoS the rejected pair would have caused cannot happen
+        vm.warp(block.timestamp + 1);
+        assertEq(
+            toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))),
+            1e18,
+            "pricing must survive the second after the rejected set"
+        );
         vm.prank(SYNC_OPERATOR);
-        vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.STALE_PRICE.selector);
         kernel.syncTrancheAccounting();
     }
 
     /**
-     * @notice Repairing the zero-threshold brick works only through the admin arms that do NOT price under the
-     *         broken config first: setChainlinkOracle without the pre-update sync, or a stored conversion rate
-     * @dev Bounds the severity of accepting (live feed, zero threshold): the bricked market is admin-recoverable,
-     *      but only by the exact paths pinned here, because the pre-sync arm prices under the OLD config and dies
-     *      on its own staleness gate before the corrected threshold can land
+     * @notice The null oracle stays settable with a zero staleness threshold once a stored conversion rate prices
+     *         the market, because no staleness gate runs without a feed
+     * @dev Pins the guard's exact shape (oracle == 0 || threshold > 0): the zero threshold is hazardous only
+     *      when paired with a live feed, and rejecting it unconditionally would break the stored-rate-only config
      */
-    function test_SetChainlinkOracle_RecoversFromZeroStalenessThresholdOnlyWithoutPreSync() public {
-        // Repair WITH the pre-update sync: the pre-sync prices under the still-bricked zero threshold and reverts,
-        // so the corrected threshold can never land through this arm
-        vm.prank(ORACLE_QUOTER_ADMIN);
-        vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.STALE_PRICE.selector);
-        kernel.setChainlinkOracle(address(priceFeed), 1 days, true);
-
-        // Repair WITHOUT the pre-sync: the 1-day threshold lands first and only then does the post-update sync
-        // price, and a 1-second-old answer is well inside 1 day, so the setter succeeds
-        vm.prank(ORACLE_QUOTER_ADMIN);
-        kernel.setChainlinkOracle(address(priceFeed), 1 days, false);
-        // Pricing resumes at the pre-brick rate: vault 1.0 x feed 1.0 = 1e18 per whole 18-decimal share
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1e18, "pricing must resume once the threshold is repaired without a pre-sync");
-
-        // Re-brick (fresh answer, zero threshold, one second passes) to prove the stored-rate escape hatch independently
-        priceFeed.setUpdatedAt(block.timestamp);
-        vm.prank(ORACLE_QUOTER_ADMIN);
-        kernel.setChainlinkOracle(address(priceFeed), 0, false);
-        vm.warp(block.timestamp + 1);
-        vm.prank(SYNC_OPERATOR);
-        vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.STALE_PRICE.selector);
-        kernel.syncTrancheAccounting();
-
-        // A stored conversion rate short-circuits the oracle query entirely, so it restores pricing without ever
-        // touching the broken staleness config
+    function test_SetChainlinkOracle_NullOracleWithZeroThresholdRemainsSettable() public {
+        // A stored conversion rate short-circuits the oracle query, so the setter's own post-update sync prices
         vm.prank(ORACLE_QUOTER_ADMIN);
         kernel.setConversionRate(1e18, false);
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1e18, "the stored rate must price around the bricked oracle config");
-        // The zero threshold still sits in storage, proving the stored-rate recovery never consulted the feed config
-        assertEq(kernel.getChainlinkOracleConfiguration().stalenessThresholdSeconds, 0, "the bricked zero threshold must remain in quoter storage");
+
+        vm.prank(ORACLE_QUOTER_ADMIN);
+        kernel.setChainlinkOracle(address(0), 0, false);
+        assertEq(kernel.getChainlinkOracleConfiguration().oracle, address(0), "the null oracle must land");
+        assertEq(kernel.getChainlinkOracleConfiguration().stalenessThresholdSeconds, 0, "the zero threshold must land alongside the null oracle");
+
+        // Pricing runs on the stored rate and never consults a feed, so the zero threshold is inert
+        vm.warp(block.timestamp + 365 days);
+        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1e18, "the stored rate must price with no feed set");
     }
 }

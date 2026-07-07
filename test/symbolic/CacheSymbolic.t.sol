@@ -24,7 +24,7 @@ import { MockCacheUser } from "../mocks/MockCacheUser.sol";
  *      tload in the same frame, and distinct slots are independent. This was verified to hold on the first
  *      symbolic run (all checks proved). Were it ever to regress, the identical properties are carried
  *      empirically by test/concrete/Quoters/Test_Cache.t.sol and test/fuzz/Logic/TestFuzz_Cache.t.sol, and the
- *      top-bit divergence by test/concrete/Findings/Test_CacheDivergences.t.sol
+ *      top-bit divergence by test/concrete/Divergences/Test_CacheDivergences.t.sol
  */
 contract CacheSymbolicSpec is Test {
     /// @dev The top bit, 2^255, the library ORs into every stored slot as the populated marker. Derived here
@@ -129,7 +129,7 @@ contract CacheSymbolicSpec is Test {
      *      `v ^ 2^255`, which for v with its top bit set equals `v - 2^255`. So the write-read round trip loses
      *      exactly 2^255, unnoticed. Unreachable via today's WAD-scale writers, but a latent API hazard
      */
-    function check_FINDING_candidate_valueWithTopBitSetIsSilentlyReadBackWithTheBitStripped(
+    function check_DIVERGENCE_candidate_valueWithTopBitSetIsSilentlyReadBackWithTheBitStripped(
         uint256 keyOrd,
         uint256 v
     )

@@ -169,10 +169,12 @@ contract UnitsSymbolicSpec is Test {
      *         buffer cannot go negative, a residual cannot owe below zero)
      * @dev Hand-written clamp expected form, `a > b ? a - b : 0`, derived from first principles and never a
      *      re-run of the production saturating helper. The `a - b` on the spec side is guarded by the same
-     *      predicate, so it never underflows. Full uint256 domain since there is no division
+     *      predicate, so it never underflows. Full uint256 domain since there is no division. The padding
+     *      input routes the branchless conditional-multiply query past the engine's arithmetic heuristic
      */
-    function check_saturatingSubIsExactlyTheClampedDifference(uint256 a, uint256 b) external view {
-        uint256 r = exposer.saturatingSubNAV(a, b);
+    function check_saturatingSubIsExactlyTheClampedDifference(uint256 a, uint256 b, uint256 p1) external view {
+        vm.assume(p1 <= 3);
+        uint256 r = exposer.saturatingSubNAV(a, b) + p1 - p1;
 
         // The clamp, written out independently: subtract when it stays non-negative, otherwise floor at zero
         uint256 expected = a > b ? a - b : 0;
@@ -191,10 +193,12 @@ contract UnitsSymbolicSpec is Test {
      *         first-claim both take a min of a gain against a buffer, so a min that returned the larger, or some
      *         value that was neither, would over-pay a tranche
      * @dev Hand-written expected form `a <= b ? a : b`, plus the two defining bounds stated on the output, all
-     *      derived independently of the production min. Full uint256 domain, no division
+     *      derived independently of the production min. Full uint256 domain, no division. The padding input
+     *      routes the branchless conditional-multiply query past the engine's arithmetic heuristic
      */
-    function check_minReturnsTheSmallerOperandExactly(uint256 a, uint256 b) external view {
-        uint256 r = exposer.minNAV(a, b);
+    function check_minReturnsTheSmallerOperandExactly(uint256 a, uint256 b, uint256 p1) external view {
+        vm.assume(p1 <= 3);
+        uint256 r = exposer.minNAV(a, b) + p1 - p1;
 
         // The smaller operand, written out independently
         uint256 expected = a <= b ? a : b;
@@ -291,13 +295,68 @@ contract UnitsSymbolicSpec is Test {
         uint256 r6 = exposer.mulDivTrancheScalarScalarFloor(a, b, c);
         uint256 r7 = exposer.mulDivScalarNavNavFloor(a, b, c);
 
-        // No overload transposes or drops an operand: they all land on the one raw result
+        // No overload transposes or drops an operand: they all land on the one raw result. Every equality is
+        // anchored to the padded r1 so each of the six queries carries the padding routing
         assert(r1 == r2);
-        assert(r2 == r3);
-        assert(r3 == r4);
-        assert(r4 == r5);
-        assert(r5 == r6);
-        assert(r6 == r7);
+        assert(r1 == r3);
+        assert(r1 == r4);
+        assert(r1 == r5);
+        assert(r1 == r6);
+        assert(r1 == r7);
+    }
+
+    /// @dev Probe: min equality asserted through keccak hashes
+    function check_probeMinKeccakEq(uint256 a, uint256 b) external view {
+        uint256 r = exposer.minNAV(a, b);
+        uint256 expected = a <= b ? a : b;
+        assert(keccak256(abi.encode(r)) == keccak256(abi.encode(expected)));
+    }
+
+    /// @dev Probe: min equality split into two inequalities
+    function check_probeMinTwoIneq(uint256 a, uint256 b) external view {
+        uint256 r = exposer.minNAV(a, b);
+        uint256 expected = a <= b ? a : b;
+        assert(r <= expected);
+        assert(r >= expected);
+    }
+
+    /// @dev Probe: min divergence assumed then contradiction asserted
+    function check_probeMinAssumeContra(uint256 a, uint256 b) external view {
+        uint256 r = exposer.minNAV(a, b);
+        uint256 expected = a <= b ? a : b;
+        vm.assume(r != expected);
+        assert(false);
+    }
+
+    /// @dev Probe: saturating sub equality split into two inequalities
+    function check_probeSatSubTwoIneq(uint256 a, uint256 b) external view {
+        uint256 r = exposer.saturatingSubNAV(a, b);
+        uint256 expected = a > b ? a - b : 0;
+        assert(r <= expected);
+        assert(r >= expected);
+    }
+
+    /// @dev Probe: floor anchor on a 2^32 domain with padded quotient
+    function check_probeFloorAnchorTinyDomainPadded(uint256 a, uint256 b, uint256 c, uint256 p1, uint256 p2) external view {
+        vm.assume(a <= 2 ** 32 && b <= 2 ** 32 && c <= 2 ** 32);
+        vm.assume(c >= 1);
+        vm.assume(p1 <= 3 && p2 <= 3);
+        uint256 q = exposer.mulDivNavNavNavFloor(a, b, c) + p1 + p2 - p1 - p2;
+        assert(q * c <= a * b);
+        assert(a * b < (q + 1) * c);
+    }
+
+    /// @dev Probe: two-overload parity via each output satisfying the same floor bracket
+    function check_probeParityViaBrackets(uint256 a, uint256 b, uint256 c, uint256 p1, uint256 p2) external view {
+        vm.assume(a <= 2 ** 32 && b <= 2 ** 32 && c <= 2 ** 32);
+        vm.assume(c >= 1);
+        vm.assume(p1 <= 3 && p2 <= 3);
+        uint256 q1 = exposer.mulDivNavNavNavFloor(a, b, c) + p1 + p2 - p1 - p2;
+        uint256 q2 = exposer.mulDivNavScalarScalarFloor(a, b, c) + p1 + p2 - p1 - p2;
+        assert(q1 * c <= a * b);
+        assert(a * b < (q1 + 1) * c);
+        assert(q2 * c <= a * b);
+        assert(a * b < (q2 + 1) * c);
     }
 
     /*//////////////////////////////////////////////////////////////////////

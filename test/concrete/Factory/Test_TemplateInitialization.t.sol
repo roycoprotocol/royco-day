@@ -63,7 +63,7 @@ contract Test_TemplateInitialization is Test {
 
     /// A mempool front-runner can seed the template's bytecode registry before the deployer, and the poisoned
     /// template still registers cleanly because registration checks only the initialized flag, never the content
-    function test_FINDING_20_TemplateInitialize_StrangerFrontRunsDeployerAndRegisterStillSucceeds() external {
+    function test_DIVERGENCE_20_TemplateInitialize_StrangerFrontRunsDeployerAndRegisterStillSucceeds() external {
         // CURRENT behavior: `BaseDeploymentTemplate.initialize` carries only OZ's `initializer` modifier — no caller
         // gate — so it is permissionless-first-caller. EXPECTED behavior: initialize restricted to the deployer or
         // the factory, or the loaded bytecode content verified at registration, so the code a registered template
@@ -95,7 +95,7 @@ contract Test_TemplateInitialization is Test {
 
     /// initialize with two empty arrays counts as fully initialized, so a template with zero components registers
     /// cleanly and the emptiness only surfaces at deploy time as CREATION_CODE_NOT_SET
-    function test_FINDING_20_TemplateInitialize_EmptyArraysCountAsInitialized_DeployLaterRevertsCreationCodeNotSet() external {
+    function test_DIVERGENCE_20_TemplateInitialize_EmptyArraysCountAsInitialized_DeployLaterRevertsCreationCodeNotSet() external {
         // CURRENT behavior: the loop body never runs for empty arrays, yet the `initializer` modifier still flips
         // the version to 1, so `isInitialized()` is true with an empty bytecode registry. EXPECTED behavior: an
         // empty component load rejected at initialize (or at registration), not discovered on the first deployment.

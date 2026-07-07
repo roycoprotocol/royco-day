@@ -58,7 +58,7 @@ contract Test_FactoryTrancheRegistry is Test {
      *      template can reach this write, so the poisoned key requires a template that emits a zero member —
      *      but that is exactly the advertised ST/JT-only result shape, not a malicious one.
      */
-    function test_FINDING_22_ZeroTrancheFromTemplate_PoisonsZeroAddressRegistryKeyAndGetMarketSentinel() external {
+    function test_DIVERGENCE_22_ZeroTrancheFromTemplate_PoisonsZeroAddressRegistryKeyAndGetMarketSentinel() external {
         address seniorTranche = makeAddr("SENIOR_TRANCHE");
         address juniorTranche = makeAddr("JUNIOR_TRANCHE");
         // The kernel stand-in reports the same ST/JT set the result carries, and no liquidity tranche.
@@ -87,7 +87,7 @@ contract Test_FactoryTrancheRegistry is Test {
         assertEq(factory.trancheToKernel(seniorTranche), address(kernel), "senior key -> kernel");
         assertEq(factory.trancheToKernel(juniorTranche), address(kernel), "junior key -> kernel");
 
-        // FINDING: the zero-tranche write poisoned the zero-address key. `trancheToKernel(address(0))` should be
+        // DIVERGENCE: the zero-tranche write poisoned the zero-address key. `trancheToKernel(address(0))` should be
         // address(0) (no tranche lives at the zero address). FIXED: the zero-tranche registry write is skipped, so
         // the zero-address key is never poisoned.
         assertEq(factory.trancheToKernel(address(0)), address(0), "zero-address key must not be poisoned");

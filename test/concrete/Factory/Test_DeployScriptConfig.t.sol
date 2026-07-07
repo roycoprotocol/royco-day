@@ -7,6 +7,7 @@ import { MockERC20C } from "../../mocks/MockERC20C.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
+    ADMIN_BLACKLIST_ROLE,
     ADMIN_ENTRY_POINT_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
@@ -61,8 +62,8 @@ contract Test_DeployScriptConfig is Test {
      */
     function test_GetRoleConfig_ResolvesEveryGeneratedRoleAssignment() public view {
         // 15 distinct dummy addresses, one per RoleAssignmentAddresses field (the struct's full address surface).
-        // The fee recipient deliberately carries three LP roles (ST/JT/LT), which is how 15 addresses fan out to
-        // 17 assignments.
+        // The fee recipient deliberately carries three LP roles (ST/JT/LT) and market ops carries the blacklist
+        // admin role alongside its own, which is how 15 addresses fan out to 18 assignments.
         DeployScript.RoleAssignmentAddresses memory addresses = DeployScript.RoleAssignmentAddresses({
             pauserAddress: address(0x1001),
             unpauserAddress: address(0x1002),
@@ -84,8 +85,9 @@ contract Test_DeployScriptConfig is Test {
         DeployScript.RoleAssignment[] memory assignments = deployScript.generateRolesAssignments(addresses);
 
         // Independently derived count: the address surface is 15 fields, of which the fee recipient maps to the
-        // three LP roles and the other 14 map one-to-one, so 14 + 3 = 17 assignments.
-        assertEq(assignments.length, 17, "one assignment per (role, assignee) pair: 14 one-to-one + 3 LP roles on the fee recipient");
+        // three LP roles, market ops maps to its own role plus the blacklist admin role, and the other 13 map
+        // one-to-one, so 13 + 3 + 2 = 18 assignments.
+        assertEq(assignments.length, 18, "one assignment per (role, assignee) pair: 13 one-to-one + 3 LP roles on the fee recipient + 2 on market ops");
 
         for (uint256 i; i < assignments.length; ++i) {
             uint64 role = assignments[i].role;
@@ -124,8 +126,9 @@ contract Test_DeployScriptConfig is Test {
 
         // The emitted role set itself, hand-listed from the deployment's operational surface (pause/unpause,
         // upgrade, sync, kernel/accountant/fee/quoter admin, LP admin + the three LP roles, guardian, deployer +
-        // its admin, Balancer pool manager, market ops). Order-pinned so a silent drop or reorder is loud.
-        uint64[17] memory expectedRoles = [
+        // its admin, Balancer pool manager, market ops + blacklist admin). Order-pinned so a silent drop or
+        // reorder is loud.
+        uint64[18] memory expectedRoles = [
             ADMIN_PAUSER_ROLE,
             ADMIN_UPGRADER_ROLE,
             SYNC_ROLE,
@@ -142,7 +145,8 @@ contract Test_DeployScriptConfig is Test {
             ADMIN_UNPAUSER_ROLE,
             LT_LP_ROLE,
             ADMIN_BALANCER_POOL_MANAGER_ROLE,
-            ADMIN_MARKET_OPS_ROLE
+            ADMIN_MARKET_OPS_ROLE,
+            ADMIN_BLACKLIST_ROLE
         ];
         for (uint256 i; i < expectedRoles.length; ++i) {
             assertEq(assignments[i].role, expectedRoles[i], "generated role set diverged from the deployment role surface");
@@ -177,7 +181,7 @@ contract Test_DeployScriptConfig is Test {
      *         already-deployed component address and reverts MARKET_COMPONENT_ALREADY_DEPLOYED atomically. It is a
      *         loud deployment foot-gun, never silent aliasing of one market's components onto another
      */
-    function test_FINDING_21_MarketIdDerivation_CollidesForShiftedNameBoundariesAndSameBlockReruns() public {
+    function test_DIVERGENCE_21_MarketIdDerivation_CollidesForShiftedNameBoundariesAndSameBlockReruns() public {
         // Fixed block context so the derivation below is fully determined: both derivations share the same
         // timestamp and chainid, isolating the string-boundary ambiguity as the only moving part.
         vm.warp(1_750_000_000);

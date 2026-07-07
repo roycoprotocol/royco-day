@@ -168,7 +168,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         require(result.kernel != address(0), INVALID_DEPLOYMENT_RESULT());
 
         // Register each tranche against the market's kernel, skipping any zero tranche address so an absent tranche
-        // (e.g. an ST/JT-only market's liquidity tranche) never poisons the zero-address registry key (Finding 22).
+        // (e.g. an ST/JT-only market's liquidity tranche) never poisons the zero-address registry key.
         if (result.seniorTranche != address(0)) $.trancheToKernel[result.seniorTranche] = result.kernel;
         if (result.juniorTranche != address(0)) $.trancheToKernel[result.juniorTranche] = result.kernel;
         if (result.liquidityTranche != address(0)) $.trancheToKernel[result.liquidityTranche] = result.kernel;

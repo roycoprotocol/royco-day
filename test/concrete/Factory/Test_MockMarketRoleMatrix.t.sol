@@ -19,9 +19,9 @@ import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
  *         BalancerV3DeploymentTemplate's role wiring is only asserted in the RPC-gated fork factory suite, so a
  *         standard CI run leaves it unverified; DayMarketTestBase hand-mirrors that wiring
  *         (`_wireTargetFunctionRoles`/`_wireRoleGrants`), and this pins the mirror against drift — and pins the
- *         exact grant set that is the root of Finding 11 (the whitelist-mint brick).
+ *         exact grant set that is the root of Divergence 11 (the whitelist-mint brick).
  * @dev Asserts selector->role bindings, the two contract grants, that the kernel/fee-recipient hold NO tranche LP
- *      role (Finding 11 root), and that `mint` is deliberately unbound (defaults to AccessManager ADMIN_ROLE, the
+ *      role (Divergence 11 root), and that `mint` is deliberately unbound (defaults to AccessManager ADMIN_ROLE, the
  *      kernel gating it via an immutable `onlyKernel` check instead).
  */
 contract Test_MockMarketRoleMatrix is DayMarketTestBase {
@@ -71,11 +71,11 @@ contract Test_MockMarketRoleMatrix is DayMarketTestBase {
     }
 
     // ---------------------------------------------------------------------
-    // Finding 11 fix: kernel and fee recipient DO hold the tranche LP roles, so a whitelist-enforcing market's
+    // Divergence 11 fix: kernel and fee recipient DO hold the tranche LP roles, so a whitelist-enforcing market's
     // fee/premium mints pass the tranche `_update` whitelist screen.
     // ---------------------------------------------------------------------
 
-    function test_FINDING_11_fix_kernelAndFeeRecipient_holdTrancheLPRoles() public view {
+    function test_DIVERGENCE_11_fix_kernelAndFeeRecipient_holdTrancheLPRoles() public view {
         assertTrue(_holds(ST_LP_ROLE, address(kernel)), "kernel must hold ST_LP_ROLE");
         assertTrue(_holds(JT_LP_ROLE, address(kernel)), "kernel must hold JT_LP_ROLE");
         assertTrue(_holds(LT_LP_ROLE, address(kernel)), "kernel must hold LT_LP_ROLE");

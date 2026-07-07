@@ -448,7 +448,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
 
         // The kernel (coverage-neutral premium senior-share mint recipient) and the protocol fee recipient (ST/JT/LT
         // fee-share mint recipient) must hold the tranche LP roles, otherwise a whitelist-enforcing market bricks on
-        // the first fee/premium mint when the tranche `_update` whitelist screen rejects them (Finding 11).
+        // the first fee/premium mint when the tranche `_update` whitelist screen rejects them.
         RoleGrant[] memory grants = new RoleGrant[](9);
         grants[0] = RoleGrant({ roleId: SYNC_ROLE, account: _r.accountant, executionDelay: 0 });
         grants[1] = RoleGrant({ roleId: BURNER_ROLE, account: _r.kernel, executionDelay: 0 });

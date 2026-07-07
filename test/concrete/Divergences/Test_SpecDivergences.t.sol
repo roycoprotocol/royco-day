@@ -56,11 +56,11 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
     }
 
     // =============================
-    // FINDING 4 — ST deposits ARE liquidity-gated
+    // DIVERGENCE 4 — ST deposits ARE liquidity-gated
     // =============================
 
     /**
-     * @notice FINDING 4: an ST deposit into an under-provisioned market reverts LIQUIDITY_REQUIREMENT_VIOLATED,
+     * @notice DIVERGENCE 4: an ST deposit into an under-provisioned market reverts LIQUIDITY_REQUIREMENT_VIOLATED,
      *         contradicting the product spec's stated intent that "deposits are enabled at all times" and that
      *         "a senior deposit keeps its own coverage gate, so no deposit is ever blocked on liquidity"
      * @dev The specification is internally inconsistent: its canonical product-requirements section (which
@@ -75,7 +75,7 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
      *      ceil(101e18 x 0.05e18 / 4.8e18) = 1052083333333333334 > WAD, and its coverage gate passes at
      *      ceil(131e18 x 0.2e18 / 30e18) = 873333333333333334 <= WAD, so the liquidity gate is what fires
      */
-    function test_FINDING_4_stDeposit_isLiquidityGated_underProvisionedMarketBlocksSeniorEntry() public {
+    function test_DIVERGENCE_4_stDeposit_isLiquidityGated_underProvisionedMarketBlocksSeniorEntry() public {
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
         applyLTPnL(-2000);
 
@@ -97,11 +97,11 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
     }
 
     // =============================
-    // FINDING 5 — JT redemption stays coverage-gated after the liquidation threshold is breached
+    // DIVERGENCE 5 — JT redemption stays coverage-gated after the liquidation threshold is breached
     // =============================
 
     /**
-     * @notice FINDING 5: once the liquidation coverage utilization is breached (forced PERPETUAL), a JT
+     * @notice DIVERGENCE 5: once the liquidation coverage utilization is breached (forced PERPETUAL), a JT
      *         redemption still reverts COVERAGE_REQUIREMENT_VIOLATED, contradicting the product spec's "unless the
      *         liquidation utilization has been breached, in which case all withdrawals are allowed"
      * @dev Production gives the liquidation bypass ONLY to LT redemptions (RedemptionLogic.sol:145,216 pass
@@ -120,7 +120,7 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
      *      = 1666666666666666667 > WAD — the liquidity gate WOULD have fired, so its success proves the
      *      liquidation bypass exists for LT and is withheld from JT
      */
-    function test_FINDING_5_jtRedeem_staysCoverageGated_afterLiquidationBreach() public {
+    function test_DIVERGENCE_5_jtRedeem_staysCoverageGated_afterLiquidationBreach() public {
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
         applySTPnL(-2100);
 
@@ -152,11 +152,11 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
     }
 
     // =============================
-    // FINDING 6 — every accountant parameter setter reverts while the kernel is paused
+    // DIVERGENCE 6 — every accountant parameter setter reverts while the kernel is paused
     // =============================
 
     /**
-     * @notice FINDING 6: pausing the kernel bricks every accountant parameter setter, because each setter's
+     * @notice DIVERGENCE 6: pausing the kernel bricks every accountant parameter setter, because each setter's
      *         withSyncedAccounting modifier (RoycoDayAccountant.sol:42-45) calls the kernel's whenNotPaused
      *         syncTrancheAccounting (RoycoDayKernel.sol:309-320), which reverts EnforcedPause
      * @dev Divergence from the operational expectation that governance can remediate parameters during an
@@ -169,7 +169,7 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
     /// @dev FIXED: `withSyncedAccounting` now performs a best-effort sync (a tolerated raw call), so the accountant
     ///      parameter setters remain available for remediation while the kernel is paused — the sync is skipped
     ///      rather than reverting the whole call.
-    function test_FINDING_6_accountantSetters_revertWhileKernelPaused() public {
+    function test_DIVERGENCE_6_accountantSetters_revertWhileKernelPaused() public {
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
 
         vm.prank(PAUSER);
@@ -199,11 +199,11 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
     }
 
     // =============================
-    // FINDING 7 — intra-spec contradiction on FIXED_TERM deposits: production's actual per-entrypoint behavior
+    // DIVERGENCE 7 — intra-spec contradiction on FIXED_TERM deposits: production's actual per-entrypoint behavior
     // =============================
 
     /**
-     * @notice FINDING 7: the product spec contradicts itself on FIXED_TERM deposits — its capital-realism
+     * @notice DIVERGENCE 7: the product spec contradicts itself on FIXED_TERM deposits — its capital-realism
      *         narrative says "in FIXED_TERM, deposits and redeems are disabled for every tranche" while its
      *         canonical requirements section says "deposits are enabled at all times". Production implements neither sentence:
      *         ST and JT deposits revert DISABLED_IN_FIXED_TERM_STATE, the in-kind LT deposit succeeds, the
@@ -225,7 +225,7 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
      *      multi-asset leg adds 1 whole quote = 1e18 NAV into the pool, minting exactly 1e18 BPT and again
      *      exactly 1e18 LT shares (7e18 eff NAV over 7e18 supply)
      */
-    function test_FINDING_7_fixedTermDeposits_perEntrypointBehavior_intraSpecContradiction() public {
+    function test_DIVERGENCE_7_fixedTermDeposits_perEntrypointBehavior_intraSpecContradiction() public {
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
         applySTPnL(-2000);
 
@@ -251,7 +251,7 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
         vm.stopPrank();
 
         // 3. Multi-asset LT deposit with an ST leg: REVERTS (it would mint senior shares mid-term)
-        address depositor = makeAddr("FINDING_LT_DEPOSITOR");
+        address depositor = makeAddr("DIVERGENCE_LT_DEPOSITOR");
         stJtVault.mintShares(depositor, stUnit);
         vm.startPrank(depositor);
         stJtVault.approve(address(liquidityTranche), stUnit);
@@ -286,16 +286,16 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
     }
 
     // =============================
-    // FINDING 11 — the mint-dilution clamp's residual overflow cliff
+    // DIVERGENCE 11 — the mint-dilution clamp's residual overflow cliff
     // =============================
 
-    /// @dev External probe so the cliff's Panic(0x11) is observable through expectRevert (findings 8-10b live in the fork suite)
+    /// @dev External probe so the cliff's Panic(0x11) is observable through expectRevert (divergences 8-10b live in the fork suite)
     function convertToSharesCliffProbe(uint256 _value, uint256 _totalValue, uint256 _supply) external pure returns (uint256) {
         return ValuationLogic._convertToShares(toNAVUnits(_value), toNAVUnits(_totalValue), _supply, Math.Rounding.Floor);
     }
 
     /**
-     * @notice FINDING 11: the mint-dilution clamp (MINT_DILUTION_RESIDUAL_WAD = 1e6) bounds the zero-NAV
+     * @notice DIVERGENCE 11: the mint-dilution clamp (MINT_DILUTION_RESIDUAL_WAD = 1e6) bounds the zero-NAV
      *         dilution mint per cycle but, with an absolute supply ceiling explicitly declined (user
      *         decision), the cap computation floor(supply x (WAD - eps) / eps) itself overflows uint256 once
      *         supply > floor((2^256 - 1) x eps / (WAD - eps)) — so repeated total-wipe dilution cycles (each
@@ -306,7 +306,7 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
      *         and one share-wei past it panics ((WAD - eps)/eps = 1e12 - 1 exactly at eps = 1e6, so the cap
      *         multiply is exact and the floor identity max - S_ok x k < k gives the crisp +1 boundary)
      */
-    function test_FINDING_11_mintDilutionClamp_residualOverflowCliff() public {
+    function test_DIVERGENCE_11_mintDilutionClamp_residualOverflowCliff() public {
         uint256 k = (WAD - MINT_DILUTION_RESIDUAL_WAD) / MINT_DILUTION_RESIDUAL_WAD; // 1e12 - 1, exact division
         uint256 supplyAtCliff = type(uint256).max / k; // the largest supply whose cap still fits in uint256
         uint256 bindingValue = 1e18; // over a 1-wei denominator this always binds: ceil(1e18 x 1e6 / (1e18 - 1e6)) > 1
@@ -321,11 +321,11 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
     }
 
     // =============================
-    // FINDING 28 — the multi-asset LT redemption ignores the caller's slippage floors when the venue slice is zero
+    // DIVERGENCE 28 — the multi-asset LT redemption ignores the caller's slippage floors when the venue slice is zero
     // =============================
 
     /**
-     * @notice FINDING 28: `redeemMultiAsset(shares, _minSTSharesOut, _minQuoteAssetsOut, ...)` promises the caller
+     * @notice DIVERGENCE 28: `redeemMultiAsset(shares, _minSTSharesOut, _minQuoteAssetsOut, ...)` promises the caller
      *         a slippage contract — return at least the requested minimums or revert — but the only enforcer of
      *         those minimums is the proportional venue removal, which is skipped entirely whenever the redeemer's
      *         venue-asset slice is zero (RedemptionLogic.sol:181-185 guards removeLiquidity behind
@@ -360,7 +360,7 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
      *      floor(108e18 / 1.1) = 98181818181818181818 vault shares, so the redeemer receives
      *      floor(98181818181818181818 x 927294718451820991 / 101599247412982126058) = 896103896103896103
      */
-    function test_FINDING_28_ltRedeemMultiAsset_minQuoteAssetsOut_ignoredWhenVenueSliceIsZero() public {
+    function test_DIVERGENCE_28_ltRedeemMultiAsset_minQuoteAssetsOut_ignoredWhenVenueSliceIsZero() public {
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
 
         // Stage the idle premium: armed venue slippage defers the gated reinvestment, so the +10% gain's premium

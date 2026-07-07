@@ -2,7 +2,7 @@
 
 Central register of every confirmed divergence between production behavior and the product spec
 (`CLAUDE.md`), surfaced by the test suite and independently re-verified against the current `src/`
-(post-2026-07-06 pull). Each finding has a runnable pinning test named `test_FINDING_<n>_<...>` that
+(post-2026-07-06 pull). Each finding has a runnable pinning test named `test_DIVERGENCE_<n>_<...>` that
 asserts **current** behavior and documents the **spec-expected** behavior in a comment, so CI stays
 green while the divergence stays visible. `src/` is intentionally unmodified — the fixes are the
 protocol team's decision.
@@ -94,7 +94,7 @@ yield is booked.
   configuration is non-functional); the mitigation today is purely that the default ships the flag off.
 - **Recommended fix**: carve the privileged premium mint (and any kernel-custodied balance move) out of
   the whitelist screen, mirroring the coverage-gate bypass the mint already receives.
-- **Pinning test**: `test_FINDING_11_whitelistMarket_bricksOnFirstSeniorGainPremiumMint`.
+- **Pinning test**: `test_DIVERGENCE_11_whitelistMarket_bricksOnFirstSeniorGainPremiumMint`.
 
 ## Finding 5 — JT redemption stays coverage-gated after the liquidation breach — **Medium**
 
@@ -112,7 +112,7 @@ junior value while junior holders are locked.
   bypass); accountant gate `src/accountant/RoycoDayAccountant.sol:327-329`.
 - **Recommended fix / decision**: extend the liquidation bypass to `JT_REDEEM`, or amend the spec to
   "all LT withdrawals are allowed". A product call.
-- **Pinning test**: `test_FINDING_5_jtRedeem_staysCoverageGated_afterLiquidationBreach` (pins both halves:
+- **Pinning test**: `test_DIVERGENCE_5_jtRedeem_staysCoverageGated_afterLiquidationBreach` (pins both halves:
   JT reverts, an LT redemption in the identical state succeeds through its bypass).
 
 ## Finding 4 — ST deposits ARE liquidity-gated — **Low code / Medium doc**
@@ -127,7 +127,7 @@ junior value while junior holders are locked.
 - **Where**: `src/accountant/RoycoDayAccountant.sol:331-334` (gate), `:376-384` (`maxSTDeposit` binding),
   `src/libraries/logic/DepositLogic.sol:59` (stDeposit passes enforce = true).
 - **Recommended fix**: reconcile CLAUDE.md to one behavior (the code is the conservative, defensible one).
-- **Pinning test**: `test_FINDING_4_stDeposit_isLiquidityGated_underProvisionedMarketBlocksSeniorEntry`.
+- **Pinning test**: `test_DIVERGENCE_4_stDeposit_isLiquidityGated_underProvisionedMarketBlocksSeniorEntry`.
 
 ## Finding 3 — In-kind LT redemption bricks when the BPT slice floors to zero — **Low-Medium**
 
@@ -141,7 +141,7 @@ junior value while junior holders are locked.
   `src/libraries/logic/RedemptionLogic.sol:111-139` (floor-scales both slices, always post-ops).
 - **Recommended fix / decision**: allow the zero-BPT redemption shape, or round the BPT slice up so the
   op always moves nonzero raw NAV.
-- **Pinning test**: `test_FINDING_3_ltRedeemZeroBPTSliceWithIdleShares_revertsInvalidPostOpState`.
+- **Pinning test**: `test_DIVERGENCE_3_ltRedeemZeroBPTSliceWithIdleShares_revertsInvalidPostOpState`.
 
 ## Finding 6 — Every accountant parameter setter reverts while the kernel is paused — **Low-Medium (operational)**
 
@@ -154,7 +154,7 @@ junior value while junior holders are locked.
   `src/kernels/base/RoycoDayKernel.sol:313` (`whenNotPaused` on the sync).
 - **Recommended fix / decision**: if pause must coexist with remediation, add a sync-less setter path;
   otherwise document as intended.
-- **Pinning test**: `test_FINDING_6_accountantSetters_revertWhileKernelPaused`.
+- **Pinning test**: `test_DIVERGENCE_6_accountantSetters_revertWhileKernelPaused`.
 
 ## Finding 13 — A dust-sized senior gain pays premiums but skips every protocol fee — **Minor**
 
@@ -166,7 +166,7 @@ junior value while junior holders are locked.
 - **Where**: `src/accountant/RoycoDayAccountant.sol:594` (the `premiumsPaid = stGain > dust` gate),
   `:631/:640/:646` (fees gated on it) vs `:624-625/:638` (premiums paid regardless).
 - **Recommended fix**: gate fees on whether a premium was actually distributed, not on gain-vs-dust.
-- **Pinning test**: `test_FINDING_13_dustGain_paysPremiumButSkipsProtocolFee`.
+- **Pinning test**: `test_DIVERGENCE_13_dustGain_paysPremiumButSkipsProtocolFee`.
 
 ## Finding 15 — Fixed-term end timestamp truncates to uint32 and can wrap into the past — **Minor**
 
@@ -177,7 +177,7 @@ junior value while junior holders are locked.
   elapsed and the next sync immediately drops it back to PERPETUAL, defeating the fixed-term lock.
 - **Where**: `src/accountant/RoycoDayAccountant.sol:705` (truncating cast), `:667` (the elapsed check).
 - **Recommended fix**: widen the stored end timestamp, or `require` the sum does not overflow uint32.
-- **Pinning test**: `test_FINDING_15_fixedTermEndTimestamp_truncatesToUint32AndWrapsIntoPast`.
+- **Pinning test**: `test_DIVERGENCE_15_fixedTermEndTimestamp_truncatesToUint32AndWrapsIntoPast`.
 
 ## Finding 14 — Zero LT depth reads liquidityUtilization as uint256 max — **Minor — SPLIT, needs a human decision**
 
@@ -193,7 +193,7 @@ in a fresh `minLiquidity > 0` market; the other as the documented guardrail. Pin
 - **Decision needed**: enforce a nonzero-`ltRawNAV` seed invariant in code (reject the config or the first
   deposit with a named error), or keep it as a documented deployment-sequencing constraint. Do not resolve
   silently — the pin makes the choice loud.
-- **Pinning test**: `test_FINDING_14_zeroLTDepth_readsLiquidityUtilizationAsMax`.
+- **Pinning test**: `test_DIVERGENCE_14_zeroLTDepth_readsLiquidityUtilizationAsMax`.
 
 ## Finding 7 — Intra-spec contradiction on FIXED_TERM deposits — **Doc-only**
 
@@ -205,7 +205,7 @@ in a fresh `minLiquidity > 0` market; the other as the documented guardrail. Pin
   leg and succeeds quote-only.
 - **Where**: `src/libraries/logic/DepositLogic.sol` FIXED_TERM guards.
 - **Recommended fix**: reconcile CLAUDE.md's two sentences to the production matrix.
-- **Pinning test**: `test_FINDING_7_fixedTermDeposits_productionMatrix_intraSpecContradiction`.
+- **Pinning test**: `test_DIVERGENCE_7_fixedTermDeposits_productionMatrix_intraSpecContradiction`.
 
 ## Finding 12 — Griefed premium reinvestment stages the premium (claimable, not forfeited) — **Intended behavior (regression guard)**
 
@@ -216,7 +216,7 @@ Not a defect — the documented staged-buffer design, pinned so a future regress
   unchanged (so the metric keeps the LDM paying), and the staged shares remain a claimable leg. An attacker
   forcing venue slippage only DEFERS deployment.
 - **Where**: `src/libraries/logic/BalancerV3VenueLogic.sol:181-196` (tolerated-failure reinvestment).
-- **Pinning test**: `test_FINDING_12_griefedReinvestment_stagesPremiumClaimableNotForfeited` (asserts the
+- **Pinning test**: `test_DIVERGENCE_12_griefedReinvestment_stagesPremiumClaimableNotForfeited` (asserts the
   sync survives, the premium stages, `ltRawNAV` is unchanged).
 
 ---
@@ -235,7 +235,7 @@ These were surfaced by the full-codebase re-audit and are not fixed (left as-is 
   target *very close* to WAD overflows the `uint64` slope via `SafeCast`.
 - **Recommended fix**: reject `TARGET == WAD` in the `StaticCurveYDM` constructor, or special-case the upper
   slope to 0.
-- **Pinning test**: `test/concrete/Findings/Test_StaticCurveYDMInitDivergences.t.sol` (`test_FINDING_34_...`).
+- **Pinning test**: `test/concrete/Divergences/Test_StaticCurveYDMInitDivergences.t.sol` (`test_DIVERGENCE_34_...`).
 
 ### Finding 36 — CREATE3 `_deployYDM` salt reuse silently drops the target-utilization arg — **Low (tied to 21)**
 
@@ -258,7 +258,7 @@ These were surfaced by the full-codebase re-audit and are not fixed (left as-is 
   LT depth before any senior gain), and the `zeroLiquidityParams` preset zeroes the LT curve.
 - **Recommended fix / guardrail**: require that a `minLiquidity == 0` market also has a zero LT yield-share curve
   (or gate the premium mint on the LT tranche existing).
-- **Pinning test**: `test/concrete/Findings/Test_PremiumToEmptyLT.t.sol`.
+- **Pinning test**: `test/concrete/Divergences/Test_PremiumToEmptyLT.t.sol`.
 
 ### Finding 38 — `_validateYieldShareConfig` uint64-sum overflow pre-empts the named error — **Low (error-quality)**
 
@@ -267,7 +267,7 @@ These were surfaced by the full-codebase re-audit and are not fixed (left as-is 
   intended `INVALID_MAX_YIELD_SHARE_CONFIG`. Admin-only, error-quality.
 - **Recommended fix**: widen the operands before the comparison.
 - **Pinning test**: `test/concrete/Kernel/Test_KernelPauseAndRevertBranches.t.sol`
-  (`test_FINDING_MaxYieldShareSum_overflowsUint64_panicsBeforeNamedError`).
+  (`test_DIVERGENCE_MaxYieldShareSum_overflowsUint64_panicsBeforeNamedError`).
 
 ---
 

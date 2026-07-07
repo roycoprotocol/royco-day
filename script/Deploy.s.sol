@@ -360,7 +360,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (predictedFactory.code.length == 0) {
             accessManager.grantRole(ADMIN_ROLE, predictedFactory, 0);
             // The factory must be able to grant the tranche LP roles (admin'd by LP_ROLE_ADMIN_ROLE) so a market's
-            // template can grant them to the kernel + fee recipient during deployment (Finding 11). Granted here,
+            // template can grant them to the kernel + fee recipient during deployment. Granted here,
             // before any `setRoleAdmin` re-points the LP roles' admin, while the deployer (ADMIN_ROLE) can still grant it.
             accessManager.grantRole(LP_ROLE_ADMIN_ROLE, predictedFactory, 0);
         }

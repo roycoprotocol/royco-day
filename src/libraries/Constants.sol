@@ -48,6 +48,6 @@ uint256 constant MAX_PROTOCOL_FEE_WAD = 1e18;
  *      - Supply growth per wipe cycle is bounded at x(1e12 - 1) (~40 bits), so the uint256 overflow cliff at
  *        supply ~1.16e65 (where the cap computation itself no longer fits) is ~4 total-annihilation cycles
  *        away instead of ~3 unbounded ones - and a market wiped four times over is not underwritable anyway
- *        (accepted residual risk; pinned by test_FINDING_11 rather than removed with an absolute ceiling)
+ *        (accepted residual risk; pinned by the mint-dilution clamp tests rather than removed with an absolute ceiling)
  */
 uint256 constant MINT_DILUTION_RESIDUAL_WAD = 1e6;

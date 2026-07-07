@@ -566,7 +566,7 @@ contract Test_RoycoFactory is Test {
     /// @dev EXPECTED: the deployer either ships StaticCurveYDM bytecode for a StaticCurve config or reverts on the
     ///      type mismatch. ACTUAL (pinned here): an adaptive model deploys under a static config. The reused snUSD V2
     ///      params (0.11e18, 0.11e18, 0.31e18) are ABI-identical to StaticCurveYDMParams, so the calldata decodes
-    function test_FINDING_21_StaticCurveYdmConfig_SilentlyDeploysAdaptiveV2Model() external {
+    function test_DIVERGENCE_21_StaticCurveYdmConfig_SilentlyDeploysAdaptiveV2Model() external {
         _register();
 
         MarketDeploymentConfig.MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");

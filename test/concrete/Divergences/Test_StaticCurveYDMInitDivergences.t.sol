@@ -10,15 +10,15 @@ import { StaticCurveYDM } from "../../../src/ydm/StaticCurveYDM.sol";
 /**
  * @title Test_StaticCurveYDMInitDivergences
  * @notice Pinning tests for two StaticCurveYDM lifecycle divergences surfaced by the 2026-07-07 re-audit.
- *         Neither is in FINDINGS.md (findings 3-33); both assert CURRENT behavior and document the
- *         spec-expected behavior in a comment, per the repo's `test_FINDING_<n>` convention.
+ *         Neither is in DIVERGENCES.md (divergences 3-33); both assert CURRENT behavior and document the
+ *         spec-expected behavior in a comment, per the repo's `test_DIVERGENCE_<n>` convention.
  * @dev Every expected value is hand-derived from src/ydm/StaticCurveYDM.sol and src/ydm/base/BaseYDM.sol.
  */
 contract Test_StaticCurveYDMInitDivergences is Test {
     address constant ACCOUNTANT = address(0xACC0);
 
     // =====================================================================
-    // Finding 34 — StaticCurveYDM with TARGET == WAD bricks initializeYDMForMarket
+    // Divergence 34 — StaticCurveYDM with TARGET == WAD bricks initializeYDMForMarket
     // =====================================================================
     //
     // Spec / intent: BaseYDM documents the target utilization (the kink) range as (0, 100%], and its
@@ -38,7 +38,7 @@ contract Test_StaticCurveYDMInitDivergences is Test {
     //        src/ydm/base/BaseYDM.sol:26 (permits _targetUtilizationWAD == WAD).
     // Recommended fix / decision: reject TARGET == WAD in the StaticCurveYDM constructor (it collapses the
     //   upper segment), or special-case the upper slope to 0 when TARGET == WAD.
-    function test_FINDING_34_staticCurveTargetWAD_bricksInitializeYDMForMarket() public {
+    function test_DIVERGENCE_34_staticCurveTargetWAD_bricksInitializeYDMForMarket() public {
         // Construction at a 100% target is accepted by the shared BaseYDM (0, WAD] gate.
         StaticCurveYDM ydm = new StaticCurveYDM(WAD);
         assertEq(ydm.TARGET_UTILIZATION_WAD(), WAD, "TARGET == WAD constructs successfully");
@@ -53,10 +53,10 @@ contract Test_StaticCurveYDMInitDivergences is Test {
 
     /// Control: an otherwise-identical static YDM at a moderate (sub-WAD) target initializes cleanly,
     /// isolating TARGET == WAD as the sole trigger of the div-by-zero brick.
-    /// Note (secondary edge, not the finding): a target very close to WAD instead bricks init via a
+    /// Note (secondary edge, not the divergence): a target very close to WAD instead bricks init via a
     /// uint64 slope overflow — `_computeSlope`'s SafeCast.toUint64 reverts when (WAD - TARGET) is tiny
     /// enough to blow the slope past 2^64-1 (e.g. TARGET = WAD-1 with the params below yields 4e35).
-    function test_FINDING_34_control_subWADTarget_initializesCleanly() public {
+    function test_DIVERGENCE_34_control_subWADTarget_initializesCleanly() public {
         StaticCurveYDM ydm = new StaticCurveYDM(8e17);
         vm.prank(ACCOUNTANT);
         ydm.initializeYDMForMarket(1e17, 5e17, 9e17); // no revert
@@ -65,7 +65,7 @@ contract Test_StaticCurveYDMInitDivergences is Test {
     }
 
     // =====================================================================
-    // Finding 35 — a static YDM attached without initialization bricks the sync hot path
+    // Divergence 35 — a static YDM attached without initialization bricks the sync hot path
     // =====================================================================
     //
     // Spec / intent: the accountant's _initializeYDM (RoycoDayAccountant.sol) only invokes
@@ -84,7 +84,7 @@ contract Test_StaticCurveYDMInitDivergences is Test {
     //        src/accountant/RoycoDayAccountant.sol _initializeYDM (empty-calldata branch, no init post-check).
     // Recommended fix / decision: have _initializeYDM require a non-empty init payload (or verify the curve
     //   reads initialized) so a YDM can never be attached in the uninitialized state.
-    function test_FINDING_35_staticCurveAttachedWithoutInit_revertsUninitializedOnYieldShare() public {
+    function test_DIVERGENCE_35_staticCurveAttachedWithoutInit_revertsUninitializedOnYieldShare() public {
         StaticCurveYDM ydm = new StaticCurveYDM(5e17);
 
         // No initializeYDMForMarket call for ACCOUNTANT: the curve for this sender is the zero sentinel.

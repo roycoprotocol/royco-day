@@ -806,7 +806,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      * @dev One-time bootstrap of the LT's market-making venue, invoked by `_seedLT` before the first entry.
      *      Default no-op for venues that need none. The BalancerV3 family overrides this to initialize the
      *      freshly created pool through Balancer's canonical Router, because the repo ships no production
-     *      initialization path for the pool (see the family override for the finding note).
+     *      initialization path for the pool (see the family override for the divergence note).
      */
     function _initializeLTVenueIfNeeded() internal virtual { }
 

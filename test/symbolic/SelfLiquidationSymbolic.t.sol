@@ -20,7 +20,7 @@ import { SelfLiquidationHarness } from "../mocks/SelfLiquidationHarness.sol";
  *         cross-multiplied with no division), sourcing draws JT's senior-backed claim before its self-backed
  *         claim while conserving the bonus, breach states with no junior buffer or no weighted senior claim pay
  *         nothing, and a configured rate above 100% provably pays out more than the NAV being redeemed (pinned
- *         as a finding candidate)
+ *         as a divergence candidate)
  * @dev Run with `forge test --symbolic --match-path test/symbolic/SelfLiquidationSymbolic.t.sol`. Functions
  *      prefixed check_ are discovered only under --symbolic. Domain: NAVs and user claims up to 1e30 NAV wei
  *      (one trillion whole 18-decimal tokens, beyond any underwritable market), minCoverage below WAD and
@@ -172,7 +172,7 @@ contract SelfLiquidationSymbolicSpec is Test {
      *      raw from effective NAVs, which only conservation keeps from underflowing. A revert here would freeze ST
      *      redemptions exactly when the market is in liquidation and exits matter most. The rate spans the full
      *      uint64 range because the setter accepts it: the desired slice can then exceed the redeemed NAV, but the
-     *      computation stays total (the value consequence is pinned by the rate-above-WAD finding check below)
+     *      computation stays total (the value consequence is pinned by the rate-above-WAD divergence check below)
      */
     function check_applySeniorTrancheSelfLiquidationBonusNeverRevertsOnReachableBreachStates(
         uint256 stRaw,
@@ -1094,7 +1094,7 @@ contract SelfLiquidationSymbolicSpec is Test {
     }
 
     /*//////////////////////////////////////////////////////////////////////
-            FINDING CANDIDATE: A RATE ABOVE 100% OUTPAYS THE REDEEMED NAV
+            DIVERGENCE CANDIDATE: A RATE ABOVE 100% OUTPAYS THE REDEEMED NAV
     //////////////////////////////////////////////////////////////////////*/
 
     /**
@@ -1113,7 +1113,7 @@ contract SelfLiquidationSymbolicSpec is Test {
      *      which binds below the buffer 10 and the cap 5 and pays double the redeemed NAV. Adjudication is to
      *      either cap the setter at WAD or accept and document the super-unitary rate as intended
      */
-    function check_FINDING_candidate_bonusRateAboveOneHundredPercentPaysOutMoreThanTheRedeemedNAV(
+    function check_DIVERGENCE_candidate_bonusRateAboveOneHundredPercentPaysOutMoreThanTheRedeemedNAV(
         uint256 stRaw,
         uint256 jtRaw,
         uint256 jtEff,

@@ -235,20 +235,20 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
     }
 
     /**
-     * @notice FINDING 8 — swaps are NOT blocked in the block of a P&L sync. The intended defense was to refuse
+     * @notice DIVERGENCE 8 — swaps are NOT blocked in the block of a P&L sync. The intended defense was to refuse
      *         any swap in the same block as a sync, so an attacker could not atomically sync-then-swap and
      *         guarantee the back-run against the freshly committed rate. Implemented reality: the hook syncs
      *         BEFORE the swap instead of blocking it, so a same-block sync-then-swap executes. The same-block
      *         re-sync is a no-op (idempotence), so no double accrual occurs — but no blocking rule exists in code.
      */
-    function test_FINDING_8_swapsNotBlockedSameBlockAsSync() public {
+    function test_DIVERGENCE_8_swapsNotBlockedSameBlockAsSync() public {
         _seedForSwaps();
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory committed0 = ACCOUNTANT.getState();
 
         (address swapper, uint256 amountIn) = _armSwapper(testConfig.quoteAsset, 0.25e18);
         uint256 amountOut = _swapExactIn(swapper, testConfig.quoteAsset, address(ST), amountIn, 0);
-        assertGt(amountOut, 0, "FINDING: a swap in the sync's own block executes rather than being blocked");
+        assertGt(amountOut, 0, "DIVERGENCE: a swap in the sync's own block executes rather than being blocked");
 
         IRoycoDayAccountant.RoycoDayAccountantState memory committed1 = ACCOUNTANT.getState();
         assertEq(committed1.lastSTEffectiveNAV, committed0.lastSTEffectiveNAV, "the same-block hook re-sync must be a no-op on the senior mark");
@@ -256,7 +256,7 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
     }
 
     /**
-     * @notice FINDING 9 — the rate-staleness LVR arb is impossible THROUGH THE POOL. The worry: the pool prices
+     * @notice DIVERGENCE 9 — the rate-staleness LVR arb is impossible THROUGH THE POOL. The worry: the pool prices
      *         the senior leg at the last committed sync rate, and a yield-bearing share marks up predictably
      *         between syncs, so an arbitrageur could buy ST cheap against the stale rate just before a sync.
      *         Refuted for through-pool flow: the before-swap hook syncs the kernel (rewriting the transient
@@ -264,7 +264,7 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
      *         the freshly-synced rate — byte-identical output with and without an explicit front-run sync.
      *         (Stale-rate exposure remains for off-pool venues quoting the last mark; out of scope here.)
      */
-    function test_FINDING_9_rateStalenessLVR_impossibleThroughPool() public {
+    function test_DIVERGENCE_9_rateStalenessLVR_impossibleThroughPool() public {
         _seedForSwaps();
         _sync();
         uint256 staleRate = _kernelRate();
@@ -282,14 +282,14 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
         _sync();
         uint256 outWithSync = _swapExactIn(swapper, testConfig.quoteAsset, address(ST), amountIn, 0);
 
-        assertEq(outWithoutSync, outWithSync, "FINDING refuted: the pool pays the identical amount with and without a front-run sync");
+        assertEq(outWithoutSync, outWithSync, "DIVERGENCE refuted: the pool pays the identical amount with and without a front-run sync");
         assertEq(rateSeenBySwapA, _kernelRate(), "both paths price the senior leg at the same freshly-synced rate");
         assertGt(rateSeenBySwapA, staleRate, "the rate the swap priced at is the POST-move rate, not the stale committed one");
     }
 
     /**
      * @notice a round trip cannot profit and pays at least (approximately) two fee legs: no-free-lunch
-     *         under the fresh-rate regime of FINDING 9.
+     *         under the fresh-rate regime of DIVERGENCE 9.
      * @dev Derivation: the reverse swap re-walks the same curve, so path effects cancel and the loss is the two
      *      fee legs, `f*Vin + f*Vout1 ~= 2*f*Vin`, floored conservatively at `2*f*Vin*alpha`.
      */
