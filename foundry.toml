@@ -45,7 +45,9 @@ number_underscore = "thousands"
 int_types = "long"
 multiline_func_header = "all"
 quote_style = "double"
-ignore = ["libs/*", "**/*.t.sol"]
+# test/ is fmt-exempt: forge's nested *.t.sol glob and number_underscore behavior drift
+# across versions (contributors run mixed forge builds); src/ and script/ are still checked.
+ignore = ["lib/**", "test/**"]
 sort_imports = true
 
 [lint]
