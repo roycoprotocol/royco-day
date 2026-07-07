@@ -44,14 +44,21 @@ jobs:
         id: build
 
       - name: Run Forge tests
-        # Fork suites (Neutrl_snUSD, Neutrl_snUSD_Senior, DayMarketDeploymentTest,
-        # RoycoFactoryTest) need an archive-node MAINNET_RPC_URL. When that secret is unset we skip
-        # them so the rest of the tests still run. Once the secret is added the fork tests run
-        # automatically.
+        # Fork suites (everything under test/fork/) run against live-chain forks and need
+        # archive-node RPC URLs. Which chains they need is derived from the fork tree itself
+        # (every *_RPC_URL env var the suites reference), so supporting a new chain never
+        # requires editing this step — just pass its secret in `env` below. If any required RPC
+        # secret is unset we skip test/fork/** so the rest of the tests still run; once the
+        # secrets are added the fork tests run automatically.
         run: |
-          if [ -z "${MAINNET_RPC_URL}" ]; then
-            echo "MAINNET_RPC_URL not set: skipping fork suites"
-            forge test -vvv --no-match-contract 'Neutrl_snUSD|DayMarketDeploymentTest|RoycoFactoryTest'
+          required=$(grep -rhoE '\b[A-Z][A-Z0-9_]*_RPC_URL\b' test/fork | sort -u)
+          missing=""
+          for var in $required; do
+            if [ -z "$(printenv "$var")" ]; then missing="$missing $var"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "Missing fork RPC secrets:$missing — skipping fork suites (test/fork/**)"
+            forge test -vvv --no-match-path 'test/fork/**'
           else
             forge test -vvv
           fi
