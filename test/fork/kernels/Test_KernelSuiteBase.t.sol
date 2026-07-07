@@ -46,8 +46,6 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     IRoycoVaultTranche internal LT;
     /// @notice The liquidity tranche's Gyro E-CLP pool (the BPT, == `KERNEL.LT_ASSET()`).
     address internal POOL;
-    /// @notice The pool's kernel-bound hook (the upgraded `RoycoDayBalancerV3Hooks` proxy).
-    address internal BALANCER_HOOK;
     /// @notice The liquidity-premium model (LDM), distinct from the JT YDM.
     address internal LT_YDM;
     /// @notice The Balancer V3 Vault the pool is registered with.
@@ -123,10 +121,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
             POOL = KERNEL.LT_ASSET();
             LT_YDM = ACCOUNTANT.getState().ltYDM;
             VAULT = IVault(address(GyroECLPPoolFactory(DEPLOY_SCRIPT.getChainConfig(block.chainid).gyroECLPPoolFactory).getVault()));
-            BALANCER_HOOK = VAULT.getHooksConfig(POOL).hooksContract;
             vm.label(address(LT), "LT");
             vm.label(POOL, "BalancerPool");
-            vm.label(BALANCER_HOOK, "BalancerHook");
             vm.label(LT_YDM, "LDM");
         }
 

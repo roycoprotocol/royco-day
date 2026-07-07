@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { PausableUpgradeable } from "../../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { Math } from "../../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 
@@ -75,9 +74,10 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
     // EXTERNAL LP THROUGH THE CANONICAL ROUTER
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice an external unbalanced add syncs the kernel through the hook exactly once and never
-    ///         touches the kernel's owned-BPT ledger; the minted BPT lands with the external actor.
-    function test_ExternalAddUnbalanced_syncs_kernelLedgerUntouched() public {
+    /// @notice An external unbalanced add never touches the kernel's owned-BPT ledger: the minted BPT lands with
+    ///         the external actor and grows the supply by exactly the mint. (With no pool hook the add does not sync
+    ///         the kernel; that Day marks stay current without a pre-op sync is proven in RoycoHookNecessity.)
+    function test_ExternalAddUnbalanced_kernelLedgerUntouched() public {
         _seedForSwaps();
         _sync();
         uint256 ltOwned0 = toUint256(KERNEL.getState().ltOwnedYieldBearingAssets);
@@ -88,11 +88,8 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         uint256 quoteAssets = _rawBalances()[_quotePoolIndex()] / 20;
         _fundExternalLP(actor, stShares, quoteAssets);
 
-        vm.recordLogs();
         uint256 bptOut = _externalAddUnbalanced(actor, stShares, quoteAssets, 0);
-        (uint256 syncCount,) = _lastLogData(vm.getRecordedLogs(), address(ACCOUNTANT), IRoycoDayAccountant.TrancheAccountingSynced.selector);
 
-        assertEq(syncCount, 1, "the before-add hook must sync the kernel exactly once");
         assertEq(toUint256(KERNEL.getState().ltOwnedYieldBearingAssets), ltOwned0, "an external add must not move the kernel's owned-BPT ledger");
         assertEq(IERC20(POOL).balanceOf(actor), bptOut, "the minted BPT must land with the external actor");
         assertEq(_bptSupply(), supply0 + bptOut, "the BPT supply must grow by exactly the external mint");
@@ -226,30 +223,6 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         uint256 valueWith = _measureRedeemValueMulti(LT_ALICE_ADDRESS, shares);
 
         assertApproxEqAbs(valueWith, valueWithout, 2 * _tol2(), "a kernel redemption's value must be independent of external depth");
-    }
-
-    /// @notice a paused hook blocks BOTH external add and external remove (the `router != kernel` path of
-    ///         each before-hook syncs `whenNotPaused`), completing the pause blast-radius picture of the hook-pause swap test.
-    /// @dev The Router calls are inlined (amounts prebuilt) so `expectRevert` targets the Router call itself
-    ///      and not a helper's read of the Vault.
-    function test_RevertIf_ExternalAddRemoveWhileHookPaused() public {
-        _seedForSwaps();
-        _sync();
-        address actor = _externalProportionalPosition("EXTERNAL_PAUSED_LP", _bptSupply() / 10);
-        uint256 stShares = _rawBalances()[_stPoolIndex()] / 50;
-        _fundExternalLP(actor, stShares, 0);
-        uint256[] memory exactAmountsIn = new uint256[](2);
-        exactAmountsIn[_stPoolIndex()] = stShares;
-        uint256 bptToBurn = IERC20(POOL).balanceOf(actor) / 2;
-        IRouter router = IRouter(_balancerV3Router());
-
-        _pauseHook();
-        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        vm.prank(actor);
-        router.addLiquidityUnbalanced(POOL, exactAmountsIn, 0, false, "");
-        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        vm.prank(actor);
-        router.removeLiquidityProportional(POOL, bptToBurn, new uint256[](2), false, "");
     }
 
     /// @notice Balancer's unbalanced-add invariant-ratio cap (5x) is the hard bound behind the seed
@@ -707,20 +680,17 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
     // FIXED_TERM x THE POOL
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice the pool is NOT frozen by a fixed term: external swaps execute in-term, the hook still
-    ///         syncs, and the fee still accrues to the BPT within the derived band.
-    function test_FixedTerm_externalSwap_functionsAndSyncs() public {
+    /// @notice A fixed term does not freeze the pool: external swaps execute in-term and the fee still
+    ///         accrues to the BPT within the derived band.
+    function test_FixedTerm_externalSwap_functions() public {
         _seedForSwaps();
         _enterFixedTerm();
         uint256 tvl0 = _poolTVL();
 
         (address swapper, uint256 amountIn) = _armSwapper(testConfig.quoteAsset, 0.25e18);
-        vm.recordLogs();
         uint256 amountOut = _swapExactIn(swapper, testConfig.quoteAsset, address(ST), amountIn, 0);
         assertGt(amountOut, 0, "an in-term external swap must execute");
 
-        (uint256 syncCount,) = _lastLogData(vm.getRecordedLogs(), address(ACCOUNTANT), IRoycoDayAccountant.TrancheAccountingSynced.selector);
-        assertEq(syncCount, 1, "the hook must still sync in-term");
         (uint256 lo, uint256 hi) = _swapFeeTVLBound(_quoteToNAV(amountIn));
         uint256 tvlDelta = _poolTVL() - tvl0;
         assertGe(tvlDelta, lo, "the in-term swap fee must still accrue to the BPT (band floor)");
