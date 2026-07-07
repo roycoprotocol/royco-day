@@ -4,23 +4,10 @@ pragma solidity ^0.8.28;
 import { Test } from "../../lib/forge-std/src/Test.sol";
 import { Vm } from "../../lib/forge-std/src/Vm.sol";
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
-import { ERC20Mock } from "../../lib/openzeppelin-contracts/contracts/mocks/token/ERC20Mock.sol";
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
 import { RoycoDayAccountant } from "../../src/accountant/RoycoDayAccountant.sol";
-import {
-    ADMIN_ACCOUNTANT_ROLE,
-    ADMIN_KERNEL_ROLE,
-    ADMIN_ORACLE_QUOTER_ROLE,
-    ADMIN_PAUSER_ROLE,
-    ADMIN_PROTOCOL_FEE_SETTER_ROLE,
-    ADMIN_UNPAUSER_ROLE,
-    ADMIN_UPGRADER_ROLE,
-    JT_LP_ROLE,
-    LP_ROLE_ADMIN_ROLE,
-    ST_LP_ROLE,
-    SYNC_ROLE
-} from "../../src/factory/RolesConfiguration.sol";
+import { ADMIN_UNPAUSER_ROLE, JT_LP_ROLE, ST_LP_ROLE } from "../../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoBlacklist } from "../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
@@ -119,15 +106,6 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     address[] internal providers;
 
     // -----------------------------------------
-    // Assets
-    // -----------------------------------------
-
-    ERC20Mock internal MOCK_USDC;
-    ERC20Mock internal MOCK_USDT;
-    ERC20Mock internal MOCK_DAI;
-    address[] internal ASSETS;
-
-    // -----------------------------------------
     // Royco Deployments
     // -----------------------------------------
 
@@ -148,7 +126,6 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     // Royco Deployments Parameters
     // -----------------------------------------
 
-    uint256 internal SEED_AMOUNT;
     string internal SENIOR_TRANCHE_NAME = "Royco Senior Tranche";
     string internal SENIOR_TRANCHE_SYMBOL = "RST";
     string internal JUNIOR_TRANCHE_NAME = "Royco Junior Tranche";
@@ -157,21 +134,18 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     bool internal JT_COINVESTED = false; // JT in a different opportunity (RFR), uncorrelated downside
     uint64 internal ST_PROTOCOL_FEE_WAD = 0.1e18; // 10% protocol fee
     uint64 internal JT_PROTOCOL_FEE_WAD = 0.1e18; // 10% protocol fee
-    uint256 internal LIQUIDATION_COVERAGE_UTILIZATION_WAD = 6.4667e18; // Liquidation coverageUtilization threshold
+    /**
+     * @dev Liquidation coverage utilization threshold. Derivation at this fixture's 20% minimum coverage:
+     *      coverage utilization is exposure x minCoverage / jtEffectiveNAV (JT not co-invested here, so exposure is
+     *      stRawNAV alone), and 97 x 0.2e18 / 3 = 6.4666...e18 is the utilization of a market whose junior buffer
+     *      has eroded to 3 NAV units against 97 units of senior exposure. Rounding that up at the fourth decimal
+     *      to 6.4667e18 keeps the exact 97-to-3 market just below the threshold, so liquidation arms only once the
+     *      junior buffer covers less than ~3.09% (0.2e18 / 6.4667e18) of senior exposure — a near-total JT wipeout,
+     *      far above any utilization a healthy seeded state in this suite reads
+     */
+    uint256 internal LIQUIDATION_COVERAGE_UTILIZATION_WAD = 6.4667e18;
     uint24 internal FIXED_TERM_DURATION_SECONDS = uint24(MAX_FIXED_TERM_SECONDS); // at the protocol-wide fixed-term cap
     NAV_UNIT internal DUST_TOLERANCE = toNAVUnits(uint256(1));
-
-    /// -----------------------------------------
-    /// Mainnet Fork Addresses
-    /// -----------------------------------------
-    uint256 internal forkId;
-    address internal constant ETHEREUM_MAINNET_USDC_ADDRESS = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
-    address internal constant ETHEREUM_MAINNET_AAVE_V3_POOL_ADDRESS = 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2;
-    mapping(uint256 chainId => mapping(address asset => address aTokenAddress)) internal aTokenAddresses;
-
-    constructor() {
-        aTokenAddresses[1][ETHEREUM_MAINNET_USDC_ADDRESS] = 0x98C23E9d8f34FEFb1B7BD6a91B7FF122F4e16F5c;
-    }
 
     modifier prankModifier(address _pranker) {
         vm.startPrank(_pranker);
@@ -193,32 +167,6 @@ abstract contract RoycoDayTestBase is Test, Assertions {
             require(forkBlock != 0, "Fork block is required");
             vm.createSelectFork(forkRpcUrl, forkBlock);
         }
-    }
-
-    function _setupAssets(uint256 _seedAmount) internal {
-        MOCK_USDC = new ERC20Mock();
-        MOCK_USDC.mint(OWNER_ADDRESS, _seedAmount * (10 ** 18));
-        MOCK_USDC.mint(ST_ALICE_ADDRESS, _seedAmount * (10 ** 18));
-        MOCK_USDC.mint(JT_ALICE_ADDRESS, _seedAmount * (10 ** 18));
-        MOCK_USDC.mint(ST_BOB_ADDRESS, _seedAmount * (10 ** 18));
-        MOCK_USDC.mint(JT_BOB_ADDRESS, _seedAmount * (10 ** 18));
-        ASSETS.push(address(MOCK_USDC));
-
-        MOCK_USDT = new ERC20Mock();
-        MOCK_USDT.mint(OWNER_ADDRESS, _seedAmount * (10 ** 18));
-        MOCK_USDT.mint(ST_ALICE_ADDRESS, _seedAmount * (10 ** 18));
-        MOCK_USDT.mint(JT_ALICE_ADDRESS, _seedAmount * (10 ** 18));
-        MOCK_USDT.mint(ST_BOB_ADDRESS, _seedAmount * (10 ** 18));
-        MOCK_USDT.mint(JT_BOB_ADDRESS, _seedAmount * (10 ** 18));
-        ASSETS.push(address(MOCK_USDT));
-
-        MOCK_DAI = new ERC20Mock();
-        MOCK_DAI.mint(OWNER_ADDRESS, _seedAmount * (10 ** 18));
-        MOCK_DAI.mint(ST_ALICE_ADDRESS, _seedAmount * (10 ** 18));
-        MOCK_DAI.mint(JT_ALICE_ADDRESS, _seedAmount * (10 ** 18));
-        MOCK_DAI.mint(ST_BOB_ADDRESS, _seedAmount * (10 ** 18));
-        MOCK_DAI.mint(JT_BOB_ADDRESS, _seedAmount * (10 ** 18));
-        ASSETS.push(address(MOCK_DAI));
     }
 
     function _setupWallets() internal {
@@ -336,13 +284,17 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     ///      admin-role holder): `OWNER_ADDRESS` for a fresh in-memory deploy, `ROOT_MULTISIG`
     ///      when the test forks a chain where the factory is already on-chain.
     function _wireExtraRoles() internal {
-        // Live-chain factory admin (matches MarketDeploymentConfig.ROOT_MULTISIG).
         address fndn;
         (bool ownerIsAdmin,) = ACCESS_MANAGER.hasRole(0, OWNER_ADDRESS);
         if (ownerIsAdmin) {
             fndn = OWNER_ADDRESS;
         } else {
-            fndn = 0x7c405bbD131e42af506d14e752f2e59B19D49997; // ROOT_MULTISIG
+            // Live-chain factory admin: the production root multisig that holds the AccessManager admin role
+            // (role id 0) on already-deployed factories, pinned as ROOT_MULTISIG in
+            // script/config/MarketDeploymentConfig.sol. Hardcoded here (rather than imported) because that
+            // config is script-side deploy tooling this test base intentionally does not depend on — if the
+            // production admin ever rotates, fork tests hitting a live factory fail loudly on the grant below
+            fndn = 0x7c405bbD131e42af506d14e752f2e59B19D49997;
         }
 
         // Standard 24h delay matches the canonical UNPAUSER config (and what `ApplySecurityMigration`
@@ -387,95 +339,6 @@ abstract contract RoycoDayTestBase is Test, Assertions {
         vm.stopPrank();
 
         return provider;
-    }
-
-    /// @notice Verifies the preview NAVs of the senior and junior tranches
-    /// @param _stState The state of the senior tranche
-    /// @param _jtState The state of the junior tranche
-    function _verifyPreviewNAVs(
-        TrancheState memory _stState,
-        TrancheState memory _jtState,
-        TRANCHE_UNIT _maxAbsDeltaTrancheUnits,
-        NAV_UNIT _maxAbsDeltaNAV
-    )
-        internal
-        view
-    {
-        assertTrue(address(ST) != address(0), "Senior tranche is not deployed");
-        assertTrue(address(JT) != address(0), "Junior tranche is not deployed");
-
-        assertApproxEqAbs(ST.getRawNAV(), _stState.rawNAV, toUint256(_maxAbsDeltaNAV), "ST raw NAV mismatch");
-        AssetClaims memory stClaims = ST.totalAssets();
-        assertApproxEqAbs(stClaims.nav, _stState.effectiveNAV, toUint256(_maxAbsDeltaNAV), "ST effective NAV mismatch");
-        assertApproxEqAbs(stClaims.stAssets, _stState.stAssetsClaim, toUint256(_maxAbsDeltaTrancheUnits), "ST st assets claim mismatch");
-        assertApproxEqAbs(stClaims.jtAssets, _stState.jtAssetsClaim, toUint256(_maxAbsDeltaTrancheUnits), "ST jt assets claim mismatch");
-
-        assertApproxEqAbs(JT.getRawNAV(), _jtState.rawNAV, toUint256(_maxAbsDeltaNAV), "JT raw NAV mismatch");
-        AssetClaims memory jtClaims = JT.totalAssets();
-        assertApproxEqAbs(jtClaims.nav, _jtState.effectiveNAV, toUint256(_maxAbsDeltaNAV), "JT effective NAV mismatch");
-        assertApproxEqAbs(jtClaims.stAssets, _jtState.stAssetsClaim, toUint256(_maxAbsDeltaTrancheUnits), "JT st assets claim mismatch");
-        assertApproxEqAbs(jtClaims.jtAssets, _jtState.jtAssetsClaim, toUint256(_maxAbsDeltaTrancheUnits), "JT jt assets claim mismatch");
-    }
-
-    /// @notice Verifies the fee taken by the senior and junior tranches
-    /// @param _stState The state of the senior tranche
-    /// @param _jtState The state of the junior tranche
-    /// @param _feeRecipient The address of the fee recipient
-    function _verifyFeeTaken(TrancheState storage _stState, TrancheState storage _jtState, address _feeRecipient) internal view {
-        uint256 seniorFeeShares = ST.balanceOf(_feeRecipient);
-        NAV_UNIT seniorFeeSharesValue = ST.convertToAssets(seniorFeeShares).nav;
-        assertEq(seniorFeeSharesValue, _stState.protocolFeeValue, "ST protocol fee value mismatch");
-
-        uint256 juniorFeeShares = JT.balanceOf(_feeRecipient);
-        NAV_UNIT juniorFeeSharesValue = JT.convertToAssets(juniorFeeShares).nav;
-        assertEq(juniorFeeSharesValue, _jtState.protocolFeeValue, "JT protocol fee value mismatch");
-    }
-
-    /// @notice Updates the state of the senior and junior tranches on a deposit
-    /// @param _trancheState The state of the tranche
-    /// @param _assets The amount of ASSETS deposited
-    /// @param _assetsValue The value of the ASSETS deposited
-    /// @param _shares The amount of shares deposited
-    /// @param _trancheType The type of tranche
-    function _updateOnDeposit(
-        TrancheState storage _trancheState,
-        TRANCHE_UNIT _assets,
-        NAV_UNIT _assetsValue,
-        uint256 _shares,
-        TrancheType _trancheType
-    )
-        internal
-    {
-        _trancheState.rawNAV = _trancheState.rawNAV + _assetsValue;
-        _trancheState.effectiveNAV = _trancheState.effectiveNAV + _assetsValue;
-        if (_trancheType == TrancheType.SENIOR) {
-            _trancheState.stAssetsClaim = _trancheState.stAssetsClaim + _assets;
-        } else {
-            _trancheState.jtAssetsClaim = _trancheState.jtAssetsClaim + _assets;
-        }
-        _trancheState.totalShares += _shares;
-    }
-
-    /// @notice Updates the state of the senior and junior tranches on a withdrawal
-    /// @param _trancheState The state of the tranche
-    /// @param _stAssetsWithdrawn The amount of ST assets withdrawn
-    /// @param _jtAssetsWithdrawn The amount of JT assets withdrawn
-    /// @param _totalAssetsValueWithdrawn The value of the ASSETS withdrawn
-    /// @param _shares The amount of shares withdrawn
-    function _updateOnWithdraw(
-        TrancheState storage _trancheState,
-        TRANCHE_UNIT _stAssetsWithdrawn,
-        TRANCHE_UNIT _jtAssetsWithdrawn,
-        NAV_UNIT _totalAssetsValueWithdrawn,
-        uint256 _shares
-    )
-        internal
-    {
-        _trancheState.rawNAV = _trancheState.rawNAV - _totalAssetsValueWithdrawn;
-        _trancheState.effectiveNAV = _trancheState.effectiveNAV - _totalAssetsValueWithdrawn;
-        _trancheState.stAssetsClaim = _trancheState.stAssetsClaim - _stAssetsWithdrawn;
-        _trancheState.jtAssetsClaim = _trancheState.jtAssetsClaim - _jtAssetsWithdrawn;
-        _trancheState.totalShares = _trancheState.totalShares - _shares;
     }
 
     /// @notice Converts the specified assets denominated in JT's tranche units to the kernel's NAV units
@@ -529,41 +392,6 @@ abstract contract RoycoDayTestBase is Test, Assertions {
                 marketOpsAddress: KERNEL_ADMIN_ADDRESS
             })
         );
-    }
-
-    /// @notice Grants all roles to their respective addresses
-    /// @dev This should be called after the factory is deployed
-    function _grantAllRoles() internal prankModifier(OWNER_ADDRESS) {
-        // Grant ADMIN_PAUSER_ROLE
-        ACCESS_MANAGER.grantRole(ADMIN_PAUSER_ROLE, PAUSER_ADDRESS, 0);
-
-        // Grant ADMIN_UNPAUSER_ROLE
-        ACCESS_MANAGER.grantRole(ADMIN_UNPAUSER_ROLE, UNPAUSER_ADDRESS, 0);
-
-        // Grant ADMIN_UPGRADER_ROLE
-        ACCESS_MANAGER.grantRole(ADMIN_UPGRADER_ROLE, UPGRADER_ADDRESS, 0);
-
-        // Grant SYNC_ROLE
-        ACCESS_MANAGER.grantRole(SYNC_ROLE, SYNC_ROLE_ADDRESS, 0);
-
-        // Grant ADMIN_KERNEL_ROLE
-        ACCESS_MANAGER.grantRole(ADMIN_KERNEL_ROLE, KERNEL_ADMIN_ADDRESS, 0);
-
-        // Grant ADMIN_ACCOUNTANT_ROLE
-        ACCESS_MANAGER.grantRole(ADMIN_ACCOUNTANT_ROLE, ACCOUNTANT_ADMIN_ADDRESS, 0);
-
-        // Grant ADMIN_PROTOCOL_FEE_SETTER_ROLE
-        ACCESS_MANAGER.grantRole(ADMIN_PROTOCOL_FEE_SETTER_ROLE, PROTOCOL_FEE_SETTER_ADDRESS, 0);
-
-        // Grant ADMIN_ORACLE_QUOTER_ROLE
-        ACCESS_MANAGER.grantRole(ADMIN_ORACLE_QUOTER_ROLE, ORACLE_QUOTER_ADMIN_ADDRESS, 0);
-
-        // Grant LP_ROLE_ADMIN_ROLE
-        ACCESS_MANAGER.grantRole(LP_ROLE_ADMIN_ROLE, LP_ROLE_ADMIN_ADDRESS, 0);
-
-        // Set ST_LP_ROLE and JT_LP_ROLE admin to LP_ROLE_ADMIN_ROLE
-        ACCESS_MANAGER.setRoleAdmin(ST_LP_ROLE, LP_ROLE_ADMIN_ROLE);
-        ACCESS_MANAGER.setRoleAdmin(JT_LP_ROLE, LP_ROLE_ADMIN_ROLE);
     }
 
     // -----------------------------------------
@@ -630,24 +458,4 @@ abstract contract RoycoDayTestBase is Test, Assertions {
         _executeKernelAdminOperation(address(KERNEL), data);
     }
 
-    /// @notice Sets the coverage via accountant admin (with scheduling)
-    /// @param _newMinCoverageWAD The new coverage in WAD
-    function _setMinCoverage(uint64 _newMinCoverageWAD) internal {
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setMinCoverage, (_newMinCoverageWAD));
-        _executeAccountantAdminOperation(address(ACCOUNTANT), data);
-    }
-
-    /// @notice Sets the ST protocol fee via protocol fee setter (with scheduling)
-    /// @param _newFeeWAD The new fee in WAD
-    function _setSeniorTrancheProtocolFee(uint64 _newFeeWAD) internal {
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setSeniorTrancheProtocolFee, (_newFeeWAD));
-        _executeProtocolFeeSetterOperation(address(ACCOUNTANT), data);
-    }
-
-    /// @notice Sets the JT protocol fee via protocol fee setter (with scheduling)
-    /// @param _newFeeWAD The new fee in WAD
-    function _setJuniorTrancheProtocolFee(uint64 _newFeeWAD) internal {
-        bytes memory data = abi.encodeCall(ACCOUNTANT.setJuniorTrancheProtocolFee, (_newFeeWAD));
-        _executeProtocolFeeSetterOperation(address(ACCOUNTANT), data);
-    }
 }

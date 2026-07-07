@@ -138,7 +138,10 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         uint256 x = 10_000e18;
         uint256 sx = ST.previewDeposit(toTrancheUnits(x));
         uint256 s2x = ST.previewDeposit(toTrancheUnits(2 * x));
-        // Each preview floors once, so the split-vs-merged difference is bounded by a few wei of floor dust
+        // Tolerance derivation: each preview composes two floor divisions (the asset -> NAV quote, then the
+        // NAV -> share conversion). For a single floor, doubling the input drifts at most 1 unit from twice the
+        // floored half (floor(2a) <= 2*floor(a) + 1), and a first-stage residue propagates through the second
+        // stage at a near-1 price adding at most 1 more unit — two stages, at most 2 wei each, 4 wei total.
         assertApproxEqAbs(s2x, 2 * sx, 4, "previewDeposit must be ~proportional to amount");
     }
 
@@ -189,6 +192,24 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
 
         assertApproxEqAbs(rawAfter, rawBefore + value, maxNAVDelta(), "stRawNAV must rise by the deposited value");
         _assertNAVConservation();
+    }
+
+    /**
+     * @notice Literal share-price anchor: the FIRST senior depositor mints shares 1:1 with its quoted deposit
+     *         value, so the senior share price starts at exactly 1.0 — the hand constant 1e18 — rather than at
+     *         whatever a pricing formula would produce.
+     */
+    function test_deposit_firstDepositorSharePriceIsOne() external {
+        _seedJT(200_000e18);
+        assertEq(ST.totalSupply(), 0, "arrange: the senior tranche must start empty for the 1:1 anchor");
+
+        uint256 shares = _depositST(_stLp(0), 50_000e18);
+
+        // Against zero supply the mint prices value 1:1, so NAV-per-share is 1e18 exactly, up to the drift between
+        // the quoted value (which sized the mint) and the booked raw delta (which backs the shares). That drift is
+        // at most maxNAVDelta(), moving the price by at most maxNAVDelta * WAD / shares, plus one floor wei.
+        uint256 tolerance = (toUint256(maxNAVDelta()) * WAD) / shares + 1;
+        assertApproxEqAbs(_stSharePriceWAD(), WAD, tolerance, "the first depositor's share price must anchor at exactly 1.0");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -336,6 +357,35 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         _assertNAVConservation();
     }
 
+    /**
+     * @notice Literal pro-rata anchors on a sole senior holder: half the supply can claim at most half the NAV
+     *         (a hand halving, not the scaling formula), and the two halves of a full exit sum back to the whole
+     *         pre-exit NAV within quoter dust — floor scaling neither leaks value to the exiter nor strands it.
+     */
+    function test_redeem_splitExitHalvesSumToWholeNAV() external {
+        _seedJT(200_000e18);
+        address lp = _stLp(0);
+        uint256 shares = _depositST(lp, 80_000e18);
+        _sync();
+        assertEq(ST.totalSupply(), shares, "arrange: the redeemer must own the whole senior supply");
+
+        NAV_UNIT wholeNAV = ST.totalAssets().nav;
+        AssetClaims memory first = _redeemST(lp, shares / 2);
+        // Hand-derived ceiling: floor rounding only goes down, and an odd share count redeems strictly less than
+        // half the supply, so half the NAV bounds the first leg in every case.
+        assertLe(toUint256(first.nav), toUint256(wholeNAV) / 2, "half the supply can never claim more than half the NAV");
+
+        AssetClaims memory second = _redeemST(lp, shares - shares / 2);
+        assertEq(ST.totalSupply(), 0, "the full exit must drain the senior supply");
+
+        // Whole-equals-sum-of-parts: the two exits drain the entire tranche, so together they must recover the
+        // whole pre-exit NAV. Each leg's booked raw delta can drift from its claim NAV by one quoter round-trip
+        // in either direction, so allow one maxNAVDelta per leg plus a floor wei each way.
+        uint256 recovered = toUint256(first.nav) + toUint256(second.nav);
+        assertLe(recovered, toUint256(wholeNAV) + toUint256(maxNAVDelta()) + 1, "the split exit cannot recover more than the whole NAV plus quoter dust");
+        assertGe(recovered + 2 * toUint256(maxNAVDelta()) + 2, toUint256(wholeNAV), "the split exit must recover the whole NAV up to quoter dust");
+    }
+
     /// @notice Senior exits are never utilization-gated: a redemption succeeds with coverage parked at the brink.
     function test_redeem_notGatedByUtilization() external {
         // Push coverage near its limit, then redeem — ST redemption carries no coverage/liquidity gate, so it succeeds.
@@ -343,6 +393,10 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         address lp = _stLp(0);
         uint256 shares = _depositSTRaw(lp, ST.maxDeposit(lp)); // deposit up to the coverage limit
         _sync();
+        // Threshold derivation: maxDeposit under-reports the exact coverage boundary only by the configured NAV
+        // dust tolerances plus quoter conversion floors — wei-to-dust magnitudes against a deposit seeded in the
+        // 1e22+ range — so a max-size deposit parks utilization within a sliver of 100%. A 0.9e18 floor sits far
+        // above anything a failed arrange could read and far below the boundary, cleanly detecting "near the limit".
         assertGt(_stSynced().coverageUtilizationWAD, 0.9e18, "coverage should be near its limit after a max deposit");
 
         AssetClaims memory claims = _redeemST(lp, shares / 4);

@@ -8,44 +8,7 @@ import { WAD } from "../../../src/libraries/Constants.sol";
 import { MarketState } from "../../../src/libraries/Types.sol";
 import { AdaptiveCurveYDM_V1 } from "../../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
-import { BaseAdaptiveCurveYDM } from "../../../src/ydm/base/BaseAdaptiveCurveYDM.sol";
-
-/**
- * @title MockAdaptiveCurveYDM
- * @notice Minimal concrete model that forwards ARBITRARY constructor parameters straight to the
- *         BaseAdaptiveCurveYDM constructor. V1 and V2 hardcode their (min, max, speed) triple, so
- *         this mock is the only way to exercise the base constructor's parameter gate across the
- *         full space (min == 0, min > max, max > WAD, speed == 0, speed > limit, speed == limit).
- * @dev The curve shape is deliberately trivial: `_computeYieldShare` returns the (already-bounded)
- *      time-averaged yield share at target, ignoring the delta. That keeps the mock's output a pure
- *      function of base machinery so the base behavior (capping, uninitialized gate, immutable
- *      getters) is what is under test, not a concrete curve.
- */
-contract MockAdaptiveCurveYDM is BaseAdaptiveCurveYDM {
-    mapping(address => uint256) public yAtTarget;
-    mapping(address => uint256) public lastTs;
-
-    constructor(uint256 _target, uint256 _minY, uint256 _maxY, uint256 _speed) BaseAdaptiveCurveYDM(_target, _minY, _maxY, _speed) { }
-
-    /// @notice Seed a nonzero yield-share-at-target for msg.sender so the market reads as initialized.
-    function initFor(uint256 _y) external {
-        yAtTarget[msg.sender] = _y;
-        lastTs[msg.sender] = 0;
-    }
-
-    function _computeYieldShare(int256, uint256 _avgYieldShareAtTargetWAD) internal pure override returns (uint256) {
-        return _avgYieldShareAtTargetWAD;
-    }
-
-    function _readAdaptiveCurve() internal view override returns (uint256, uint256) {
-        return (yAtTarget[msg.sender], lastTs[msg.sender]);
-    }
-
-    function _writeAdaptiveCurve(uint256 _newYieldShareAtTargetWAD, uint256) internal override {
-        yAtTarget[msg.sender] = _newYieldShareAtTargetWAD;
-        lastTs[msg.sender] = block.timestamp;
-    }
-}
+import { MockAdaptiveCurveYDM } from "../../mocks/MockAdaptiveCurveYDM.sol";
 
 /**
  * @title Test_BaseAdaptiveCurveYDM
@@ -99,6 +62,9 @@ contract Test_BaseAdaptiveCurveYDM is Test {
 
     /// min == max pins the curve to a single yield-share-at-target and is accepted
     function test_Constructor_MinEqualsMax() public {
+        // A degenerate-but-valid clamp: min == max collapses the adaptation range to a point, turning the
+        // adaptive model into a fixed-premium one. Deployers may legitimately want a non-adapting premium,
+        // so the gate must accept equality rather than require strict min < max.
         MockAdaptiveCurveYDM m = _mock(3e17, 3e17, SPEED_LIMIT);
         assertEq(m.MIN_YIELD_SHARE_AT_TARGET_WAD(), 3e17);
         assertEq(m.MAX_YIELD_SHARE_AT_TARGET_WAD(), 3e17);
@@ -106,12 +72,19 @@ contract Test_BaseAdaptiveCurveYDM is Test {
 
     /// min above max is an empty clamp range and rejected
     function test_RevertIf_ConstructorMinAboveMax() public {
+        // min > max leaves NO value the adaptation clamp could return: every adapted yield-share would be
+        // simultaneously below the floor and above the ceiling, so any curve built this way is unusable
+        // from the first sync. The gate must reject it at deploy rather than let a market wire a dead model.
+        // 3e17 + 1 is the tightest violation, one wei past the accepted min == max boundary.
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
         _mock(3e17 + 1, 3e17, SPEED_LIMIT);
     }
 
     /// One wei is the smallest accepted clamp floor
     function test_Constructor_MinOneWei() public {
+        // The gate requires only min > 0 (a positive floor keeps the premium from adapting to exactly zero
+        // and permanently switching the junior payment off), so the 1-wei floor -- economically negligible
+        // but strictly positive -- must pass, pinning the boundary exactly one wei above the rejected zero.
         MockAdaptiveCurveYDM m = _mock(1, MAX_YT, SPEED_LIMIT);
         assertEq(m.MIN_YIELD_SHARE_AT_TARGET_WAD(), 1);
     }

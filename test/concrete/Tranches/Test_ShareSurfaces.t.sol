@@ -3,7 +3,10 @@ pragma solidity ^0.8.28;
 
 import { IERC20Errors } from "../../../lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
+import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
+import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoSeniorTranche } from "../../../src/interfaces/IRoycoSeniorTranche.sol";
 import { IRoycoLiquidityTranche } from "../../../src/interfaces/IRoycoLiquidityTranche.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { AssetClaims, Operation } from "../../../src/libraries/Types.sol";
@@ -85,6 +88,95 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
         uint256 reportedSupply = seniorTranche.mintProtocolFeeShares(PROTOCOL_FEE_RECIPIENT, 0);
         assertEq(reportedSupply, supplyBefore, "a zero-share fee mint must report the unchanged supply");
         assertEq(seniorTranche.balanceOf(PROTOCOL_FEE_RECIPIENT), 0, "a zero-share fee mint must mint nothing");
+    }
+
+    /**
+     * @notice Only the kernel can mint liquidity premium shares, and a zero-share premium mint is a
+     *         supply-preserving no-op that still reports and emits the current supply
+     * @dev The premium mint reassigns senior appreciation to the liquidity tranche, so an open mint gate would let
+     *      anyone dilute every senior holder for free — the kernel-only gate is the entire defense. A sync whose
+     *      liquidity premium rounds to zero shares still calls this, so the zero path must change no balance and
+     *      no supply, only surface the (unchanged) supply the kernel prices later mints against
+     */
+    function test_MintLiquidityPremiumShares_KernelOnlyAndZeroIsNoOp() public {
+        vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
+        seniorTranche.mintLiquidityPremiumShares(address(kernel), 1e18);
+
+        // Expected values are pre-call reads: a no-op must leave every one of them byte-identical
+        uint256 supplyBefore = seniorTranche.totalSupply();
+        uint256 kernelBalanceBefore = seniorTranche.balanceOf(address(kernel));
+        vm.expectEmit(address(seniorTranche));
+        emit IRoycoSeniorTranche.LiquidityPremiumSharesMinted(address(kernel), 0, supplyBefore);
+        vm.prank(address(kernel));
+        uint256 reportedSupply = seniorTranche.mintLiquidityPremiumShares(address(kernel), 0);
+
+        assertEq(reportedSupply, supplyBefore, "a zero-share premium mint must report the unchanged supply");
+        assertEq(seniorTranche.totalSupply(), supplyBefore, "a zero-share premium mint must not change the supply");
+        assertEq(seniorTranche.balanceOf(address(kernel)), kernelBalanceBefore, "a zero-share premium mint must credit the kernel nothing");
+    }
+
+    // =============================
+    // Paused-tranche mint surface
+    // =============================
+
+    /**
+     * @notice A paused senior tranche admits no supply change: every kernel mint path with non-zero shares reverts
+     * @dev Pausing the tranche token itself (not the kernel) is the emergency stop on share movement, and a mint
+     *      is a share movement like any other — if any kernel mint slipped through, a paused market's share count
+     *      could still drift and dilute holders mid-incident. The fee and premium mints hit the pause inside the
+     *      balance update, the plain mint at its own entry gate, all three must land on the same EnforcedPause
+     */
+    function test_RevertIf_TranchePausedAndKernelMintsNonZeroShares() public {
+        vm.prank(PAUSER);
+        IRoycoAuth(address(seniorTranche)).pause();
+
+        vm.startPrank(address(kernel));
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        seniorTranche.mintProtocolFeeShares(PROTOCOL_FEE_RECIPIENT, 1e18);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        seniorTranche.mintLiquidityPremiumShares(address(kernel), 1e18);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        seniorTranche.mint(address(this), 1e18);
+        vm.stopPrank();
+    }
+
+    /**
+     * @notice While the senior tranche is paused, the ZERO-share fee and premium mints still succeed (returning
+     *         the unchanged supply and emitting their mint events), while the plain mint reverts even for zero
+     *         shares — the pause surface is inconsistent across the three kernel mint paths
+     * @dev The fee and premium mints only check the pause inside the balance update, which a zero-share call
+     *      never reaches, whereas the plain mint checks the pause at its entry, before even its own zero-shares
+     *      guard. Nothing of value escapes (no balance or supply moves, only the event fires), but a paused token
+     *      that still answers two of its three kernel mints is a surface a consistent design would close: every
+     *      supply-touching entrypoint should refuse uniformly while paused
+     */
+    function test_FINDING_33_ZeroShareKernelMintsSucceedWhileTranchePaused() public {
+        vm.prank(PAUSER);
+        IRoycoAuth(address(seniorTranche)).pause();
+
+        uint256 supplyBefore = seniorTranche.totalSupply();
+        uint256 kernelBalanceBefore = seniorTranche.balanceOf(address(kernel));
+
+        vm.startPrank(address(kernel));
+        // The zero-share fee mint sails through the pause and still emits its mint event
+        vm.expectEmit(address(seniorTranche));
+        emit IRoycoVaultTranche.ProtocolFeeSharesMinted(PROTOCOL_FEE_RECIPIENT, 0, supplyBefore);
+        uint256 feeReportedSupply = seniorTranche.mintProtocolFeeShares(PROTOCOL_FEE_RECIPIENT, 0);
+        // So does the zero-share premium mint
+        vm.expectEmit(address(seniorTranche));
+        emit IRoycoSeniorTranche.LiquidityPremiumSharesMinted(address(kernel), 0, supplyBefore);
+        uint256 premiumReportedSupply = seniorTranche.mintLiquidityPremiumShares(address(kernel), 0);
+        // The plain mint refuses the same zero-share call at its pause gate, before its zero-shares guard can fire
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        seniorTranche.mint(address(this), 0);
+        vm.stopPrank();
+
+        assertEq(feeReportedSupply, supplyBefore, "the paused zero-share fee mint must report the unchanged supply");
+        assertEq(premiumReportedSupply, supplyBefore, "the paused zero-share premium mint must report the unchanged supply");
+        // Only the events escape the pause: no supply or balance may have moved
+        assertEq(seniorTranche.totalSupply(), supplyBefore, "no supply change may escape the pause");
+        assertEq(seniorTranche.balanceOf(PROTOCOL_FEE_RECIPIENT), 0, "the fee recipient must be credited nothing while paused");
+        assertEq(seniorTranche.balanceOf(address(kernel)), kernelBalanceBefore, "the kernel must be credited nothing while paused");
     }
 
     // =============================

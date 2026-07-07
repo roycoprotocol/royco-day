@@ -235,12 +235,11 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
     }
 
     /**
-     * @notice FINDING 8 — swaps are NOT blocked in the block of a P&L sync. CLAUDE.md ("Slippage gate and
-     *         the same-block-swap rule"): "Block swaps in the same block as a P&L sync so an attacker cannot
-     *         atomically sync-then-swap and guarantee the back-run." Implemented reality: the hook syncs BEFORE
-     *         the swap instead of blocking it, so a same-block sync-then-swap executes. The same-block re-sync
-     *         is a no-op (idempotence), so no double accrual occurs — but the documented blocking rule does not
-     *         exist in code.
+     * @notice FINDING 8 — swaps are NOT blocked in the block of a P&L sync. The intended defense was to refuse
+     *         any swap in the same block as a sync, so an attacker could not atomically sync-then-swap and
+     *         guarantee the back-run against the freshly committed rate. Implemented reality: the hook syncs
+     *         BEFORE the swap instead of blocking it, so a same-block sync-then-swap executes. The same-block
+     *         re-sync is a no-op (idempotence), so no double accrual occurs — but no blocking rule exists in code.
      */
     function test_FINDING_8_swapsNotBlockedSameBlockAsSync() public {
         _seedForSwaps();
@@ -249,7 +248,7 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
 
         (address swapper, uint256 amountIn) = _armSwapper(testConfig.quoteAsset, 0.25e18);
         uint256 amountOut = _swapExactIn(swapper, testConfig.quoteAsset, address(ST), amountIn, 0);
-        assertGt(amountOut, 0, "FINDING: a swap in the sync's own block executes (spec says it should be blocked)");
+        assertGt(amountOut, 0, "FINDING: a swap in the sync's own block executes rather than being blocked");
 
         IRoycoDayAccountant.RoycoDayAccountantState memory committed1 = ACCOUNTANT.getState();
         assertEq(committed1.lastSTEffectiveNAV, committed0.lastSTEffectiveNAV, "the same-block hook re-sync must be a no-op on the senior mark");
@@ -257,8 +256,9 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
     }
 
     /**
-     * @notice FINDING 9 — the rate-staleness LVR arb is impossible THROUGH THE POOL. CLAUDE.md
-     *         ("Capital realism"): "an arbitrageur can buy ST cheap against the stale rate just before a sync."
+     * @notice FINDING 9 — the rate-staleness LVR arb is impossible THROUGH THE POOL. The worry: the pool prices
+     *         the senior leg at the last committed sync rate, and a yield-bearing share marks up predictably
+     *         between syncs, so an arbitrageur could buy ST cheap against the stale rate just before a sync.
      *         Refuted for through-pool flow: the before-swap hook syncs the kernel (rewriting the transient
      *         rate cache) and the Vault reloads token rates after `onBeforeSwap`, so the swap ALWAYS prices at
      *         the freshly-synced rate — byte-identical output with and without an explicit front-run sync.
@@ -269,7 +269,7 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
         _sync();
         uint256 staleRate = _kernelRate();
 
-        simulateSTYield(0.01e18); // the stale-rate window CLAUDE.md worries about: feed moved, no sync yet
+        simulateSTYield(0.01e18); // the stale-rate window under attack: the feed has moved, no sync has committed it
         (address swapper, uint256 amountIn) = _armSwapper(testConfig.quoteAsset, 0.25e18);
 
         // Path A: swap immediately against the "stale" market — no explicit sync.
@@ -372,8 +372,15 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
     function test_GetRate_matchesCommittedSeniorNAVPerShare() public {
         _seedForSwaps();
         _sync();
-        uint256 expected = Math.mulDiv(WAD, toUint256(ACCOUNTANT.getState().lastSTEffectiveNAV), ST.totalSupply());
-        assertEq(_kernelRate(), expected, "getRate must equal the committed senior effective NAV per share (floored)");
+        uint256 rate = _kernelRate();
+        uint256 supply = ST.totalSupply();
+        uint256 stEff = toUint256(ACCOUNTANT.getState().lastSTEffectiveNAV);
+        assertEq(rate, Math.mulDiv(WAD, stEff, supply), "getRate must equal the committed senior effective NAV per share (floored)");
+        // Independent counterweight on plain checked integers (no shared math library): a floored NAV-per-share
+        // must reconstruct the committed senior NAV to within one unit of supply-scale floor loss — scaling the
+        // rate back up by the supply never overshoots WAD * NAV, and undershoots it by less than one full supply.
+        assertLe(rate * supply, WAD * stEff, "rate * supply must never overstate the committed senior NAV");
+        assertGt(rate * supply + supply, WAD * stEff, "rate * supply must undershoot the committed senior NAV by less than one supply unit");
     }
 
     /// @notice within a synced transaction the rate is FROZEN: a feed move after the sync does not move

@@ -503,7 +503,8 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * Sync scenario (ST flat, JT loss, dust IL): the dust il persists un-erased through a PERPETUAL sync (E5 tie-in)
+     * Sync scenario (ST flat, JT loss, dust IL): the dust il persists un-erased through a PERPETUAL sync —
+     * a sub-dust senior claim is carried forward, never written off, so a junior loss cannot launder it away
      * Derivation: dJTEff = -20e18 (zero attribution to the 5 wei claim), jtEffectiveNAV = 180e18 - 5, il stays 5 <= dust 7
      */
     function test_Sync_DustIL_STFlatJTLoss() public {
@@ -2067,9 +2068,14 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * premium floor exactness at awkward prime-adjacent values against independent 256-bit floor math
-     * Derivation: prem = floor(gain * (rate * elapsed) / (elapsed * 1e18)) with gain 999999999999999937 (prime),
-     * elapsed 3607 (prime), rates 123456789012345677 and 98765432109876543 (both below their caps)
+     * premium floor exactness at awkward prime-adjacent values, pinned to hand-worked literals
+     * The rate accrues time-weighted over a single window, so rate and window both carry the same
+     * elapsed = 3607 (prime) and the ratio reduces exactly to floor(gain * rate / 1e18). Worked by hand
+     * with gain 999_999_999_999_999_937 (prime) and both rates below their caps:
+     *   999999999999999937 * 123456789012345677 = 123456789012345669_222222292222222349 -> jtPrem = 123_456_789_012_345_669
+     *   999999999999999937 * 98765432109876543  =  98765432109876536_777777777077777791 -> ltPrem =  98_765_432_109_876_536
+     * Both products leave a nonzero 18-digit fractional tail, so any rounding other than a floor
+     * (ceil, half-up) would land exactly one wei high — the premiums must never round senior gain up
      */
     function test_Sync_premiumFloorExactnessAtAwkwardValues() public {
         _seedAndInitAccrual();
@@ -2080,12 +2086,15 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         jtYDM.setYieldShareReturn(rateJT);
         ltYDM.setYieldShareReturn(rateLT);
         vm.warp(block.timestamp + elapsed);
-        uint256 expectedJTPremium = (gain * (rateJT * elapsed)) / (elapsed * WAD);
-        uint256 expectedLTPremium = (gain * (rateLT * elapsed)) / (elapsed * WAD);
+        // Hand-derived literals from the header derivation — the sub-wei tails (…349 and …791) are floored away
+        uint256 expectedJTPremium = 123_456_789_012_345_669;
+        uint256 expectedLTPremium = 98_765_432_109_876_536;
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(SEED_ST_RAW + gain), toNAVUnits(SEED_JT_RAW));
         assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW + expectedJTPremium, "jt premium floors exactly");
         assertEq(toUint256(state.ltLiquidityPremium), expectedLTPremium, "lt premium floors exactly");
-        assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW + gain - expectedJTPremium, "st keeps the residual plus the lt premium value retained senior");
+        // Senior residual by hand: 999_999_999_999_999_937 - 123_456_789_012_345_669 = 876_543_210_987_654_268
+        // (only the jt premium leaves the senior side, the lt premium re-labels value that stays senior)
+        assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW + 876_543_210_987_654_268, "st keeps the residual plus the lt premium value retained senior");
     }
 
     /**

@@ -1,20 +1,23 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { stdError } from "../../../lib/forge-std/src/StdError.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_ReinvestLiquidityPremiumGate_Kernel
- * @notice The liquidity premium reinvestment's slippage gate: the minimum-BPT-out floor is
- *         ceil(fairBPT x (WAD - maxReinvestmentSlippage) / WAD), pinned from both sides of the exact boundary,
- *         plus the partial-amount path that deploys only part of the idle pile
+ * @notice The liquidity premium reinvestment's slippage gate: the minimum-BPT-out floor pinned from both sides of the
+ *         exact boundary, the partial-amount path that deploys only part of the idle pile, and two pinned divergences
+ *         where the gate's fair-value floor degrades — rounding to zero (the add runs unprotected) and dividing by a
+ *         zero oracle TVL (every tranche operation reverts)
  * @dev The gate is the manipulation defense on the single-sided add: a venue fill one wei under it must be a
  *      tolerated no-op (the idle liquidity premium senior shares stay claimable), a fill exactly at it must deploy
  */
@@ -24,25 +27,23 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
     }
 
     /**
-     * @notice The gate floors the add at minOut = ceil(fairBPT x (WAD - maxSlippage) / WAD), pinned from BOTH sides
-     *         on the same idle pile: a venue minting exactly minOut - 1 defers (tolerated failure, idle pile and
-     *         committed state untouched), a venue minting exactly minOut deploys the entire pile with its event
+     * @notice The gate floors the add at exactly 0.999e18 BPT for the seeded pile (hand-derived below), pinned from
+     *         BOTH sides: a venue minting exactly one wei less defers (tolerated failure, idle pile and committed
+     *         state untouched), a venue minting exactly the floor deploys the entire pile with its event
      * @dev Attacker intent: park the venue's fill exactly at the threshold to check the comparison direction, an
      *      off-by-one here either strands healthy reinvestments or accepts a sandwiched fill one wei too poor
      */
     function test_ReinvestLiquidityPremium_MinBptOutBoundary_BothSides() public {
         uint256 idleShares = _accrueIdlePremiumSeniorShares();
+        _assertSeededGateFixture(idleShares);
 
-        // Derive the gate's exact floor from committed state, mirroring the production formula:
-        //   fairNAV  = floor(stEff x idleShares / stSupply)                (ValuationLogic._convertToValue)
-        //   fairBPT  = floor(bptSupply x fairNAV / TVL)                    (ltConvertNAVUnitsToTrancheUnits)
-        //   minOut   = ceil(fairBPT x (WAD - maxSlippage) / WAD)
-        uint256 stEff = toUint256(accountant.getState().lastSTEffectiveNAV);
-        uint256 stSupply = seniorTranche.totalSupply();
-        uint256 fairNAV = Math.mulDiv(stEff, idleShares, stSupply, Math.Rounding.Floor);
-        uint256 fairBPT = Math.mulDiv(balancerVault.totalSupply(address(bpt)), fairNAV, bptOracle.computeTVL(), Math.Rounding.Floor);
-        uint256 minOut = Math.mulDiv(fairBPT, WAD - params.maxReinvestmentSlippageWAD, WAD, Math.Rounding.Ceil);
-        assertGt(minOut, 1, "arrange: the boundary must be expressible from both sides");
+        // The gate's floor, hand-derived from the pinned fixture state rather than by re-running the production
+        // conversion chain: the whole idle pile values to floor(108e18 x 940733772342427093 / 101599247412982126058)
+        // = 999999999999999999 at the committed senior rate — the 1e18 premium it was minted for, less a single
+        // floor-rounding wei. The pool's NAV per BPT is exactly 1.0 (6.000001e18 BPT backing 6.000001e18 of value),
+        // so the fair BPT is that same figure, and the 0.1% max reinvestment slippage discount floors the add at
+        // ceil(999999999999999999 x 999 / 1000) = ceil(999e15 - 0.999) = 999000000000000000
+        uint256 minOut = 0.999e18;
 
         uint256 ltOwnedBefore = toUint256(kernel.getState().ltOwnedYieldBearingAssets);
         uint256 committedLtRawNAVBefore = toUint256(accountant.getState().lastLTRawNAV);
@@ -73,14 +74,17 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
      */
     function test_ReinvestLiquidityPremium_PartialAmount_LeavesRemainderIdle() public {
         uint256 idleShares = _accrueIdlePremiumSeniorShares();
-        uint256 half = idleShares / 2;
-        assertGt(half, 0, "arrange: the pile must split into two nonzero parts");
+        _assertSeededGateFixture(idleShares);
 
-        // The same gate formula, applied to only the deployed half
-        uint256 stEff = toUint256(accountant.getState().lastSTEffectiveNAV);
-        uint256 fairNAV = Math.mulDiv(stEff, half, seniorTranche.totalSupply(), Math.Rounding.Floor);
-        uint256 fairBPT = Math.mulDiv(balancerVault.totalSupply(address(bpt)), fairNAV, bptOracle.computeTVL(), Math.Rounding.Floor);
-        uint256 minOut = Math.mulDiv(fairBPT, WAD - params.maxReinvestmentSlippageWAD, WAD, Math.Rounding.Ceil);
+        // Deploy the floor-rounded half of the pinned pile: 940733772342427093 / 2 = 470366886171213546
+        uint256 half = 470366886171213546;
+
+        // The gate's floor for the half, hand-derived from the pinned fixture state: the half values to
+        // floor(108e18 x 470366886171213546 / 101599247412982126058) = 499999999999999999 at the committed senior
+        // rate (half the premium less a floor-rounding wei), the pool's NAV per BPT is exactly 1.0 so the fair BPT
+        // is the same figure, and the 0.1% discount floors the add at ceil(499999999999999999 x 999 / 1000)
+        // = ceil(4995e14 - 0.999) = 499500000000000000
+        uint256 minOut = 0.4995e18;
 
         uint256 ltOwnedBefore = toUint256(kernel.getState().ltOwnedYieldBearingAssets);
 
@@ -92,6 +96,102 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
 
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares - half, "the undeployed remainder must stay idle and claimable");
         assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), ltOwnedBefore + minOut, "exactly the partial add's BPT must be credited");
+    }
+
+    /**
+     * @notice PINS CURRENT BEHAVIOR: when the oracle's fair-value floor rounds to zero, the single-sided add executes
+     *         with NO slippage protection — the entire idle pile is debited for exactly 1 wei of BPT
+     * @dev The gate exists so a manipulated pool cannot buy the staged premium below its oracle fair value, but the
+     *      floor is computed as floor(bptSupply x premiumValue / TVL) discounted by the slippage tolerance, and once
+     *      the pool's TVL dwarfs the premium's value the floor rounds to 0 and ceil(0 x 999 / 1000) is still 0, so
+     *      minBptAmountOut = 0 reaches the venue and ANY fill — even 1 wei for a ~1e18-value pile — clears the gate.
+     *      Economically this is the exact regime where the gate matters least per add but where a sandwich costs the
+     *      LT the most relative to what it receives. Expected behavior: a zero floor should defer the add and leave
+     *      the shares idle and claimable, exactly as a breached gate does
+     */
+    function test_FINDING_23_ReinvestLiquidityPremium_ZeroMinOutFloor_AddExecutesWithoutSlippageProtection() public {
+        uint256 idleShares = _accrueIdlePremiumSeniorShares();
+        _assertSeededGateFixture(idleShares);
+
+        // Sync once more: the +10% gain is already committed, so this sync accrues no new premium, which guarantees
+        // the reinvest call's own internal pre-op sync below also mints nothing — its fee-path deploy attempt stays
+        // inert and cannot consume the one-shot venue override armed for the explicit reinvestment
+        vm.prank(SYNC_OPERATOR);
+        kernel.syncTrancheAccounting();
+        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares, "arrange: the no-gain sync must not touch the idle pile");
+
+        // Pin the oracle to a TVL that rounds the fair-value floor to zero. The pile values to under 1e18 NAV
+        // (999999999999999999, pinned above) and the BPT supply is 6.000001e18, so the fair-BPT numerator
+        // bptSupply x premiumValue is under 6.1e36 — any TVL above that rounds floor(numerator / TVL) to 0, and
+        // 1e40 clears the boundary by more than a thousandfold
+        bptOracle.setMode(MockBPTOracle.Mode.MANUAL);
+        bptOracle.setTVL(1e40);
+
+        uint256 ltOwnedBefore = toUint256(kernel.getState().ltOwnedYieldBearingAssets);
+
+        // A venue fill of exactly 1 wei of BPT for the whole pile: ~1e18 of senior value sold for 1 wei. A live gate
+        // would reject this fill outright, so its acceptance is direct proof the add ran with minBptAmountOut == 0
+        balancerVault.setNextBptOutOverride(1);
+        vm.expectEmit(address(kernel));
+        emit IRoycoDayKernel.LiquidityPremiumReinvested(idleShares, toTrancheUnits(1));
+        vm.prank(MARKET_OPS_ADMIN);
+        kernel.reinvestLiquidityPremium(idleShares);
+
+        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, 0, "the entire idle pile is debited despite the worthless fill");
+        assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), ltOwnedBefore + 1, "exactly 1 wei of BPT is credited for the whole pile");
+    }
+
+    /**
+     * @notice PINS CURRENT BEHAVIOR: with the BPT oracle marking a zero TVL while BPT supply is positive, the sync
+     *         that would mint a pending liquidity premium panics with a division-by-zero — and because every tranche
+     *         operation runs that same pre-op sync, every operation reverts until the oracle heals
+     * @dev The reinvestment attempt is designed to be non-blocking: the venue add runs behind a tolerated low-level
+     *      call so a failed deploy leaves the premium idle instead of reverting the operation. But the gate's floor
+     *      is computed BEFORE that tolerated frame, and converting the premium's NAV to BPT divides by the oracle
+     *      TVL — zero TVL with a nonzero BPT supply skips the empty-pool early-return and panics in the conversion
+     *      itself. The pending senior gain can never commit (every sync reverts before committing), so the market is
+     *      fully bricked: no sync, no deposit, no redemption. Expected behavior: tolerated deferral — the sync
+     *      commits, the premium stays idle and claimable, and only the reinvestment waits for a sane oracle
+     */
+    function test_FINDING_23_SyncTrancheAccounting_BricksWhenOracleTVLZeroWithBPTSupply() public {
+        _seedMarket(100e18, 50e18);
+
+        // The first sync initializes the premium accrual clock
+        vm.prank(SYNC_OPERATOR);
+        kernel.syncTrancheAccounting();
+
+        // Arm venue slippage so that even if the deploy attempt were reached it would defer and keep the premium
+        // idle — proving the revert below comes from the floor computation, not from the tolerated venue add
+        setVenueSlippageMode(true);
+
+        // Accrue senior gain across a real time window so the NEXT sync mints a nonzero premium (the fee path only
+        // attempts a reinvestment when premium shares actually minted, so a nonzero pending premium is what arms it)
+        _warpAndRefreshFeed(1 days);
+        applySTPnL(1000); // +10%
+
+        // Poison the oracle: zero TVL against a live pool. The seeded pool carries 6.000001e18 BPT, so the
+        // fair-value conversion's zero-supply early-return does not fire and the division by TVL == 0 is reached
+        bptOracle.setMode(MockBPTOracle.Mode.MANUAL);
+        bptOracle.setTVL(0);
+        assertGt(balancerVault.totalSupply(address(bpt)), 0, "arrange: the poisoned state requires live BPT supply against the zero TVL");
+
+        // The sync itself reverts: the premium mint's deploy attempt divides by the zero TVL while computing the gate floor
+        vm.prank(SYNC_OPERATOR);
+        vm.expectRevert(stdError.divisionError);
+        kernel.syncTrancheAccounting();
+
+        // An ordinary senior deposit reverts identically: its pre-op sync mints the same pending premium and hits
+        // the same division, so the oracle outage locks out depositors with no exposure to the liquidity tranche
+        stJtVault.mintShares(ST_PROVIDER, 1e18);
+        vm.startPrank(ST_PROVIDER);
+        stJtVault.approve(address(seniorTranche), 1e18);
+        vm.expectRevert(stdError.divisionError);
+        seniorTranche.deposit(toTrancheUnits(1e18), ST_PROVIDER);
+        vm.stopPrank();
+
+        // Nothing committed and nothing staged: the premium was never minted, so the gain is still pending and every
+        // future operation will retry the same reverting path until the oracle reports a nonzero TVL again
+        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, 0, "no premium may stage while every sync reverts");
     }
 
     // =============================
@@ -123,6 +223,29 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         assertGt(idleShares, 0, "arrange: the premium must be idle (venue slippage armed)");
 
         setVenueSlippageMode(false);
+    }
+
+    /**
+     * @dev Pins the exact post-accrual fixture state every hand-computed gate literal in this contract is derived
+     *      from, so a fixture drift fails loudly here instead of silently invalidating a pinned floor.
+     *      Derivation from the seeded market (100e18 senior, 50e18 junior, +10% vault rate over one day):
+     *      - the senior raw NAV moves 100e18 to 110e18, a 10e18 senior gain, and the junior's pinned 20% risk
+     *        premium routes 2e18 of it to the junior side, so the committed senior effective NAV is 108e18
+     *      - the liquidity tranche's pinned 10% premium carves 1e18 out of the gain, and the 10% senior protocol
+     *        fee takes 0.7e18 (10% of the 7e18 senior residual after the 2e18 and 1e18 carve-outs), so the
+     *        pre-existing 100e18 senior shares retain 108e18 - 1e18 - 0.7e18 = 106.3e18
+     *      - premium shares minted: floor(1e18 x 100e18 / 106.3e18) = 940733772342427093 idle senior shares
+     *      - fee shares minted: floor(0.7e18 x 100e18 / 106.3e18) = 658513640639698965, so the senior supply lands
+     *        at 100e18 + 940733772342427093 + 658513640639698965 = 101599247412982126058
+     *      - the pool holds 6.000001e18 BPT backing 6.000001e18 of quote-leg value (the 6e6-quote-wei auto-seed
+     *        plus the genesis backing of the dead minimum supply), so its NAV per BPT is exactly 1.0
+     */
+    function _assertSeededGateFixture(uint256 _idleShares) internal view {
+        assertEq(_idleShares, 940733772342427093, "fixture pin: the idle premium pile");
+        assertEq(toUint256(accountant.getState().lastSTEffectiveNAV), 108e18, "fixture pin: the committed senior effective NAV");
+        assertEq(seniorTranche.totalSupply(), 101599247412982126058, "fixture pin: the post-mint senior supply");
+        assertEq(balancerVault.totalSupply(address(bpt)), 6000001000000000000, "fixture pin: the pool's BPT supply");
+        assertEq(bptOracle.computeTVL(), 6000001000000000000, "fixture pin: the pool's oracle TVL (NAV per BPT exactly 1.0)");
     }
 }
 

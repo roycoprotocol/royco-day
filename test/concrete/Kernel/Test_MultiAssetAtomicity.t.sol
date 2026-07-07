@@ -1,21 +1,22 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IVaultErrors } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultErrors.sol";
-import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
-import { IRoycoLiquidityTranche } from "../../src/interfaces/IRoycoLiquidityTranche.sol";
-import { WAD } from "../../src/libraries/Constants.sol";
-import { AssetClaims } from "../../src/libraries/Types.sol";
-import { toUint256 } from "../../src/libraries/Units.sol";
-import { defaultParams } from "../utils/MarketParams.sol";
-import { cellA } from "../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../utils/DayMarketTestBase.sol";
-import { RoycoTestMath } from "../utils/RoycoTestMath.sol";
-import { MockBalancerVault } from "../mocks/MockBalancerVault.sol";
+import { IVaultErrors } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultErrors.sol";
+import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoLiquidityTranche } from "../../../src/interfaces/IRoycoLiquidityTranche.sol";
+import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
+import { WAD } from "../../../src/libraries/Constants.sol";
+import { AssetClaims } from "../../../src/libraries/Types.sol";
+import { toUint256 } from "../../../src/libraries/Units.sol";
+import { defaultParams } from "../../utils/MarketParams.sol";
+import { cellA } from "../../utils/TokenConfigs.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
+import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
+import { MockBalancerVault } from "../../mocks/MockBalancerVault.sol";
 
 /**
- * @title Invariant_MultiAssetAtomicity
+ * @title Test_MultiAssetAtomicity
  * @notice The two multi-asset liquidity flows are all-or-nothing: a failure injected into any leg (the venue
  *         mint, the venue removal, a caller floor, or a post-op gate) must roll back the entire flow with no
  *         partial senior mint, no partial debit of the idle liquidity premium senior shares, and no share
@@ -25,7 +26,7 @@ import { MockBalancerVault } from "../mocks/MockBalancerVault.sol";
  *      below one hundred percent when they succeed, and flows the gates exempt (pure liquidity deposits, and
  *      every redemption once liquidation coverage is breached) still succeed while the gates read breached
  */
-contract Invariant_MultiAssetAtomicity is DayMarketTestBase {
+contract Test_MultiAssetAtomicity is DayMarketTestBase {
     /// @dev One whole quote token in its native decimals (this market's quote asset uses 6 decimals, so 1e6)
     uint256 internal QUOTE_UNIT;
 
@@ -172,6 +173,50 @@ contract Invariant_MultiAssetAtomicity is DayMarketTestBase {
             assertEq(bytes4(err), IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector, "expected the coverage gate to reject the whole flow");
         }
         assertEq(_marketDigest(actor), digestBefore, "a gate-rejected multi-asset deposit left a partial trace on the market");
+    }
+
+    /**
+     * @notice A senior leg so small it floors to zero senior shares rejects the whole deposit rather than
+     *         silently keeping the wei as an unpaid credit to existing senior holders
+     * @dev The flow credits the senior leg to the kernel's owned-asset ledger BEFORE minting the depositor's
+     *      senior shares, so only the zero-share mint guard stands between a dust leg and a donation: the wei
+     *      would raise senior raw NAV while minting nothing, a pure gift to whoever already holds senior shares
+     */
+    function test_LTDepositMultiAsset_STLegDustFloorsToZeroShares_RevertsWithoutDonatingToSeniorHolders() public {
+        // Appreciate the shared senior/junior vault 2% and commit the gain, so the senior share price strictly
+        // exceeds one NAV unit per share: the residual senior gain accrues to the pre-existing supply while the
+        // premium and fee share mints are priced at the post-gain NAV, so price-per-share ends above 1.0
+        _warpAndRefreshFeed(1 days);
+        applySTPnL(200);
+        _sync();
+        uint256 seniorSupply = seniorTranche.totalSupply();
+        uint256 stEffectiveNAV = toUint256(accountant.getState().lastSTEffectiveNAV);
+        assertGt(stEffectiveNAV, seniorSupply, "setup: expected the senior share price to strictly exceed one NAV unit per share");
+
+        // A 1-wei senior leg values to at most 1 NAV wei (the rate is below 2.0, so the floored conversion of
+        // 1 tranche wei cannot exceed 1), and with supply < stEffectiveNAV the share mint floors to zero:
+        // floor(1 * supply / stEffectiveNAV) = 0. The quote leg is real, so the flow has value to lose
+        address actor = LT_PROVIDER;
+        uint256 quoteAssets = 100 * QUOTE_UNIT;
+        _fundDepositLegs(actor, 1, quoteAssets);
+
+        // Pin the two ledgers a silent donation would inflate, alongside the full digest
+        uint256 stOwnedBefore = toUint256(kernel.getState().stOwnedYieldBearingAssets);
+        uint256 stRawNAVBefore = toUint256(accountant.getState().lastSTRawNAV);
+        bytes32 digestBefore = _marketDigest(actor);
+
+        vm.prank(actor);
+        try liquidityTranche.depositMultiAsset(1, quoteAssets, 0, actor) returns (uint256) {
+            fail("the deposit must revert when its senior leg floors to zero senior shares");
+        } catch (bytes memory err) {
+            assertEq(bytes4(err), IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES.selector, "expected the zero-share senior mint guard to reject the whole flow");
+        }
+
+        // The revert must roll back the pre-mint 1-wei owned-asset credit along with everything else,
+        // so nothing was donated to senior holders and the quote leg went back to the depositor
+        assertEq(toUint256(kernel.getState().stOwnedYieldBearingAssets), stOwnedBefore, "the 1-wei senior credit survived the revert, donating it to senior holders");
+        assertEq(toUint256(accountant.getState().lastSTRawNAV), stRawNAVBefore, "the committed senior raw NAV moved despite the reverted deposit");
+        assertEq(_marketDigest(actor), digestBefore, "a reverted dust-leg deposit left a partial trace on the market");
     }
 
     // =============================

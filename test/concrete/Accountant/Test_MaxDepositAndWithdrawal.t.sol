@@ -476,8 +476,12 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
         // retention = 1e18 - floor(0.1e18 * (0 + 1e18) / 1e18) = 0.9e18, claimable = floor(surplus * 1e18 / 0.9e18)
         SyncedAccountingState memory coinvested = _bareState(1000e18, 200e18, 0, 1000e18, 200e18, true, 0.1e18, 0);
         (NAV_UNIT stW, NAV_UNIT jtW) = accountant.maxJTWithdrawal(coinvested);
-        uint256 surplus = 200e18 - (120e18 + 3 + 7 + 2);
-        uint256 claimable = (surplus * WAD) / 0.9e18;
+        // Hand derivation (general form: claimable = floor(surplus * 1e18 / retention)): only the 0.9 retained
+        // fraction of each withdrawn wei actually leaves the junior effective NAV, so the surplus stretches to
+        //   surplus   = 200e18 - (120e18 + 3 + 7 + 2) = 80e18 - 12 = 79_999_999_999_999_999_988
+        //   claimable = floor(79_999_999_999_999_999_988 * 10 / 9) = floor(799_999_999_999_999_999_880 / 9)
+        //             = 88_888_888_888_888_888_875 (remainder 5 floored away, keeping the max inside the gate)
+        uint256 claimable = 88_888_888_888_888_888_875;
         assertEq(toUint256(stW), 0, "flat claims put nothing on the senior raw NAV");
         assertEq(toUint256(jtW), claimable, "coinvested junior withdrawable grossed up by the retention");
         // Risk-free twin on the same deployment: required = 100e18, jtDust excluded, retention = WAD

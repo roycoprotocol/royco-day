@@ -22,31 +22,10 @@ import { RoycoSeniorTranche } from "../../../src/tranches/RoycoSeniorTranche.sol
 import { MockBPT } from "../../mocks/MockBPT.sol";
 import { MockERC20C } from "../../mocks/MockERC20C.sol";
 import { MockERC4626C } from "../../mocks/MockERC4626C.sol";
+import { MockThreeTokenVaultShim } from "../../mocks/MockThreeTokenVaultShim.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
-
-/**
- * @dev Minimal vault shim registering a pool with three tokens, the only way to reach the LT quoter constructor's
- *      POOL_MUST_HAVE_TWO_TOKENS guard, since MockBalancerVault's registry is structurally two-token
- */
-contract ThreeTokenVaultShim {
-    IERC20[] internal _tokens;
-
-    constructor(IERC20[] memory _threeTokens) {
-        for (uint256 i; i < _threeTokens.length; ++i) {
-            _tokens.push(_threeTokens[i]);
-        }
-    }
-
-    function isPoolRegistered(address) external pure returns (bool) {
-        return true;
-    }
-
-    function getPoolTokens(address) external view returns (IERC20[] memory) {
-        return _tokens;
-    }
-}
 
 /**
  * @title Test_Construction_Kernel
@@ -160,7 +139,7 @@ contract Test_Construction_Kernel is DayMarketTestBase {
         three[0] = IERC20(address(seniorTranche));
         three[1] = IERC20(address(quoteToken));
         three[2] = IERC20(makeAddr("THIRD_TOKEN"));
-        ThreeTokenVaultShim shim = new ThreeTokenVaultShim(three);
+        MockThreeTokenVaultShim shim = new MockThreeTokenVaultShim(three);
         MockBPT shimBpt = new MockBPT(IVault(address(shim)), "Shim BPT", "shBPT");
 
         IRoycoDayKernel.RoycoDayKernelConstructionParams memory params = _goodConstructionParams();

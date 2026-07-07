@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { stdError } from "../../../lib/forge-std/src/StdError.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { MAX_FIXED_TERM_SECONDS, MAX_PROTOCOL_FEE_WAD, WAD, ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
@@ -195,6 +196,102 @@ contract Test_Setters_Accountant is AccountantTestBase {
         accountant.setJuniorTrancheDustTolerance(toNAVUnits(uint256(10)));
         state = kernel.doPreOp(toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW + 20));
         assertEq(toUint256(state.jtProtocolFee), 0, "gain equal to dust takes no fee");
+    }
+
+    /**
+     * the only guard on the cached dust sum is the raw checked add: each dust setter writes its own tolerance
+     * and then recomputes effectiveNAVDustTolerance = st + jt with plain checked arithmetic, so two individually
+     * accepted tolerances whose sum exceeds uint256 revert with a bare Panic(0x11) instead of a typed error,
+     * and the revert rolls the half-written tolerance back so the committed config is byte-unchanged
+     */
+    function test_RevertIf_DustToleranceSumOverflowsUint256() public {
+        // Against a zero JT tolerance the ST setter accepts the full uint256 range: max + 0 does not overflow
+        accountant.setSeniorTrancheDustTolerance(toNAVUnits(type(uint256).max));
+        IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
+        assertEq(toUint256(s.stNAVDustTolerance), type(uint256).max, "st dust accepts the uint256 maximum");
+        assertEq(toUint256(s.effectiveNAVDustTolerance), type(uint256).max, "effective dust is max + 0");
+
+        // A 1 wei JT tolerance now makes the cached sum max + 1: the checked add panics with no typed error
+        vm.expectRevert(stdError.arithmeticError);
+        accountant.setJuniorTrancheDustTolerance(toNAVUnits(uint256(1)));
+        // The revert rolls back the JT write that happened before the add, so all three fields are untouched
+        s = accountant.getState();
+        assertEq(toUint256(s.stNAVDustTolerance), type(uint256).max, "st dust unchanged after the revert");
+        assertEq(toUint256(s.jtNAVDustTolerance), 0, "jt dust write rolled back by the revert");
+        assertEq(toUint256(s.effectiveNAVDustTolerance), type(uint256).max, "effective dust unchanged after the revert");
+
+        // Symmetric order: park the uint256 maximum on the JT side and overflow from the ST setter instead
+        accountant.setSeniorTrancheDustTolerance(ZERO_NAV_UNITS);
+        accountant.setJuniorTrancheDustTolerance(toNAVUnits(type(uint256).max));
+        vm.expectRevert(stdError.arithmeticError);
+        accountant.setSeniorTrancheDustTolerance(toNAVUnits(uint256(1)));
+        s = accountant.getState();
+        assertEq(toUint256(s.stNAVDustTolerance), 0, "st dust write rolled back by the revert");
+        assertEq(toUint256(s.jtNAVDustTolerance), type(uint256).max, "jt dust unchanged after the revert");
+        assertEq(toUint256(s.effectiveNAVDustTolerance), type(uint256).max, "effective dust unchanged after the revert");
+    }
+
+    /**
+     * Pins that the dust setters accept economically absurd tolerances with no upper bound. Dust exists to
+     * suppress rounding artifacts of a few wei, but a 1e45 tolerance (far above any NAV in the market, no
+     * overflow) makes EVERY gain and EVERY coverage loss read as dust, which silently disables three unrelated
+     * protections at once:
+     * 1. Protocol fees: a genuine 100e18 senior gain still pays the JT risk premium and LT liquidity premium,
+     *    but the fee-taking gate (gain must exceed the effective dust) never opens, so st/jt/lt fees are all
+     *    zero where the configured 10% fee would otherwise take them
+     * 2. Premium-window resets: because the gain reads as dust, the premiums are never marked as paid, so the
+     *    time-weighted accumulators are not reset and the last premium payment timestamp does not advance,
+     *    leaving the same earned window to be paid again on every subsequent gain
+     * 3. FIXED_TERM entry: a genuine coverage loss that wipes over half the junior buffer leaves an
+     *    impermanent loss below the tolerance, so the market never enters the fixed-term protection window
+     * Expected behavior: the setter should bound the tolerance like every other economic parameter
+     */
+    function test_FINDING_30_HugeDustToleranceDisablesProtocolFeesAndFixedTermEntry() public {
+        // Flat 1000e18 / 200e18 market with the accrual and premium clocks initialized this block
+        _seedAndInitAccrual();
+        uint32 premiumClockBefore = accountant.getState().lastPremiumPaymentTimestamp;
+
+        // An absurd but non-overflowing JT dust tolerance: 1e45 dwarfs every NAV this market will ever hold
+        accountant.setJuniorTrancheDustTolerance(toNAVUnits(uint256(1e45)));
+        assertEq(toUint256(accountant.getState().effectiveNAVDustTolerance), 1e45, "effective dust is 0 + 1e45");
+
+        // Accrue a 1000s premium window at yield shares jt 0.1e18 / lt 0.05e18 (both below their caps 0.2e18 / 0.1e18)
+        jtYDM.setRates(0.1e18);
+        ltYDM.setRates(0.05e18);
+        vm.warp(block.timestamp + 1000);
+
+        // A genuine 100e18 senior gain: accrued windows twJT = 0.1e18 * 1000 = 100e18 and twLT = 0.05e18 * 1000 = 50e18
+        // pay jtRiskPremium = floor(100e18 * 100e18 / (1000 * 1e18)) = 10e18 and ltLiquidityPremium = 5e18,
+        // leaving the plain-senior residual 100e18 - 10e18 - 5e18 = 85e18
+        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(SEED_ST_RAW + 100e18), toNAVUnits(SEED_JT_RAW));
+        assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW + 10e18, "jt risk premium is still paid");
+        assertEq(toUint256(state.ltLiquidityPremium), 5e18, "lt liquidity premium is still paid");
+        assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW + 85e18 + 5e18, "st keeps the residual plus the lt premium leg");
+
+        // With zero dust this exact sync takes jt fee floor(10e18 * 0.1e18 / 1e18) = 1e18, lt fee
+        // floor(5e18 * 0.1e18 / 1e18) = 0.5e18, and st fee floor(85e18 * 0.1e18 / 1e18) = 8.5e18, all
+        // strictly positive, but the 100e18 gain reads as dust against 1e45 so every fee is skipped
+        assertEq(toUint256(state.jtProtocolFee), 0, "jt fee of 1e18 skipped because the gain reads as dust");
+        assertEq(toUint256(state.ltProtocolFee), 0, "lt fee of 0.5e18 skipped because the gain reads as dust");
+        assertEq(toUint256(state.stProtocolFee), 0, "st fee of 8.5e18 skipped because the gain reads as dust");
+
+        // The premiums were paid but never marked as paid: the earned window survives to be paid again
+        IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
+        assertEq(uint256(s.twJTYieldShareAccruedWAD), 100e18, "jt accumulator not reset by the paid premium");
+        assertEq(uint256(s.twLTYieldShareAccruedWAD), 50e18, "lt accumulator not reset by the paid premium");
+        assertEq(s.lastPremiumPaymentTimestamp, premiumClockBefore, "premium payment clock frozen");
+
+        // A genuine 10% senior raw loss (1100e18 -> 990e18) at checkpoint stEff 1090e18 / jtEff 210e18:
+        // JT's 10e18 premium claim on senior raw NAV takes floor(110e18 * 10e18 / 1100e18) = 1e18 of the drop
+        // directly, and the remaining 109e18 senior loss is fully covered by the junior buffer, so
+        // jtEffectiveNAV = 210e18 - 1e18 - 109e18 = 100e18 with a 109e18 coverage impermanent loss
+        state = kernel.doPreOp(toNAVUnits(uint256(990e18)), toNAVUnits(SEED_JT_RAW));
+        assertEq(toUint256(state.jtEffectiveNAV), 100e18, "junior buffer paid 109e18 of coverage plus its 1e18 direct loss");
+        assertEq(toUint256(state.jtCoverageImpermanentLoss), 109e18, "over half the junior buffer is owed back as il");
+
+        // With zero dust a 109e18 il enters FIXED_TERM to protect the junior tranche while senior repays it,
+        // but 109e18 <= 1e45 reads as dust so the market never leaves PERPETUAL despite the real loss
+        assertEq(uint8(accountant.getState().lastMarketState), uint8(MarketState.PERPETUAL), "fixed-term protection never engages");
     }
 
     /// setJuniorTrancheYDM rejects the current LT YDM
