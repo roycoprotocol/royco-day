@@ -209,7 +209,13 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     /// @inheritdoc IRoycoVaultTranche
     function convertToAssets(uint256 _shares) public view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
         // Get the post-sync tranche state: applying NAV reconciliation.
-        (, AssetClaims memory trancheClaims, uint256 trancheTotalShares) = IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
+        (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 trancheTotalShares) =
+            IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
+        if (TRANCHE_TYPE() == TrancheType.LIQUIDITY) {
+            // Re-base the LT claims to the BPT leg only
+            trancheClaims.stShares = 0;
+            trancheClaims.nav = state.ltRawNAV;
+        }
         return TrancheClaimsLogic._scaleAssetClaims(trancheClaims, _shares, trancheTotalShares);
     }
 
@@ -220,8 +226,11 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         if (TRANCHE_TYPE() == TrancheType.SENIOR) value = IRoycoDayKernel(KERNEL).stConvertTrancheUnitsToNAVUnits(_assets);
         else if (TRANCHE_TYPE() == TrancheType.JUNIOR) value = IRoycoDayKernel(KERNEL).jtConvertTrancheUnitsToNAVUnits(_assets);
         else value = IRoycoDayKernel(KERNEL).ltConvertTrancheUnitsToNAVUnits(_assets);
-        (, AssetClaims memory trancheClaims, uint256 trancheTotalShares) = IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
-        shares = ValuationLogic._convertToShares(value, trancheClaims.nav, trancheTotalShares, Math.Rounding.Floor);
+        (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 trancheTotalShares) =
+            IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
+        // The LT converts against the BPT-only raw NAV; ST/JT convert against their effective NAV claims
+        NAV_UNIT navBasis = TRANCHE_TYPE() == TrancheType.LIQUIDITY ? state.ltRawNAV : trancheClaims.nav;
+        shares = ValuationLogic._convertToShares(value, navBasis, trancheTotalShares, Math.Rounding.Floor);
     }
 
     /**

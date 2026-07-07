@@ -118,7 +118,7 @@ coverageUtilization = (stRaw_total + jtRaw * beta) * minCoverage / jtEffectiveNA
 liquidityUtilization = stEffectiveNAV * minLiquidity / ltRawNAV
 ```
 
-`ltRawNAV` is the BPT value from Balancer's E-CLP oracle, the actual pool depth that backs ST exits. It is the BPT only and excludes any idle, not-yet-deployed premium ST shares, which keeps the liquidity metric reading under-provisioned until real depth lands. The LT share's effective NAV (its deposit/redeem and oracle price) is `ltRawNAV` plus that claimable idle premium, so the two coincide only once all staged premium has deployed.
+`ltRawNAV` is the BPT value from Balancer's E-CLP oracle, the actual pool depth that backs ST exits. It is the BPT only and excludes any idle, not-yet-deployed premium ST shares, which keeps the liquidity metric reading under-provisioned until real depth lands. The LT share's effective NAV (its deposit/redeem and preview pricing) is `ltRawNAV` plus that claimable idle premium. The external `convertToShares`/`convertToAssets` exchange-rate surface — what integrators like a Pendle SY wrapper or a Morpho collateral oracle read — prices on `ltRawNAV` only: a staged premium deploys into BPT at a slippage haircut, so an idle-inclusive quoted price would dip at deploy, while the BPT-only price only rises as value lands in the pool. The two pricings coincide once all staged premium has deployed.
 
 Both inputs are manipulation-resistant: `stEffectiveNAV` is total senior NAV (swaps in the pool do not change it), and `ltRawNAV` is the Balancer oracle. There is no composition subtraction in the numerator.
 
@@ -203,6 +203,7 @@ The tranche dispatch handles `SENIOR`/`JUNIOR`/`LIQUIDITY` with a revert default
 - The premium mint is coverage-neutral: it adds no senior assets, only reassigns share ownership, so it does not move `coverageUtilization` or consume coverage capacity.
 - The reinvestment is bounded by a min-BPT-out and changes `ltRawNAV`, not the conservation identity.
 - The LT share's effective NAV is the BPT depth plus any idle, not-yet-deployed liquidity-premium ST shares (a claimable leg). `ltRawNAV` is the BPT only: staged premium is excluded so the liquidity metric reads under-provisioned and keeps the LDM paying. The staged premium is claimable on redemption (sent to the redeemer directly), not forfeited.
+- The LT's external `convertToShares`/`convertToAssets` exchange rate is BPT-only (`ltRawNAV`, no idle leg) so the integrator-quoted share price cannot dip when a staged premium deploys at a slippage haircut; deposit/redeem execution and every `preview*` stay idle-inclusive, and the two coincide exactly when nothing is staged.
 - `maxLiquidityPremiumWAD + maxRiskPremiumWAD <= WAD`.
 - LDM and YDM outputs depend only on the last committed checkpoint, so the waterfall stays pure.
 - Coverage math and the PERPETUAL/FIXED_TERM machine remain ST/JT only.
