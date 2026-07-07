@@ -89,6 +89,11 @@ abstract contract UpgradeBase is UpgradeConfig, AccessManagerConfigUtils, Create
         require(_ups.length > 0, UpgradeBase__NoUpgrades());
         require(_ups.length == _modules.length, UpgradeBase__LengthMismatch());
 
+        // TODO: these scheduled Safe transactions target the factory address as the access manager, which was correct
+        // when the factory was itself the AccessManager. The current design uses a standalone AccessManager and the
+        // factory is only managed by it, so these transactions would be sent to the wrong contract and the upgrade
+        // would neither schedule nor execute. This path is not exercised today: no market is deployed and the upgrade
+        // config list is empty. Re-point it at the standalone AccessManager before running the upgrade scripts.
         address factory = getFactory(_chainId);
         // Derive per-market sync kernels: for each upgrade, if it is the first one encountered for
         // its market in this chain's batch, capture the kernel address to be synced first. Sync

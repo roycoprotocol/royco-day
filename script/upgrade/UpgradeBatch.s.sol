@@ -5,14 +5,13 @@ import { TrancheType } from "../../src/libraries/Types.sol";
 
 import { UpgradeBase } from "./base/UpgradeBase.sol";
 import { UpgradeAccountantModule } from "./modules/UpgradeAccountantModule.sol";
-import { UpgradeFactoryModule } from "./modules/UpgradeFactoryModule.sol";
 import { UpgradeModuleBase } from "./modules/UpgradeModuleBase.sol";
 import { UpgradeTrancheModule } from "./modules/UpgradeTrancheModule.sol";
 
 /**
  * @title UpgradeBatch
  * @notice Single orchestrator that drives a heterogeneous list of UUPS upgrades — any mix of
- *         tranches, kernels, accountants, factory — and emits one `schedule.json` + one
+ *         tranches, kernels, accountants — and emits one `schedule.json` + one
  *         `execute.json` + one `cancel.json` per chain.
  *
  * @dev Workflow:
@@ -29,7 +28,7 @@ import { UpgradeTrancheModule } from "./modules/UpgradeTrancheModule.sol";
  *
  *      Each `UpgradeConfig` entry carries:
  *        - `chainId`     — which chain
- *        - `kind`        — which contract type (TRANCHE, KERNEL, ACCOUNTANT, FACTORY)
+ *        - `kind`        — which contract type (TRANCHE, KERNEL, ACCOUNTANT)
  *        - `saltVersion` — version suffix folded into the CREATE2 salt (e.g. "V3"); bump per upgrade
  *        - `payload`     — ABI-encoded module-specific data (see each module's natspec)
  */
@@ -42,8 +41,7 @@ contract UpgradeBatch is UpgradeBase {
     ///      `KERNEL_*` value when introducing a new kernel module.
     enum UpgradeKind {
         TRANCHE,
-        ACCOUNTANT,
-        FACTORY
+        ACCOUNTANT
     }
 
     struct UpgradeConfigEntry {
@@ -62,7 +60,6 @@ contract UpgradeBatch is UpgradeBase {
     // Modules — one instance per kind.
     UpgradeTrancheModule internal _trancheModule;
     UpgradeAccountantModule internal _accountantModule;
-    UpgradeFactoryModule internal _factoryModule;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // ERRORS
@@ -78,12 +75,10 @@ contract UpgradeBatch is UpgradeBase {
     constructor() {
         _trancheModule = new UpgradeTrancheModule();
         _accountantModule = new UpgradeAccountantModule();
-        _factoryModule = new UpgradeFactoryModule();
         // Modules must persist across `vm.createSelectFork` calls in `run()` — their bytecode is
         // deployed at setup time (before any fork is selected).
         vm.makePersistent(address(_trancheModule));
         vm.makePersistent(address(_accountantModule));
-        vm.makePersistent(address(_factoryModule));
         _initializeConfigs();
     }
 
@@ -133,12 +128,6 @@ contract UpgradeBatch is UpgradeBase {
         _configs.push(UpgradeConfigEntry({ chainId: chainId, kind: UpgradeKind.ACCOUNTANT, saltVersion: saltVersion, payload: abi.encode(marketName) }));
     }
 
-    /// @dev Push a factory upgrade for the chain. Factory is a per-chain singleton, so one entry
-    ///      per chain — placed after all market entries so it lands last in the Safe batch.
-    function _pushFactoryUpgrade(uint256 chainId, string memory saltVersion) internal {
-        _configs.push(UpgradeConfigEntry({ chainId: chainId, kind: UpgradeKind.FACTORY, saltVersion: saltVersion, payload: "" }));
-    }
-
     // ═══════════════════════════════════════════════════════════════════════════
     // ENTRY POINT
     // ═══════════════════════════════════════════════════════════════════════════
@@ -183,7 +172,6 @@ contract UpgradeBatch is UpgradeBase {
     function _moduleFor(UpgradeKind kind) internal view returns (UpgradeModuleBase) {
         if (kind == UpgradeKind.TRANCHE) return _trancheModule;
         if (kind == UpgradeKind.ACCOUNTANT) return _accountantModule;
-        if (kind == UpgradeKind.FACTORY) return _factoryModule;
         revert UpgradeBatch__ModuleNotImplemented(kind);
     }
 

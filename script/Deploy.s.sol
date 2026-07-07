@@ -15,6 +15,7 @@ import {
     ADMIN_ORACLE_QUOTER_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
+    ADMIN_REINVESTMENT_ROLE,
     ADMIN_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
@@ -59,6 +60,7 @@ import {
 } from "../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
 import { BalancerV3_LT_BPTOracle_Quoter } from "../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 import { RoycoDayBalancerV3Hooks } from "../src/kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3Hooks.sol";
+import { LONG_DELAY_SECONDS, MAX_FIXED_TERM_SECONDS, SHORT_DELAY_SECONDS } from "../src/libraries/Constants.sol";
 import { toNAVUnits } from "../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoLiquidityTranche } from "../src/tranches/RoycoLiquidityTranche.sol";
@@ -180,6 +182,20 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         uint32 executionDelay;
     }
 
+    /// @dev The three delay constants are set explicitly; this asserts the relationships they must keep.
+    constructor() {
+        // A user must always be able to exit before a change takes effect
+        // NOTE: the deploy asserts the long delay is at least this cap, and the accountant rejects any fixed term above
+        // it, so at deploy a committed user can always exit before a governance change takes effect. The reverse is not
+        // checked anywhere: the long delay lives in the AccessManager, and nothing rejects a later reduction of it
+        // below this cap. If the long delay is ever lowered below the maximum fixed term, a user committed for the full
+        // term could be locked in past the point a change takes effect. Keep the long delay at least this cap; if the
+        // delay ever becomes adjustable from a Day contract, enforce this there.
+
+        require(LONG_DELAY_SECONDS >= MAX_FIXED_TERM_SECONDS, "long delay must cover the maximum fixed term");
+        require(LONG_DELAY_SECONDS >= SHORT_DELAY_SECONDS, "long delay must cover the short delay");
+    }
+
     /// @notice Entry point for `forge script`. Reads DEPLOYER_PRIVATE_KEY and MARKET_NAME from env.
     function run() external virtual {
         ENABLE_LOGGING = true;
@@ -236,6 +252,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         public
         returns (DeploymentResult memory)
     {
+        // Per-market configuration check: no market may commit users for longer than the cap the long delay covers.
+        require(_config.fixedTermDurationSeconds <= MAX_FIXED_TERM_SECONDS, "market fixed term exceeds MAX_FIXED_TERM_SECONDS");
         _scheduledOperationsExpirySeconds; // silence unused (template factory has no scheduled-ops expiry)
         vm.startBroadcast(_deployerPrivateKey);
         address deployer = vm.addr(_deployerPrivateKey);
@@ -253,6 +271,23 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         bytes32 marketId = keccak256(abi.encodePacked(_config.seniorTrancheName, _config.juniorTrancheName, block.timestamp, block.chainid));
         BalancerV3DeploymentTemplate.DayParams memory params = _buildDayParams(_config, marketId, _protocolFeeRecipient, roycoBlacklist);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(template, abi.encode(params));
+
+        // 5. Target admin delay on every proxy this deployment created (the factory proxy gets its delay when the
+        //    AccessManager is deployed). With the delay set, the admin calls that reassign which role may call a
+        //    proxy (setTargetFunctionRole), block all calls to it (setTargetClosed), or point it at a different
+        //    authority (updateAuthority) must be scheduled and wait LONG_DELAY_SECONDS. Skipped when the deployer
+        //    no longer holds ADMIN_ROLE (a rerun against an existing AccessManager, which also skips
+        //    _applyRoleGraph); the root must then schedule setTargetAdminDelay itself for the new market's proxies.
+        (bool deployerIsAdmin,) = accessManager.hasRole(ADMIN_ROLE, deployer);
+        if (deployerIsAdmin) {
+            BalancerV3DeploymentTemplate.ExtraContractsDeployedResult memory extraContracts =
+                abi.decode(r.extras, (BalancerV3DeploymentTemplate.ExtraContractsDeployedResult));
+            address[7] memory marketProxies =
+                [roycoBlacklist, r.seniorTranche, r.juniorTranche, r.liquidityTranche, r.kernel, r.accountant, extraContracts.balancerHook];
+            for (uint256 i; i < marketProxies.length; ++i) {
+                accessManager.setTargetAdminDelay(marketProxies[i], LONG_DELAY_SECONDS);
+            }
+        }
 
         // Renounce the deployer's roles after deployment is complete.
         accessManager.renounceRole(ADMIN_FACTORY_ROLE, deployer);
@@ -274,7 +309,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
     /// @notice Builds the role assignments applied to the AccessManager (surface-compatible with the legacy helper).
     function generateRolesAssignments(RoleAssignmentAddresses memory _addresses) public pure returns (RoleAssignment[] memory roleAssignments) {
-        roleAssignments = new RoleAssignment[](17);
+        roleAssignments = new RoleAssignment[](18);
         roleAssignments[0] = _assignment(ADMIN_PAUSER_ROLE, _addresses.pauserAddress);
         roleAssignments[1] = _assignment(ADMIN_UPGRADER_ROLE, _addresses.upgraderAddress);
         roleAssignments[2] = _assignment(SYNC_ROLE, _addresses.syncRoleAddress);
@@ -292,6 +327,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         roleAssignments[14] = _assignment(LT_LP_ROLE, _addresses.protocolFeeRecipientAddress);
         roleAssignments[15] = _assignment(ADMIN_BALANCER_POOL_MANAGER_ROLE, _addresses.balancerPoolManagerAddress);
         roleAssignments[16] = _assignment(ADMIN_MARKET_OPS_ROLE, _addresses.marketOpsAddress);
+        roleAssignments[17] = _assignment(ADMIN_REINVESTMENT_ROLE, _addresses.marketOpsAddress);
     }
 
     function _assignment(uint64 _role, address _assignee) private pure returns (RoleAssignment memory) {
@@ -302,22 +338,31 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     /// @notice Returns the admin/guardian/delay configuration for a role (ported from legacy RolesConfiguration).
     function getRoleConfig(uint64 role) public pure returns (RoleConfig memory) {
         if (role == ADMIN_PAUSER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == ADMIN_UPGRADER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
+        // The upgrader replaces implementations and can therefore change anything in the system, so it carries the
+        // long delay; revert this one line to SHORT_DELAY_SECONDS to keep upgrades on the short delay instead.
+        if (role == ADMIN_UPGRADER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: LONG_DELAY_SECONDS });
         if (role == ST_LP_ROLE || role == JT_LP_ROLE) return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == LP_ROLE_ADMIN_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == SYNC_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == ADMIN_KERNEL_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
-        if (role == ADMIN_ACCOUNTANT_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
-        if (role == ADMIN_PROTOCOL_FEE_SETTER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
-        if (role == ADMIN_ORACLE_QUOTER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == ADMIN_KERNEL_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: SHORT_DELAY_SECONDS });
+        if (role == ADMIN_ACCOUNTANT_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: SHORT_DELAY_SECONDS });
+        if (role == ADMIN_PROTOCOL_FEE_SETTER_ROLE) {
+            return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: SHORT_DELAY_SECONDS });
+        }
+        if (role == ADMIN_ORACLE_QUOTER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: SHORT_DELAY_SECONDS });
         if (role == GUARDIAN_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: ADMIN_ROLE, executionDelay: 0 });
         if (role == DEPLOYER_ROLE) return RoleConfig({ adminRole: DEPLOYER_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == DEPLOYER_ROLE_ADMIN_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_FACTORY_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == ADMIN_UNPAUSER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == ADMIN_UNPAUSER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: SHORT_DELAY_SECONDS });
         if (role == LT_LP_ROLE) return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == ADMIN_BALANCER_POOL_MANAGER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == ADMIN_MARKET_OPS_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == ADMIN_BALANCER_POOL_MANAGER_ROLE) {
+            return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: SHORT_DELAY_SECONDS });
+        }
+        if (role == ADMIN_MARKET_OPS_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: SHORT_DELAY_SECONDS });
+        // The reinvestment role only deploys already-accrued liquidity premium, a routine keeper action that a
+        // per-call wait would defeat, so it carries no delay.
+        if (role == ADMIN_REINVESTMENT_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         revert UNKNOWN_ROLE(role);
     }
 
@@ -349,13 +394,24 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         (address factoryProxy,) = deployWithSanityChecks(FACTORY_PROXY_SALT, factoryProxyCreationCode, false);
         require(factoryProxy == predictedFactory, "factory address mismatch");
         factory = RoycoFactory(factoryProxy);
-        if (!amExisted) _applyRoleGraph(accessManager, _factoryAdmin, _deployer, _roleAssignments);
+        if (!amExisted) {
+            _applyRoleGraph(accessManager, _factoryAdmin, _deployer, _roleAssignments);
+            // The admin calls that reassign which role may call the factory (setTargetFunctionRole), block all
+            // calls to it (setTargetClosed), or point it at a different authority (updateAuthority) must be
+            // scheduled and wait LONG_DELAY_SECONDS, so nobody can reassign the factory's upgrade, template
+            // registration, or deployment permissions faster than the delays those permissions carry. A new
+            // target admin delay takes effect `minSetback()` seconds after this transaction.
+            accessManager.setTargetAdminDelay(address(factory), LONG_DELAY_SECONDS);
+        }
     }
 
     /// @notice Applies role admins/guardians/grants on the AccessManager (mirrors the legacy factory.initialize role setup).
     function _applyRoleGraph(AccessManager _am, address _factoryAdmin, address _deployer, RoleAssignment[] memory _roleAssignments) internal {
-        // Ensure the factory admin holds ADMIN_ROLE (role 0).
-        if (_factoryAdmin != _deployer) _am.grantRole(ADMIN_ROLE, _factoryAdmin, 0);
+        // Ensure the factory admin holds ADMIN_ROLE (role 0). Because the grant carries an execution delay, every
+        // admin operation the root performs (granting or revoking a role, changing a delay, reassigning which role
+        // may call a contract) must be scheduled and then wait LONG_DELAY_SECONDS before it can execute, so the
+        // root cannot act at once to work around the delays configured below.
+        if (_factoryAdmin != _deployer) _am.grantRole(ADMIN_ROLE, _factoryAdmin, LONG_DELAY_SECONDS);
 
         // The deployer needs DEPLOYER_ROLE (executeMarketDeployment) + ADMIN_FACTORY_ROLE (registerTemplate).
         _am.grantRole(DEPLOYER_ROLE, _deployer, 0);
@@ -375,6 +431,19 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             RoleConfig memory cfg = getRoleConfig(ra.role);
             if (cfg.adminRole != ADMIN_ROLE) _am.setRoleAdmin(ra.role, cfg.adminRole);
             _am.setRoleGuardian(ra.role, cfg.guardianRole);
+        }
+
+        // Pass 3: grant delays on the roles that control upgrades, accounting, and the market's price sources
+        // (each already carrying an execution delay), so an account granted one of these roles cannot use it the
+        // moment the delayed grant executes. All of them use the shared long delay; to give a role its own value,
+        // take it out of the list and call setGrantDelay for it directly. The other roles (pauser, unpauser, sync,
+        // LP, deployer, market ops, Balancer pool manager) keep a zero grant delay so a replacement holder can be
+        // added without a second wait; the pauser in particular must stay usable at once. A new grant delay takes
+        // effect `minSetback()` seconds after this transaction.
+        uint64[5] memory grantDelayedRoles =
+            [ADMIN_UPGRADER_ROLE, ADMIN_KERNEL_ROLE, ADMIN_ACCOUNTANT_ROLE, ADMIN_PROTOCOL_FEE_SETTER_ROLE, ADMIN_ORACLE_QUOTER_ROLE];
+        for (uint256 i; i < grantDelayedRoles.length; ++i) {
+            _am.setGrantDelay(grantDelayedRoles[i], LONG_DELAY_SECONDS);
         }
     }
 

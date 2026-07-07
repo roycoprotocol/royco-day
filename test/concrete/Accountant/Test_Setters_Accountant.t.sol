@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
-import { MAX_PROTOCOL_FEE_WAD, WAD, ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
+import { MAX_FIXED_TERM_SECONDS, MAX_PROTOCOL_FEE_WAD, WAD, ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
 import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { MockAccountantKernel } from "../../mocks/MockAccountantKernel.sol";
@@ -109,10 +109,10 @@ contract Test_Setters_Accountant is AccountantTestBase {
         _seedState(900e18, 300e18, 1000e18, 200e18, 100e18, SEED_LT_RAW, MarketState.FIXED_TERM);
         uint32 endBefore = accountant.getState().fixedTermEndTimestamp;
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.FixedTermDurationUpdated(uint24(1_209_600));
-        accountant.setFixedTermDuration(uint24(1_209_600));
+        emit IRoycoDayAccountant.FixedTermDurationUpdated(uint24(MAX_FIXED_TERM_SECONDS));
+        accountant.setFixedTermDuration(uint24(MAX_FIXED_TERM_SECONDS));
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
-        assertEq(s.fixedTermDurationSeconds, 1_209_600, "duration written");
+        assertEq(s.fixedTermDurationSeconds, uint24(MAX_FIXED_TERM_SECONDS), "duration written");
         assertEq(uint8(s.lastMarketState), uint8(MarketState.FIXED_TERM), "market state untouched");
         assertEq(toUint256(s.lastJTCoverageImpermanentLoss), 100e18, "il untouched");
         assertEq(s.fixedTermEndTimestamp, endBefore, "end timestamp untouched");
@@ -151,6 +151,20 @@ contract Test_Setters_Accountant is AccountantTestBase {
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayAccountant.FixedTermDurationUpdated(0);
         accountant.setFixedTermDuration(0);
+    }
+
+    /// a duration above the protocol-wide cap reverts, so no market can commit users past the maximum fixed term
+    function test_SetFixedTermDuration_revertsAboveMax() public {
+        vm.expectRevert(IRoycoDayAccountant.FIXED_TERM_DURATION_EXCEEDS_MAX.selector);
+        accountant.setFixedTermDuration(uint24(MAX_FIXED_TERM_SECONDS + 1));
+    }
+
+    /// durations at and below the protocol-wide cap are accepted and written
+    function test_SetFixedTermDuration_succeedsAtAndBelowMax() public {
+        accountant.setFixedTermDuration(uint24(MAX_FIXED_TERM_SECONDS));
+        assertEq(accountant.getState().fixedTermDurationSeconds, uint24(MAX_FIXED_TERM_SECONDS), "duration at the cap written");
+        accountant.setFixedTermDuration(uint24(MAX_FIXED_TERM_SECONDS - 1));
+        assertEq(accountant.getState().fixedTermDurationSeconds, uint24(MAX_FIXED_TERM_SECONDS - 1), "duration below the cap written");
     }
 
     /// each dust setter writes its tolerance, emits, and recomputes the cached effective sum
