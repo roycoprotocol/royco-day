@@ -12,7 +12,7 @@ Each market tracks and reconciles two types of NAVs (Net Asset Value) per tranch
 
 **Effective NAV**: The NAV after applying coverage obligations and yield share (risk and liquidity premiums). The effective NAV determines the actual redemption value for tranche LPs. The liquidity tranche has no separate effective NAV: its redemption value is its raw NAV plus any idle liquidity-premium senior shares not yet reinvested.
 
-### Coverage Utilization
+### Minimum Coverage Requirement
 
 Each market enforces a minimum coverage requirement, ensuring that senior capital always retains guaranteed downside protection. Coverage utilization measures how much of the junior buffer is currently "used" by senior exposure:
 
@@ -32,9 +32,9 @@ Markets target a slight excess of junior capital above the minimum coverage requ
 
 Each market also defines a **liquidation coverage utilization**, validated to be strictly greater than 100% so the market is only considered unhealthy once the minimum coverage requirement is violated. When coverage utilization exceeds this threshold, the market is deemed unhealthy and ST redeemers receive a senior tranche self-liquidation bonus funded by JT effective NAV, incentivizing seniors to exit to restore the market into a healthy state. A threshold of 150% means the market enters liquidation when JT's remaining buffer can only cover two-thirds of the required coverage relative to senior exposure.
 
-### Liquidity and Liquidity Utilization
+### Minimum Liquidity Requirement
 
-Beyond guaranteeing minimum coverage for senior shares, Day guarantees a minimum secondary liquidity for them. The liquidity tranche (LT) holds market-making capital, a position in an AMM or market-making venue pairing the senior tranche share against a quote stablecoin, so senior holders always have a venue to exit into. Liquidity utilization measures the senior liquidity demand against the depth the LT provides:
+Beyond guaranteeing minimum coverage for senior shares, Day guarantees a minimum amount of secondary liquidity for them as well. The liquidity tranche (LT) holds market-making capital, a position in an AMM or another market-making venue pairing the senior tranche share against a quote stablecoin, so senior holders always have a venue to exit into. Liquidity utilization measures the senior liquidity demand against the depth the LT provides:
 
 ```
                         ST_EFFECTIVE_NAV × MIN_LIQUIDITY
