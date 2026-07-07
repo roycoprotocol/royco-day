@@ -10,13 +10,11 @@ import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 /**
  * @title Test_SameBlockPremiumConservation
  * @notice Concrete pin for the same-block (elapsed == 0) instantaneous-premium branch
- *         (RoycoDayAccountant.sol:600-622), which every waterfall SYMBOLIC proof statically excludes
- *         (vm.assume(lastPay < SYNC_TIMESTAMP)). Two premium-paying syncs in the same block drive that branch;
+ *         (RoycoDayAccountant.sol:600-622). Two premium-paying syncs in the same block drive that branch;
  *         this asserts two-term NAV conservation holds on it, both on the returned state and the committed
  *         checkpoint.
  * @dev Conservation is itself a `require` inside the sync (RoycoDayAccountant.sol:654 / :287), so a same-block
- *      sync that returns at all already proves conservation held — this makes that proof loud and explicit, and
- *      complements AccountantSyncLemmasSymbolic's same-block no-revert / premium<=gain lemma.
+ *      sync that returns at all already proves conservation held — this makes that proof loud and explicit.
  */
 contract Test_SameBlockPremiumConservation is DayMarketTestBase {
     uint256 internal constant ST_SEED_WHOLE = 100;

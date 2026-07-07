@@ -24,9 +24,7 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          # Pinned to stable 1.7.1. The symbolic suite (test/symbolic/, forge test --symbolic)
-          # needs a nightly with the SMT engine and is run locally, not in CI (see below), so CI
-          # stays on a stable release.
+          # Pinned to stable 1.7.1.
           version: "1.7.1"
 
       - name: Show Forge version
@@ -53,10 +51,6 @@ jobs:
         # requires editing this step — just pass its secret in `env` below. If any required RPC
         # secret is unset we skip test/fork/** so the rest of the tests still run; once the
         # secrets are added the fork tests run automatically.
-        #
-        # test/symbolic/** is always excluded here: those check_*/prove_* specs are proven with
-        # `forge test --symbolic` (an SMT engine only in the nightly) and are run locally, not in
-        # CI. They still compile in the build step above; they are just not executed as tests here.
         run: |
           required=$(grep -rhoE '\b[A-Z][A-Z0-9_]*_RPC_URL\b' test/fork | sort -u)
           missing=""
@@ -65,9 +59,9 @@ jobs:
           done
           if [ -n "$missing" ]; then
             echo "Missing fork RPC secrets:$missing — skipping fork suites (test/fork/**)"
-            forge test -vvv --no-match-path '{test/fork/**,test/symbolic/**}'
+            forge test -vvv --no-match-path 'test/fork/**'
           else
-            forge test -vvv --no-match-path 'test/symbolic/**'
+            forge test -vvv
           fi
         id: test
         env:

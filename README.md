@@ -1,6 +1,6 @@
 # Royco Day [![CI](https://github.com/roycoprotocol/royco-day/actions/workflows/CI.yml/badge.svg)](https://github.com/roycoprotocol/royco-day/actions/workflows/CI.yml)
 
-Day enables structured risk tranching for any yield source by splitting it into distinct risk and return profiles across three tranches: a junior, a senior, and a liquidity tranche. The junior tranche serves as first-loss capital in exchange for a risk premium paid by the senior tranche. The liquidity tranche is market-making capital that provides secondary liquidity for senior shares in exchange for a liquidity premium paid by the senior tranche. It holds covered senior capital, so it ranks pari passu with the senior tranche on risk, forgoing liquidity for extra yield.
+Royco Day transforms the risk and liquidity profile of any yield source by splitting it into three distinct tranches: a senior, junior, and liquidity tranche. The senior tranche is protected from incurring losses up to a guaranteed threshold in addition to having a guaranteed amount of secondary liquidity. The junior tranche serves as first-loss capital in exchange for a risk premium paid by the senior tranche. The liquidity tranche is market-making capital that provides secondary liquidity for senior shares in exchange for a liquidity premium paid by the senior tranche. It holds covered senior capital, so it ranks pari passu with the senior tranche on risk, forgoing liquidity for extra yield.
 
 ## Core Concepts
 
@@ -127,9 +127,6 @@ When losses occur, they are handled differently based on which tranche experienc
 
 **JT Coverage IL Reset**: The JT coverage impermanent loss is reset (JT forfeits its claim) when the market is forced back to PERPETUAL. This happens when the fixed-term duration elapses, on a liquidation breach, or on an uncollateralized market (no junior NAV remaining against a non-zero senior NAV).
 
-## Supported Yield Sources
-
-Royco Day enables risk and liquidity transformation for any priceable asset.
 
 ## Extended Capabilities
 

@@ -14,9 +14,9 @@ import {
 
 /**
  * @title UnitsExposer
- * @notice Thin external exposer over the typed unit math in Units.sol so a symbolic test can observe reverts
- *         through try/catch and drive every production code path (the wrap/unwrap round trip, the signed wrap
- *         and int256 conversions, the NAV delta, saturating subtraction, minimum, all seven mulDiv overloads,
+ * @notice Thin external exposer over the typed unit math in Units.sol so a test can observe reverts through
+ *         try/catch and drive every production code path (the wrap/unwrap round trip, the signed wrap and
+ *         int256 conversions, the NAV delta, saturating subtraction, minimum, all seven mulDiv overloads,
  *         and the checked arithmetic operators bound to the two unit types)
  * @dev Every function is external and pure so the caller can wrap it in try/catch to characterize its revert
  *      surface. The operator bindings (+, -, /) are exercised through the globally bound free functions, so a
@@ -75,8 +75,7 @@ contract UnitsExposer {
     //////////////////////////////////////////////////////////////////////*/
 
     /// @dev The rounding is a literal at every call site below, not a passed parameter, so the compiler folds
-    ///      the `unsignedRoundsUp` branch away. For Floor this drops the extra `mulmod` term entirely, leaving
-    ///      the plain 256-by-256 quotient the symbolic engine can discharge (matching the proven scale path)
+    ///      the `unsignedRoundsUp` branch away and each exposer exercises exactly one production rounding path
 
     /// @notice Rounded-down `(a*b)/c` with a, b, c all NAV-denominated
     function mulDivNavNavNavFloor(uint256 _a, uint256 _b, uint256 _c) external pure returns (uint256) {

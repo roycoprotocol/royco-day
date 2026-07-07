@@ -6,13 +6,10 @@ import { UnitsExposer } from "../../mocks/UnitsExposer.sol";
 
 /**
  * @title TestFuzz_UnitsMath
- * @notice Fuzz owners for the typed unit-math primitives whose symbolic twins the SMT engine cannot
- *         currently certify: the minimum and the saturating subtraction (OpenZeppelin's branchless
- *         conditional multiply trips the engine's arithmetic heuristic into an unreplayable witness),
+ * @notice Fuzz owners for the typed unit-math primitives: the minimum, the saturating subtraction,
  *         and the three mulDiv properties (the floor anchor, the ceil anchor, and the seven-overload
- *         parity sweep, whose 512-bit mulmod prelude exceeds the solver timeout at every domain).
- *         Every expected form here is derived from first principles on the raw operands, never by
- *         re-running the production helper or OpenZeppelin's mulDiv as its own expectation
+ *         parity sweep). Every expected form here is derived from first principles on the raw operands,
+ *         never by re-running the production helper or OpenZeppelin's mulDiv as its own expectation
  * @dev The two mulDiv anchors and the parity sweep run on the 1e30 NAV-wei operand domain (one trillion
  *      whole 18-decimal tokens, beyond any underwritable market), where every product caps near 1e60,
  *      far below 2^256, so the spec-side checked multiplies are exact. The min and saturating-sub twins

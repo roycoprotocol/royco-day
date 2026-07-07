@@ -131,9 +131,9 @@ Additional ideas adopted from the report (`dawn-test-suite-audit.md`), restated 
 12. **Whitelist-deny + precedence matrix** (report A9: the deny path had zero tests). `ACCOUNT_NOT_WHITELISTED_TRANCHE_LP` (`RoycoDayKernel.sol:550`) deny path, whitelist-allow path, and blacklist-beats-whitelist precedence — folded into I20.
 13. **Pause-interaction matrix** (report A15, sharpened by code here): pause is not just per-entry-point — all 11 accountant setters are `withSyncedAccounting` (`RoycoDayAccountant.sol:844-947`), whose modifier calls the kernel's `whenNotPaused` sync, so **every parameter setter reverts while the kernel is paused** (only the YDM swap setters survive, via tolerated raw call `:822,836`). Pinned as behavior + flagged as Appendix B.8.
 14. **Multi-asset atomicity via revert injection** (report §6.2-I6): inject a failure into each leg of `ltDepositMultiAsset`/`ltRedeemMultiAsset` (venue min-out breach, venue revert, post-op gate) and assert full pre-state snapshot equality — no partial senior mint, no partial idle-pile debit. Now invariant **I22**.
-15. **Mutation before/after metric** (report §5.6): record the mutation score once golden vectors exist (post-Phase B) and again after Phase F; the delta is the quantitative evidence the suite improved. Added to §4.6.
+15. **Mutation before/after metric** (report §5.6): record the mutation score once golden vectors exist (post-Phase B) and again after Phase F; the delta is the quantitative evidence the suite improved. Added to §4.5.
 16. **Assertion-strength distribution as a CI artifact** (report §2′): the grep-derived macro distribution (`assertEq` vs `assertGt` vs `approxEq`) is published per PR so sign-only drift is visible before review. Added to §5.
-17. **`[rpc_endpoints]` in `foundry.toml`** so fork suites fail loudly when RPC env is missing rather than silently skipping (report §3.8). Added to §4.7.
+17. **`[rpc_endpoints]` in `foundry.toml`** so fork suites fail loudly when RPC env is missing rather than silently skipping (report §3.8). Added to §4.6.
 
 Explicitly not adopted: preview-vs-actual as the *only* pricing check (circular; both sides call the same code — preview-parity is one invariant, I11, and independent derivation is mandatory); the report's Python `--ffi` differential oracle (superseded by `RoycoTestMath` in-language plus the simulator trajectories, §4.4 — same exact-integer goal, no FFI dependency); its N-term conservation and vectorized-YDM generalizations (Day resolved these differently: conservation stays two-term with the premium inside `stEff`, and the YDM stays scalar-per-instance with two instances); its D5/D6/D8 exotic-decimals cells (>18-dp, 78-dp) — Day's quoter family scales through ERC4626 rates into WAD NAV and no >18-dp underlying is targeted; excluded with this justification rather than tested.
 
@@ -163,7 +163,6 @@ test/
 │   ├── DayMarketInvariants.t.sol
 │   └── modes/                      # handler weight profiles (calm / stressed / liquidation)
 ├── differential/               # vs RoycoTestMath replay + simulator trajectories
-├── symbolic/                   # Halmos specs (excluded from forge CI profile)
 ├── fork/                       # real tokens + real Balancer, pinned blocks
 └── scaffold/                   # this pass's exemplars; deleted once Phase A lands
 ```
@@ -210,7 +209,7 @@ Sampling policy: cells A–D run in every CI pass across unit+fuzz+invariant (fi
 | `MockBalancerVault` + `MockVenue` | Balancer V3 vault/pool for non-fork layers | settable BPT supply, proportional-remove composition, add-liquidity BPT-out (to drive the slippage gate both ways), UNBALANCED-add fee haircut bps |
 | `MockYDM` | both YDM slots | settable constant/scripted yield share; REVERT mode (sync-bricking YDM, exercises `setJuniorTrancheYDM` recovery path `RoycoDayAccountant.sol:816-827`) |
 
-Real YDMs are also tested directly (unit/fuzz/symbolic); `MockYDM` exists so accountant tests pin premium shares to chosen constants instead of curve outputs.
+Real YDMs are also tested directly (unit/fuzz); `MockYDM` exists so accountant tests pin premium shares to chosen constants instead of curve outputs.
 
 Mock discipline (both adopted from report anti-patterns §3(b)/(c)): **(i)** `vm.mockCall` is banned on any quoting/oracle/venue path — behavior changes go through the mock's setters so the production math between mock and assertion actually executes; **(ii)** `MockAggregatorV3` never auto-refreshes `updatedAt` — yield simulation and freshness are independent knobs, so warping time genuinely crosses the staleness gate (the legacy suite's freshness-restamping mocks made `STALE_PRICE` unreachable end-to-end).
 
@@ -224,18 +223,18 @@ Core functions: `attribute(delta, claim, lastRaw)`, `waterfall(WaterfallIn) → 
 
 ## 3. Invariant catalog
 
-Notation: `stR,jtR,ltR` raw NAVs; `stE,jtE` effective; `IL` = jtCoverageImpermanentLoss; `covU,liqU` utilizations; `S_x` share supply of tranche x; `idle` = `$.ltOwnedSeniorTrancheShares`; `Δop` = change across one operation. Layer key: **H** = stateful invariant handler, **F** = fuzz property, **S** = symbolic, **U** = unit/golden.
+Notation: `stR,jtR,ltR` raw NAVs; `stE,jtE` effective; `IL` = jtCoverageImpermanentLoss; `covU,liqU` utilizations; `S_x` share supply of tranche x; `idle` = `$.ltOwnedSeniorTrancheShares`; `Δop` = change across one operation. Layer key: **H** = stateful invariant handler, **F** = fuzz property, **U** = unit/golden.
 
 | ID | Formal statement | Layer | Notes |
 |---|---|---|---|
-| I1 | After every committed sync/op: `stR + jtR == stE + jtE` (0 dust — enforced at `RoycoDayAccountant.sol:286,651`) | H,F,S | Handler asserts on `getState()`, not by trusting the require: catches paths that skip commits |
+| I1 | After every committed sync/op: `stR + jtR == stE + jtE` (0 dust — enforced at `RoycoDayAccountant.sol:286,651`) | H,F | Handler asserts on `getState()`, not by trusting the require: catches paths that skip commits |
 | I2 | Solvency: `token.balanceOf(kernel) ≥ Σ owned` per asset: `stOwned+jtOwned` (same asset ⇒ summed), `ltOwned` BPT, `idle` ST shares. Strict equality in mock cells (no donations); `≥` in fork | H | ghost-tracked transfers in/out |
 | I3 | Loss priority: within one sync, `stE_after < stE_before ⟹ jtE_after == 0 ∨ ΔstE_uncovered == stLoss − coverageApplied` where `coverageApplied = min(stLoss, jtE_pre)`; equivalently uncovered senior loss > 0 ⟹ JT buffer exhausted at application time | H,U | exact recomputation via RoycoTestMath, not sign checks |
 | I4 | LT isolation: `stE + jtE` after a sync is independent of `ltR` (re-run waterfall with perturbed `ltR` in preview: identical `stE,jtE`) | F | proves two-lane priority of §1.5 |
 | I5 | IL ledger: `IL` changes only by: `+coverageApplied` (F2), `−min(stGain,IL)` (F3), `×⌊jtE'/jtE⌋` on JT redeem (F18), `→0` on the four erasure conditions (§1.4). Ghost var replays exact sequence | H | |
 | I6 | Premium bound: per sync, `jtPrem + ltPrem ≤ stGain_afterILRecovery` (require `:624` must **never** be the thing that saves us: handler asserts `twJT ≤ maxJT·Δt ∧ twLT ≤ maxLT·Δt` so the require is provably dead) | H,F | doubles as sync-liveness (I14) evidence |
 | I7 | Coverage-neutral mint: across `_processFeesAndLiquidityPremium`: `ΔstR == 0 ∧ ΔcovU == 0 ∧ ΔS_st == premiumShares + feeShares ∧ Δidle == premiumShares − reinvested` | U,F | |
-| I8 | Mint value bound (two-sided): `|valueFor(premiumShares, S_post, stE) − ltPrem| ≤ ε`, `ε = 2·⌈stE/S_post⌉ + 2` wei. Downward slack: premium-share floor (F9); upward slack: the *fee* carve-out's floor dust stays in the pot and accrues pro-rata to all post-mint shares incl. the premium shares; final valuation floor (F10) adds < 1. The one-sided `value ≤ prem` version was refuted by the fuzz exemplar in 28 runs — kept in `test/scaffold/FuzzExemplar.t.sol` as the worked example of derive-then-fuzz-validate | F,S | derived tolerance, not arbitrary |
+| I8 | Mint value bound (two-sided): `|valueFor(premiumShares, S_post, stE) − ltPrem| ≤ ε`, `ε = 2·⌈stE/S_post⌉ + 2` wei. Downward slack: premium-share floor (F9); upward slack: the *fee* carve-out's floor dust stays in the pot and accrues pro-rata to all post-mint shares incl. the premium shares; final valuation floor (F10) adds < 1. The one-sided `value ≤ prem` version was refuted by the fuzz exemplar in 28 runs — kept in `test/scaffold/FuzzExemplar.t.sol` as the worked example of derive-then-fuzz-validate | F | derived tolerance, not arbitrary |
 | I9 | Gate post-conditions: successful `ST_DEPOSIT ∨ (LT_DEPOSIT ∧ stLeg>0)` ⟹ `covU ≤ WAD ∧ liqU ≤ WAD`; `JT_REDEEM` ⟹ `covU ≤ WAD`; `LT_REDEEM ∧ covU_pre < liqThreshold` ⟹ `liqU ≤ WAD`; and no gate is enforced on any other op (verified by constructing breach states where exempt ops still succeed) | H,U | both directions: enforcement and exemption |
 | I10 | Max inversions: `maxDeposit()` deposited exactly succeeds; `maxDeposit() + slack + 1` reverts, `slack` = the documented dust terms of F15 (similarly maxRedeem/maxJTWithdrawal/maxLTWithdrawal). The `+2 wei` at `:422` gets a dedicated boundary vector | F,U | |
 | I11 | Preview parity: same block, `previewDeposit/previewRedeem/previewDepositMultiAsset/previewRedeemMultiAsset` == executed results **exactly** for all six flows (multi-asset previews via staticcall-style snapshot-revert) | H,F | |
@@ -320,24 +319,11 @@ Two oracles, two tolerance regimes:
 1. **`RoycoTestMath` (primary, exact).** Same-language independent reimplementation; tolerance: **0** for every integer formula (it mirrors rounding). Used inside unit/fuzz layers — this is the main defense against R1.
 2. **`royco-day-simulator` (trajectory oracle, bounded).** The TS engine mirrors the waterfall/YDM/LT spec but in IEEE-754 floats with documented drift (its own audit reports conservation residual ≤ 1.5e-8 rel). Use: generate N scenario trajectories (op sequences + PnL paths) in the simulator, replay through the Solidity market in a Foundry script, compare per-step `{stE, jtE, IL, covU, liqU, premiums}` with **relative tolerance 1e-6 per step, non-accumulating** (re-anchor simulator state to on-chain state each step so float drift cannot compound); flag any step where direction disagrees (sign of ΔstE etc.) regardless of magnitude. Formulas the simulator admits it approximates (cross-claim attribution) get direction-only… no — get *excluded* from magnitude comparison and covered exclusively by oracle 1; exclusion list checked into the differential harness with justification per entry.
 
-### 4.5 Symbolic (Halmos; Kontrol as stretch for the waterfall)
-
-| Target | Property |
-|---|---|
-| `UtilizationLogic._computeCoverageUtilization/_computeLiquidityUtilization` | ceil bias, zero-edge totality (never reverts), monotonicity in numerator/denominator |
-| `ValuationLogic._convertToShares/_convertToValue` | round-trip loss bound (I8's ε), no revert for `supply,value ≤ 2^128` |
-| `_attributeDeltaToClaimOnRawNAV` | `|out| ≤ |Δ|`; split additivity within 1; totality given `claim ≤ lastRaw` |
-| `_computeSTFeeAndLiquidityPremiumSharesToMint` | joint-pricing: neither carve-out dilutes the other (price equality cross-mul within 1) |
-| `TrancheClaimsLogic._computeSTandJTClaimsOnNAV` | given I1 precondition: four claims ≥ 0, `stCl_st + jtCl_st == stR`, `stCl_jt + jtCl_jt == jtR` |
-| `SelfLiquidationLogic._computeMaxCoverageUtilizationNeutralBonus` | `covU_post ≤ covU_pre` for the returned bound (the `:73-89` derivation, machine-checked) |
-| `StaticCurveYDM._yieldShare` | `y ≤ WAD`; continuity at kink within slope-floor dust |
-| Waterfall core (extracted pure harness of `:500-651`) | I1 (conservation) and I3 (priority) for symbolic 128-bit inputs — Kontrol if Halmos times out |
-
-### 4.6 Mutation
+### 4.5 Mutation
 
 Tool: **Gambit** (Certora) generating mutants for `src/accountant`, `src/libraries/logic`, `src/ydm`; kill-suite = unit + fuzz (CI profile). Gate: **≥90% mutants killed** on those paths (rounding-direction flips, `<`↔`<=`, operand swaps are exactly the R1 bug class; a floor→ceil mutant that survives means an assertion is tolerance-sloppy). Cadence: weekly scheduled job + mandatory before audit handoff; not per-PR (runtime). Record a baseline score at end of Phase B and re-measure after Phase F — the delta is the quantitative evidence the assertion standard works (report §5.6's before/after method).
 
-### 4.7 Fork
+### 4.6 Fork
 
 Pinned-block policy: one canonical mainnet block per integration, bumped monthly by PR (never floating). Add an `[rpc_endpoints]` block to `foundry.toml` referencing the env vars so fork suites fail loudly when RPC is unset instead of silently skipping (§1.7-17). List:
 - Balancer V3 vault + a real Gyro E-CLP pool + `LPOracleBase` oracle: full LT lifecycle (deposit BPT, multi-asset join/exit, reinvest against real pool math, hooks sync path with a real external router). This is the only layer where F20/F21 meet real math.
@@ -347,7 +333,7 @@ Pinned-block policy: one canonical mainnet block per integration, bumped monthly
 
 **IMPLEMENTED (2026-07-06): the deep Balancer-venue fork batteries** (`test/fork/balancer/base/*`, ~49 tests, chained under the `Neutrl_snUSD` leaf so one config carries the kernel battery plus the venue batteries): A real E-CLP swaps + hook coupling (band-exact execution pricing, fee-to-BPT within derived bounds, pause blast-radius, range-boundary reverts, capacity/band geometry); B `getRate` rate-provider coherence (committed NAV-per-share equality, transient-cache freeze, WITH_RATE wiring via `getPoolTokenRates`); C real `computeTVL` (TVL∈[MtM·α, MtM] band, manipulation resistance quantified as fee-bounded TVL vs 10x composition moves, rate-leg composition, mid-`unlock` read); D external LP via the canonical Router (hook sync, kernel-ledger isolation, the single-sided-add leak law, invariant-ratio cap); E the liquidity gate on real oracle numbers (ceil-mirror equality across states, bind/release at WAD, yield-driven breach); F reinvest decomposition (wealth-conservation identity, leak law through the production path, gate flip at the measured haircut, shipped-10bp grounding, invariant-ratio-cap tolerated failure); G proportional-remove composition after skew; H FIXED_TERM x pool liveness. Key derived law (verified on fork, documented in `BalancerVenueForkBase._expectedSingleSidedAddLeak`): a single-sided add of value V leaks `(1-w)·V·(f + (1-q))` — imbalance fee plus INTERNAL-price absorption — the dominant term is the internal price gap, not the fee. Real-math facts pinned: single-sided ADDS never trip `AssetBoundsExceeded` (the range wall binds swaps only; the slippage gate is the only deploy protection on a skewed pool), and the venue's genuine reinvest failure mode is the 5x invariant-ratio cap. New spec-divergence pins: `test_FINDING_8` (swaps are NOT blocked in the sync block — CLAUDE.md's same-block-swap rule is unimplemented), `test_FINDING_9` (through-pool rate-staleness LVR is structurally impossible: the hook sync + the Vault's post-`onBeforeSwap` rate reload refute the CLAUDE.md arb for pool flows), `test_FINDING_10`/`10b` (the pool LP set is permissionless and the liquidity gate is depth-blind in BOTH directions: external exits drain real depth without moving the gate, external adds cannot release a binding gate — answers the CLAUDE.md "Pool permissioning" open item).
 
-### 4.8 Port vs rewrite (default: rewrite)
+### 4.7 Port vs rewrite (default: rewrite)
 
 | Legacy asset | Decision | Justification |
 |---|---|---|
@@ -368,7 +354,7 @@ Pinned-block policy: one canonical mainnet block per integration, bumped monthly
 | Branch coverage (same) | ≥ 95% | below-95 exceptions require a written unreachability note (e.g. `stProtocolFee` zeroing at `:690` marked "Formality") |
 | Branch coverage (kernel, tranches, quoters, auth) | ≥ 90% | some Balancer-callback branches only reachable on fork; fork layer counted in nightly coverage merge |
 | Branch coverage (factory/templates/scripts) | ≥ 80%, scripts excluded | deploy assertions live in DayMarketDeploymentTest |
-| Mutation score (accountant+logic+ydm) | ≥ 90% killed | §4.6 |
+| Mutation score (accountant+logic+ydm) | ≥ 90% killed | §4.5 |
 | Fuzz runs | PR: 1,000/test (override `[profile.ci.fuzz] runs`); nightly: 50,000 + 4 token cells | current repo default of 200 (`foundry.toml:54`) is a smoke setting, not a gate |
 | Invariant | PR: 256×64; nightly: 2048×256 × 3 profiles × cells A–D | §4.3 |
 | Weak-assertion lint | CI grep-based deny + review checklist | deny in `test/` (scaffold excluded): `assertTrue(true)`, `assertGt(*, 0,` without adjacent `// direction-only:` justification tag, `assertApproxEq*` whose tolerance operand is a literal not named `*_DERIVED_BOUND`/`maxNAVDelta()`, `return;` inside a `test`/`testFuzz` body, bare `vm.expectRevert()` |
@@ -377,7 +363,7 @@ Pinned-block policy: one canonical mainnet block per integration, bumped monthly
 | `vm.mockCall` ban on quoting paths | CI grep: no `vm.mockCall` targeting quoter/oracle/venue selectors in `test/` | mock-setter discipline (§2.4); prevents the staleness-gate-defeat anti-pattern |
 | Param-sweep totality | `MarketParams.sol` field→test map stays total (CI grep) | no-frozen-parameters rule (§2.2) |
 | Gas snapshots | `forge snapshot` diff posted, informational, non-blocking | per prompt default |
-| Build | `forge build` + lint config as-is; symbolic and mutation excluded from PR path | runtime |
+| Build | `forge build` + lint config as-is; mutation excluded from PR path | runtime |
 
 ---
 
@@ -392,8 +378,8 @@ Effort in engineer-days (ED), single senior test engineer, assumes strategy appr
 | **C** | Fuzz layer (§4.2, full table) in cells A–D | B | 8 ED | every listed property implemented; 50k-run nightly green 3 consecutive nights; assume-rejection < 20% everywhere |
 | **D** | Invariant handler + catalog (§3), 4 profiles (calm / stressed / liquidation / I21-reduction) | B (C parallel-ok) | 8 ED | all 22 invariants have a passing handler run at 2048×256; forced-regime profiles demonstrably reach: FIXED_TERM, covU>WAD rejection, liquidation breach, staged-premium > 0, zero-supply (assert via ghost coverage counters); the I21 reduction profile matches a plain ST/JT trajectory |
 | **E** | Heterogeneous matrix expansion: cells E–I across B–D layers; expected-failure cell G documented | B,C,D | 4 ED | nightly matrix green; cell G produces the documented revert; per-cell coverage report |
-| **F** | Differential (RoycoTestMath replay harness + simulator trajectories), symbolic specs (§4.5), mutation baseline + gate | B–D | 8 ED | 100 simulator trajectories replayed within tolerance; all §4.5 properties proven or documented-timeout; mutation ≥ 90% or gap list ticketed |
-| **G** | Fork suite (§4.7) | A (+ real-market configs) | 5 ED | LT lifecycle green against real Balancer at pinned block; snUSD suite green; monthly block-bump job wired |
+| **F** | Differential (RoycoTestMath replay harness + simulator trajectories), mutation baseline + gate | B–D | 8 ED | 100 simulator trajectories replayed within tolerance; mutation ≥ 90% or gap list ticketed |
+| **G** | Fork suite (§4.6) | A (+ real-market configs) | 5 ED | LT lifecycle green against real Balancer at pinned block; snUSD suite green; monthly block-bump job wired |
 
 Total ≈ 49 ED. Critical path A→B→{C,D}→E.
 
@@ -402,7 +388,7 @@ Total ≈ 49 ED. Critical path A→B→{C,D}→E.
 ## Appendix A — [UNVERIFIED] items for human review
 
 1. `LPOracleBase.computeTVL()` manipulation-resistance properties and return-value decimals — taken from Balancer's vendored implementation and the subagent's read; the fork layer (Phase G) is specified to validate empirically. Confirm the oracle contract actually deployed per market matches `lib/balancer-v3-monorepo`'s `LPOracleBase`.
-2. Deployment chains (mainnet only vs L2s) — affects sequencer-uptime fork tests (§4.7).
+2. Deployment chains (mainnet only vs L2s) — affects sequencer-uptime fork tests (§4.6).
 3. Whether any governance/config layer excludes fee-on-transfer and rebasing underlyings at market-creation time; no code-level guard was found in `DepositLogic` (it credits face amounts, `DepositLogic.sol:229,265,299`). Cell G assumes exclusion-by-policy and tests the failure mode.
 4. Factory/template internals (`src/factory/*`) were reviewed only via the existing deployment tests, not line-by-line; role-wiring invariants (I20, R11) cite behavior asserted in `test/deploy/DayMarketDeploymentTest.sol`.
 5. Venue-layer file:line citations in §1.2/§1.3 rows F20–F21 and the hooks row were produced by a subagent read of those files; spot-checked for consistency but not re-read line-by-line by the author of this document.
@@ -437,6 +423,6 @@ Dense, file:line-cited working notes produced during the AbstractKernelTestSuite
 | `docs/testing/agent-notes/12-waterfall-golden-matrix-spec.md` | Phase B spec for §4.1 blocks 1-4: the normative sync pipeline order (P0-P9 with verified line cites and the premiums-imply-PERPETUAL sharpening), WaterfallIn/Out struct mapping with required amendments (4th fee rate, instantaneous-branch inputs), the three Phase-A seam calibrations (all confirmed), the 54-cell matrix (regimes R1-R6 with staging routes, hand-derived expected tuples, W55-W60 auxiliaries), and the block 2-4 vector enumerations |
 | `docs/testing/agent-notes/13-spec-divergence-findings.md` | The live spec-divergence ledger: numbered production-vs-CLAUDE.md divergences (spec quote, actual, file:line, severity, `test_FINDING_*` pin each) — findings 1-2 retracted with the retraction evidence, finding 3 (zero-BPT-slice LT redeem, Appendix B.2), findings 4-7 (ST deposits liquidity-gated, JT redemption without the liquidation bypass, setters bricked while the kernel is paused, the FIXED_TERM deposit intra-spec contradiction). Extend, never duplicate — pins live in `test/unit/findings/SpecDivergences.t.sol` and `test/unit/accountant/CarveOut.t.sol` |
 | `docs/testing/agent-notes/14-phase-ab-build-report.md` | Phase A+B build report: fixture recipe decisions (identical-assets + forced-jtCoinvested constraints, auto-seed circularity, sorted pool registration, wei-exact genesis), mock fidelity model, vector counts (28 smoke, 117 RoycoTestMath self-vectors incl. 17 W-cells, +33 matrix tests, blocks 2-4 = 10/8/10), the 19-finding review and the over-refutation correction (findings 4-7 remediation), final suite counts, Phase C-F carry-forwards. Also holds the fixture build record that would have been note 11 (never written separately, numbering jumps 10 → 12) |
-| `docs/testing/agent-notes/17-test-conventions.md` | The consolidation contract for the audit/prune/refine pass: taxonomy and conventions modeled exclusively on royco-iam's RecipeMarketHub tests (concrete/fuzz mirrors, layered utils bases, Test_/TestFuzz_/RevertIf_ naming), Day-specific extensions (invariant/symbolic/scenarios/fork layers), prune rules, and the current→target migration map |
+| `docs/testing/agent-notes/17-test-conventions.md` | The consolidation contract for the audit/prune/refine pass: taxonomy and conventions modeled exclusively on royco-iam's RecipeMarketHub tests (concrete/fuzz mirrors, layered utils bases, Test_/TestFuzz_/RevertIf_ naming), Day-specific extensions (invariant/scenarios/fork layers), prune rules, and the current→target migration map |
 
 Maintenance rule: any future multi-agent workflow over this repo caches its reconnaissance maps, specs, and verified findings here (numbered, one file per artifact) and keeps this table current.
