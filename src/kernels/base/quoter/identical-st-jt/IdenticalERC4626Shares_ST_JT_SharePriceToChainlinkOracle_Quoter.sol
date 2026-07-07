@@ -32,6 +32,10 @@ abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quote
         uint48 gracePeriodSeconds;
     }
 
+    /// @notice Thrown when the stored conversion rate is the sentinel but no usable chainlink oracle is configured
+    /// @dev A usable oracle has a non-null address and a positive staleness threshold
+    error SENTINEL_RATE_REQUIRES_CHAINLINK_ORACLE();
+
     /// @notice Initializes the identical ERC4626 shares chainlink oracle quoter and its inherited contracts
     /// @param _params The quoter-specific initialization parameters
     function __IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter_init(ST_JT_QuoterSpecificParams calldata _params) internal onlyInitializing {
@@ -39,6 +43,14 @@ abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quote
         __IdenticalAssets_ST_JT_ChainlinkOracle_Quoter_init_unchained(
             _params.baseAssetToNavAssetOracle, _params.stalenessThresholdSeconds, _params.sequencerUptimeFeed, _params.gracePeriodSeconds
         );
+
+        // A rate matching the sentinel means this market reads its price from the chainlink oracle, so the oracle must be
+        // usable: a non-null address and a positive staleness threshold. The setters already reject a broken oracle
+        // (their post-write sync reads it and reverts); initialize does not sync, so check it here instead.
+        if (getStoredConversionRateWAD() == SENTINEL_CONVERSION_RATE) {
+            (address oracle, uint48 stalenessThresholdSeconds) = _getChainlinkOracle();
+            require(oracle != address(0) && stalenessThresholdSeconds > 0, SENTINEL_RATE_REQUIRES_CHAINLINK_ORACLE());
+        }
     }
 
     /**

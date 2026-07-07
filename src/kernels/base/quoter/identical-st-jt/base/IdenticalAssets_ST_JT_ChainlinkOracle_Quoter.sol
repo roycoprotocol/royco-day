@@ -134,6 +134,14 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
         return _getIdenticalAssets_ST_JT_ChainlinkOracle_QuoterStorage();
     }
 
+    /// @dev Returns the configured chainlink oracle address and its staleness threshold (mirrors `_setChainlinkOracle`)
+    /// @return oracle The configured chainlink (compatible) oracle address (the null address when unset)
+    /// @return stalenessThresholdSeconds The configured maximum age in seconds an oracle price may have before it is stale
+    function _getChainlinkOracle() internal view returns (address oracle, uint48 stalenessThresholdSeconds) {
+        IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState storage $ = _getIdenticalAssets_ST_JT_ChainlinkOracle_QuoterStorage();
+        return ($.oracle, $.stalenessThresholdSeconds);
+    }
+
     /**
      * @notice Queries the chainlink oracle for the price
      * @dev The price is returned as the answer from the latest round
