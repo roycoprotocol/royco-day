@@ -109,11 +109,11 @@ Markets operate as perpetual instruments with full liquidity for all tranches un
 
 The two states are:
 
-**PERPETUAL**: The normal operating state governed by market forces, and the permanent state of a market configured with no fixed-term duration. The market is either healthy (no losses beyond the dust tolerance), severely undercollateralized (its liquidation coverage utilization breached), or uncollateralized (no junior NAV remaining against a non-zero senior NAV). All three tranches are liquid, subject to the coverage and liquidity requirements. While under- or uncollateralized, the liquidity tranche shares the senior's liquidity profile and the liquidity requirement is exempt. Premiums and protocol fees accrue on senior yield, and adaptive-curve models adapt to the market's coverage and liquidity utilization.
+**PERPETUAL**: The normal operating state governed by market forces, and the permanent state of a market configured with no fixed-term duration. The market is either healthy (no losses beyond the dust tolerance), severely undercollateralized (its liquidation coverage utilization breached), or uncollateralized (no junior NAV remaining against a non-zero senior NAV). All three tranches are liquid, subject to the coverage and liquidity requirements. While under or uncollateralized, the liquidity tranche shares the senior's liquidity profile and the liquidity requirement is exempt. Premiums and protocol fees accrue on senior yield, and adaptive-curve models adapt to the market's coverage and liquidity utilization.
 
 **FIXED_TERM**: A temporary recovery state entered when junior coverage first absorbs a senior drawdown while coverage stays within the liquidation threshold, giving the underlying position time to recover before junior LPs realize any losses. Senior and junior deposits and redemptions are all blocked. This stops seniors from withdrawing coverage from existing juniors, and new juniors from diluting existing juniors, on arbitrary volatility. Liquidity tranche redemptions are also blocked so the LT keeps market-making the senior when secondary liquidity is most valuable, while liquidity tranche deposits stay open. No liquidity premium is paid and no protocol fees are taken, and the adaptive-curve models do not adapt, since utilization moves on underlying PnL rather than market forces during recovery.
 
-**Transitions back to PERPETUAL** occur when the junior coverage impermanent loss fully clears or the fixed-term duration elapses. The market is additionally forced back to PERPETUAL on a liquidation breach or an uncollateralized market, which resets the junior coverage impermanent loss so junior forfeits its recovery claim.
+**State Transitions**: A market configured with no fixed-term duration is permanently perpetual and never leaves the perpetual state. Otherwise the market enters FIXED_TERM from PERPETUAL when a senior drawdown is first absorbed by junior coverage while coverage stays within the liquidation threshold, which starts the fixed-term. It returns to PERPETUAL when the junior coverage impermanent loss fully clears, meaning the position recovered and junior was made whole, or when the fixed-term duration elapses. The market is additionally forced back to PERPETUAL on a liquidation breach or an uncollateralized market. When the return is forced, or the fixed-term elapses before the loss recovers, the junior coverage impermanent loss is reset, so junior forfeits its recovery claim.
 
 ### Impermanent Loss
 
@@ -133,8 +133,6 @@ Royco Day enables risk and liquidity transformation for any priceable asset.
 
 ## Extended Capabilities
 
-**Compliance Screening**: Every tranche transfer is screened against a market blacklist and a sanctions overlay, so restricted accounts cannot hold or move tranche shares. Markets can be deployed for permissioned, institutional flow without changing the core mechanism.
-
 **Depeg Protection**: Markets backed by synthetic assets use oracles that value the underlying based on actual, fundamental value of their backing rather than secondary market prices.
 
 If a depeg occurs, the loss is absorbed by junior coverage rather than passed through at stale valuations.
@@ -150,3 +148,5 @@ Equity:    Junior A
 ```
 
 This process can be repeated indefinitely to create arbitrarily deep capital structures.
+
+**Compliance Screening**: Every tranche share mint, redemption, and transfer is screened against a market blacklist and a sanctions overlay, so restricted accounts cannot hold or move tranche shares. Markets can be deployed for permissioned, institutional flow without changing the core mechanism.
