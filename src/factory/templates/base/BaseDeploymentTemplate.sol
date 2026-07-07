@@ -146,7 +146,7 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
      *         same address regardless of template.
      * @param _marketId Caller-supplied stable identifier for the market.
      * @param _componentTag E.g. `bytes32("ST")`, `bytes32("JT")`, `bytes32("KERNEL")`,
-     *        `bytes32("ACCOUNTANT")`, `bytes32("HOOKS")`.
+     *        `bytes32("ACCOUNTANT")`, `bytes32("LT")`.
      */
     function _marketComponentSalt(bytes32 _marketId, bytes32 _componentTag) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked("ROYCO_MARKET_", _marketId, _componentTag));

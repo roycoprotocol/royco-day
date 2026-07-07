@@ -30,19 +30,13 @@ import {
 import { RoycoFactory } from "../src/factory/RoycoFactory.sol";
 import { BalancerV3DeploymentTemplate } from "../src/factory/templates/BalancerV3DeploymentTemplate.sol";
 import { DayIdenticalERC4626ChainlinkDeploymentTemplate } from "../src/factory/templates/DayIdenticalERC4626ChainlinkDeploymentTemplate.sol";
-import { BaseDeploymentTemplate } from "../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import {
     COMPONENT_ID_ACCOUNTANT_IMPL,
-    COMPONENT_ID_DAY_BALANCER_HOOKS,
     COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK,
     COMPONENT_ID_JUNIOR_TRANCHE_IMPL,
     COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL,
     COMPONENT_ID_SENIOR_TRANCHE_IMPL,
-    COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2,
-    TAG_ACCOUNTANT_IMPL,
-    TAG_JT_IMPL,
-    TAG_KERNEL_IMPL,
-    TAG_ST_IMPL
+    COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2
 } from "../src/factory/templates/base/Components.sol";
 import { IRoycoDayAccountant } from "../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../src/interfaces/IRoycoDayKernel.sol";
@@ -58,7 +52,6 @@ import {
     IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
 } from "../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
 import { BalancerV3_LT_BPTOracle_Quoter } from "../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
-import { RoycoDayBalancerV3Hooks } from "../src/kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3Hooks.sol";
 import { toNAVUnits } from "../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoLiquidityTranche } from "../src/tranches/RoycoLiquidityTranche.sol";
@@ -408,8 +401,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         pure
         returns (bytes32[] memory ids, bytes[] memory codes)
     {
-        ids = new bytes32[](7);
-        codes = new bytes[](7);
+        ids = new bytes32[](6);
+        codes = new bytes[](6);
         ids[0] = COMPONENT_ID_SENIOR_TRANCHE_IMPL;
         codes[0] = type(RoycoSeniorTranche).creationCode;
         ids[1] = COMPONENT_ID_JUNIOR_TRANCHE_IMPL;
@@ -422,8 +415,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         codes[4] = type(AdaptiveCurveYDM_V2).creationCode;
         ids[5] = _kernelComponentId;
         codes[5] = _kernelCreationCode;
-        ids[6] = COMPONENT_ID_DAY_BALANCER_HOOKS;
-        codes[6] = type(RoycoDayBalancerV3Hooks).creationCode;
     }
 
     /// @notice Public helper: the component set for the Day ERC4626-Chainlink-Balancer kernel template (test/tooling use).
