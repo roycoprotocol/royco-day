@@ -9,6 +9,7 @@ import { RoycoBlacklist } from "../src/auth/RoycoBlacklist.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
+    ADMIN_BLACKLIST_ROLE,
     ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
@@ -246,6 +247,14 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         // 2. Deploy (or reuse) the chain's shared blacklist (governed by the AccessManager, not the factory).
         address roycoBlacklist = _deployBlacklist(address(accessManager));
 
+        {
+            bytes4[] memory blacklistSelectors = new bytes4[](3);
+            blacklistSelectors[0] = RoycoBlacklist.blacklistAccounts.selector;
+            blacklistSelectors[1] = RoycoBlacklist.unblacklistAccounts.selector;
+            blacklistSelectors[2] = RoycoBlacklist.setSanctionsList.selector;
+            accessManager.setTargetFunctionRole(roycoBlacklist, blacklistSelectors, ADMIN_BLACKLIST_ROLE);
+        }
+
         // 3. Register (or reuse) the Day template for this kernel type.
         address template = _getOrRegisterTemplate(factory, _config.kernelType);
 
@@ -274,7 +283,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
     /// @notice Builds the role assignments applied to the AccessManager (surface-compatible with the legacy helper).
     function generateRolesAssignments(RoleAssignmentAddresses memory _addresses) public pure returns (RoleAssignment[] memory roleAssignments) {
-        roleAssignments = new RoleAssignment[](17);
+        roleAssignments = new RoleAssignment[](18);
         roleAssignments[0] = _assignment(ADMIN_PAUSER_ROLE, _addresses.pauserAddress);
         roleAssignments[1] = _assignment(ADMIN_UPGRADER_ROLE, _addresses.upgraderAddress);
         roleAssignments[2] = _assignment(SYNC_ROLE, _addresses.syncRoleAddress);
@@ -292,6 +301,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         roleAssignments[14] = _assignment(LT_LP_ROLE, _addresses.protocolFeeRecipientAddress);
         roleAssignments[15] = _assignment(ADMIN_BALANCER_POOL_MANAGER_ROLE, _addresses.balancerPoolManagerAddress);
         roleAssignments[16] = _assignment(ADMIN_MARKET_OPS_ROLE, _addresses.marketOpsAddress);
+        // The dedicated blacklist-management role (gates blacklistAccounts/unblacklistAccounts/setSanctionsList on
+        // the shared RoycoBlacklist) is granted to the market-ops admin.
+        roleAssignments[17] = _assignment(ADMIN_BLACKLIST_ROLE, _addresses.marketOpsAddress);
     }
 
     function _assignment(uint64 _role, address _assignee) private pure returns (RoleAssignment memory) {
@@ -318,6 +330,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (role == LT_LP_ROLE) return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_BALANCER_POOL_MANAGER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_MARKET_OPS_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == ADMIN_BLACKLIST_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         revert UNKNOWN_ROLE(role);
     }
 
@@ -344,7 +357,13 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         bytes memory factoryProxyCreationCode = getERC1967ProxyCreationCode(factoryImpl, abi.encodeCall(RoycoFactory.initialize, (amAddr)));
         address predictedFactory = generateDeterminsticAddress(FACTORY_PROXY_SALT, factoryProxyCreationCode);
 
-        if (predictedFactory.code.length == 0) accessManager.grantRole(ADMIN_ROLE, predictedFactory, 0);
+        if (predictedFactory.code.length == 0) {
+            accessManager.grantRole(ADMIN_ROLE, predictedFactory, 0);
+            // The factory must be able to grant the tranche LP roles (admin'd by LP_ROLE_ADMIN_ROLE) so a market's
+            // template can grant them to the kernel + fee recipient during deployment (Finding 11). Granted here,
+            // before any `setRoleAdmin` re-points the LP roles' admin, while the deployer (ADMIN_ROLE) can still grant it.
+            accessManager.grantRole(LP_ROLE_ADMIN_ROLE, predictedFactory, 0);
+        }
 
         (address factoryProxy,) = deployWithSanityChecks(FACTORY_PROXY_SALT, factoryProxyCreationCode, false);
         require(factoryProxy == predictedFactory, "factory address mismatch");

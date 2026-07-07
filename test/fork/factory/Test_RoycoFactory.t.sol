@@ -16,7 +16,15 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { CREATE3 } from "../../../lib/solady/src/utils/CREATE3.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../../script/config/MarketDeploymentConfig.sol";
-import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ROLE, ADMIN_UPGRADER_ROLE, DEPLOYER_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import {
+    ADMIN_ENTRY_POINT_ROLE,
+    ADMIN_FACTORY_ROLE,
+    ADMIN_PAUSER_ROLE,
+    ADMIN_ROLE,
+    ADMIN_UNPAUSER_ROLE,
+    ADMIN_UPGRADER_ROLE,
+    DEPLOYER_ROLE
+} from "../../../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { DayIdenticalERC4626ChainlinkDeploymentTemplate } from "../../../src/factory/templates/DayIdenticalERC4626ChainlinkDeploymentTemplate.sol";
 import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
@@ -76,6 +84,10 @@ contract Test_RoycoFactory is Test {
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
         am.grantRole(DEPLOYER_ROLE, DEPLOYER, 0);
         am.grantRole(ADMIN_UPGRADER_ROLE, UPGRADER, 0);
+        // initialize() binds the factory's pause/unpause to the pauser/unpauser roles, so this test contract (the AM
+        // admin) needs them to pause/unpause the factory directly.
+        am.grantRole(ADMIN_PAUSER_ROLE, address(this), 0);
+        am.grantRole(ADMIN_UNPAUSER_ROLE, address(this), 0);
 
         // The real Day template, bound to this factory. `deployScript` is used only for its pure/view build helpers
         // (`dayTemplateComponents`, `buildDayParams`, `getMarketConfig`) — the factory + template above are the units under test.

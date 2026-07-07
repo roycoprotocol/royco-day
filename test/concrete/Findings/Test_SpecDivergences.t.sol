@@ -166,6 +166,9 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
      *      or at minimum a remediation path exists while paused. ACTUAL: EnforcedPause across all three admin
      *      roles' setter surfaces until the kernel is unpaused
      */
+    /// @dev FIXED: `withSyncedAccounting` now performs a best-effort sync (a tolerated raw call), so the accountant
+    ///      parameter setters remain available for remediation while the kernel is paused — the sync is skipped
+    ///      rather than reverting the whole call.
     function test_FINDING_6_accountantSetters_revertWhileKernelPaused() public {
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
 

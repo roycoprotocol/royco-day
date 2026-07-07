@@ -88,15 +88,15 @@ contract Test_FactoryTrancheRegistry is Test {
         assertEq(factory.trancheToKernel(juniorTranche), address(kernel), "junior key -> kernel");
 
         // FINDING: the zero-tranche write poisoned the zero-address key. `trancheToKernel(address(0))` should be
-        // address(0) (no tranche lives at the zero address), but the unconditional third write mapped it to the kernel.
-        assertEq(factory.trancheToKernel(address(0)), address(kernel), "zero-address key poisoned with the kernel");
+        // address(0) (no tranche lives at the zero address). FIXED: the zero-tranche registry write is skipped, so
+        // the zero-address key is never poisoned.
+        assertEq(factory.trancheToKernel(address(0)), address(0), "zero-address key must not be poisoned");
 
-        // FINDING (consequence): `getMarket(address(0))` should hit its unknown-tranche branch and return all zeros,
-        // but the mapping is nonempty, so it reads the kernel's getters and resolves a live market for a non-key.
+        // FIXED (consequence): `getMarket(address(0))` hits its unknown-tranche branch and returns all zeros.
         (address st, address jt, address lt, address k) = factory.getMarket(address(0));
-        assertEq(st, seniorTranche, "sentinel broken: senior resolves for the zero key");
-        assertEq(jt, juniorTranche, "sentinel broken: junior resolves for the zero key");
-        assertEq(lt, address(0), "liquidity leg mirrors the kernel getter");
-        assertEq(k, address(kernel), "sentinel broken: kernel resolves for the zero key");
+        assertEq(st, address(0), "sentinel intact: senior does not resolve for the zero key");
+        assertEq(jt, address(0), "sentinel intact: junior does not resolve for the zero key");
+        assertEq(lt, address(0), "sentinel intact: liquidity does not resolve for the zero key");
+        assertEq(k, address(0), "sentinel intact: kernel does not resolve for the zero key");
     }
 }

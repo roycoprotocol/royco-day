@@ -41,22 +41,18 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
      *      bricks on exactly the pre-bootstrap and fully-exited states where an integrator probes it. Expected
      *      behavior: return zero claims without reverting
      */
-    function test_FINDING_24_ConvertToAssets_EmptyTranchePanicsInsteadOfReturningZeroClaims() public {
+    function test_FINDING_24_ConvertToAssets_EmptyTrancheReturnsZeroClaims() public {
         // A freshly deployed, never-seeded market: every tranche has zero share supply
         _deployMarket(cellA(), defaultParams());
         assertEq(juniorTranche.totalSupply(), 0, "the fresh junior tranche must start with zero share supply");
         assertEq(liquidityTranche.totalSupply(), 0, "the fresh liquidity tranche must start with zero share supply");
 
-        // Both the zero-share and the whole-share probes panic: the claims scale divides by the zero total supply
-        // before the requested share count can short-circuit anything
-        vm.expectRevert(stdError.divisionError);
-        juniorTranche.convertToAssets(0);
-        vm.expectRevert(stdError.divisionError);
-        juniorTranche.convertToAssets(1e18);
-        vm.expectRevert(stdError.divisionError);
-        liquidityTranche.convertToAssets(0);
-        vm.expectRevert(stdError.divisionError);
-        liquidityTranche.convertToAssets(1e18);
+        // FIXED: an empty tranche's claim scale short-circuits on zero total supply and returns zero claims instead
+        // of dividing by zero, so both the zero-share and the whole-share probes return zero-valued claims.
+        assertEq(toUint256(juniorTranche.convertToAssets(0).nav), 0, "empty JT convertToAssets(0) returns zero NAV");
+        assertEq(toUint256(juniorTranche.convertToAssets(1e18).nav), 0, "empty JT convertToAssets(1e18) returns zero NAV");
+        assertEq(toUint256(liquidityTranche.convertToAssets(0).nav), 0, "empty LT convertToAssets(0) returns zero NAV");
+        assertEq(toUint256(liquidityTranche.convertToAssets(1e18).nav), 0, "empty LT convertToAssets(1e18) returns zero NAV");
 
         // The asymmetry pin: convertToShares on the IDENTICAL empty state does not revert, because the
         // shares-from-value conversion special-cases zero supply as a 1:1 bootstrap mint. Independent derivation:

@@ -175,7 +175,7 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
      */
     function _setChainlinkOracle(address _oracle, uint48 _stalenessThresholdSeconds) internal {
         // Oracle can be set to the null address since upstream contracts may use an admin set price with the chainlink oracle as a fallback
-        require(_oracle != address(0) || _stalenessThresholdSeconds > 0, INVALID_STALENESS_THRESHOLD_SECONDS());
+        require(_oracle == address(0) || _stalenessThresholdSeconds > 0, INVALID_STALENESS_THRESHOLD_SECONDS());
 
         IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState storage $ = _getIdenticalAssets_ST_JT_ChainlinkOracle_QuoterStorage();
         $.oracle = _oracle;

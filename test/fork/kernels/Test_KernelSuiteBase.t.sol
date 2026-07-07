@@ -995,11 +995,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /// @notice Blacklists `_account` on the market's shared blacklist via the AccessManager admin.
     /// @dev The blacklist's restricted selectors are unbound, so they resolve to the AccessManager ADMIN_ROLE holder.
     function _blacklist(address _account) internal {
-        (bool ownerIsAdmin,) = ACCESS_MANAGER.hasRole(0, OWNER_ADDRESS);
-        address admin = ownerIsAdmin ? OWNER_ADDRESS : 0x7c405bbD131e42af506d14e752f2e59B19D49997;
         address[] memory accounts = new address[](1);
         accounts[0] = _account;
-        vm.prank(admin);
+        // The blacklist admin surface is gated by ADMIN_BLACKLIST_ROLE, granted to the market-ops admin.
+        vm.prank(KERNEL_ADMIN_ADDRESS);
         BLACKLIST.blacklistAccounts(accounts);
     }
 
@@ -3470,6 +3469,20 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         NAV_UNIT idleValue = _expectedValue(idleShares, ST.totalSupply(), a.lastSTEffectiveNAV);
         assertGt(toUint256(idleValue), 0, "arrange: the staged premium must carry value");
         assertApproxEqAbs(LT.totalAssets().nav, a.lastLTRawNAV + idleValue, maxNAVDelta(), "the LT effective NAV must include the claimable idle leg");
+
+        // The split valuation surfaces on the real stack: the external convert* exchange rate is BPT-only (raw NAV,
+        // no idle senior-share leg), while totalAssets (above) and previewRedeem keep the claimable idle leg — so
+        // the convert quote sits strictly below the redemption quote for the same shares while premium is staged
+        uint256 probeShares = LT.totalSupply() / 3;
+        AssetClaims memory convClaims = LT.convertToAssets(probeShares);
+        assertEq(convClaims.stShares, 0, "convertToAssets must report no senior-share claim (the idle leg is excluded)");
+        assertApproxEqAbs(
+            convClaims.nav,
+            _expectedValue(probeShares, LT.totalSupply(), a.lastLTRawNAV),
+            maxNAVDelta(),
+            "convertToAssets must price the pro-rata slice of the BPT-only raw NAV"
+        );
+        assertGt(toUint256(LT.previewRedeem(probeShares).nav), toUint256(convClaims.nav), "the redemption quote must sit strictly above the BPT-only convert quote while premium is staged");
 
         SyncedAccountingState memory state = _syncWithState();
         uint256 rawBasedUtilWAD = _expectedLiquidityUtilization(a.lastSTEffectiveNAV, a.minLiquidityWAD, a.lastLTRawNAV);

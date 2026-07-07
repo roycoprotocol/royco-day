@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
-import { toUint256 } from "../../../src/libraries/Units.sol";
+import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
@@ -46,7 +46,10 @@ contract Test_PremiumMintDivergences_DayMarket is DayMarketTestBase {
      * @dev The kernel is never granted the senior tranche's deposit (LP) role, so canCall(kernel, ST, deposit) is
      *      false and the hook's `_to != authority && isWhitelistedTrancheLP` requirement fails on the kernel
      */
-    function test_FINDING_11_whitelistMarket_bricksOnFirstSeniorGainPremiumMint() public {
+    /// @dev FIXED: the deployment now grants the kernel and the protocol fee recipient the tranche LP roles, so the
+    ///      premium/fee mints pass the tranche `_update` whitelist screen. A whitelist-enforcing market no longer
+    ///      bricks on the first senior gain.
+    function test_FINDING_11_whitelistMarket_syncsCleanlyAfterSeniorGain() public {
         // Redeploy the market with the tranche-transfer whitelist enforced
         MarketParamsConfig memory p = defaultParams();
         p.enforceWhitelistOnTransfer = true;
@@ -56,13 +59,20 @@ contract Test_PremiumMintDivergences_DayMarket is DayMarketTestBase {
         // Seeding is premium-free (rates are flat), so the whitelist market seeds cleanly
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
 
-        // Book a +10% senior gain so the next sync accrues a nonzero liquidity premium to mint
+        // Book a +10% senior gain so the next sync accrues a nonzero liquidity premium (and protocol fees) to mint
         applySTPnL(1000);
 
-        // ACTUAL: the premium mint transfers senior shares to the kernel, which the whitelist hook rejects
-        // SPEC-EXPECTED: the privileged premium mint bypasses the whitelist, so the sync succeeds
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayKernel.ACCOUNT_NOT_WHITELISTED_TRANCHE_LP.selector, address(kernel)));
-        _sync();
+        // FIXED: the premium mint to the kernel and the fee mints to the fee recipient pass the whitelist screen.
+        _sync(); // no revert
+
+        // The market keeps functioning: a subsequent whitelisted senior deposit (which pre-op syncs, minting the
+        // premium/fees again) also lands.
+        uint256 more = 10 * stUnit;
+        stJtVault.mintShares(ST_PROVIDER, more);
+        vm.startPrank(ST_PROVIDER);
+        stJtVault.approve(address(seniorTranche), more);
+        seniorTranche.deposit(toTrancheUnits(more), ST_PROVIDER);
+        vm.stopPrank();
     }
 
     // =============================

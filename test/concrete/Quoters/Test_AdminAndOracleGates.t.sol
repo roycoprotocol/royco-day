@@ -89,11 +89,15 @@ contract Test_AdminAndOracleGates_STJTChainlinkQuoter is DayMarketTestBase {
         assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1.5e18, "the stored rate must price with no oracle wired");
     }
 
-    /// @notice Wiring a null oracle with a zero staleness threshold is rejected, that configuration could never price anything
-    function test_RevertIf_ChainlinkOracleSetNullWithZeroStalenessThreshold() public {
-        vm.prank(ORACLE_QUOTER_ADMIN);
-        vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.INVALID_STALENESS_THRESHOLD_SECONDS.selector);
-        kernel.setChainlinkOracle(address(0), 0, false);
+    /// @notice A null oracle with a zero staleness threshold is now ACCEPTED (the fixed guard only requires a positive
+    ///         staleness threshold when the oracle is set). With a stored admin rate as the price source, this is a
+    ///         valid admin-fallback configuration.
+    function test_ChainlinkOracleSetNullWithZeroStalenessThreshold_AcceptedWithStoredRate() public {
+        vm.startPrank(ORACLE_QUOTER_ADMIN);
+        kernel.setConversionRate(1.5e18, false); // admin rate as the price source
+        kernel.setChainlinkOracle(address(0), 0, false); // no revert: oracle null, staleness irrelevant
+        vm.stopPrank();
+        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1.5e18, "the stored rate prices with a null oracle and zero staleness");
     }
 
     /**
@@ -107,21 +111,20 @@ contract Test_AdminAndOracleGates_STJTChainlinkQuoter is DayMarketTestBase {
      *      so the accepted and rejected configurations are swapped. The staleness gate is updatedAt + threshold >= now, so with
      *      threshold 0 a fresh answer (updatedAt == now) passes only until the next second ticks
      */
-    function test_FINDING_19_SetChainlinkOracle_AcceptsLiveFeedWithZeroStalenessThreshold() public {
-        // A fresh answer in this very second, updatedAt == now, so the zero-threshold gate updatedAt + 0 >= now still holds
-        priceFeed.setUpdatedAt(block.timestamp);
-
-        // Current behavior: the (live feed, zero threshold) pair is accepted instead of rejected
+    function test_FINDING_19_SetChainlinkOracle_RejectsLiveFeedWithZeroStalenessThreshold() public {
+        // Fixed: when the oracle is set (non-null), a zero staleness threshold is rejected — it would brick every
+        // read (updatedAt + 0 >= now requires a same-second update). The guard now enforces staleness > 0 iff the
+        // oracle is set.
         vm.prank(ORACLE_QUOTER_ADMIN);
+        vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.INVALID_STALENESS_THRESHOLD_SECONDS.selector);
         kernel.setChainlinkOracle(address(priceFeed), 0, false);
 
-        // The hazardous configuration landed in storage exactly as passed
+        // A positive staleness threshold with a live feed is accepted.
+        vm.prank(ORACLE_QUOTER_ADMIN);
+        kernel.setChainlinkOracle(address(priceFeed), 1 days, false);
         IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState memory config = kernel.getChainlinkOracleConfiguration();
         assertEq(config.oracle, address(priceFeed), "the live feed must have landed in quoter storage");
-        assertEq(config.stalenessThresholdSeconds, 0, "the zero staleness threshold must have landed in quoter storage");
-
-        // Same-second pricing still succeeds (updatedAt + 0 == now): vault 1.0 x feed 1.0 = 1e18 per whole 18-decimal share
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1e18, "pricing must still work in the second the feed updated in");
+        assertEq(config.stalenessThresholdSeconds, 1 days, "the positive staleness threshold must have landed in quoter storage");
     }
 
     // =============================
