@@ -9,9 +9,8 @@ import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
 
 /**
  * @title Test_PremiumDivergences_Accountant
- * @notice Loud, first-class pins of the accountant-layer divergences between production and the CLAUDE.md
- *         product spec that only reproduce on the mock-kernel accountant base (findings 13-15 of the ledger
- *         docs/testing/agent-notes/13-spec-divergence-findings.md)
+ * @notice Loud, first-class pins of the accountant-layer divergences between production behavior and the
+ *         intended product spec that only reproduce on the mock-kernel accountant base
  * @dev Each test drives the accountant through legal MockKernel post-op and pre-op calls, asserts CURRENT
  *      production behavior, and documents the spec-expected behavior in an adjacent comment. If a future src
  *      change makes production match the spec, the corresponding test MUST fail — that is the alarm these pins
@@ -74,9 +73,9 @@ contract Test_PremiumDivergences_Accountant is AccountantTestBase {
      *         (UtilizationLogic.sol:72), so every liquidity-gated operation reads the market as infinitely
      *         under-provisioned. One reviewer reads this as a code bug (a divide-by-zero sentinel that bricks the
      *         first senior deposit), the other as the documented guardrail
-     * @dev This matches the CLAUDE.md open decision "ST supply seed: ensure ltRawNAV is never zero against a
-     *      positive minLiquidity, which would make liquidityUtilization infinite" — so it is pinned as CURRENT
-     *      behavior, flagged for a human to decide whether to seed-guard in code or keep as a deployment constraint
+     * @dev This matches the intended guardrail that the LT raw NAV is never zero against a positive minimum
+     *      liquidity, which would make liquidity utilization infinite — so it is pinned as CURRENT behavior,
+     *      flagged for a human to decide whether to seed-guard in code or keep it a deployment constraint
      * @dev Derivation: a committed checkpoint with stEffectiveNAV = 1000e18, minLiquidity 0.05e18, ltRawNAV = 0.
      *      _computeLiquidityUtilization takes the ltRawNAV == 0 branch and returns type(uint256).max
      */
@@ -90,8 +89,8 @@ contract Test_PremiumDivergences_Accountant is AccountantTestBase {
         SyncedAccountingState memory s =
             kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(uint256(1000e18)), toNAVUnits(uint256(201e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
 
-        // ACTUAL: zero LT depth against a positive minimum liquidity reads as infinite utilization
-        // matches the CLAUDE.md ltRawNAV-never-zero guardrail; the split is whether to enforce this in code
+        // ACTUAL: zero LT depth against a positive minimum liquidity reads as infinite utilization,
+        // matching the LT-raw-NAV-never-zero guardrail. The open split is whether to enforce this in code
         assertEq(s.liquidityUtilizationWAD, type(uint256).max, "zero LT depth with positive minLiquidity must read liquidityUtilization as uint256 max");
     }
 

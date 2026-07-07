@@ -308,7 +308,7 @@ contract StaticCurveYDMSymbolicSpec is Test {
      * @notice Within the at-or-above-target leg the yield share is monotone non-decreasing in utilization:
      *         past the kink the steeper leg keeps paying weakly more as the service saturates
      * @dev Both outputs floor the same slope against ordered distances from the kink. The leg is pinned up to
-     *      WAD; inputs beyond that are the plateau property, proven separately
+     *      WAD, inputs beyond that are the plateau property, proven separately
      */
     function check_staticCurve_monotoneWhenBothUtilizationsAtOrAboveTarget(uint256 target, uint64 y0, uint64 yT, uint64 yFull, uint256 utilA, uint256 utilB) external {
         StaticCurveYDM model = _deployInitialized(target, y0, yT, yFull);

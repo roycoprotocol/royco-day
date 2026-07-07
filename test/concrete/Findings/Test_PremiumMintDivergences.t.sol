@@ -13,8 +13,7 @@ import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
  * @title Test_PremiumMintDivergences_DayMarket
  * @notice Loud, first-class pins of the two liquidity-premium-mint behaviors that reproduce on the full mock
  *         market: the whitelist-transfer brick (a confirmed defect) and the griefed reinvestment leaving idle
- *         liquidity premium senior shares (documented, intended behavior). Findings 11-12 of the ledger
- *         docs/testing/agent-notes/13-spec-divergence-findings.md
+ *         liquidity premium senior shares (documented, intended behavior)
  * @dev The premium is minted as senior tranche shares to the kernel on every pre-op sync that books a senior gain
  *      (FeeAndLiquidityPremiumLogic._processFeesAndLiquidityPremium), so both behaviors ride the same mint the
  *      spec makes load-bearing
@@ -73,9 +72,9 @@ contract Test_PremiumMintDivergences_DayMarket is DayMarketTestBase {
     /**
      * @notice FINDING 12 (intended behavior): when the single-sided reinvestment fails the slippage gate, the
      *         premium mint still succeeds and the freshly minted senior shares stay idle in the kernel
-     *         (ltOwnedSeniorTrancheShares), NOT deployed into ltRawNAV and NOT forfeited. This matches CLAUDE.md:
-     *         the un-deployed premium is held by the kernel as idle liquidity premium senior shares, claimable
-     *         and never forfeited, and a tranche operation tolerates a failing reinvestment without reverting
+     *         (ltOwnedSeniorTrancheShares), NOT deployed into ltRawNAV and NOT forfeited. This matches the intended
+     *         design: the un-deployed premium is held by the kernel as idle liquidity premium senior shares,
+     *         claimable and never forfeited, and a tranche operation tolerates a failing reinvestment without reverting
      * @dev This pins the CURRENT (correct) behavior so a future change that either reverts the sync on a failed
      *      reinvestment, or silently drops the idle premium shares, fails loudly. An attacker forcing venue
      *      slippage only DEFERS deployment; the metric keeps reading under-provisioned (ltRawNAV excludes the

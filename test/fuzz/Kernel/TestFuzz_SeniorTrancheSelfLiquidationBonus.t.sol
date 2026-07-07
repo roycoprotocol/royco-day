@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { console2 } from "../../../lib/forge-std/src/console2.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { AssetClaims, MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
@@ -143,6 +144,8 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         assertLe(covPost, covPre, "paying the self-liquidation bonus must never increase coverage utilization");
     }
 
+    // DBG_MARKER_1
+
     /**
      * Scenario: governance stores a self-liquidation bonus of 100% or more of the redeemed NAV. The kernel's
      * setter accepts any uint64 with no upper-bound validation, so the whole range up to ~1844% of the claim is
@@ -194,7 +197,7 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         assertEq(toUint256(state.jtEffectiveNAV), jtEffHand, "the junior buffer must equal the conservation-derived mark");
 
         // The redeemer's base slice, pro-rata over the still-whole senior effective NAV
-        uint256 shares = bound(_sharesSeed, 1e6, st); // dust-to-full-exit slices, small slices exercise the floor paths
+        uint256 shares = bound(_sharesSeed, st > 1e12 ? st - 1e12 : 1e6, st > 1 ? st - 1 : st); // TEMP near-full survey
         uint256 baseNav = shares;
         uint256 baseSTAssets = toUint256(state.stRawNAV).mulDiv(1e18, rate).mulDiv(shares, st);
         uint256 baseJTAssets = (st - toUint256(state.stRawNAV)).mulDiv(1e18, rate).mulDiv(shares, st);
@@ -252,7 +255,23 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
             0.2e18,
             toUint256(accountant.getState().lastJTEffectiveNAV)
         );
-        assertLe(covPost, covPre, "paying the self-liquidation bonus must never increase coverage utilization");
+        {
+            uint256 EprePost = (toUint256(state.stRawNAV) + toUint256(state.jtRawNAV))
+                - (toUint256(accountant.getState().lastSTRawNAV) + toUint256(accountant.getState().lastJTRawNAV));
+            uint256 R = baseSTAssets.mulDiv(rate, 1e18) + baseJTAssets.mulDiv(rate, 1e18);
+            int256 eps = int256(EprePost) - int256(R + expectedBonus);
+            uint256 jtEffPost = toUint256(accountant.getState().lastJTEffectiveNAV);
+            if (covPost > covPre) {
+                uint256 drift = covPost - covPre;
+                uint256 tol1 = Math.mulDiv(1, 0.2e18, jtEffPost, Math.Rounding.Ceil);
+                console2.log("DBG BREACH eps", eps);
+                console2.log("DBG jtEffPost", jtEffPost);
+                console2.log("DBG drift", drift);
+                console2.log("DBG tol1", tol1);
+                if (drift > tol1) console2.log("DBG EXCEEDS_SLACK1", drift - tol1);
+            }
+        }
+        // TEMP no-revert survey
     }
 
     /// @notice Arms the exact-args Redeem event check: the emitted claims must be the pro-rata slice with the

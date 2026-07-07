@@ -521,6 +521,82 @@ contract Test_RoycoFactory is Test {
         assertEq(factory.authority(), address(am), "authority preserved");
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MARKET-ID COLLISION + YDM-TYPE WIRING
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Re-running a deployment with a marketId that already produced a market reverts on the first colliding
+    ///         CREATE3 salt (the senior tranche implementation) and unwinds the whole transaction atomically, so a
+    ///         same-names/same-block marketId collision can never half-build a second market or leave a live market
+    ///         wired to a YDM reused earlier in the same transaction. Blast radius is a clean revert, never aliasing
+    function test_RevertIf_MarketRedeployedWithSameMarketId() external {
+        _register();
+        bytes32 marketId = keccak256("dup-id");
+        IRoycoProtocolTemplate.DeploymentResult memory first = _deploy(marketId);
+        assertGt(first.kernel.code.length, 0, "first market is live");
+
+        // The deterministic component addresses are a pure function of the marketId, so a second run with the same id
+        // cannot get past the very first CREATE3 deploy. Match on the selector only: the exact (address, salt) payload
+        // is an internal detail, but the specific already-deployed error must be the one that fires.
+        bytes memory p = _encodedParams(marketId);
+        vm.prank(DEPLOYER);
+        vm.expectRevert(BaseDeploymentTemplate.MARKET_COMPONENT_ALREADY_DEPLOYED.selector);
+        factory.executeMarketDeployment(address(template), p);
+
+        // Atomicity: the failed redeploy left the first market's registry entry exactly as it was.
+        _assertGetMarketResolves(first, first.seniorTranche, "first market intact after failed redeploy");
+    }
+
+    /// @notice A StaticCurve YDM config silently ships an AdaptiveCurveYDM_V2 model instead of failing loudly. The
+    ///         template only ever deploys V2 bytecode (the target utilization is a constructor arg on that one code),
+    ///         and StaticCurveYDM.initializeYDMForMarket(uint64,uint64,uint64) shares its 4-byte selector with the V2
+    ///         initializer, so the V2 instance accepts the static init calldata and comes up initialized with no revert
+    /// @dev EXPECTED: the deployer either ships StaticCurveYDM bytecode for a StaticCurve config or reverts on the
+    ///      type mismatch. ACTUAL (pinned here): an adaptive model deploys under a static config. The reused snUSD V2
+    ///      params (0.11e18, 0.11e18, 0.31e18) are ABI-identical to StaticCurveYDMParams, so the calldata decodes
+    function test_FINDING_21_StaticCurveYdmConfig_SilentlyDeploysAdaptiveV2Model() external {
+        _register();
+
+        MarketDeploymentConfig.MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
+        cfg.ydmType = DeployScript.YDMType.StaticCurve;
+        bytes memory p = abi.encode(deployScript.buildDayParams(cfg, keccak256("static-config-ships-adaptive"), PROTOCOL_FEE_RECIPIENT, address(0)));
+
+        vm.prank(DEPLOYER);
+        IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
+
+        // The deployed model is AdaptiveCurveYDM_V2, not the configured StaticCurveYDM. The YDMs embed their target
+        // utilization as an immutable, so runtime code is target-dependent — compare against reference instances built
+        // with the SAME targets the config carries, which isolates the model type as the only difference that matters.
+        AdaptiveCurveYDM_V2 refJtV2 = new AdaptiveCurveYDM_V2(cfg.jtYdmTargetUtilizationWAD);
+        AdaptiveCurveYDM_V2 refLtV2 = new AdaptiveCurveYDM_V2(cfg.ltYdmTargetUtilizationWAD);
+        StaticCurveYDM refStatic = new StaticCurveYDM(cfg.jtYdmTargetUtilizationWAD);
+        assertEq(r.ydm.codehash, address(refJtV2).codehash, "configured StaticCurve, but ydm is AdaptiveCurveYDM_V2");
+        assertEq(r.ltYdm.codehash, address(refLtV2).codehash, "configured StaticCurve, but ltYdm is AdaptiveCurveYDM_V2");
+        // And it is NOT the StaticCurve model the config asked for.
+        assertTrue(r.ydm.codehash != address(refStatic).codehash, "ydm must not be the configured StaticCurveYDM code");
+    }
+
+    /// @notice An AdaptiveCurve_V1 YDM config fails loudly — the correct behavior the StaticCurve arm lacks. V1's
+    ///         initializeYDMForMarket(uint64,uint64) has a two-argument selector that does NOT match the V2 bytecode
+    ///         the template deploys, so initializing the V2 instance with V1 calldata hits no function and reverts,
+    ///         taking the whole deployment down. Only the selector-colliding StaticCurve config slips through silently
+    function test_RevertIf_AdaptiveV1YdmConfigSentToV2Bytecode() external {
+        _register();
+
+        MarketDeploymentConfig.MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
+        cfg.ydmType = DeployScript.YDMType.AdaptiveCurve_V1;
+        // V1 takes only (target, full), so re-encode both curves as V1 params — a two-word init blob whose selector
+        // cannot bind on the deployed V2 instance.
+        bytes memory v1Params = abi.encode(DeployScript.AdaptiveCurveYDM_V1_Params({ yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18 }));
+        cfg.ydmSpecificParams = v1Params;
+        cfg.ltYdmSpecificParams = v1Params;
+        bytes memory p = abi.encode(deployScript.buildDayParams(cfg, keccak256("v1-config-reverts"), PROTOCOL_FEE_RECIPIENT, address(0)));
+
+        vm.prank(DEPLOYER);
+        vm.expectRevert();
+        factory.executeMarketDeployment(address(template), p);
+    }
+
     // ─── internal ───
 
     function _emptyResult() internal pure returns (IRoycoProtocolTemplate.DeploymentResult memory r) {

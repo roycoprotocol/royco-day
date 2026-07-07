@@ -237,7 +237,7 @@ contract WaterfallPostOpSymbolicSpec is Test {
      * @dev Economic why: past the liquidation threshold a redeeming senior is made whole partly out of the
      *      junior buffer (the bonus is realized coverage), so the junior effective NAV must shrink by exactly
      *      the bonus and the senior effective NAV by exactly everything else. A wei of the bonus left with
-     *      juniors would double-charge the remaining seniors; a wei over would burn junior buffer that no
+     *      juniors would double-charge the remaining seniors, a wei over would burn junior buffer that no
      *      redemption consumed. The total redeemed value is derived from both raw pool deltas because the
      *      kernel may source a senior exit from either pool
      */

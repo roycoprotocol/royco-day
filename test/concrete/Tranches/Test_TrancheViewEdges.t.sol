@@ -104,10 +104,19 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
 
         // The in-kind path cannot disprove maxRedeem here: handing the idle senior shares over in kind moves no
         // raw NAV anywhere (share ownership only changes hands and the BPT leg marks zero), so the accountant's
-        // redemption shape check sees a redemption that withdrew nothing and rejects it outright
+        // redemption shape check sees a redemption that withdrew nothing and rejects it with INVALID_POST_OP_STATE.
+        // The revert is captured with a low-level call rather than vm.expectRevert because the in-kind redeem's
+        // pre-op sync retries the still-slipping premium reinvestment, whose internally-caught BptAmountOutBelowMin
+        // revert would otherwise be mistaken by the cheatcode for the expected top-level revert
         vm.prank(LT_PROVIDER);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_REDEEM));
-        liquidityTranche.redeem(balance, LT_PROVIDER, LT_PROVIDER);
+        (bool inKindSucceeded, bytes memory inKindReturn) =
+            address(liquidityTranche).call(abi.encodeWithSelector(liquidityTranche.redeem.selector, balance, LT_PROVIDER, LT_PROVIDER));
+        assertFalse(inKindSucceeded, "the in-kind redemption must revert when only the idle senior-share leg is claimable");
+        assertEq(
+            inKindReturn,
+            abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_REDEEM),
+            "the in-kind redemption must revert with the LT_REDEEM post-op shape violation"
+        );
 
         // Pre-redeem senior ledgers for the multi-asset exit: the idle slice is redeemed against the senior
         // tranche's pool of yield-bearing vault shares

@@ -36,7 +36,7 @@ import { WaterfallSyncDriver } from "../mocks/WaterfallSyncDriver.sol";
  *      effective NAVs), and the block timestamp sits past the premium payment clock so the same-block branch
  *      that queries the external YDMs is statically excluded and the waterfall is closed arithmetic
  * @dev Solver notes: the two mixed quadrants run at a tightened 1e27 NAV bound (senior gain against junior
- *      loss and vice versa stack the premium and fee mulDivs on top of both loss arms); the both-lose quadrant
+ *      loss and vice versa stack the premium and fee mulDivs on top of both loss arms), the both-lose quadrant
  *      never reaches the premium math and the both-gain quadrant never enters a loss arm, so both run at the
  *      full 1e30 suite bound
  */

@@ -17,9 +17,9 @@ import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_SpecDivergences_DayMarket
- * @notice Loud, first-class pins of every known kernel-layer divergence between production and the CLAUDE.md
- *         product spec (findings ledger docs/testing/agent-notes/13-spec-divergence-findings.md, findings 4-7)
- * @dev Each test states the exact CLAUDE.md sentence it contradicts, constructs the divergent state on the
+ * @notice Loud, first-class pins of every known kernel-layer divergence between production and the documented
+ *         product specification
+ * @dev Each test states the exact spec expectation it contradicts, constructs the divergent state on the
  *      18-decimal ERC4626 ST/JT vault, 6-decimal quote market with defaultParams, and asserts CURRENT production
  *      behavior with the spec-expected behavior documented in an adjacent comment. If a future src change makes
  *      production match the spec, the corresponding test here MUST fail — that is the alarm these pins exist to
@@ -61,12 +61,12 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
 
     /**
      * @notice FINDING 4: an ST deposit into an under-provisioned market reverts LIQUIDITY_REQUIREMENT_VIOLATED,
-     *         contradicting CLAUDE.md's "Deposits are enabled at all times" / "a senior deposit keeps its own
-     *         coverage gate, so no deposit is ever blocked on liquidity" (the two-metrics section)
-     * @dev CLAUDE.md contradicts itself: the canonical product-spec section (which CLAUDE.md says governs) states
-     *      "Each market sets a minimum percentage of liquidity required for senior tranche deposits", and
+     *         contradicting the product spec's stated intent that "deposits are enabled at all times" and that
+     *         "a senior deposit keeps its own coverage gate, so no deposit is ever blocked on liquidity"
+     * @dev The specification is internally inconsistent: its canonical product-requirements section (which
+     *      governs) states "each market sets a minimum percentage of liquidity required for senior tranche deposits", and
      *      production follows that line — Operation.ST_DEPOSIT is in the post-op liquidity requirement check
-     *      (RoycoDayAccountant.sol:332-334). SPEC-EXPECTED (two-metrics narrative): the deposit succeeds because
+     *      (RoycoDayAccountant.sol:332-334). SPEC-EXPECTED (the two-metrics design narrative): the deposit succeeds because
      *      liquidity never blocks a deposit. ACTUAL: it reverts until LT depth is restored
      * @dev Breach derivation: seeded stEffectiveNAV = 100e18 and auto-seeded ltRawNAV = 6e18, then a -20% LT
      *      venue mark (applyLTPnL scales both pool-token oracle prices by 0.8) gives ltRawNAV = 4.8e18 exactly, so
@@ -87,7 +87,7 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
         assertEq(uint8(pre.marketState), uint8(MarketState.PERPETUAL), "a liquidity breach must not move the state machine");
 
         // ACTUAL production behavior: the senior deposit is blocked on liquidity
-        // SPEC-EXPECTED (CLAUDE.md two-metrics section): the deposit succeeds and mints ~1e18 ST shares
+        // SPEC-EXPECTED (the two-metrics design narrative): the deposit succeeds and mints ~1e18 ST shares
         stJtVault.mintShares(ST_PROVIDER, stUnit);
         vm.startPrank(ST_PROVIDER);
         stJtVault.approve(address(seniorTranche), stUnit);
@@ -102,7 +102,7 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
 
     /**
      * @notice FINDING 5: once the liquidation coverage utilization is breached (forced PERPETUAL), a JT
-     *         redemption still reverts COVERAGE_REQUIREMENT_VIOLATED, contradicting CLAUDE.md's "unless the
+     *         redemption still reverts COVERAGE_REQUIREMENT_VIOLATED, contradicting the product spec's "unless the
      *         liquidation utilization has been breached, in which case all withdrawals are allowed"
      * @dev Production gives the liquidation bypass ONLY to LT redemptions (RedemptionLogic.sol:145,216 pass
      *      enforce = coverage utilization < liquidation threshold) while jtRedeem passes enforce = true
@@ -135,7 +135,7 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
         assertEq(toUint256(pre.jtCoverageImpermanentLoss), 0, "the liquidation branch must erase the coverage IL");
 
         // ACTUAL production behavior: the JT redemption is still coverage-gated during liquidation
-        // SPEC-EXPECTED (CLAUDE.md canonical spec): the redemption succeeds, all withdrawals are allowed
+        // SPEC-EXPECTED (the canonical product spec): the redemption succeeds, all withdrawals are allowed
         uint256 jtShares = juniorTranche.balanceOf(JT_PROVIDER) / 10;
         vm.prank(JT_PROVIDER);
         vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
@@ -200,9 +200,9 @@ contract Test_SpecDivergences_DayMarket is DayMarketTestBase {
     // =============================
 
     /**
-     * @notice FINDING 7: CLAUDE.md contradicts itself on FIXED_TERM deposits — the capital-realism section says
-     *         "In FIXED_TERM, deposits and redeems are disabled for every tranche" while the canonical spec
-     *         section says "Deposits are enabled at all times". Production implements neither sentence:
+     * @notice FINDING 7: the product spec contradicts itself on FIXED_TERM deposits — its capital-realism
+     *         narrative says "in FIXED_TERM, deposits and redeems are disabled for every tranche" while its
+     *         canonical requirements section says "deposits are enabled at all times". Production implements neither sentence:
      *         ST and JT deposits revert DISABLED_IN_FIXED_TERM_STATE, the in-kind LT deposit succeeds, the
      *         multi-asset LT deposit reverts with an ST leg and succeeds quote-only
      * @dev Production behavior pinned here, entrypoint by entrypoint (all five deposit paths in FIXED_TERM):
