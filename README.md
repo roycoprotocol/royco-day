@@ -50,7 +50,7 @@ A dedicated instance of the market's Yield Distribution Model (YDM), driven by l
 
 The **Factory** is a singleton contract that deploys and manages all Day markets. It is the privileged administrator of the protocol's shared access-control authority, and configures role-based permissions for every deployed market through it. Markets are deployed only through **deployment templates** the factory owner has registered and enabled, and each deployment is routed to a single enabled template.
 
-A template encodes one market recipe and atomically deploys the full market at deterministic addresses, wiring every component's roles to the factory. This covers the senior, junior, and liquidity tranches, the kernel and accountant, the risk and liquidity premium yield models, and the liquidity tranche's market-making venue, oracle, and hook. Each template's component creation code is loaded and stored on-chain once when the template is registered.
+A template encodes one market recipe and atomically deploys the full market at deterministic addresses, wiring every component's roles to the factory. This covers the senior, junior, and liquidity tranches, the kernel and accountant, the risk and liquidity premium yield models, and the liquidity tranche's market-making venue, oracle, and hook. Each template's component creation code is loaded and stored on-chain once when the template is initialized.
 
 Templates are layered for extensibility. A base template standardizes the shared component parameters and the deterministic deploy machinery. A venue template adds the specific market-making venue, its oracle, and its role bindings. A concrete template pins the kernel recipe, meaning its yield source and pricing. Supporting a new yield source, oracle, or market-making venue only takes a new concrete template registered with the factory, with no change to the factory or existing markets.
 
@@ -68,7 +68,7 @@ Tranches are ERC20Permit-enabled, pausable, and burnable, and support standard p
 
 Royco tranches are natively composable across DeFi. Senior tranches transform high-risk vault tokens into leverage-eligible collateral for lending markets, unlocking net-new capital that wasn't accessible before.
 
-Beyond lending, tranches can be paired on AMMs/CLOBs, split on Pendle for fixed or variable rate exposure, and recursively tranched into layered risk structures.
+Beyond lending, tranches can be paired on AMMs/CLOBs, split into fixed or variable rate exposure, and recursively tranched into layered risk structures.
 
 ### Kernel
 
@@ -95,11 +95,11 @@ A **YDM** takes a utilization and returns a yield share, the percentage of senio
 
 Day supports multiple YDM implementations:
 
-**Static Curve YDM**: A fixed piecewise curve that remains eternally static. The curve is defined by three anchor points: JT yield share at 0%, 90%, and 100% utilization. Higher utilization means JT earns more of the senior yield. Setting all three of these parameters at the same JT yield share results in a fixed yield share market.
+**Static Curve YDM**: A fixed piecewise curve that remains eternally static. The curve is defined by three anchor points: the yield share at 0% utilization, at the target utilization (the kink, set per instance), and at 100% utilization. Higher utilization means the pool earns more of the senior yield. Setting all three anchors at the same yield share results in a fixed yield share market.
 
 **Adaptive Curve YDM V1**: The curve shifts up or down over time based on how far utilization deviates from target. When the curve adapts, the entire shape scales proportionally: the steeper the curve, the more aggressively JT yield share changes with utilization.
 
-**Adaptive Curve YDM V2**: Similar to V1, but the entire curve translates vertically rather than scaling. The slopes remain constant because the fixed discount (reduction from target yield share at 0% utilization) and fixed premium (addition to target yield share at 100% utilization) are set at initialization. V2 also allows each market to configure its own adaptation speed.
+**Adaptive Curve YDM V2**: Similar to V1, but the entire curve translates vertically rather than scaling. The slopes remain constant because the fixed discount (reduction from target yield share at 0% utilization) and fixed premium (addition to target yield share at 100% utilization) are set at initialization.
 
 ## Market Dynamics
 
@@ -132,6 +132,8 @@ When losses occur, they are handled differently based on which tranche experienc
 Royco Day enables risk and liquidity transformation for any priceable asset.
 
 ## Extended Capabilities
+
+**Compliance Screening**: Every tranche transfer is screened against a market blacklist and a sanctions overlay, so restricted accounts cannot hold or move tranche shares. Markets can be deployed for permissioned, institutional flow without changing the core mechanism.
 
 **Depeg Protection**: Markets backed by synthetic assets use oracles that value the underlying based on actual, fundamental value of their backing rather than secondary market prices.
 
