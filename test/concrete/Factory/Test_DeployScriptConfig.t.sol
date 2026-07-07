@@ -13,6 +13,7 @@ import {
     ADMIN_ORACLE_QUOTER_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
+    ADMIN_REINVESTMENT_ROLE,
     ADMIN_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
@@ -61,8 +62,8 @@ contract Test_DeployScriptConfig is Test {
      */
     function test_GetRoleConfig_ResolvesEveryGeneratedRoleAssignment() public view {
         // 15 distinct dummy addresses, one per RoleAssignmentAddresses field (the struct's full address surface).
-        // The fee recipient deliberately carries three LP roles (ST/JT/LT), which is how 15 addresses fan out to
-        // 17 assignments.
+        // The fee recipient deliberately carries three LP roles (ST/JT/LT) and the market-ops address carries both
+        // market ops and reinvestment, which is how 15 addresses fan out to 18 assignments.
         DeployScript.RoleAssignmentAddresses memory addresses = DeployScript.RoleAssignmentAddresses({
             pauserAddress: address(0x1001),
             unpauserAddress: address(0x1002),
@@ -83,9 +84,10 @@ contract Test_DeployScriptConfig is Test {
 
         DeployScript.RoleAssignment[] memory assignments = deployScript.generateRolesAssignments(addresses);
 
-        // Independently derived count: the address surface is 15 fields, of which the fee recipient maps to the
-        // three LP roles and the other 14 map one-to-one, so 14 + 3 = 17 assignments.
-        assertEq(assignments.length, 17, "one assignment per (role, assignee) pair: 14 one-to-one + 3 LP roles on the fee recipient");
+        // Independently derived count: the address surface is 15 fields; the fee recipient maps to the three LP
+        // roles, the market-ops address maps to both market ops and reinvestment, and the other 13 map one-to-one,
+        // so 13 + 3 + 2 = 18 assignments.
+        assertEq(assignments.length, 18, "one assignment per (role, assignee) pair: 13 one-to-one + 3 LP roles on the fee recipient + reinvestment on the market-ops address");
 
         for (uint256 i; i < assignments.length; ++i) {
             uint64 role = assignments[i].role;
@@ -125,7 +127,7 @@ contract Test_DeployScriptConfig is Test {
         // The emitted role set itself, hand-listed from the deployment's operational surface (pause/unpause,
         // upgrade, sync, kernel/accountant/fee/quoter admin, LP admin + the three LP roles, guardian, deployer +
         // its admin, Balancer pool manager, market ops). Order-pinned so a silent drop or reorder is loud.
-        uint64[17] memory expectedRoles = [
+        uint64[18] memory expectedRoles = [
             ADMIN_PAUSER_ROLE,
             ADMIN_UPGRADER_ROLE,
             SYNC_ROLE,
@@ -142,7 +144,8 @@ contract Test_DeployScriptConfig is Test {
             ADMIN_UNPAUSER_ROLE,
             LT_LP_ROLE,
             ADMIN_BALANCER_POOL_MANAGER_ROLE,
-            ADMIN_MARKET_OPS_ROLE
+            ADMIN_MARKET_OPS_ROLE,
+            ADMIN_REINVESTMENT_ROLE
         ];
         for (uint256 i; i < expectedRoles.length; ++i) {
             assertEq(assignments[i].role, expectedRoles[i], "generated role set diverged from the deployment role surface");

@@ -54,13 +54,13 @@ uint256 constant MINT_DILUTION_RESIDUAL_WAD = 1e6;
 
 /// @dev The execution delay for the operational admin roles that change a live market's configuration (the
 ///      kernel, accountant, protocol fee setter, unpauser, oracle quoter, market ops, and Balancer pool manager
-///      roles). Two days is the common operational timelock.
+///      roles). It is the common operational timelock.
 uint32 constant SHORT_DELAY_SECONDS = 2 days;
 
 /// @dev The root admin's execution delay on the AccessManager, the grant delay on the consequential roles, and
-///      the target admin delay on every deployed proxy. Fourteen days is the conservative delay for changes that
+///      the target admin delay on every deployed proxy. It is the conservative delay for changes that
 ///      restructure the system.
-uint32 constant LONG_DELAY_SECONDS = 14 days;
+uint32 constant LONG_DELAY_SECONDS = 15 days;
 
 // NOTE: the deploy asserts the long delay is at least this cap, and the accountant rejects any fixed term above it, so
 // at deploy a committed user can always exit before a governance change takes effect. The reverse is not checked
@@ -70,6 +70,5 @@ uint32 constant LONG_DELAY_SECONDS = 14 days;
 // from a Day contract, enforce this there.
 
 /// @dev The maximum fixed-term duration any market may carry. The long delay must be at least this, so a
-///      governance change cannot take effect faster than a committed user can exit; ten days leaves a four-day
-///      margin under the fourteen-day long delay.
-uint32 constant MAX_FIXED_TERM_SECONDS = 10 days;
+///      governance change cannot take effect faster than a committed user can exit.
+uint32 constant MAX_FIXED_TERM_SECONDS = 14 days;

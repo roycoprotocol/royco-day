@@ -505,9 +505,9 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
     ///         short execution delay, the upgrader on the long one, and the oracle quoter carrying the long grant
     ///         delay.
     function test_delays_longDelayCalibration() public {
-        assertEq(LONG_DELAY_SECONDS, 14 days, "long delay value changed; recheck it against the maximum fixed term and the short delay");
+        assertEq(LONG_DELAY_SECONDS, 15 days, "long delay value changed; recheck it against the maximum fixed term and the short delay");
         assertEq(SHORT_DELAY_SECONDS, 2 days, "short delay value changed; recheck the roles that carry it");
-        assertEq(MAX_FIXED_TERM_SECONDS, 10 days, "maximum fixed term changed; recheck the long delay");
+        assertEq(MAX_FIXED_TERM_SECONDS, 14 days, "maximum fixed term changed; recheck the long delay");
         assertGe(LONG_DELAY_SECONDS, SHORT_DELAY_SECONDS, "long delay must cover the short delay");
         assertGe(LONG_DELAY_SECONDS, MAX_FIXED_TERM_SECONDS, "long delay must cover the maximum fixed term");
         assertGe(LONG_DELAY_SECONDS, DEPLOY_SCRIPT.getRoleConfig(ADMIN_UPGRADER_ROLE).executionDelay, "must cover the upgrader delay");
