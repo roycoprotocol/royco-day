@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 // =============================================================================
-// RolesConfiguration — canonical registry of Royco protocol role IDs.
+// RolesConfiguration — canonical registry of Royco protocol role IDs
 // =============================================================================
 
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -49,8 +49,8 @@ library ValuationLogic {
      * @notice Returns the effective net asset value (NAV) of the liquidity tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
      * @dev The effective NAV is the liquidity tranche's deployed market-making inventory (its raw NAV) plus the value of the
      *      senior tranche shares it holds from accumulated, not yet reinvested, liquidity premium payments
-     * @dev Reads the held senior-share count from storage, the value execution sees after the premium mint. The preview path uses
-     *      the overload below to inject the post-mint count that storage does not yet reflect
+     * @dev Reads the held senior-share count from storage, the value execution sees after the premium mint
+     *      The preview path uses the overload below to inject the post-mint count that storage does not yet reflect
      * @dev The senior NAV and share supply must be mutually consistent: the post-sync effective NAV against the
      *      post-carve-out-mint total supply, so the held senior shares are valued at the correct NAV per share
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
@@ -105,9 +105,10 @@ library ValuationLogic {
      * @notice Returns the number of shares that have a claim on the specified value, clamped by the protocol's max mint dilution
      * @dev The single share-conversion primitive, shared by the tranches and the kernel-side mint sizing so both resolve identical share counts
      * @dev The mint-dilution clamp: any single mint may own at most MAX_MINT_DILUTION_WAD / WAD of the POST-mint supply, leaving
-     *      pre-existing holders at least the complementary (WAD − MAX_MINT_DILUTION_WAD) / WAD sliver. The minted shares therefore
+     *      pre-existing holders at least the complementary (WAD − MAX_MINT_DILUTION_WAD) / WAD sliver
+     *      The minted shares therefore
      *      never exceed cap = ⌊supply · MAX_MINT_DILUTION_WAD / (WAD − MAX_MINT_DILUTION_WAD)⌋ (derivation:
-     *      minted·WAD ≤ MAX_MINT_DILUTION_WAD·(supply + minted) ⟺ minted·(WAD − MAX_MINT_DILUTION_WAD) ≤ supply·MAX_MINT_DILUTION_WAD).
+     *      minted·WAD ≤ MAX_MINT_DILUTION_WAD·(supply + minted) ⟺ minted·(WAD − MAX_MINT_DILUTION_WAD) ≤ supply·MAX_MINT_DILUTION_WAD)
      * @dev With no shares outstanding the conversion stays 1:1 (a bootstrap mint dilutes nobody, so the clamp is exempt)
      * @param _value The value to convert in NAV units
      * @param _totalValue The total tranche controlled value in NAV units

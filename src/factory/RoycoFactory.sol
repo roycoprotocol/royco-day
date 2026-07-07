@@ -54,9 +54,9 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
     }
 
     /**
-     * @notice Initializes the factory proxy against a pre-deployed `AccessManager`.
+     * @notice Initializes the factory proxy against a pre-deployed `AccessManager`
      * @param _roycoAccessManager Pre-deployed AM. Must already grant `ADMIN_ROLE` to this
-     *        factory's address.
+     *        factory's address
      */
     function initialize(address _roycoAccessManager) external initializer {
         require(_roycoAccessManager != address(0), ACCESS_MANAGER_CANNOT_BE_ZERO_ADDRESS());
@@ -71,7 +71,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         // Wire the factory's authority the specified access manager
         __RoycoBase_init(_roycoAccessManager);
 
-        // Bind factory-level gated selectors to their roles.
+        // Bind factory-level gated selectors to their roles
         bytes4[] memory deployerSelectors = new bytes4[](1);
         deployerSelectors[0] = IRoycoFactory.executeMarketDeployment.selector;
         am.setTargetFunctionRole(address(this), deployerSelectors, DEPLOYER_ROLE);
@@ -85,7 +85,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         adminFactorySelectors[1] = IRoycoFactory.disableTemplate.selector;
         am.setTargetFunctionRole(address(this), adminFactorySelectors, ADMIN_FACTORY_ROLE);
 
-        // Bind the factory's pause/unpause to the pauser/unpauser roles (else they default to ADMIN_ROLE).
+        // Bind the factory's pause/unpause to the pauser/unpauser roles (else they default to ADMIN_ROLE)
         bytes4[] memory pauserSelectors = new bytes4[](1);
         pauserSelectors[0] = IRoycoAuth.pause.selector;
         am.setTargetFunctionRole(address(this), pauserSelectors, ADMIN_PAUSER_ROLE);
@@ -114,7 +114,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         RoycoFactoryState storage $ = _getRoycoFactoryStorage();
         require(!$.isTemplateEnabled[_template], TEMPLATE_ALREADY_REGISTERED());
 
-        // Sanity: template was constructed pointing at this factory.
+        // Sanity: template was constructed pointing at this factory
         require(address(IBaseTemplate(_template).ROYCO_FACTORY()) == address(this), TEMPLATE_BOUND_TO_DIFFERENT_FACTORY());
 
         // Check if the template is initialized
@@ -193,11 +193,11 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         whenNotPaused
         returns (address deployed, bool alreadyDeployed)
     {
-        // Check if the contract already exists at the predicted address.
+        // Check if the contract already exists at the predicted address
         deployed = CREATE3.predictDeterministicAddress(_salt);
         if (deployed.code.length > 0) return (deployed, true);
 
-        // Deploy the contract.
+        // Deploy the contract
         return (CREATE3.deployDeterministic(_creationCode, _salt), false);
     }
 
@@ -213,11 +213,11 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         whenNotPaused
         returns (address deployed, bool alreadyDeployed)
     {
-        // Check if the proxy already exists at the predicted address.
+        // Check if the proxy already exists at the predicted address
         deployed = CREATE3.predictDeterministicAddress(_salt);
         if (deployed.code.length > 0) return (deployed, true);
 
-        // Deploy the proxy.
+        // Deploy the proxy
         bytes memory creationCode = abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(_implementation, _initData));
         deployed = CREATE3.deployDeterministic(creationCode, _salt);
         return (deployed, false);
@@ -273,9 +273,9 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         returns (address seniorTranche, address juniorTranche, address liquidityTranche, address kernel)
     {
         kernel = _getRoycoFactoryStorage().trancheToKernel[_tranche];
-        // Unknown tranche: every component resolves to zero.
+        // Unknown tranche: every component resolves to zero
         if (kernel == address(0)) return (address(0), address(0), address(0), address(0));
-        // The kernel's immutables are the single source of truth for the market's tranche set.
+        // The kernel's immutables are the single source of truth for the market's tranche set
         IRoycoDayKernel dayKernel = IRoycoDayKernel(kernel);
         return (dayKernel.SENIOR_TRANCHE(), dayKernel.JUNIOR_TRANCHE(), dayKernel.LIQUIDITY_TRANCHE(), kernel);
     }

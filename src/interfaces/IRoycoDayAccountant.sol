@@ -263,7 +263,8 @@ interface IRoycoDayAccountant {
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      * @dev The returned state's ltRawNAV and liquidityUtilizationWAD are zero placeholders: this sync does not mark the liquidity
-     *      tranche. The kernel commits the freshly marked liquidity tranche raw NAV via commitLiquidityTrancheRawNAV after minting the
+     *      tranche
+     *      The kernel commits the freshly marked liquidity tranche raw NAV via commitLiquidityTrancheRawNAV after minting the
      *      fee shares, then refreshes both fields in the state packet in memory
      */
     function preOpSyncTrancheAccounting(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external returns (SyncedAccountingState memory state);
@@ -273,7 +274,7 @@ interface IRoycoDayAccountant {
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
-     * @dev The returned state's ltRawNAV and liquidityUtilizationWAD are zero placeholders (this sync does not mark the liquidity tranche). The kernel preview refreshes them in memory
+     * @dev The returned state's ltRawNAV and liquidityUtilizationWAD are zero placeholders (this sync does not mark the liquidity tranche) — the kernel preview refreshes them in memory
      */
     function previewSyncTrancheAccounting(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external view returns (SyncedAccountingState memory state);
 
@@ -285,7 +286,7 @@ interface IRoycoDayAccountant {
      * @dev When enforcement is requested, fails fast on the coverage requirement for operations that can worsen coverage (add senior exposure or
      *      remove the junior loss-absorption buffer: ST_DEPOSIT, LT_DEPOSIT, JT_REDEEM) and on the liquidity requirement for operations that can
      *      worsen liquidity (raise the senior effective NAV or reduce the depth of the AMM or another market-making venue: ST_DEPOSIT, the multi-asset
-     *      LT_DEPOSIT, and an LT_REDEEM that pays no self-liquidation bonus). A bonus-paying LT_REDEEM is a liquidation-breach exit and is exempt.
+     *      LT_DEPOSIT, and an LT_REDEEM that pays no self-liquidation bonus) — a bonus-paying LT_REDEEM is a liquidation-breach exit and is exempt
      *      Intermediate multi-asset sub-syncs pass false, deferring enforcement to the final post-op sync that books the combined exposure
      * @param _op The operation being executed in between the pre and post operation synchronizations
      * @param _stRawNAV The post-op senior tranche's raw NAV
@@ -309,12 +310,13 @@ interface IRoycoDayAccountant {
     /**
      * @notice Commits the liquidity tranche's freshly marked raw NAV
      * @dev MUST be called by the kernel only after preOpSyncTrancheAccounting has committed the senior/junior NAVs AND the resulting
-     *      premium and protocol fee shares have been minted. This ordering is required for correctness: the fresh mark is read from the
+     *      premium and protocol fee shares have been minted — this ordering is required for correctness: the fresh mark is read from the
      *      AMM or another market-making venue oracle, whose senior leg is rate-scaled by the senior share rate (committed senior effective NAV over senior supply), so
-     *      only after the pre-op sync and its share mints does the mark reflect the final post-sync, post-mint senior state. Committing
-     *      it out of this order records a liquidity tranche raw NAV against a stale senior state
+     *      only after the pre-op sync and its share mints does the mark reflect the final post-sync, post-mint senior state
+     *      Committing it out of this order records a liquidity tranche raw NAV against a stale senior state
      * @dev Committing the liquidity tranche raw NAV here, separately from the pre-op waterfall, is what keeps it out of the P&L
-     *      attribution and out of the senior share rate provider's dependency loop. The kernel derives the resulting liquidity
+     *      attribution and out of the senior share rate provider's dependency loop
+     *      The kernel derives the resulting liquidity
      *      utilization from this mark and the synced senior effective NAV it already holds, avoiding an extra storage read
      * @param _freshLtRawNAV The liquidity tranche's freshly marked raw NAV (the oracle value of the AMM or another market-making venue)
      */

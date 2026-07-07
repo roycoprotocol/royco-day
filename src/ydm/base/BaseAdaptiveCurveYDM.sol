@@ -13,7 +13,8 @@ import { BaseYDM } from "./BaseYDM.sol";
  * @dev A general-purpose model for paying a tranche's yield as a premium to a capital pool that provides a service to that tranche
  * @dev It is parameterized purely by the utilization of that service, so the same contract prices any tranche-yield premium
  * @dev Utilization is the fraction of the capital pool's service capacity that is currently in use: the ratio of demand for the service the pool provides to the pool's capacity to supply it, scaled to WAD precision
- * @dev At zero utilization the service is unused and the capital is abundant, so it earns the least. At WAD utilization demand equals the pool's full capacity. Demand beyond capacity is reported above WAD and capped to WAD here
+ * @dev At zero utilization the service is unused and the capital is abundant, so it earns the least
+ * @dev At WAD utilization demand equals the pool's full capacity — demand beyond capacity is reported above WAD and capped to WAD here
  * @dev The premium rises with utilization so scarcer service is paid more, pulling additional capital into the pool
  * @dev The curve adapts its yield share at the kink (Y_T) up or down based on the market's relative delta from the target utilization over time
  * @dev This base owns the model-agnostic machinery: the exponential, time- and distance-weighted adaptation of Y_T (bounded and overflow-safe), the trapezoidal time-averaging of Y_T over the elapsed period, and the read/adapt/commit flow of yieldShare and previewYieldShare
@@ -43,7 +44,7 @@ abstract contract BaseAdaptiveCurveYDM is BaseYDM {
 
     /**
      * @notice Sets the per-instance target utilization (the kink), the bounds on the adaptive yield share at target, and the boundary adaptation speed
-     * @dev Must be greater than zero so the curve regions are well defined when utilization is zero. Concrete models may further constrain it
+     * @dev Must be greater than zero so the curve regions are well defined when utilization is zero — concrete models may further constrain it
      * @param _targetUtilizationWAD The target utilization (the kink) for this model, in the range (0, 100%], scaled to WAD precision
      * @param _minYieldShareAtTargetWAD The minimum yield share at target utilization, in the range (0, _maxYieldShareAtTargetWAD], scaled to WAD precision
      * @param _maxYieldShareAtTargetWAD The maximum yield share at target utilization, in the range [_minYieldShareAtTargetWAD, WAD], scaled to WAD precision
@@ -86,7 +87,7 @@ abstract contract BaseAdaptiveCurveYDM is BaseYDM {
     /**
      * @notice Computes the yield share for a market at the given utilization, applying any pending adaptation
      * @dev Uses trapezoidal approximation to compute the average continuously adapting yield share for more accurate time-weighted results
-     * @param _marketState The state of this Royco market (perpetual or fixed term). The curve only adapts in PERPETUAL
+     * @param _marketState The state of this Royco market (perpetual or fixed term) — the curve only adapts in PERPETUAL
      * @param _utilizationWAD The utilization of the service the capital pool provides, scaled to WAD precision, bounded to WAD here
      * @return yieldShareWAD The share of the tranche's yield paid to the capital pool as a premium, scaled to WAD precision
      *                       It is implied that (WAD - yieldShareWAD) is retained by the paying tranche, excluding any protocol fees

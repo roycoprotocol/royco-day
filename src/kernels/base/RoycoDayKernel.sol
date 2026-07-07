@@ -20,7 +20,8 @@ import { RedemptionLogic } from "../../libraries/logic/RedemptionLogic.sol";
  * @author Ankur Dubey, Shivaansh Kapoor
  * @notice Abstract contract serving as the base for all Royco kernel implementations
  * @dev Provides the foundational logic for kernel contracts including pre and post operation NAV reconciliation, coverage enforcement logic,
- *      and base wiring for tranche synchronization. All concrete kernel implementations should inherit from the Royco Kernel.
+ *      and base wiring for tranche synchronization
+ *      All concrete kernel implementations should inherit from the Royco Kernel
  */
 abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardTransient {
     /// @dev Storage slot for RoycoDayKernelState using ERC-7201 pattern
@@ -88,7 +89,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         _;
     }
 
-    /// @dev Initializes the quoter cache at the start of the call. No teardown is needed since the transient cache auto-clears at transaction end
+    /// @dev Initializes the quoter cache at the start of the call — no teardown is needed since the transient cache auto-clears at transaction end
     /// @dev Should be placed on all functions that use the quoter cache
     modifier withQuoterCache() {
         _initializeQuoterCache();

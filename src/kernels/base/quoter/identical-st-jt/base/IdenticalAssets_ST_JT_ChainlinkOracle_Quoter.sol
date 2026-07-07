@@ -186,7 +186,8 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
 
     /**
      * @notice Sets the new L2 sequencer uptime feed and grace period
-     * @dev A null sequencer uptime feed disables the L2 sequencer check. When a feed is set, the grace period must be a positive
+     * @dev A null sequencer uptime feed disables the L2 sequencer check
+     *      When a feed is set, the grace period must be a positive
      *      duration (mirroring the treatment of the staleness threshold for the price feed)
      * @param _sequencerUptimeFeed The new L2 sequencer uptime feed (set to the null address to disable the check)
      * @param _gracePeriodSeconds The new grace period seconds
