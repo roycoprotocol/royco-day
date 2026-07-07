@@ -995,11 +995,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /// @notice Blacklists `_account` on the market's shared blacklist via the AccessManager admin.
     /// @dev The blacklist's restricted selectors are unbound, so they resolve to the AccessManager ADMIN_ROLE holder.
     function _blacklist(address _account) internal {
-        (bool ownerIsAdmin,) = ACCESS_MANAGER.hasRole(0, OWNER_ADDRESS);
-        address admin = ownerIsAdmin ? OWNER_ADDRESS : 0x7c405bbD131e42af506d14e752f2e59B19D49997;
         address[] memory accounts = new address[](1);
         accounts[0] = _account;
-        vm.prank(admin);
+        // The blacklist admin surface is gated by ADMIN_BLACKLIST_ROLE, granted to the market-ops admin.
+        vm.prank(KERNEL_ADMIN_ADDRESS);
         BLACKLIST.blacklistAccounts(accounts);
     }
 
