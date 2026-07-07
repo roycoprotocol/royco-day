@@ -135,29 +135,6 @@ library TrancheClaimsLogic {
     }
 
     /**
-     * @notice Scales the claims on ST and JT assets of a tranche by a given NAV ratio
-     * @param _claims The claims on ST and JT assets of the tranche
-     * @param _navNumerator The NAV to use for the numerator
-     * @param _navDenominator The NAV to use for the denominator
-     * @return scaledClaims The scaled claims on ST and JT assets of the tranche
-     */
-    function _scaleAssetClaims(
-        AssetClaims memory _claims,
-        NAV_UNIT _navNumerator,
-        NAV_UNIT _navDenominator
-    )
-        internal
-        pure
-        returns (AssetClaims memory scaledClaims)
-    {
-        scaledClaims.nav = _claims.nav.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
-        scaledClaims.stAssets = _claims.stAssets.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
-        scaledClaims.jtAssets = _claims.jtAssets.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
-        scaledClaims.ltAssets = _claims.ltAssets.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
-        scaledClaims.stShares = _claims.stShares.mulDiv(_navNumerator, _navDenominator, Math.Rounding.Floor);
-    }
-
-    /**
      * @notice Decomposes the senior and junior tranche NAVs into self-backed and cross-tranche NAV claims
      * @param _state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      * @return stClaimOnSTRawNAV The amount of ST's effective NAV that is backed by ST's own raw NAV

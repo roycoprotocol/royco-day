@@ -9,6 +9,8 @@ import { IVaultErrors } from "../../lib/balancer-v3-monorepo/pkg/interfaces/cont
  * @notice Thin ERC20 test mock for a Balancer Pool Token, delegating every balance read and move to the vault's ledger
  * @dev Mirrors BalancerPoolToken exactly for the surface the kernel touches, the kernel constructor calls BalancerPoolToken(ltAsset).getVault()
  * @dev All accounting lives in MockBalancerVault, this contract only forwards and emits the ERC20 events on the vault's instruction
+ * @dev Fidelity gap vs the real BalancerPoolToken: no ERC20Permit/EIP-712 surface and no rate-getter, neither of
+ *      which the kernel or tranches touch
  */
 contract MockBPT {
     /// @notice Emitted on every balance-moving operation, mirroring the ERC20 standard

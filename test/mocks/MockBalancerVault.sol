@@ -25,6 +25,8 @@ import { MockBPT } from "./MockBPT.sol";
  *      the real vault's eth_call-only gate because kernel previews self-call quote mid-transaction in tests
  * @dev The debt/credit session ledger mirrors the real vault, every delta opened by addLiquidity, removeLiquidity, and sendTo must be
  *      closed by settle or sendTo before unlock returns, else BalanceNotSettled
+ * @dev The complete fidelity table (mirrored semantics vs deliberate deltas such as linear fair-value add pricing,
+ *      no swap surface, and no hook layer) lives in test/mocks/README.md
  */
 contract MockBalancerVault {
     using Math for uint256;
@@ -166,7 +168,7 @@ contract MockBalancerVault {
     }
 
     /// @notice Returns the pool token allowance from the vault ledger
-    /// @dev Mirrors the real ERC20MultiToken carve-out, an owner can spend anything without approval, so owner == spender reads max
+    /// @dev Mirrors the real ERC20MultiToken exemption, an owner can spend anything without approval, so owner == spender reads max
     function allowance(address _token, address _owner, address _spender) external view returns (uint256) {
         if (_owner == _spender) return type(uint256).max;
         return _bptAllowances[_token][_owner][_spender];
@@ -186,7 +188,7 @@ contract MockBalancerVault {
     }
 
     /// @notice Moves pool tokens using the spender's allowance on behalf of the calling pool token contract
-    /// @dev Mirrors the real ERC20MultiToken carve-out, the owner spends without approval, so _from == _spender skips the allowance check
+    /// @dev Mirrors the real ERC20MultiToken exemption, the owner spends without approval, so _from == _spender skips the allowance check
     function transferFrom(address _spender, address _from, address _to, uint256 _amount) external returns (bool) {
         uint256 currentAllowance = _from == _spender ? type(uint256).max : _bptAllowances[msg.sender][_from][_spender];
         if (currentAllowance != type(uint256).max) {

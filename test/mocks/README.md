@@ -14,7 +14,7 @@ which behaviors would differ on a fork.
 | UNBALANCED add semantics | `maxAmountsIn` treated as exact amounts in, `BptAmountOutBelowMin(actual, min)` on a shorted mint | Same, same error shape |
 | PROPORTIONAL remove semantics | `maxBptAmountIn` exact, floor-rounded constituent claims, `AmountOutBelowMin(token, actual, min)` | Same, same error shape |
 | Minimum pool supply | `_POOL_MINIMUM_TOTAL_SUPPLY = 1e6` minted to `address(0)` at pool initialization (`ERC20MultiToken._mintMinimumSupplyReserve`), and any mint or burn leaving `totalSupply < 1e6` reverts `PoolTotalSupplyTooLow(newTotalSupply)` | Same: the first `mintPoolTokensTo` for a pool mints the 1e6 dead reserve in addition to the requested amount, and `_mintBpt` / `_burnBpt` enforce the floor with the imported `IERC20MultiTokenErrors.PoolTotalSupplyTooLow` |
-| Owner-spends-freely allowance | `_allowance(pool, owner, spender)` returns `type(uint256).max` when `owner == spender` ("Owner can spend anything without approval"), so `transferFrom` by the owner needs no approval | Same carve-out in `allowance` and `transferFrom` |
+| Owner-spends-freely allowance | `_allowance(pool, owner, spender)` returns `type(uint256).max` when `owner == spender` ("Owner can spend anything without approval"), so `transferFrom` by the owner needs no approval | Same exemption in `allowance` and `transferFrom` |
 | Token registration order | Tokens registered sorted ascending by address, so the senior tranche share is NOT guaranteed index 0 | The fixture registers `[min(st, quote), max(st, quote)]`; the mock stores and reports whatever order it was given |
 | Rate-scaled leg pricing | The E-CLP prices a rate-scaled token through `IRateProvider.getRate` read live on every pool operation, and the E-CLP oracle values that leg through the same provider | `setTokenRateProvider(token, provider)` on both the vault and the oracle; the fixture wires the kernel (the production rate provider) for the senior tranche share at deployment, so a post-sync rate refresh reaches the very next add/remove and the TVL mark exactly like production, and the senior leg can never read the raw ST-asset mark |
 
@@ -33,9 +33,9 @@ which behaviors would differ on a fork.
 ## Conventions
 
 - `mintPoolTokensTo` token amounts are positional in the pool's REGISTRATION order (sorted by
-  address). Use `TrancheFixture.stPoolTokenIndex` to place a senior or quote leg, never a literal
+  address). Use `DayMarketTestBase.stPoolTokenIndex` to place a senior or quote leg, never a literal
   index.
-- The first `mintPoolTokensTo` for a pool mints the 1e6 dead reserve. `TrancheFixture`
+- The first `mintPoolTokensTo` for a pool mints the 1e6 dead reserve. `DayMarketTestBase`
   initializes every market's pool with a genesis seed whose value exactly backs the dead shares
   (`_initializePoolMinimumSupply`), so NAV-per-BPT starts at exactly 1.0 and hand-derived marks
   stay wei-exact while the minimum-supply semantics stay real.

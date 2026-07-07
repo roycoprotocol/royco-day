@@ -12,6 +12,9 @@ import { MarketState } from "../../src/libraries/Types.sol";
  *      then the per-accountant pinned share, then the global default share
  * @dev previewYieldShare is a STATICCALL from the accountant, so preview invocations cannot be recorded on-chain, only mutating
  *      calls are counted, use vm.expectCall to observe previews
+ * @dev Fidelity gaps vs the production YDMs: initializeYDMForMarket accepts any curve without the monotonicity and
+ *      nonzero-target validation StaticCurveYDM enforces (INVALID_YDM_INITIALIZATION), is freely re-callable, and the
+ *      output is a pinned constant with no utilization dependence or adaptation
  */
 contract MockYDM is IYDM {
     /// @dev A per-accountant pinned yield share and whether it is set, so a pinned zero is distinguishable from unset

@@ -104,11 +104,15 @@ library AccountingSyncLogic {
             // Update the simulated post-mint ST shares owned by LT
             uint256 ltOwnedSeniorTrancheShares = $.ltOwnedSeniorTrancheShares + liquidityPremiumShares;
             claims.stShares = ltOwnedSeniorTrancheShares;
-            NAV_UNIT ltEffectiveNAV =
-                ValuationLogic._getLiquidityTrancheEffectiveNAV($, state.stEffectiveNAV, stTotalSupplyAfterMints, ltOwnedSeniorTrancheShares);
-            uint256 ltTotalSupply = IERC20(_immutables.liquidityTranche).totalSupply();
-            totalTrancheShares = ltTotalSupply
-                + ValuationLogic._convertToShares(state.ltProtocolFee, (ltEffectiveNAV - state.ltProtocolFee), ltTotalSupply, Math.Rounding.Floor);
+            totalTrancheShares = IERC20(_immutables.liquidityTranche).totalSupply();
+            totalTrancheShares = totalTrancheShares
+                + ValuationLogic._convertToShares(
+                    state.ltProtocolFee,
+                    (ValuationLogic._getLiquidityTrancheEffectiveNAV($, state.stEffectiveNAV, stTotalSupplyAfterMints, ltOwnedSeniorTrancheShares)
+                            - state.ltProtocolFee),
+                    totalTrancheShares,
+                    Math.Rounding.Floor
+                );
         }
     }
 

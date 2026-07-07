@@ -97,7 +97,7 @@ library FeeAndLiquidityPremiumLogic {
         returns (uint256 liquidityPremiumShares, uint256 stProtocolFeeShares, uint256 stTotalSupplyAfterMints)
     {
         // The pre-existing senior shares retain the senior effective NAV net of the premium and fee
-        // NOTE: The waterfall enforces that (premium + fee) <= senior effective NAV, so the subtraction never underflows
+        // NOTE: The waterfall enforces that the ST effective NAV is inclusive of the LT premium and ST fees, so the subtraction never underflows
         NAV_UNIT retainedSeniorNAV = (_state.stEffectiveNAV - _state.ltLiquidityPremium - _state.stProtocolFee);
 
         // Convert each carve-out into senior shares against the retained NAV over the pre-sync supply (the zero-NAV boundary is handled in _convertToShares)

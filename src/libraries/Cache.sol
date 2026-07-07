@@ -61,15 +61,6 @@ library Cache {
     }
 
     /**
-     * @notice Clears the cached value for the specified key for the remainder of the transaction
-     * @dev Resets the slot to zero (clearing the populated marker) so a subsequent read misses, as if the key were never written this transaction
-     * @param _key The key in this cache to clear
-     */
-    function _clear(CacheKey _key) internal {
-        _getTransientStorageSlot(_key).asUint256().tstore(0);
-    }
-
-    /**
      * @notice Returns the transient slot holding the cached value for the specified cache key
      * @dev Offsets the cache base slot by the key's ordinal. The reserved 256-slot ERC-7201 window guarantees keys never collide
      * @param _key The key in this cache to derive the transient storage slot for

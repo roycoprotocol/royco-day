@@ -90,7 +90,6 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @inheritdoc IRoycoFactory
-
     function registerTemplate(address _template) external override(IRoycoFactory) whenNotPaused restricted {
         require(_template != address(0), TEMPLATE_CANNOT_BE_ZERO_ADDRESS());
 

@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { DayMarketInvariants } from "../DayMarketInvariants.t.sol";
+import { Invariant_DayMarket } from "../Invariant_DayMarket.t.sol";
 import { DayMarketHandler } from "../handlers/DayMarketHandler.sol";
 
 /**
- * @title WeightedModeInvariants
+ * @title WeightProfileBase
  * @notice Shared base for the market-regime invariant profiles, same handler and invariants as the default
  *         suite, different op weights so each run lingers in one regime instead of averaging across all of them
  * @dev The default suite's mixed weighting visits every regime briefly. These profiles re-weight the same
  *      handler selectors so the fuzzer spends a whole run inside one regime (steady flows, sustained stress,
  *      or the liquidation wind-down), which is where regime-specific bugs hide from a mixed schedule
  */
-abstract contract WeightedModeInvariants is DayMarketInvariants {
+abstract contract WeightProfileBase is Invariant_DayMarket {
     function setUp() public override {
         handler = _deployHandler();
         handler.init();
@@ -25,14 +25,14 @@ abstract contract WeightedModeInvariants is DayMarketInvariants {
 }
 
 /**
- * @title CalmMarketInvariants
+ * @title Invariant_CalmMarket
  * @notice A healthy, flow-dominated market: deposits, redemptions, reinvestments, and time passing dominate,
  *         with only occasional small rate moves and a clean venue throughout
  * @dev This regime maximizes successful executions of every production flow (including both multi-asset LT
- *      flows and the premium mint-and-reinvest loop), so share pricing, claim scaling, and the premium
- *      carve-outs get the deepest coverage of states where the gates are far from binding
+ *      flows and the premium mint-and-reinvest loop), so share pricing, claim scaling, and the fee and
+ *      liquidity premium share mint get the deepest coverage of states where the gates are far from binding
  */
-contract CalmMarketInvariants is WeightedModeInvariants {
+contract Invariant_CalmMarket is WeightProfileBase {
     function _modeSelectors() internal pure override returns (bytes4[] memory sels) {
         bytes4[24] memory weighted = [
             DayMarketHandler.op_stDeposit.selector,
@@ -68,14 +68,15 @@ contract CalmMarketInvariants is WeightedModeInvariants {
 }
 
 /**
- * @title StressedMarketInvariants
+ * @title Invariant_StressedMarket
  * @notice A market under sustained stress: rate moves on every feed dominate, the venue's slippage flaps so
- *         premium repeatedly stages and deploys, and external pool activity drifts the composition
- * @dev This regime concentrates on the waterfall's loss and recovery arms, the coverage-loss ledger, the
- *      staged-premium buffer under a hostile venue, and pool marks that move underneath the liquidity gate,
- *      while a thin stream of flows keeps every gate prediction exercised against the shifting state
+ *         the premium repeatedly sits idle and then deploys, and external pool activity drifts the composition
+ * @dev This regime concentrates on the tranche accounting sync's loss and recovery arms, the
+ *      jtCoverageImpermanentLoss ledger, the idle liquidity premium senior shares under a hostile venue,
+ *      and pool marks that move underneath the liquidity gate, while a thin stream of flows keeps every
+ *      gate prediction exercised against the shifting state
  */
-contract StressedMarketInvariants is WeightedModeInvariants {
+contract Invariant_StressedMarket is WeightProfileBase {
     function _modeSelectors() internal pure override returns (bytes4[] memory sels) {
         bytes4[25] memory weighted = [
             DayMarketHandler.op_stPnL.selector,
@@ -112,14 +113,14 @@ contract StressedMarketInvariants is WeightedModeInvariants {
 }
 
 /**
- * @title LiquidationMarketInvariants
+ * @title Invariant_LiquidationMarket
  * @notice A market repeatedly driven to and past the liquidation coverage threshold, then wound down and
  *         recapitalized: closed-form losses to the threshold, full exits, and heavy redemption pressure
  * @dev This regime concentrates on the breached-coverage regime the default mix only touches: the liquidity
- *      gate standing down in liquidation, the senior self-liquidation exit bonus, the coverage-loss erasure
- *      on forced-perpetual transitions, zero-supply edges after full exits, and junior recapitalization
+ *      gate standing down in liquidation, the senior tranche self-liquidation bonus, the coverage-loss
+ *      erasure on forced-perpetual transitions, zero-supply edges after full exits, and junior recapitalization
  */
-contract LiquidationMarketInvariants is WeightedModeInvariants {
+contract Invariant_LiquidationMarket is WeightProfileBase {
     function _modeSelectors() internal pure override returns (bytes4[] memory sels) {
         bytes4[22] memory weighted = [
             DayMarketHandler.aimed_loseUntilLiquidation.selector,

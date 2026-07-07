@@ -5,7 +5,8 @@ pragma solidity ^0.8.28;
  * @title MockBehaviors
  * @notice Shared token behavior flag constants for the configurable test mocks
  * @dev OR-able bitmap flags consumed by MockERC20C.setBehaviors, BEHAVIOR_NONE is a fully standard ERC20
- * @dev Single source of truth for mocks and fixtures, mirroring the flag values declared in test/scaffold/TrancheFixture.sol
+ * @dev Single source of truth for the flag values, consumed by test/mocks/MockERC20C.sol and the token
+ *      shapes in test/utils/TokenConfigs.sol
  */
 library MockBehaviors {
     /// @dev No non-standard behavior, a fully standard ERC20

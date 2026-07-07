@@ -206,7 +206,9 @@ contract ValuationConversionSymbolicSpec is Test {
      *         overflow. Provable: the bind test's intermediate is at most value; a bind returns
      *         cap <= 2^128 * (WAD − ε) / ε < 2^256; and a no-bind fair mint is <= cap so its mulDiv reduction
      *         fits. (The residual cliff begins only past supply ~2^256 * ε / (WAD − ε) ≈ 1.158e65, far above
-     *         this domain — pinned separately by test_FINDING_11.)
+     *         this domain — pinned separately by
+     *      test_FINDING_11_mintDilutionClamp_residualOverflowCliff in
+     *      test/concrete/Findings/Test_SpecDivergences.t.sol.)
      */
     function check_clampNeverRevertsOnExtendedDomain(uint256 value, uint256 totalValue, uint256 totalSupply) external view {
         vm.assume(totalSupply <= 2 ** 128);

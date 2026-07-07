@@ -12,6 +12,9 @@ import { WAD, WAD_DECIMALS } from "../../src/libraries/Constants.sol";
  * @notice ERC4626-shaped test vault over a MockERC20C underlying, implementing only what the identical-shares quoter family touches
  * @dev The rate (assets per share, WAD-normalized) moves ONLY via setRate and accrue, never on its own, so PnL injection is an explicit test action
  * @dev Satisfies the quoter identity, convertToAssets(10 ** (18 + shareDecimals - underlyingDecimals)) == the intended WAD tranche-unit to base-asset rate
+ * @dev Fidelity gaps vs a real ERC4626 vault: no preview/max surface and no Deposit/Withdraw events (the quoters
+ *      never call them), the rate is a pinned knob rather than a balance-derived value, and mintShares mints
+ *      without pulling underlying so redeeming free-minted shares requires funding the vault separately
  */
 contract MockERC4626C {
     using Math for uint256;
@@ -67,7 +70,7 @@ contract MockERC4626C {
 
     /**
      * @notice Deploys the mock vault share token over the specified underlying
-     * @param _underlying The underlying asset (a MockERC20C in the fixture cells)
+     * @param _underlying The underlying asset (a MockERC20C in the fixture's token shapes)
      * @param _shareName The share token name
      * @param _shareSymbol The share token symbol
      * @param _shareDecimals The share token decimals

@@ -8,6 +8,8 @@ import { AggregatorV3Interface } from "../../src/interfaces/external/chainlink/A
  * @notice Chainlink-shaped aggregator test mock serving as both the price feed and the L2 sequencer-uptime feed
  * @dev HARD RULE, updatedAt is NEVER auto-refreshed, freshness and price are independent knobs so warping time genuinely crosses the staleness gate
  * @dev The constructor stamps the initial round once, after that every field moves only through its setter
+ * @dev Fidelity gap vs a real aggregator: there is no round history, getRoundData ignores the requested round id and
+ *      returns the single stored round (the quoters under test only read latestRoundData)
  */
 contract MockAggregatorV3 is AggregatorV3Interface {
     /// @notice Thrown by both round-data getters when revert mode is armed

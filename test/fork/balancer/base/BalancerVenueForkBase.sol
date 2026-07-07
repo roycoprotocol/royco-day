@@ -18,19 +18,19 @@ import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from ".
 import {
     IPermit2Like,
     Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest
-} from "../../../kernels/Identical_ERC4626_Chainlink_BalancerV3_LT/base/Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest.sol";
+} from "../../kernels/Identical_ERC4626_Chainlink_BalancerV3_LT/base/Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest.sol";
 
 /**
  * @title BalancerVenueForkBase
- * @notice Shared scaffolding (NO tests) for the deep Balancer-venue fork batteries: external actors that trade
+ * @notice Shared scaffolding (NO tests) for the deep Balancer-venue fork suites: external actors that trade
  *         and LP through Balancer's canonical V3 Router, pool composition/price/TVL readers, swap-capacity
- *         probes and skew builders, a liquidity-gate driver, and the derived-bound helpers the batteries
+ *         probes and skew builders, a liquidity-gate driver, and the derived-bound helpers the tests
  *         assert against. Everything runs on the real forked Vault + Gyro E-CLP pool + E-CLP LP oracle the
  *         deploy template ships — nothing here touches a mock.
- * @dev Transient-cache discipline (testing-strategy fork plan): foundry executes a whole test as ONE
+ * @dev Transient-cache discipline: foundry executes a whole test as ONE
  *      transaction, so the quoter's transient `ST_SHARE_RATE` cache persists across helper calls. `getRate()`
  *      reads taken BEFORE any kernel op/sync in a test are cache-miss (fresh preview) reads; any read AFTER a
- *      sync observes the frozen cached mark of that sync. Each battery test states which regime it reads under.
+ *      sync observes the frozen cached mark of that sync. Each test states which regime it reads under.
  */
 abstract contract BalancerVenueForkBase is Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest {
     // ═══════════════════════════════════════════════════════════════════════════
@@ -341,12 +341,12 @@ abstract contract BalancerVenueForkBase is Identical_ERC4626_Chainlink_BalancerV
 
     /**
      * @notice Enables the LT overlay with a `minLiquidity` that pins the committed liquidity utilization at
-     *         `_targetUtilWAD` against the current real pool depth (the deployed market ships minLiquidity 0).
+     *         `_targetUtilizationWAD` against the current real pool depth (the deployed market ships minLiquidity 0).
      * @dev Syncs first so the requirement derivation reads a fresh committed checkpoint.
      */
-    function _driveLiqUtilTo(uint256 _targetUtilWAD) internal {
+    function _driveLiquidityUtilizationTo(uint256 _targetUtilizationWAD) internal {
         _sync();
-        _enableLTOverlay(0.1e18, 0.5e18, _minLiquidityForTargetUtil(_targetUtilWAD));
+        _enableLTOverlay(0.1e18, 0.5e18, _minLiquidityForTargetUtilization(_targetUtilizationWAD));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
