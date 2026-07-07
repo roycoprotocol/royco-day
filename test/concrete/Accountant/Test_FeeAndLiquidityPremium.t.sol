@@ -341,18 +341,21 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     }
 
     /*//////////////////////////////////////////////////////////////////////
-            ZERO-BPT-SLICE LT REDEMPTION (SPEC DIVERGENCE PIN)
+                ZERO-BPT-SLICE LT REDEMPTION (FINDING PIN)
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * FINDING 3 (ledger: docs/testing/agent-notes/13-spec-divergence-findings.md): an
-     * in-kind LT redemption whose BPT slice floors to zero NAV while the idle-share slice is positive presents
-     * the accountant with deltaLT == 0 and totalSTAndJTRedemptionNAV == 0 (transferring idle ST shares moves no
-     * raw NAV), which fails the LT_REDEEM op-shape require at RoycoDayAccountant.sol:263 regardless of the
-     * enforcement flag.
-     * Spec-expected value: the redemption SUCCEEDS and the redeemer receives its pro-rata idle ST shares
-     * (CLAUDE.md: "If a user redeems LT shares while idle ST shares still sit in the LT, those ST shares are
-     * sent directly to them"). Pinned here as the current (diverging) revert
+     * FINDING 3: an in-kind LT redemption whose proportional BPT slice floors to zero NAV while the idle
+     * premium ST-share slice is positive still reverts. Handing idle ST shares to the redeemer moves no raw
+     * NAV — only share ownership shifts, no assets leave the vault — so the accountant sees deltaLTRawNAV == 0
+     * AND totalSTAndJTRedemptionNAV == 0, and the LT_REDEEM op-shape require (RoycoDayAccountant.sol:263)
+     * rejects the operation regardless of the enforcement flag. The zero-BPT-delta shape is admitted only when
+     * the redemption also unwinds raw value (positive total, the leg pinned by
+     * test_PostOp_LTRedeem_zeroLTDeltaWithPositiveTotalPasses in Test_PostOpSync_Accountant), so the pure
+     * idle-share hand-off remains blocked.
+     * Intended behavior: staged premium is claimable, not forfeited — a redeemer whose BPT slice floors to
+     * zero should still succeed and receive its pro-rata idle ST shares directly, so no premium is stranded.
+     * Pinned here as the current (diverging) revert
      */
     function test_FINDING_3_ltRedeemZeroBPTSliceWithIdleShares_revertsInvalidPostOpState() public {
         _seedSymmetric(1000e18, 200e18, 100e18);

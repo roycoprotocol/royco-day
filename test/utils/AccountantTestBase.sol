@@ -11,6 +11,7 @@ import { toNAVUnits, toUint256 } from "../../src/libraries/Units.sol";
 import { MockAccountantKernel } from "../mocks/MockAccountantKernel.sol";
 import { MockRecordingYDM } from "../mocks/MockRecordingYDM.sol";
 import { UninitializedERC1967Proxy } from "../mocks/UninitializedERC1967Proxy.sol";
+import { RoycoTestMath } from "./RoycoTestMath.sol";
 
 /**
  * @title AccountantTestBase
@@ -364,15 +365,13 @@ abstract contract AccountantTestBase is Test {
         }
     }
 
-    /// @dev Ceiling division of a raw product, the test-local mirror for the ceil-rounded utilization formulas
-    function _ceilDiv(uint256 _num, uint256 _den) internal pure returns (uint256) {
-        return _num == 0 ? 0 : ((_num - 1) / _den) + 1;
-    }
-
     /**
-     * @dev Independent mirror of the spec coverage utilization formula:
+     * @dev Independent coverage utilization expectation:
      * ceil((stRawNAV + (coinvested ? jtRawNAV : 0)) * minCoverage / jtEffectiveNAV), 0 when the minimum coverage or the
      * exposure is zero, uint256 max when the junior buffer is zero against live exposure
+     * @dev Forwards to the suite's single utilization mirror (RoycoTestMath, 512-bit mulDiv) so every caller
+     * shares one overflow surface, a raw-multiply duplicate that overflowed at exposure x minCoverage >= 2^256
+     * used to live here and was deleted in favor of this forward
      */
     function _specCoverageUtilization(
         uint256 _stRaw,
@@ -385,21 +384,18 @@ abstract contract AccountantTestBase is Test {
         pure
         returns (uint256)
     {
-        uint256 exposure = _stRaw + (_coinvested ? _jtRaw : 0);
-        if (_minCoverageWAD == 0 || exposure == 0) return 0;
-        if (_jtEff == 0) return type(uint256).max;
-        return _ceilDiv(exposure * _minCoverageWAD, _jtEff);
+        return RoycoTestMath.computeCoverageUtilization(_stRaw, _jtRaw, _coinvested, _minCoverageWAD, _jtEff);
     }
 
     /**
-     * @dev Independent mirror of the spec liquidity utilization formula:
+     * @dev Independent liquidity utilization expectation:
      * ceil(stEffectiveNAV * minLiquidity / ltRawNAV), 0 when the senior effective NAV or the minimum liquidity is zero,
      * uint256 max when the market-making inventory is zero against a live requirement
+     * @dev Forwards to the suite's single utilization mirror (RoycoTestMath, 512-bit mulDiv), see
+     * _specCoverageUtilization for why the raw-multiply duplicate was deleted
      */
     function _specLiquidityUtilization(uint256 _stEff, uint256 _minLiquidityWAD, uint256 _ltRaw) internal pure returns (uint256) {
-        if (_stEff == 0 || _minLiquidityWAD == 0) return 0;
-        if (_ltRaw == 0) return type(uint256).max;
-        return _ceilDiv(_stEff * _minLiquidityWAD, _ltRaw);
+        return RoycoTestMath.computeLiquidityUtilization(_stEff, _minLiquidityWAD, _ltRaw);
     }
 
     /**

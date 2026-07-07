@@ -193,7 +193,10 @@ library BalancerV3VenueLogic {
                 )
             );
         // On a breached gate (or any add revert) the premium shares remain idle: no state mutated here, the inner frame rolled back
-        if (!reinvestmentSucceeded) return;
+        if (!reinvestmentSucceeded) {
+            emit IRoycoDayKernel.LiquidityPremiumReinvestmentFailed(stSharesToReinvest, minLTAssetsOut, callbackReturnData);
+            return;
+        }
 
         // Decode the BPT minted from the single-sided provision
         TRANCHE_UNIT ltAssetsMinted;

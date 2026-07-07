@@ -5,27 +5,12 @@ import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/prox
 import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoBlacklist } from "../../../src/interfaces/IRoycoBlacklist.sol";
-import { ISanctionsList } from "../../../src/interfaces/external/chainalysis/ISanctionsList.sol";
-import { toUint256 } from "../../../src/libraries/Units.sol";
+import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { MockRevertingSanctionsList } from "../../mocks/MockRevertingSanctionsList.sol";
+import { MockSanctionsList } from "../../mocks/MockSanctionsList.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
-
-/// @notice Minimal Chainalysis-shaped sanctions list with a settable designation per address
-contract SanctionsListStub is ISanctionsList {
-    /// @dev The sanctions designations this stub reports
-    mapping(address account => bool sanctioned) private _sanctioned;
-
-    /// @notice Flags or clears an address's sanctions designation
-    function setSanctioned(address _account, bool _isSanctioned) external {
-        _sanctioned[_account] = _isSanctioned;
-    }
-
-    /// @inheritdoc ISanctionsList
-    function isSanctioned(address _account) external view override(ISanctionsList) returns (bool) {
-        return _sanctioned[_account];
-    }
-}
 
 /**
  * @title Test_BlacklistScreening_RoycoBlacklist
@@ -39,8 +24,8 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
     /// @dev The production blacklist behind a proxy, administered by this test through the market's access manager
     RoycoBlacklist internal roycoBlacklist;
 
-    /// @dev The Chainalysis-shaped sanctions stub the overlay tests flag accounts on
-    SanctionsListStub internal sanctionsList;
+    /// @dev The Chainalysis-shaped sanctions mock the overlay tests flag accounts on
+    MockSanctionsList internal sanctionsList;
 
     /// @dev A flagged account and a clean account reused across the tests
     address internal FLAGGED;
@@ -48,7 +33,7 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        sanctionsList = new SanctionsListStub();
+        sanctionsList = new MockSanctionsList();
         roycoBlacklist = RoycoBlacklist(
             address(
                 new ERC1967Proxy(
@@ -230,5 +215,151 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
         assertEq(seniorTranche.balanceOf(ally), 0, "the ally must have extracted nothing");
         assertEq(seniorTranche.balanceOf(ST_PROVIDER), 90e18, "the clean holder's balance must be unchanged");
         assertEq(seniorTranche.allowance(FLAGGED, ally), 10e18, "the failed transferFrom must not have consumed allowance");
+    }
+
+    // =============================
+    // Sanctions list failure modes and recovery
+    // =============================
+
+    /**
+     * @notice A codeless address wired as the sanctions list bricks every screen on the blacklist itself
+     * @dev Every account that is not locally flagged (which is every account here) falls through to the
+     *      sanctions overlay, so the overlay call sits on the hot path of every screen. A high-level call
+     *      that expects return data from an address with no code reverts at the EVM level with empty revert
+     *      data, so a codeless list turns every clean-account query into a bare revert
+     */
+    function test_RevertIf_SanctionsListHasNoCode_EveryScreenBricks() public {
+        // The setter performs no probe, so the codeless target lands in storage without complaint
+        roycoBlacklist.setSanctionsList(makeAddr("CODELESS_SANCTIONS_LIST"));
+
+        // The membership query dies inside the codeless overlay call (empty revert data, hence the bare expect)
+        vm.expectRevert();
+        roycoBlacklist.isBlacklisted(CLEAN);
+
+        // Both enforcement overloads route through the same query, so they die identically
+        vm.expectRevert();
+        roycoBlacklist.enforceNotBlacklisted(CLEAN);
+        vm.expectRevert();
+        roycoBlacklist.enforceNotBlacklisted(_one(CLEAN));
+    }
+
+    /**
+     * @notice A reverting sanctions list bricks every guarded market flow AND the max views once wired into the kernel
+     * @dev Every tranche share balance update (transfer, deposit mint, redemption burn) routes through the
+     *      kernel's pre-balance-update hook, which batch-screens caller, from, and to, so one broken sanctions
+     *      oracle takes the whole market hostage. The max views are meant to be the polite integrator surface
+     *      that reports zero capacity instead of reverting, yet they consult the same blacklist first, so the
+     *      oracle failure breaches even the never-revert view contract
+     */
+    function test_RevertIf_SanctionsListReverts_AllGuardedMarketFlowsBrick() public {
+        // Seed real balances first so every attempt below would succeed absent the broken oracle
+        // Coverage after seed: (100 + 30) x 0.2 / 30 = 0.8667 <= 1
+        _seedMarket(100e18, 30e18);
+        vm.prank(MARKET_OPS_ADMIN);
+        kernel.setRoycoBlacklist(address(roycoBlacklist));
+        roycoBlacklist.setSanctionsList(address(new MockRevertingSanctionsList()));
+
+        // 1. Transfers: the hook screens the caller before anything else, and that screen dies in the oracle
+        vm.prank(ST_PROVIDER);
+        vm.expectRevert(MockRevertingSanctionsList.SANCTIONS_LIST_UNAVAILABLE.selector);
+        seniorTranche.transfer(CLEAN, 1e18);
+
+        // 2. Deposits: the mint's balance update routes through the same hook, so new capital cannot enter
+        stJtVault.mintShares(JT_PROVIDER, 10e18);
+        vm.startPrank(JT_PROVIDER);
+        stJtVault.approve(address(juniorTranche), 10e18);
+        vm.expectRevert(MockRevertingSanctionsList.SANCTIONS_LIST_UNAVAILABLE.selector);
+        juniorTranche.deposit(toTrancheUnits(10e18), JT_PROVIDER);
+        vm.stopPrank();
+
+        // 3. Redemptions: the burn's balance update routes through the hook, so existing capital cannot leave
+        vm.prank(ST_PROVIDER);
+        vm.expectRevert(MockRevertingSanctionsList.SANCTIONS_LIST_UNAVAILABLE.selector);
+        seniorTranche.redeem(1e18, ST_PROVIDER, ST_PROVIDER);
+
+        // 4. Every max view checks the blacklist before anything else, so instead of reporting zero capacity
+        //    (their contract for a blocked account) they all revert with the oracle's error
+        vm.expectRevert(MockRevertingSanctionsList.SANCTIONS_LIST_UNAVAILABLE.selector);
+        seniorTranche.maxDeposit(CLEAN);
+        vm.expectRevert(MockRevertingSanctionsList.SANCTIONS_LIST_UNAVAILABLE.selector);
+        juniorTranche.maxDeposit(CLEAN);
+        vm.expectRevert(MockRevertingSanctionsList.SANCTIONS_LIST_UNAVAILABLE.selector);
+        liquidityTranche.maxDeposit(CLEAN);
+        vm.expectRevert(MockRevertingSanctionsList.SANCTIONS_LIST_UNAVAILABLE.selector);
+        seniorTranche.maxRedeem(ST_PROVIDER);
+        vm.expectRevert(MockRevertingSanctionsList.SANCTIONS_LIST_UNAVAILABLE.selector);
+        juniorTranche.maxRedeem(JT_PROVIDER);
+        vm.expectRevert(MockRevertingSanctionsList.SANCTIONS_LIST_UNAVAILABLE.selector);
+        liquidityTranche.maxRedeem(LT_PROVIDER);
+    }
+
+    /**
+     * @notice Unwiring the sanctions list (the null address) recovers a market bricked by a broken list
+     * @dev The recovery lever must itself be immune to the failure it recovers from: setSanctionsList never
+     *      consults the outgoing list, it only overwrites storage, so governance can always swap a broken
+     *      oracle for nothing and restore every guarded flow in one call
+     */
+    function test_SetSanctionsList_NullAddressRecoversBrickedMarket() public {
+        // Coverage after seed: (100 + 30) x 0.2 / 30 = 0.8667 <= 1
+        _seedMarket(100e18, 30e18);
+        vm.prank(MARKET_OPS_ADMIN);
+        kernel.setRoycoBlacklist(address(roycoBlacklist));
+        roycoBlacklist.setSanctionsList(address(new MockRevertingSanctionsList()));
+
+        // The market is bricked: a routine transfer between two clean accounts dies in the broken oracle
+        vm.prank(ST_PROVIDER);
+        vm.expectRevert(MockRevertingSanctionsList.SANCTIONS_LIST_UNAVAILABLE.selector);
+        seniorTranche.transfer(CLEAN, 5e18);
+
+        // Governance unwires the broken list, the setter succeeds because it never queries the outgoing list
+        vm.expectEmit(address(roycoBlacklist));
+        emit IRoycoBlacklist.SanctionsListUpdated(address(0));
+        roycoBlacklist.setSanctionsList(address(0));
+
+        // The previously-reverting transfer now lands: 5e18 of the seeded 100e18 senior shares move
+        vm.prank(ST_PROVIDER);
+        seniorTranche.transfer(CLEAN, 5e18);
+        assertEq(seniorTranche.balanceOf(ST_PROVIDER), 95e18, "the sender must hold the seeded balance minus the transfer");
+        assertEq(seniorTranche.balanceOf(CLEAN), 5e18, "the receiver must hold exactly the transferred shares");
+
+        // The previously-bricked deposit path also lands: 10e18 vault shares into a junior tranche holding
+        // 30e18 shares against 30e18 effective NAV mint 10e18 x 30 / 30 = 10e18 new shares
+        stJtVault.mintShares(JT_PROVIDER, 10e18);
+        vm.startPrank(JT_PROVIDER);
+        stJtVault.approve(address(juniorTranche), 10e18);
+        juniorTranche.deposit(toTrancheUnits(10e18), JT_PROVIDER);
+        vm.stopPrank();
+        assertEq(juniorTranche.balanceOf(JT_PROVIDER), 40e18, "the junior provider must hold the seeded 30e18 plus the 10e18 minted");
+    }
+
+    /**
+     * @notice The sanctions list setter accepts any nonzero address without probing that it can answer isSanctioned
+     * @dev Divergence pin: setSanctionsList only overwrites storage, so a codeless (or otherwise broken) target
+     *      is accepted at configuration time and every screen, every guarded market flow, and every max view
+     *      reverts from that moment until governance unwires it. Expected behavior: the setter probes the target
+     *      with an isSanctioned call so an unresponsive list is rejected before it can take the market down
+     */
+    function test_FINDING_32_SetSanctionsList_AcceptsTargetThatCannotAnswerIsSanctioned() public {
+        // Coverage after seed: (100 + 30) x 0.2 / 30 = 0.8667 <= 1
+        _seedMarket(100e18, 30e18);
+        vm.prank(MARKET_OPS_ADMIN);
+        kernel.setRoycoBlacklist(address(roycoBlacklist));
+
+        // The codeless target sails through the setter: event emitted, storage written, no probe performed
+        address codeless = makeAddr("UNRESPONSIVE_SANCTIONS_LIST");
+        vm.expectEmit(address(roycoBlacklist));
+        emit IRoycoBlacklist.SanctionsListUpdated(codeless);
+        roycoBlacklist.setSanctionsList(codeless);
+        assertEq(roycoBlacklist.getSanctionsList(), codeless, "the unprobed codeless target must have landed in storage");
+
+        // One configuration mistake later, a routine transfer between two clean accounts is dead
+        // (the codeless overlay call reverts with empty data, hence the bare expects)
+        vm.prank(ST_PROVIDER);
+        vm.expectRevert();
+        seniorTranche.transfer(CLEAN, 1e18);
+
+        // and the never-revert view surface reverts instead of reporting capacity
+        vm.expectRevert();
+        seniorTranche.maxDeposit(CLEAN);
     }
 }

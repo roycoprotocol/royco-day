@@ -38,10 +38,20 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         _externalAddProportional(actor, _exactBptOut);
     }
 
-    /// @dev The committed liquidity utilization recomputed from the committed checkpoint via the independent mirror.
+    /**
+     * @dev The committed liquidity utilization re-derived from the committed checkpoint with plain checked
+     *      integer arithmetic (the ceiling division written out), sharing no math library with production:
+     *      utilization is the depth the senior tranche requires (`stEffectiveNAV * minLiquidity`) over the
+     *      pooled depth backing it (`ltRawNAV`), rounded up in favor of reading a breach. Products stay far
+     *      below 2^256 on this suite's NAV domain, so the checked multiply cannot overflow.
+     */
     function _committedLiquidityUtilization() internal view returns (uint256) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        return _expectedLiquidityUtilization(a.lastSTEffectiveNAV, a.minLiquidityWAD, a.lastLTRawNAV);
+        uint256 stEff = toUint256(a.lastSTEffectiveNAV);
+        uint256 ltRaw = toUint256(a.lastLTRawNAV);
+        if (stEff == 0 || a.minLiquidityWAD == 0) return 0; // no senior claim or no requirement: nothing to back
+        if (ltRaw == 0) return type(uint256).max; // a live requirement against zero depth is unboundedly breached
+        return (stEff * uint256(a.minLiquidityWAD) + ltRaw - 1) / ltRaw;
     }
 
     /**
@@ -145,8 +155,8 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
 
     /**
      * @notice FINDING 10 — the pool's LP set is PERMISSIONLESS and the liquidity gate is blind to venue
-     *         depth. CLAUDE.md ("Pool permissioning"): "Confirm the pool LP set equals the kernel, so external
-     *         mint and burn cannot move the gate without the kernel knowing." Actual behavior: anyone can LP
+     *         depth. The intended posture was a kernel-only LP set, so external mint and burn could never move
+     *         the gate's inputs without the kernel knowing. Actual behavior: anyone can LP
      *         through the canonical Router, and an external LP holding half the pool can exit in full —
      *         unrestricted by any Royco gate — draining half the REAL tradable depth while the committed
      *         liquidity utilization (which values only kernel-owned BPT at NAV-per-BPT, invariant under a

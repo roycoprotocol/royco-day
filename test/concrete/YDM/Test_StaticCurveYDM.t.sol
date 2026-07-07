@@ -230,8 +230,9 @@ contract Test_StaticCurveYDM is Test {
         ydm.initializeYDMForMarket(0, 1, uint64(WAD));
         (,,, uint64 sGte) = ydm.accountantToCurve(address(this));
         assertLe(sGte, UINT64_MAX, "within uint64");
-        // floor((1e36 - 1e18)/6e16)
-        assertEq(sGte, (1e36 - 1e18) / 6e16, "hand-derived slopeGte");
+        // slopeGte = floor((WAD-1)*WAD/(WAD-94e16)) = floor((1e36 - 1e18)/6e16) = floor((1e20 - 100)/6)
+        //          = 99999999999999999900/6 = 16666666666666666650 exactly (the numerator divides by 6)
+        assertEq(sGte, 16_666_666_666_666_666_650, "hand-derived slopeGte literal");
     }
 
     /// Overflow is gap-driven, not target-alone: extreme target=5e16 but tiny gap => tiny slope.
@@ -253,11 +254,13 @@ contract Test_StaticCurveYDM is Test {
     /// 1-wei target usable when y0==yT (flat lt leg): slopeLt = 0.
     function test_Initialize_OneWeiTargetWithFlatLowerLeg() public {
         StaticCurveYDM ydm = _deploy(1);
-        // slopeGte = (9e17-5e17)*1e18/(WAD-1) = 4e35/(1e18-1) = floor -> 4e17-ish, safe (< max)
+        // slopeGte = floor(4e17*1e18/(1e18-1)) = floor(4e35/(1e18-1)). Since (1e18-1)*4e17 = 4e35 - 4e17,
+        // the remainder is 4e17 < 1e18-1: the one-wei-shrunk denominator cannot lift the slope a whole wei,
+        // so the floor is exactly 4e17 (safe, far under uint64.max)
         ydm.initializeYDMForMarket(5e17, 5e17, 9e17);
         (, uint64 sLt,, uint64 sGte) = ydm.accountantToCurve(address(this));
         assertEq(sLt, 0, "flat lt");
-        assertEq(sGte, (4e17 * WAD) / (WAD - 1), "hand-derived slopeGte");
+        assertEq(sGte, 400_000_000_000_000_000, "hand-derived slopeGte literal");
     }
 
     /// Near-WAD target usable when yT==yFull (flat gte leg): slopeGte = 0.
@@ -266,8 +269,9 @@ contract Test_StaticCurveYDM is Test {
         ydm.initializeYDMForMarket(5e17, 9e17, 9e17);
         (, uint64 sLt,, uint64 sGte) = ydm.accountantToCurve(address(this));
         assertEq(sGte, 0, "flat gte");
-        // slopeLt = (9e17-5e17)*1e18/(WAD-1) = 4e35/(1e18-1), floor
-        assertEq(sLt, (4e17 * WAD) / (WAD - 1), "hand-derived slopeLt");
+        // slopeLt = floor(4e17*1e18/(1e18-1)): (1e18-1)*4e17 = 4e35 - 4e17 leaves remainder 4e17 < 1e18-1,
+        // so the floor is exactly 4e17
+        assertEq(sLt, 400_000_000_000_000_000, "hand-derived slopeLt literal");
     }
 
     // =====================================================================

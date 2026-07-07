@@ -33,35 +33,40 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
         assertEq(toUint256(s.lastSTEffectiveNAV), SEED_ST_RAW + 123e18, "st effective NAV committed");
     }
 
-    /// an ST deposit with a zero senior raw NAV delta violates the shape require
+    /// an ST deposit with a zero senior raw NAV delta violates the shape require — a deposit that added no
+    /// senior value would let the kernel mint senior claims against nothing, so value must verifiably arrive
     function test_RevertIf_STDepositZeroSTDelta() public {
         _seedFlatWithLT(SEED_LT_RAW);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
         kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
     }
 
-    /// an ST deposit with a negative senior raw NAV delta violates the shape require
+    /// an ST deposit with a negative senior raw NAV delta violates the shape require — value leaving during a
+    /// deposit is an unsynced loss that must run the waterfall (so coverage applies), never a checkpoint commit
     function test_RevertIf_STDepositNegativeSTDelta() public {
         _seedFlatWithLT(SEED_LT_RAW);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
         kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW - 1), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
     }
 
-    /// an ST deposit with a positive junior raw NAV delta violates the shape require
+    /// an ST deposit with a positive junior raw NAV delta violates the shape require — a senior deposit never
+    /// touches junior assets, so a moving junior mark is unsynced P&L smuggled past yield attribution
     function test_RevertIf_STDepositPositiveJTDelta() public {
         _seedFlatWithLT(SEED_LT_RAW);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
         kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + 10e18), toNAVUnits(SEED_JT_RAW + 1), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
     }
 
-    /// an ST deposit with a negative junior raw NAV delta violates the shape require
+    /// an ST deposit with a negative junior raw NAV delta violates the shape require — a junior loss may only
+    /// be recognized by a sync, where the waterfall and coverage accounting run, not inside a deposit commit
     function test_RevertIf_STDepositNegativeJTDelta() public {
         _seedFlatWithLT(SEED_LT_RAW);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
         kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + 10e18), toNAVUnits(SEED_JT_RAW - 1), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
     }
 
-    /// an ST deposit with a nonzero liquidity raw NAV delta violates the shape require in both directions
+    /// an ST deposit with a nonzero liquidity raw NAV delta violates the shape require in both directions — a
+    /// senior deposit never touches the pooled BPT, so any motion in the liquidity mark is an unsynced pool event
     function test_RevertIf_STDepositNonzeroLTDelta() public {
         _seedFlatWithLT(SEED_LT_RAW);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
@@ -70,14 +75,16 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
         kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW - 1), ZERO_NAV_UNITS, false);
     }
 
-    /// an ST deposit with a nonzero self-liquidation bonus value violates the shape require
+    /// an ST deposit with a nonzero self-liquidation bonus value violates the shape require — the bonus is a
+    /// junior-funded sweetener that exists only on senior redemptions and would debit JT with nothing redeemed
     function test_RevertIf_STDepositNonzeroBonus() public {
         _seedFlatWithLT(SEED_LT_RAW);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
         kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), toNAVUnits(uint256(1)), false);
     }
 
-    /// a JT deposit adds its junior raw NAV delta to the junior effective NAV and commits the checkpoint
+    /// a JT deposit adds its junior raw NAV delta to the junior effective NAV and commits the checkpoint —
+    /// fresh junior capital immediately deepens the first-loss buffer that covers senior
     function test_PostOp_JTDeposit_addsDeltaToJTEffective() public {
         _seedFlatWithLT(SEED_LT_RAW);
         SyncedAccountingState memory state =
@@ -87,35 +94,40 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
         assertEq(toUint256(accountant.getState().lastJTEffectiveNAV), SEED_JT_RAW + 45e18, "jt effective NAV committed");
     }
 
-    /// a JT deposit with a zero junior raw NAV delta violates the shape require
+    /// a JT deposit with a zero junior raw NAV delta violates the shape require — junior claims may only be
+    /// minted against value that verifiably arrived in the junior mark, else the buffer is diluted for free
     function test_RevertIf_JTDepositZeroJTDelta() public {
         _seedFlatWithLT(SEED_LT_RAW);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
         kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
     }
 
-    /// a JT deposit with a negative junior raw NAV delta violates the shape require
+    /// a JT deposit with a negative junior raw NAV delta violates the shape require — value leaving during a
+    /// deposit is an unsynced junior loss that must run the waterfall before any checkpoint commit
     function test_RevertIf_JTDepositNegativeJTDelta() public {
         _seedFlatWithLT(SEED_LT_RAW);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
         kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW - 1), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
     }
 
-    /// a JT deposit with a positive senior raw NAV delta violates the shape require
+    /// a JT deposit with a positive senior raw NAV delta violates the shape require — a junior deposit never
+    /// adds senior exposure, so a rising senior mark is unsynced senior gain bypassing the premium and fee split
     function test_RevertIf_JTDepositPositiveSTDelta() public {
         _seedFlatWithLT(SEED_LT_RAW);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
         kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_RAW + 1), toNAVUnits(SEED_JT_RAW + 10e18), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
     }
 
-    /// a JT deposit with a negative senior raw NAV delta violates the shape require
+    /// a JT deposit with a negative senior raw NAV delta violates the shape require — a senior loss surfacing
+    /// mid-deposit must be recognized by a sync so junior coverage can absorb it, not committed silently
     function test_RevertIf_JTDepositNegativeSTDelta() public {
         _seedFlatWithLT(SEED_LT_RAW);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
         kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_RAW - 1), toNAVUnits(SEED_JT_RAW + 10e18), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
     }
 
-    /// a JT deposit with a nonzero liquidity raw NAV delta violates the shape require in both directions
+    /// a JT deposit with a nonzero liquidity raw NAV delta violates the shape require in both directions — a
+    /// junior deposit never touches the pooled BPT, so a moving liquidity mark signals an unsynced pool event
     function test_RevertIf_JTDepositNonzeroLTDelta() public {
         _seedFlatWithLT(SEED_LT_RAW);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
@@ -124,14 +136,16 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
         kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW + 10e18), toNAVUnits(SEED_LT_RAW - 1), ZERO_NAV_UNITS, false);
     }
 
-    /// a JT deposit with a nonzero self-liquidation bonus value violates the shape require
+    /// a JT deposit with a nonzero self-liquidation bonus value violates the shape require — the bonus exists
+    /// only on senior redemptions, where junior pays to retire senior exposure, never on junior entry
     function test_RevertIf_JTDepositNonzeroBonus() public {
         _seedFlatWithLT(SEED_LT_RAW);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
         kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW + 10e18), toNAVUnits(SEED_LT_RAW), toNAVUnits(uint256(1)), false);
     }
 
-    /// a BPT-only LT deposit (zero senior delta) books the liquidity raw NAV and leaves both effective NAVs untouched
+    /// a BPT-only LT deposit (zero senior delta) books the liquidity raw NAV and leaves both effective NAVs
+    /// untouched — pre-minted BPT adds pooled exit depth without creating any senior or junior claim to conserve
     function test_PostOp_LTDepositBPTOnly_leavesEffectiveNAVsUntouched() public {
         _seedFlatWithLT(SEED_LT_RAW);
         SyncedAccountingState memory state =
@@ -142,7 +156,8 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
         assertEq(toUint256(accountant.getState().lastLTRawNAV), SEED_LT_RAW + 30e18, "lt raw NAV committed");
     }
 
-    /// a multi-asset LT deposit (positive senior delta) adds the freshly minted senior value to the senior effective NAV
+    /// a multi-asset LT deposit (positive senior delta) adds the freshly minted senior value to the senior
+    /// effective NAV — the ST shares joined into the pool are real new senior exposure that coverage must track
     function test_PostOp_LTDepositMultiAsset_addsSTDeltaToSTEffective() public {
         _seedFlatWithLT(SEED_LT_RAW);
         SyncedAccountingState memory state = kernel.doPostOp(
@@ -153,28 +168,32 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
         assertEq(toUint256(accountant.getState().lastSTEffectiveNAV), SEED_ST_RAW + 50e18, "st effective NAV committed");
     }
 
-    /// an LT deposit with a zero liquidity raw NAV delta violates the shape require
+    /// an LT deposit with a zero liquidity raw NAV delta violates the shape require — a liquidity deposit that
+    /// added no pooled depth would mint LT claims against nothing and dilute existing LT holders
     function test_RevertIf_LTDepositZeroLTDelta() public {
         _seedFlatWithLT(SEED_LT_RAW);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_DEPOSIT));
         kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW + 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
     }
 
-    /// an LT deposit with a negative liquidity raw NAV delta violates the shape require
+    /// an LT deposit with a negative liquidity raw NAV delta violates the shape require — pooled depth leaving
+    /// during a deposit means the mark embeds an unsynced pool loss that a fresh depositor would be priced into
     function test_RevertIf_LTDepositNegativeLTDelta() public {
         _seedFlatWithLT(SEED_LT_RAW);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_DEPOSIT));
         kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW + 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW - 1), ZERO_NAV_UNITS, false);
     }
 
-    /// an LT deposit with a negative senior raw NAV delta violates the shape require
+    /// an LT deposit with a negative senior raw NAV delta violates the shape require — the multi-asset flow can
+    /// only MINT senior shares, so a falling senior mark is an unsynced senior loss bypassing the waterfall
     function test_RevertIf_LTDepositNegativeSTDelta() public {
         _seedFlatWithLT(SEED_LT_RAW);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_DEPOSIT));
         kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW - 1), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW + 10e18), ZERO_NAV_UNITS, false);
     }
 
-    /// an LT deposit with a nonzero junior raw NAV delta violates the shape require in both directions
+    /// an LT deposit with a nonzero junior raw NAV delta violates the shape require in both directions — no LT
+    /// flow touches junior assets, so a moving junior mark is unsynced junior P&L outside the coverage accounting
     function test_RevertIf_LTDepositNonzeroJTDelta() public {
         _seedFlatWithLT(SEED_LT_RAW);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_DEPOSIT));
@@ -183,7 +202,8 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
         kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW - 1), toNAVUnits(SEED_LT_RAW + 10e18), ZERO_NAV_UNITS, false);
     }
 
-    /// an LT deposit with a nonzero self-liquidation bonus value violates the shape require
+    /// an LT deposit with a nonzero self-liquidation bonus value violates the shape require — the junior-funded
+    /// bonus exists only on senior redemptions and has no meaning when liquidity capital enters
     function test_RevertIf_LTDepositNonzeroBonus() public {
         _seedFlatWithLT(SEED_LT_RAW);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_DEPOSIT));
@@ -619,17 +639,18 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
     }
 
     /**
-     * REAL FINDING (spec conflict, behavior pinned, adjudication needed): an in-kind BPT-only LT deposit
-     * that IMPROVES a breached liquidity utilization but does not fully heal it reverts under enforcement
+     * REAL FINDING (behavior pinned, adjudication needed): an in-kind BPT-only LT deposit that IMPROVES a
+     * breached liquidity utilization but does not fully heal it reverts under enforcement
      *
-     * CLAUDE.md's redemption-gate section and invariants state "Deposits are never liquidity-gated ... an LT
-     * deposit only raises ltRawNAV ... so no deposit is ever blocked on liquidity", yet the implementation
-     * gates LT_DEPOSIT (and ST_DEPOSIT) on the liquidity requirement. CLAUDE.md is internally inconsistent:
-     * its own product-requirements section demands a "minimum percentage of liquidity required for senior
-     * tranche deposits" and maxSTDeposit's documented liquidity leg exists solely to
-     * bound deposits by liquidity. The sharp consequence pinned here is that enforcement blocks the exact
-     * restoring force (external LT deposits) the spec relies on to heal a breach, unless the kernel passes
-     * enforce = false for LT deposits. Severity rests on the kernel's flag choice — flagged for adjudication
+     * An LT deposit can only add pooled depth: it raises ltRawNAV, never the senior exposure, so every BPT-only
+     * deposit strictly lowers liquidity utilization and is a pure restoring force on a breach. One design
+     * reading therefore says no deposit should ever be blocked on liquidity, while the competing reading says
+     * the minimum-liquidity requirement must hold after EVERY enforced operation, deposits included (the
+     * reading maxSTDeposit's liquidity leg encodes). The accountant implements the second: LT_DEPOSIT (and
+     * ST_DEPOSIT) sit inside the liquidity gate. The sharp consequence pinned here is that enforcement blocks
+     * the exact healing capital (external LT deposits drawn in by a high liquidity premium) that is supposed
+     * to close the breach, unless the kernel passes enforce = false for LT deposits. Severity rests on the
+     * kernel's flag choice — flagged for adjudication
      */
     function test_PostOp_liquidityGate_blocksHealingLTDepositUnderBreach() public {
         _seedState(SEED_ST_RAW, SEED_JT_RAW, SEED_ST_RAW, SEED_JT_RAW, 0, 10e18, MarketState.PERPETUAL);
@@ -645,7 +666,7 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
     /**
      * ST_REDEEM and JT_DEPOSIT pass BOTH breached gates with enforcement on
      * NOTE an ST redemption with a bonus consumes the junior buffer and can worsen coverage, but the
-     * accountant exempts it by design — the kernel bounds the bonus to be utilization-neutral (F19)
+     * accountant exempts it by design — the kernel bounds the bonus to be utilization-neutral
      */
     function test_PostOp_gateExemptions_stRedeemAndJTDepositPassBothBreaches() public {
         _seedState(SEED_ST_RAW, 50e18, SEED_ST_RAW, 50e18, 0, 10e18, MarketState.PERPETUAL);

@@ -94,7 +94,10 @@ abstract contract AccountantFuzzTestBase is AccountantTestBase {
         in_.minCoverageWAD = DEFAULT_MIN_COVERAGE_WAD;
         in_.jtCoinvested = accountant.JT_COINVESTED();
         in_.coverageLiquidationUtilizationWAD = DEFAULT_LIQUIDATION_UTILIZATION_WAD;
-        in_.effectiveDust = 0;
+        // Read the effective dust the deployed accountant actually enforces (it maintains the field as the sum
+        // of the two configured raw-NAV dust tolerances) instead of hard-coding 0, so a suite that deploys with
+        // nonzero dust tolerances feeds its mirror the same fee/premium dust gate production applies
+        in_.effectiveDust = toUint256(s.effectiveNAVDustTolerance);
         in_.minLiquidityWAD = DEFAULT_MIN_LIQUIDITY_WAD;
     }
 }

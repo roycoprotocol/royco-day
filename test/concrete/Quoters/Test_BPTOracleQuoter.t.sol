@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { stdError } from "../../../lib/forge-std/src/StdError.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { BalancerV3_LT_BPTOracle_Quoter } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
@@ -169,6 +170,31 @@ contract Test_OracleGuardAndConversions_BPTOracleQuoter is DayMarketTestBase {
         uint256 expected = Math.mulDiv(bptSupply, value, 7e18, Math.Rounding.Floor);
 
         assertEq(toUint256(kernel.ltConvertNAVUnitsToTrancheUnits(toNAVUnits(value))), expected, "the conversion must be floor(supply x value / TVL)");
+    }
+
+    /**
+     * @notice At TVL == 0 with BPT supply outstanding, BPT -> NAV marks exactly 0 without reverting (TVL is the numerator
+     *         of the mark), while NAV -> BPT panics with division-by-zero (TVL is the denominator of the inverse)
+     * @dev This directional asymmetry is why the raw-NAV mark itself never bricks a sync: the sync only ever reads the
+     *      tolerant BPT -> NAV direction, and the sole sync-bricking consumer of the panicking inverse is the reinvest
+     *      path's NAV -> tranche division (pinned in the sibling reinvest test file). This test pins the exact boundary
+     *      between the tolerant and the panicking direction
+     */
+    function test_LTConvertTrancheUnitsToNAVUnits_ZeroTVLWithSupply_MarksZeroWithoutRevert() public {
+        bptOracle.setTVL(0);
+        bptOracle.setMode(MockBPTOracle.Mode.MANUAL);
+
+        // Supply must be nonzero so neither direction takes its zero-supply early return: only the TVL is zero here
+        uint256 bptSupply = balancerVault.totalSupply(address(bpt));
+        assertGt(bptSupply, 0, "arrange: genesis minimum supply must exist so the zero-supply early return is not taken");
+
+        // BPT -> NAV: floor(TVL x amount / supply) = floor(0 x 1e18 / supply) = 0 for ANY positive supply, so a
+        // worthless pool marks at exactly zero and never divides by zero
+        assertEq(toUint256(kernel.ltConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 0, "a zero TVL must mark the BPT at exactly zero NAV, not revert");
+
+        // NAV -> BPT: floor(supply x value / TVL) divides by TVL == 0, so the inverse direction panics (0x12)
+        vm.expectRevert(stdError.divisionError);
+        kernel.ltConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(1e18)));
     }
 
     /// @notice A reverting oracle bricks the LT mark: the conversion path surfaces the oracle failure rather than guessing

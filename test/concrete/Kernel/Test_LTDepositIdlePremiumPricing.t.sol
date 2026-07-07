@@ -55,6 +55,40 @@ contract Test_LTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
     }
 
     /**
+     * @notice Pins the idle-leg-inclusive LT deposit price to hand-computed literals on the fixture's exact numbers,
+     *         so the pricing cannot silently share an arithmetic bug with the kernel's own conversion primitives
+     * @dev Every expected value below is worked out with plain integer arithmetic from the seed and the +10% senior
+     *      gain, none is recomputed through the kernel's or the quoter's own math. A shared rounding or scaling bug
+     *      in the conversion chain (premium share mint, idle-leg valuation, deposit price) would shift one of these
+     *      literals and fail here even if a formula-mirroring assertion still agreed with itself
+     */
+    function test_LTDeposit_PriceIncludesIdlePremiumLeg_LiteralAnchor() public {
+        uint256 idleShares = _accrueIdlePremiumSeniorShares();
+
+        // Hand derivation (all divisions floor):
+        //   Seed: 100e18 senior NAV backing 100e18 senior shares (1:1 first mint), 30e18 junior NAV, and the
+        //   6e18 quote-only auto-seeded pool depth. A +10% senior gain is 10e18. The fixture pins the yield
+        //   shares at 20% (JT) and 10% (LT), so the risk premium is 2e18 and the liquidity premium is 1e18,
+        //   leaving a residual senior gain of 10e18 - 2e18 - 1e18 = 7e18, on which the 10% senior protocol fee
+        //   takes 0.7e18. The premium stays a senior claim, so stEffectiveNAV = 100e18 + 7e18 + 1e18 = 108e18.
+        //   The premium and fee share mints are both priced on the NAV the pre-existing shares retain,
+        //   108e18 - 1e18 - 0.7e18 = 106.3e18, over the pre-sync 100e18 supply:
+        //     premium shares = floor(1e18 x 100e18 / 106.3e18) = floor(10^21 / 1063)     = 940733772342427093
+        //     fee shares     = floor(0.7e18 x 100e18 / 106.3e18) = floor(7x10^20 / 1063) = 658513640639698965
+        //   post-mint senior supply = 100e18 + 940733772342427093 + 658513640639698965 = 101599247412982126058
+        assertEq(idleShares, 940_733_772_342_427_093, "the staged premium must be exactly the hand-derived senior share count");
+        assertEq(seniorTranche.totalSupply(), 101_599_247_412_982_126_058, "the senior supply must carry exactly the premium and fee mints");
+
+        (SyncedAccountingState memory st,,, NAV_UNIT navToMintSharesAt) = kernel.ltPreviewDeposit(toTrancheUnits(1e18));
+        assertEq(toUint256(st.stEffectiveNAV), 108e18, "the senior effective NAV must be exactly seed plus residual gain plus premium");
+        assertEq(toUint256(st.ltRawNAV), 6e18, "the pool depth must be exactly the untouched auto-seed");
+        // Idle leg value = floor(940733772342427093 x 108e18 / 101599247412982126058) = 999999999999999999:
+        // the 1e18 premium minus one wei lost across the two floor roundings (share mint, then valuation), so
+        // the deposit price is 6e18 + (1e18 - 1) and the rounding wei stays with the pool, never the entrant
+        assertEq(toUint256(navToMintSharesAt), 6_999_999_999_999_999_999, "the deposit price must be pool depth plus the idle leg, one wei under 7e18");
+    }
+
+    /**
      * @notice A depositor who tries to buy in while the idle liquidity premium is undeployed pays the idle-leg-inclusive
      *         price: the shares minted are priced on ltRawNAV plus the idle value, strictly fewer than pool-depth-only
      *         pricing would grant, so the entrant cannot dilute existing holders out of their undeployed premium claim
