@@ -23,3 +23,7 @@ output/
 
 # Claude output
 .claude
+
+# OS / editor cruft
+.DS_Store
+**/.DS_Store
