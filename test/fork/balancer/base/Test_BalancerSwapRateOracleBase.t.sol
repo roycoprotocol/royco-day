@@ -218,8 +218,15 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
     function test_GetRate_matchesCommittedSeniorNAVPerShare() public {
         _seedForSwaps();
         _sync();
-        uint256 expected = Math.mulDiv(WAD, toUint256(ACCOUNTANT.getState().lastSTEffectiveNAV), ST.totalSupply());
-        assertEq(_kernelRate(), expected, "getRate must equal the committed senior effective NAV per share (floored)");
+        uint256 rate = _kernelRate();
+        uint256 supply = ST.totalSupply();
+        uint256 stEff = toUint256(ACCOUNTANT.getState().lastSTEffectiveNAV);
+        assertEq(rate, Math.mulDiv(WAD, stEff, supply), "getRate must equal the committed senior effective NAV per share (floored)");
+        // Independent counterweight on plain checked integers (no shared math library): a floored NAV-per-share
+        // must reconstruct the committed senior NAV to within one unit of supply-scale floor loss — scaling the
+        // rate back up by the supply never overshoots WAD * NAV, and undershoots it by less than one full supply.
+        assertLe(rate * supply, WAD * stEff, "rate * supply must never overstate the committed senior NAV");
+        assertGt(rate * supply + supply, WAD * stEff, "rate * supply must undershoot the committed senior NAV by less than one supply unit");
     }
 
     /// @notice within a synced transaction the rate is FROZEN: a feed move after the sync does not move

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { stdError } from "../../../lib/forge-std/src/StdError.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IYDM } from "../../../src/interfaces/IYDM.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
@@ -253,6 +254,81 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         vm.warp(block.timestamp + 100 * 365 days);
         kernel.doPreOp(toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW));
         assertEq(accountant.getState().twJTYieldShareAccruedWAD, uint192(uint256(1e18) * 3_153_600_000), "century-scale accumulator exact");
+    }
+
+    /**
+     * the uint192 accumulator's checked += fails loud once the running total would exceed its width
+     * A market whose accrual window is never consumed (no gain sync ever pays premiums, so the accumulator is
+     * never reset) grows by rate * elapsed forever. When the running total would pass type(uint192).max the
+     * checked += reverts with an arithmetic panic, bricking every subsequent sync — a loud failure, in contrast
+     * to the silent single-increment wrap pinned by test_FINDING_31_AccrualIncrementCastSilentlyTruncatesPastUint192
+     * Derivation, from the accumulator width alone:
+     *   type(uint192).max = 2^192 - 1 = 6277101735386680763835789423207666416102355444464034512895
+     *   E1 = floor((2^192 - 1) / 1e18) - 1 = 6277101735386680763835789423207666416101
+     *   first increment = 1e18 * E1 = 6277101735386680763835789423207666416101000000000000000000
+     *     which sits 1355444464034512895 under the max, so the uint192 cast is lossless and the += from zero fits
+     *   a second window of E1 seconds doubles the total: 2 * (1e18 * E1) > 2^192 - 1, so the checked += panics
+     */
+    function test_RevertIf_AccrualAccumulatorOverflowsUint192() public {
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
+        p.maxJTYieldShareWAD = uint64(WAD);
+        p.maxLTYieldShareWAD = 0;
+        _deploy(false, p);
+        _seedAndInitAccrual();
+        jtYDM.setYieldShareReturn(WAD);
+
+        // First window: a flat sync (no gain, so nothing pays out or resets the window) lands the accumulator
+        // just under the uint192 ceiling with a lossless cast
+        uint256 elapsedOne = 6_277_101_735_386_680_763_835_789_423_207_666_416_101;
+        vm.warp(block.timestamp + elapsedOne);
+        kernel.doPreOp(toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW));
+        assertEq(
+            uint256(accountant.getState().twJTYieldShareAccruedWAD),
+            6_277_101_735_386_680_763_835_789_423_207_666_416_101_000_000_000_000_000_000,
+            "first window lands the accumulator just under the uint192 ceiling"
+        );
+
+        // The accrual clock is stored as a uint32, so at this timestamp it holds block.timestamp mod 2^32,
+        // warp to storedClock + E1 (a forward warp here) so the next elapsed reads exactly E1 once more
+        uint256 storedClock = accountant.getState().lastYieldShareAccrualTimestamp;
+        vm.warp(storedClock + elapsedOne);
+        // The second increment alone still fits uint192, but the running total 2 * (1e18 * E1) exceeds the
+        // ceiling, so the checked += reverts: the sync bricks loudly instead of wrapping the accumulator to a
+        // tiny value that would silently underpay the junior tranche's earned yield share
+        vm.expectRevert(stdError.arithmeticError);
+        kernel.doPreOp(toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW));
+    }
+
+    /**
+     * a single oversized increment does NOT revert: the explicit uint192() cast truncates before the checked add
+     * The running-total add is checked, but each increment is cast to uint192 first, so one window with
+     * 1e18 * elapsed >= 2^192 wraps modulo 2^192 and lands a dust accumulator instead of panicking — the junior
+     * tranche's entire earned window silently collapses. The wrap, by hand:
+     *   elapsed E = floor((2^192 - 1) / 1e18) + 1 = 6277101735386680763835789423207666416103
+     *   raw increment = 1e18 * E = 6277101735386680763835789423207666416103000000000000000000
+     *   2^192         =            6277101735386680763835789423207666416102355444464034512896
+     *   raw mod 2^192 = 644555535965487104, worth ~0.64 seconds of accrual at a 100% yield share
+     * Reachability needs one un-synced window of ~2e32 years, so this is a latent width hazard rather than a
+     * live economic path — pinned so the asymmetry with the loud += overflow above stays visible
+     */
+    function test_FINDING_31_AccrualIncrementCastSilentlyTruncatesPastUint192() public {
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
+        p.maxJTYieldShareWAD = uint64(WAD);
+        p.maxLTYieldShareWAD = 0;
+        _deploy(false, p);
+        _seedAndInitAccrual();
+        jtYDM.setYieldShareReturn(WAD);
+
+        // One second past the largest lossless window: the raw increment exceeds 2^192 by
+        // 644555535965487104, which is exactly what the cast leaves behind
+        uint256 elapsed = 6_277_101_735_386_680_763_835_789_423_207_666_416_103;
+        vm.warp(block.timestamp + elapsed);
+        kernel.doPreOp(toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW));
+        assertEq(
+            uint256(accountant.getState().twJTYieldShareAccruedWAD),
+            644_555_535_965_487_104,
+            "oversized increment wraps modulo 2^192 instead of reverting"
+        );
     }
 
     /**

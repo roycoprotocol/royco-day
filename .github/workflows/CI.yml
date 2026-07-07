@@ -24,7 +24,12 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: "1.7.1"
+          # Symbolic testing (forge test --symbolic) is not in a stable release yet; this nightly
+          # matches the version verified locally. Bump to the next stable once symbolic ships in one.
+          version: "nightly-0a8e2a09b7740b852af4a65409eea7322f48a918"
+
+      - name: Install z3 (SMT solver for symbolic tests)
+        run: sudo apt-get update && sudo apt-get install -y z3
 
       - name: Show Forge version
         run: |
@@ -69,3 +74,11 @@ jobs:
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
           ARBITRUM_RPC_URL: ${{ secrets.ARBITRUM_RPC_URL }}
           FOUNDRY_FUZZ_RUNS: ${{ secrets.FOUNDRY_FUZZ_RUNS || 200 }}
+
+      - name: Run symbolic tests
+        # check_*/prove_* specs are only discovered under --symbolic; they prove math properties
+        # over the whole bounded input domain with an SMT solver (z3) instead of sampling.
+        # Scoped to test/symbolic/ so the invariant suites don't also get re-run symbolically.
+        run: |
+          forge test --symbolic --match-path 'test/symbolic/**' -vvv
+        id: symbolic

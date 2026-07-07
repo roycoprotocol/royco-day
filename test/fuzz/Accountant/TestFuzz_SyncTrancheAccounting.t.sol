@@ -13,7 +13,8 @@ import { AccountantFuzzTestBase } from "../../utils/AccountantFuzzTestBase.sol";
  * @notice Fuzz properties for the full pre-op tranche accounting sync: field-for-field equality against
  *         the independent RoycoTestMath mirror, wei-exact NAV conservation, junior-buffer-first loss
  *         priority with an independently recomputed coverage amount, the premium-inside-the-gain bound,
- *         and the isolation of senior/junior accounting from the liquidity tranche's mark
+ *         independent fee-cap and carve-out-fit bounds on all three protocol fees, and the isolation of
+ *         senior/junior accounting from the liquidity tranche's mark
  * @dev Every run drives a reachable market: a symmetric deposit-seeded checkpoint, a preparatory sync
  *      that can book coverage impermanent loss or enter a fixed term, then the measured sync from there
  */
@@ -101,6 +102,41 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
 
         // Two-term conservation at wei precision on production's own outputs
         assertEq(stRaw2 + jtRaw2, toUint256(st.stEffectiveNAV) + toUint256(st.jtEffectiveNAV), "sync: raw and effective NAVs conserve exactly");
+
+        // Independent fee bounds sharing nothing with the mirror pipeline. Every gain a sync can book is
+        // capped by the gross upside of the raw marks, computed in plain checked integers: a tranche's
+        // attributed slice of one raw leg's move can never exceed the move itself (no claim exceeds the raw
+        // NAV it is a claim on, and a leg that fell contributes no gain), so the senior gain, the junior net
+        // gain, and every premium carved from the senior gain each fit inside grossUpside. The fee fields
+        // are unsigned, so non-negativity is structural rather than asserted
+        uint256 grossUpside = (stRaw2 > stRaw1 ? stRaw2 - stRaw1 : 0) + (jtRaw2 > jtRaw1 ? jtRaw2 - jtRaw1 : 0);
+        // This fixture deploys every protocol fee rate at 0.1e18, so each fee is a floored 10% slice of its
+        // base and ten times the fee must fit back inside the base: the senior fee's base is the senior
+        // gain residual and the liquidity fee's base is the liquidity premium (both <= grossUpside). The
+        // junior fee is the sum of two 10% legs (the junior tranche's own net gain and the risk premium,
+        // each <= grossUpside), so five times it must fit inside grossUpside
+        assertLe(toUint256(st.stProtocolFee) * 10, grossUpside, "fee bound: the senior fee exceeds 10% of the gross upside");
+        assertLe(toUint256(st.ltProtocolFee) * 10, grossUpside, "fee bound: the liquidity fee exceeds 10% of the gross upside");
+        assertLe(toUint256(st.jtProtocolFee) * 5, grossUpside, "fee bound: the junior fee exceeds its two 10% legs of the gross upside");
+        assertLe(toUint256(st.ltLiquidityPremium), grossUpside, "fee bound: the liquidity premium exceeds the gross upside");
+        // Fees are charged on gains only, never on principal: a sync with zero upside on both raw legs has
+        // no gain anywhere in the waterfall (this fixture's NAV dust tolerances are zero, so any nonzero
+        // gain is fee-eligible and, conversely, zero gain admits zero fees and zero premium)
+        if (grossUpside == 0) {
+            assertEq(toUint256(st.stProtocolFee), 0, "fee bound: a senior fee was charged with no gain booked");
+            assertEq(toUint256(st.jtProtocolFee), 0, "fee bound: a junior fee was charged with no gain booked");
+            assertEq(toUint256(st.ltProtocolFee), 0, "fee bound: a liquidity fee was charged with no gain booked");
+            assertEq(toUint256(st.ltLiquidityPremium), 0, "fee bound: a liquidity premium was paid with no gain booked");
+        }
+        // Conservation including the fee carve-outs: fees and the premium are dilution claims inside the
+        // conserved NAV, never additions to it, so each carve-out must fit inside the effective NAV it will
+        // be minted against -- otherwise the post-sync share mints would price against NAV that does not exist
+        assertLe(
+            toUint256(st.ltLiquidityPremium) + toUint256(st.stProtocolFee),
+            toUint256(st.stEffectiveNAV),
+            "fee bound: the senior carve-outs exceed the senior effective NAV"
+        );
+        assertLe(toUint256(st.jtProtocolFee), toUint256(st.jtEffectiveNAV), "fee bound: the junior fee exceeds the junior effective NAV");
 
         // The committed checkpoint equals the returned state, and the liquidity mark landed
         IRoycoDayAccountant.RoycoDayAccountantState memory sAfter = accountant.getState();

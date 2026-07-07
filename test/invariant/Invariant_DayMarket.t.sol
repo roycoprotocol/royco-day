@@ -2,9 +2,9 @@
 pragma solidity ^0.8.28;
 
 import { DayMarketHandler } from "./handlers/DayMarketHandler.sol";
-import { StdInvariant } from "forge-std/StdInvariant.sol";
-import { Test } from "forge-std/Test.sol";
-import { console2 } from "forge-std/console2.sol";
+import { StdInvariant } from "../../lib/forge-std/src/StdInvariant.sol";
+import { Test } from "../../lib/forge-std/src/Test.sol";
+import { console2 } from "../../lib/forge-std/src/console2.sol";
 
 /**
  * @title Invariant_DayMarket

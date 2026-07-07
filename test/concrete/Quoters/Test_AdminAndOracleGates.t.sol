@@ -96,6 +96,34 @@ contract Test_AdminAndOracleGates_STJTChainlinkQuoter is DayMarketTestBase {
         kernel.setChainlinkOracle(address(0), 0, false);
     }
 
+    /**
+     * @notice CURRENT BEHAVIOR (divergence): wiring a LIVE feed with a ZERO staleness threshold is accepted, even though that
+     *         configuration can only ever price inside the exact second the feed updates in
+     * @dev Expected from first principles: revert INVALID_STALENESS_THRESHOLD_SECONDS. A zero threshold is only harmless when no
+     *      feed is consulted, so the guard should reject (live feed, zero threshold) and allow (null feed, zero threshold),
+     *      which is exactly the sequencer twin's polarity (a null uptime feed disables the check, a live one demands a positive
+     *      grace period). The guard at IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol:178 reads `_oracle != address(0) ||
+     *      _stalenessThresholdSeconds > 0` while its own preceding comment and the sequencer guard at :195 use `== address(0) ||`,
+     *      so the accepted and rejected configurations are swapped. The staleness gate is updatedAt + threshold >= now, so with
+     *      threshold 0 a fresh answer (updatedAt == now) passes only until the next second ticks
+     */
+    function test_FINDING_19_SetChainlinkOracle_AcceptsLiveFeedWithZeroStalenessThreshold() public {
+        // A fresh answer in this very second, updatedAt == now, so the zero-threshold gate updatedAt + 0 >= now still holds
+        priceFeed.setUpdatedAt(block.timestamp);
+
+        // Current behavior: the (live feed, zero threshold) pair is accepted instead of rejected
+        vm.prank(ORACLE_QUOTER_ADMIN);
+        kernel.setChainlinkOracle(address(priceFeed), 0, false);
+
+        // The hazardous configuration landed in storage exactly as passed
+        IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState memory config = kernel.getChainlinkOracleConfiguration();
+        assertEq(config.oracle, address(priceFeed), "the live feed must have landed in quoter storage");
+        assertEq(config.stalenessThresholdSeconds, 0, "the zero staleness threshold must have landed in quoter storage");
+
+        // Same-second pricing still succeeds (updatedAt + 0 == now): vault 1.0 x feed 1.0 = 1e18 per whole 18-decimal share
+        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1e18, "pricing must still work in the second the feed updated in");
+    }
+
     // =============================
     // Admin setters, attacker side
     // =============================

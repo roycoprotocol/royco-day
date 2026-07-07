@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { FixedPointMathLib } from "../../../lib/solady/src/utils/FixedPointMathLib.sol";
+import { WAD } from "../../../src/libraries/Constants.sol";
 import { MarketState } from "../../../src/libraries/Types.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
@@ -19,9 +20,6 @@ import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
  *      envelope bound is derived from those literals independently of the contract's internals
  */
 contract TestFuzz_YieldShare_AdaptiveCurveYDM is Test {
-    /// @notice WAD fixed-point unit, 1e18 == 100%
-    uint256 internal constant WAD = 1e18;
-
     /// @dev Deployment floor on the share at the kink: the V2 constructor passes 0.0001e18 (one basis point)
     uint256 internal constant MIN_YT = 0.0001e18;
 

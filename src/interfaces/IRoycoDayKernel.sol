@@ -107,6 +107,14 @@ interface IRoycoDayKernel {
      */
     event LiquidityPremiumReinvested(uint256 stSharesReinvested, TRANCHE_UNIT ltAssetsMinted);
 
+    /**
+     * @notice Emitted when a liquidity-premium reinvestment attempt does not execute, leaving the senior shares idle in the kernel
+     * @param stSharesToReinvest The senior tranche shares the kernel attempted to deploy into the liquidity venue
+     * @param minLTAssetsOut The slippage-bounded minimum liquidity tranche assets the deployment demanded
+     * @param revertData The raw revert data returned by the venue, identifying a breached slippage gate versus any other add failure
+     */
+    event LiquidityPremiumReinvestmentFailed(uint256 stSharesToReinvest, TRANCHE_UNIT minLTAssetsOut, bytes revertData);
+
     /// @notice Thrown when the tranche and the kernel's corresponding tranche assets don't match
     error TRANCHE_AND_KERNEL_ASSETS_MISMATCH();
 
