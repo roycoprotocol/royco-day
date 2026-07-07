@@ -9,6 +9,7 @@ import { RoycoBlacklist } from "../src/auth/RoycoBlacklist.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
+    ADMIN_BLACKLIST_ROLE,
     ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
@@ -245,6 +246,14 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
         // 2. Deploy (or reuse) the chain's shared blacklist (governed by the AccessManager, not the factory).
         address roycoBlacklist = _deployBlacklist(address(accessManager));
+
+        {
+            bytes4[] memory blacklistSelectors = new bytes4[](3);
+            blacklistSelectors[0] = RoycoBlacklist.blacklistAccounts.selector;
+            blacklistSelectors[1] = RoycoBlacklist.unblacklistAccounts.selector;
+            blacklistSelectors[2] = RoycoBlacklist.setSanctionsList.selector;
+            accessManager.setTargetFunctionRole(roycoBlacklist, blacklistSelectors, ADMIN_BLACKLIST_ROLE);
+        }
 
         // 3. Register (or reuse) the Day template for this kernel type.
         address template = _getOrRegisterTemplate(factory, _config.kernelType);

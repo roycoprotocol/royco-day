@@ -145,6 +145,9 @@ interface IRoycoDayKernel {
     /// @notice Thrown when the to address is not whitelisted on the tranche
     error ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(address to);
 
+    /// @notice Thrown when the senior tranche self-liquidation bonus is set above 100% (WAD)
+    error INVALID_SELF_LIQUIDATION_BONUS();
+
     /// @notice Thrown when an LT multi-asset deposit/redeem is made with zero of both constituent assets (ST underlying and quote)
     error MUST_DEPOSIT_NON_ZERO_ASSETS();
 

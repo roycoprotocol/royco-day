@@ -10,6 +10,7 @@ import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { COMPONENT_ID_SENIOR_TRANCHE_IMPL, COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2 } from "../../../src/factory/templates/base/Components.sol";
 import { IBaseTemplate } from "../../../src/interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
+import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { MockDeploymentTemplate } from "../../mocks/MockDeploymentTemplate.sol";
 import { UninitializedERC1967Proxy } from "../../mocks/UninitializedERC1967Proxy.sol";
@@ -165,6 +166,21 @@ contract Test_TemplateInitialization is Test {
         (bytes32[] memory ids, bytes[] memory codes) = _singleComponent(COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2, type(AdaptiveCurveYDM_V2).creationCode);
         template.initialize(ids, codes);
         factory.registerTemplate(address(template));
+
+        // The factory requires a non-zero kernel in the deployment result; this test only exercises the YDM path,
+        // so hand back a minimal result carrying a kernel (tranches may be zero — those registry writes are skipped).
+        template.setDeploymentResult(
+            IRoycoProtocolTemplate.DeploymentResult({
+                seniorTranche: address(0),
+                juniorTranche: address(0),
+                liquidityTranche: address(0),
+                kernel: makeAddr("YDM_TEST_KERNEL"),
+                accountant: address(0),
+                ydm: address(0),
+                ltYdm: address(0),
+                extras: ""
+            })
+        );
 
         // First deployment at the salt: fresh instance, so alreadyDeployed is false and the immutable kink is
         // exactly the 0.5e18 passed as the constructor arg (the appended abi.encode(0.5e18) word).

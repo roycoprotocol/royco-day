@@ -71,16 +71,17 @@ contract Test_MockMarketRoleMatrix is DayMarketTestBase {
     }
 
     // ---------------------------------------------------------------------
-    // Finding 11 root: kernel and fee recipient hold NO tranche LP role
+    // Finding 11 fix: kernel and fee recipient DO hold the tranche LP roles, so a whitelist-enforcing market's
+    // fee/premium mints pass the tranche `_update` whitelist screen.
     // ---------------------------------------------------------------------
 
-    function test_FINDING_11_root_kernelAndFeeRecipient_holdNoTrancheLPRole() public view {
-        assertFalse(_holds(ST_LP_ROLE, address(kernel)), "kernel must NOT hold ST_LP_ROLE");
-        assertFalse(_holds(JT_LP_ROLE, address(kernel)), "kernel must NOT hold JT_LP_ROLE");
-        assertFalse(_holds(LT_LP_ROLE, address(kernel)), "kernel must NOT hold LT_LP_ROLE");
-        assertFalse(_holds(ST_LP_ROLE, PROTOCOL_FEE_RECIPIENT), "fee recipient must NOT hold ST_LP_ROLE");
-        assertFalse(_holds(JT_LP_ROLE, PROTOCOL_FEE_RECIPIENT), "fee recipient must NOT hold JT_LP_ROLE");
-        assertFalse(_holds(LT_LP_ROLE, PROTOCOL_FEE_RECIPIENT), "fee recipient must NOT hold LT_LP_ROLE");
+    function test_FINDING_11_fix_kernelAndFeeRecipient_holdTrancheLPRoles() public view {
+        assertTrue(_holds(ST_LP_ROLE, address(kernel)), "kernel must hold ST_LP_ROLE");
+        assertTrue(_holds(JT_LP_ROLE, address(kernel)), "kernel must hold JT_LP_ROLE");
+        assertTrue(_holds(LT_LP_ROLE, address(kernel)), "kernel must hold LT_LP_ROLE");
+        assertTrue(_holds(ST_LP_ROLE, PROTOCOL_FEE_RECIPIENT), "fee recipient must hold ST_LP_ROLE");
+        assertTrue(_holds(JT_LP_ROLE, PROTOCOL_FEE_RECIPIENT), "fee recipient must hold JT_LP_ROLE");
+        assertTrue(_holds(LT_LP_ROLE, PROTOCOL_FEE_RECIPIENT), "fee recipient must hold LT_LP_ROLE");
     }
 
     // ---------------------------------------------------------------------

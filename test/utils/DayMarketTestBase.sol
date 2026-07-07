@@ -842,6 +842,16 @@ abstract contract DayMarketTestBase is Assertions {
         accessManager.grantRole(SYNC_ROLE, address(accountant), 0);
         accessManager.grantRole(BURNER_ROLE, address(kernel), 0);
 
+        // Mirror the template's Finding-11 fix: the kernel (premium senior-share mint recipient) and the protocol
+        // fee recipient (fee-share mint recipient) hold the tranche LP roles so a whitelist-enforcing market does
+        // not brick on the first fee/premium mint.
+        accessManager.grantRole(ST_LP_ROLE, address(kernel), 0);
+        accessManager.grantRole(JT_LP_ROLE, address(kernel), 0);
+        accessManager.grantRole(LT_LP_ROLE, address(kernel), 0);
+        accessManager.grantRole(ST_LP_ROLE, PROTOCOL_FEE_RECIPIENT, 0);
+        accessManager.grantRole(JT_LP_ROLE, PROTOCOL_FEE_RECIPIENT, 0);
+        accessManager.grantRole(LT_LP_ROLE, PROTOCOL_FEE_RECIPIENT, 0);
+
         // Dedicated admin wallets
         PAUSER = _generateActor("PAUSER", ADMIN_PAUSER_ROLE);
         UNPAUSER = _generateActor("UNPAUSER", ADMIN_UNPAUSER_ROLE);

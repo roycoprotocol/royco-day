@@ -7,11 +7,20 @@ import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access
 import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { CREATE3 } from "../../lib/solady/src/utils/CREATE3.sol";
 import { RoycoBase } from "../base/RoycoBase.sol";
+import { IRoycoAuth } from "../interfaces/IRoycoAuth.sol";
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
 import { IBaseTemplate } from "../interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../interfaces/factory/IRoycoProtocolTemplate.sol";
-import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ROLE, ADMIN_UPGRADER_ROLE, DEPLOYER_ROLE } from "./RolesConfiguration.sol";
+import {
+    ADMIN_ENTRY_POINT_ROLE,
+    ADMIN_FACTORY_ROLE,
+    ADMIN_PAUSER_ROLE,
+    ADMIN_ROLE,
+    ADMIN_UNPAUSER_ROLE,
+    ADMIN_UPGRADER_ROLE,
+    DEPLOYER_ROLE
+} from "./RolesConfiguration.sol";
 
 /**
  * @title RoycoFactory
@@ -75,6 +84,15 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         adminFactorySelectors[0] = IRoycoFactory.registerTemplate.selector;
         adminFactorySelectors[1] = IRoycoFactory.disableTemplate.selector;
         am.setTargetFunctionRole(address(this), adminFactorySelectors, ADMIN_FACTORY_ROLE);
+
+        // Bind the factory's pause/unpause to the pauser/unpauser roles (else they default to ADMIN_ROLE).
+        bytes4[] memory pauserSelectors = new bytes4[](1);
+        pauserSelectors[0] = IRoycoAuth.pause.selector;
+        am.setTargetFunctionRole(address(this), pauserSelectors, ADMIN_PAUSER_ROLE);
+
+        bytes4[] memory unpauserSelectors = new bytes4[](1);
+        unpauserSelectors[0] = IRoycoAuth.unpause.selector;
+        am.setTargetFunctionRole(address(this), unpauserSelectors, ADMIN_UNPAUSER_ROLE);
 
         // Grant the factory `ADMIN_ENTRY_POINT_ROLE` on the AM
         am.grantRole(ADMIN_ENTRY_POINT_ROLE, address(this), 0);
@@ -146,10 +164,14 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         // Explicit clear for clarity; transient storage auto-clears at tx-end as a backstop.
         _activeTemplate = address(0);
 
-        // Register each tranche against the market's kernel.
-        $.trancheToKernel[result.seniorTranche] = result.kernel;
-        $.trancheToKernel[result.juniorTranche] = result.kernel;
-        $.trancheToKernel[result.liquidityTranche] = result.kernel;
+        // A kernel is mandatory; every tranche is registered against it.
+        require(result.kernel != address(0), INVALID_DEPLOYMENT_RESULT());
+
+        // Register each tranche against the market's kernel, skipping any zero tranche address so an absent tranche
+        // (e.g. an ST/JT-only market's liquidity tranche) never poisons the zero-address registry key (Finding 22).
+        if (result.seniorTranche != address(0)) $.trancheToKernel[result.seniorTranche] = result.kernel;
+        if (result.juniorTranche != address(0)) $.trancheToKernel[result.juniorTranche] = result.kernel;
+        if (result.liquidityTranche != address(0)) $.trancheToKernel[result.liquidityTranche] = result.kernel;
 
         emit MarketDeploymentCompleted(_template, msg.sender, result);
     }

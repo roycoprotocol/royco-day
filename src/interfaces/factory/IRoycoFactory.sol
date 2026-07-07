@@ -53,6 +53,9 @@ interface IRoycoFactory {
     /// @notice Thrown when a factory-forwarded call reverts.
     error FACTORY_CALL_FAILED(bytes returnData);
 
+    /// @notice Thrown when a template returns a deployment result with a zero tranche or kernel address
+    error INVALID_DEPLOYMENT_RESULT();
+
     /// @notice Returns the AccessManager that governs this factory and its markets.
     function ROYCO_AUTHORITY() external view returns (address);
 

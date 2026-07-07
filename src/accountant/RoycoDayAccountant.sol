@@ -1003,6 +1003,8 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             (bool success, bytes memory data) = _ydm.call(_ydmInitializationData);
             require(success, FAILED_TO_INITIALIZE_YDM(data));
         }
+        // Verify the YDM is actually initialized for THIS market.
+        IYDM(_ydm).previewYieldShare(MarketState.PERPETUAL, 0);
     }
 
     // =============================

@@ -175,9 +175,9 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         assertGe(covPre, LIQUIDATION_COVERAGE_THRESHOLD_WAD, "the drawdown must breach the liquidation coverage threshold by construction");
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "a liquidation breach forces the market PERPETUAL so withdrawals stay open");
 
-        // Store an at-or-above-100% bonus through the production setter: it accepts any uint64 verbatim, so the
-        // redemption clamp is the only line of defense against these configs
-        uint64 bonusWAD = uint64(bound(_bonusSeed, 1e18, type(uint64).max));
+        // The setter now caps the bonus at WAD (100%). Drive the maximal end of the valid range so the redemption
+        // clamp is still shown to keep an exiting senior LP from raising coverage utilization even at a 100% bonus.
+        uint64 bonusWAD = uint64(bound(_bonusSeed, 0.5e18, 1e18));
         vm.prank(KERNEL_ADMIN);
         kernel.setSeniorTrancheSelfLiquidationBonus(bonusWAD);
 
