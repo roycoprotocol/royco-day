@@ -145,4 +145,17 @@ library ValuationLogic {
         if (_totalSupply == 0) return ZERO_NAV_UNITS;
         return _totalValue.mulDiv(_shares, _totalSupply, _rounding);
     }
+
+    /**
+     * @notice Returns the senior share rate: the NAV-unit value of one whole senior tranche share at the post-mint supply
+     * @dev The single senior-rate expression, shared by the sync's cache write and the quoter's cache-miss preview so both resolve an
+     *      identical rate. It values one whole share (WAD) against the senior effective NAV over the post-mint senior supply, rounding
+     *      down so the rate is never overstated
+     * @param _postMintSeniorSupply The total senior tranche supply after this sync mints the premium and protocol fee shares
+     * @param _stEffectiveNAV The senior tranche's post-sync effective NAV backing all senior shares
+     * @return rate The NAV-unit value of one whole senior tranche share, rounded down
+     */
+    function _computeSTShareRate(uint256 _postMintSeniorSupply, NAV_UNIT _stEffectiveNAV) internal pure returns (NAV_UNIT rate) {
+        return _convertToValue(WAD, _postMintSeniorSupply, _stEffectiveNAV, Math.Rounding.Floor);
+    }
 }

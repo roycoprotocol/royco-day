@@ -172,7 +172,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
 
             // Compute the ST share rate
             // NOTE: Tranche shares always have 18 decimals of precision, so WAD == 1 whole tranche share
-            rate = toUint256(ValuationLogic._convertToValue(WAD, stTotalSupply, state.stEffectiveNAV, Math.Rounding.Floor));
+            rate = toUint256(ValuationLogic._computeSTShareRate(stTotalSupply, state.stEffectiveNAV));
         }
 
         // Floor the ST share rate to 1 wei so the Balancer pool never receives a zero rate, which it would reject
