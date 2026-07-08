@@ -10,6 +10,7 @@ import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
     ADMIN_BLACKLIST_ROLE,
+    ADMIN_CONVERSION_RATE_ROLE,
     ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
@@ -18,6 +19,7 @@ import {
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
     ADMIN_REINVESTMENT_ROLE,
     ADMIN_ROLE,
+    ADMIN_SANCTIONS_ROLE,
     ADMIN_UNBLACKLIST_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
@@ -274,11 +276,17 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             instantBlacklistSelectors[0] = RoycoBlacklist.blacklistAccounts.selector;
             accessManager.setTargetFunctionRole(roycoBlacklist, instantBlacklistSelectors, ADMIN_BLACKLIST_ROLE);
 
-            // The delayed relaxations: unblacklisting and repointing the sanctions source wait ADMIN_UNBLACKLIST_ROLE's short delay.
-            bytes4[] memory delayedBlacklistSelectors = new bytes4[](2);
-            delayedBlacklistSelectors[0] = RoycoBlacklist.unblacklistAccounts.selector;
-            delayedBlacklistSelectors[1] = RoycoBlacklist.setSanctionsList.selector;
-            accessManager.setTargetFunctionRole(roycoBlacklist, delayedBlacklistSelectors, ADMIN_UNBLACKLIST_ROLE);
+            // The short-delayed removal: unblacklisting an account is operational, not a system-security change, so it
+            // waits ADMIN_UNBLACKLIST_ROLE's short delay.
+            bytes4[] memory unblacklistSelectors = new bytes4[](1);
+            unblacklistSelectors[0] = RoycoBlacklist.unblacklistAccounts.selector;
+            accessManager.setTargetFunctionRole(roycoBlacklist, unblacklistSelectors, ADMIN_UNBLACKLIST_ROLE);
+
+            // The long-delayed screening-source change: repointing the sanctions source changes how every account is
+            // screened, a system-level change, so setSanctionsList waits ADMIN_SANCTIONS_ROLE's long delay.
+            bytes4[] memory sanctionsSelectors = new bytes4[](1);
+            sanctionsSelectors[0] = RoycoBlacklist.setSanctionsList.selector;
+            accessManager.setTargetFunctionRole(roycoBlacklist, sanctionsSelectors, ADMIN_SANCTIONS_ROLE);
         }
 
         // 3. Register (or reuse) the Day template for this kernel type.
@@ -326,7 +334,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
     /// @notice Builds the role assignments applied to the AccessManager (surface-compatible with the legacy helper).
     function generateRolesAssignments(RoleAssignmentAddresses memory _addresses) public pure returns (RoleAssignment[] memory roleAssignments) {
-        roleAssignments = new RoleAssignment[](20);
+        roleAssignments = new RoleAssignment[](22);
         roleAssignments[0] = _assignment(ADMIN_PAUSER_ROLE, _addresses.pauserAddress);
         roleAssignments[1] = _assignment(ADMIN_UPGRADER_ROLE, _addresses.upgraderAddress);
         roleAssignments[2] = _assignment(SYNC_ROLE, _addresses.syncRoleAddress);
@@ -344,12 +352,17 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         roleAssignments[14] = _assignment(LT_LP_ROLE, _addresses.protocolFeeRecipientAddress);
         roleAssignments[15] = _assignment(ADMIN_BALANCER_POOL_MANAGER_ROLE, _addresses.balancerPoolManagerAddress);
         roleAssignments[16] = _assignment(ADMIN_MARKET_OPS_ROLE, _addresses.marketOpsAddress);
-        // The blacklist roles both go to the market-ops admin: ADMIN_BLACKLIST_ROLE for the instant add
-        // (blacklistAccounts) and ADMIN_UNBLACKLIST_ROLE for the short-delayed relaxations (unblacklistAccounts,
-        // setSanctionsList). The same operator, split only by execution delay.
+        // The blacklist screening roles all go to the market-ops admin, split only by execution delay:
+        // ADMIN_BLACKLIST_ROLE for the instant add (blacklistAccounts), ADMIN_UNBLACKLIST_ROLE for the short-delayed
+        // removal (unblacklistAccounts), and ADMIN_SANCTIONS_ROLE for the long-delayed screening-source change
+        // (setSanctionsList).
         roleAssignments[17] = _assignment(ADMIN_BLACKLIST_ROLE, _addresses.marketOpsAddress);
         roleAssignments[18] = _assignment(ADMIN_REINVESTMENT_ROLE, _addresses.marketOpsAddress);
         roleAssignments[19] = _assignment(ADMIN_UNBLACKLIST_ROLE, _addresses.marketOpsAddress);
+        roleAssignments[20] = _assignment(ADMIN_SANCTIONS_ROLE, _addresses.marketOpsAddress);
+        // The conversion-rate override is the long-delayed sibling of the operational oracle-quoter role: the same
+        // oracle operator, split only by execution delay.
+        roleAssignments[21] = _assignment(ADMIN_CONVERSION_RATE_ROLE, _addresses.adminOracleQuoterAddress);
     }
 
     function _assignment(uint64 _role, address _assignee) private pure returns (RoleAssignment memory) {
@@ -375,7 +388,11 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (role == GUARDIAN_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: ADMIN_ROLE, executionDelay: 0 });
         if (role == DEPLOYER_ROLE) return RoleConfig({ adminRole: DEPLOYER_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == DEPLOYER_ROLE_ADMIN_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
-        if (role == ADMIN_FACTORY_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        // Template registration is the consequential factory operation: a registered template acts with the factory's
+        // admin during its deployment window, so registering one is a change to the system's trusted code and waits the
+        // long delay. This also bounds the factory's retained admin (see the deploy-flow NOTE): the only way to drive
+        // that admin is through a registered template, and registration now waits the long delay.
+        if (role == ADMIN_FACTORY_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: LONG_DELAY_SECONDS });
         if (role == ADMIN_UNPAUSER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: SHORT_DELAY_SECONDS });
         if (role == LT_LP_ROLE) return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_BALANCER_POOL_MANAGER_ROLE) {
@@ -388,6 +405,16 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (role == ADMIN_BLACKLIST_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_UNBLACKLIST_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: SHORT_DELAY_SECONDS });
+        }
+        // Repointing the sanctions source (setSanctionsList) changes how every account is screened, a system-level
+        // change, so it waits the long delay.
+        if (role == ADMIN_SANCTIONS_ROLE) {
+            return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: LONG_DELAY_SECONDS });
+        }
+        // Setting the ST-asset conversion rate directly (setConversionRate) is a pricing change, so it waits the long
+        // delay; repointing the oracle source stays operational under ADMIN_ORACLE_QUOTER_ROLE.
+        if (role == ADMIN_CONVERSION_RATE_ROLE) {
+            return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: LONG_DELAY_SECONDS });
         }
         revert UNKNOWN_ROLE(role);
     }
@@ -465,15 +492,24 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             _am.setRoleGuardian(ra.role, cfg.guardianRole);
         }
 
-        // Pass 3: grant delays on the roles that control upgrades, accounting, and the market's price sources
-        // (each already carrying an execution delay), so an account granted one of these roles cannot use it the
-        // moment the delayed grant executes. All of them use the shared long delay; to give a role its own value,
-        // take it out of the list and call setGrantDelay for it directly. The other roles (pauser, unpauser, sync,
-        // LP, deployer, market ops, Balancer pool manager) keep a zero grant delay so a replacement holder can be
-        // added without a second wait; the pauser in particular must stay usable at once. A new grant delay takes
-        // effect `minSetback()` seconds after this transaction.
-        uint64[5] memory grantDelayedRoles =
-            [ADMIN_UPGRADER_ROLE, ADMIN_KERNEL_ROLE, ADMIN_ACCOUNTANT_ROLE, ADMIN_PROTOCOL_FEE_SETTER_ROLE, ADMIN_ORACLE_QUOTER_ROLE];
+        // Pass 3: grant delays on the roles that control upgrades, accounting, the market's price sources, template
+        // registration, the sanctions source, and the conversion rate (each already carrying an execution delay), so an
+        // account granted one of these roles cannot use it the moment the delayed grant executes. All of them use the
+        // shared long delay; to give a role its own value, take it out of the list and call setGrantDelay for it
+        // directly. The other roles (pauser, unpauser, sync, LP, deployer, market ops, Balancer pool manager, the
+        // instant blacklist add, the short-delayed unblacklist, and reinvestment) keep a zero grant delay so a
+        // replacement holder can be added without a second wait; the pauser in particular must stay usable at once. A
+        // new grant delay takes effect `minSetback()` seconds after this transaction.
+        uint64[8] memory grantDelayedRoles = [
+            ADMIN_UPGRADER_ROLE,
+            ADMIN_KERNEL_ROLE,
+            ADMIN_ACCOUNTANT_ROLE,
+            ADMIN_PROTOCOL_FEE_SETTER_ROLE,
+            ADMIN_ORACLE_QUOTER_ROLE,
+            ADMIN_FACTORY_ROLE,
+            ADMIN_SANCTIONS_ROLE,
+            ADMIN_CONVERSION_RATE_ROLE
+        ];
         for (uint256 i; i < grantDelayedRoles.length; ++i) {
             _am.setGrantDelay(grantDelayedRoles[i], LONG_DELAY_SECONDS);
         }

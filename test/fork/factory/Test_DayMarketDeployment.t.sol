@@ -21,6 +21,7 @@ import { DeployScript } from "../../../script/Deploy.s.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
+    ADMIN_CONVERSION_RATE_ROLE,
     ADMIN_ENTRY_POINT_ROLE,
     ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
@@ -29,6 +30,7 @@ import {
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
     ADMIN_REINVESTMENT_ROLE,
+    ADMIN_SANCTIONS_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     BURNER_ROLE,
@@ -356,10 +358,12 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         _assertRole(address(ACCOUNTANT), IRoycoDayAccountant.setSeniorTrancheDustTolerance.selector, ADMIN_MARKET_OPS_ROLE);
         _assertRole(address(ACCOUNTANT), IRoycoDayAccountant.setJuniorTrancheDustTolerance.selector, ADMIN_MARKET_OPS_ROLE);
 
-        // Quoter admin surface -> ADMIN_ORACLE_QUOTER_ROLE (previously unbound => silently defaulted to ADMIN_ROLE).
+        // Quoter admin surface -> ADMIN_ORACLE_QUOTER_ROLE, except the direct conversion-rate override, which is a
+        // pricing change bound to ADMIN_CONVERSION_RATE_ROLE at the long delay (previously unbound => silently
+        // defaulted to ADMIN_ROLE).
         _assertRole(address(KERNEL), BalancerV3_LT_BPTOracle_Quoter.setBPTOracle.selector, ADMIN_ORACLE_QUOTER_ROLE);
         _assertRole(address(KERNEL), BalancerV3_LT_BPTOracle_Quoter.setMaxReinvestmentSlippage.selector, ADMIN_ORACLE_QUOTER_ROLE);
-        _assertRole(address(KERNEL), bytes4(keccak256("setConversionRate(uint256,bool)")), ADMIN_ORACLE_QUOTER_ROLE);
+        _assertRole(address(KERNEL), bytes4(keccak256("setConversionRate(uint256,bool)")), ADMIN_CONVERSION_RATE_ROLE);
         _assertRole(address(KERNEL), bytes4(keccak256("setChainlinkOracle(address,uint48,bool)")), ADMIN_ORACLE_QUOTER_ROLE);
         _assertRole(address(KERNEL), bytes4(keccak256("setSequencerUptimeFeed(address,uint48)")), ADMIN_ORACLE_QUOTER_ROLE);
 
@@ -554,6 +558,11 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_ACCOUNTANT_ROLE), d, "accountant admin grant delay");
         assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_PROTOCOL_FEE_SETTER_ROLE), d, "fee setter grant delay");
         assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_ORACLE_QUOTER_ROLE), d, "oracle quoter grant delay");
+        // The consequential roles the hardening added: template registration, the sanctions source, and the
+        // conversion-rate override all carry the long grant delay.
+        assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_FACTORY_ROLE), d, "template registration grant delay");
+        assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_SANCTIONS_ROLE), d, "sanctions source grant delay");
+        assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_CONVERSION_RATE_ROLE), d, "conversion rate grant delay");
 
         assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_PAUSER_ROLE), 0, "pauser grant delay must stay zero");
         assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_UNPAUSER_ROLE), 0, "unpauser grant delay must stay zero");

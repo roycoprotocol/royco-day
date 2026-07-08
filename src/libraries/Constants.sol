@@ -67,11 +67,13 @@ uint32 constant SHORT_DELAY_SECONDS = 2 days;
 uint32 constant LONG_DELAY_SECONDS = 15 days;
 
 // NOTE: the deploy asserts the long delay is at least this cap, and the accountant rejects any fixed term above it, so
-// at deploy a committed user can always exit before a governance change takes effect. The reverse is not checked
-// anywhere: the long delay lives in the AccessManager, and nothing rejects a later reduction of it below this cap. If
-// the long delay is ever lowered below the maximum fixed term, a user committed for the full term could be locked in
-// past the point a change takes effect. Keep the long delay at least this cap; if the delay ever becomes adjustable
-// from a Day contract, enforce this there.
+// at deploy a committed user can always exit before a governance change takes effect. A later reduction of the long
+// delay below this cap cannot take effect faster than the long delay itself, so the cap is self-protecting through the
+// AccessManager and needs no separate runtime check: the AccessManager applies every delay change through
+// Time.Delay.withUpdate, which makes a reduction wait a setback equal to the amount reduced, and every admin path that
+// could reduce it is itself bounded by the long delay (the governance admin's execution delay is the long delay, and
+// the factory's retained admin can only be driven by a registered template, whose registration now waits the long
+// delay). Keep the long delay at least this cap at deploy.
 
 /// @dev The maximum fixed-term duration any market may carry. The long delay must be at least this, so a
 ///      governance change cannot take effect faster than a committed user can exit.
