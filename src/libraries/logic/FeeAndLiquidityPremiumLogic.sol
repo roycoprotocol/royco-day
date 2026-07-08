@@ -42,7 +42,7 @@ library FeeAndLiquidityPremiumLogic {
             _computeSTFeeAndLiquidityPremiumSharesToMint(_state, IERC20(_immutables.seniorTranche).totalSupply());
 
         // Cache the senior share rate at this sync's post-mint value before the reinvestment (or any venue mark read) consumes it, so an inline senior share move cannot shift the venue's senior-leg mark
-        Cache._write(CacheKey.ST_SHARE_RATE, toUint256(ValuationLogic._computeSTShareRate(stTotalSupplyAfterMints, _state.stEffectiveNAV)));
+        Cache._write(CacheKey.ST_SHARE_RATE, toUint256(ValuationLogic._computeTrancheShareRate(stTotalSupplyAfterMints, _state.stEffectiveNAV)));
 
         // Mint the liquidity premium as senior tranche shares held by the kernel on behalf of the liquidity tranche
         // The premium is already booked into the senior effective NAV, so minting these shares only reassigns senior appreciation to the LT

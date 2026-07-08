@@ -147,15 +147,15 @@ library ValuationLogic {
     }
 
     /**
-     * @notice Returns the senior share rate: the NAV-unit value of one whole senior tranche share at the post-mint supply
-     * @dev The single senior-rate expression, shared by the sync's cache write and the quoter's cache-miss preview so both resolve an
-     *      identical rate. It values one whole share (WAD) against the senior effective NAV over the post-mint senior supply, rounding
-     *      down so the rate is never overstated
-     * @param _postMintSeniorSupply The total senior tranche supply after this sync mints the premium and protocol fee shares
-     * @param _stEffectiveNAV The senior tranche's post-sync effective NAV backing all senior shares
-     * @return rate The NAV-unit value of one whole senior tranche share, rounded down
+     * @notice Returns a tranche share rate: the NAV-unit value of one whole tranche share at the given supply and effective NAV
+     * @dev A tranche-agnostic share-rate primitive. Its sole consumer today is the senior share rate, the only tranche leg a liquidity
+     *      pool prices, shared by the sync's cache write and the quoter's cache-miss preview so both resolve an identical rate. It values
+     *      one whole share (WAD) against the tranche effective NAV over the tranche supply, rounding down so the rate is never overstated
+     * @param _trancheTotalSupply The total tranche share supply the rate is computed against (for the senior tranche, the post-mint supply)
+     * @param _trancheEffectiveNAV The tranche's effective NAV backing all of its shares
+     * @return rate The NAV-unit value of one whole tranche share, rounded down
      */
-    function _computeSTShareRate(uint256 _postMintSeniorSupply, NAV_UNIT _stEffectiveNAV) internal pure returns (NAV_UNIT rate) {
-        return _convertToValue(WAD, _postMintSeniorSupply, _stEffectiveNAV, Math.Rounding.Floor);
+    function _computeTrancheShareRate(uint256 _trancheTotalSupply, NAV_UNIT _trancheEffectiveNAV) internal pure returns (NAV_UNIT rate) {
+        return _convertToValue(WAD, _trancheTotalSupply, _trancheEffectiveNAV, Math.Rounding.Floor);
     }
 }
