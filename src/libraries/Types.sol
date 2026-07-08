@@ -64,7 +64,7 @@ struct AssetClaims {
  * @custom:field ltProtocolFee - Protocol fee taken on the liquidity premium (LT yield share) on this sync
  * @custom:field coverageUtilizationWAD - The current coverageUtilization of the market, scaled to WAD precision
  * @custom:field liquidityUtilizationWAD - The current liquidityUtilization of the market, scaled to WAD precision
- * @custom:field fixedTermEndTimestamp - The timestamp at which the fixed term ends. Set to 0 if the market is not in a fixed term state
+ * @custom:field fixedTermEndTimestamp - The timestamp at which the fixed term ends — set to 0 if the market is not in a fixed term state
  * @custom:field minCoverageWAD - The coverage percentage that the senior tranche is expected to be protected by, scaled to WAD precision
  * @custom:field jtCoinvested - Whether the junior tranche is co-invested in the same yield-bearing opportunity as senior (true means it shares senior's downside stress) or in the RFR (false)
  * @custom:field coverageLiquidationUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
@@ -117,7 +117,7 @@ enum Operation {
 
 /**
  * @title TrancheType
- * @dev Defines the types of Royco tranches deployed per market.
+ * @dev Defines the types of Royco tranches deployed per market
  * @custom:type SENIOR - The identifier for the senior tranche (protected capital)
  * @custom:type JUNIOR - The identifier for the junior tranche (first-loss capital)
  * @custom:type LIQUIDITY - The identifier for the liquidity tranche (market-making capital)

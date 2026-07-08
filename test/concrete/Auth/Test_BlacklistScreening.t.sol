@@ -339,7 +339,7 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
      *      reverts from that moment until governance unwires it. Expected behavior: the setter probes the target
      *      with an isSanctioned call so an unresponsive list is rejected before it can take the market down
      */
-    function test_FINDING_32_SetSanctionsList_AcceptsTargetThatCannotAnswerIsSanctioned() public {
+    function test_DIVERGENCE_32_SetSanctionsList_AcceptsTargetThatCannotAnswerIsSanctioned() public {
         // Coverage after seed: (100 + 30) x 0.2 / 30 = 0.8667 <= 1
         _seedMarket(100e18, 30e18);
         vm.prank(MARKET_OPS_ADMIN);

@@ -28,11 +28,11 @@ library RoycoTestMath {
     /// @notice WAD fixed-point unit, 1e18 == 100%.
     uint256 internal constant WAD = 1e18;
 
-    /// @notice Independent restatement of the protocol's mint-dilution residual (Constants.sol
-    ///         MINT_DILUTION_RESIDUAL_WAD = 1e6, a 1e-12 residual): a single mint owns at most
-    ///         (1 − 1e-12) of the post-mint supply. Deliberately NOT imported from src so a silent
-    ///         production change diverges from this mirror and fails every cross-assert loudly.
-    uint256 internal constant MINT_DILUTION_RESIDUAL = 1e6;
+    /// @notice Independent restatement of the protocol's max mint dilution (Constants.sol
+    ///         MAX_MINT_DILUTION_WAD = WAD − 1e6): a single mint owns at most (1 − 1e-12) of the
+    ///         post-mint supply, leaving incumbents a 1e-12 residual. Deliberately NOT imported from
+    ///         src so a silent production change diverges from this mirror and fails every cross-assert loudly.
+    uint256 internal constant MAX_MINT_DILUTION = 1e18 - 1e6;
 
     /// @notice One below solady expWad's overflow threshold, the clamp on the adaptive yield model's linear adaptation.
     int256 internal constant MAX_LINEAR_ADAPTATION_WAD = 135_305_999_368_893_231_589 - 1;
@@ -199,7 +199,7 @@ library RoycoTestMath {
      * @custom:field elapsedSeconds - Seconds since the last adaptation (0 on the first-ever call)
      * @custom:field discountToTargetAtZeroUtilWAD - Fixed discount below the target share at 0% utilization (FD_T)
      * @custom:field premiumToTargetAtFullUtilWAD - Fixed premium above the target share at 100% utilization (FP_T)
-     * @custom:field maxAdaptationSpeedWAD - Max adaptation speed per second, scaled by the normalized delta
+     * @custom:field adaptationSpeedAtBoundaryWAD - Adaptation speed per second at the region boundary, scaled by the normalized delta
      * @custom:field minYieldShareAtTargetWAD - Lower clamp on the adapted share at target (1bp in production)
      * @custom:field maxYieldShareAtTargetWAD - Upper clamp on the adapted share at target (WAD in production)
      * @custom:field perpetual - Whether the market is PERPETUAL, the only state in which the curve adapts
@@ -211,7 +211,7 @@ library RoycoTestMath {
         uint256 elapsedSeconds;
         uint256 discountToTargetAtZeroUtilWAD;
         uint256 premiumToTargetAtFullUtilWAD;
-        uint256 maxAdaptationSpeedWAD;
+        uint256 adaptationSpeedAtBoundaryWAD;
         uint256 minYieldShareAtTargetWAD;
         uint256 maxYieldShareAtTargetWAD;
         bool perpetual;
@@ -306,14 +306,15 @@ library RoycoTestMath {
      * @dev Mirrors src ValuationLogic._convertToShares.
      *      Edges: supply == 0 mints value 1:1 (totalValue ignored, no clamp — a bootstrap mint dilutes nobody),
      *      and totalValue == 0 with a live supply pins the denominator to 1 wei.
-     *      The mint-dilution clamp: a single mint may own at most (1 − ε/WAD) of the
-     *      post-mint supply, ε = MINT_DILUTION_RESIDUAL (this library's own restatement of the protocol
+     *      The mint-dilution clamp: a single mint may own at most MAX_MINT_DILUTION / WAD of the
+     *      post-mint supply (MAX_MINT_DILUTION is this library's own restatement of the protocol
      *      constant — if Constants.sol changes without this mirror, every cross-assert fails loudly). The
-     *      shares therefore never exceed cap = ⌊supply · (WAD − ε) / ε⌋. The bind test runs BEFORE the
-     *      fair-shares division in its overflow-free form (⌈value·ε/(WAD − ε)⌉ > denominator,
+     *      shares therefore never exceed cap = ⌊supply · MAX_MINT_DILUTION / (WAD − MAX_MINT_DILUTION)⌋.
+     *      The bind test runs BEFORE the fair-shares division in its overflow-free form
+     *      (⌈value·(WAD − MAX_MINT_DILUTION) / MAX_MINT_DILUTION⌉ > denominator,
      *      integer-equivalent to fair > cap), mirroring production's ordering exactly — including the panic
-     *      surface: the cap mulDiv overflows uint256 once supply ≥ ⌈2^256·ε/(WAD − ε)⌉, exactly when
-     *      production's does (load-bearing for the invariant handler's revert prediction).
+     *      surface: the cap mulDiv overflows uint256 once supply ≥ ⌈2^256·(WAD − MAX_MINT_DILUTION) / MAX_MINT_DILUTION⌉,
+     *      exactly when production's does (load-bearing for the invariant handler's revert prediction).
      *      Rounding: Floor on both branches (the cap floor favors existing holders).
      * @param value The value being contributed
      * @param totalValue The pre-contribution total value backing the supply
@@ -323,8 +324,8 @@ library RoycoTestMath {
     function convertToShares(uint256 value, uint256 totalValue, uint256 supply) internal pure returns (uint256 shares) {
         if (supply == 0) return value;
         uint256 denominator = totalValue == 0 ? 1 : totalValue;
-        if (Math.mulDiv(value, MINT_DILUTION_RESIDUAL, WAD - MINT_DILUTION_RESIDUAL, Math.Rounding.Ceil) > denominator) {
-            return Math.mulDiv(supply, WAD - MINT_DILUTION_RESIDUAL, MINT_DILUTION_RESIDUAL);
+        if (Math.mulDiv(value, WAD - MAX_MINT_DILUTION, MAX_MINT_DILUTION, Math.Rounding.Ceil) > denominator) {
+            return Math.mulDiv(supply, MAX_MINT_DILUTION, WAD - MAX_MINT_DILUTION);
         }
         shares = Math.mulDiv(supply, value, denominator);
     }
@@ -757,7 +758,7 @@ library RoycoTestMath {
      * @dev Mirrors src AdaptiveCurveYDM_V2.yieldShare / previewYieldShare.
      *      Utilization is capped at WAD. The normalized delta is a truncating signed division over the
      *      region's max delta. Adaptation runs only when perpetual: linear = speed · elapsed with
-     *      speed = (maxSpeed · normDelta) / WAD, each adapted point is
+     *      speed = (boundarySpeed · normDelta) / WAD, each adapted point is
      *      clamp(⌊start · expWad(min(linear, MAX_LINEAR_ADAPTATION_WAD)) / WAD⌋, [min, max]), and the midpoint
      *      uses linear / 2 (halved before its own clamp). The curve output adds (normDelta · spread) / WAD to
      *      the averaged share at target, spread = FD_T below target and FP_T at or above, then clamps to
@@ -773,7 +774,7 @@ library RoycoTestMath {
 
         uint256 avgYieldShareAtTargetWAD;
         if (in_.perpetual) {
-            int256 speedWAD = (int256(in_.maxAdaptationSpeedWAD) * normalizedDeltaWAD) / int256(WAD);
+            int256 speedWAD = (int256(in_.adaptationSpeedAtBoundaryWAD) * normalizedDeltaWAD) / int256(WAD);
             int256 linearAdaptationWAD = speedWAD * int256(in_.elapsedSeconds);
             out.endYieldShareAtTargetWAD = _adaptYieldShareAtTarget(in_, linearAdaptationWAD);
             uint256 midYieldShareAtTargetWAD = _adaptYieldShareAtTarget(in_, linearAdaptationWAD / 2);

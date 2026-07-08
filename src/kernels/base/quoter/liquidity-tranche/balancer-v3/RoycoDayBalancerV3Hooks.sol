@@ -67,7 +67,8 @@ contract RoycoDayBalancerV3Hooks is RoycoBase, BaseHooks, VaultGuard {
 
     /**
      * @inheritdoc IHooks
-     * @dev Returns false so a pool cannot be registered directly against this implementation. The kernel, pool, and hook form a circular
+     * @dev Returns false so a pool cannot be registered directly against this implementation
+     *      The kernel, pool, and hook form a circular
      *      construction dependency (the hook derives the pool from the kernel, the kernel from the pool), so registration is performed against
      *      a stand-in implementation that returns true and the same `getHookFlags`, after which the proxy is upgraded to this implementation
      */
@@ -153,7 +154,7 @@ contract RoycoDayBalancerV3Hooks is RoycoBase, BaseHooks, VaultGuard {
      *      kernel captures any oracle drift on the senior side before the operation mutates the pool's composition
      * @dev Requires this hook contract to hold the SYNCER role on the kernel
      * @dev Reverts if this hook contract is paused
-     * @return synced Always true on success. Lets callers forward the result directly as the hook's required `bool` return
+     * @return synced Always true on success, letting callers forward the result directly as the hook's required `bool` return
      */
     function _preLiquidityOperationSyncTrancheAccounting() internal whenNotPaused returns (bool synced) {
         IRoycoDayKernel(ROYCO_DAY_KERNEL).syncTrancheAccounting();

@@ -261,7 +261,7 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
      * A market whose accrual window is never consumed (no gain sync ever pays premiums, so the accumulator is
      * never reset) grows by rate * elapsed forever. When the running total would pass type(uint192).max the
      * checked += reverts with an arithmetic panic, bricking every subsequent sync — a loud failure, in contrast
-     * to the silent single-increment wrap pinned by test_FINDING_31_AccrualIncrementCastSilentlyTruncatesPastUint192
+     * to the silent single-increment wrap pinned by test_DIVERGENCE_31_AccrualIncrementCastSilentlyTruncatesPastUint192
      * Derivation, from the accumulator width alone:
      *   type(uint192).max = 2^192 - 1 = 6277101735386680763835789423207666416102355444464034512895
      *   E1 = floor((2^192 - 1) / 1e18) - 1 = 6277101735386680763835789423207666416101
@@ -311,7 +311,7 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
      * Reachability needs one un-synced window of ~2e32 years, so this is a latent width hazard rather than a
      * live economic path — pinned so the asymmetry with the loud += overflow above stays visible
      */
-    function test_FINDING_31_AccrualIncrementCastSilentlyTruncatesPastUint192() public {
+    function test_DIVERGENCE_31_AccrualIncrementCastSilentlyTruncatesPastUint192() public {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.maxJTYieldShareWAD = uint64(WAD);
         p.maxLTYieldShareWAD = 0;

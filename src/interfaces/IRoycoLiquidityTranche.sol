@@ -8,9 +8,9 @@ import { IRoycoVaultTranche } from "./IRoycoVaultTranche.sol";
  * @title IRoycoLiquidityTranche
  * @notice Interface for the liquidity tranche (LT): the standard share-token surface (inherited from IRoycoVaultTranche)
  *         plus the LT-specific multi-asset entrypoints that let an LP enter/exit with the LP token's constituent assets
- *         (ST underlying + quote) directly.
- * @dev The LT's base asset is a market-making LP token. The kernel keeps the specific venue (e.g. the AMM) behind its
- *      own hooks, so this surface stays venue-agnostic.
+ *         (ST underlying + quote) directly
+ * @dev The LT's base asset is a market-making LP token — the kernel keeps the specific venue (e.g. the AMM) behind its
+ *      own hooks, so this surface stays venue-agnostic
  */
 interface IRoycoLiquidityTranche is IRoycoVaultTranche {
     /// @notice Thrown when a multi-asset deposit is made with zero of both constituent assets (ST underlying and quote)
@@ -62,7 +62,7 @@ interface IRoycoLiquidityTranche is IRoycoVaultTranche {
     /**
      * @notice Exits the LT to the LP token's constituent assets: ST underlying + quote
      * @dev The kernel proportionally removes the LP-token slice, redeems the pooled senior shares to ST underlying, and
-     *      transfers the ST underlying and quote directly to the receiver. The LT shares are burned afterwards
+     *      transfers the ST underlying and quote directly to the receiver — the LT shares are burned afterwards
      * @param _shares The number of LT shares to redeem
      * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must yield (slippage bound)
      * @param _minQuoteAssetsOut The minimum quote to receive (slippage bound)

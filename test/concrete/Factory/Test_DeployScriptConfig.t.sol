@@ -7,6 +7,7 @@ import { MockERC20C } from "../../mocks/MockERC20C.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
+    ADMIN_BLACKLIST_ROLE,
     ADMIN_ENTRY_POINT_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
@@ -62,8 +63,8 @@ contract Test_DeployScriptConfig is Test {
      */
     function test_GetRoleConfig_ResolvesEveryGeneratedRoleAssignment() public view {
         // 15 distinct dummy addresses, one per RoleAssignmentAddresses field (the struct's full address surface).
-        // The fee recipient deliberately carries three LP roles (ST/JT/LT) and the market-ops address carries both
-        // market ops and reinvestment, which is how 15 addresses fan out to 18 assignments.
+        // The fee recipient deliberately carries three LP roles (ST/JT/LT) and market ops carries the blacklist
+        // admin and reinvestment roles alongside its own, which is how 15 addresses fan out to 19 assignments.
         DeployScript.RoleAssignmentAddresses memory addresses = DeployScript.RoleAssignmentAddresses({
             pauserAddress: address(0x1001),
             unpauserAddress: address(0x1002),
@@ -84,10 +85,10 @@ contract Test_DeployScriptConfig is Test {
 
         DeployScript.RoleAssignment[] memory assignments = deployScript.generateRolesAssignments(addresses);
 
-        // Independently derived count: the address surface is 15 fields; the fee recipient maps to the three LP
-        // roles, the market-ops address maps to both market ops and reinvestment, and the other 13 map one-to-one,
-        // so 13 + 3 + 2 = 18 assignments.
-        assertEq(assignments.length, 18, "one assignment per (role, assignee) pair: 13 one-to-one + 3 LP roles on the fee recipient + reinvestment on the market-ops address");
+        // Independently derived count: the address surface is 15 fields, of which the fee recipient maps to the
+        // three LP roles, market ops maps to its own role plus the blacklist admin and reinvestment roles, and the
+        // other 13 map one-to-one, so 13 + 3 + 3 = 19 assignments.
+        assertEq(assignments.length, 19, "one assignment per (role, assignee) pair: 13 one-to-one + 3 LP roles on the fee recipient + 3 on market ops");
 
         for (uint256 i; i < assignments.length; ++i) {
             uint64 role = assignments[i].role;
@@ -126,8 +127,9 @@ contract Test_DeployScriptConfig is Test {
 
         // The emitted role set itself, hand-listed from the deployment's operational surface (pause/unpause,
         // upgrade, sync, kernel/accountant/fee/quoter admin, LP admin + the three LP roles, guardian, deployer +
-        // its admin, Balancer pool manager, market ops). Order-pinned so a silent drop or reorder is loud.
-        uint64[18] memory expectedRoles = [
+        // its admin, Balancer pool manager, market ops + blacklist admin + reinvestment). Order-pinned so a silent
+        // drop or reorder is loud.
+        uint64[19] memory expectedRoles = [
             ADMIN_PAUSER_ROLE,
             ADMIN_UPGRADER_ROLE,
             SYNC_ROLE,
@@ -145,6 +147,7 @@ contract Test_DeployScriptConfig is Test {
             LT_LP_ROLE,
             ADMIN_BALANCER_POOL_MANAGER_ROLE,
             ADMIN_MARKET_OPS_ROLE,
+            ADMIN_BLACKLIST_ROLE,
             ADMIN_REINVESTMENT_ROLE
         ];
         for (uint256 i; i < expectedRoles.length; ++i) {
@@ -180,7 +183,7 @@ contract Test_DeployScriptConfig is Test {
      *         already-deployed component address and reverts MARKET_COMPONENT_ALREADY_DEPLOYED atomically. It is a
      *         loud deployment foot-gun, never silent aliasing of one market's components onto another
      */
-    function test_FINDING_21_MarketIdDerivation_CollidesForShiftedNameBoundariesAndSameBlockReruns() public {
+    function test_DIVERGENCE_21_MarketIdDerivation_CollidesForShiftedNameBoundariesAndSameBlockReruns() public {
         // Fixed block context so the derivation below is fully determined: both derivations share the same
         // timestamp and chainid, isolating the string-boundary ambiguity as the only moving part.
         vm.warp(1_750_000_000);

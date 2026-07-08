@@ -7,6 +7,7 @@ import { RoycoBase } from "../../base/RoycoBase.sol";
 import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
+import { WAD } from "../../libraries/Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "../../libraries/Units.sol";
 import { AccountingSyncLogic } from "../../libraries/logic/AccountingSyncLogic.sol";
@@ -19,7 +20,8 @@ import { RedemptionLogic } from "../../libraries/logic/RedemptionLogic.sol";
  * @author Ankur Dubey, Shivaansh Kapoor
  * @notice Abstract contract serving as the base for all Royco kernel implementations
  * @dev Provides the foundational logic for kernel contracts including pre and post operation NAV reconciliation, coverage enforcement logic,
- *      and base wiring for tranche synchronization. All concrete kernel implementations should inherit from the Royco Kernel.
+ *      and base wiring for tranche synchronization
+ *      All concrete kernel implementations should inherit from the Royco Kernel
  */
 abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardTransient {
     /// @dev Storage slot for RoycoDayKernelState using ERC-7201 pattern
@@ -87,7 +89,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         _;
     }
 
-    /// @dev Initializes the quoter cache at the start of the call. No teardown is needed since the transient cache auto-clears at transaction end
+    /// @dev Initializes the quoter cache at the start of the call — no teardown is needed since the transient cache auto-clears at transaction end
     /// @dev Should be placed on all functions that use the quoter cache
     modifier withQuoterCache() {
         _initializeQuoterCache();
@@ -142,6 +144,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
         // Initialize the kernel state
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
+        require(_params.stSelfLiquidationBonusWAD <= WAD, INVALID_SELF_LIQUIDATION_BONUS());
         $.protocolFeeRecipient = _params.protocolFeeRecipient;
         $.stSelfLiquidationBonusWAD = _params.stSelfLiquidationBonusWAD;
         $.roycoBlacklist = _params.roycoBlacklist;
@@ -501,6 +504,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @inheritdoc IRoycoDayKernel
     function setSeniorTrancheSelfLiquidationBonus(uint64 _stSelfLiquidationBonusWAD) external override(IRoycoDayKernel) restricted {
+        require(_stSelfLiquidationBonusWAD <= WAD, INVALID_SELF_LIQUIDATION_BONUS());
         _getRoycoDayKernelStorage().stSelfLiquidationBonusWAD = _stSelfLiquidationBonusWAD;
         emit SeniorTrancheSelfLiquidationBonusUpdated(_stSelfLiquidationBonusWAD);
     }

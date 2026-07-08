@@ -246,7 +246,7 @@ contract Test_Setters_Accountant is AccountantTestBase {
      *    impermanent loss below the tolerance, so the market never enters the fixed-term protection window
      * Expected behavior: the setter should bound the tolerance like every other economic parameter
      */
-    function test_FINDING_30_HugeDustToleranceDisablesProtocolFeesAndFixedTermEntry() public {
+    function test_DIVERGENCE_30_HugeDustToleranceDisablesProtocolFeesAndFixedTermEntry() public {
         // Flat 1000e18 / 200e18 market with the accrual and premium clocks initialized this block
         _seedAndInitAccrual();
         uint32 premiumClockBefore = accountant.getState().lastPremiumPaymentTimestamp;

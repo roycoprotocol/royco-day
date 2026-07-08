@@ -12,7 +12,7 @@ import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 /**
  * @title TestFuzz_YieldShare_AdaptiveCurveYDM
  * @notice Fuzz properties for the adaptive yield curve: the output always sits inside the envelope allowed
- *         by the maximum adaptation speed and the fixed spreads, the preview equals the mutating return,
+ *         by the boundary adaptation speed and the fixed spreads, the preview equals the mutating return,
  *         the curve is frozen (time-invariant) while the market is in its fixed term, and a full century
  *         between adaptations never reverts
  * @dev The test contract plays the accountant: it initializes and queries the curve as msg.sender.
@@ -26,8 +26,8 @@ contract TestFuzz_YieldShare_AdaptiveCurveYDM is Test {
     /// @dev Deployment ceiling on the share at the kink: the V2 constructor passes WAD (100%)
     uint256 internal constant MAX_YT = WAD;
 
-    /// @dev Deployment max adaptation speed per second: the V2 constructor passes 100e18 / 365 days = 3_170_979_198_376 wei/s
-    uint256 internal constant MAX_SPEED = 100e18 / uint256(365 days);
+    /// @dev Deployment boundary adaptation speed per second: the V2 constructor passes 100e18 / 365 days = 3_170_979_198_376 wei/s
+    uint256 internal constant BOUNDARY_SPEED = 100e18 / uint256(365 days);
 
     /// @dev One below solady expWad's overflow threshold, the clamp the adaptation applies before exponentiating
     int256 internal constant MAX_LINEAR_ADAPTATION = 135_305_999_368_893_231_589 - 1;
@@ -59,7 +59,7 @@ contract TestFuzz_YieldShare_AdaptiveCurveYDM is Test {
         // The deployment constants the envelope below is derived from, pinned against the live instance
         assertEq(c.ydm.MIN_YIELD_SHARE_AT_TARGET_WAD(), MIN_YT, "deployed floor on the share at target must be 0.0001e18");
         assertEq(c.ydm.MAX_YIELD_SHARE_AT_TARGET_WAD(), MAX_YT, "deployed ceiling on the share at target must be WAD");
-        assertEq(c.ydm.MAX_ADAPTATION_SPEED_WAD(), MAX_SPEED, "deployed max adaptation speed must be 100e18 / 365 days");
+        assertEq(c.ydm.ADAPTATION_SPEED_AT_BOUNDARY_WAD(), BOUNDARY_SPEED, "deployed boundary adaptation speed must be 100e18 / 365 days");
     }
 
     /**
@@ -80,7 +80,7 @@ contract TestFuzz_YieldShare_AdaptiveCurveYDM is Test {
      * @dev Mirrors only the outer shape the speed limit imposes: exponentiate the extreme linear adaptation
      *      (clamped below expWad's overflow threshold exactly as production clamps it) and clamp the result to
      *      the deployment [MIN_YT, MAX_YT] band. Any realized adaptation is milder, because the realized speed
-     *      is the max speed scaled down by the normalized distance from the kink
+     *      is the boundary speed scaled down by the normalized distance from the kink
      */
     function _extremeAdaptedShare(uint256 _startYT, int256 _extremeLinear) internal pure returns (uint256 point) {
         if (_extremeLinear > MAX_LINEAR_ADAPTATION) _extremeLinear = MAX_LINEAR_ADAPTATION;
@@ -91,7 +91,7 @@ contract TestFuzz_YieldShare_AdaptiveCurveYDM is Test {
 
     /**
      * Property: in a perpetual market the output can never escape the speed-bounded drift envelope. Over a
-     * window of `elapsed` seconds the linear adaptation is at most MAX_SPEED * elapsed in magnitude, so every
+     * window of `elapsed` seconds the linear adaptation is at most BOUNDARY_SPEED * elapsed in magnitude, so every
      * adapted point (start, mid, end, and their average) lies between the two extreme adapted shares, and the
      * final output adds at most the fixed spread on its side of the kink. The persisted share at target must
      * land inside the same band, drift in the direction of the utilization imbalance, and the whole result
@@ -127,7 +127,7 @@ contract TestFuzz_YieldShare_AdaptiveCurveYDM is Test {
                 elapsedSeconds: elapsed,
                 discountToTargetAtZeroUtilWAD: c.yT - c.y0,
                 premiumToTargetAtFullUtilWAD: c.yFull - c.yT,
-                maxAdaptationSpeedWAD: MAX_SPEED,
+                adaptationSpeedAtBoundaryWAD: BOUNDARY_SPEED,
                 minYieldShareAtTargetWAD: MIN_YT,
                 maxYieldShareAtTargetWAD: MAX_YT,
                 perpetual: true
@@ -137,13 +137,13 @@ contract TestFuzz_YieldShare_AdaptiveCurveYDM is Test {
         (uint64 storedYT,,,) = c.ydm.accountantToCurve(address(this));
         assertEq(storedYT, expected.endYieldShareAtTargetWAD, "persisted share at target must equal the independent mirror exactly");
 
-        // Drift envelope: |linear adaptation| <= MAX_SPEED * elapsed, so the persisted share is pinned between
+        // Drift envelope: |linear adaptation| <= BOUNDARY_SPEED * elapsed, so the persisted share is pinned between
         // the two extreme adapted points, and the output adds at most the fixed spread on its side of the kink
-        uint256 maxLinear = MAX_SPEED * elapsed;
+        uint256 maxLinear = BOUNDARY_SPEED * elapsed;
         uint256 upPoint = _extremeAdaptedShare(c.yT, int256(maxLinear));
         uint256 downPoint = _extremeAdaptedShare(c.yT, -int256(maxLinear));
-        assertGe(storedYT, downPoint, "persisted share cannot fall faster than the max adaptation speed");
-        assertLe(storedYT, upPoint, "persisted share cannot rise faster than the max adaptation speed");
+        assertGe(storedYT, downPoint, "persisted share cannot fall faster than the boundary adaptation speed");
+        assertLe(storedYT, upPoint, "persisted share cannot rise faster than the boundary adaptation speed");
 
         uint256 spreadDown = c.yT - c.y0;
         uint256 lowerBound = downPoint > spreadDown ? downPoint - spreadDown : 0;
@@ -212,7 +212,7 @@ contract TestFuzz_YieldShare_AdaptiveCurveYDM is Test {
 
     /**
      * Property: a full century between adaptations never reverts. The linear adaptation grows to
-     * MAX_SPEED * 100 years = 3_170_979_198_376 * 3_153_600_000 ≈ 1e22, far past expWad's overflow threshold
+     * BOUNDARY_SPEED * 100 years = 3_170_979_198_376 * 3_153_600_000 ≈ 1e22, far past expWad's overflow threshold
      * of ~135.3e18, so this exercises the internal clamp on the up side and expWad's zero saturation on the
      * down side. The call must succeed and the output must still respect the 100% cap and equal its preview
      */

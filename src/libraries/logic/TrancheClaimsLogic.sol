@@ -127,6 +127,10 @@ library TrancheClaimsLogic {
         pure
         returns (AssetClaims memory scaledClaims)
     {
+        // If the total tranche shares is zero, it has no claims on the assets, so return the claims as is
+        if (_totalTrancheShares == 0) return scaledClaims;
+
+        // Scale the claims by the given shares
         scaledClaims.nav = _claims.nav.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
         scaledClaims.stAssets = _claims.stAssets.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
         scaledClaims.jtAssets = _claims.jtAssets.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
-import { MINT_DILUTION_RESIDUAL_WAD, ONE_NAV_UNIT, WAD, ZERO_NAV_UNITS } from "../Constants.sol";
+import { MAX_MINT_DILUTION_WAD, ONE_NAV_UNIT, WAD, ZERO_NAV_UNITS } from "../Constants.sol";
 import { Math, NAV_UNIT, RoycoUnitsMath, toUint256 } from "../Units.sol";
 
 /**
@@ -49,8 +49,8 @@ library ValuationLogic {
      * @notice Returns the effective net asset value (NAV) of the liquidity tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
      * @dev The effective NAV is the liquidity tranche's deployed market-making inventory (its raw NAV) plus the value of the
      *      senior tranche shares it holds from accumulated, not yet reinvested, liquidity premium payments
-     * @dev Reads the held senior-share count from storage, the value execution sees after the premium mint. The preview path uses
-     *      the overload below to inject the post-mint count that storage does not yet reflect
+     * @dev Reads the held senior-share count from storage, the value execution sees after the premium mint
+     *      The preview path uses the overload below to inject the post-mint count that storage does not yet reflect
      * @dev The senior NAV and share supply must be mutually consistent: the post-sync effective NAV against the
      *      post-carve-out-mint total supply, so the held senior shares are valued at the correct NAV per share
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
@@ -102,11 +102,13 @@ library ValuationLogic {
     }
 
     /**
-     * @notice Returns the number of shares that have a claim on the specified value, clamped by the protocol's mint-dilution residual
+     * @notice Returns the number of shares that have a claim on the specified value, clamped by the protocol's max mint dilution
      * @dev The single share-conversion primitive, shared by the tranches and the kernel-side mint sizing so both resolve identical share counts
-     * @dev The mint-dilution clamp: any single mint may own at most (1 − ε/WAD) of the POST-mint supply, where
-     *      ε = MINT_DILUTION_RESIDUAL_WAD. The minted shares therefore never exceed cap = ⌊supply · (WAD − ε) / ε⌋ (derivation: m·WAD ≤ (WAD − ε)·(supply + m)
-     *      ⟺ m·ε ≤ supply·(WAD − ε)).
+     * @dev The mint-dilution clamp: any single mint may own at most MAX_MINT_DILUTION_WAD / WAD of the POST-mint supply, leaving
+     *      pre-existing holders at least the complementary (WAD − MAX_MINT_DILUTION_WAD) / WAD sliver
+     *      The minted shares therefore
+     *      never exceed cap = ⌊supply · MAX_MINT_DILUTION_WAD / (WAD − MAX_MINT_DILUTION_WAD)⌋ (derivation:
+     *      minted·WAD ≤ MAX_MINT_DILUTION_WAD·(supply + minted) ⟺ minted·(WAD − MAX_MINT_DILUTION_WAD) ≤ supply·MAX_MINT_DILUTION_WAD)
      * @dev With no shares outstanding the conversion stays 1:1 (a bootstrap mint dilutes nobody, so the clamp is exempt)
      * @param _value The value to convert in NAV units
      * @param _totalValue The total tranche controlled value in NAV units
@@ -119,11 +121,12 @@ library ValuationLogic {
         if (_totalSupply == 0) return toUint256(_value);
         // When the total value is zero, assume all existing shares are backed by a single NAV unit so new depositors dilute the existing unbacked holders
         NAV_UNIT denominator = (_totalValue == ZERO_NAV_UNITS ? ONE_NAV_UNIT : _totalValue);
-        // The overflow-free bind test, run before the fair-shares division
-        // fair > cap ⟺ value·ε > denominator·(WAD − ε) ⟺ ⌈value·ε/(WAD − ε)⌉ > denominator
-        if (_value.mulDiv(MINT_DILUTION_RESIDUAL_WAD, (WAD - MINT_DILUTION_RESIDUAL_WAD), Math.Rounding.Ceil) > denominator) {
-            // The mint binds the clamp: pre-existing holders retain at least the residual of the post-mint supply
-            return Math.mulDiv(_totalSupply, (WAD - MINT_DILUTION_RESIDUAL_WAD), MINT_DILUTION_RESIDUAL_WAD);
+        // The overflow-free bind test, run before the fair-shares division:
+        // fair > cap ⟺ value·(WAD − MAX_MINT_DILUTION_WAD) > denominator·MAX_MINT_DILUTION_WAD
+        //           ⟺ ⌈value·(WAD − MAX_MINT_DILUTION_WAD) / MAX_MINT_DILUTION_WAD⌉ > denominator
+        if (_value.mulDiv((WAD - MAX_MINT_DILUTION_WAD), MAX_MINT_DILUTION_WAD, Math.Rounding.Ceil) > denominator) {
+            // The mint binds the clamp: pre-existing holders retain at least the complement of the max dilution
+            return Math.mulDiv(_totalSupply, MAX_MINT_DILUTION_WAD, (WAD - MAX_MINT_DILUTION_WAD));
         }
         return _totalSupply.mulDiv(_value, denominator, _rounding);
     }

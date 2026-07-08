@@ -17,15 +17,20 @@ import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
  * @title RoycoLiquidityTranche
  * @author Ankur Dubey, Shivaansh Kapoor
  * @notice Liquidity tranche implementation for Royco markets
- * @dev In addition to the standard LT asset deposit/redeem flows, it exposes multi-asset entrypoints that let an LP enter/exit with ST and quote assets directly (ST assets are used to mint ST shares)
+ * @dev In addition to the standard LT asset deposit/redeem flows, it exposes multi-asset entrypoints that let an LP enter/exit with ST and quote assets directly (ST assets are involved in minting/redeeming ST shares)
  */
 contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
     using SafeERC20 for IERC20;
 
+    /**
+     * @notice Constructs the Royco liquidity tranche vault
+     * @param _asset The underlying asset for the tranche
+     * @param _kernel The kernel that handles the core market logic and accounting synchronization
+     */
     constructor(address _asset, address _kernel) RoycoVaultTranche(_asset, _kernel) { }
 
-    /// @notice Initializes the Royco liquidity tranche.
-    /// @param _ltParams Deployment parameters including name, symbol, and initial authority for the liquidity tranche.
+    /// @notice Initializes the Royco liquidity tranche
+    /// @param _ltParams Deployment parameters including name, symbol, and initial authority for the liquidity tranche
     function initialize(RoycoTrancheInitParams calldata _ltParams) external initializer {
         __RoycoTranche_init(_ltParams);
     }
@@ -98,7 +103,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
             _spendAllowance(_owner, msg.sender, _shares);
         }
 
-        // Orchestrate the multi-asset redemption in the kernel, bounding the removal's slippage by the caller's minimum senior shares and quote out. It transfers the assets directly to the receiver
+        // Orchestrate the multi-asset redemption in the kernel, bounding the removal's slippage by the caller's minimum senior shares and quote out — it transfers the assets directly to the receiver
         (stClaims, quoteAssets) = IRoycoDayKernel(KERNEL).ltRedeemMultiAsset(_shares, _minSTSharesOut, _minQuoteAssetsOut, _receiver);
 
         // Burn shares after the kernel processes the redemption (kernel depends on pre-burn total supply)

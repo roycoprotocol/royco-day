@@ -13,9 +13,7 @@ import { SelfLiquidationHarness } from "../../mocks/SelfLiquidationHarness.sol";
  *         produced by the production coverage-utilization math from that same state, applying the bonus
  *         never reverts — in particular the coverage-utilization-neutral cap's division by
  *         (totalCoveredExposure - jtEffectiveNAV) can never hit a zero or underflowing denominator
- * @dev Forge-CI complement to the halmos lemma in test/symbolic/SelfLiquidationSymbolic.t.sol, so the
- *      no-div-0-on-breach property is enforced on every CI run rather than only where halmos runs.
- *      The SelfLiquidationHarness converts tranche units to NAV units 1:1, so every tranche-unit bound
+ * @dev The SelfLiquidationHarness converts tranche units to NAV units 1:1, so every tranche-unit bound
  *      below doubles as its NAV value
  */
 contract TestFuzz_SelfLiquidation_Logic is Test {

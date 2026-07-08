@@ -263,10 +263,11 @@ contract Test_SeniorShareRateProvider_BPTOracleQuoter is DayMarketTestBase {
     }
 
     /**
-     * @notice Once a sync has cached the rate, an inline senior-share mint (supply +100%) cannot move the rate the
-     *         venue sees within the same transaction
-     * @dev Attacker intent: sandwich a sync with a supply move so the pool prices its senior leg off a rate the
-     *      attacker just shifted. The transaction-scoped cache pins the rate for the rest of the transaction
+     * @notice Once a sync has cached the senior-share rate, an inline senior-share mint (supply +100%) cannot move it
+     *         for the rest of the transaction: the transaction-scoped cache pins the rate
+     * @dev This is the cache's purpose. Within a synced op (e.g. a multi-asset LT deposit/redemption that mints or burns
+     *      ST shares inline) the senior-leg mark the pool prices against is fixed at the pre-op sync, so an inline supply
+     *      move cannot shift it before the matching effective NAV commits
      */
     function test_GetRate_TransactionInvariant_UnderInlineSeniorMint() public {
         vm.prank(SYNC_OPERATOR);
@@ -279,5 +280,24 @@ contract Test_SeniorShareRateProvider_BPTOracleQuoter is DayMarketTestBase {
         seniorTranche.mint(makeAddr("INLINE_MINT_RECIPIENT"), 100e18);
 
         assertEq(kernel.getRate(), cachedRate, "the rate must be unchanged by an inline supply move, the cache pins it");
+    }
+
+    /**
+     * @notice With no sync in the transaction the cache is unset, so getRate() previews the senior-share rate live off
+     *         current supply: doubling the senior supply against unchanged backing NAV halves the previewed rate
+     * @dev The miss path a standalone off-chain read or a pre-sync pool interaction takes. No sync runs in the body, so
+     *      the ST_SHARE_RATE cache stays unset (Foundry clears transient storage at the setUp->test boundary) and both
+     *      reads recompute live from committed state and the live supply
+     */
+    function test_GetRate_MissPathPreviewsLiveOffCurrentSeniorSupply() public {
+        // Cache unset (no sync in the body): 100e18 stEff over the seeded 100e18 supply previews live to exactly 1.0
+        assertEq(kernel.getRate(), 1e18, "arrange: the uncached rate at seed must preview live to exactly 1.0");
+
+        // Senior mint doubles the supply (through the tranche's kernel-only mint gate) and adds no backing NAV
+        vm.prank(address(kernel));
+        seniorTranche.mint(makeAddr("INLINE_MINT_RECIPIENT"), 100e18);
+
+        // Still uncached, so the read previews live: floor(100e18 x 1e18 / 200e18) = 0.5e18
+        assertEq(kernel.getRate(), 0.5e18, "an uncached read previews live, halving the rate on a doubled senior supply");
     }
 }

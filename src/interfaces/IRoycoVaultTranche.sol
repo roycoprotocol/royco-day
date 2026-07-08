@@ -121,6 +121,9 @@ interface IRoycoVaultTranche is IERC20Metadata {
     /**
      * @notice Converts a specified amount of assets to shares using the current exchange rate
      * @dev Does not mutate any state
+     * @dev For the liquidity tranche the exchange rate is BPT-only (the raw NAV): the claimable idle
+     *      liquidity-premium senior shares are excluded, so the quoted rate cannot dip when a staged premium deploys
+     *      Use `previewDeposit` for the accurate deposit quote, which prices at the idle-inclusive effective NAV
      * @param _assets The amount of assets to convert, denominated in the tranche's base asset units
      * @return shares The equivalent number of shares for the specified asset amount
      */
@@ -129,6 +132,11 @@ interface IRoycoVaultTranche is IERC20Metadata {
     /**
      * @notice Converts a specified number of shares to asset claims using the current exchange rate
      * @dev Does not mutate any state
+     * @dev For the liquidity tranche this is the composability-facing exchange rate and is BPT-only (the raw NAV,
+     *      `stShares` always zero): the claimable idle liquidity-premium senior shares are excluded, so the quoted
+     *      price is a conservative floor that cannot dip when a staged premium deploys into the pool
+     *      Use `previewRedeem` for the accurate redemption quote, which includes the idle slice paid in-kind — the two
+     *      coincide exactly when no premium is staged
      * @param _shares The number of shares to convert
      * @return claims The equivalent asset claims for the specified share amount, including claims on ST assets, JT assets, and their total NAV value
      */
@@ -155,7 +163,7 @@ interface IRoycoVaultTranche is IERC20Metadata {
 
     /**
      * @notice Mints tranche shares to the specified account
-     * @dev Authorized via the AccessManager `restricted` modifier. The deploy template grants the market's kernel the role
+     * @dev Authorized via the AccessManager `restricted` modifier — the deploy template grants the market's kernel the role
      *      for this selector so the kernel can mint senior shares to itself when seeding the LT's Balancer pool
      * @dev Takes a raw share count: the caller (kernel) is responsible for computing a fair, non-diluting amount
      * @param _to The account to mint the shares to

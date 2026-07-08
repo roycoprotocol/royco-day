@@ -219,7 +219,7 @@ abstract contract MakinaMarketTestBase is DayMarketTestBase {
  *         shapes, and the missing zero-rate sentinel branch pinned as a divergence
  * @dev The composition has NO oracle fallback: the stored admin rate is the only accounting-asset price source, and
  *      because the quoter reads it with no sentinel check, a zero stored rate silently prices everything at zero
- *      instead of failing loud (see the FINDING test at the bottom)
+ *      instead of failing loud (see the DIVERGENCE test at the bottom)
  */
 contract Test_MachineSharePriceTimesAdminRate_MakinaAdminOracleQuoter is MakinaMarketTestBase {
     /// @dev Baseline shape: 18-decimal machine shares over an 18-decimal accounting token, machine share price 1.0, admin rate initialized to 2.0
@@ -413,7 +413,7 @@ contract Test_MachineSharePriceTimesAdminRate_MakinaAdminOracleQuoter is MakinaM
      *      direction divides by the zero rate and panics. This test pins the CURRENT silent-zero behavior, the
      *      expected behavior is a loud typed revert exactly like the sibling's
      */
-    function test_FINDING_18_MakinaQuoterZeroStoredRateSilentlyZeroesTrancheNAVInsteadOfReverting() public {
+    function test_DIVERGENCE_18_MakinaQuoterZeroStoredRateSilentlyZeroesTrancheNAVInsteadOfReverting() public {
         // An uninitialized proxy over the live impl: all immutables (machine, tranche assets) resolve, but the
         // stored conversion rate slot was never written and holds the sentinel 0
         MakinaKernel bare = MakinaKernel(address(new UninitializedERC1967Proxy(address(makinaKernelImpl))));
