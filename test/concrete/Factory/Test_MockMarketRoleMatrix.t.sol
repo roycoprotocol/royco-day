@@ -69,17 +69,19 @@ contract Test_MockMarketRoleMatrix is DayMarketTestBase {
     }
 
     // ---------------------------------------------------------------------
-    // Kernel and fee recipient DO hold the tranche LP roles, so a whitelist-enforcing market's fee/premium mints
-    // pass the tranche `_update` whitelist screen.
+    // Kernel and fee recipient do NOT hold the tranche LP roles: the kernel whitelist hook exempts both by address
+    // (_to == address(this) and _to == protocolFeeRecipient), so a whitelist-enforcing market's fee/premium mints
+    // pass the tranche `_update` screen without a standing role grant. Redeeming fee shares is then a separate,
+    // per-recipient whitelisting step the operator performs when needed.
     // ---------------------------------------------------------------------
 
-    function test_KernelAndFeeRecipient_HoldTrancheLPRoles() public view {
-        assertTrue(_holds(ST_LP_ROLE, address(kernel)), "kernel must hold ST_LP_ROLE");
-        assertTrue(_holds(JT_LP_ROLE, address(kernel)), "kernel must hold JT_LP_ROLE");
-        assertTrue(_holds(LT_LP_ROLE, address(kernel)), "kernel must hold LT_LP_ROLE");
-        assertTrue(_holds(ST_LP_ROLE, PROTOCOL_FEE_RECIPIENT), "fee recipient must hold ST_LP_ROLE");
-        assertTrue(_holds(JT_LP_ROLE, PROTOCOL_FEE_RECIPIENT), "fee recipient must hold JT_LP_ROLE");
-        assertTrue(_holds(LT_LP_ROLE, PROTOCOL_FEE_RECIPIENT), "fee recipient must hold LT_LP_ROLE");
+    function test_KernelAndFeeRecipient_DoNotHoldTrancheLPRoles() public view {
+        assertFalse(_holds(ST_LP_ROLE, address(kernel)), "kernel must not hold ST_LP_ROLE");
+        assertFalse(_holds(JT_LP_ROLE, address(kernel)), "kernel must not hold JT_LP_ROLE");
+        assertFalse(_holds(LT_LP_ROLE, address(kernel)), "kernel must not hold LT_LP_ROLE");
+        assertFalse(_holds(ST_LP_ROLE, PROTOCOL_FEE_RECIPIENT), "fee recipient must not hold ST_LP_ROLE");
+        assertFalse(_holds(JT_LP_ROLE, PROTOCOL_FEE_RECIPIENT), "fee recipient must not hold JT_LP_ROLE");
+        assertFalse(_holds(LT_LP_ROLE, PROTOCOL_FEE_RECIPIENT), "fee recipient must not hold LT_LP_ROLE");
     }
 
     // ---------------------------------------------------------------------
