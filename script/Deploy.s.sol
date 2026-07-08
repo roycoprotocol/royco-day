@@ -32,7 +32,6 @@ import { RoycoFactory } from "../src/factory/RoycoFactory.sol";
 import {
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
 } from "../src/factory/templates/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
-import { RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate } from "../src/factory/templates/RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate.sol";
 import { BaseDeploymentTemplate } from "../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import {
     COMPONENT_ID_ACCOUNTANT_IMPL,
@@ -45,6 +44,7 @@ import {
     COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2,
     COMPONENT_ID_YDM_STATIC_CURVE
 } from "../src/factory/templates/base/Components.sol";
+import { BalancerV3_GyroECLP_LT_DeploymentTemplate } from "../src/factory/templates/liquidity-tranche/BalancerV3_GyroECLP_LT_DeploymentTemplate.sol";
 import { IRoycoDayAccountant } from "../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../src/interfaces/IRoycoVaultTranche.sol";
@@ -260,7 +260,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
         // 4. Deploy the market via the template.
         bytes32 marketId = keccak256(abi.encode(_config.seniorTrancheName, _config.juniorTrancheName, block.timestamp, block.chainid));
-        RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate.DayParams memory params = _buildDayParams(_config, marketId, _protocolFeeRecipient, roycoBlacklist);
+        BalancerV3_GyroECLP_LT_DeploymentTemplate.DayParams memory params = _buildDayParams(_config, marketId, _protocolFeeRecipient, roycoBlacklist);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(template, abi.encode(params));
 
         // Renounce the deployer's roles after deployment is complete.
@@ -466,7 +466,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     )
         public
         pure
-        returns (RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate.DayParams memory)
+        returns (BalancerV3_GyroECLP_LT_DeploymentTemplate.DayParams memory)
     {
         return _buildDayParams(_config, _marketId, _protocolFeeRecipient, _roycoBlacklist);
     }
@@ -510,7 +510,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     )
         internal
         pure
-        returns (RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate.DayParams memory params)
+        returns (BalancerV3_GyroECLP_LT_DeploymentTemplate.DayParams memory params)
     {
         params.marketId = _marketId;
 

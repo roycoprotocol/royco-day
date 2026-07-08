@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IGyroECLPPool } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
 import { IERC20Metadata } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate } from "../../src/factory/templates/RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate.sol";
+import { BalancerV3_GyroECLP_LT_DeploymentTemplate } from "../../src/factory/templates/liquidity-tranche/BalancerV3_GyroECLP_LT_DeploymentTemplate.sol";
 import {
     IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
 } from "../../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
@@ -113,7 +113,7 @@ abstract contract MarketDeploymentConfig {
         uint256 jtYdmTargetUtilizationWAD; // JT YDM target-utilization kink
         uint256 ltYdmTargetUtilizationWAD; // LDM target-utilization kink
         // Liquidity tranche: the Gyro E-CLP {ST_share, quote} pool the LT BPT is minted from.
-        RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate.GyroECLPPoolParams gyroECLPPoolParams;
+        BalancerV3_GyroECLP_LT_DeploymentTemplate.GyroECLPPoolParams gyroECLPPoolParams;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -270,7 +270,7 @@ abstract contract MarketDeploymentConfig {
             ),
             jtYdmTargetUtilizationWAD: 0.9e18,
             ltYdmTargetUtilizationWAD: 0.9e18,
-            gyroECLPPoolParams: RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate.GyroECLPPoolParams({
+            gyroECLPPoolParams: BalancerV3_GyroECLP_LT_DeploymentTemplate.GyroECLPPoolParams({
                 name: _poolName(SNUSD, USDC[block.chainid]),
                 symbol: _poolSymbol(SNUSD, USDC[block.chainid]),
                 eclpParams: IGyroECLPPool.EclpParams({

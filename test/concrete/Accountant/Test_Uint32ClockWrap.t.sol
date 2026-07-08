@@ -9,37 +9,36 @@ import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
 
 /**
- * @title Test_ClockWrapDivergences
- * @notice Loud, first-class pins of the uint32 clock-width divergences (divergences 16 and 17). Every clock the
- *         adaptive YDMs and the accountant persist is stamped as uint32(block.timestamp), so from the first
- *         second past 2^32 (February 2106) each stored stamp silently drops the 2^32 bit while block.timestamp
- *         keeps it. Every elapsed-time subtraction against such a stamp then reads 2^32 seconds (about 136
- *         years) too long: adaptive curves are slammed to their configured bounds in one call, the same-block
- *         accrual guard misses so phantom time-weighted yield share is minted in a zero-second window, and the
- *         premium payment window over-weights the accumulators until every gain-bearing sync reverts
- * @dev Each test asserts CURRENT production behavior and documents the correctly dated behavior in an adjacent
- *      comment with independently derived bounds. If a future src change widens the clocks, these pins MUST
- *      fail loudly — that is the alarm they exist to raise
+ * @title Test_Uint32ClockWrap
+ * @notice The uint32 clock-width behavior of the adaptive YDMs and the accountant. Every clock they persist is
+ *         stamped as uint32(block.timestamp), so from the first second past 2^32 (February 2106) each stored
+ *         stamp drops the 2^32 bit while block.timestamp keeps it. Every elapsed-time subtraction against such a
+ *         stamp then reads 2^32 seconds (about 136 years) too long: adaptive curves are slammed to their
+ *         configured bounds in one call, the same-block accrual guard misses so time-weighted yield share is
+ *         minted in a zero-second window, and the premium payment window over-weights the accumulators until
+ *         every gain-bearing sync reverts
+ * @dev Each test asserts the past-horizon behavior and documents the sub-horizon dated behavior in an adjacent
+ *      comment with independently derived bounds
  */
-contract Test_ClockWrapDivergences is AccountantTestBase {
+contract Test_Uint32ClockWrap is AccountantTestBase {
     /// @dev 2^32, the width of every persisted clock: the first second at which the truncated stamps disagree with block.timestamp
     uint256 internal constant TWO_POW_32 = 4_294_967_296;
 
     // =============================
-    // DIVERGENCE 16 — the YDM adaptation clock wraps at uint32 and slams the curve to its bounds
+    // The YDM adaptation clock wraps at uint32 and slams the curve to its bounds
     // =============================
 
     /**
-     * @notice DIVERGENCE 16 (V2, downward): one real hour after the uint32 horizon, a below-target call slams the
-     *         adaptive yield share at target from 0.1e18 straight to the 0.0001e18 floor, because the stored
+     * @notice V2, downward: one real hour after the uint32 horizon, a below-target call slams the adaptive yield
+     *         share at target from 0.1e18 straight to the 0.0001e18 floor, because the stored
      *         lastAdaptationTimestamp lost its 2^32 bit and the elapsed time reads 136 years instead of one hour
-     * @dev Expected with a correct clock, an hour of full-speed downward adaptation decays the yield share at
+     * @dev With a correctly sized clock, an hour of full-speed downward adaptation decays the yield share at
      *      target by exp(-speed x 3600) where speed = 100e18 / 365 days = floor(1e20 / 31536000) = 3170979198376
      *      per second, an exponent of 3170979198376 x 3600 = 11415525114153600 (about 1.1% per hour). Since
      *      exp(-x) >= 1 - x, the correctly decayed value is at least
      *      0.1e18 x (1e18 - 11415525114153600) / 1e18 = 98858447488584640
      */
-    function test_DIVERGENCE_16_ydmAdaptationClock_uint32WrapSlamsYieldShareAtTargetToMin_V2() public {
+    function test_ydmAdaptationClock_wrapsAtUint32_slamsV2YieldShareToFloor() public {
         // Standalone V2 curve with this test as its market accountant: kink at 50% utilization,
         // yield shares 0.05e18 at zero utilization / 0.1e18 at target / 0.2e18 at full utilization
         AdaptiveCurveYDM_V2 ydm = new AdaptiveCurveYDM_V2(0.5e18);
@@ -57,7 +56,7 @@ contract Test_ClockWrapDivergences is AccountantTestBase {
         assertEq(yT0, 0.1e18, "first call adapts nothing because the curve had never been stamped");
         assertEq(ts0, 1000, "the stored adaptation stamp truncates 4294968296 to its low 32 bits");
 
-        // One REAL hour later, still at zero utilization (full-speed downward adaptation). The buggy elapsed
+        // One REAL hour later, still at zero utilization (full-speed downward adaptation). The wrapped elapsed
         // reads block.timestamp - 1000 = 2^32 + 3600 = 4294970896 seconds, so the linear adaptation is
         // -3170979198376 x 4294970896 (about -1.36e22), far past the exponential's underflow-to-zero cutoff:
         // the new yield share at target computes to 0 and is clamped up to the floor. The curve's entire
@@ -80,17 +79,17 @@ contract Test_ClockWrapDivergences is AccountantTestBase {
     }
 
     /**
-     * @notice DIVERGENCE 16 (V1, upward): the mirror direction — one real hour after the uint32 horizon, an
-     *         above-target call slams the adaptive yield share at target from 0.1e18 straight to the 1e18
-     *         ceiling, because the wrapped elapsed clamps the linear adaptation to the exponential's overflow
-     *         guard and its exponential dwarfs every bound
-     * @dev Expected with a correct clock, an hour of full-speed upward adaptation grows the yield share at
-     *      target by exp(+speed x 3600) where speed = 50e18 / 365 days = floor(5e19 / 31536000) = 1585489599188
-     *      per second, an exponent of 1585489599188 x 3600 = 5707762557076800 (about +0.57% per hour). Since
+     * @notice V1, upward: the mirror direction — one real hour after the uint32 horizon, an above-target call
+     *         slams the adaptive yield share at target from 0.1e18 straight to the 1e18 ceiling, because the
+     *         wrapped elapsed clamps the linear adaptation to the exponential's overflow guard and its
+     *         exponential dwarfs every bound
+     * @dev With a correctly sized clock, an hour of full-speed upward adaptation grows the yield share at target
+     *      by exp(+speed x 3600) where speed = 50e18 / 365 days = floor(5e19 / 31536000) = 1585489599188 per
+     *      second, an exponent of 1585489599188 x 3600 = 5707762557076800 (about +0.57% per hour). Since
      *      exp(x) <= 1 / (1 - x) for x in [0, 1), the correctly grown value is at most
      *      0.1e18 / (1 - 0.0057078) < 100600000000000000
      */
-    function test_DIVERGENCE_16_ydmAdaptationClock_uint32WrapSlamsYieldShareAtTargetToMax_V1() public {
+    function test_ydmAdaptationClock_wrapsAtUint32_slamsV1YieldShareToCeiling() public {
         // Standalone V1 curve: kink at 50% utilization, yield shares 0.1e18 at target / 0.2e18 at full
         // utilization, giving a multiplicative steepness of 2e18
         AdaptiveCurveYDM_V1 ydm = new AdaptiveCurveYDM_V1(0.5e18);
@@ -106,7 +105,7 @@ contract Test_ClockWrapDivergences is AccountantTestBase {
         assertEq(yT0, 0.1e18, "first call adapts nothing because the curve had never been stamped");
         assertEq(ts0, 1000, "the stored adaptation stamp truncates 4294968296 to its low 32 bits");
 
-        // One REAL hour later at full utilization (full-speed upward adaptation). The buggy elapsed reads
+        // One REAL hour later at full utilization (full-speed upward adaptation). The wrapped elapsed reads
         // 2^32 + 3600 seconds, the linear adaptation 1585489599188 x 4294970896 (about +6.8e21) is clamped to
         // the exponential overflow guard (about 135.3e18) whose exponential is about e^135, so the new yield
         // share at target overshoots everything and is clamped to the ceiling: the market instantly prices
@@ -128,20 +127,20 @@ contract Test_ClockWrapDivergences is AccountantTestBase {
     }
 
     // =============================
-    // DIVERGENCE 17 — the accountant's accrual clock and premium window wrap at uint32
+    // The accountant's accrual clock and premium window wrap at uint32
     // =============================
 
     /**
-     * @notice DIVERGENCE 17 (accrual): past the uint32 horizon, a SAME-BLOCK re-sync accrues 2^32 seconds of
-     *         phantom time-weighted yield share, because the stored accrual stamp lost its 2^32 bit so the
-     *         zero-elapsed same-block guard misses. This is the dated twin of
-     *         test_Accrual_sameBlockReaccrualIsNoop, which pins the correct no-op below the horizon
-     * @dev The accumulators meter premium entitlement per second of service actually rendered. Zero real
-     *      seconds pass here, so the correct accrual is exactly zero. Instead each accumulator jumps by
-     *      rate x 2^32 = 0.1e18 x 4294967296 = 429496729600000000000000000, minting 136 years of phantom
-     *      entitlement out of a zero-second window
+     * @notice Accrual: past the uint32 horizon, a same-block re-sync accrues 2^32 seconds of time-weighted yield
+     *         share, because the stored accrual stamp lost its 2^32 bit so the zero-elapsed same-block guard
+     *         misses. This is the past-horizon twin of test_Accrual_sameBlockReaccrualIsNoop, which covers the
+     *         no-op below the horizon
+     * @dev The accumulators meter premium entitlement per second of service rendered. Zero real seconds pass
+     *      here, so below the horizon the accrual is exactly zero. Past the horizon each accumulator jumps by
+     *      rate x 2^32 = 0.1e18 x 4294967296 = 429496729600000000000000000, accruing 136 years of entitlement
+     *      out of a zero-second window
      */
-    function test_DIVERGENCE_17_yieldShareAccrualClock_uint32WrapAccruesPhantom2Pow32SecondsSameBlock() public {
+    function test_accrualClock_wrapsAtUint32_accruesFullPeriodSameBlock() public {
         _deploy(false, _defaultParams());
 
         // Land the first accrual past the uint32 horizon: it only initializes the clocks (no accrual, no YDM
@@ -161,8 +160,8 @@ contract Test_ClockWrapDivergences is AccountantTestBase {
         // seconds were rendered, so no premium entitlement should accrue and the YDMs should not be consulted
         kernel.doPreOp(toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW));
 
-        // ACTUAL: elapsed reads block.timestamp - 5000 = 2^32, the elapsed == 0 guard misses, both YDMs are
-        // consulted, and each accumulator jumps by 0.1e18 x 4294967296 in a zero-second window
+        // Past the horizon: elapsed reads block.timestamp - 5000 = 2^32, the elapsed == 0 guard misses, both YDMs
+        // are consulted, and each accumulator jumps by 0.1e18 x 4294967296 in a zero-second window
         IRoycoDayAccountant.RoycoDayAccountantState memory s1 = accountant.getState();
         assertEq(jtYDM.yieldShareCallCount(), 1, "the jt YDM is wrongly consulted for a zero-second window");
         assertEq(ltYDM.yieldShareCallCount(), 1, "the lt YDM is wrongly consulted for a zero-second window");
@@ -172,17 +171,17 @@ contract Test_ClockWrapDivergences is AccountantTestBase {
     }
 
     /**
-     * @notice DIVERGENCE 17 (premium window): past the uint32 horizon, with both premium caps at 0.1e18 (so at
-     *         most 20% of any senior gain should ever leave as premiums), a handful of flat syncs poison the
-     *         accumulators so badly that EVERY subsequent gain-bearing sync reverts with
-     *         PREMIUMS_EXCEED_SENIOR_YIELD — and the accumulators only reset when a premium is actually paid,
-     *         which now can never happen, so the market cannot heal itself
+     * @notice Premium window: past the uint32 horizon, with both premium caps at 0.1e18 (so at most 20% of any
+     *         senior gain should ever leave as premiums), a handful of flat syncs poison the accumulators so
+     *         badly that every subsequent gain-bearing sync reverts with PREMIUMS_EXCEED_SENIOR_YIELD — and the
+     *         accumulators only reset when a premium is actually paid, which now can never happen, so the market
+     *         cannot heal itself
      * @dev Each 1-second flat sync accrues rate x (2^32 + 1) per leg instead of rate x 1, while the premium
      *      payment window itself only over-reads by a single 2^32. Six such syncs stack a 6 x 2^32-scale
      *      numerator against a 1 x 2^32-scale window, so the premium fraction reads about 6 x cap = 0.6 per
      *      leg (1.2 combined) where the correct bound is the 0.1 cap per leg (0.2 combined)
      */
-    function test_DIVERGENCE_17_premiumWindow_uint32WrapMakesGainSyncRevertPremiumsExceedSeniorYield() public {
+    function test_premiumWindow_wrapsAtUint32_gainSyncRevertsPremiumsExceedSeniorYield() public {
         // Deploy with both premium caps at 0.1e18: jt risk premium plus lt liquidity premium should together
         // never exceed 20% of a senior gain, which is what makes the revert below a pure clock artifact
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
@@ -214,10 +213,10 @@ contract Test_ClockWrapDivergences is AccountantTestBase {
         jtYDM.setRates(0);
         ltYDM.setRates(0);
 
-        // A modest +10e18 senior gain one second later. Correct-clock arithmetic: the accumulators would hold
+        // A modest +10e18 senior gain one second later. With a correctly sized clock the accumulators would hold
         // six 1-second accruals of 0.1e18 = 0.6e18 per leg over a 7-second window, so each premium would be
         // floor(10e18 x 0.6e18 / (7 x 1e18)) = 857142857142857142, about 0.086 x the gain per leg — well
-        // within the gain. ACTUAL: the window reads block.timestamp - 5000 = 2^32 + 7 = 4294967303 seconds
+        // within the gain. Past the horizon: the window reads block.timestamp - 5000 = 2^32 + 7 = 4294967303 seconds
         // against accumulators of 6 x 0.1e18 x (2^32 + 1), so each leg computes
         // floor(10e18 x 2576980378200000000000000000 / (4294967303 x 1e18)) = 5999999991618096842 and the two
         // legs sum to 11999999983236193684 > the 10e18 gain, tripping the premiums-exceed-senior-yield guard

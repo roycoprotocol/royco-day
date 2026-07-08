@@ -1,22 +1,19 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { ERC20BurnableUpgradeable } from
-    "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
-import {
-    ADMIN_ROLE, PUBLIC_ROLE, ST_LP_ROLE, JT_LP_ROLE, LT_LP_ROLE, SYNC_ROLE, BURNER_ROLE
-} from "../../../src/factory/RolesConfiguration.sol";
+import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
+import { ADMIN_ROLE, BURNER_ROLE, JT_LP_ROLE, LT_LP_ROLE, PUBLIC_ROLE, ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoLiquidityTranche } from "../../../src/interfaces/IRoycoLiquidityTranche.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_MockMarketRoleMatrix
  * @notice Always-running regression pin on the deployed-market access-control matrix. The production
- *         RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate's role wiring is only asserted in the RPC-gated fork factory suite, so a
+ *         BalancerV3_GyroECLP_LT_DeploymentTemplate's role wiring is only asserted in the RPC-gated fork factory suite, so a
  *         standard CI run leaves it unverified; DayMarketTestBase hand-mirrors that wiring
  *         (`_wireTargetFunctionRoles`/`_wireRoleGrants`), and this pins the mirror against drift — including the
  *         grant set that lets a whitelist-enforcing market mint fee and premium shares.

@@ -1,39 +1,39 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { ILPOracleFactoryBase } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleFactoryBase.sol";
-import { IGyroECLPPool } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
-import { IRateProvider } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/solidity-utils/helpers/IRateProvider.sol";
-import { IBasePool } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IBasePool.sol";
-import { IProtocolFeeController } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IProtocolFeeController.sol";
-import { IVault } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
-import { IVaultAdmin } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultAdmin.sol";
+import { ILPOracleFactoryBase } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleFactoryBase.sol";
+import { IGyroECLPPool } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
+import { IRateProvider } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/solidity-utils/helpers/IRateProvider.sol";
+import { IBasePool } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IBasePool.sol";
+import { IProtocolFeeController } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IProtocolFeeController.sol";
+import { IVault } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
+import { IVaultAdmin } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultAdmin.sol";
 import {
     PoolRoleAccounts as BalancerV3PoolRoleAccounts,
     TokenConfig as BalancerV3TokenConfig,
     TokenType as BalancerV3TokenType
-} from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
-import { ConstantPriceFeed } from "../../../lib/balancer-v3-monorepo/pkg/oracles/contracts/ConstantPriceFeed.sol";
-import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
-import { BalancerPoolToken } from "../../../lib/balancer-v3-monorepo/pkg/vault/contracts/BalancerPoolToken.sol";
-import { SingletonAuthentication } from "../../../lib/balancer-v3-monorepo/pkg/vault/contracts/SingletonAuthentication.sol";
+} from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
+import { ConstantPriceFeed } from "../../../../lib/balancer-v3-monorepo/pkg/oracles/contracts/ConstantPriceFeed.sol";
+import { GyroECLPPoolFactory } from "../../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
+import { BalancerPoolToken } from "../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/BalancerPoolToken.sol";
+import { SingletonAuthentication } from "../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/SingletonAuthentication.sol";
 import {
     AggregatorV3Interface as BalancerAggregatorV3Interface
-} from "../../../lib/chainlink-brownie-contracts/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
-import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
-import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
-import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import { IRoycoAuth } from "../../interfaces/IRoycoAuth.sol";
-import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
-import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
-import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
-import { IRoycoFactory } from "../../interfaces/factory/IRoycoFactory.sol";
-import { IRoycoProtocolTemplate } from "../../interfaces/factory/IRoycoProtocolTemplate.sol";
-import { BalancerV3_LT_BPTOracle_Quoter } from "../../kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
-import { RoycoDayBalancerV3Hooks } from "../../kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3Hooks.sol";
-import { RoycoDayBalancerV3HooksStandIn } from "../../kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3HooksStandIn.sol";
-import { TrancheType } from "../../libraries/Types.sol";
-import { RoycoLiquidityTranche } from "../../tranches/RoycoLiquidityTranche.sol";
+} from "../../../../lib/chainlink-brownie-contracts/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import { UUPSUpgradeable } from "../../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
+import { ERC20BurnableUpgradeable } from "../../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
+import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { IRoycoAuth } from "../../../interfaces/IRoycoAuth.sol";
+import { IRoycoDayAccountant } from "../../../interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayKernel } from "../../../interfaces/IRoycoDayKernel.sol";
+import { IRoycoVaultTranche } from "../../../interfaces/IRoycoVaultTranche.sol";
+import { IRoycoFactory } from "../../../interfaces/factory/IRoycoFactory.sol";
+import { IRoycoProtocolTemplate } from "../../../interfaces/factory/IRoycoProtocolTemplate.sol";
+import { BalancerV3_LT_BPTOracle_Quoter } from "../../../kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
+import { RoycoDayBalancerV3Hooks } from "../../../kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3Hooks.sol";
+import { RoycoDayBalancerV3HooksStandIn } from "../../../kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3HooksStandIn.sol";
+import { TrancheType } from "../../../libraries/Types.sol";
+import { RoycoLiquidityTranche } from "../../../tranches/RoycoLiquidityTranche.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
@@ -50,8 +50,8 @@ import {
     PUBLIC_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
-} from "../RolesConfiguration.sol";
-import { BaseDeploymentTemplate } from "./base/BaseDeploymentTemplate.sol";
+} from "../../RolesConfiguration.sol";
+import { BaseDeploymentTemplate } from "../base/BaseDeploymentTemplate.sol";
 import {
     COMPONENT_ID_DAY_BALANCER_HOOKS,
     TAG_ACCOUNTANT_IMPL,
@@ -69,14 +69,14 @@ import {
     TAG_ST_IMPL,
     TAG_ST_PROXY,
     TAG_YDM
-} from "./base/Components.sol";
+} from "../base/Components.sol";
 
 /**
- * @title RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate
+ * @title BalancerV3_GyroECLP_LT_DeploymentTemplate
  * @author Ankur Dubey, Shivaansh Kapoor
- * @notice Abstract base for every Royco Day market deployment template (ST + JT + LT)
+ * @notice Abstract base for every Royco Day market that has their LT deployed into a Balancer V3 Gyroscope ECLP pool
  */
-abstract contract RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTemplate {
+abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTemplate {
     // ═══════════════════════════════════════════════════════════════════════════
     // PARAM STRUCTS
     // ═══════════════════════════════════════════════════════════════════════════
