@@ -18,6 +18,7 @@ import {
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
     ADMIN_REINVESTMENT_ROLE,
     ADMIN_ROLE,
+    ADMIN_UNBLACKLIST_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     DEPLOYER_ROLE,
@@ -266,11 +267,16 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         address roycoBlacklist = _deployBlacklist(address(accessManager));
 
         {
-            bytes4[] memory blacklistSelectors = new bytes4[](3);
-            blacklistSelectors[0] = RoycoBlacklist.blacklistAccounts.selector;
-            blacklistSelectors[1] = RoycoBlacklist.unblacklistAccounts.selector;
-            blacklistSelectors[2] = RoycoBlacklist.setSanctionsList.selector;
-            accessManager.setTargetFunctionRole(roycoBlacklist, blacklistSelectors, ADMIN_BLACKLIST_ROLE);
+            // The instant, protective add: fast to block a threat, so ADMIN_BLACKLIST_ROLE carries no delay.
+            bytes4[] memory instantBlacklistSelectors = new bytes4[](1);
+            instantBlacklistSelectors[0] = RoycoBlacklist.blacklistAccounts.selector;
+            accessManager.setTargetFunctionRole(roycoBlacklist, instantBlacklistSelectors, ADMIN_BLACKLIST_ROLE);
+
+            // The delayed relaxations: unblacklisting and repointing the sanctions source wait ADMIN_UNBLACKLIST_ROLE's short delay.
+            bytes4[] memory delayedBlacklistSelectors = new bytes4[](2);
+            delayedBlacklistSelectors[0] = RoycoBlacklist.unblacklistAccounts.selector;
+            delayedBlacklistSelectors[1] = RoycoBlacklist.setSanctionsList.selector;
+            accessManager.setTargetFunctionRole(roycoBlacklist, delayedBlacklistSelectors, ADMIN_UNBLACKLIST_ROLE);
         }
 
         // 3. Register (or reuse) the Day template for this kernel type.
@@ -318,7 +324,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
     /// @notice Builds the role assignments applied to the AccessManager (surface-compatible with the legacy helper).
     function generateRolesAssignments(RoleAssignmentAddresses memory _addresses) public pure returns (RoleAssignment[] memory roleAssignments) {
-        roleAssignments = new RoleAssignment[](19);
+        roleAssignments = new RoleAssignment[](20);
         roleAssignments[0] = _assignment(ADMIN_PAUSER_ROLE, _addresses.pauserAddress);
         roleAssignments[1] = _assignment(ADMIN_UPGRADER_ROLE, _addresses.upgraderAddress);
         roleAssignments[2] = _assignment(SYNC_ROLE, _addresses.syncRoleAddress);
@@ -336,10 +342,12 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         roleAssignments[14] = _assignment(LT_LP_ROLE, _addresses.protocolFeeRecipientAddress);
         roleAssignments[15] = _assignment(ADMIN_BALANCER_POOL_MANAGER_ROLE, _addresses.balancerPoolManagerAddress);
         roleAssignments[16] = _assignment(ADMIN_MARKET_OPS_ROLE, _addresses.marketOpsAddress);
-        // The dedicated blacklist-management role (gates blacklistAccounts/unblacklistAccounts/setSanctionsList on
-        // the shared RoycoBlacklist) is granted to the market-ops admin.
+        // The blacklist roles both go to the market-ops admin: ADMIN_BLACKLIST_ROLE for the instant add
+        // (blacklistAccounts) and ADMIN_UNBLACKLIST_ROLE for the short-delayed relaxations (unblacklistAccounts,
+        // setSanctionsList). The same operator, split only by execution delay.
         roleAssignments[17] = _assignment(ADMIN_BLACKLIST_ROLE, _addresses.marketOpsAddress);
         roleAssignments[18] = _assignment(ADMIN_REINVESTMENT_ROLE, _addresses.marketOpsAddress);
+        roleAssignments[19] = _assignment(ADMIN_UNBLACKLIST_ROLE, _addresses.marketOpsAddress);
     }
 
     function _assignment(uint64 _role, address _assignee) private pure returns (RoleAssignment memory) {
@@ -376,6 +384,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         // per-call wait would defeat, so it carries no delay.
         if (role == ADMIN_REINVESTMENT_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_BLACKLIST_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == ADMIN_UNBLACKLIST_ROLE) {
+            return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: SHORT_DELAY_SECONDS });
+        }
         revert UNKNOWN_ROLE(role);
     }
 

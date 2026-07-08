@@ -74,10 +74,15 @@ uint64 constant DEPLOYER_ROLE_ADMIN_ROLE = uint64(uint256(keccak256(abi.encode("
 uint64 constant LP_ROLE_ADMIN_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_LP_ROLE_ADMIN_ROLE"))));
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// BLACKLIST ROLE
+// BLACKLIST ROLES
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// @dev The role for the instant, protective blacklist add (blacklistAccounts): fast to block a threat, so it carries no delay.
 uint64 constant ADMIN_BLACKLIST_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_BLACKLIST_ROLE"))));
+
+/// @dev The role for the delayed blacklist relaxations (unblacklistAccounts, setSanctionsList): removing protection or
+///      repointing the sanctions source waits the short delay, so it cannot take effect without notice.
+uint64 constant ADMIN_UNBLACKLIST_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_UNBLACKLIST_ROLE"))));
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GUARDIAN ROLE

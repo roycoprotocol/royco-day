@@ -1006,12 +1006,12 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /// @notice Blacklists `_account` on the market's shared blacklist via the AccessManager admin.
-    /// @dev The blacklist selectors are gated by ADMIN_BLACKLIST_ROLE, which the deploy script grants to the
+    /// @dev blacklistAccounts is restricted to ADMIN_BLACKLIST_ROLE, which the deploy script grants to the
     ///      market-ops admin with no execution delay, so the helper calls straight through.
     function _blacklist(address _account) internal {
         address[] memory accounts = new address[](1);
         accounts[0] = _account;
-        // The blacklist admin surface is gated by ADMIN_BLACKLIST_ROLE, granted to the market-ops admin.
+        // blacklistAccounts is restricted to ADMIN_BLACKLIST_ROLE, held by the market-ops admin with no delay.
         vm.prank(KERNEL_ADMIN_ADDRESS);
         BLACKLIST.blacklistAccounts(accounts);
     }
