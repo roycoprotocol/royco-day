@@ -552,7 +552,7 @@ contract Test_RoycoFactory is Test {
         // is an internal detail, but the specific already-deployed error must be the one that fires.
         bytes memory p = _encodedParams(marketId);
         vm.prank(DEPLOYER);
-        vm.expectRevert(BaseDeploymentTemplate.MARKET_COMPONENT_ALREADY_DEPLOYED.selector);
+        vm.expectPartialRevert(BaseDeploymentTemplate.MARKET_COMPONENT_ALREADY_DEPLOYED.selector);
         factory.executeMarketDeployment(address(template), p);
 
         // Atomicity: the failed redeploy left the first market's registry entry exactly as it was.
