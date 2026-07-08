@@ -143,14 +143,12 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
     /**
      * @notice While the senior tranche is paused, the ZERO-share fee and premium mints still succeed (returning
      *         the unchanged supply and emitting their mint events), while the plain mint reverts even for zero
-     *         shares — the pause surface is inconsistent across the three kernel mint paths
+     *         shares
      * @dev The fee and premium mints only check the pause inside the balance update, which a zero-share call
      *      never reaches, whereas the plain mint checks the pause at its entry, before even its own zero-shares
-     *      guard. Nothing of value escapes (no balance or supply moves, only the event fires), but a paused token
-     *      that still answers two of its three kernel mints is a surface a consistent design would close: every
-     *      supply-touching entrypoint should refuse uniformly while paused
+     *      guard. Nothing of value escapes: no balance or supply moves, only the event fires.
      */
-    function test_DIVERGENCE_33_ZeroShareKernelMintsSucceedWhileTranchePaused() public {
+    function test_ZeroShareFeeAndPremiumMintsSucceedWhilePaused_PlainMintReverts() public {
         vm.prank(PAUSER);
         IRoycoAuth(address(seniorTranche)).pause();
 

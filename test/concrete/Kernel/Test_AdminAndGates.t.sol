@@ -62,17 +62,16 @@ contract Test_AdminAndGates_Kernel is DayMarketTestBase {
     }
 
     /**
-     * @notice Pins that the self-liquidation bonus setter accepts any uint64, including values far above 100%
-     *         of the redeemed NAV, where every sibling WAD-fraction setter rejects out-of-range inputs
+     * @notice The self-liquidation bonus setter rejects any bonus above WAD (100% of the redeemed NAV), accepting
+     *         exactly WAD as the upper bound, like every sibling WAD-fraction setter
      * @dev The bonus is a WAD fraction of the NAV a self-liquidating senior holder redeems: 1e18 means the
      *      holder is paid their entire redemption over again as a bonus out of the junior tranche's buffer.
      *      The accountant's WAD-fraction setters all validate (protocol fees are capped, minCoverage and
-     *      minLiquidity must stay below WAD), but this setter stores the raw input with no bound, so an admin
-     *      typo or compromised key can configure a bonus of type(uint64).max = 18446744073709551615, roughly
-     *      18.4467e18, an 1844% bonus. The redemption-side clamps are then the only thing standing between
-     *      that config and draining the junior buffer. Expected behavior: reject any bonus above WAD (1e18)
+     *      minLiquidity must stay below WAD), and this setter likewise bounds its input, so an out-of-range value
+     *      such as type(uint64).max = 18446744073709551615 (roughly 18.4467e18, an 1844% bonus) or 1e18 + 1
+     *      reverts with INVALID_SELF_LIQUIDATION_BONUS.
      */
-    function test_DIVERGENCE_29_SelfLiquidationBonusSetterRejectsAboveOneHundredPercent() public {
+    function test_SelfLiquidationBonusSetter_RejectsAboveWAD() public {
         // Fixed: a bonus above WAD (1e18 = 100%) is rejected. type(uint64).max would have been ~1844%.
         vm.prank(KERNEL_ADMIN);
         vm.expectRevert(IRoycoDayKernel.INVALID_SELF_LIQUIDATION_BONUS.selector);

@@ -216,10 +216,10 @@ abstract contract MakinaMarketTestBase is DayMarketTestBase {
  * @notice The Makina machine-share-price-to-admin-oracle composition's full construction, pricing, and admin surface:
  *         the constructor sanity checks (null machine, foreign share token, the supported decimal envelope), the
  *         zero-rate guards at initialization and at the setter, the composed two-hop rate across three decimal
- *         shapes, and the missing zero-rate sentinel branch pinned as a divergence
+ *         shapes, and the missing zero-rate sentinel branch
  * @dev The composition has NO oracle fallback: the stored admin rate is the only accounting-asset price source, and
  *      because the quoter reads it with no sentinel check, a zero stored rate silently prices everything at zero
- *      instead of failing loud (see the DIVERGENCE test at the bottom)
+ *      instead of failing loud (see the zero-rate test at the bottom)
  */
 contract Test_MachineSharePriceTimesAdminRate_MakinaAdminOracleQuoter is MakinaMarketTestBase {
     /// @dev Baseline shape: 18-decimal machine shares over an 18-decimal accounting token, machine share price 1.0, admin rate initialized to 2.0

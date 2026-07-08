@@ -40,11 +40,11 @@ contract Test_FactoryDeploymentWiring is Test {
         am.grantRole(DEPLOYER_ROLE, address(this), 0);
 
         template = new MockWiringTemplate(IRoycoFactory(address(factory)));
-        // Empty init arrays count as initialized (Divergence 20), which satisfies registerTemplate's isInitialized gate.
+        // Empty init arrays count as initialized, which satisfies registerTemplate's isInitialized gate.
         template.initialize(new bytes32[](0), new bytes[](0));
         factory.registerTemplate(address(template));
 
-        // A canned non-zero result so the registry write is clean (avoids the zero-tranche poison of Divergence 22).
+        // A canned non-zero result so the registry write is clean (avoids the zero-tranche registry skip).
         template.setDeploymentResult(
             IRoycoProtocolTemplate.DeploymentResult({
                 seniorTranche: makeAddr("ST"),

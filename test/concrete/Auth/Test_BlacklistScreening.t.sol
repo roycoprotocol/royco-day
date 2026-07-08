@@ -334,12 +334,11 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
 
     /**
      * @notice The sanctions list setter accepts any nonzero address without probing that it can answer isSanctioned
-     * @dev Divergence pin: setSanctionsList only overwrites storage, so a codeless (or otherwise broken) target
-     *      is accepted at configuration time and every screen, every guarded market flow, and every max view
-     *      reverts from that moment until governance unwires it. Expected behavior: the setter probes the target
-     *      with an isSanctioned call so an unresponsive list is rejected before it can take the market down
+     * @dev setSanctionsList only overwrites storage, so a codeless (or otherwise broken) target is accepted at
+     *      configuration time and every screen, every guarded market flow, and every max view reverts from that
+     *      moment until governance unwires it.
      */
-    function test_DIVERGENCE_32_SetSanctionsList_AcceptsTargetThatCannotAnswerIsSanctioned() public {
+    function test_SetSanctionsList_AcceptsUnprobedTargetThatLaterBricksScreening() public {
         // Coverage after seed: (100 + 30) x 0.2 / 30 = 0.8667 <= 1
         _seedMarket(100e18, 30e18);
         vm.prank(MARKET_OPS_ADMIN);

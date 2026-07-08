@@ -5,7 +5,7 @@ import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { Cache, CacheKey } from "../../../src/libraries/Cache.sol";
 
 /**
- * @title Test_CacheDivergences
+ * @title Test_CacheOutOfDomain
  * @notice The transient cache library rejects an out-of-domain write loudly: a value at or above 2^255 would
  *         collide with the populated marker and read back corrupted, so the write reverts instead
  * @dev The cache stores `value | 2^255` and reads back `stored ^ 2^255`, using the top bit as the populated
@@ -17,7 +17,7 @@ import { Cache, CacheKey } from "../../../src/libraries/Cache.sol";
  *      library call, while the in-domain round-trip read runs in this contract's own frame — the same
  *      transient-storage scope production consumes the cache in, where a quoter writes and reads within one transaction
  */
-contract Test_CacheDivergences is Test {
+contract Test_CacheOutOfDomain is Test {
     /// @dev 2^255, the populated-marker bit the cache ORs into every stored slot. Hand literal: half of 2^256
     uint256 internal constant TOP_BIT = 57896044618658097711785492504343953926634992332820282019728792003956564819968;
 

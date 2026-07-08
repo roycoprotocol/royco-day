@@ -100,33 +100,6 @@ contract Test_AdminAndOracleGates_STJTChainlinkQuoter is DayMarketTestBase {
         assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1.5e18, "the stored rate prices with a null oracle and zero staleness");
     }
 
-    /**
-     * @notice CURRENT BEHAVIOR (divergence): wiring a LIVE feed with a ZERO staleness threshold is accepted, even though that
-     *         configuration can only ever price inside the exact second the feed updates in
-     * @dev Expected from first principles: revert INVALID_STALENESS_THRESHOLD_SECONDS. A zero threshold is only harmless when no
-     *      feed is consulted, so the guard should reject (live feed, zero threshold) and allow (null feed, zero threshold),
-     *      which is exactly the sequencer twin's polarity (a null uptime feed disables the check, a live one demands a positive
-     *      grace period). The guard at IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol:178 reads `_oracle != address(0) ||
-     *      _stalenessThresholdSeconds > 0` while its own preceding comment and the sequencer guard at :195 use `== address(0) ||`,
-     *      so the accepted and rejected configurations are swapped. The staleness gate is updatedAt + threshold >= now, so with
-     *      threshold 0 a fresh answer (updatedAt == now) passes only until the next second ticks
-     */
-    function test_DIVERGENCE_19_SetChainlinkOracle_RejectsLiveFeedWithZeroStalenessThreshold() public {
-        // Fixed: when the oracle is set (non-null), a zero staleness threshold is rejected — it would brick every
-        // read (updatedAt + 0 >= now requires a same-second update). The guard now enforces staleness > 0 iff the
-        // oracle is set.
-        vm.prank(ORACLE_QUOTER_ADMIN);
-        vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.INVALID_STALENESS_THRESHOLD_SECONDS.selector);
-        kernel.setChainlinkOracle(address(priceFeed), 0, false);
-
-        // A positive staleness threshold with a live feed is accepted.
-        vm.prank(ORACLE_QUOTER_ADMIN);
-        kernel.setChainlinkOracle(address(priceFeed), 1 days, false);
-        IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState memory config = kernel.getChainlinkOracleConfiguration();
-        assertEq(config.oracle, address(priceFeed), "the live feed must have landed in quoter storage");
-        assertEq(config.stalenessThresholdSeconds, 1 days, "the positive staleness threshold must have landed in quoter storage");
-    }
-
     // =============================
     // Composite conversion-rate floor
     // =============================

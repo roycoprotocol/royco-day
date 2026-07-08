@@ -33,15 +33,14 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
     // =============================
 
     /**
-     * @notice On a tranche with zero share supply, convertToAssets panics with a division-by-zero instead of
-     *         reporting zero claims, while convertToShares on the identical state returns cleanly
-     * @dev A share of an empty tranche is worth nothing, so a total conversion view should report zero claims for
-     *      any input (the ERC-4626 convention integrators like lending oracles and yield wrappers rely on).
-     *      Instead, scaling the tranche's claims by shares over a zero total supply divides by zero, so the view
-     *      bricks on exactly the pre-bootstrap and fully-exited states where an integrator probes it. Expected
-     *      behavior: return zero claims without reverting
+     * @notice On a tranche with zero share supply, convertToAssets reports zero claims for any input, while
+     *         convertToShares on the identical state returns the 1:1 bootstrap quote
+     * @dev A share of an empty tranche is worth nothing, so the total conversion view reports zero claims for any
+     *      input (the ERC-4626 convention integrators like lending oracles and yield wrappers rely on): the claim
+     *      scale short-circuits on zero total supply instead of dividing by zero. convertToShares special-cases
+     *      the same empty state as a 1:1 bootstrap mint, so it returns value-for-value without reverting.
      */
-    function test_DIVERGENCE_24_ConvertToAssets_EmptyTrancheReturnsZeroClaims() public {
+    function test_ConvertToAssets_EmptyTrancheReturnsZeroClaims_ConvertToSharesBootstraps() public {
         // A freshly deployed, never-seeded market: every tranche has zero share supply
         _deployMarket(cellA(), defaultParams());
         assertEq(juniorTranche.totalSupply(), 0, "the fresh junior tranche must start with zero share supply");
@@ -71,13 +70,12 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
      * @notice When the LT's pool-depth mark is zero but claimable idle liquidity-premium senior shares are
      *         outstanding, maxRedeem reports zero while the same holder can redeem its FULL balance through the
      *         multi-asset exit and is paid its pro-rata slice of the idle senior shares
-     * @dev The idle premium is a claimable leg of the LT's effective NAV: a redeemer must receive its slice even
-     *      when the pooled depth marks worthless, otherwise the premium would be stranded. The multi-asset
-     *      redemption honors that, but maxRedeem keys the LT's claims on the pool-depth mark alone, so it returns
-     *      0 whenever the BPT marks zero and underreports the true maximum. Expected behavior: maxRedeem reports
-     *      the largest amount a redemption accepts, here the full balance
+     * @dev The idle premium is a claimable leg of the LT's effective NAV: a redeemer receives its slice even when
+     *      the pooled depth marks worthless, so the premium is not stranded. The multi-asset redemption honors
+     *      that, but maxRedeem keys the LT's claims on the pool-depth mark alone, so it returns 0 whenever the BPT
+     *      marks zero and underreports the true maximum the redemption path accepts.
      */
-    function test_DIVERGENCE_25_LTMaxRedeem_ReportsZeroOnIdleOnlyNAVWhileFullBalanceRedeems() public {
+    function test_LTMaxRedeem_UnderreportsZeroOnIdleOnlyNAV_WhileFullBalanceRedeemsMultiAsset() public {
         _deployZeroMinLiquidityMarketWithPremium();
         uint256 idleShares = _accrueIdlePremiumSeniorShares();
 

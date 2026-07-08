@@ -10,15 +10,14 @@ import { cellA } from "../../utils/TokenConfigs.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
- * @title Test_PremiumMintDivergences_DayMarket
- * @notice Loud, first-class pins of the two liquidity-premium-mint behaviors that reproduce on the full mock
- *         market: the whitelist-transfer brick (a confirmed defect) and the griefed reinvestment leaving idle
- *         liquidity premium senior shares (documented, intended behavior)
+ * @title Test_WhitelistPremiumMint
+ * @notice Two liquidity-premium-mint behaviors on the full mock market: a whitelist-transfer market syncs
+ *         cleanly after a senior gain because the kernel and fee recipient hold the tranche LP roles, and a
+ *         griefed reinvestment stages the premium as idle senior shares
  * @dev The premium is minted as senior tranche shares to the kernel on every pre-op sync that books a senior gain
- *      (FeeAndLiquidityPremiumLogic._processFeesAndLiquidityPremium), so both behaviors ride the same mint the
- *      spec makes load-bearing
+ *      (FeeAndLiquidityPremiumLogic._processFeesAndLiquidityPremium), so both behaviors ride the same mint
  */
-contract Test_PremiumMintDivergences_DayMarket is DayMarketTestBase {
+contract Test_WhitelistPremiumMint is DayMarketTestBase {
     /// @dev Whole ST/JT vault shares seeded. Coverage after seed: (100 + 30) x 0.2 / 30 = 0.8667 <= 1, gate clears
     uint256 internal constant ST_SEED_WHOLE = 100;
     uint256 internal constant JT_SEED_WHOLE = 30;
@@ -32,24 +31,19 @@ contract Test_PremiumMintDivergences_DayMarket is DayMarketTestBase {
     }
 
     // =============================
-    // DIVERGENCE 11 — a whitelist-transfer market bricks on the first senior gain
+    // A whitelist-transfer market syncs cleanly on the first senior gain
     // =============================
 
     /**
-     * @notice DIVERGENCE 11: in a market that enforces the tranche-transfer whitelist, the liquidity-premium mint
-     *         reverts ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(kernel), because the premium is minted as senior shares to
-     *         the kernel and the mint's _update hook screens the kernel as an un-whitelisted recipient
-     *         (RoycoDayKernel.preTrancheBalanceUpdateHook, the ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER branch)
-     * @dev CONSEQUENCE: once any senior gain accrues a premium, EVERY sync (hence every deposit and redemption,
-     *      which all pre-op sync) reverts. The whole market is bricked. SPEC-EXPECTED: the privileged internal
-     *      premium mint bypasses the transfer whitelist, so a whitelist market keeps functioning
-     * @dev The kernel is never granted the senior tranche's deposit (LP) role, so canCall(kernel, ST, deposit) is
-     *      false and the hook's `_to != authority && isWhitelistedTrancheLP` requirement fails on the kernel
+     * @notice In a market that enforces the tranche-transfer whitelist, the liquidity-premium mint to the kernel
+     *         and the protocol-fee mints to the fee recipient pass the tranche `_update` whitelist screen, so a
+     *         senior gain syncs cleanly and the market keeps functioning
+     * @dev The deployment grants the kernel and the protocol fee recipient the tranche LP roles, so the premium
+     *      is minted as senior shares to the kernel and the mint's _update hook accepts the kernel and the fee
+     *      recipient as whitelisted recipients (RoycoDayKernel.preTrancheBalanceUpdateHook, the
+     *      ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER branch)
      */
-    /// @dev FIXED: the deployment now grants the kernel and the protocol fee recipient the tranche LP roles, so the
-    ///      premium/fee mints pass the tranche `_update` whitelist screen. A whitelist-enforcing market no longer
-    ///      bricks on the first senior gain.
-    function test_DIVERGENCE_11_whitelistMarket_syncsCleanlyAfterSeniorGain() public {
+    function test_whitelistMarket_premiumMintPassesWhitelist_syncsCleanlyAfterGain() public {
         // Redeploy the market with the tranche-transfer whitelist enforced
         MarketParamsConfig memory p = defaultParams();
         p.enforceWhitelistOnTransfer = true;
@@ -62,7 +56,7 @@ contract Test_PremiumMintDivergences_DayMarket is DayMarketTestBase {
         // Book a +10% senior gain so the next sync accrues a nonzero liquidity premium (and protocol fees) to mint
         applySTPnL(1000);
 
-        // FIXED: the premium mint to the kernel and the fee mints to the fee recipient pass the whitelist screen.
+        // The premium mint to the kernel and the fee mints to the fee recipient pass the whitelist screen.
         _sync(); // no revert
 
         // The market keeps functioning: a subsequent whitelisted senior deposit (which pre-op syncs, minting the
@@ -76,21 +70,19 @@ contract Test_PremiumMintDivergences_DayMarket is DayMarketTestBase {
     }
 
     // =============================
-    // DIVERGENCE 12 — a griefed reinvestment leaves the premium staged and claimable, not forfeited
+    // A griefed reinvestment stages the premium as idle senior shares
     // =============================
 
     /**
-     * @notice DIVERGENCE 12 (intended behavior): when the single-sided reinvestment fails the slippage gate, the
-     *         premium mint still succeeds and the freshly minted senior shares stay idle in the kernel
-     *         (ltOwnedSeniorTrancheShares), NOT deployed into ltRawNAV and NOT forfeited. This matches the intended
-     *         design: the un-deployed premium is held by the kernel as idle liquidity premium senior shares,
-     *         claimable and never forfeited, and a tranche operation tolerates a failing reinvestment without reverting
-     * @dev This pins the CURRENT (correct) behavior so a future change that either reverts the sync on a failed
-     *      reinvestment, or silently drops the idle premium shares, fails loudly. An attacker forcing venue
-     *      slippage only DEFERS deployment; the metric keeps reading under-provisioned (ltRawNAV excludes the
-     *      idle shares) so the LDM keeps paying
+     * @notice When the single-sided reinvestment fails the slippage gate, the premium mint still succeeds and the
+     *         freshly minted senior shares stay idle in the kernel (ltOwnedSeniorTrancheShares), not deployed into
+     *         ltRawNAV and not forfeited. The un-deployed premium is held by the kernel as idle liquidity premium
+     *         senior shares, claimable and never forfeited, and a tranche operation tolerates a failing
+     *         reinvestment without reverting
+     * @dev An attacker forcing venue slippage only defers deployment: the metric keeps reading under-provisioned
+     *      (ltRawNAV excludes the idle shares) so the LDM keeps paying
      */
-    function test_DIVERGENCE_12_griefedReinvestment_stagesPremiumClaimableNotForfeited() public {
+    function test_griefedReinvestment_stagesPremiumAsIdleSeniorShares() public {
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
 
         // Arm persistent venue slippage so the single-sided reinvestment deterministically fails its min-BPT-out
@@ -105,7 +97,7 @@ contract Test_PremiumMintDivergences_DayMarket is DayMarketTestBase {
         applySTPnL(1000);
         SyncedAccountingState memory s = _sync();
 
-        // ACTUAL and SPEC-EXPECTED: the sync does not revert, the premium is staged (not deployed, not forfeited)
+        // The sync does not revert, the premium is staged (not deployed, not forfeited)
         uint256 stagedAfter = kernel.getState().ltOwnedSeniorTrancheShares;
         assertGt(stagedAfter, stagedBefore, "the griefed premium is staged as idle senior shares, not forfeited");
         // ltRawNAV (the BPT depth) does not grow from the premium: the staged pile stays out of the liquidity metric

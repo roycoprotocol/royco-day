@@ -27,3 +27,4 @@ output/
 # OS / editor cruft
 .DS_Store
 **/.DS_Store
+.vscode/

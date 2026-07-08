@@ -8,7 +8,7 @@ import { cellA } from "../../utils/TokenConfigs.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
- * @title Test_PremiumToEmptyLT
+ * @title Test_EmptyLTPremiumBootstrap
  * @notice Investigates whether the liquidity premium (ST shares staged for the LT) can be minted while the LT
  *         tranche has ZERO shares, and what that causes.
  * @dev The premium mint (`mintLiquidityPremiumShares`) targets the kernel and does not read LT tranche supply,
@@ -17,7 +17,7 @@ import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
  *      still pays a premium at zero utilization). We also zero the LT protocol fee so the LT-fee mint does not
  *      itself create the first LT share.
  */
-contract Test_PremiumToEmptyLT is DayMarketTestBase {
+contract Test_EmptyLTPremiumBootstrap is DayMarketTestBase {
     uint256 internal stUnit;
     uint256 internal quoteUnit;
 

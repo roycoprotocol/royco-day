@@ -209,7 +209,8 @@ contract Test_LTConvertRawPricing_Tranches is DayMarketTestBase {
      * @notice With the pool-depth mark at zero but idle premium outstanding, the convert surface floors to zero on
      *         every leg while previewRedeem still carries the claimable idle slice
      * @dev The BPT-only rate is a conservative floor: a worthless pool mark quotes a worthless share even though a
-     *      redemption would still deliver the idle senior shares (DIVERGENCE 25's maxRedeem behavior, same key)
+     *      redemption would still deliver the idle senior shares (the same key drives the maxRedeem behavior in
+     *      test_LTMaxRedeem_UnderreportsZeroOnIdleOnlyNAV_WhileFullBalanceRedeemsMultiAsset)
      */
     function test_Convert_FloorsToZeroOnZeroPoolMark_PreviewStillCarriesIdleLeg() public {
         _deployZeroMinLiquidityMarketWithPremium();

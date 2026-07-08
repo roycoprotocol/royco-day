@@ -171,7 +171,6 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
             (,, uint256 stTotalSupply) = FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(SENIOR_TRANCHE).totalSupply());
 
             // Compute the ST share rate
-            // NOTE: Tranche shares always have 18 decimals of precision, so WAD == 1 whole tranche share
             rate = toUint256(ValuationLogic._computeTrancheShareRate(stTotalSupply, state.stEffectiveNAV));
         }
 
