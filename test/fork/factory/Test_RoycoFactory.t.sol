@@ -26,7 +26,7 @@ import {
     DEPLOYER_ROLE
 } from "../../../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
-import { DayIdenticalERC4626ChainlinkDeploymentTemplate } from "../../../src/factory/templates/DayIdenticalERC4626ChainlinkDeploymentTemplate.sol";
+import { Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate } from "../../../src/factory/templates/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
 import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import { COMPONENT_ID_SENIOR_TRANCHE_IMPL, TAG_ST_IMPL, TAG_ST_PROXY } from "../../../src/factory/templates/base/Components.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
@@ -38,7 +38,7 @@ import { StaticCurveYDM } from "../../../src/ydm/StaticCurveYDM.sol";
 
 /// @title Test_RoycoFactory
 /// @notice Fork tests for `RoycoFactory` driven by the REAL Day market template
-///         (`DayIdenticalERC4626ChainlinkDeploymentTemplate`) — no mock. Covers: initialization + role wiring,
+///         (`Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate`) — no mock. Covers: initialization + role wiring,
 ///         template registration/disabling, the deployment entrypoint standing up a real snUSD market (tranche
 ///         mappings + events + live contracts), auth/pause gating, the active-template-gated primitives rejecting
 ///         outside a deployment window, getters, and the UUPS upgrade gate.
@@ -52,7 +52,7 @@ contract Test_RoycoFactory is Test {
     AccessManager internal am;
     RoycoFactory internal factory;
     DeployScript internal deployScript;
-    DayIdenticalERC4626ChainlinkDeploymentTemplate internal template;
+    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate internal template;
 
     address internal FACTORY_ADMIN = makeAddr("FACTORY_ADMIN");
     address internal DEPLOYER = makeAddr("DEPLOYER");
@@ -93,7 +93,7 @@ contract Test_RoycoFactory is Test {
         // The real Day template, bound to this factory. `deployScript` is used only for its pure/view build helpers
         // (`dayTemplateComponents`, `buildDayParams`, `getMarketConfig`) — the factory + template above are the units under test.
         deployScript = new DeployScript();
-        template = new DayIdenticalERC4626ChainlinkDeploymentTemplate(
+        template = new Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
             IRoycoFactory(address(factory)), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY), ILPOracleFactoryBase(ECLP_LP_ORACLE_FACTORY)
         );
     }
@@ -234,7 +234,7 @@ contract Test_RoycoFactory is Test {
     /// A template constructed against a different factory address is rejected
     function test_RevertIf_TemplateBoundToDifferentFactoryRegistered() external {
         // A real template bound to a different factory address must be rejected.
-        DayIdenticalERC4626ChainlinkDeploymentTemplate foreign = new DayIdenticalERC4626ChainlinkDeploymentTemplate(
+        Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate foreign = new Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
             IRoycoFactory(makeAddr("OTHER_FACTORY")), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY), ILPOracleFactoryBase(ECLP_LP_ORACLE_FACTORY)
         );
         vm.prank(FACTORY_ADMIN);

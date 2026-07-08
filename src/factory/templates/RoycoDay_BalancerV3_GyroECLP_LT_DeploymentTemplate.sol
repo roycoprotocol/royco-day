@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { ILPOracleBase } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleBase.sol";
 import { ILPOracleFactoryBase } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleFactoryBase.sol";
 import { IGyroECLPPool } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
 import { IRateProvider } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/solidity-utils/helpers/IRateProvider.sol";
@@ -21,7 +20,6 @@ import { SingletonAuthentication } from "../../../lib/balancer-v3-monorepo/pkg/v
 import {
     AggregatorV3Interface as BalancerAggregatorV3Interface
 } from "../../../lib/chainlink-brownie-contracts/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
-import { AccessManagedUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/access/manager/AccessManagedUpgradeable.sol";
 import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
@@ -74,11 +72,11 @@ import {
 } from "./base/Components.sol";
 
 /**
- * @title BalancerV3DeploymentTemplate
+ * @title RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate
  * @author Ankur Dubey, Shivaansh Kapoor
  * @notice Abstract base for every Royco Day market deployment template (ST + JT + LT)
  */
-abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
+abstract contract RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTemplate {
     // ═══════════════════════════════════════════════════════════════════════════
     // PARAM STRUCTS
     // ═══════════════════════════════════════════════════════════════════════════
