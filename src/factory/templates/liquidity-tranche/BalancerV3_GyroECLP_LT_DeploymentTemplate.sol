@@ -302,7 +302,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         UUPSUpgradeable(balancerHook).upgradeToAndCall(realHookImpl, abi.encodeCall(RoycoDayBalancerV3Hooks.initialize, (ROYCO_FACTORY.ROYCO_AUTHORITY())));
 
         // 12. Apply selector->role bindings + post-init grants (including SYNC_ROLE for the pool hook so it can sync the kernel)
-        _applyRoleBindings(_buildRoleBindings(result, balancerHook, p.protocolFeeRecipient));
+        _applyRoleBindings(_buildRoleBindings(result, balancerHook));
 
         // 13. Record + verify-friendly extras
         result.extras = abi.encode(ExtraContractsDeployedResult({ balancerPool: balancerPool, balancerHook: balancerHook, bptOracle: bptOracle }));
@@ -427,8 +427,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
 
     function _buildRoleBindings(
         DeploymentResult memory _r,
-        address _balancerHook,
-        address _protocolFeeRecipient
+        address _balancerHook
     )
         internal
         view
@@ -446,19 +445,10 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         targets[7] = _balancerHookBinding(_balancerHook);
         targets[8] = _kernelQuoterBinding(_r.kernel);
 
-        // The kernel (coverage-neutral premium senior-share mint recipient) and the protocol fee recipient (ST/JT/LT
-        // fee-share mint recipient) must hold the tranche LP roles, otherwise a whitelist-enforcing market bricks on
-        // the first fee/premium mint when the tranche `_update` whitelist screen rejects them
-        RoleGrant[] memory grants = new RoleGrant[](9);
+        RoleGrant[] memory grants = new RoleGrant[](3);
         grants[0] = RoleGrant({ roleId: SYNC_ROLE, account: _r.accountant, executionDelay: 0 });
         grants[1] = RoleGrant({ roleId: BURNER_ROLE, account: _r.kernel, executionDelay: 0 });
         grants[2] = RoleGrant({ roleId: SYNC_ROLE, account: _balancerHook, executionDelay: 0 });
-        grants[3] = RoleGrant({ roleId: ST_LP_ROLE, account: _r.kernel, executionDelay: 0 });
-        grants[4] = RoleGrant({ roleId: JT_LP_ROLE, account: _r.kernel, executionDelay: 0 });
-        grants[5] = RoleGrant({ roleId: LT_LP_ROLE, account: _r.kernel, executionDelay: 0 });
-        grants[6] = RoleGrant({ roleId: ST_LP_ROLE, account: _protocolFeeRecipient, executionDelay: 0 });
-        grants[7] = RoleGrant({ roleId: JT_LP_ROLE, account: _protocolFeeRecipient, executionDelay: 0 });
-        grants[8] = RoleGrant({ roleId: LT_LP_ROLE, account: _protocolFeeRecipient, executionDelay: 0 });
 
         return RoleBindings({ targetBindings: targets, postInitGrants: grants });
     }
