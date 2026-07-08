@@ -16,7 +16,15 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { CREATE3 } from "../../../lib/solady/src/utils/CREATE3.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../../script/config/MarketDeploymentConfig.sol";
-import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ROLE, ADMIN_UPGRADER_ROLE, DEPLOYER_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import {
+    ADMIN_ENTRY_POINT_ROLE,
+    ADMIN_FACTORY_ROLE,
+    ADMIN_PAUSER_ROLE,
+    ADMIN_ROLE,
+    ADMIN_UNPAUSER_ROLE,
+    ADMIN_UPGRADER_ROLE,
+    DEPLOYER_ROLE
+} from "../../../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { DayIdenticalERC4626ChainlinkDeploymentTemplate } from "../../../src/factory/templates/DayIdenticalERC4626ChainlinkDeploymentTemplate.sol";
 import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
@@ -24,6 +32,7 @@ import { COMPONENT_ID_SENIOR_TRANCHE_IMPL, TAG_ST_IMPL, TAG_ST_PROXY } from "../
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
+import { AdaptiveCurveYDM_V1 } from "../../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { StaticCurveYDM } from "../../../src/ydm/StaticCurveYDM.sol";
 
@@ -76,6 +85,10 @@ contract Test_RoycoFactory is Test {
         am.grantRole(ADMIN_FACTORY_ROLE, FACTORY_ADMIN, 0);
         am.grantRole(DEPLOYER_ROLE, DEPLOYER, 0);
         am.grantRole(ADMIN_UPGRADER_ROLE, UPGRADER, 0);
+        // initialize() binds the factory's pause/unpause to the pauser/unpauser roles, so this test contract (the AM
+        // admin) needs them to pause/unpause the factory directly.
+        am.grantRole(ADMIN_PAUSER_ROLE, address(this), 0);
+        am.grantRole(ADMIN_UNPAUSER_ROLE, address(this), 0);
 
         // The real Day template, bound to this factory. `deployScript` is used only for its pure/view build helpers
         // (`dayTemplateComponents`, `buildDayParams`, `getMarketConfig`) — the factory + template above are the units under test.
@@ -519,6 +532,84 @@ contract Test_RoycoFactory is Test {
         vm.prank(UPGRADER);
         factory.upgradeToAndCall(newImpl, "");
         assertEq(factory.authority(), address(am), "authority preserved");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MARKET-ID COLLISION + YDM-TYPE WIRING
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Re-running a deployment with a marketId that already produced a market reverts on the first colliding
+    ///         CREATE3 salt (the senior tranche implementation) and unwinds the whole transaction atomically, so a
+    ///         same-names/same-block marketId collision can never half-build a second market or leave a live market
+    ///         wired to a YDM reused earlier in the same transaction. Blast radius is a clean revert, never aliasing
+    function test_RevertIf_MarketRedeployedWithSameMarketId() external {
+        _register();
+        bytes32 marketId = keccak256("dup-id");
+        IRoycoProtocolTemplate.DeploymentResult memory first = _deploy(marketId);
+        assertGt(first.kernel.code.length, 0, "first market is live");
+
+        // The deterministic component addresses are a pure function of the marketId, so a second run with the same id
+        // cannot get past the very first CREATE3 deploy. Match on the selector only: the exact (address, salt) payload
+        // is an internal detail, but the specific already-deployed error must be the one that fires.
+        bytes memory p = _encodedParams(marketId);
+        vm.prank(DEPLOYER);
+        vm.expectPartialRevert(BaseDeploymentTemplate.MARKET_COMPONENT_ALREADY_DEPLOYED.selector);
+        factory.executeMarketDeployment(address(template), p);
+
+        // Atomicity: the failed redeploy left the first market's registry entry exactly as it was.
+        _assertGetMarketResolves(first, first.seniorTranche, "first market intact after failed redeploy");
+    }
+
+    /// @notice A StaticCurve YDM config deploys an actual StaticCurveYDM model for both the JT YDM and the LT LDM
+    /// @dev The template registers every YDM model's bytecode and selects the configured type by component id, so the
+    ///      deployed contract matches the config even though StaticCurveYDM.initializeYDMForMarket(uint64,uint64,uint64)
+    ///      shares its 4-byte selector with the V2 initializer. The reused snUSD params (0.11e18, 0.11e18, 0.31e18) are
+    ///      ABI-identical to StaticCurveYDMParams, so the static init calldata decodes and binds on the StaticCurve model
+    function test_StaticCurveYdmConfig_DeploysStaticCurveModel() external {
+        _register();
+
+        MarketDeploymentConfig.MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
+        cfg.ydmType = DeployScript.YDMType.StaticCurve;
+        bytes memory p = abi.encode(deployScript.buildDayParams(cfg, keccak256("static-config-deploys-static"), PROTOCOL_FEE_RECIPIENT, address(0)));
+
+        vm.prank(DEPLOYER);
+        IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
+
+        // The deployed model is the configured StaticCurveYDM. The YDMs embed their target utilization as an immutable,
+        // so runtime code is target-dependent — compare against reference instances built with the SAME targets the
+        // config carries, which isolates the model type as the only difference that matters.
+        StaticCurveYDM refJtStatic = new StaticCurveYDM(cfg.jtYdmTargetUtilizationWAD);
+        StaticCurveYDM refLtStatic = new StaticCurveYDM(cfg.ltYdmTargetUtilizationWAD);
+        AdaptiveCurveYDM_V2 refV2 = new AdaptiveCurveYDM_V2(cfg.jtYdmTargetUtilizationWAD);
+        assertEq(r.ydm.codehash, address(refJtStatic).codehash, "configured StaticCurve, ydm must be StaticCurveYDM");
+        assertEq(r.ltYdm.codehash, address(refLtStatic).codehash, "configured StaticCurve, ltYdm must be StaticCurveYDM");
+        // And it is NOT the adaptive model that used to stand in for it under a static config.
+        assertTrue(r.ydm.codehash != address(refV2).codehash, "ydm must not be the adaptive V2 code");
+    }
+
+    /// @notice An AdaptiveCurve_V1 YDM config deploys an actual AdaptiveCurveYDM_V1 model for both the JT YDM and the LT LDM
+    /// @dev With every YDM model's bytecode registered and selected by component id, a V1 config deploys the V1 contract
+    ///      and its two-argument initializeYDMForMarket(uint64,uint64) binds on it, so the deployment succeeds rather than
+    ///      reverting against a stand-in V2 instance whose selector the V1 calldata could not match
+    function test_AdaptiveV1YdmConfig_DeploysAdaptiveV1Model() external {
+        _register();
+
+        MarketDeploymentConfig.MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
+        cfg.ydmType = DeployScript.YDMType.AdaptiveCurve_V1;
+        // V1 takes only (target, full), so re-encode both curves as V1 params — a two-word init blob that binds on the V1 model
+        bytes memory v1Params = abi.encode(DeployScript.AdaptiveCurveYDM_V1_Params({ yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18 }));
+        cfg.ydmSpecificParams = v1Params;
+        cfg.ltYdmSpecificParams = v1Params;
+        bytes memory p = abi.encode(deployScript.buildDayParams(cfg, keccak256("v1-config-deploys-v1"), PROTOCOL_FEE_RECIPIENT, address(0)));
+
+        vm.prank(DEPLOYER);
+        IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
+
+        // The deployed model is the configured AdaptiveCurveYDM_V1, compared against references built with the same targets
+        AdaptiveCurveYDM_V1 refJtV1 = new AdaptiveCurveYDM_V1(cfg.jtYdmTargetUtilizationWAD);
+        AdaptiveCurveYDM_V1 refLtV1 = new AdaptiveCurveYDM_V1(cfg.ltYdmTargetUtilizationWAD);
+        assertEq(r.ydm.codehash, address(refJtV1).codehash, "configured AdaptiveCurve_V1, ydm must be AdaptiveCurveYDM_V1");
+        assertEq(r.ltYdm.codehash, address(refLtV1).codehash, "configured AdaptiveCurve_V1, ltYdm must be AdaptiveCurveYDM_V1");
     }
 
     // ─── internal ───

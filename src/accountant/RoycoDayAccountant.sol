@@ -328,7 +328,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             require(state.coverageUtilizationWAD <= WAD, COVERAGE_REQUIREMENT_VIOLATED());
         }
 
-        // Enforce the liquidity requirement for operations that can violate it (raise the senior exposure or reduce the depth of the liquidity tranche). An LT
+        // Enforce the liquidity requirement for operations that can violate it (raise the senior exposure or reduce the depth of the liquidity tranche)
         if (_op == Operation.ST_DEPOSIT || _op == Operation.LT_DEPOSIT || _op == Operation.LT_REDEEM) {
             require(state.liquidityUtilizationWAD <= WAD, LIQUIDITY_REQUIREMENT_VIOLATED());
         }
@@ -393,7 +393,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
      *
      * @dev Coverage Requirement: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_COINVESTED ? JT_RAW_NAV : 0)) * MIN_COVERAGE
      * @dev When assets are claimed from the JT, they are always liquidated in the same proportion as the tranche's total claims on the ST and JT assets
-     * @dev Let JT_CLAIM_ON_ST and JT_CLAIM_ON_JT be the JT's total claims on the ST and JT assets respectively, in NAV units. The JT's total claims are JT_CLAIM_ON_ST + JT_CLAIM_ON_JT
+     * @dev Let JT_CLAIM_ON_ST and JT_CLAIM_ON_JT be the JT's total claims on the ST and JT assets respectively, in NAV units — the JT's total claims are JT_CLAIM_ON_ST + JT_CLAIM_ON_JT
      * @dev Let ST_CLAIM_FRACTION be JT_CLAIM_ON_ST / (JT_CLAIM_ON_ST + JT_CLAIM_ON_JT) and JT_CLAIM_FRACTION be JT_CLAIM_ON_JT / (JT_CLAIM_ON_ST + JT_CLAIM_ON_JT)
      * @dev Therefore, if a total NAV of y is claimed from the JT, ST_CLAIM_FRACTION * y is claimed from the ST_RAW_NAV and JT_CLAIM_FRACTION * y is claimed from the JT_RAW_NAV
      * @dev Max assets withdrawable from JT, y: (JT_EFFECTIVE_NAV - y) = ((ST_RAW_NAV - ST_CLAIM_FRACTION * y) + (JT_COINVESTED ? (JT_RAW_NAV - JT_CLAIM_FRACTION * y) : 0)) * MIN_COVERAGE
@@ -540,7 +540,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         NAV_UNIT ltProtocolFee;
 
         /// @dev STEP_APPLY_MARK_TO_MARKET: Mark the ST and JT NAVs to market based on their PnL and respective obligations to another in
-        // The net JT gains. The JT protocol fee accrued is calculated using this NAV.
+        // The net JT gains — the JT protocol fee accrued is calculated using this NAV
         NAV_UNIT jtNetGain;
         /// @dev STEP_APPLY_JT_LOSS: The JT assets depreciated in value
         if (deltaJTEffectiveNAV < 0) {
@@ -1003,6 +1003,8 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             (bool success, bytes memory data) = _ydm.call(_ydmInitializationData);
             require(success, FAILED_TO_INITIALIZE_YDM(data));
         }
+        // Verify the YDM is actually initialized for THIS market
+        IYDM(_ydm).previewYieldShare(MarketState.PERPETUAL, 0);
     }
 
     // =============================

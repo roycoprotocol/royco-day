@@ -13,7 +13,8 @@ import { BaseYDM } from "./BaseYDM.sol";
  * @dev A general-purpose model for paying a tranche's yield as a premium to a capital pool that provides a service to that tranche
  * @dev It is parameterized purely by the utilization of that service, so the same contract prices any tranche-yield premium
  * @dev Utilization is the fraction of the capital pool's service capacity that is currently in use: the ratio of demand for the service the pool provides to the pool's capacity to supply it, scaled to WAD precision
- * @dev At zero utilization the service is unused and the capital is abundant, so it earns the least. At WAD utilization demand equals the pool's full capacity. Demand beyond capacity is reported above WAD and capped to WAD here
+ * @dev At zero utilization the service is unused and the capital is abundant, so it earns the least
+ * @dev At WAD utilization demand equals the pool's full capacity — demand beyond capacity is reported above WAD and capped to WAD here
  * @dev The premium rises with utilization so scarcer service is paid more, pulling additional capital into the pool
  * @dev The curve adapts its yield share at the kink (Y_T) up or down based on the market's relative delta from the target utilization over time
  * @dev This base owns the model-agnostic machinery: the exponential, time- and distance-weighted adaptation of Y_T (bounded and overflow-safe), the trapezoidal time-averaging of Y_T over the elapsed period, and the read/adapt/commit flow of yieldShare and previewYieldShare
@@ -21,16 +22,17 @@ import { BaseYDM } from "./BaseYDM.sol";
  * @dev Inspired by Morpho's AdaptiveCurveIrm: https://github.com/morpho-org/morpho-blue-irm/blob/main/src/adaptive-curve-irm/AdaptiveCurveIrm.sol
  */
 abstract contract BaseAdaptiveCurveYDM is BaseYDM {
-    /// @notice The maximum adaptation speed per second, scaled to WAD precision
-    /// @dev A deploy-time ceiling on MAX_ADAPTATION_SPEED_WAD that keeps the speed math safely within int256
-    uint256 public constant MAX_ADAPTATION_SPEED_LIMIT_WAD = 100e18 / uint256(365 days);
+    /// @notice The maximum allowed adaptation speed per second, scaled to WAD precision
+    /// @dev A deploy-time ceiling on ADAPTATION_SPEED_AT_BOUNDARY_WAD that keeps the speed math safely within int256
+    uint256 public constant MAX_ADAPTATION_SPEED_WAD = 100e18 / uint256(365 days);
 
-    /**
-     * @notice The maximum speed at which the curve adapts per second scaled to WAD precision
-     * @dev This represents how quickly the curve shifts up or down at the edges, 100% and 0% utilization respectively
-     * @dev The actual speed that the curve shifts at is based on the current relative distance from the target utilization
-     */
-    uint256 public immutable MAX_ADAPTATION_SPEED_WAD;
+    /// @dev The maximum linear adaptation the curve can apply: one below Solady expWad's overflow threshold, so expWad never reverts
+    /// @dev Derivation: https://github.com/Vectorized/solady/blob/acd959aa4bd04720d640bf4e6a5c71037510cc4b/src/utils/FixedPointMathLib.sol#L215-L217
+    int256 internal constant MAX_LINEAR_ADAPTATION_WAD = (135_305_999_368_893_231_589 - 1);
+
+    /// @notice The speed at which the curve adapts per second when utilization sits at a boundary of its region (0% or 100%), scaled to WAD precision
+    /// @dev The actual adaptation speed scales linearly with the normalized distance from the target utilization, reaching this value only at the region's boundary
+    uint256 public immutable ADAPTATION_SPEED_AT_BOUNDARY_WAD;
 
     /// @notice The minimum yield share at target utilization the adaptation can decay to, scaled to WAD precision
     /// @dev Configured per instance, and must be greater than zero so an initialized market's yield share at target is never the uninitialized sentinel (zero)
@@ -40,34 +42,30 @@ abstract contract BaseAdaptiveCurveYDM is BaseYDM {
     /// @dev Configured per instance, bounded to WAD
     uint256 public immutable MAX_YIELD_SHARE_AT_TARGET_WAD;
 
-    /// @dev The maximum linear adaptation the curve can apply: one below Solady expWad's overflow threshold, so expWad never reverts
-    /// @dev Derivation: https://github.com/Vectorized/solady/blob/acd959aa4bd04720d640bf4e6a5c71037510cc4b/src/utils/FixedPointMathLib.sol#L215-L217
-    int256 internal constant MAX_LINEAR_ADAPTATION_WAD = (135_305_999_368_893_231_589 - 1);
-
     /**
-     * @notice Sets the per-instance target utilization (the kink), the bounds on the adaptive yield share at target, and the max adaptation speed
-     * @dev Must be greater than zero so the curve regions are well defined when utilization is zero. Concrete models may further constrain it
+     * @notice Sets the per-instance target utilization (the kink), the bounds on the adaptive yield share at target, and the boundary adaptation speed
+     * @dev Must be greater than zero so the curve regions are well defined when utilization is zero — concrete models may further constrain it
      * @param _targetUtilizationWAD The target utilization (the kink) for this model, in the range (0, 100%], scaled to WAD precision
      * @param _minYieldShareAtTargetWAD The minimum yield share at target utilization, in the range (0, _maxYieldShareAtTargetWAD], scaled to WAD precision
      * @param _maxYieldShareAtTargetWAD The maximum yield share at target utilization, in the range [_minYieldShareAtTargetWAD, WAD], scaled to WAD precision
-     * @param _maxAdaptationSpeedWAD The maximum speed at which the curve adapts per second, in the range (0, MAX_ADAPTATION_SPEED_LIMIT_WAD], scaled to WAD precision
+     * @param _adaptationSpeedAtBoundaryWAD The speed at which the curve adapts per second at 0% and 100% utilization, in the range (0, MAX_ADAPTATION_SPEED_WAD], scaled to WAD precision
      */
     constructor(
         uint256 _targetUtilizationWAD,
         uint256 _minYieldShareAtTargetWAD,
         uint256 _maxYieldShareAtTargetWAD,
-        uint256 _maxAdaptationSpeedWAD
+        uint256 _adaptationSpeedAtBoundaryWAD
     )
         BaseYDM(_targetUtilizationWAD)
     {
         require(
             _minYieldShareAtTargetWAD > 0 && _minYieldShareAtTargetWAD <= _maxYieldShareAtTargetWAD && _maxYieldShareAtTargetWAD <= WAD
-                && _maxAdaptationSpeedWAD > 0 && _maxAdaptationSpeedWAD <= MAX_ADAPTATION_SPEED_LIMIT_WAD,
+                && _adaptationSpeedAtBoundaryWAD > 0 && _adaptationSpeedAtBoundaryWAD <= MAX_ADAPTATION_SPEED_WAD,
             INVALID_YDM_INITIALIZATION()
         );
         MIN_YIELD_SHARE_AT_TARGET_WAD = _minYieldShareAtTargetWAD;
         MAX_YIELD_SHARE_AT_TARGET_WAD = _maxYieldShareAtTargetWAD;
-        MAX_ADAPTATION_SPEED_WAD = _maxAdaptationSpeedWAD;
+        ADAPTATION_SPEED_AT_BOUNDARY_WAD = _adaptationSpeedAtBoundaryWAD;
     }
 
     /// @inheritdoc IYDM
@@ -89,7 +87,7 @@ abstract contract BaseAdaptiveCurveYDM is BaseYDM {
     /**
      * @notice Computes the yield share for a market at the given utilization, applying any pending adaptation
      * @dev Uses trapezoidal approximation to compute the average continuously adapting yield share for more accurate time-weighted results
-     * @param _marketState The state of this Royco market (perpetual or fixed term). The curve only adapts in PERPETUAL
+     * @param _marketState The state of this Royco market (perpetual or fixed term) — the curve only adapts in PERPETUAL
      * @param _utilizationWAD The utilization of the service the capital pool provides, scaled to WAD precision, bounded to WAD here
      * @return yieldShareWAD The share of the tranche's yield paid to the capital pool as a premium, scaled to WAD precision
      *                       It is implied that (WAD - yieldShareWAD) is retained by the paying tranche, excluding any protocol fees
@@ -97,13 +95,12 @@ abstract contract BaseAdaptiveCurveYDM is BaseYDM {
      */
     function _yieldShare(MarketState _marketState, uint256 _utilizationWAD) internal view returns (uint256 yieldShareWAD, uint256 newYieldShareAtTargetWAD) {
         // Bound the supplied utilization to 100%
-        uint256 utilizationWAD = _utilizationWAD;
-        if (utilizationWAD > WAD) utilizationWAD = WAD;
+        _utilizationWAD = ((_utilizationWAD > WAD) ? WAD : _utilizationWAD);
 
         // Compute the max delta from the target utilization in the region of the curve that the market is currently in (above or below the kink)
-        uint256 maxDeltaFromTargetInRegionWAD = utilizationWAD > TARGET_UTILIZATION_WAD ? (WAD - TARGET_UTILIZATION_WAD) : TARGET_UTILIZATION_WAD;
+        uint256 maxDeltaFromTargetInRegionWAD = _utilizationWAD > TARGET_UTILIZATION_WAD ? (WAD - TARGET_UTILIZATION_WAD) : TARGET_UTILIZATION_WAD;
         // Normalize the actual delta from the target utilization relative to the max delta in the current region
-        int256 normalizedDeltaFromTargetWAD = ((int256(utilizationWAD) - int256(TARGET_UTILIZATION_WAD)) * WAD_INT) / int256(maxDeltaFromTargetInRegionWAD);
+        int256 normalizedDeltaFromTargetWAD = ((int256(_utilizationWAD) - int256(TARGET_UTILIZATION_WAD)) * WAD_INT) / int256(maxDeltaFromTargetInRegionWAD);
 
         // Retrieve the concrete model's yield share at target and last adaptation timestamp for the market
         (uint256 initialYieldShareAtTargetWAD, uint256 lastAdaptationTimestamp) = _readAdaptiveCurve();
@@ -111,8 +108,8 @@ abstract contract BaseAdaptiveCurveYDM is BaseYDM {
         // Only adapt the curve if the market is in a perpetual state and market forces are enabled to affect utilization
         uint256 avgYieldShareAtTargetWAD;
         if (_marketState == MarketState.PERPETUAL) {
-            // Compute the adaptation speed based on the normalized delta: scale the max adaptation speed by the relative delta from the target based on the region
-            int256 currentAdaptationSpeedWAD = (int256(MAX_ADAPTATION_SPEED_WAD) * normalizedDeltaFromTargetWAD) / WAD_INT;
+            // Compute the adaptation speed based on the normalized delta: scale the boundary adaptation speed by the relative delta from the target based on the region
+            int256 currentAdaptationSpeedWAD = (int256(ADAPTATION_SPEED_AT_BOUNDARY_WAD) * normalizedDeltaFromTargetWAD) / WAD_INT;
             // Compute the linear adaptation that will be applied to the curve based on the speed
             uint256 elapsed = lastAdaptationTimestamp == 0 ? 0 : block.timestamp - lastAdaptationTimestamp;
             int256 linearAdaptationWAD = currentAdaptationSpeedWAD * int256(elapsed);

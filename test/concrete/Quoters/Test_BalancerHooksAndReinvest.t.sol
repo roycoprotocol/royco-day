@@ -15,9 +15,9 @@ import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 /**
  * @title Test_ReinvestLiquidityPremiumGate_Kernel
  * @notice The liquidity premium reinvestment's slippage gate: the minimum-BPT-out floor pinned from both sides of the
- *         exact boundary, the partial-amount path that deploys only part of the idle pile, and two pinned divergences
- *         where the gate's fair-value floor degrades — rounding to zero (the add runs unprotected) and dividing by a
- *         zero oracle TVL (every tranche operation reverts)
+ *         exact boundary, the partial-amount path that deploys only part of the idle pile, and two edges where the
+ *         gate's fair-value floor degrades — rounding to zero (the add runs unprotected) and dividing by a zero
+ *         oracle TVL (every tranche operation reverts)
  * @dev The gate is the manipulation defense on the single-sided add: a venue fill one wei under it must be a
  *      tolerated no-op (the idle liquidity premium senior shares stay claimable), a fill exactly at it must deploy
  */
@@ -99,23 +99,21 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
     }
 
     /**
-     * @notice PINS CURRENT BEHAVIOR: when the oracle's fair-value floor rounds to zero, the single-sided add executes
-     *         with NO slippage protection — the entire idle pile is debited for exactly 1 wei of BPT
-     * @dev The gate exists so a manipulated pool cannot buy the staged premium below its oracle fair value, but the
-     *      floor is computed as floor(bptSupply x premiumValue / TVL) discounted by the slippage tolerance, and once
-     *      the pool's TVL dwarfs the premium's value the floor rounds to 0 and ceil(0 x 999 / 1000) is still 0, so
-     *      minBptAmountOut = 0 reaches the venue and ANY fill — even 1 wei for a ~1e18-value pile — clears the gate.
-     *      Economically this is the exact regime where the gate matters least per add but where a sandwich costs the
-     *      LT the most relative to what it receives. Expected behavior: a zero floor should defer the add and leave
-     *      the shares idle and claimable, exactly as a breached gate does
+     * @notice When the oracle's fair-value floor rounds to zero, the reinvestment defers: the add is skipped and the
+     *         premium shares stay idle and claimable, exactly as a breached gate leaves them
+     * @dev The gate marks the staged premium to its fair BPT as floor(bptSupply x premiumValue / TVL) discounted by
+     *      the slippage tolerance. Once the pool's TVL dwarfs the premium's value that floor rounds to 0, and
+     *      ceil(0 x 999 / 1000) is still 0. A zero floor would send minBptAmountOut = 0 to the venue — no slippage
+     *      protection at all — so rather than let a ~1e18-value pile clear for as little as 1 wei, the reinvestment
+     *      returns early and leaves the shares idle. This is the exact regime where a sandwich costs the LT the most
+     *      relative to what it receives, so deferring is the safe outcome.
      */
-    function test_FINDING_23_ReinvestLiquidityPremium_ZeroMinOutFloor_AddExecutesWithoutSlippageProtection() public {
+    function test_ReinvestLiquidityPremium_ZeroMinOutFloor_DefersAddAndLeavesSharesIdle() public {
         uint256 idleShares = _accrueIdlePremiumSeniorShares();
         _assertSeededGateFixture(idleShares);
 
-        // Sync once more: the +10% gain is already committed, so this sync accrues no new premium, which guarantees
-        // the reinvest call's own internal pre-op sync below also mints nothing — its fee-path deploy attempt stays
-        // inert and cannot consume the one-shot venue override armed for the explicit reinvestment
+        // Sync once more: the +10% gain is already committed, so this sync accrues no new premium and the reinvest
+        // call's own internal pre-op sync below also mints nothing, leaving the idle pile intact for the explicit reinvestment
         vm.prank(SYNC_OPERATOR);
         kernel.syncTrancheAccounting();
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares, "arrange: the no-gain sync must not touch the idle pile");
@@ -129,31 +127,27 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
 
         uint256 ltOwnedBefore = toUint256(kernel.getState().ltOwnedYieldBearingAssets);
 
-        // A venue fill of exactly 1 wei of BPT for the whole pile: ~1e18 of senior value sold for 1 wei. A live gate
-        // would reject this fill outright, so its acceptance is direct proof the add ran with minBptAmountOut == 0
-        balancerVault.setNextBptOutOverride(1);
-        vm.expectEmit(address(kernel));
-        emit IRoycoDayKernel.LiquidityPremiumReinvested(idleShares, toTrancheUnits(1));
+        // With a zero fair-value floor the reinvestment returns early before any venue add: it never reaches the
+        // Vault, so no fill can occur and the idle pile is left untouched
         vm.prank(MARKET_OPS_ADMIN);
         kernel.reinvestLiquidityPremium(idleShares);
 
-        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, 0, "the entire idle pile is debited despite the worthless fill");
-        assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), ltOwnedBefore + 1, "exactly 1 wei of BPT is credited for the whole pile");
+        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares, "the idle pile stays idle and claimable when the fair-value floor rounds to zero");
+        assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), ltOwnedBefore, "no BPT is credited: the zero-floor add is deferred, not executed");
     }
 
     /**
-     * @notice PINS CURRENT BEHAVIOR: with the BPT oracle marking a zero TVL while BPT supply is positive, the sync
-     *         that would mint a pending liquidity premium panics with a division-by-zero — and because every tranche
-     *         operation runs that same pre-op sync, every operation reverts until the oracle heals
+     * @notice With the BPT oracle marking a zero TVL while BPT supply is positive, the sync that would mint a
+     *         pending liquidity premium reverts with a division-by-zero — and because every tranche operation runs
+     *         that same pre-op sync, every operation reverts until the oracle heals
      * @dev The reinvestment attempt is designed to be non-blocking: the venue add runs behind a tolerated low-level
      *      call so a failed deploy leaves the premium idle instead of reverting the operation. But the gate's floor
      *      is computed BEFORE that tolerated frame, and converting the premium's NAV to BPT divides by the oracle
-     *      TVL — zero TVL with a nonzero BPT supply skips the empty-pool early-return and panics in the conversion
-     *      itself. The pending senior gain can never commit (every sync reverts before committing), so the market is
-     *      fully bricked: no sync, no deposit, no redemption. Expected behavior: tolerated deferral — the sync
-     *      commits, the premium stays idle and claimable, and only the reinvestment waits for a sane oracle
+     *      TVL — zero TVL with a nonzero BPT supply skips the empty-pool early-return and reverts in the conversion
+     *      itself. The pending senior gain never commits (every sync reverts before committing), so no sync, no
+     *      deposit, and no redemption can run until the oracle reports a sane TVL.
      */
-    function test_FINDING_23_SyncTrancheAccounting_BricksWhenOracleTVLZeroWithBPTSupply() public {
+    function test_SyncTrancheAccounting_RevertsWhenOracleTVLZeroWithBPTSupply() public {
         _seedMarket(100e18, 50e18);
 
         // The first sync initializes the premium accrual clock

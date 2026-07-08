@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 // =============================================================================
-// RolesConfiguration — canonical registry of Royco protocol role IDs.
+// RolesConfiguration — canonical registry of Royco protocol role IDs
 // =============================================================================
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -73,6 +73,12 @@ uint64 constant DEPLOYER_ROLE_ADMIN_ROLE = uint64(uint256(keccak256(abi.encode("
 uint64 constant LP_ROLE_ADMIN_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_LP_ROLE_ADMIN_ROLE"))));
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// BLACKLIST ROLE
+// ═══════════════════════════════════════════════════════════════════════════
+
+uint64 constant ADMIN_BLACKLIST_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_BLACKLIST_ROLE"))));
+
+// ═══════════════════════════════════════════════════════════════════════════
 // GUARDIAN ROLE
 // ═══════════════════════════════════════════════════════════════════════════════
 

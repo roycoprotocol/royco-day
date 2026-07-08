@@ -94,13 +94,13 @@ library DepositLogic {
     }
 
     /**
-     * @notice Processes the deposit of a specified amount of assets into the liquidity tranche.
+     * @notice Processes the deposit of a specified amount of assets into the liquidity tranche
      * @dev An in-kind LT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state (including fixed-term)
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _assets The amount of assets (the liquidity venue's position token) to deposit, denominated in the liquidity tranche's tranche units
-     * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units.
-     * @return navToMintSharesAt The NAV at which the shares will be minted, exclusive of valueAllocated.
+     * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
+     * @return navToMintSharesAt The NAV at which the shares will be minted, exclusive of valueAllocated
      * @dev An in-kind LT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state and enforces no requirements
      */
     function ltDeposit(
@@ -121,7 +121,8 @@ library DepositLogic {
         // Credit the deposited assets to the liquidity tranche
         $.ltOwnedYieldBearingAssets = $.ltOwnedYieldBearingAssets + _assets;
 
-        // Execute a post-deposit sync on accounting. An in-kind LT deposit only adds market-making depth and improves liquidity, so no requirements are enforced
+        // Execute a post-deposit sync on accounting
+        // An in-kind LT deposit only adds market-making depth and improves liquidity, so no requirements are enforced
         AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.LT_DEPOSIT, ZERO_NAV_UNITS, false);
     }
 
@@ -130,7 +131,7 @@ library DepositLogic {
      *         shares), adds (senior shares + quote) into the liquidity venue to mint the LT tranche assets, then deposits them into the LT
      * @dev Assumes the ST underlying and quote have been transferred to the kernel before this call (by the LT tranche)
      * @dev Enabled in a PERPETUAL market state, and in a fixed-term market only for a quote-only deposit that mints no senior shares
-     * @dev The combined new senior exposure is gated by the market's coverage and liquidity requirements. Reverts if either is unsatisfied
+     * @dev The combined new senior exposure is gated by the market's coverage and liquidity requirements — reverts if either is unsatisfied
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _stAssets The amount of ST underlying (the senior tranche's base asset) to deposit, denominated in ST tranche units

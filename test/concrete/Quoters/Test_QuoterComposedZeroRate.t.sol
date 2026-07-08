@@ -10,19 +10,18 @@ import { cellA } from "../../utils/TokenConfigs.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
- * @title Test_QuoterZeroRateDivergences_DayMarket
- * @notice Loud, first-class pins of the unguarded zero composed ST/JT conversion rate: the vault-share hop times
- *         the price-feed hop can floor to exactly zero and the quoter accepts that broken price with no typed
- *         error, so forward conversions silently zero both tranche NAVs while backward conversions panic
+ * @title Test_QuoterComposedZeroRate
+ * @notice The composed ST/JT conversion rate (the vault-share hop times the price-feed hop) can floor to exactly
+ *         zero, and the quoter accepts that composed rate with no typed error: forward conversions value both
+ *         tranche NAVs at zero while backward conversions revert division-by-zero
  * @dev The kernel family prices a tranche unit as floor(vaultHop x feedHop / 1e18), where the vault hop is the
  *      ERC4626 share price scaled to WAD and the feed hop is the Chainlink-shaped answer scaled to WAD. The feed
- *      hop is gated (a non-positive answer reverts INVALID_PRICE), but the composed PRODUCT has no zero gate, so
- *      a 1-wei vault rate against a sub-1.0 feed answer floors the composed rate to exactly zero one hop past
- *      the gate. Every test below constructs that reachable zero on the 18-decimal ERC4626 ST/JT vault,
- *      6-decimal quote market and asserts CURRENT production behavior. If a future src change adds the missing
- *      composed-rate zero guard, these pins MUST fail — that is the alarm they exist to raise
+ *      hop is gated (a non-positive answer reverts INVALID_PRICE), but the composed product has no zero gate, so
+ *      a 1-wei vault rate against a sub-1.0 feed answer floors the composed rate to exactly zero one hop past the
+ *      gate. Every test below constructs that reachable zero on the 18-decimal ERC4626 ST/JT vault, 6-decimal
+ *      quote market and asserts the resulting behavior
  */
-contract Test_QuoterZeroRateDivergences_DayMarket is DayMarketTestBase {
+contract Test_QuoterComposedZeroRate is DayMarketTestBase {
     // =============================
     // Seed Constants (whole tokens, 18-decimal ERC4626 ST/JT shares, 6-decimal quote)
     // =============================
@@ -69,18 +68,16 @@ contract Test_QuoterZeroRateDivergences_DayMarket is DayMarketTestBase {
     }
 
     // =============================
-    // FINDING 27 — forward conversion silently accepts the zero composed rate
+    // Forward conversion accepts the zero composed rate
     // =============================
 
     /**
-     * @notice FINDING 27 (silent half): with the composed rate floored to zero, the quoter reports the rate as a
-     *         plain zero and forward conversion values whole shares of BOTH tranches at 0 NAV, no revert
-     * @dev EXPECTED-CORRECT: a resolved conversion rate of zero means pricing is broken — every senior and junior
-     *      share in existence would be marked worthless by an oracle artifact, so the quoter should reject it
-     *      with a typed error exactly as the feed hop rejects a zero answer one hop earlier. ACTUAL: the zero
-     *      flows through as an ordinary number and every downstream NAV mark silently becomes zero
+     * @notice With the composed rate floored to zero, the quoter reports the rate as a plain zero and forward
+     *         conversion values whole shares of both tranches at 0 NAV, with no revert
+     * @dev The composed product is not gated on zero the way the feed hop is, so the zero flows through as an
+     *      ordinary number and every downstream NAV mark becomes zero
      */
-    function test_FINDING_27_ZeroCompositeConversionRate_ForwardConversionSilentlyZeroesBothTrancheNAVs() public {
+    function test_ComposedZeroRate_forwardConversionYieldsZeroNAVForBothTranches() public {
         _collapseToComposedZeroRate();
 
         // The composed rate is exactly zero: floor(1 x 0.99e18 / 1e18) = 0 — accepted where the feed's own
@@ -94,19 +91,17 @@ contract Test_QuoterZeroRateDivergences_DayMarket is DayMarketTestBase {
     }
 
     // =============================
-    // FINDING 27 — backward conversion panics on the same zero rate
+    // Backward conversion reverts on the same zero composed rate
     // =============================
 
     /**
-     * @notice FINDING 27 (loud half): the SAME zero composed rate that forward conversion silently accepts makes
-     *         backward conversion panic with division-by-zero — one broken price, two contradictory behaviors
+     * @notice The same zero composed rate that forward conversion accepts makes backward conversion revert with
+     *         division-by-zero
      * @dev Backward conversion computes floor(nav x 1e18 / composedRate), so a zero rate is a zero denominator:
-     *      floor(1e18 x 1e18 / 0) hits Solidity's division-by-zero check, Panic(0x12). EXPECTED-CORRECT: both
-     *      directions reject the broken price with the same typed error, so integrators see one failure mode.
-     *      ACTUAL: the direction of the conversion decides between a silent zero and a raw panic, and every
-     *      caller that backward-converts (previews, max views, redemption sizing) bricks with an untyped panic
+     *      floor(1e18 x 1e18 / 0) hits Solidity's division-by-zero check, Panic(0x12). Every caller that
+     *      backward-converts (previews, max views, redemption sizing) reverts with that panic
      */
-    function test_FINDING_27_ZeroCompositeConversionRate_BackwardConversionPanicsWithDivisionByZero() public {
+    function test_ComposedZeroRate_backwardConversionRevertsDivisionByZero() public {
         _collapseToComposedZeroRate();
 
         // Senior direction: floor(1e18 NAV x 1e18 / 0) divides by the zero composed rate, Panic(0x12)
@@ -119,36 +114,31 @@ contract Test_QuoterZeroRateDivergences_DayMarket is DayMarketTestBase {
     }
 
     // =============================
-    // FINDING 27 — a sync commits a total wipe off the pricing artifact, then the max-deposit view panics
+    // A sync commits zeroed NAVs at the zero composed rate, then the max-deposit view reverts
     // =============================
 
     /**
-     * @notice FINDING 27 (committed damage): a sync at the zero composed rate marks stRaw and jtRaw to zero and
-     *         the waterfall commits a checkpoint that wipes both effective NAVs — 130 whole shares of real
-     *         deposited capital erased by a pricing artifact — while BOTH risk metrics read a healthy zero.
-     *         The senior max-deposit view then panics instead of returning a number
+     * @notice A sync at the zero composed rate marks stRaw and jtRaw to zero and the waterfall commits a
+     *         checkpoint that zeroes both effective NAVs, while both risk metrics read zero. The senior
+     *         max-deposit view then reverts instead of returning a number
      * @dev Hand derivation from the seeded amounts: 100e18 senior shares and 30e18 junior shares deposited at a
      *      1.0 share price and a 1.0 feed mark stRaw = 100e18 and jtRaw = 30e18. At the collapsed rate the raw
      *      marks become floor(100e18 x 0 / 1e18) = 0 and floor(30e18 x 0 / 1e18) = 0, and the waterfall's
-     *      conservation identity (stRaw + jtRaw == stEff + jtEff) forces stEff = jtEff = 0: the junior buffer is
-     *      wiped covering a "loss" no underlying asset ever took. Perversely the wipe reads HEALTHY: coverage
-     *      utilization returns 0 because there is no covered exposure left (0 raw NAV needs no protection), and
-     *      liquidity utilization returns 0 because there is no senior value left to market-make, so the market
-     *      stays PERPETUAL and nothing in the committed state flags that pricing is broken.
-     *      EXPECTED-CORRECT: the sync reverts on the broken price (as it would had the feed itself answered
-     *      zero), leaving the last honest checkpoint in place. ACTUAL: the wipe commits silently
-     * @dev Max-deposit panic derivation: the view previews the sync at the live zero rate (previewed
+     *      conservation identity (stRaw + jtRaw == stEff + jtEff) forces stEff = jtEff = 0. The zeroed state
+     *      reads healthy: coverage utilization returns 0 because there is no covered exposure left (0 raw NAV
+     *      needs no protection), and liquidity utilization returns 0 because there is no senior value left to
+     *      market-make, so the market stays PERPETUAL. The sync commits the zeroed checkpoint
+     * @dev Max-deposit revert derivation: the view previews the sync at the live zero rate (previewed
      *      jtEffectiveNAV = 0), so the coverage-bounded max is floor(0 x 1e18 / 0.2e18) saturating-minus the
      *      dust-padded exposure = 0 NAV, the liquidity-bounded max is floor(6e18 x 1e18 / 0.05e18) - (0 + 1) =
      *      120e18 - 1 NAV, and the binding minimum is 0 NAV. Zero is not the unlimited sentinel, so the view
-     *      backward-converts it at the live composed rate: floor(0 x 1e18 / 0) divides by zero, Panic(0x12).
-     *      A max-deposit view exists to tell integrators what is safe to attempt, it should never revert
+     *      backward-converts it at the live composed rate: floor(0 x 1e18 / 0) divides by zero, Panic(0x12)
      */
-    function test_FINDING_27_ZeroCompositeConversionRate_SyncCommitsFullLossAndMaxDepositViewPanics() public {
+    function test_ComposedZeroRate_syncCommitsZeroedNAVsAndMaxDepositReverts() public {
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
         _collapseToComposedZeroRate();
 
-        // ACTUAL production behavior: the sync succeeds and commits the wipe (no revert to catch)
+        // The sync succeeds and commits the zeroed checkpoint (no revert to catch)
         SyncedAccountingState memory state = _sync();
 
         // Raw marks: every deposited share times the zero composed rate floors to zero
@@ -160,7 +150,7 @@ contract Test_QuoterZeroRateDivergences_DayMarket is DayMarketTestBase {
         assertEq(toUint256(state.stEffectiveNAV), 0, "the waterfall must wipe stEffectiveNAV to 0 off the pricing artifact");
         assertEq(toUint256(state.jtEffectiveNAV), 0, "the waterfall must wipe jtEffectiveNAV to 0 off the pricing artifact");
 
-        // The wipe is COMMITTED, not just previewed: the checkpoint now anchors all future waterfalls at zero,
+        // The zeroing is committed, not just previewed: the checkpoint now anchors all future waterfalls at zero,
         // so even a rate recovery next block would book the rebound as fresh senior gain, not a correction
         IRoycoDayAccountant.RoycoDayAccountantState memory committed = accountant.getState();
         assertEq(toUint256(committed.lastSTRawNAV), 0, "the committed checkpoint must carry the zeroed senior raw NAV");
@@ -177,8 +167,8 @@ contract Test_QuoterZeroRateDivergences_DayMarket is DayMarketTestBase {
         // The quote-only LT pool is untouched by the senior share price, its 6e18 mark survives the collapse
         assertEq(toUint256(state.ltRawNAV), SEEDED_LT_RAW_NAV, "the quote-only LT depth must be unaffected by the senior pricing collapse");
 
-        // The never-revert view contract breaks: converting the 0-NAV coverage-bounded max back to tranche
-        // units divides by the live zero composed rate, so integrators polling deposit capacity get a raw panic
+        // The max-deposit view reverts: converting the 0-NAV coverage-bounded max back to tranche units divides
+        // by the live zero composed rate, so integrators polling deposit capacity get a division-by-zero panic
         vm.expectRevert(stdError.divisionError);
         kernel.stMaxDeposit(ST_PROVIDER);
     }

@@ -10,6 +10,7 @@ import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { COMPONENT_ID_SENIOR_TRANCHE_IMPL, COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2 } from "../../../src/factory/templates/base/Components.sol";
 import { IBaseTemplate } from "../../../src/interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
+import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { MockDeploymentTemplate } from "../../mocks/MockDeploymentTemplate.sol";
 import { UninitializedERC1967Proxy } from "../../mocks/UninitializedERC1967Proxy.sol";
@@ -62,11 +63,10 @@ contract Test_TemplateInitialization is Test {
 
     /// A mempool front-runner can seed the template's bytecode registry before the deployer, and the poisoned
     /// template still registers cleanly because registration checks only the initialized flag, never the content
-    function test_FINDING_20_TemplateInitialize_StrangerFrontRunsDeployerAndRegisterStillSucceeds() external {
-        // CURRENT behavior: `BaseDeploymentTemplate.initialize` carries only OZ's `initializer` modifier — no caller
-        // gate — so it is permissionless-first-caller. EXPECTED behavior: initialize restricted to the deployer or
-        // the factory, or the loaded bytecode content verified at registration, so the code a registered template
-        // deploys is provably the code the deployer intended to load.
+    function test_TemplateInitialize_PermissionlessFirstCaller_FrontRunPoisonsRegistryButStillRegisters() external {
+        // `BaseDeploymentTemplate.initialize` carries only OZ's `initializer` modifier — no caller gate — so it is
+        // permissionless-first-caller: the first address to call it, deployer or not, loads the bytecode registry
+        // and registration only ever checks the initialized flag, never the loaded content.
         bytes memory attackerCode = hex"deadbeefcafe";
 
         // The stranger front-runs the deployer's initialize with attacker-chosen creation code.
@@ -94,10 +94,10 @@ contract Test_TemplateInitialization is Test {
 
     /// initialize with two empty arrays counts as fully initialized, so a template with zero components registers
     /// cleanly and the emptiness only surfaces at deploy time as CREATION_CODE_NOT_SET
-    function test_FINDING_20_TemplateInitialize_EmptyArraysCountAsInitialized_DeployLaterRevertsCreationCodeNotSet() external {
-        // CURRENT behavior: the loop body never runs for empty arrays, yet the `initializer` modifier still flips
-        // the version to 1, so `isInitialized()` is true with an empty bytecode registry. EXPECTED behavior: an
-        // empty component load rejected at initialize (or at registration), not discovered on the first deployment.
+    function test_TemplateInitialize_EmptyArraysCountAsInitialized_DeployRevertsCreationCodeNotSet() external {
+        // The loop body never runs for empty arrays, yet the `initializer` modifier still flips the version to 1,
+        // so `isInitialized()` is true with an empty bytecode registry, and the emptiness is not caught until the
+        // first deployment reads a component's creation code.
         template.initialize(new bytes32[](0), new bytes[](0));
         assertTrue(template.isInitialized(), "zero-component initialize counts as initialized");
 
@@ -165,6 +165,22 @@ contract Test_TemplateInitialization is Test {
         (bytes32[] memory ids, bytes[] memory codes) = _singleComponent(COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2, type(AdaptiveCurveYDM_V2).creationCode);
         template.initialize(ids, codes);
         factory.registerTemplate(address(template));
+
+        // The factory requires a kernel, a senior tranche, and at least one subordinate tranche in the deployment
+        // result; this test only exercises the YDM path, so hand back the minimal valid result (no liquidity
+        // tranche — that registry write is skipped)
+        template.setDeploymentResult(
+            IRoycoProtocolTemplate.DeploymentResult({
+                seniorTranche: makeAddr("YDM_TEST_ST"),
+                juniorTranche: makeAddr("YDM_TEST_JT"),
+                liquidityTranche: address(0),
+                kernel: makeAddr("YDM_TEST_KERNEL"),
+                accountant: address(0),
+                ydm: address(0),
+                ltYdm: address(0),
+                extras: ""
+            })
+        );
 
         // First deployment at the salt: fresh instance, so alreadyDeployed is false and the immutable kink is
         // exactly the 0.5e18 passed as the constructor arg (the appended abi.encode(0.5e18) word).

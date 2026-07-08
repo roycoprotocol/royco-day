@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { stdError } from "../../../lib/forge-std/src/StdError.sol";
+import { Vm } from "../../../lib/forge-std/src/Vm.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { BalancerV3_LT_BPTOracle_Quoter } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
@@ -263,21 +264,101 @@ contract Test_SeniorShareRateProvider_BPTOracleQuoter is DayMarketTestBase {
     }
 
     /**
-     * @notice Once a sync has cached the rate, an inline senior-share mint (supply +100%) cannot move the rate the
-     *         venue sees within the same transaction
-     * @dev Attacker intent: sandwich a sync with a supply move so the pool prices its senior leg off a rate the
-     *      attacker just shifted. The transaction-scoped cache pins the rate for the rest of the transaction
+     * @notice Once a sync has cached the senior-share rate, an inline senior-share mint (supply +100%) cannot move it
+     *         for the rest of the transaction: the transaction-scoped cache pins the rate
+     * @dev This is the cache's purpose. Within a synced op (e.g. a multi-asset LT deposit/redemption that mints or burns
+     *      ST shares inline) the senior-leg mark the pool prices against is fixed at the pre-op sync, so an inline supply
+     *      move cannot shift it before the matching effective NAV commits. The cache is transient storage, which Foundry
+     *      clears between the test contract's top-level calls, so the sync, the inline mint, and the reads must all run in
+     *      a single top-level call to model one on-chain transaction — the harness below bundles them so the cache persists
      */
     function test_GetRate_TransactionInvariant_UnderInlineSeniorMint() public {
-        vm.prank(SYNC_OPERATOR);
-        kernel.syncTrancheAccounting();
-        uint256 cachedRate = kernel.getRate();
-        assertEq(cachedRate, 1e18, "arrange: the cached rate at seed must be exactly 1.0");
+        InlineSeniorMintRateHarness harness = new InlineSeniorMintRateHarness();
 
-        // Inline senior mint: doubles the supply mid-transaction (through the tranche's kernel-only mint gate)
+        // Run pre-op sync -> read -> inline senior mint (supply +100%) -> read as ONE transaction so the transient cache lives
+        (uint256 cachedRate, uint256 rateAfterInlineMint) = harness.syncMintAndReadRate(
+            IRateHarnessKernel(address(kernel)),
+            IRateHarnessTranche(address(seniorTranche)),
+            SYNC_OPERATOR,
+            makeAddr("INLINE_MINT_RECIPIENT"),
+            100e18
+        );
+
+        assertEq(cachedRate, 1e18, "arrange: the cached rate at seed must be exactly 1.0");
+        assertEq(rateAfterInlineMint, cachedRate, "the rate must be unchanged by an inline supply move, the cache pins it");
+    }
+
+    /**
+     * @notice With no sync in the transaction the cache is unset, so getRate() previews the senior-share rate live off
+     *         current supply: doubling the senior supply against unchanged backing NAV halves the previewed rate
+     * @dev The miss path a standalone off-chain read or a pre-sync pool interaction takes. No sync runs in the body, so
+     *      the ST_SHARE_RATE cache stays unset (Foundry clears transient storage at the setUp->test boundary) and both
+     *      reads recompute live from committed state and the live supply
+     */
+    function test_GetRate_MissPathPreviewsLiveOffCurrentSeniorSupply() public {
+        // Cache unset (no sync in the body): 100e18 stEff over the seeded 100e18 supply previews live to exactly 1.0
+        assertEq(kernel.getRate(), 1e18, "arrange: the uncached rate at seed must preview live to exactly 1.0");
+
+        // Senior mint doubles the supply (through the tranche's kernel-only mint gate) and adds no backing NAV
         vm.prank(address(kernel));
         seniorTranche.mint(makeAddr("INLINE_MINT_RECIPIENT"), 100e18);
 
-        assertEq(kernel.getRate(), cachedRate, "the rate must be unchanged by an inline supply move, the cache pins it");
+        // Still uncached, so the read previews live: floor(100e18 x 1e18 / 200e18) = 0.5e18
+        assertEq(kernel.getRate(), 0.5e18, "an uncached read previews live, halving the rate on a doubled senior supply");
+    }
+}
+
+/// @dev Minimal kernel surface the rate harness drives: the pre-op sync that caches the senior share rate and the rate read
+interface IRateHarnessKernel {
+    function syncTrancheAccounting() external;
+    function getRate() external view returns (uint256);
+}
+
+/// @dev Minimal senior-tranche surface the rate harness drives: the kernel-gated inline share mint
+interface IRateHarnessTranche {
+    function mint(address to, uint256 shares) external;
+}
+
+/**
+ * @title InlineSeniorMintRateHarness
+ * @notice Bundles a pre-op sync, an inline senior-share mint, and the surrounding rate reads into a single top-level call
+ * @dev The senior-share-rate cache is transient storage that Foundry clears between the test contract's top-level calls,
+ *      so the transaction-invariant can only be exercised when every step shares one call frame (one transaction) as it
+ *      does on-chain, keeping the cache the sync wrote alive across the inline supply move and the follow-up read
+ */
+contract InlineSeniorMintRateHarness {
+    Vm private constant vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+
+    /**
+     * @notice Syncs to cache the rate, reads it, inline-mints senior shares to move the supply, then re-reads the rate
+     * @param _kernel The kernel exposing syncTrancheAccounting and getRate
+     * @param _seniorTranche The senior tranche whose kernel-gated mint moves the supply mid-transaction
+     * @param _syncOperator The address authorized to call syncTrancheAccounting
+     * @param _mintRecipient The receiver of the inline senior-share mint
+     * @param _mintShares The senior shares to mint inline
+     * @return cachedRate The rate read right after the sync cached it
+     * @return rateAfterInlineMint The rate read after the inline supply move, which the cache must pin to cachedRate
+     */
+    function syncMintAndReadRate(
+        IRateHarnessKernel _kernel,
+        IRateHarnessTranche _seniorTranche,
+        address _syncOperator,
+        address _mintRecipient,
+        uint256 _mintShares
+    )
+        external
+        returns (uint256 cachedRate, uint256 rateAfterInlineMint)
+    {
+        // Pre-op sync writes the transient senior-share-rate cache in the kernel's context
+        vm.prank(_syncOperator);
+        _kernel.syncTrancheAccounting();
+        cachedRate = _kernel.getRate();
+
+        // Inline senior mint doubles the supply within this same transaction, through the tranche's kernel-only mint gate
+        vm.prank(address(_kernel));
+        _seniorTranche.mint(_mintRecipient, _mintShares);
+
+        // The transient cache still pins the rate: same transaction, so the supply move cannot shift it
+        rateAfterInlineMint = _kernel.getRate();
     }
 }

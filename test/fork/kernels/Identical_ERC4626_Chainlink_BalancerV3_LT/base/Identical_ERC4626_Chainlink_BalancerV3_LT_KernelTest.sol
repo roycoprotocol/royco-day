@@ -115,7 +115,7 @@ abstract contract Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest is Test_K
      * @dev Initializes the market's freshly created Gyro E-CLP pool through Balancer's canonical Router when it
      *      is still uninitialized, since Balancer rejects the kernel's UNBALANCED adds (`PoolNotInitialized`)
      *      until the pool is initialized.
-     * @dev FINDING (reported): the repo ships NO production path that initializes the pool.
+     * @dev The repo ships no production path that initializes the pool.
      *      The kernel only performs UNBALANCED adds and the deploy template never calls `Vault.initialize`, so a
      *      freshly deployed Day market's entire LT surface is unusable until market ops initialize the pool
      *      out-of-band. This helper performs that ops step through the venue's own production Router (never a

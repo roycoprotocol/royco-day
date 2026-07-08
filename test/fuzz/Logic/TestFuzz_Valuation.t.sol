@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { MINT_DILUTION_RESIDUAL_WAD, WAD } from "../../../src/libraries/Constants.sol";
+import { MAX_MINT_DILUTION_WAD, WAD } from "../../../src/libraries/Constants.sol";
 import { toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { ValuationLogic } from "../../../src/libraries/logic/ValuationLogic.sol";
 import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
@@ -16,21 +16,22 @@ import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
  *         mint in the contributed value
  * @dev Pure-library layer, no market deploy. Production is asserted against RoycoTestMath or a hand-derived
  *      bound, never against a second call of the function under test
- * @dev The share mint carries the protocol's mint-dilution clamp (MINT_DILUTION_RESIDUAL_WAD = 1e6, a 1e-12
- *      residual): a single mint owns at most (1 − 1e-12) of the post-mint supply. The inline pins below
- *      recompute the bind predicate from first principles per branch; the clamp-specific properties (cap
- *      exactness, ownership bound, depositor loss) live in TestFuzz_MintDilutionClamp.t.sol
+ * @dev The share mint carries the protocol's mint-dilution clamp (MAX_MINT_DILUTION_WAD = WAD − 1e6): a
+ *      single mint owns at most (1 − 1e-12) of the post-mint supply, leaving incumbents the residual
+ *      WAD − MAX_MINT_DILUTION_WAD = 1e6. The inline pins below recompute the bind predicate from first
+ *      principles per branch; the clamp-specific properties (cap exactness, ownership bound, depositor loss)
+ *      live in TestFuzz_MintDilutionClamp.t.sol
  */
 contract TestFuzz_Valuation_Logic is Test {
     /// @notice Suite-wide NAV and share-supply ceiling
     uint256 internal constant MAX_NAV = 1e30;
 
     /// @dev The clamp's bind predicate, restated inline and independently of both production and the mirror:
-    ///      a mint binds iff value · ε > d · (WAD − ε), with d the totalValue pinned to 1 wei at zero.
-    ///      Products fit: value, d <= 1e30 and ε <= 1e6, so both sides stay below 1e48
+    ///      a mint binds iff value · (WAD − MAX_MINT_DILUTION_WAD) > d · MAX_MINT_DILUTION_WAD, with d the
+    ///      totalValue pinned to 1 wei at zero. Products fit: value, d <= 1e30 and WAD − MAX_MINT_DILUTION_WAD = 1e6, so both sides stay below 1e48
     function _binds(uint256 _value, uint256 _totalValue) internal pure returns (bool) {
         uint256 d = _totalValue == 0 ? 1 : _totalValue;
-        return _value * MINT_DILUTION_RESIDUAL_WAD > d * (WAD - MINT_DILUTION_RESIDUAL_WAD);
+        return _value * (WAD - MAX_MINT_DILUTION_WAD) > d * MAX_MINT_DILUTION_WAD;
     }
 
     /**
@@ -40,7 +41,7 @@ contract TestFuzz_Valuation_Logic is Test {
      * Property: _convertToShares(v, T, S, Floor) == RoycoTestMath.convertToShares(v, T, S) exactly, with each
      * branch additionally re-pinned against inline math so the mirror itself cannot mask a regression:
      *   S == 0                 => shares == v (the first deposit mints 1:1, totalValue ignored, clamp exempt)
-     *   S > 0, mint binds      => shares == floor(S * (WAD − ε) / ε) (the dilution cap)
+     *   S > 0, mint binds      => shares == floor(S * MAX_MINT_DILUTION_WAD / (WAD − MAX_MINT_DILUTION_WAD)) (the dilution cap)
      *   S > 0, T == 0, no bind => shares == S * v (the denominator pins to 1 wei)
      *   otherwise              => shares == floor(S * v / T)
      */
@@ -58,7 +59,7 @@ contract TestFuzz_Valuation_Logic is Test {
         if (_supply == 0) {
             assertEq(shares, _value, "zero supply mints 1:1 with the value");
         } else if (_binds(_value, _totalValue)) {
-            assertEq(shares, Math.mulDiv(_supply, WAD - MINT_DILUTION_RESIDUAL_WAD, MINT_DILUTION_RESIDUAL_WAD), "a binding mint clamps to the dilution cap");
+            assertEq(shares, Math.mulDiv(_supply, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD), "a binding mint clamps to the dilution cap");
         } else if (_totalValue == 0) {
             // No overflow: S * v <= 1e30 * 1e30 = 1e60 < 2^256
             assertEq(shares, _supply * _value, "zero total value pins the denominator to 1 wei");
@@ -102,13 +103,13 @@ contract TestFuzz_Valuation_Logic is Test {
      * The fair-pricing round trip only exists below the bind: a binding mint deliberately returns less
      * (the clamp's purpose; its loss bound is the DepositorLossBounded property in
      * TestFuzz_MintDilutionClamp.t.sol), so the domain is shaped to the no-bind region via bound(), not
-     * assumed away: v is drawn from [0, min(MAX_NAV, T * (WAD − ε) / ε)], the exact no-bind interval
+     * assumed away: v is drawn from [0, min(MAX_NAV, T * MAX_MINT_DILUTION_WAD / (WAD − MAX_MINT_DILUTION_WAD))], the exact no-bind interval
      */
     function testFuzz_ValuationRoundTrip_LossWithinDerivedSlack(uint256 _value, uint256 _totalValue, uint256 _supply) public pure {
         _totalValue = bound(_totalValue, 1, MAX_NAV); // live vault: positive backing (T == 0 pinned in the equality property)
         _supply = bound(_supply, 1, MAX_NAV); // live vault: positive supply (S == 0 pinned in the equality property)
-        // The exact no-bind ceiling: v <= floor(T * (WAD − ε) / ε) never binds (integer lemma); capped to the domain
-        uint256 noBindCeiling = Math.mulDiv(_totalValue, WAD - MINT_DILUTION_RESIDUAL_WAD, MINT_DILUTION_RESIDUAL_WAD);
+        // The exact no-bind ceiling: v <= floor(T * MAX_MINT_DILUTION_WAD / (WAD − MAX_MINT_DILUTION_WAD)) never binds (integer lemma); capped to the domain
+        uint256 noBindCeiling = Math.mulDiv(_totalValue, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD);
         _value = bound(_value, 0, noBindCeiling < MAX_NAV ? noBindCeiling : MAX_NAV); // uniform over the fair-priced region
 
         uint256 shares = ValuationLogic._convertToShares(toNAVUnits(_value), toNAVUnits(_totalValue), _supply, Math.Rounding.Floor);
@@ -145,7 +146,7 @@ contract TestFuzz_Valuation_Logic is Test {
      * would leak a wei on every call, and repeated dust-sized calls would drain the tranche.
      * Bracketing is asserted in cross-multiplied integer form (no division can hide a violation):
      *   sharesFloor * T <= S * v <= sharesCeil * T   and   valueFloor * S <= T * shares <= valueCeil * S
-     * Overflow guards: v <= T * (WAD − ε)/ε caps sharesCeil <= S * v / T + 1 <= ~1e42, so every product here
+     * Overflow guards: v <= T * MAX_MINT_DILUTION_WAD/(WAD − MAX_MINT_DILUTION_WAD) caps sharesCeil <= S * v / T + 1 <= ~1e42, so every product here
      * stays below 1e72 < 2^256; on the value side valueCeil * S <= T * shares + S <= 1e60 + 1e30
      */
     function testFuzz_RoundingDirectionPair_CeilAndFloorBracketTheExactRatio(
@@ -162,7 +163,7 @@ contract TestFuzz_Valuation_Logic is Test {
         _shares = bound(_shares, 0, MAX_NAV); // full share range incl. the 0 edge
         // Stay below the clamp bind so both share variants price fairly (a binding mint returns the cap
         // regardless of the rounding argument, which is pinned in TestFuzz_MintDilutionClamp.t.sol)
-        uint256 noBindCeiling = Math.mulDiv(_totalValue, WAD - MINT_DILUTION_RESIDUAL_WAD, MINT_DILUTION_RESIDUAL_WAD);
+        uint256 noBindCeiling = Math.mulDiv(_totalValue, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD);
         _value = bound(_value, 0, noBindCeiling < MAX_NAV ? noBindCeiling : MAX_NAV); // uniform over the fair-priced region
 
         // Deposit-side pair: shares for a value contribution

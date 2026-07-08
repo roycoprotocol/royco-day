@@ -81,8 +81,9 @@ contract DayMarketHandler is DayMarketTestBase {
      *      ~1e52 × 1e12 ≈ 1e64 < 1.158e65 and the sync's fee mints add at most ~supply / 9 on top. Sync
      *      liveness therefore cannot be lost to this edge inside a campaign, while the dilution branch
      *      itself stays exercised at one-unit size. The cliff itself (the cap computation's Panic(0x11)
-     *      once a supply crosses ~1.158e65) is pinned by the concrete test
-     *      test_FINDING_11_mintDilutionClamp_residualOverflowCliff, not re-hunted by campaigns
+     *      once a supply crosses ~1.158e65) is covered by the concrete test
+     *      test_mintDilutionClamp_capComputationOverflowBoundary
+     *      (Kernel/Test_EntrypointGateAndConversionEdges.t.sol), not re-hunted by campaigns
      */
     uint256 internal constant TRANCHE_SUPPLY_CAMPAIGN_BOUND = 1e45;
 

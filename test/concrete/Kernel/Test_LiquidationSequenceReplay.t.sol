@@ -10,13 +10,13 @@ import { DayMarketHandler } from "../../invariant/handlers/DayMarketHandler.sol"
  *         successive junior deposits against that dust NAV inflated the junior share supply toward 1e77, and the
  *         next sync's junior protocol-fee share mint (supply / 9 at a 10% fee) overflowed uint256 inside the
  *         ERC20 supply update, reverting every future sync on a healthy market.
- * @dev Fixed by the mint-dilution clamp in ValuationLogic (any single mint may own at most 1 - epsilon of the
- *      post-mint supply), which bounds supply growth per deposit and keeps the fee mint representable. This test
- *      pins the fix by replaying the exact recorded handler calldata: every step must execute without tripping a
- *      handler-observed violation. The residual supply-inflation cliff itself stays pinned separately by
- *      test_FINDING_11 in Test_SpecDivergences.
+ * @dev The mint-dilution clamp in ValuationLogic (any single mint may own at most 1 - epsilon of the post-mint
+ *      supply) bounds supply growth per deposit and keeps the fee mint representable. This test replays the exact
+ *      recorded handler calldata: every step must execute without tripping a handler-observed violation. The
+ *      residual supply-inflation cliff itself is covered separately by
+ *      test_mintDilutionClamp_capComputationOverflowBoundary in Test_EntrypointGateAndConversionEdges.
  */
-contract Test_JTSupplyInflationSequenceReplay_Findings is Test {
+contract Test_LiquidationSequenceReplay is Test {
     struct Step {
         bytes data;
         string name;
@@ -65,7 +65,7 @@ contract Test_JTSupplyInflationSequenceReplay_Findings is Test {
 
     /// @notice Replays the recorded sequence step by step; the mint-dilution clamp must keep every sync alive
     /// @dev A regression here means supply inflation can again push a protocol-fee share mint past uint256
-    function test_FINDING_11_replayedLiquidationSequenceCannotBrickSync() public {
+    function test_replayedLiquidationSequence_syncStaysRepresentable() public {
         for (uint256 i; i < steps.length; ++i) {
             (bool ok,) = address(handler).call(steps[i].data);
             ok; // a handler op may legitimately no-op; the property is the violation counter staying at zero

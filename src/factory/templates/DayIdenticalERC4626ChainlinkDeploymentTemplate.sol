@@ -17,7 +17,7 @@ import { COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK } from "./base/Comp
 /**
  * @title DayIdenticalERC4626ChainlinkDeploymentTemplate
  * @notice Concrete Royco Day deployment template for a market whose ST/JT kernel is
- *         `Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel` and whose LT holds a Gyro E-CLP pool position.
+ *         `Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel` and whose LT holds a Gyro E-CLP pool position
  */
 contract DayIdenticalERC4626ChainlinkDeploymentTemplate is BalancerV3DeploymentTemplate {
     constructor(

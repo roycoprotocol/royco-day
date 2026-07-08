@@ -218,10 +218,10 @@ contract Test_Setters_Accountant is AccountantTestBase {
     }
 
     /**
-     * Pins that the dust setters accept economically absurd tolerances with no upper bound. Dust exists to
-     * suppress rounding artifacts of a few wei, but a 1e45 tolerance (far above any NAV in the market, no
-     * overflow) makes EVERY gain and EVERY coverage loss read as dust, which silently disables three unrelated
-     * protections at once:
+     * The dust setters accept economically absurd tolerances with no upper bound. Dust exists to suppress
+     * rounding artifacts of a few wei, but a 1e45 tolerance (far above any NAV in the market, no overflow) makes
+     * EVERY gain and EVERY coverage loss read as dust, which silently disables three unrelated protections at
+     * once:
      * 1. Protocol fees: a genuine 100e18 senior gain still pays the JT risk premium and LT liquidity premium,
      *    but the fee-taking gate (gain must exceed the effective dust) never opens, so st/jt/lt fees are all
      *    zero where the configured 10% fee would otherwise take them
@@ -230,9 +230,8 @@ contract Test_Setters_Accountant is AccountantTestBase {
      *    leaving the same earned window to be paid again on every subsequent gain
      * 3. FIXED_TERM entry: a genuine coverage loss that wipes over half the junior buffer leaves an
      *    impermanent loss below the tolerance, so the market never enters the fixed-term protection window
-     * Expected behavior: the setter should bound the tolerance like every other economic parameter
      */
-    function test_FINDING_30_HugeDustToleranceDisablesProtocolFeesAndFixedTermEntry() public {
+    function test_HugeDustTolerance_SuppressesProtocolFeesPremiumResetsAndFixedTermEntry() public {
         // Flat 1000e18 / 200e18 market with the accrual and premium clocks initialized this block
         _seedAndInitAccrual();
         uint32 premiumClockBefore = accountant.getState().lastPremiumPaymentTimestamp;

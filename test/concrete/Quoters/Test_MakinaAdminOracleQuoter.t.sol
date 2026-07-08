@@ -216,10 +216,10 @@ abstract contract MakinaMarketTestBase is DayMarketTestBase {
  * @notice The Makina machine-share-price-to-admin-oracle composition's full construction, pricing, and admin surface:
  *         the constructor sanity checks (null machine, foreign share token, the supported decimal envelope), the
  *         zero-rate guards at initialization and at the setter, the composed two-hop rate across three decimal
- *         shapes, and the missing zero-rate sentinel branch pinned as a divergence
+ *         shapes, and the missing zero-rate sentinel branch
  * @dev The composition has NO oracle fallback: the stored admin rate is the only accounting-asset price source, and
  *      because the quoter reads it with no sentinel check, a zero stored rate silently prices everything at zero
- *      instead of failing loud (see the FINDING test at the bottom)
+ *      instead of failing loud (see the zero-rate test at the bottom)
  */
 contract Test_MachineSharePriceTimesAdminRate_MakinaAdminOracleQuoter is MakinaMarketTestBase {
     /// @dev Baseline shape: 18-decimal machine shares over an 18-decimal accounting token, machine share price 1.0, admin rate initialized to 2.0
@@ -400,34 +400,34 @@ contract Test_MachineSharePriceTimesAdminRate_MakinaAdminOracleQuoter is MakinaM
     }
 
     // =============================
-    // Pinned divergence: no zero-rate sentinel branch
+    // Zero stored rate reverts loud (no silent-zero mark)
     // =============================
 
     /**
-     * @notice A zero stored rate silently prices every tranche unit at zero NAV instead of reverting loud
-     * @dev The ERC4626 sibling quoter treats a zero stored rate as the sentinel and routes it to the admin oracle
-     *      hook, which reverts loud (MUST_USE_ADMIN_ORACLE_INPUT). The Makina quoter reads the stored rate with NO
-     *      sentinel check, so on a proxy whose initializer never ran (rate storage still 0, a state the initializer
-     *      and setter both reject but a bare or hijacked proxy exposes) the composed rate is machine hop x 0 = 0:
-     *      a sync would read total senior wipeout off a pricing artifact rather than failing, and the inverse
-     *      direction divides by the zero rate and panics. This test pins the CURRENT silent-zero behavior, the
-     *      expected behavior is a loud typed revert exactly like the sibling's
+     * @notice A zero stored rate reverts loud instead of silently pricing every tranche unit at zero NAV
+     * @dev A zero stored rate is the oracle sentinel, the Makina quoter resolves it through the admin-oracle path
+     *      which reverts MUST_USE_ADMIN_ORACLE_INPUT, so a bare or never-initialized proxy (rate slot still 0, a
+     *      state the initializer and setter both reject but a bare proxy exposes) can never mark a full senior
+     *      wipeout off a pricing artifact, and both conversion directions fail the same typed way instead of
+     *      silently collapsing to zero NAV forward and panicking backward
      */
-    function test_FINDING_18_MakinaQuoterZeroStoredRateSilentlyZeroesTrancheNAVInsteadOfReverting() public {
+    function test_MakinaQuoterZeroStoredRateRevertsInsteadOfSilentlyZeroingTrancheNAV() public {
         // An uninitialized proxy over the live impl: all immutables (machine, tranche assets) resolve, but the
         // stored conversion rate slot was never written and holds the sentinel 0
         MakinaKernel bare = MakinaKernel(address(new UninitializedERC1967Proxy(address(makinaKernelImpl))));
 
-        // The composed rate silently reads 0: machine hop 1e18 x stored 0 / 1e18 = 0, no revert anywhere
-        assertEq(bare.getTrancheUnitToNAVUnitConversionRateWAD(), 0, "the composed rate must silently read zero on the sentinel stored rate");
+        // The composed rate resolves the sentinel through the admin-oracle path, which reverts loud
+        vm.expectRevert(IdenticalAssets_ST_JT_AdminOracle_Quoter.MUST_USE_ADMIN_ORACLE_INPUT.selector);
+        bare.getTrancheUnitToNAVUnitConversionRateWAD();
 
-        // Forward conversion silently zeroes: 1e18 share-wei x 0 / 1e18 = 0 NAV, a full senior mark-to-zero
-        assertEq(toUint256(bare.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 0, "a whole-share quote must silently collapse to zero NAV");
-        assertEq(toUint256(bare.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 0, "the junior side silently collapses identically");
+        // Forward conversion reverts the same way instead of collapsing a whole-share quote to zero NAV
+        vm.expectRevert(IdenticalAssets_ST_JT_AdminOracle_Quoter.MUST_USE_ADMIN_ORACLE_INPUT.selector);
+        bare.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
+        vm.expectRevert(IdenticalAssets_ST_JT_AdminOracle_Quoter.MUST_USE_ADMIN_ORACLE_INPUT.selector);
+        bare.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
 
-        // The inverse direction divides by the zero composed rate: 1e18 NAV x 1e18 / 0 panics (0x12) instead of
-        // reverting with a typed error, so the two directions fail asymmetrically off the same broken state
-        vm.expectRevert(stdError.divisionError);
+        // The inverse direction now reverts with the same typed error instead of a division panic
+        vm.expectRevert(IdenticalAssets_ST_JT_AdminOracle_Quoter.MUST_USE_ADMIN_ORACLE_INPUT.selector);
         bare.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(1e18)));
     }
 }

@@ -69,15 +69,6 @@ fuzz = { runs = 50000, show_logs = false }
 invariant = { runs = 2048, depth = 256, fail_on_revert = false }
 show_progress = false
 
-# Symbolic execution (forge test --symbolic): check_*/prove_* specs under test/symbolic/ are only
-# discovered in symbolic mode and verify math properties over ALL inputs in a bounded domain,
-# not sampled ones. Requires an SMT solver (z3) on PATH.
-[profile.default.symbolic]
-solver = "z3"
-timeout = 120
-max_paths = 4096
-max_solver_queries = 20000
-
 # Fork suites read these so a missing RPC env fails loudly instead of silently skipping
 [rpc_endpoints]
 mainnet = "${MAINNET_RPC_URL}"

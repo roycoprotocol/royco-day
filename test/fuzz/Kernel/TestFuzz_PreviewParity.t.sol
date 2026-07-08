@@ -111,6 +111,65 @@ contract TestFuzz_PreviewParity_Kernel is MarketFuzzTestBase {
         }
     }
 
+    /**
+     * Scenario: a seeded market accrues a strictly positive fuzzed yield (so a liquidity premium exists) and a
+     * fuzzed coin flip decides whether the premium stays STAGED (venue slippage armed, reinvestment defers) or
+     * deploys inline at the sync. The split valuation must then hold for any share slice: convertToAssets prices
+     * the pro-rata BPT-only raw NAV with no idle senior-share leg, previewRedeem prices the pro-rata
+     * idle-inclusive effective NAV, the convert quote never exceeds the redemption quote (strictly below whenever
+     * the pro-rata idle slice carries value), and the two surfaces coincide on every claim leg iff nothing is staged
+     */
+    function testFuzz_LTConvertQuote_BptOnlyAndNeverExceedsRedemptionQuote(
+        uint256 _stSeed,
+        uint256 _jtSeed,
+        uint256 _vaultBps,
+        uint256 _elapsed,
+        uint256 _sharesSeed,
+        uint256 _stageSeed
+    )
+        public
+    {
+        uint256 st = bound(_stSeed, 1e18, 1e26); // uniform over 8 orders of magnitude of senior seed size
+        uint256 jt = bound(_jtSeed, st / 2, 2 * st); // uniform coverage ratios from 2:1 to 1:2
+        uint256 vb = bound(_vaultBps, 1, 10_000); // strictly positive up-only yield (+1 bp to +100%) so a premium accrues
+        uint256 elapsed = bound(_elapsed, 1 hours, 365 days); // premium accrual window from an hour to a year
+        bool staged = bound(_stageSeed, 0, 1) == 1; // fair coin flip: the premium stays staged vs deploys inline
+        _seedFlatMarket(st, jt, st.mulDiv(3, 20) / QUOTE_TO_NAV_SCALE + 1);
+
+        if (staged) setVenueSlippageMode(true);
+        applySTPnL(int256(vb));
+        _warpAndRefreshFeed(elapsed);
+        syncVenuePrices();
+        _sync();
+
+        uint256 idle = kernel.getState().ltOwnedSeniorTrancheShares;
+        if (staged) assertGt(idle, 0, "arrange: the armed slippage gate must have left the premium staged");
+        else assertEq(idle, 0, "arrange: the open gate must have deployed the premium inline");
+
+        // Independent recompute of both NAV bases from the just-committed checkpoint (same block as the sync)
+        uint256 supply = liquidityTranche.totalSupply();
+        uint256 shares = bound(_sharesSeed, 1, supply); // any slice from one share wei to the whole supply
+        uint256 rawNAV = toUint256(accountant.getState().lastLTRawNAV);
+        uint256 idleValue = Math.mulDiv(toUint256(accountant.getState().lastSTEffectiveNAV), idle, seniorTranche.totalSupply(), Math.Rounding.Floor);
+
+        AssetClaims memory conv = liquidityTranche.convertToAssets(shares);
+        AssetClaims memory prev = liquidityTranche.previewRedeem(shares);
+
+        assertEq(conv.stShares, 0, "the convert surface must never report the idle senior-share leg");
+        assertEq(toUint256(conv.nav), Math.mulDiv(rawNAV, shares, supply, Math.Rounding.Floor), "convertToAssets must price the pro-rata BPT-only raw NAV");
+        assertEq(toUint256(prev.nav), Math.mulDiv(rawNAV + idleValue, shares, supply, Math.Rounding.Floor), "previewRedeem must price the pro-rata idle-inclusive effective NAV");
+        assertLe(toUint256(conv.nav), toUint256(prev.nav), "the convert quote must never exceed the redemption quote");
+
+        // Floor superadditivity guarantees the gap is at least the floored idle slice, so strictness holds exactly
+        // when the redeemer's pro-rata idle slice carries value
+        if (Math.mulDiv(idleValue, shares, supply, Math.Rounding.Floor) > 0) {
+            assertGt(toUint256(prev.nav), toUint256(conv.nav), "the redemption quote must be strictly richer whenever the idle slice carries value");
+        }
+        if (idle == 0) {
+            assertEq(keccak256(abi.encode(conv)), keccak256(abi.encode(prev)), "with nothing staged the two surfaces must coincide on every claim leg");
+        }
+    }
+
     /// @notice Asserts all five claim legs of an executed redemption equal the same-block preview byte-for-byte
     function _assertClaimsParity(AssetClaims memory _executed, AssetClaims memory _previewed, string memory _flow) internal pure {
         assertEq(_executed.stAssets, _previewed.stAssets, string.concat(_flow, ": senior-asset leg must match the preview"));

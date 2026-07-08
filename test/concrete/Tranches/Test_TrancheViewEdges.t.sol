@@ -33,30 +33,25 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
     // =============================
 
     /**
-     * @notice On a tranche with zero share supply, convertToAssets panics with a division-by-zero instead of
-     *         reporting zero claims, while convertToShares on the identical state returns cleanly
-     * @dev A share of an empty tranche is worth nothing, so a total conversion view should report zero claims for
-     *      any input (the ERC-4626 convention integrators like lending oracles and yield wrappers rely on).
-     *      Instead, scaling the tranche's claims by shares over a zero total supply divides by zero, so the view
-     *      bricks on exactly the pre-bootstrap and fully-exited states where an integrator probes it. Expected
-     *      behavior: return zero claims without reverting
+     * @notice On a tranche with zero share supply, convertToAssets reports zero claims for any input, while
+     *         convertToShares on the identical state returns the 1:1 bootstrap quote
+     * @dev A share of an empty tranche is worth nothing, so the total conversion view reports zero claims for any
+     *      input (the ERC-4626 convention integrators like lending oracles and yield wrappers rely on): the claim
+     *      scale short-circuits on zero total supply instead of dividing by zero. convertToShares special-cases
+     *      the same empty state as a 1:1 bootstrap mint, so it returns value-for-value without reverting.
      */
-    function test_FINDING_24_ConvertToAssets_EmptyTranchePanicsInsteadOfReturningZeroClaims() public {
+    function test_ConvertToAssets_EmptyTrancheReturnsZeroClaims_ConvertToSharesBootstraps() public {
         // A freshly deployed, never-seeded market: every tranche has zero share supply
         _deployMarket(cellA(), defaultParams());
         assertEq(juniorTranche.totalSupply(), 0, "the fresh junior tranche must start with zero share supply");
         assertEq(liquidityTranche.totalSupply(), 0, "the fresh liquidity tranche must start with zero share supply");
 
-        // Both the zero-share and the whole-share probes panic: the claims scale divides by the zero total supply
-        // before the requested share count can short-circuit anything
-        vm.expectRevert(stdError.divisionError);
-        juniorTranche.convertToAssets(0);
-        vm.expectRevert(stdError.divisionError);
-        juniorTranche.convertToAssets(1e18);
-        vm.expectRevert(stdError.divisionError);
-        liquidityTranche.convertToAssets(0);
-        vm.expectRevert(stdError.divisionError);
-        liquidityTranche.convertToAssets(1e18);
+        // FIXED: an empty tranche's claim scale short-circuits on zero total supply and returns zero claims instead
+        // of dividing by zero, so both the zero-share and the whole-share probes return zero-valued claims.
+        assertEq(toUint256(juniorTranche.convertToAssets(0).nav), 0, "empty JT convertToAssets(0) returns zero NAV");
+        assertEq(toUint256(juniorTranche.convertToAssets(1e18).nav), 0, "empty JT convertToAssets(1e18) returns zero NAV");
+        assertEq(toUint256(liquidityTranche.convertToAssets(0).nav), 0, "empty LT convertToAssets(0) returns zero NAV");
+        assertEq(toUint256(liquidityTranche.convertToAssets(1e18).nav), 0, "empty LT convertToAssets(1e18) returns zero NAV");
 
         // The asymmetry pin: convertToShares on the IDENTICAL empty state does not revert, because the
         // shares-from-value conversion special-cases zero supply as a 1:1 bootstrap mint. Independent derivation:
@@ -75,13 +70,12 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
      * @notice When the LT's pool-depth mark is zero but claimable idle liquidity-premium senior shares are
      *         outstanding, maxRedeem reports zero while the same holder can redeem its FULL balance through the
      *         multi-asset exit and is paid its pro-rata slice of the idle senior shares
-     * @dev The idle premium is a claimable leg of the LT's effective NAV: a redeemer must receive its slice even
-     *      when the pooled depth marks worthless, otherwise the premium would be stranded. The multi-asset
-     *      redemption honors that, but maxRedeem keys the LT's claims on the pool-depth mark alone, so it returns
-     *      0 whenever the BPT marks zero and underreports the true maximum. Expected behavior: maxRedeem reports
-     *      the largest amount a redemption accepts, here the full balance
+     * @dev The idle premium is a claimable leg of the LT's effective NAV: a redeemer receives its slice even when
+     *      the pooled depth marks worthless, so the premium is not stranded. The multi-asset redemption honors
+     *      that, but maxRedeem keys the LT's claims on the pool-depth mark alone, so it returns 0 whenever the BPT
+     *      marks zero and underreports the true maximum the redemption path accepts.
      */
-    function test_FINDING_25_LTMaxRedeem_ReportsZeroOnIdleOnlyNAVWhileFullBalanceRedeems() public {
+    function test_LTMaxRedeem_UnderreportsZeroOnIdleOnlyNAV_WhileFullBalanceRedeemsMultiAsset() public {
         _deployZeroMinLiquidityMarketWithPremium();
         uint256 idleShares = _accrueIdlePremiumSeniorShares();
 
@@ -104,10 +98,19 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
 
         // The in-kind path cannot disprove maxRedeem here: handing the idle senior shares over in kind moves no
         // raw NAV anywhere (share ownership only changes hands and the BPT leg marks zero), so the accountant's
-        // redemption shape check sees a redemption that withdrew nothing and rejects it outright
+        // redemption shape check sees a redemption that withdrew nothing and rejects it with INVALID_POST_OP_STATE.
+        // The revert is captured with a low-level call rather than vm.expectRevert because the in-kind redeem's
+        // pre-op sync retries the still-slipping premium reinvestment, whose internally-caught BptAmountOutBelowMin
+        // revert would otherwise be mistaken by the cheatcode for the expected top-level revert
         vm.prank(LT_PROVIDER);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_REDEEM));
-        liquidityTranche.redeem(balance, LT_PROVIDER, LT_PROVIDER);
+        (bool inKindSucceeded, bytes memory inKindReturn) =
+            address(liquidityTranche).call(abi.encodeWithSelector(liquidityTranche.redeem.selector, balance, LT_PROVIDER, LT_PROVIDER));
+        assertFalse(inKindSucceeded, "the in-kind redemption must revert when only the idle senior-share leg is claimable");
+        assertEq(
+            inKindReturn,
+            abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_REDEEM),
+            "the in-kind redemption must revert with the LT_REDEEM post-op shape violation"
+        );
 
         // Pre-redeem senior ledgers for the multi-asset exit: the idle slice is redeemed against the senior
         // tranche's pool of yield-bearing vault shares

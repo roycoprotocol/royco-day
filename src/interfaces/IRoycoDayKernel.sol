@@ -145,6 +145,9 @@ interface IRoycoDayKernel {
     /// @notice Thrown when the to address is not whitelisted on the tranche
     error ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(address to);
 
+    /// @notice Thrown when the senior tranche self-liquidation bonus is set above 100% (WAD)
+    error INVALID_SELF_LIQUIDATION_BONUS();
+
     /// @notice Thrown when an LT multi-asset deposit/redeem is made with zero of both constituent assets (ST underlying and quote)
     error MUST_DEPOSIT_NON_ZERO_ASSETS();
 
@@ -168,13 +171,13 @@ interface IRoycoDayKernel {
     /// @return accountant The accountant responsible for maintaining this Royco market's accounting state and marking tranche NAVs to market
     function ACCOUNTANT() external view returns (address accountant);
 
-    /// @notice Retrieves the liquidity tranche address.
+    /// @notice Retrieves the liquidity tranche address
     function LIQUIDITY_TRANCHE() external view returns (address liquidityTranche);
 
-    /// @notice Retrieves the liquidity tranche's base asset (the liquidity venue's market-making position token) address.
+    /// @notice Retrieves the liquidity tranche's base asset (the liquidity venue's market-making position token) address
     function LT_ASSET() external view returns (address ltAsset);
 
-    /// @notice Retrieves the quote asset paired against the senior share in the liquidity venue.
+    /// @notice Retrieves the quote asset paired against the senior share in the liquidity venue
     function QUOTE_ASSET() external view returns (address quoteAsset);
 
     /**
@@ -470,19 +473,19 @@ interface IRoycoDayKernel {
     function jtRedeem(uint256 _shares, address _receiver) external returns (AssetClaims memory userAssetClaims);
 
     /**
-     * @notice Processes the deposit of a specified amount of assets into the liquidity tranche.
-     * @dev An in-kind LT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state (including fixed-term).
-     * @param _assets The amount of assets (the liquidity venue's position token) to deposit, denominated in the liquidity tranche's tranche units.
-     * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units.
-     * @return navToMintSharesAt The NAV at which the shares will be minted, exclusive of valueAllocated.
+     * @notice Processes the deposit of a specified amount of assets into the liquidity tranche
+     * @dev An in-kind LT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state (including fixed-term)
+     * @param _assets The amount of assets (the liquidity venue's position token) to deposit, denominated in the liquidity tranche's tranche units
+     * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
+     * @return navToMintSharesAt The NAV at which the shares will be minted, exclusive of valueAllocated
      */
     function ltDeposit(TRANCHE_UNIT _assets) external returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt);
 
     /**
-     * @notice Processes the redemption of a specified number of shares from the liquidity tranche.
-     * @param _shares The number of shares to redeem.
-     * @param _receiver The address that is receiving the assets.
-     * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption.
+     * @notice Processes the redemption of a specified number of shares from the liquidity tranche
+     * @param _shares The number of shares to redeem
+     * @param _receiver The address that is receiving the assets
+     * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
      */
     function ltRedeem(uint256 _shares, address _receiver) external returns (AssetClaims memory userAssetClaims);
 
@@ -490,8 +493,8 @@ interface IRoycoDayKernel {
      * @notice Atomically enters the liquidity tranche with the LT assets' constituent assets: deposits ST underlying (minting senior
      *         shares), adds (senior shares + quote) into the liquidity venue to mint the LT tranche assets, then deposits them into the LT
      * @dev Assumes the ST underlying and quote have been transferred to the kernel before this call (by the LT tranche)
-     * @dev Enabled in a PERPETUAL market state, and in a fixed-term market only for a quote-only deposit (_stAssets == 0) that mints no senior shares. An ST-leg deposit reverts in a fixed-term market
-     * @dev The combined new senior exposure is gated by the market's coverage and liquidity requirements. Reverts if either is unsatisfied
+     * @dev Enabled in a PERPETUAL market state, and in a fixed-term market only for a quote-only deposit (_stAssets == 0) that mints no senior shares — an ST-leg deposit reverts in a fixed-term market
+     * @dev The combined new senior exposure is gated by the market's coverage and liquidity requirements — reverts if either is unsatisfied
      * @param _stAssets The amount of ST underlying (the senior tranche's base asset) to deposit, denominated in ST tranche units
      * @param _quoteAssets The amount of quote asset to add as the second venue leg
      * @param _minLTAssetsOut The minimum LT tranche assets the liquidity add must mint (slippage bound against an unfavorable venue state)
@@ -544,7 +547,7 @@ interface IRoycoDayKernel {
      * @param _ltAssets The exact liquidity tranche assets to burn
      * @param _minSTSharesOut The minimum senior tranche shares that must be withdrawn, bounding the removal's slippage
      * @param _minQuoteAssetsOut The minimum quote assets that must be withdrawn, bounding the removal's slippage
-     * @param _quoteAssetsReceiver The recipient of the withdrawn quote assets. The withdrawn senior shares are returned to the kernel for the combined senior unwind
+     * @param _quoteAssetsReceiver The recipient of the withdrawn quote assets — the withdrawn senior shares are returned to the kernel for the combined senior unwind
      * @return stShares The senior tranche shares withdrawn by the removal
      * @return quoteAssets The quote assets withdrawn by the removal
      */
@@ -586,7 +589,7 @@ interface IRoycoDayKernel {
 
     /**
      * @notice Pre-balance update hook for the tranche
-     * @dev This function should revert if the balance update is invalid.
+     * @dev This function should revert if the balance update is invalid
      * @dev Should be called before every tranche share balance update
      * @param _caller The address that is calling the balance update
      * @param _from The address from which the balance is being updated

@@ -1,6 +1,6 @@
 # Royco Day [![CI](https://github.com/roycoprotocol/royco-day/actions/workflows/CI.yml/badge.svg)](https://github.com/roycoprotocol/royco-day/actions/workflows/CI.yml)
 
-Day enables structured risk tranching for any yield source by splitting it into distinct risk and return profiles across three tranches: a junior, a senior, and a liquidity tranche. The junior tranche serves as first-loss capital in exchange for a risk premium paid by the senior tranche. The liquidity tranche is market-making capital that provides secondary liquidity for senior shares in exchange for a liquidity premium paid by the senior tranche. It holds covered senior capital, so it ranks pari passu with the senior tranche on risk, forgoing liquidity for extra yield.
+Royco Day transforms the risk and liquidity profile of any yield source by splitting it into three distinct tranches: a senior, junior, and liquidity tranche. The senior tranche is protected from incurring losses up to a guaranteed threshold in addition to having a guaranteed amount of secondary liquidity. The junior tranche serves as first-loss capital in exchange for a risk premium paid by the senior tranche. The liquidity tranche is market-making capital that provides secondary liquidity for senior shares in exchange for a liquidity premium paid by the senior tranche. It holds covered senior capital, so it ranks pari passu with the senior tranche on risk, forgoing liquidity for extra yield.
 
 ## Core Concepts
 
@@ -64,9 +64,7 @@ Each market has ERC4626-style vault contracts representing its tranches:
 
 **Liquidity Tranche (LT)**: Covered senior capital that also provides liquidity. It holds a market-making venue position pairing the senior tranche share against a quote stablecoin, giving senior holders a venue to exit into. It earns a liquidity premium from senior yield, sized by a liquidity-driven instance of the market's Yield Distribution Model (YDM). The premium is minted as senior shares and reinvested into the venue, so the LT share is up-only and composable. Beyond depositing a pre-minted venue position, the LT supports an atomic multi-asset flow that mints the senior share, joins the venue, and mints the LT share in one transaction.
 
-Tranches are ERC20Permit-enabled, pausable, and burnable, and support standard preview and deposit/redeem operations.
-
-Royco tranches are natively composable across DeFi. Senior tranches transform high-risk vault tokens into leverage-eligible collateral for lending markets, unlocking net-new capital that wasn't accessible before.
+Royco tranches are natively composable across DeFi. Senior tranches transform assets into leverage-eligible collateral for lending markets, unlocking net-new capital that wasn't accessible to issuers before.
 
 Beyond lending, tranches can be paired on AMMs/CLOBs, split into fixed or variable rate exposure, and recursively tranched into layered risk structures.
 
@@ -82,12 +80,12 @@ The **Accountant** maintains the financial state of each market. Before and afte
 
 1. Reconciling any unrealized PnL since the last accounting sync via the deltas between the current and last checkpointed raw NAVs of each tranche
 2. Applying coverage obligations on losses
-3. Tracking impermanent losses (temporary losses that may recover)
-4. Distributing yield from senior to junior (risk premium) as instructed by the market's YDM
+3. Tracking junior's impermanent losses (temporary losses that may recover) from providing coverage
+4. Distributing yield from senior to the junior tranche (risk premium) as instructed by the market's YDM
 5. Distributing yield from senior to the liquidity tranche (liquidity premium) as instructed by the liquidity-driven YDM instance
 6. Accruing protocol fees
 
-The junior risk premium is a reallocation of senior appreciation into junior effective NAV. The liquidity premium is minted as senior tranche shares credited to the liquidity tranche and then reinvested, and protocol fees are minted as shares, both against value already in the market. Minting the liquidity premium as senior shares reassigns appreciation without adding senior exposure, so it stays coverage-neutral and preserves the two-term conservation identity at wei precision, where senior raw NAV plus junior raw NAV equals senior effective NAV plus junior effective NAV.
+The junior risk premium is a reallocation of senior appreciation into junior effective NAV. The liquidity premium is minted as senior tranche shares credited to the liquidity tranche and then reinvested, and protocol fees are minted as shares, both against value already in the market. Minting the liquidity premium as senior shares reassigns appreciation without adding senior exposure, so it stays coverage-neutral and preserves the NAV conservation property, where the sum of the raw NAVs equals the sum of the effective NAVs.
 
 ### Yield Distribution Model (YDM)
 
@@ -127,9 +125,6 @@ When losses occur, they are handled differently based on which tranche experienc
 
 **JT Coverage IL Reset**: The JT coverage impermanent loss is reset (JT forfeits its claim) when the market is forced back to PERPETUAL. This happens when the fixed-term duration elapses, on a liquidation breach, or on an uncollateralized market (no junior NAV remaining against a non-zero senior NAV).
 
-## Supported Yield Sources
-
-Royco Day enables risk and liquidity transformation for any priceable asset.
 
 ## Extended Capabilities
 

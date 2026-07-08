@@ -151,15 +151,14 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
     }
 
     /**
-     * @notice FINDING 10 — the pool's LP set is PERMISSIONLESS and the liquidity gate is blind to venue
-     *         depth. The intended posture was a kernel-only LP set, so external mint and burn could never move
-     *         the gate's inputs without the kernel knowing. Actual behavior: anyone can LP
-     *         through the canonical Router, and an external LP holding half the pool can exit in full —
-     *         unrestricted by any Royco gate — draining half the REAL tradable depth while the committed
-     *         liquidity utilization (which values only kernel-owned BPT at NAV-per-BPT, invariant under a
-     *         proportional burn) does not move. The gate guarantees the kernel's INVENTORY VALUE, not venue depth.
+     * @notice the liquidity gate values the kernel's INVENTORY, not venue depth. The pool's LP set is
+     *         permissionless: anyone can LP through the canonical Router, and an external LP holding half the
+     *         pool can exit in full — unrestricted by any Royco gate — draining half the real tradable depth
+     *         while the committed liquidity utilization does not move. Utilization values only kernel-owned BPT
+     *         at NAV-per-BPT, which is invariant under a proportional burn, so the external exit passes
+     *         unnoticed by the gate.
      */
-    function test_FINDING_10_poolPermissionless_externalExitDrainsDepthGateBlind() public {
+    function test_liquidityGate_valuesKernelInventoryNotVenueDepth_externalExitDrainsDepthUnnoticed() public {
         _seedForSwaps();
         _sync();
         address actor = _externalProportionalPosition("EXTERNAL_MAJORITY_LP", _bptSupply()); // owns 50% post-mint
@@ -173,10 +172,10 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         _externalRemoveProportional(actor, IERC20(POOL).balanceOf(actor));
 
         uint256 depthAfter = _markToMarketAtFeeds();
-        assertLe(depthAfter, Math.mulDiv(depthBefore, 55, 100), "FINDING: half the real tradable depth left the venue");
+        assertLe(depthAfter, Math.mulDiv(depthBefore, 55, 100), "half the real tradable depth left the venue");
 
         _sync();
-        assertLe(_committedLiquidityUtilization(), utilBefore + 1, "FINDING: the liquidity utilization did not move (the gate is depth-blind)");
+        assertLe(_committedLiquidityUtilization(), utilBefore + 1, "the liquidity utilization did not move (the gate values kernel inventory, not venue depth)");
         assertApproxEqAbs(toUint256(ACCOUNTANT.getState().lastLTRawNAV), ltRawBefore, _tol2(), "the committed LT mark is invariant under the external burn");
     }
 
@@ -778,12 +777,12 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
     }
 
     /**
-     * @notice FINDING 10, companion in the inverse direction — EXTERNAL depth cannot release a binding
-     *         gate: with the utilization breached, an external LP doubling the pool's REAL tradable depth
-     *         changes nothing — the committed LT mark counts kernel-owned BPT only, so the LT redemption stays
-     *         blocked. The venue is deep; the market says it is not.
+     * @notice the inverse direction — external depth cannot release a bound gate: with the utilization
+     *         breached, an external LP doubling the pool's real tradable depth changes nothing. The committed
+     *         LT mark counts kernel-owned BPT only, so the LT redemption stays blocked. The venue is deep; the
+     *         market says it is not.
      */
-    function test_FINDING_10b_externalDepthCannotReleaseGate() public {
+    function test_liquidityGate_externalDepthCannotReleaseBoundGate() public {
         _seedForSwaps();
         _arrangeYieldDrivenLiquidityBreach();
         assertGt(_committedLiquidityUtilization(), WAD, "arrange: the gate must be binding");
@@ -791,7 +790,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         _externalProportionalPosition("EXTERNAL_RESCUER_LP", _bptSupply()); // doubles the real venue depth
         _sync();
 
-        assertGt(_committedLiquidityUtilization(), WAD, "FINDING: doubling the REAL depth does not move the committed utilization");
+        assertGt(_committedLiquidityUtilization(), WAD, "doubling the real depth does not move the committed utilization");
         uint256 shares = LT.balanceOf(LT_ALICE_ADDRESS) / 10;
         vm.prank(LT_ALICE_ADDRESS);
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);

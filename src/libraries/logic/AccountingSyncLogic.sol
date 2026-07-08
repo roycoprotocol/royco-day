@@ -237,7 +237,8 @@ library AccountingSyncLogic {
      * @notice Marks and commits the liquidity tranche's fresh raw NAV and refreshes the in-memory state packet
      * @dev Called after a sync has committed the senior/junior NAVs and this kernel has minted any fee shares (and after any liquidity
      *      tranche venue mutation has settled), so the freshly marked liquidity tranche raw NAV reflects the final post-mint depth and
-     *      senior share rate. The committed liquidity tranche raw NAV stays out of the P&L waterfall and the senior share rate provider's dependency loop
+     *      senior share rate
+     *      The committed liquidity tranche raw NAV stays out of the P&L waterfall and the senior share rate provider's dependency loop
      * @dev Refreshes the state packet in place so every downstream consumer reads the most up-to-date values
      * @param _state The synced accounting state to refresh in place
      */

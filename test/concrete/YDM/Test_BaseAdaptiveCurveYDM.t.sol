@@ -20,7 +20,7 @@ import { MockAdaptiveCurveYDM } from "../../mocks/MockAdaptiveCurveYDM.sol";
  */
 contract Test_BaseAdaptiveCurveYDM is Test {
     // Base-defined limits / bounds, mirrored from source (never read back from the contract to build an expectation).
-    uint256 constant SPEED_LIMIT = 100e18 / uint256(365 days); // MAX_ADAPTATION_SPEED_LIMIT_WAD
+    uint256 constant SPEED_LIMIT = 100e18 / uint256(365 days); // MAX_ADAPTATION_SPEED_WAD
     uint256 constant SPEED_V1 = 50e18 / uint256(365 days);
     uint256 constant SPEED_V2 = 100e18 / uint256(365 days);
     uint256 constant MIN_YT = 0.0001e18; // 1e14
@@ -48,8 +48,8 @@ contract Test_BaseAdaptiveCurveYDM is Test {
         assertEq(m.TARGET_UTILIZATION_WAD(), 3e17, "target");
         assertEq(m.MIN_YIELD_SHARE_AT_TARGET_WAD(), 2e14, "min");
         assertEq(m.MAX_YIELD_SHARE_AT_TARGET_WAD(), 8e17, "max");
-        assertEq(m.MAX_ADAPTATION_SPEED_WAD(), SPEED_V1, "speed");
-        assertEq(m.MAX_ADAPTATION_SPEED_LIMIT_WAD(), SPEED_LIMIT, "limit constant");
+        assertEq(m.ADAPTATION_SPEED_AT_BOUNDARY_WAD(), SPEED_V1, "speed");
+        assertEq(m.MAX_ADAPTATION_SPEED_WAD(), SPEED_LIMIT, "limit constant");
     }
 
     // --- min bound ---
@@ -120,7 +120,7 @@ contract Test_BaseAdaptiveCurveYDM is Test {
     /// The adaptation speed may sit exactly at the deploy-time limit
     function test_Constructor_SpeedAtLimit() public {
         MockAdaptiveCurveYDM m = _mock(MIN_YT, MAX_YT, SPEED_LIMIT);
-        assertEq(m.MAX_ADAPTATION_SPEED_WAD(), SPEED_LIMIT, "speed == limit accepted");
+        assertEq(m.ADAPTATION_SPEED_AT_BOUNDARY_WAD(), SPEED_LIMIT, "speed == limit accepted");
     }
 
     /// One wei above the adaptation speed limit is rejected
@@ -138,7 +138,7 @@ contract Test_BaseAdaptiveCurveYDM is Test {
     /// One wei is the smallest accepted adaptation speed
     function test_Constructor_SpeedOneWei() public {
         MockAdaptiveCurveYDM m = _mock(MIN_YT, MAX_YT, 1);
-        assertEq(m.MAX_ADAPTATION_SPEED_WAD(), 1);
+        assertEq(m.ADAPTATION_SPEED_AT_BOUNDARY_WAD(), 1);
     }
 
     // --- target bound (BaseYDM gate, evaluated in the parent constructor) ---
@@ -183,8 +183,8 @@ contract Test_BaseAdaptiveCurveYDM is Test {
         assertEq(y.TARGET_UTILIZATION_WAD(), 7e17, "V1 target");
         assertEq(y.MIN_YIELD_SHARE_AT_TARGET_WAD(), MIN_YT, "V1 min");
         assertEq(y.MAX_YIELD_SHARE_AT_TARGET_WAD(), MAX_YT, "V1 max");
-        assertEq(y.MAX_ADAPTATION_SPEED_WAD(), SPEED_V1, "V1 speed == 50e18/365d");
-        assertEq(y.MAX_ADAPTATION_SPEED_LIMIT_WAD(), SPEED_LIMIT, "limit constant");
+        assertEq(y.ADAPTATION_SPEED_AT_BOUNDARY_WAD(), SPEED_V1, "V1 speed == 50e18/365d");
+        assertEq(y.MAX_ADAPTATION_SPEED_WAD(), SPEED_LIMIT, "limit constant");
     }
 
     /// V2 forwards its hardcoded (min, max, speed) triple to the base and the getters return it verbatim
@@ -193,20 +193,20 @@ contract Test_BaseAdaptiveCurveYDM is Test {
         assertEq(y.TARGET_UTILIZATION_WAD(), 2e17, "V2 target");
         assertEq(y.MIN_YIELD_SHARE_AT_TARGET_WAD(), MIN_YT, "V2 min");
         assertEq(y.MAX_YIELD_SHARE_AT_TARGET_WAD(), MAX_YT, "V2 max");
-        assertEq(y.MAX_ADAPTATION_SPEED_WAD(), SPEED_V2, "V2 speed == 100e18/365d (== limit)");
-        assertEq(y.MAX_ADAPTATION_SPEED_LIMIT_WAD(), SPEED_LIMIT, "limit constant");
+        assertEq(y.ADAPTATION_SPEED_AT_BOUNDARY_WAD(), SPEED_V2, "V2 speed == 100e18/365d (== limit)");
+        assertEq(y.MAX_ADAPTATION_SPEED_WAD(), SPEED_LIMIT, "limit constant");
     }
 
     /// V2 adapts at exactly the deploy-time speed limit
     function test_ImmutableGetters_V2SpeedSitsAtLimit() public {
         AdaptiveCurveYDM_V2 y = new AdaptiveCurveYDM_V2(5e17);
-        assertEq(y.MAX_ADAPTATION_SPEED_WAD(), y.MAX_ADAPTATION_SPEED_LIMIT_WAD(), "V2 sits exactly at the limit");
+        assertEq(y.ADAPTATION_SPEED_AT_BOUNDARY_WAD(), y.MAX_ADAPTATION_SPEED_WAD(), "V2 sits exactly at the limit");
     }
 
     /// V1 adapts at exactly half the deploy-time speed limit
     function test_ImmutableGetters_V1SpeedIsHalfLimit() public {
         AdaptiveCurveYDM_V1 y = new AdaptiveCurveYDM_V1(5e17);
-        assertEq(y.MAX_ADAPTATION_SPEED_WAD() * 2, y.MAX_ADAPTATION_SPEED_LIMIT_WAD(), "V1 is half the limit");
+        assertEq(y.ADAPTATION_SPEED_AT_BOUNDARY_WAD() * 2, y.MAX_ADAPTATION_SPEED_WAD(), "V1 is half the limit");
     }
 
     // =====================================================================
@@ -455,7 +455,7 @@ contract Test_BaseAdaptiveCurveYDM is Test {
             _mock(MIN_YT, MAX_YT, speed);
         } else {
             MockAdaptiveCurveYDM m = _mock(MIN_YT, MAX_YT, speed);
-            assertEq(m.MAX_ADAPTATION_SPEED_WAD(), speed, "in-range speed stored");
+            assertEq(m.ADAPTATION_SPEED_AT_BOUNDARY_WAD(), speed, "in-range speed stored");
         }
     }
 

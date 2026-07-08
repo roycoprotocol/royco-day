@@ -3,15 +3,15 @@ pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { MINT_DILUTION_RESIDUAL_WAD, WAD } from "../../../src/libraries/Constants.sol";
+import { MAX_MINT_DILUTION_WAD, WAD } from "../../../src/libraries/Constants.sol";
 import { toNAVUnits } from "../../../src/libraries/Units.sol";
 import { ValuationLogic } from "../../../src/libraries/logic/ValuationLogic.sol";
 
 /**
  * @title TestFuzz_MintDilutionClamp_Logic
  * @notice Fuzz properties for the mint-dilution clamp inside the share-pricing primitive: any single mint may
- *         own at most (1 − ε/WAD) of the post-mint supply, ε = MINT_DILUTION_RESIDUAL_WAD (1e6, a 1e-12
- *         residual). Three properties pin the clamp end to end: the post-mint ownership bound holds
+ *         own at most MAX_MINT_DILUTION_WAD / WAD of the post-mint supply (WAD − 1e6, leaving incumbents a
+ *         1e-12 residual EPS). Three properties pin the clamp end to end: the post-mint ownership bound holds
  *         unconditionally, a binding mint returns exactly the cap, and a clamped depositor's value loss is
  *         bounded by the residual times the deposit plus derived floor dust. The non-binding identity (the
  *         clamp leaves fair pricing untouched below the bind) is pinned branch-exactly over the full domain
@@ -23,14 +23,14 @@ contract TestFuzz_MintDilutionClamp_Logic is Test {
     /// @notice Suite-wide NAV and share-supply ceiling
     uint256 internal constant MAX_NAV = 1e30;
 
-    /// @dev The protocol residual, locally aliased for readability in the derivations below
-    uint256 internal constant EPS = MINT_DILUTION_RESIDUAL_WAD;
+    /// @dev The incumbent residual (the complement of the protocol's max mint dilution), locally aliased for readability in the derivations below
+    uint256 internal constant EPS = WAD - MAX_MINT_DILUTION_WAD;
 
     /**
      * The clamp's defining guarantee, asserted UNCONDITIONALLY (bind or not, every branch except the exempt
-     * bootstrap): the minted shares own at most (1 − ε/WAD) of the post-mint supply. In product form
-     * (exactly equivalent to m <= cap and overflow-safe on this domain since m <= S * (WAD − ε) / ε
-     * <= 1e30 * (1e12 − 1) < 1e43): m * ε <= S * (WAD − ε)
+     * bootstrap): the minted shares own at most (1 − EPS/WAD) of the post-mint supply. In product form
+     * (exactly equivalent to m <= cap and overflow-safe on this domain since m <= S * (WAD − EPS) / EPS
+     * <= 1e30 * (1e12 − 1) < 1e43): m * EPS <= S * (WAD − EPS)
      */
     function testFuzz_Clamp_PostMintOwnershipBound(uint256 _value, uint256 _totalValue, uint256 _supply) public pure {
         _value = bound(_value, 0, MAX_NAV); // uniform over the full NAV range incl. the 0 edge
@@ -42,15 +42,15 @@ contract TestFuzz_MintDilutionClamp_Logic is Test {
     }
 
     /**
-     * Above the bind the clamp returns EXACTLY cap = floor(supply * (WAD − ε) / ε): the mint plateaus at
+     * Above the bind the clamp returns EXACTLY cap = floor(supply * (WAD − EPS) / EPS): the mint plateaus at
      * the residual guarantee. The bind predicate is recomputed here in its integer-equivalent product form
-     * (value * ε > d * (WAD − ε), both products <= 1e30 * 1e18 so overflow-free), independent of the
+     * (value * EPS > d * (WAD − EPS), both products <= 1e30 * 1e18 so overflow-free), independent of the
      * production ordering
      */
     function testFuzz_Clamp_BindReturnsExactCap(uint256 _value, uint256 _totalValue, uint256 _supply) public pure {
         // Steer into the bind by construction: the bind requires the whole pre-existing tranche to be worth
         // under ~1e-12 of the deposit, so a binding value only exists on the domain when
-        // threshold = floor(d * (WAD − ε) / ε) < MAX_NAV, i.e. d <= floor((MAX_NAV − 1) * ε / (WAD − ε)) ~ 1e18.
+        // threshold = floor(d * (WAD − EPS) / EPS) < MAX_NAV, i.e. d <= floor((MAX_NAV − 1) * EPS / (WAD − EPS)) ~ 1e18.
         // Bounding d there (instead of vm.assume) keeps every run on the binding region with zero rejections
         uint256 maxBindableTotal = Math.mulDiv(MAX_NAV - 1, EPS, WAD - EPS);
         _totalValue = bound(_totalValue, 0, maxBindableTotal); // includes 0 => the 1-wei dilution branch
@@ -66,14 +66,14 @@ contract TestFuzz_MintDilutionClamp_Logic is Test {
     /**
      * The economic safety argument for clamp-not-revert semantics: a clamped depositor's loss is bounded by
      * the residual share of its own deposit plus derived floor dust, because the clamp can only bind when the
-     * whole pre-existing tranche is worth less than ~ε * value / (WAD − ε).
-     * Derivation (bind case, cap* = S(WAD−ε)/ε exact):
+     * whole pre-existing tranche is worth less than ~EPS * value / (WAD − EPS).
+     * Derivation (bind case, cap* = S(WAD−EPS)/EPS exact):
      *   received = floor((T + v) * cap / (S + cap)) with cap = floor(cap*) >= cap* − 1, so
-     *   received >= (T + v)(1 − ε/WAD) − (T + v)/(S + cap) − 1, hence
-     *   v − received <= v*ε/WAD − T(1 − ε/WAD) + (T + v)/(S + cap) + 1
-     *               <= ceil(v*ε/WAD) + ceil((T + v)/(S + cap)) + 1   =: ε-share + LOSS_SLACK_DERIVED_BOUND.
-     * The no-gain side is exact: bind implies T(WAD − ε) < v*ε, so (T + v) * cap/(S + cap)
-     * <= (T + v)(1 − ε/WAD) <= v, and the floors only lower it
+     *   received >= (T + v)(1 − EPS/WAD) − (T + v)/(S + cap) − 1, hence
+     *   v − received <= v*EPS/WAD − T(1 − EPS/WAD) + (T + v)/(S + cap) + 1
+     *               <= ceil(v*EPS/WAD) + ceil((T + v)/(S + cap)) + 1   =: EPS-share + LOSS_SLACK_DERIVED_BOUND.
+     * The no-gain side is exact: bind implies T(WAD − EPS) < v*EPS, so (T + v) * cap/(S + cap)
+     * <= (T + v)(1 − EPS/WAD) <= v, and the floors only lower it
      */
     function testFuzz_Clamp_DepositorLossBounded(uint256 _value, uint256 _totalValue, uint256 _supply) public pure {
         // Steer into the bind by construction (the fair-priced region's loss bound is the round-trip property

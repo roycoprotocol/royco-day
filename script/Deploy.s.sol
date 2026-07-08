@@ -9,6 +9,7 @@ import { RoycoBlacklist } from "../src/auth/RoycoBlacklist.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
+    ADMIN_BLACKLIST_ROLE,
     ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
@@ -36,7 +37,13 @@ import {
     COMPONENT_ID_JUNIOR_TRANCHE_IMPL,
     COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL,
     COMPONENT_ID_SENIOR_TRANCHE_IMPL,
-    COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2
+    COMPONENT_ID_YDM_ADAPTIVE_CURVE_V1,
+    COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2,
+    COMPONENT_ID_YDM_STATIC_CURVE,
+    TAG_ACCOUNTANT_IMPL,
+    TAG_JT_IMPL,
+    TAG_KERNEL_IMPL,
+    TAG_ST_IMPL
 } from "../src/factory/templates/base/Components.sol";
 import { IRoycoDayAccountant } from "../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../src/interfaces/IRoycoDayKernel.sol";
@@ -239,11 +246,19 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         // 2. Deploy (or reuse) the chain's shared blacklist (governed by the AccessManager, not the factory).
         address roycoBlacklist = _deployBlacklist(address(accessManager));
 
+        {
+            bytes4[] memory blacklistSelectors = new bytes4[](3);
+            blacklistSelectors[0] = RoycoBlacklist.blacklistAccounts.selector;
+            blacklistSelectors[1] = RoycoBlacklist.unblacklistAccounts.selector;
+            blacklistSelectors[2] = RoycoBlacklist.setSanctionsList.selector;
+            accessManager.setTargetFunctionRole(roycoBlacklist, blacklistSelectors, ADMIN_BLACKLIST_ROLE);
+        }
+
         // 3. Register (or reuse) the Day template for this kernel type.
         address template = _getOrRegisterTemplate(factory, _config.kernelType);
 
         // 4. Deploy the market via the template.
-        bytes32 marketId = keccak256(abi.encodePacked(_config.seniorTrancheName, _config.juniorTrancheName, block.timestamp, block.chainid));
+        bytes32 marketId = keccak256(abi.encode(_config.seniorTrancheName, _config.juniorTrancheName, block.timestamp, block.chainid));
         BalancerV3DeploymentTemplate.DayParams memory params = _buildDayParams(_config, marketId, _protocolFeeRecipient, roycoBlacklist);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(template, abi.encode(params));
 
@@ -267,7 +282,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
     /// @notice Builds the role assignments applied to the AccessManager (surface-compatible with the legacy helper).
     function generateRolesAssignments(RoleAssignmentAddresses memory _addresses) public pure returns (RoleAssignment[] memory roleAssignments) {
-        roleAssignments = new RoleAssignment[](17);
+        roleAssignments = new RoleAssignment[](18);
         roleAssignments[0] = _assignment(ADMIN_PAUSER_ROLE, _addresses.pauserAddress);
         roleAssignments[1] = _assignment(ADMIN_UPGRADER_ROLE, _addresses.upgraderAddress);
         roleAssignments[2] = _assignment(SYNC_ROLE, _addresses.syncRoleAddress);
@@ -285,6 +300,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         roleAssignments[14] = _assignment(LT_LP_ROLE, _addresses.protocolFeeRecipientAddress);
         roleAssignments[15] = _assignment(ADMIN_BALANCER_POOL_MANAGER_ROLE, _addresses.balancerPoolManagerAddress);
         roleAssignments[16] = _assignment(ADMIN_MARKET_OPS_ROLE, _addresses.marketOpsAddress);
+        // The dedicated blacklist-management role (gates blacklistAccounts/unblacklistAccounts/setSanctionsList on
+        // the shared RoycoBlacklist) is granted to the market-ops admin.
+        roleAssignments[17] = _assignment(ADMIN_BLACKLIST_ROLE, _addresses.marketOpsAddress);
     }
 
     function _assignment(uint64 _role, address _assignee) private pure returns (RoleAssignment memory) {
@@ -311,6 +329,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (role == LT_LP_ROLE) return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_BALANCER_POOL_MANAGER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_MARKET_OPS_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == ADMIN_BLACKLIST_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         revert UNKNOWN_ROLE(role);
     }
 
@@ -337,7 +356,13 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         bytes memory factoryProxyCreationCode = getERC1967ProxyCreationCode(factoryImpl, abi.encodeCall(RoycoFactory.initialize, (amAddr)));
         address predictedFactory = generateDeterminsticAddress(FACTORY_PROXY_SALT, factoryProxyCreationCode);
 
-        if (predictedFactory.code.length == 0) accessManager.grantRole(ADMIN_ROLE, predictedFactory, 0);
+        if (predictedFactory.code.length == 0) {
+            accessManager.grantRole(ADMIN_ROLE, predictedFactory, 0);
+            // The factory must be able to grant the tranche LP roles (admin'd by LP_ROLE_ADMIN_ROLE) so a market's
+            // template can grant them to the kernel + fee recipient during deployment. Granted here,
+            // before any `setRoleAdmin` re-points the LP roles' admin, while the deployer (ADMIN_ROLE) can still grant it.
+            accessManager.grantRole(LP_ROLE_ADMIN_ROLE, predictedFactory, 0);
+        }
 
         (address factoryProxy,) = deployWithSanityChecks(FACTORY_PROXY_SALT, factoryProxyCreationCode, false);
         require(factoryProxy == predictedFactory, "factory address mismatch");
@@ -401,8 +426,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         pure
         returns (bytes32[] memory ids, bytes[] memory codes)
     {
-        ids = new bytes32[](6);
-        codes = new bytes[](6);
+        ids = new bytes32[](8);
+        codes = new bytes[](8);
         ids[0] = COMPONENT_ID_SENIOR_TRANCHE_IMPL;
         codes[0] = type(RoycoSeniorTranche).creationCode;
         ids[1] = COMPONENT_ID_JUNIOR_TRANCHE_IMPL;
@@ -411,10 +436,14 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         codes[2] = type(RoycoLiquidityTranche).creationCode;
         ids[3] = COMPONENT_ID_ACCOUNTANT_IMPL;
         codes[3] = type(RoycoDayAccountant).creationCode;
-        ids[4] = COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2;
-        codes[4] = type(AdaptiveCurveYDM_V2).creationCode;
-        ids[5] = _kernelComponentId;
-        codes[5] = _kernelCreationCode;
+        ids[4] = COMPONENT_ID_YDM_STATIC_CURVE;
+        codes[4] = type(StaticCurveYDM).creationCode;
+        ids[5] = COMPONENT_ID_YDM_ADAPTIVE_CURVE_V1;
+        codes[5] = type(AdaptiveCurveYDM_V1).creationCode;
+        ids[6] = COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2;
+        codes[6] = type(AdaptiveCurveYDM_V2).creationCode;
+        ids[7] = _kernelComponentId;
+        codes[7] = _kernelCreationCode;
     }
 
     /// @notice Public helper: the component set for the Day ERC4626-Chainlink-Balancer kernel template (test/tooling use).
@@ -517,6 +546,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         params.gyroECLPPoolParams = _config.gyroECLPPoolParams;
         params.jtYDMTargetUtilizationWAD = _config.jtYdmTargetUtilizationWAD;
         params.ltYDMTargetUtilizationWAD = _config.ltYdmTargetUtilizationWAD;
+        // Select the YDM bytecode the template deploys from the configured model, so the deployed contract is the configured type (not a stand-in that shares a selector)
+        params.ydmComponentId = _ydmComponentId(_config.ydmType);
         params.kernelSpecificParams = _config.kernelSpecificParams; // template KernelParams are field-identical to the config blobs
         params.protocolFeeRecipient = _protocolFeeRecipient;
         params.stSelfLiquidationBonusWAD = _config.stSelfLiquidationBonusWAD;
@@ -545,6 +576,15 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         } else {
             revert UnsupportedYDMType(_ydmType);
         }
+    }
+
+    /// @notice Maps a YDM model to the component id whose registered bytecode the template deploys for it
+    /// @dev Kept in lockstep with `_buildYDMInitializationData` so the deployed contract type and its initialization data always agree
+    function _ydmComponentId(YDMType _ydmType) internal pure returns (bytes32 ydmComponentId) {
+        if (_ydmType == YDMType.StaticCurve) return COMPONENT_ID_YDM_STATIC_CURVE;
+        if (_ydmType == YDMType.AdaptiveCurve_V1) return COMPONENT_ID_YDM_ADAPTIVE_CURVE_V1;
+        if (_ydmType == YDMType.AdaptiveCurve_V2) return COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2;
+        revert UnsupportedYDMType(_ydmType);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

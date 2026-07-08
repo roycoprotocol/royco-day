@@ -9,9 +9,8 @@ import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
 
 /**
  * @title Test_PremiumDivergences_Accountant
- * @notice Loud, first-class pins of the accountant-layer divergences between production and the CLAUDE.md
- *         product spec that only reproduce on the mock-kernel accountant base (findings 13-15 of the ledger
- *         docs/testing/agent-notes/13-spec-divergence-findings.md)
+ * @notice Loud, first-class pins of the accountant-layer divergences between production behavior and the
+ *         intended product spec that only reproduce on the mock-kernel accountant base
  * @dev Each test drives the accountant through legal MockKernel post-op and pre-op calls, asserts CURRENT
  *      production behavior, and documents the spec-expected behavior in an adjacent comment. If a future src
  *      change makes production match the spec, the corresponding test MUST fail — that is the alarm these pins
@@ -21,11 +20,11 @@ contract Test_PremiumDivergences_Accountant is AccountantTestBase {
     uint256 internal constant WAD = 1e18;
 
     // =============================
-    // FINDING 13 — a dust-sized senior gain pays premiums but skips every protocol fee
+    // DIVERGENCE 13 — a dust-sized senior gain pays premiums but skips every protocol fee
     // =============================
 
     /**
-     * @notice FINDING 13: when a senior gain is at or below the effective dust tolerance, production still pays the
+     * @notice DIVERGENCE 13: when a senior gain is at or below the effective dust tolerance, production still pays the
      *         JT risk premium and LT liquidity premium, but suppresses ALL protocol fees, because the fee gate keys
      *         on `stGain > effectiveNAVDustTolerance` (RoycoDayAccountant.sol:594) rather than on the premium being
      *         nonzero. So a premium is distributed with no protocol fee taken on it
@@ -38,7 +37,7 @@ contract Test_PremiumDivergences_Accountant is AccountantTestBase {
      *      jtRiskPremium = 5e11 x 0.1e18 / 1e18 = 5e10, their sum 1e11 <= the 5e11 gain. Every fee is gated on
      *      premiumsPaid, so all three protocol fees are zero
      */
-    function test_FINDING_13_dustGain_paysPremiumButSkipsProtocolFee() public {
+    function test_DIVERGENCE_13_dustGain_paysPremiumButSkipsProtocolFee() public {
         // Deploy with a 1e12-wei effective dust tolerance so a sub-dust gain is easy to construct
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.stNAVDustTolerance = toNAVUnits(uint256(1e12));
@@ -65,22 +64,22 @@ contract Test_PremiumDivergences_Accountant is AccountantTestBase {
     }
 
     // =============================
-    // FINDING 14 — zero LT depth against a positive minimum liquidity reads liquidityUtilization as uint256 max
+    // DIVERGENCE 14 — zero LT depth against a positive minimum liquidity reads liquidityUtilization as uint256 max
     // =============================
 
     /**
-     * @notice FINDING 14 (SPLIT — needs human judgment): with a positive minimum liquidity and zero LT raw NAV but
+     * @notice DIVERGENCE 14 (SPLIT — needs human judgment): with a positive minimum liquidity and zero LT raw NAV but
      *         positive senior effective NAV, production's liquidity utilization is `type(uint256).max`
      *         (UtilizationLogic.sol:72), so every liquidity-gated operation reads the market as infinitely
      *         under-provisioned. One reviewer reads this as a code bug (a divide-by-zero sentinel that bricks the
      *         first senior deposit), the other as the documented guardrail
-     * @dev This matches the CLAUDE.md open decision "ST supply seed: ensure ltRawNAV is never zero against a
-     *      positive minLiquidity, which would make liquidityUtilization infinite" — so it is pinned as CURRENT
-     *      behavior, flagged for a human to decide whether to seed-guard in code or keep as a deployment constraint
+     * @dev This matches the intended guardrail that the LT raw NAV is never zero against a positive minimum
+     *      liquidity, which would make liquidity utilization infinite — so it is pinned as CURRENT behavior,
+     *      flagged for a human to decide whether to seed-guard in code or keep it a deployment constraint
      * @dev Derivation: a committed checkpoint with stEffectiveNAV = 1000e18, minLiquidity 0.05e18, ltRawNAV = 0.
      *      _computeLiquidityUtilization takes the ltRawNAV == 0 branch and returns type(uint256).max
      */
-    function test_FINDING_14_zeroLTDepth_readsLiquidityUtilizationAsMax() public {
+    function test_DIVERGENCE_14_zeroLTDepth_readsLiquidityUtilizationAsMax() public {
         _deploy(true, _defaultParams());
 
         // Seed a checkpoint with senior/junior depth but ZERO liquidity-tranche depth
@@ -90,17 +89,17 @@ contract Test_PremiumDivergences_Accountant is AccountantTestBase {
         SyncedAccountingState memory s =
             kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(uint256(1000e18)), toNAVUnits(uint256(201e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
 
-        // ACTUAL: zero LT depth against a positive minimum liquidity reads as infinite utilization
-        // matches the CLAUDE.md ltRawNAV-never-zero guardrail; the split is whether to enforce this in code
+        // ACTUAL: zero LT depth against a positive minimum liquidity reads as infinite utilization,
+        // matching the LT-raw-NAV-never-zero guardrail. The open split is whether to enforce this in code
         assertEq(s.liquidityUtilizationWAD, type(uint256).max, "zero LT depth with positive minLiquidity must read liquidityUtilization as uint256 max");
     }
 
     // =============================
-    // FINDING 15 — the fixed-term end timestamp truncates to uint32 and can wrap into the past
+    // DIVERGENCE 15 — the fixed-term end timestamp truncates to uint32 and can wrap into the past
     // =============================
 
     /**
-     * @notice FINDING 15: entering FIXED_TERM near the uint32 timestamp ceiling truncates the fixed-term end to
+     * @notice DIVERGENCE 15: entering FIXED_TERM near the uint32 timestamp ceiling truncates the fixed-term end to
      *         uint32 (RoycoDayAccountant.sol:705, `uint32(block.timestamp + fixedTermDurationSeconds)`), wrapping
      *         it to a value in the past, so the market enters FIXED_TERM already elapsed
      * @dev SPEC-EXPECTED: the fixed-term end is `block.timestamp + fixedTermDurationSeconds` in the future.
@@ -109,7 +108,7 @@ contract Test_PremiumDivergences_Accountant is AccountantTestBase {
      *      senior loss on a 100e18/30e18 seed enters FIXED_TERM. The true end is bigT + 604800 = 4295571995, which
      *      overflows uint32 (max 4294967295) and wraps to 4295571995 - 4294967296 = 604699, far below bigT
      */
-    function test_FINDING_15_fixedTermEndTimestamp_truncatesToUint32AndWrapsIntoPast() public {
+    function test_DIVERGENCE_15_fixedTermEndTimestamp_truncatesToUint32AndWrapsIntoPast() public {
         _deploy(true, _defaultParams());
 
         // Seed a healthy PERPETUAL checkpoint

@@ -363,6 +363,25 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
         assertLe(tvlDelta, Math.mulDiv(delta, beta, WAD) + _tol2(), "the TVL move must not exceed the rate-scaled ST leg (band ceiling)");
     }
 
+    /**
+     * @notice The template deploys the E-CLP LP oracle with `shouldRevertIfVaultUnlocked = false`, so the LT raw
+     *         NAV stays readable while the Balancer Vault is unlocked (mid-operation). Also confirms an external
+     *         unbalanced add succeeds against the hookless pool.
+     */
+    function test_ComputeTVL_midVaultUnlock_doesNotRevert() public {
+        _seedForSwaps();
+        _sync();
+        assertFalse(_oracleShouldRevertIfVaultUnlocked(), "the template must deploy the oracle readable mid-unlock");
+
+        address actor = _makeExternalLP("MID_UNLOCK_ADDER");
+        uint256 stShares = _rawBalances()[_stPoolIndex()] / 20;
+        uint256 quoteAssets = _rawBalances()[_quotePoolIndex()] / 20;
+        _fundExternalLP(actor, stShares, quoteAssets);
+
+        uint256 bptOut = _externalAddUnbalanced(actor, stShares, quoteAssets, 0);
+        assertGt(bptOut, 0, "the external add must succeed against the hookless pool");
+    }
+
     /// @notice the kernel's LT conversions round-trip on the LIVE oracle TVL with bounded floor loss:
     ///         `back <= x` and the gap is at most one NAV-wei's worth of BPT plus the final floor.
     function test_LTConversions_roundTripFloor_onLiveTVL() public {

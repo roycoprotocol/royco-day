@@ -414,7 +414,7 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
     /**
      * from any conserved flat checkpoint, every valid post-op shape commits without reverting and the
      * committed checkpoint conserves NAV exactly — the NAV_CONSERVATION_VIOLATION arm at :286 is unreachable
-     * from conserved checkpoints (any revert or wei of drift here is a REAL finding)
+     * from conserved checkpoints (any revert or wei of drift here is a REAL divergence)
      */
     function testFuzz_PostOp_conservationHoldsForValidShapes(uint256 _stRaw0, uint256 _jtRaw0, uint256 _lt0, uint256 _value, uint256 _opSeed) public {
         // Bounds: checkpoint raw NAVs uniform in [1e18, 1e30] (the strategy magnitude bound), the committed
@@ -639,18 +639,16 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
     }
 
     /**
-     * REAL FINDING (behavior pinned, adjudication needed): an in-kind BPT-only LT deposit that IMPROVES a
-     * breached liquidity utilization but does not fully heal it reverts under enforcement
+     * Current behavior: an in-kind BPT-only LT deposit that IMPROVES a breached liquidity utilization but does
+     * not fully heal it reverts under enforcement
      *
      * An LT deposit can only add pooled depth: it raises ltRawNAV, never the senior exposure, so every BPT-only
-     * deposit strictly lowers liquidity utilization and is a pure restoring force on a breach. One design
-     * reading therefore says no deposit should ever be blocked on liquidity, while the competing reading says
-     * the minimum-liquidity requirement must hold after EVERY enforced operation, deposits included (the
-     * reading maxSTDeposit's liquidity leg encodes). The accountant implements the second: LT_DEPOSIT (and
-     * ST_DEPOSIT) sit inside the liquidity gate. The sharp consequence pinned here is that enforcement blocks
-     * the exact healing capital (external LT deposits drawn in by a high liquidity premium) that is supposed
-     * to close the breach, unless the kernel passes enforce = false for LT deposits. Severity rests on the
-     * kernel's flag choice — flagged for adjudication
+     * deposit strictly lowers liquidity utilization and is a pure restoring force on a breach. The accountant
+     * nonetheless enforces the minimum-liquidity requirement after EVERY enforced operation, deposits included
+     * (the same requirement maxSTDeposit's liquidity leg encodes): LT_DEPOSIT (and ST_DEPOSIT) sit inside the
+     * liquidity gate. The consequence is that enforcement blocks the exact healing capital (external LT deposits
+     * drawn in by a high liquidity premium) that would close the breach, unless the kernel passes enforce =
+     * false for LT deposits, so the outcome rests on the kernel's flag choice
      */
     function test_PostOp_liquidityGate_blocksHealingLTDepositUnderBreach() public {
         _seedState(SEED_ST_RAW, SEED_JT_RAW, SEED_ST_RAW, SEED_JT_RAW, 0, 10e18, MarketState.PERPETUAL);

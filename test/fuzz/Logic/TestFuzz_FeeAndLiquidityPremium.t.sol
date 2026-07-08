@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { MINT_DILUTION_RESIDUAL_WAD, WAD } from "../../../src/libraries/Constants.sol";
+import { MAX_MINT_DILUTION_WAD, WAD } from "../../../src/libraries/Constants.sol";
 import { SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { FeeAndLiquidityPremiumLogic } from "../../../src/libraries/logic/FeeAndLiquidityPremiumLogic.sol";
@@ -97,13 +97,13 @@ contract TestFuzz_FeeAndLiquidityPremium_Logic is Test {
      * The value bound is a FAIR-pricing property, so it is conditioned on the mint-dilution clamp
      * (never an early return: every arm carries its own exact assertion):
      *   - a binding leg deliberately mints less than its NAV is worth (the clamp's whole point),
-     *     so it asserts shares == cap = floor(preSupply * (WAD - eps) / eps) exactly;
+     *     so it asserts shares == cap = floor(preSupply * MAX_MINT_DILUTION_WAD / (WAD - MAX_MINT_DILUTION_WAD)) exactly;
      *   - a fair leg whose SIBLING binds cannot use the value bound either — the sibling's under-mint
      *     shrinks supplyAfter, so every post-mint share (including this leg's) is worth more than the
      *     fair derivation assumed — so it asserts its exact floor formula shares == floor(S*leg/denom);
      *   - only when NEITHER leg binds does the two-sided value bound apply, with its original derivation.
-     * The bind predicate is recomputed here from first principles at the protocol constant eps =
-     * MINT_DILUTION_RESIDUAL_WAD: leg binds iff legNAV * eps > denom * (WAD - eps), with denom the
+     * The bind predicate is recomputed here from first principles at the protocol constant:
+     * leg binds iff legNAV * (WAD - MAX_MINT_DILUTION_WAD) > denom * MAX_MINT_DILUTION_WAD, with denom the
      * retained NAV pinned to 1 wei when zero (the integer-equivalent form of production's ordering)
      */
     function testFuzz_FeeAndLiquidityPremiumShareMint_MintedValueMatchesMintedNAVWithinDerivedDust(
@@ -128,11 +128,11 @@ contract TestFuzz_FeeAndLiquidityPremium_Logic is Test {
 
         // The bind predicate per leg, recomputed from first principles (see the property comment)
         uint256 denom = (_stEff - _prem - _fee) == 0 ? 1 : (_stEff - _prem - _fee);
-        // No overflow: legNAV, denom <= 1e30 and eps = 1e6, so both products stay below 1e48
-        bool premBinds = _prem * MINT_DILUTION_RESIDUAL_WAD > denom * (WAD - MINT_DILUTION_RESIDUAL_WAD);
-        bool feeBinds = _fee * MINT_DILUTION_RESIDUAL_WAD > denom * (WAD - MINT_DILUTION_RESIDUAL_WAD);
-        // cap <= 1e30 * (1e12 - 1) < 1e43: the fuzz domain sits far below the residual cliff
-        uint256 cap = Math.mulDiv(_preSupply, WAD - MINT_DILUTION_RESIDUAL_WAD, MINT_DILUTION_RESIDUAL_WAD);
+        // No overflow: legNAV, denom <= 1e30 and WAD - MAX_MINT_DILUTION_WAD = 1e6, so both products stay below 1e48
+        bool premBinds = _prem * (WAD - MAX_MINT_DILUTION_WAD) > denom * MAX_MINT_DILUTION_WAD;
+        bool feeBinds = _fee * (WAD - MAX_MINT_DILUTION_WAD) > denom * MAX_MINT_DILUTION_WAD;
+        // cap <= 1e30 * (1e12 - 1) < 1e43: the fuzz domain sits far below the cap's overflow cliff
+        uint256 cap = Math.mulDiv(_preSupply, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD);
 
         if (premiumShares != 0) {
             if (premBinds) {
