@@ -414,7 +414,7 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
     /**
      * from any conserved flat checkpoint, every valid post-op shape commits without reverting and the
      * committed checkpoint conserves NAV exactly — the NAV_CONSERVATION_VIOLATION arm at :286 is unreachable
-     * from conserved checkpoints (any revert or wei of drift here is a REAL finding)
+     * from conserved checkpoints (any revert or wei of drift here is a REAL divergence)
      */
     function testFuzz_PostOp_conservationHoldsForValidShapes(uint256 _stRaw0, uint256 _jtRaw0, uint256 _lt0, uint256 _value, uint256 _opSeed) public {
         // Bounds: checkpoint raw NAVs uniform in [1e18, 1e30] (the strategy magnitude bound), the committed
@@ -639,7 +639,7 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
     }
 
     /**
-     * REAL FINDING (behavior pinned, adjudication needed): an in-kind BPT-only LT deposit that IMPROVES a
+     * REAL DIVERGENCE (behavior pinned, adjudication needed): an in-kind BPT-only LT deposit that IMPROVES a
      * breached liquidity utilization but does not fully heal it reverts under enforcement
      *
      * An LT deposit can only add pooled depth: it raises ltRawNAV, never the senior exposure, so every BPT-only

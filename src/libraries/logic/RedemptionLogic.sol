@@ -102,11 +102,11 @@ library RedemptionLogic {
     }
 
     /**
-     * @notice Processes the redemption of a specified number of shares from the liquidity tranche.
+     * @notice Processes the redemption of a specified number of shares from the liquidity tranche
      * @dev LT redemptions are enabled only in a PERPETUAL market state, granted that the market's liquidity requirement is satisfied post-redemption
-     * @param _shares The number of shares to redeem.
-     * @param _receiver The address that is receiving the assets.
-     * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption.
+     * @param _shares The number of shares to redeem
+     * @param _receiver The address that is receiving the assets
+     * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
      */
     function ltRedeem(
         IRoycoDayKernel.RoycoDayKernelState storage $,
@@ -166,7 +166,7 @@ library RedemptionLogic {
         // Multi-asset redemptions are disabled during a fixed-term market state
         require(state.marketState == MarketState.PERPETUAL, IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE());
 
-        // An LT share claims both LT effective-NAV legs: the deployed LT assets and the idle liquidity-premium senior shares.
+        // An LT share claims both LT effective-NAV legs: the deployed LT assets and the idle liquidity-premium senior shares
         // Compute the LT assets
         AssetClaims memory userAssetClaims = TrancheClaimsLogic._scaleAssetClaims(ltClaims, _ltShares, totalLTShares);
 
@@ -277,7 +277,7 @@ library RedemptionLogic {
         // An LT share claims both LT effective-NAV legs: the deployed LT assets and the idle liquidity-premium senior shares
         AssetClaims memory userAssetClaims = TrancheClaimsLogic._scaleAssetClaims(ltClaims, _ltShares, totalLTShares);
 
-        // Derive the ST total claims from the synced state, and the senior supply AFTER this sync mints the premium and ST protocol fee shares.
+        // Derive the ST total claims from the synced state, and the senior supply AFTER this sync mints the premium and ST protocol fee shares
         // The execution path reads totalSupply() after the pre-op sync has minted those shares, so the preview must use the same post-mint supply
         stClaims = TrancheClaimsLogic._deriveTrancheAssetClaims($, _immutables, TrancheType.SENIOR, state);
         (,, uint256 totalSTShares) =
@@ -371,7 +371,7 @@ library RedemptionLogic {
         // JT redemptions are disabled during a fixed-term market state
         if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
-        // Use the precise NAV claims directly from the decomposition instead of round-tripping them through tranche units (NAV -> tranche -> NAV).
+        // Use the precise NAV claims directly from the decomposition instead of round-tripping them through tranche units (NAV -> tranche -> NAV)
         (,, claimOnSTNAV, claimOnJTNAV) = TrancheClaimsLogic._computeSTandJTClaimsOnRawNAVs(state);
 
         // Get the max withdrawable ST and JT assets in NAV units from the accountant considering the coverage requirement

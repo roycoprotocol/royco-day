@@ -10,8 +10,8 @@ import { RoycoDayKernel } from "../../../RoycoDayKernel.sol";
  * @title IdenticalAssets_ST_JT_Oracle_Quoter
  * @notice Quoter to convert tranche units to/from NAV units using an oracle for markets where both tranches use the same tranche units
  * @dev NAV units always have WAD precision
- * @dev The quoter reads the conversion rate from the specified oracle in WAD precision.
- *      The kernel admin can optionally override the conversion rate with a fixed value.
+ * @dev The quoter reads the conversion rate from the specified oracle in WAD precision
+ *      The kernel admin can optionally override the conversion rate with a fixed value
  *      Supported use-cases include:
  *      - Identical Yield Bearing ERC20 for ST And JT: Yield Bearing ERC20 and Tranche Unit (FalconXUSDC, reUSD, etc.), NAV Unit (USD)
  */
@@ -120,7 +120,7 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
     }
 
     /// @notice Initializes the quoter cache for the operation
-    /// @dev Called at the start of a synchronized operation to cache the tranche unit to NAV unit conversion rate, so every conversion in the operation values against one consistent rate. No teardown is needed: each operation re-caches and the transient cache auto-clears at transaction end
+    /// @dev Called at the start of a synchronized operation to cache the tranche unit to NAV unit conversion rate, so every conversion in the operation values against one consistent rate — no teardown is needed, since each operation re-caches and the transient cache auto-clears at transaction end
     function _initializeQuoterCache() internal virtual override {
         // Cache the tranche unit to NAV unit conversion rate for the operation
         Cache._write(CacheKey.IDENTICAL_ST_JT_TRANCHE_TO_NAV_UNIT_RATE, getTrancheUnitToNAVUnitConversionRateWAD());

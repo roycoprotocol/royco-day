@@ -20,9 +20,9 @@ import { DayMarketTestBase } from "../utils/DayMarketTestBase.sol";
  *      expected number is derived by hand BEFORE execution, never read back from the code: raw NAVs are
  *      `shares x rateWAD x oraclePrice` scaled to WAD, conservation is the exact two-term identity, and the
  *      premium, fee, and redemption expectations are the floor-arithmetic derivations shown at the constants below
- * @dev This file carries NO test_FINDING_* pins. Two earlier suspected deposit-gating divergences were retracted
+ * @dev This file carries NO test_DIVERGENCE_* pins. Two earlier suspected deposit-gating divergences were retracted
  *      (production conforms, see the two positive conformance tests at the bottom), and the surviving pinned
- *      findings live in the dedicated findings suite
+ *      divergences live in the dedicated divergences suite
  */
 abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
     // =============================

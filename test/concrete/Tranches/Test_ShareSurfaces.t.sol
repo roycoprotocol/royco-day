@@ -150,7 +150,7 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
      *      that still answers two of its three kernel mints is a surface a consistent design would close: every
      *      supply-touching entrypoint should refuse uniformly while paused
      */
-    function test_FINDING_33_ZeroShareKernelMintsSucceedWhileTranchePaused() public {
+    function test_DIVERGENCE_33_ZeroShareKernelMintsSucceedWhileTranchePaused() public {
         vm.prank(PAUSER);
         IRoycoAuth(address(seniorTranche)).pause();
 

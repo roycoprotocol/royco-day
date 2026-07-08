@@ -14,9 +14,9 @@ import { DayMarketHandler } from "../../invariant/handlers/DayMarketHandler.sol"
  *      post-mint supply), which bounds supply growth per deposit and keeps the fee mint representable. This test
  *      pins the fix by replaying the exact recorded handler calldata: every step must execute without tripping a
  *      handler-observed violation. The residual supply-inflation cliff itself stays pinned separately by
- *      test_FINDING_11 in Test_SpecDivergences.
+ *      test_DIVERGENCE_11 in Test_SpecDivergences.
  */
-contract Test_JTSupplyInflationSequenceReplay_Findings is Test {
+contract Test_JTSupplyInflationSequenceReplay_Divergences is Test {
     struct Step {
         bytes data;
         string name;
@@ -65,7 +65,7 @@ contract Test_JTSupplyInflationSequenceReplay_Findings is Test {
 
     /// @notice Replays the recorded sequence step by step; the mint-dilution clamp must keep every sync alive
     /// @dev A regression here means supply inflation can again push a protocol-fee share mint past uint256
-    function test_FINDING_11_replayedLiquidationSequenceCannotBrickSync() public {
+    function test_DIVERGENCE_11_replayedLiquidationSequenceCannotBrickSync() public {
         for (uint256 i; i < steps.length; ++i) {
             (bool ok,) = address(handler).call(steps[i].data);
             ok; // a handler op may legitimately no-op; the property is the violation counter staying at zero

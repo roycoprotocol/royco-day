@@ -11,10 +11,11 @@ import { BaseAdaptiveCurveYDM } from "./base/BaseAdaptiveCurveYDM.sol";
  * @dev A general-purpose model for paying a tranche's yield as a premium to a capital pool that provides a service to that tranche
  * @dev It is parameterized purely by the utilization of that service, so the same contract prices any tranche-yield premium
  * @dev Utilization is the fraction of the capital pool's service capacity that is currently in use: the ratio of demand for the service the pool provides to the pool's capacity to supply it, scaled to WAD precision
- * @dev At zero utilization the service is unused and the capital is abundant, so it earns the least. At WAD utilization demand equals the pool's full capacity. Demand beyond capacity is reported above WAD and capped to WAD here
+ * @dev At zero utilization the service is unused and the capital is abundant, so it earns the least
+ * @dev At WAD utilization demand equals the pool's full capacity — demand beyond capacity is reported above WAD and capped to WAD here
  * @dev The premium rises with utilization so scarcer service is paid more, pulling additional capital into the pool
  * @dev The curve is an adaptive piece-wise function parameterized by the utilization, the steepness of the curve, a per-instance target utilization (the kink) supplied at construction, and the yield share at the kink (Y_T)
- * @dev The curve adapts its yield share at the kink up or down based on the market's relative delta from the target utilization over time. The slopes above and below the kink adapt with it
+ * @dev The curve adapts its yield share at the kink up or down based on the market's relative delta from the target utilization over time — the slopes above and below the kink adapt with it
  */
 contract AdaptiveCurveYDM_V1 is BaseAdaptiveCurveYDM {
     /**

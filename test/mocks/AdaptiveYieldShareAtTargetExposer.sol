@@ -16,9 +16,9 @@ contract AdaptiveYieldShareAtTargetExposer is BaseAdaptiveCurveYDM {
         uint256 _targetUtilizationWAD,
         uint256 _minYieldShareAtTargetWAD,
         uint256 _maxYieldShareAtTargetWAD,
-        uint256 _maxAdaptationSpeedWAD
+        uint256 _adaptationSpeedAtBoundaryWAD
     )
-        BaseAdaptiveCurveYDM(_targetUtilizationWAD, _minYieldShareAtTargetWAD, _maxYieldShareAtTargetWAD, _maxAdaptationSpeedWAD)
+        BaseAdaptiveCurveYDM(_targetUtilizationWAD, _minYieldShareAtTargetWAD, _maxYieldShareAtTargetWAD, _adaptationSpeedAtBoundaryWAD)
     { }
 
     /// @notice Forwards to the base's internal post-adaptation yield share at target computation

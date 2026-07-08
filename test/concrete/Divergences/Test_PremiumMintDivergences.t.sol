@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
-import { toUint256 } from "../../../src/libraries/Units.sol";
+import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
@@ -13,8 +13,7 @@ import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
  * @title Test_PremiumMintDivergences_DayMarket
  * @notice Loud, first-class pins of the two liquidity-premium-mint behaviors that reproduce on the full mock
  *         market: the whitelist-transfer brick (a confirmed defect) and the griefed reinvestment leaving idle
- *         liquidity premium senior shares (documented, intended behavior). Findings 11-12 of the ledger
- *         docs/testing/agent-notes/13-spec-divergence-findings.md
+ *         liquidity premium senior shares (documented, intended behavior)
  * @dev The premium is minted as senior tranche shares to the kernel on every pre-op sync that books a senior gain
  *      (FeeAndLiquidityPremiumLogic._processFeesAndLiquidityPremium), so both behaviors ride the same mint the
  *      spec makes load-bearing
@@ -33,11 +32,11 @@ contract Test_PremiumMintDivergences_DayMarket is DayMarketTestBase {
     }
 
     // =============================
-    // FINDING 11 — a whitelist-transfer market bricks on the first senior gain
+    // DIVERGENCE 11 — a whitelist-transfer market bricks on the first senior gain
     // =============================
 
     /**
-     * @notice FINDING 11: in a market that enforces the tranche-transfer whitelist, the liquidity-premium mint
+     * @notice DIVERGENCE 11: in a market that enforces the tranche-transfer whitelist, the liquidity-premium mint
      *         reverts ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(kernel), because the premium is minted as senior shares to
      *         the kernel and the mint's _update hook screens the kernel as an un-whitelisted recipient
      *         (RoycoDayKernel.preTrancheBalanceUpdateHook, the ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER branch)
@@ -47,7 +46,10 @@ contract Test_PremiumMintDivergences_DayMarket is DayMarketTestBase {
      * @dev The kernel is never granted the senior tranche's deposit (LP) role, so canCall(kernel, ST, deposit) is
      *      false and the hook's `_to != authority && isWhitelistedTrancheLP` requirement fails on the kernel
      */
-    function test_FINDING_11_whitelistMarket_bricksOnFirstSeniorGainPremiumMint() public {
+    /// @dev FIXED: the deployment now grants the kernel and the protocol fee recipient the tranche LP roles, so the
+    ///      premium/fee mints pass the tranche `_update` whitelist screen. A whitelist-enforcing market no longer
+    ///      bricks on the first senior gain.
+    function test_DIVERGENCE_11_whitelistMarket_syncsCleanlyAfterSeniorGain() public {
         // Redeploy the market with the tranche-transfer whitelist enforced
         MarketParamsConfig memory p = defaultParams();
         p.enforceWhitelistOnTransfer = true;
@@ -57,31 +59,38 @@ contract Test_PremiumMintDivergences_DayMarket is DayMarketTestBase {
         // Seeding is premium-free (rates are flat), so the whitelist market seeds cleanly
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
 
-        // Book a +10% senior gain so the next sync accrues a nonzero liquidity premium to mint
+        // Book a +10% senior gain so the next sync accrues a nonzero liquidity premium (and protocol fees) to mint
         applySTPnL(1000);
 
-        // ACTUAL: the premium mint transfers senior shares to the kernel, which the whitelist hook rejects
-        // SPEC-EXPECTED: the privileged premium mint bypasses the whitelist, so the sync succeeds
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayKernel.ACCOUNT_NOT_WHITELISTED_TRANCHE_LP.selector, address(kernel)));
-        _sync();
+        // FIXED: the premium mint to the kernel and the fee mints to the fee recipient pass the whitelist screen.
+        _sync(); // no revert
+
+        // The market keeps functioning: a subsequent whitelisted senior deposit (which pre-op syncs, minting the
+        // premium/fees again) also lands.
+        uint256 more = 10 * stUnit;
+        stJtVault.mintShares(ST_PROVIDER, more);
+        vm.startPrank(ST_PROVIDER);
+        stJtVault.approve(address(seniorTranche), more);
+        seniorTranche.deposit(toTrancheUnits(more), ST_PROVIDER);
+        vm.stopPrank();
     }
 
     // =============================
-    // FINDING 12 — a griefed reinvestment leaves the premium staged and claimable, not forfeited
+    // DIVERGENCE 12 — a griefed reinvestment leaves the premium staged and claimable, not forfeited
     // =============================
 
     /**
-     * @notice FINDING 12 (intended behavior): when the single-sided reinvestment fails the slippage gate, the
+     * @notice DIVERGENCE 12 (intended behavior): when the single-sided reinvestment fails the slippage gate, the
      *         premium mint still succeeds and the freshly minted senior shares stay idle in the kernel
-     *         (ltOwnedSeniorTrancheShares), NOT deployed into ltRawNAV and NOT forfeited. This matches CLAUDE.md:
-     *         the un-deployed premium is held by the kernel as idle liquidity premium senior shares, claimable
-     *         and never forfeited, and a tranche operation tolerates a failing reinvestment without reverting
+     *         (ltOwnedSeniorTrancheShares), NOT deployed into ltRawNAV and NOT forfeited. This matches the intended
+     *         design: the un-deployed premium is held by the kernel as idle liquidity premium senior shares,
+     *         claimable and never forfeited, and a tranche operation tolerates a failing reinvestment without reverting
      * @dev This pins the CURRENT (correct) behavior so a future change that either reverts the sync on a failed
      *      reinvestment, or silently drops the idle premium shares, fails loudly. An attacker forcing venue
      *      slippage only DEFERS deployment; the metric keeps reading under-provisioned (ltRawNAV excludes the
      *      idle shares) so the LDM keeps paying
      */
-    function test_FINDING_12_griefedReinvestment_stagesPremiumClaimableNotForfeited() public {
+    function test_DIVERGENCE_12_griefedReinvestment_stagesPremiumClaimableNotForfeited() public {
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
 
         // Arm persistent venue slippage so the single-sided reinvestment deterministically fails its min-BPT-out

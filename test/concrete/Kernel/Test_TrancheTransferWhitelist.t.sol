@@ -26,7 +26,7 @@ contract Test_TrancheTransferWhitelist_Kernel is DayMarketTestBase {
     function setUp() public {
         // Every test in this suite runs on a market that enforces the tranche-transfer whitelist. All seeding is
         // done at flat PnL: a senior gain would make the next sync mint the liquidity premium as senior shares to
-        // the kernel, which this same whitelist hook rejects (pinned by test_FINDING_11 in
+        // the kernel, which this same whitelist hook rejects (pinned by test_DIVERGENCE_11 in
         // Test_PremiumMintDivergences), and that unrelated brick would mask what these tests isolate
         MarketParamsConfig memory p = defaultParams();
         p.enforceWhitelistOnTransfer = true;

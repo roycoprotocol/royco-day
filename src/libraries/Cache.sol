@@ -5,7 +5,7 @@ import { SlotDerivation } from "../../lib/openzeppelin-contracts/contracts/utils
 import { TransientSlot } from "../../lib/openzeppelin-contracts/contracts/utils/TransientSlot.sol";
 
 /**
- * @notice Indexes a slot in the unified transient cache. Each key occupies the transient slot at the cache base slot offset by the key's ordinal
+ * @notice Indexes a slot in the unified transient cache: each key occupies the transient slot at the cache base slot offset by the key's ordinal
  * @custom:type IDENTICAL_ST_JT_TRANCHE_TO_NAV_UNIT_RATE - The identical senior and junior tranche unit to NAV unit conversion rate (only used if ST and JT are invested in the same asset)
  * @custom:type ST_SHARE_RATE - The senior tranche share rate (senior NAV per share)
  * @dev The ordinal is the key's transient slot offset from the cache base slot, so the enum is bounded to 256 members by the reserved ERC-7201 slot window
@@ -51,7 +51,7 @@ library Cache {
 
     /**
      * @notice Writes a value to the unified transient cache for the remainder of the transaction
-     * @dev The value is stored as `_value | CACHE_SET_MASK`. Re-callable to overwrite
+     * @dev The value is stored as `_value | CACHE_SET_MASK` — re-callable to overwrite
      * @dev The value must be strictly less than 2^255 so the populated marker is unambiguous
      * @param _key The key in this cache to write to
      * @param _value The value to cache
@@ -62,7 +62,7 @@ library Cache {
 
     /**
      * @notice Returns the transient slot holding the cached value for the specified cache key
-     * @dev Offsets the cache base slot by the key's ordinal. The reserved 256-slot ERC-7201 window guarantees keys never collide
+     * @dev Offsets the cache base slot by the key's ordinal — the reserved 256-slot ERC-7201 window guarantees keys never collide
      * @param _key The key in this cache to derive the transient storage slot for
      * @return The transient slot for the specified cache key
      */

@@ -284,7 +284,8 @@ contract Test_RoycoTestMath is Test {
     ///   feeShares     = ⌊1000e18·20e18/1000e18⌋ = 20e18
     ///   supplyAfter   = 1000e18 + 30e18 + 20e18 = 1050e18
     function test_ComputeSTFeeAndLiquidityPremiumSharesToMint_CleanDivision() public pure {
-        (uint256 premiumShares, uint256 feeShares, uint256 supplyAfter) = RoycoTestMath.computeSTFeeAndLiquidityPremiumSharesToMint(1050e18, 30e18, 20e18, 1000e18);
+        (uint256 premiumShares, uint256 feeShares, uint256 supplyAfter) =
+            RoycoTestMath.computeSTFeeAndLiquidityPremiumSharesToMint(1050e18, 30e18, 20e18, 1000e18);
         assertEq(premiumShares, 30e18, "premium shares exact");
         assertEq(feeShares, 20e18, "fee shares exact");
         assertEq(supplyAfter, 1050e18, "supply after both mints");
@@ -793,7 +794,8 @@ contract Test_RoycoTestMath is Test {
      *   coverageUtilizationWAD = ⌈1050e18·0.1e18/(185e18−1)⌉ = 567567567567567568. liquidityUtilizationWAD = ⌈(1045e18+1)/2000⌉ = 522500000000000001.
      */
     function test_SyncTrancheAccounting_DustIL_RecoveryThenAwkwardPremiumFloors() public pure {
-        RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18, 1000e18 + 5, 200e18 - 5, 5, RoycoTestMath.MarketState.PERPETUAL, 0, 7, 1050e18, 180e18);
+        RoycoTestMath.SyncInputs memory in_ =
+            _syncInputs(1000e18, 200e18, 1000e18 + 5, 200e18 - 5, 5, RoycoTestMath.MarketState.PERPETUAL, 0, 7, 1050e18, 180e18);
         RoycoTestMath.SyncOutputs memory expected;
         expected.stRawNAV = 1050e18;
         expected.jtRawNAV = 180e18;
@@ -874,7 +876,8 @@ contract Test_RoycoTestMath is Test {
      * liquidityUtilizationWAD = ⌈(1000e18+5)/2000⌉ = 500000000000000001.
      */
     function test_SyncTrancheAccounting_FlatSync_TipsPerpetualToFixedTerm() public pure {
-        RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18, 1000e18 + 5, 200e18 - 5, 5, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 1000e18, 200e18);
+        RoycoTestMath.SyncInputs memory in_ =
+            _syncInputs(1000e18, 200e18, 1000e18 + 5, 200e18 - 5, 5, RoycoTestMath.MarketState.PERPETUAL, 0, 0, 1000e18, 200e18);
         RoycoTestMath.SyncOutputs memory expected;
         expected.stRawNAV = 1000e18;
         expected.jtRawNAV = 200e18;
@@ -1305,7 +1308,15 @@ contract Test_RoycoTestMath is Test {
 
     /// Builds a SelfLiqBonusIn with the shared reference state: stRawNAV 1000e18, jtRawNAV 100e18, jtEffectiveNAV 140e18
     /// (jtClaimOnST = 40e18), coverage utilization at the 1.1e18 liquidation threshold, bonus rate 5e17.
-    function _bonusIn(uint256 userNav, uint256 weighted, bool coinvested) private pure returns (RoycoTestMath.SeniorTrancheSelfLiquidationBonusInputs memory in_) {
+    function _bonusIn(
+        uint256 userNav,
+        uint256 weighted,
+        bool coinvested
+    )
+        private
+        pure
+        returns (RoycoTestMath.SeniorTrancheSelfLiquidationBonusInputs memory in_)
+    {
         in_.stRawNAV = 1000e18;
         in_.jtRawNAV = 100e18;
         in_.jtEffectiveNAV = 140e18;
@@ -1386,7 +1397,7 @@ contract Test_RoycoTestMath is Test {
     //////////////////////////////////////////////////////////////////////////*/
 
     /// Builds an AdaptiveYdmIn with the shared reference curve: target 8e17, start 1e17, FD_T 5e16, FP_T 1e17,
-    /// clamps [1e14, 1e18] (the production 1bp floor and WAD ceiling), maxSpeed 1e12, PERPETUAL.
+    /// clamps [1e14, 1e18] (the production 1bp floor and WAD ceiling), boundary speed 1e12, PERPETUAL.
     function _ydmIn(uint256 u, uint256 elapsed) private pure returns (RoycoTestMath.AdaptiveCurveYieldShareInputs memory in_) {
         in_.utilizationWAD = u;
         in_.targetUtilizationWAD = 8e17;
@@ -1394,7 +1405,7 @@ contract Test_RoycoTestMath is Test {
         in_.elapsedSeconds = elapsed;
         in_.discountToTargetAtZeroUtilWAD = 5e16;
         in_.premiumToTargetAtFullUtilWAD = 1e17;
-        in_.maxAdaptationSpeedWAD = 1e12;
+        in_.adaptationSpeedAtBoundaryWAD = 1e12;
         in_.minYieldShareAtTargetWAD = 1e14;
         in_.maxYieldShareAtTargetWAD = 1e18;
         in_.perpetual = true;

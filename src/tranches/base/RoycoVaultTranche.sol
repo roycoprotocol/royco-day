@@ -20,7 +20,7 @@ import { ValuationLogic } from "../../libraries/logic/ValuationLogic.sol";
  * @title RoycoVaultTranche
  * @author Ankur Dubey, Shivaansh Kapoor
  * @notice Abstract base contract implementing core vault functionality for Royco tranches (ST, JT, and LT)
- * @dev Tranches interact with the kernel for asset operations and the accountant for NAV synchronizations
+ * @dev Tranches interact with the kernel to execute all operations based on the current holistic state of the Royco market
  */
 abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20PausableUpgradeable, ERC20BurnableUpgradeable, ERC20PermitUpgradeable {
     using Math for uint256;
@@ -208,20 +208,32 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @inheritdoc IRoycoVaultTranche
     function convertToAssets(uint256 _shares) public view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
-        // Get the post-sync tranche state: applying NAV reconciliation.
-        (, AssetClaims memory trancheClaims, uint256 trancheTotalShares) = IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
+        // Get the post-sync tranche state: applying NAV reconciliation
+        (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 trancheTotalShares) =
+            IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
+        if (TRANCHE_TYPE() == TrancheType.LIQUIDITY) {
+            // We exclude any idle (not reinvested) ST shares from the LT claims in order to ensure that its share price does not drop due to slippage incurred on reinvestment
+            trancheClaims.stShares = 0;
+            trancheClaims.nav = state.ltRawNAV;
+        }
         return TrancheClaimsLogic._scaleAssetClaims(trancheClaims, _shares, trancheTotalShares);
     }
 
     /// @inheritdoc IRoycoVaultTranche
     function convertToShares(TRANCHE_UNIT _assets) public view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
-        // Get the post-sync tranche state: applying NAV reconciliation.
+        // Value the assets specified in NAV units
         NAV_UNIT value;
         if (TRANCHE_TYPE() == TrancheType.SENIOR) value = IRoycoDayKernel(KERNEL).stConvertTrancheUnitsToNAVUnits(_assets);
         else if (TRANCHE_TYPE() == TrancheType.JUNIOR) value = IRoycoDayKernel(KERNEL).jtConvertTrancheUnitsToNAVUnits(_assets);
         else value = IRoycoDayKernel(KERNEL).ltConvertTrancheUnitsToNAVUnits(_assets);
-        (, AssetClaims memory trancheClaims, uint256 trancheTotalShares) = IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
-        shares = ValuationLogic._convertToShares(value, trancheClaims.nav, trancheTotalShares, Math.Rounding.Floor);
+
+        // Get the post-sync tranche state
+        (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 trancheTotalShares) =
+            IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
+
+        // We exclude any idle (not reinvested) ST shares from the LT NAV basis in order to ensure that its NAV per share does not drop due to slippage incurred on reinvestment
+        NAV_UNIT navBasis = ((TRANCHE_TYPE() == TrancheType.LIQUIDITY) ? state.ltRawNAV : trancheClaims.nav);
+        shares = ValuationLogic._convertToShares(value, navBasis, trancheTotalShares, Math.Rounding.Floor);
     }
 
     /**
@@ -244,8 +256,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         if (TRANCHE_TYPE() == TrancheType.SENIOR || TRANCHE_TYPE() == TrancheType.JUNIOR) {
             //  We query the kernel for (a) N_s and N_j - the notional claim of the tranche on the ST and JT assets respectively in NAV units, and
             //                          (b) L_s and L_j - the amount that can be withdrawn from the senior and junior tranches globally in NAV units, respectively
-            //  When shares are redeemed, assets from the senior and junior tranches are withdrawn proportionally to the notional claims of the tranche on the respective assets.
-            //  But, the global max withdrawable assets for each tranche are also considered. These are inclusive of any coverage requirements, as well as liquidity constraints.
+            //  When shares are redeemed, assets from the senior and junior tranches are withdrawn proportionally to the notional claims of the tranche on the respective assets
+            //  But, the global max withdrawable assets for each tranche are also considered — these are inclusive of any coverage requirements, as well as liquidity constraints
             //  If T respresents the total shares in the tranche, s the total shares owned by the owner, then the maximum amount of shares that can be redeemed s' is subject to:
             //      (a) s' * N_s / T  <= min(s * N_s / T, L_s) => s' <= min(s, T * L_s / N_s)
             //      (b) s' * N_j / T  <= min(s * N_j / T, L_j) => s' <= min(s, T * L_j / N_j)
@@ -296,18 +308,18 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         else return state.ltRawNAV;
     }
 
-    /**
-     * @inheritdoc IERC20Metadata
-     * @dev The Kernel always uses WAD precision for NAV units
-     * @dev Shares are minted using NAV_UNIT values units instead of TRANCHE_UNIT values, so they have identical precision to NAV_UNIT (WAD precision)
-     */
-    function decimals() public view virtual override(ERC20Upgradeable, IERC20Metadata) returns (uint8) {
-        return uint8(WAD_DECIMALS);
-    }
-
     /// @inheritdoc IRoycoVaultTranche
     function asset() external view virtual override(IRoycoVaultTranche) returns (address) {
         return ASSET;
+    }
+
+    /**
+     * @inheritdoc IERC20Metadata
+     * @dev The kernel always uses WAD precision for NAV units
+     * @dev Shares are minted using NAV_UNIT values instead of TRANCHE_UNIT values, so they have identical precision to NAV_UNIT values (WAD precision)
+     */
+    function decimals() public view virtual override(ERC20Upgradeable, IERC20Metadata) returns (uint8) {
+        return uint8(WAD_DECIMALS);
     }
 
     /// @dev Returns the type of the tranche (Senior or Junior)

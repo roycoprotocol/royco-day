@@ -72,19 +72,20 @@ contract Test_AdminAndGates_Kernel is DayMarketTestBase {
      *      18.4467e18, an 1844% bonus. The redemption-side clamps are then the only thing standing between
      *      that config and draining the junior buffer. Expected behavior: reject any bonus above WAD (1e18)
      */
-    function test_FINDING_29_SelfLiquidationBonusSetterAcceptsAboveOneHundredPercent() public {
-        // type(uint64).max = 2^64 - 1 = 18446744073709551615, which as a WAD fraction is
-        // 18446744073709551615 / 1e18 = 18.446744073709551615, i.e. ~1844.67% of the redeemed NAV
-        uint64 absurdBonusWAD = type(uint64).max;
-        vm.expectEmit(address(kernel));
-        emit IRoycoDayKernel.SeniorTrancheSelfLiquidationBonusUpdated(absurdBonusWAD);
+    function test_DIVERGENCE_29_SelfLiquidationBonusSetterRejectsAboveOneHundredPercent() public {
+        // Fixed: a bonus above WAD (1e18 = 100%) is rejected. type(uint64).max would have been ~1844%.
         vm.prank(KERNEL_ADMIN);
-        kernel.setSeniorTrancheSelfLiquidationBonus(absurdBonusWAD);
-        assertEq(
-            kernel.getState().stSelfLiquidationBonusWAD,
-            18_446_744_073_709_551_615,
-            "the setter must have stored the unvalidated ~1844% bonus verbatim"
-        );
+        vm.expectRevert(IRoycoDayKernel.INVALID_SELF_LIQUIDATION_BONUS.selector);
+        kernel.setSeniorTrancheSelfLiquidationBonus(type(uint64).max);
+
+        vm.prank(KERNEL_ADMIN);
+        vm.expectRevert(IRoycoDayKernel.INVALID_SELF_LIQUIDATION_BONUS.selector);
+        kernel.setSeniorTrancheSelfLiquidationBonus(uint64(1e18 + 1));
+
+        // Exactly WAD (100%) is the accepted upper bound.
+        vm.prank(KERNEL_ADMIN);
+        kernel.setSeniorTrancheSelfLiquidationBonus(uint64(1e18));
+        assertEq(kernel.getState().stSelfLiquidationBonusWAD, 1e18, "a 100% bonus (WAD) is accepted");
     }
 
     /// @notice The market ops admin can wire and unwire the blacklist contract, and each change lands with its event

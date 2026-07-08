@@ -82,7 +82,7 @@ contract DayMarketHandler is DayMarketTestBase {
      *      liveness therefore cannot be lost to this edge inside a campaign, while the dilution branch
      *      itself stays exercised at one-unit size. The cliff itself (the cap computation's Panic(0x11)
      *      once a supply crosses ~1.158e65) is pinned by the concrete test
-     *      test_FINDING_11_mintDilutionClamp_residualOverflowCliff, not re-hunted by campaigns
+     *      test_DIVERGENCE_11_mintDilutionClamp_residualOverflowCliff, not re-hunted by campaigns
      */
     uint256 internal constant TRANCHE_SUPPLY_CAMPAIGN_BOUND = 1e45;
 
