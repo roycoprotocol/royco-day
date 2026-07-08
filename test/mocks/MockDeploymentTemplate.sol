@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { BaseDeploymentTemplate } from "../../src/factory/templates/base/BaseDeploymentTemplate.sol";
+import { COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2 } from "../../src/factory/templates/base/Components.sol";
 import { IRoycoFactory } from "../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 
@@ -43,7 +44,7 @@ contract MockDeploymentTemplate is BaseDeploymentTemplate {
     {
         if (_params.length != 0) {
             (bytes32 salt, uint256 targetUtilizationWAD) = abi.decode(_params, (bytes32, uint256));
-            (lastDeployedYDM, lastYDMAlreadyDeployed) = _deployYDM(salt, targetUtilizationWAD);
+            (lastDeployedYDM, lastYDMAlreadyDeployed) = _deployYDM(salt, targetUtilizationWAD, COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2);
         }
         result = _result;
     }

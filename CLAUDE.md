@@ -41,7 +41,7 @@ The liquidity tranche specification:
 - An LDM (the same model family as the YDM) takes this `liquidityUtilization` and returns the portion of ST yield paid as the liquidity premium to the LT, in ST's underlying assets.
 - Valid operations based on the `liquidityUtilization` after an operation:
   - Senior (ST) deposits are liquidity-gated: they are enabled in a perpetual state only if `liquidityUtilization <= 100%` after the deposit. Junior deposits and in-kind liquidity deposits (which only deepen coverage/`ltRawNAV`) are not liquidity-gated.
-  - Redemptions are enabled in a perpetual state only if `liquidityUtilization <= 100%` after the redemption — unless the liquidation utilization has been breached, in which case all withdrawals are allowed.
+  - Redemptions are enabled in a perpetual state only if `liquidityUtilization <= 100%` after the redemption — unless the liquidation utilization has been breached, in which case the liquidity gate is bypassed for the depth-reducing (ST and LT) redemptions. Junior redemptions stay coverage-gated even in liquidation: junior first-loss capital remains locked as loss-absorption while the senior tranche winds down.
   - FIXED_TERM overrides all of the above: it blocks every operation on every tranche (all deposits and all redemptions), so the liquidity-gate rules apply only in the PERPETUAL state.
 
 Why this shape:
@@ -150,7 +150,7 @@ Redemption is gated on `liquidityUtilization`, the same metric that prices the p
 
 Two redemption flows reduce depth and both are gated identically. The default is in-kind and proportional: an LT holder burns LT shares for a proportional slice of the BPT, taken as a sandwich-safe proportional `removeLiquidity`. The multi-asset flow additionally unwinds the senior leg of that slice (plus any idle, not-yet-reinvested premium senior shares) back to the senior tranche's yield-bearing asset, so the holder leaves in underlying rather than BPT. Both remove a whole LP token — senior leg and quote leg — from the pool while unwinding only the small senior leg, so both raise `liquidityUtilization`, and both must leave it at or below 100%. The proportional `removeLiquidity` reads no composition and cannot drain one side of the pool, so the gate is the only thing standing between a redemption and the senior liquidity floor.
 
-The single exception is a breached liquidation coverage utilization. Once coverage is in liquidation, every withdrawal is allowed and the redemption bypasses the liquidity gate, because the senior tranche is being wound down and there is nothing left to protect. FIXED_TERM otherwise locks every tranche, including the LT, so the drawdown run vector does not exist and the LT's principal is covered through the lock.
+The single exception is a breached liquidation coverage utilization. Once coverage is in liquidation, the depth-reducing (ST and LT) redemptions bypass the liquidity gate, because the senior tranche is being wound down and locking its liquidity in protects no one. Junior redemptions are NOT unlocked here: `jtRedeem` stays coverage-gated, so junior first-loss capital remains pinned as loss-absorption through the wind-down. FIXED_TERM otherwise locks every tranche, including the LT, so the drawdown run vector does not exist and the LT's principal is covered through the lock.
 
 If a holder redeems while idle premium senior shares are still staged for the LT, those shares are sent directly to the redeemer as part of the redemption, so no premium is stranded.
 

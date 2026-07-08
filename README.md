@@ -64,9 +64,7 @@ Each market has ERC4626-style vault contracts representing its tranches:
 
 **Liquidity Tranche (LT)**: Covered senior capital that also provides liquidity. It holds a market-making venue position pairing the senior tranche share against a quote stablecoin, giving senior holders a venue to exit into. It earns a liquidity premium from senior yield, sized by a liquidity-driven instance of the market's Yield Distribution Model (YDM). The premium is minted as senior shares and reinvested into the venue, so the LT share is up-only and composable. Beyond depositing a pre-minted venue position, the LT supports an atomic multi-asset flow that mints the senior share, joins the venue, and mints the LT share in one transaction.
 
-Tranches are ERC20Permit-enabled, pausable, and burnable, and support standard preview and deposit/redeem operations.
-
-Royco tranches are natively composable across DeFi. Senior tranches transform high-risk vault tokens into leverage-eligible collateral for lending markets, unlocking net-new capital that wasn't accessible before.
+Royco tranches are natively composable across DeFi. Senior tranches transform assets into leverage-eligible collateral for lending markets, unlocking net-new capital that wasn't accessible to issuers before.
 
 Beyond lending, tranches can be paired on AMMs/CLOBs, split into fixed or variable rate exposure, and recursively tranched into layered risk structures.
 

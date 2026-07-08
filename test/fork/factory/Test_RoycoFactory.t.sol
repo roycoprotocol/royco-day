@@ -32,6 +32,7 @@ import { COMPONENT_ID_SENIOR_TRANCHE_IMPL, TAG_ST_IMPL, TAG_ST_PROXY } from "../
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
+import { AdaptiveCurveYDM_V1 } from "../../../src/ydm/AdaptiveCurveYDM_V1.sol";
 import { AdaptiveCurveYDM_V2 } from "../../../src/ydm/AdaptiveCurveYDM_V2.sol";
 import { StaticCurveYDM } from "../../../src/ydm/StaticCurveYDM.sol";
 
@@ -559,54 +560,56 @@ contract Test_RoycoFactory is Test {
         _assertGetMarketResolves(first, first.seniorTranche, "first market intact after failed redeploy");
     }
 
-    /// @notice A StaticCurve YDM config silently ships an AdaptiveCurveYDM_V2 model instead of failing loudly. The
-    ///         template only ever deploys V2 bytecode (the target utilization is a constructor arg on that one code),
-    ///         and StaticCurveYDM.initializeYDMForMarket(uint64,uint64,uint64) shares its 4-byte selector with the V2
-    ///         initializer, so the V2 instance accepts the static init calldata and comes up initialized with no revert
-    /// @dev EXPECTED: the deployer either ships StaticCurveYDM bytecode for a StaticCurve config or reverts on the
-    ///      type mismatch. ACTUAL (pinned here): an adaptive model deploys under a static config. The reused snUSD V2
-    ///      params (0.11e18, 0.11e18, 0.31e18) are ABI-identical to StaticCurveYDMParams, so the calldata decodes
-    function test_DIVERGENCE_21_StaticCurveYdmConfig_SilentlyDeploysAdaptiveV2Model() external {
+    /// @notice A StaticCurve YDM config deploys an actual StaticCurveYDM model for both the JT YDM and the LT LDM
+    /// @dev The template registers every YDM model's bytecode and selects the configured type by component id, so the
+    ///      deployed contract matches the config even though StaticCurveYDM.initializeYDMForMarket(uint64,uint64,uint64)
+    ///      shares its 4-byte selector with the V2 initializer. The reused snUSD params (0.11e18, 0.11e18, 0.31e18) are
+    ///      ABI-identical to StaticCurveYDMParams, so the static init calldata decodes and binds on the StaticCurve model
+    function test_StaticCurveYdmConfig_DeploysStaticCurveModel() external {
         _register();
 
         MarketDeploymentConfig.MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
         cfg.ydmType = DeployScript.YDMType.StaticCurve;
-        bytes memory p = abi.encode(deployScript.buildDayParams(cfg, keccak256("static-config-ships-adaptive"), PROTOCOL_FEE_RECIPIENT, address(0)));
+        bytes memory p = abi.encode(deployScript.buildDayParams(cfg, keccak256("static-config-deploys-static"), PROTOCOL_FEE_RECIPIENT, address(0)));
 
         vm.prank(DEPLOYER);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
 
-        // The deployed model is AdaptiveCurveYDM_V2, not the configured StaticCurveYDM. The YDMs embed their target
-        // utilization as an immutable, so runtime code is target-dependent — compare against reference instances built
-        // with the SAME targets the config carries, which isolates the model type as the only difference that matters.
-        AdaptiveCurveYDM_V2 refJtV2 = new AdaptiveCurveYDM_V2(cfg.jtYdmTargetUtilizationWAD);
-        AdaptiveCurveYDM_V2 refLtV2 = new AdaptiveCurveYDM_V2(cfg.ltYdmTargetUtilizationWAD);
-        StaticCurveYDM refStatic = new StaticCurveYDM(cfg.jtYdmTargetUtilizationWAD);
-        assertEq(r.ydm.codehash, address(refJtV2).codehash, "configured StaticCurve, but ydm is AdaptiveCurveYDM_V2");
-        assertEq(r.ltYdm.codehash, address(refLtV2).codehash, "configured StaticCurve, but ltYdm is AdaptiveCurveYDM_V2");
-        // And it is NOT the StaticCurve model the config asked for.
-        assertTrue(r.ydm.codehash != address(refStatic).codehash, "ydm must not be the configured StaticCurveYDM code");
+        // The deployed model is the configured StaticCurveYDM. The YDMs embed their target utilization as an immutable,
+        // so runtime code is target-dependent — compare against reference instances built with the SAME targets the
+        // config carries, which isolates the model type as the only difference that matters.
+        StaticCurveYDM refJtStatic = new StaticCurveYDM(cfg.jtYdmTargetUtilizationWAD);
+        StaticCurveYDM refLtStatic = new StaticCurveYDM(cfg.ltYdmTargetUtilizationWAD);
+        AdaptiveCurveYDM_V2 refV2 = new AdaptiveCurveYDM_V2(cfg.jtYdmTargetUtilizationWAD);
+        assertEq(r.ydm.codehash, address(refJtStatic).codehash, "configured StaticCurve, ydm must be StaticCurveYDM");
+        assertEq(r.ltYdm.codehash, address(refLtStatic).codehash, "configured StaticCurve, ltYdm must be StaticCurveYDM");
+        // And it is NOT the adaptive model that used to stand in for it under a static config.
+        assertTrue(r.ydm.codehash != address(refV2).codehash, "ydm must not be the adaptive V2 code");
     }
 
-    /// @notice An AdaptiveCurve_V1 YDM config fails loudly — the correct behavior the StaticCurve arm lacks. V1's
-    ///         initializeYDMForMarket(uint64,uint64) has a two-argument selector that does NOT match the V2 bytecode
-    ///         the template deploys, so initializing the V2 instance with V1 calldata hits no function and reverts,
-    ///         taking the whole deployment down. Only the selector-colliding StaticCurve config slips through silently
-    function test_RevertIf_AdaptiveV1YdmConfigSentToV2Bytecode() external {
+    /// @notice An AdaptiveCurve_V1 YDM config deploys an actual AdaptiveCurveYDM_V1 model for both the JT YDM and the LT LDM
+    /// @dev With every YDM model's bytecode registered and selected by component id, a V1 config deploys the V1 contract
+    ///      and its two-argument initializeYDMForMarket(uint64,uint64) binds on it, so the deployment succeeds rather than
+    ///      reverting against a stand-in V2 instance whose selector the V1 calldata could not match
+    function test_AdaptiveV1YdmConfig_DeploysAdaptiveV1Model() external {
         _register();
 
         MarketDeploymentConfig.MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
         cfg.ydmType = DeployScript.YDMType.AdaptiveCurve_V1;
-        // V1 takes only (target, full), so re-encode both curves as V1 params — a two-word init blob whose selector
-        // cannot bind on the deployed V2 instance.
+        // V1 takes only (target, full), so re-encode both curves as V1 params — a two-word init blob that binds on the V1 model
         bytes memory v1Params = abi.encode(DeployScript.AdaptiveCurveYDM_V1_Params({ yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18 }));
         cfg.ydmSpecificParams = v1Params;
         cfg.ltYdmSpecificParams = v1Params;
-        bytes memory p = abi.encode(deployScript.buildDayParams(cfg, keccak256("v1-config-reverts"), PROTOCOL_FEE_RECIPIENT, address(0)));
+        bytes memory p = abi.encode(deployScript.buildDayParams(cfg, keccak256("v1-config-deploys-v1"), PROTOCOL_FEE_RECIPIENT, address(0)));
 
         vm.prank(DEPLOYER);
-        vm.expectRevert();
-        factory.executeMarketDeployment(address(template), p);
+        IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
+
+        // The deployed model is the configured AdaptiveCurveYDM_V1, compared against references built with the same targets
+        AdaptiveCurveYDM_V1 refJtV1 = new AdaptiveCurveYDM_V1(cfg.jtYdmTargetUtilizationWAD);
+        AdaptiveCurveYDM_V1 refLtV1 = new AdaptiveCurveYDM_V1(cfg.ltYdmTargetUtilizationWAD);
+        assertEq(r.ydm.codehash, address(refJtV1).codehash, "configured AdaptiveCurve_V1, ydm must be AdaptiveCurveYDM_V1");
+        assertEq(r.ltYdm.codehash, address(refLtV1).codehash, "configured AdaptiveCurve_V1, ltYdm must be AdaptiveCurveYDM_V1");
     }
 
     // ─── internal ───

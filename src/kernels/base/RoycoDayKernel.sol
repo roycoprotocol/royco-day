@@ -544,8 +544,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         // Batch screen the involved accounts against the market's blacklist
         BlacklistLogic._enforceNotBlacklisted(_getRoycoDayKernelStorage(), _caller, _from, _to);
 
-        // If transferring shares, ensure that the recipient is a whitelisted LP for the tranche
-        if (_to != address(0) && ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER) {
+        // If transferring shares, ensure that the recipient is a whitelisted LP for the tranche or the kernel (Liquidity premium ST share mints require this)
+        if (_to != address(0) && _to != address(this) && ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER) {
             // It is assumed that the sender is already a whitelisted LP
             address authority = authority();
             // Check if the to address can call the deposit function on the tranche

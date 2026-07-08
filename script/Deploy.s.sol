@@ -39,7 +39,9 @@ import {
     COMPONENT_ID_JUNIOR_TRANCHE_IMPL,
     COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL,
     COMPONENT_ID_SENIOR_TRANCHE_IMPL,
+    COMPONENT_ID_YDM_ADAPTIVE_CURVE_V1,
     COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2,
+    COMPONENT_ID_YDM_STATIC_CURVE,
     TAG_ACCOUNTANT_IMPL,
     TAG_JT_IMPL,
     TAG_KERNEL_IMPL,
@@ -259,7 +261,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         address template = _getOrRegisterTemplate(factory, _config.kernelType);
 
         // 4. Deploy the market via the template.
-        bytes32 marketId = keccak256(abi.encodePacked(_config.seniorTrancheName, _config.juniorTrancheName, block.timestamp, block.chainid));
+        bytes32 marketId = keccak256(abi.encode(_config.seniorTrancheName, _config.juniorTrancheName, block.timestamp, block.chainid));
         BalancerV3DeploymentTemplate.DayParams memory params = _buildDayParams(_config, marketId, _protocolFeeRecipient, roycoBlacklist);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(template, abi.encode(params));
 
@@ -427,8 +429,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         pure
         returns (bytes32[] memory ids, bytes[] memory codes)
     {
-        ids = new bytes32[](7);
-        codes = new bytes[](7);
+        ids = new bytes32[](9);
+        codes = new bytes[](9);
         ids[0] = COMPONENT_ID_SENIOR_TRANCHE_IMPL;
         codes[0] = type(RoycoSeniorTranche).creationCode;
         ids[1] = COMPONENT_ID_JUNIOR_TRANCHE_IMPL;
@@ -437,12 +439,16 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         codes[2] = type(RoycoLiquidityTranche).creationCode;
         ids[3] = COMPONENT_ID_ACCOUNTANT_IMPL;
         codes[3] = type(RoycoDayAccountant).creationCode;
-        ids[4] = COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2;
-        codes[4] = type(AdaptiveCurveYDM_V2).creationCode;
-        ids[5] = _kernelComponentId;
-        codes[5] = _kernelCreationCode;
-        ids[6] = COMPONENT_ID_DAY_BALANCER_HOOKS;
-        codes[6] = type(RoycoDayBalancerV3Hooks).creationCode;
+        ids[4] = COMPONENT_ID_YDM_STATIC_CURVE;
+        codes[4] = type(StaticCurveYDM).creationCode;
+        ids[5] = COMPONENT_ID_YDM_ADAPTIVE_CURVE_V1;
+        codes[5] = type(AdaptiveCurveYDM_V1).creationCode;
+        ids[6] = COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2;
+        codes[6] = type(AdaptiveCurveYDM_V2).creationCode;
+        ids[7] = _kernelComponentId;
+        codes[7] = _kernelCreationCode;
+        ids[8] = COMPONENT_ID_DAY_BALANCER_HOOKS;
+        codes[8] = type(RoycoDayBalancerV3Hooks).creationCode;
     }
 
     /// @notice Public helper: the component set for the Day ERC4626-Chainlink-Balancer kernel template (test/tooling use).
@@ -545,6 +551,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         params.gyroECLPPoolParams = _config.gyroECLPPoolParams;
         params.jtYDMTargetUtilizationWAD = _config.jtYdmTargetUtilizationWAD;
         params.ltYDMTargetUtilizationWAD = _config.ltYdmTargetUtilizationWAD;
+        // Select the YDM bytecode the template deploys from the configured model, so the deployed contract is the configured type (not a stand-in that shares a selector)
+        params.ydmComponentId = _ydmComponentId(_config.ydmType);
         params.kernelSpecificParams = _config.kernelSpecificParams; // template KernelParams are field-identical to the config blobs
         params.protocolFeeRecipient = _protocolFeeRecipient;
         params.stSelfLiquidationBonusWAD = _config.stSelfLiquidationBonusWAD;
@@ -573,6 +581,15 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         } else {
             revert UnsupportedYDMType(_ydmType);
         }
+    }
+
+    /// @notice Maps a YDM model to the component id whose registered bytecode the template deploys for it
+    /// @dev Kept in lockstep with `_buildYDMInitializationData` so the deployed contract type and its initialization data always agree
+    function _ydmComponentId(YDMType _ydmType) internal pure returns (bytes32 ydmComponentId) {
+        if (_ydmType == YDMType.StaticCurve) return COMPONENT_ID_YDM_STATIC_CURVE;
+        if (_ydmType == YDMType.AdaptiveCurve_V1) return COMPONENT_ID_YDM_ADAPTIVE_CURVE_V1;
+        if (_ydmType == YDMType.AdaptiveCurve_V2) return COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2;
+        revert UnsupportedYDMType(_ydmType);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

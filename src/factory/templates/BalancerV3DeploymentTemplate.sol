@@ -120,6 +120,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
      * @custom:field gyroECLPPoolParams - The Gyro E-CLP pool params for the liquidity tranche's `{ST_share, quote}` pool
      * @custom:field jtYDMTargetUtilizationWAD - The junior tranche YDM's target coverage utilization, scaled to WAD
      * @custom:field ltYDMTargetUtilizationWAD - The liquidity tranche LDM's target liquidity utilization, scaled to WAD
+     * @custom:field ydmComponentId - The component id selecting the YDM model bytecode deployed for both the JT YDM and the LT LDM
      * @custom:field protocolFeeRecipient - The market's protocol fee recipient
      * @custom:field stSelfLiquidationBonusWAD - The ST self-liquidation bonus remitted to redeeming ST LPs once the liquidation coverage threshold is breached, scaled to WAD
      * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables screening)
@@ -138,6 +139,7 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
         GyroECLPPoolParams gyroECLPPoolParams;
         uint256 jtYDMTargetUtilizationWAD;
         uint256 ltYDMTargetUtilizationWAD;
+        bytes32 ydmComponentId;
         address protocolFeeRecipient;
         uint64 stSelfLiquidationBonusWAD;
         address roycoBlacklist;
@@ -262,8 +264,8 @@ abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
 
         // 2. Deploy the JT YDM (driven by coverage utilization) and the LT YDM / LDM (driven by liquidity utilization), each
         //    pinning its own target-utilization curve kink
-        (result.ydm,) = _deployYDM(_marketComponentSalt(p.marketId, TAG_YDM), p.jtYDMTargetUtilizationWAD);
-        (result.ltYdm,) = _deployYDM(_marketComponentSalt(p.marketId, TAG_LDM), p.ltYDMTargetUtilizationWAD);
+        (result.ydm,) = _deployYDM(_marketComponentSalt(p.marketId, TAG_YDM), p.jtYDMTargetUtilizationWAD, p.ydmComponentId);
+        (result.ltYdm,) = _deployYDM(_marketComponentSalt(p.marketId, TAG_LDM), p.ltYDMTargetUtilizationWAD, p.ydmComponentId);
 
         // 3. Deploy ST impl + proxy first — the pool needs ST_PROXY as one of its tokens
         address stImpl = _deploySeniorTrancheImpl(p.stAsset, result.kernel, _marketComponentSalt(p.marketId, TAG_ST_IMPL));

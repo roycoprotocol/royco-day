@@ -147,10 +147,7 @@ library ValuationLogic {
     }
 
     /**
-     * @notice Returns a tranche share rate: the NAV-unit value of one whole tranche share at the given supply and effective NAV
-     * @dev A tranche-agnostic share-rate primitive. Its sole consumer today is the senior share rate, the only tranche leg a liquidity
-     *      pool prices, shared by the sync's cache write and the quoter's cache-miss preview so both resolve an identical rate. It values
-     *      one whole share (WAD) against the tranche effective NAV over the tranche supply, rounding down so the rate is never overstated
+     * @notice Returns a tranche share rate: the NAV-unit value of one whole tranche share at the given tranche's total share supply and effective NAV
      * @param _trancheTotalSupply The total tranche share supply the rate is computed against (for the senior tranche, the post-mint supply)
      * @param _trancheEffectiveNAV The tranche's effective NAV backing all of its shares
      * @return rate The NAV-unit value of one whole tranche share, rounded down

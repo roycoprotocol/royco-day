@@ -36,6 +36,9 @@ library Cache {
     /// @dev The top bit set on a transient cache slot to mark it populated, so a set slot is distinguishable from an unset one
     uint256 private constant CACHE_SET_MASK = (1 << 255);
 
+    /// @notice Thrown when a value to cache is not strictly less than 2^255, which would collide with the populated marker and read back corrupted
+    error CACHE_VALUE_OUT_OF_DOMAIN();
+
     /**
      * @notice Reads a value from the unified transient cache
      * @dev The top bit (CACHE_SET_MASK) marks a populated slot, so an unset (zero) slot reads as a miss
@@ -57,6 +60,8 @@ library Cache {
      * @param _value The value to cache
      */
     function _write(CacheKey _key, uint256 _value) internal {
+        // The value must be strictly less than 2^255 so it cannot collide with the populated marker, reject an out-of-domain value loudly rather than reading it back corrupted
+        require(_value < CACHE_SET_MASK, CACHE_VALUE_OUT_OF_DOMAIN());
         _getTransientStorageSlot(_key).asUint256().tstore((_value | CACHE_SET_MASK));
     }
 
