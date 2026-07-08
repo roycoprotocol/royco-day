@@ -766,8 +766,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         twLTYieldShareAccruedWAD = ($.twLTYieldShareAccruedWAD += uint192(ltYieldShareWAD * elapsed));
         $.lastYieldShareAccrualTimestamp = uint32(block.timestamp);
 
-        emit JuniorTrancheYieldShareAccrued(jtYieldShareWAD, twJTYieldShareAccruedWAD);
-        emit LiquidityTrancheYieldShareAccrued(ltYieldShareWAD, twLTYieldShareAccruedWAD);
+        emit YieldSharesAccrued(jtYieldShareWAD, twJTYieldShareAccruedWAD, ltYieldShareWAD, twLTYieldShareAccruedWAD);
     }
 
     /**
