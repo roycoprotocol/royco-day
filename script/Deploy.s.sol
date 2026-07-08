@@ -33,8 +33,10 @@ import {
     SYNC_ROLE
 } from "../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../src/factory/RoycoFactory.sol";
-import { BalancerV3DeploymentTemplate } from "../src/factory/templates/BalancerV3DeploymentTemplate.sol";
-import { DayIdenticalERC4626ChainlinkDeploymentTemplate } from "../src/factory/templates/DayIdenticalERC4626ChainlinkDeploymentTemplate.sol";
+import {
+    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
+} from "../src/factory/templates/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
+import { RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate } from "../src/factory/templates/RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate.sol";
 import { BaseDeploymentTemplate } from "../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import {
     COMPONENT_ID_ACCOUNTANT_IMPL,
@@ -45,11 +47,7 @@ import {
     COMPONENT_ID_SENIOR_TRANCHE_IMPL,
     COMPONENT_ID_YDM_ADAPTIVE_CURVE_V1,
     COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2,
-    COMPONENT_ID_YDM_STATIC_CURVE,
-    TAG_ACCOUNTANT_IMPL,
-    TAG_JT_IMPL,
-    TAG_KERNEL_IMPL,
-    TAG_ST_IMPL
+    COMPONENT_ID_YDM_STATIC_CURVE
 } from "../src/factory/templates/base/Components.sol";
 import { IRoycoDayAccountant } from "../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../src/interfaces/IRoycoDayKernel.sol";
@@ -294,7 +292,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
         // 4. Deploy the market via the template.
         bytes32 marketId = keccak256(abi.encode(_config.seniorTrancheName, _config.juniorTrancheName, block.timestamp, block.chainid));
-        BalancerV3DeploymentTemplate.DayParams memory params = _buildDayParams(_config, marketId, _protocolFeeRecipient, roycoBlacklist);
+        RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate.DayParams memory params = _buildDayParams(_config, marketId, _protocolFeeRecipient, roycoBlacklist);
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(template, abi.encode(params));
 
         // 5. Target admin delay on every proxy this deployment created (the factory proxy gets its delay when the
@@ -305,8 +303,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         //    _applyRoleGraph); the root must then schedule setTargetAdminDelay itself for the new market's proxies.
         (bool deployerIsAdmin,) = accessManager.hasRole(ADMIN_ROLE, deployer);
         if (deployerIsAdmin) {
-            BalancerV3DeploymentTemplate.ExtraContractsDeployedResult memory extraContracts =
-                abi.decode(r.extras, (BalancerV3DeploymentTemplate.ExtraContractsDeployedResult));
+            RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate.ExtraContractsDeployedResult memory extraContracts =
+                abi.decode(r.extras, (RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate.ExtraContractsDeployedResult));
             address[7] memory marketProxies =
                 [roycoBlacklist, r.seniorTranche, r.juniorTranche, r.liquidityTranche, r.kernel, r.accountant, extraContracts.balancerHook];
             for (uint256 i; i < marketProxies.length; ++i) {
@@ -584,7 +582,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     )
         public
         pure
-        returns (BalancerV3DeploymentTemplate.DayParams memory)
+        returns (RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate.DayParams memory)
     {
         return _buildDayParams(_config, _marketId, _protocolFeeRecipient, _roycoBlacklist);
     }
@@ -605,7 +603,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
         if (_kernelType == KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel) {
             return (
-                address(new DayIdenticalERC4626ChainlinkDeploymentTemplate(_factory, poolFactory, eclpLPOracleFactory)),
+                address(
+                    new Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(_factory, poolFactory, eclpLPOracleFactory)
+                ),
                 COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK,
                 type(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode
             );
@@ -626,7 +626,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     )
         internal
         pure
-        returns (BalancerV3DeploymentTemplate.DayParams memory params)
+        returns (RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate.DayParams memory params)
     {
         params.marketId = _marketId;
 

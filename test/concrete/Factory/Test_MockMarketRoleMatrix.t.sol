@@ -16,7 +16,7 @@ import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 /**
  * @title Test_MockMarketRoleMatrix
  * @notice Always-running regression pin on the deployed-market access-control matrix. The production
- *         BalancerV3DeploymentTemplate's role wiring is only asserted in the RPC-gated fork factory suite, so a
+ *         RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate's role wiring is only asserted in the RPC-gated fork factory suite, so a
  *         standard CI run leaves it unverified; DayMarketTestBase hand-mirrors that wiring
  *         (`_wireTargetFunctionRoles`/`_wireRoleGrants`), and this pins the mirror against drift — including the
  *         grant set that lets a whitelist-enforcing market mint fee and premium shares.

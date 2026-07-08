@@ -11,29 +11,29 @@ import {
 import { IdenticalAssets_ST_JT_ChainlinkOracle_Quoter } from "../../kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol";
 import { IdenticalAssets_ST_JT_Oracle_Quoter } from "../../kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_Oracle_Quoter.sol";
 import { ADMIN_CONVERSION_RATE_ROLE, ADMIN_ORACLE_QUOTER_ROLE } from "../RolesConfiguration.sol";
-import { BalancerV3DeploymentTemplate } from "./BalancerV3DeploymentTemplate.sol";
+import { RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate } from "./RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate.sol";
 import { COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK } from "./base/Components.sol";
 
 /**
- * @title DayIdenticalERC4626ChainlinkDeploymentTemplate
+ * @title Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
  * @notice Concrete Royco Day deployment template for a market whose ST/JT kernel is
  *         `Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel` and whose LT holds a Gyro E-CLP pool position
  */
-contract DayIdenticalERC4626ChainlinkDeploymentTemplate is BalancerV3DeploymentTemplate {
+contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate is RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate {
     constructor(
         IRoycoFactory _factory,
         GyroECLPPoolFactory _balancerV3PoolFactory,
         ILPOracleFactoryBase _eclpLPOracleFactory
     )
-        BalancerV3DeploymentTemplate(_factory, _balancerV3PoolFactory, _eclpLPOracleFactory)
+        RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate(_factory, _balancerV3PoolFactory, _eclpLPOracleFactory)
     { }
 
-    /// @inheritdoc BalancerV3DeploymentTemplate
-    function _kernelComponentId() internal pure override(BalancerV3DeploymentTemplate) returns (bytes32) {
+    /// @inheritdoc RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate
+    function _kernelComponentId() internal pure override(RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate) returns (bytes32) {
         return COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK;
     }
 
-    /// @inheritdoc BalancerV3DeploymentTemplate
+    /// @inheritdoc RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate
     function _kernelInitData(
         IRoycoDayKernel.RoycoDayKernelInitParams memory _kip,
         bytes memory _kernelSpecificParams,
@@ -41,7 +41,7 @@ contract DayIdenticalERC4626ChainlinkDeploymentTemplate is BalancerV3DeploymentT
     )
         internal
         pure
-        override(BalancerV3DeploymentTemplate)
+        override(RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate)
         returns (bytes memory)
     {
         Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.KernelSpecificInitParams memory qp =
@@ -52,14 +52,14 @@ contract DayIdenticalERC4626ChainlinkDeploymentTemplate is BalancerV3DeploymentT
     }
 
     /**
-     * @inheritdoc BalancerV3DeploymentTemplate
+     * @inheritdoc RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate
      * @dev Extends the base's LT-quoter setters with this kernel family's ST/JT Chainlink quoter setters. The oracle
      *      source setters (setChainlinkOracle, setSequencerUptimeFeed) are operational under ADMIN_ORACLE_QUOTER_ROLE;
      *      the direct conversion-rate override (setConversionRate) is a pricing change, bound to ADMIN_CONVERSION_RATE_ROLE
      *      at the long delay. (Every restricted selector must be explicitly bound: an unbound selector
      *      silently defaults to ADMIN_ROLE under OZ AccessManager.)
      */
-    function _kernelQuoterBinding(address _kernel) internal view override(BalancerV3DeploymentTemplate) returns (TargetBinding memory) {
+    function _kernelQuoterBinding(address _kernel) internal view override(RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate) returns (TargetBinding memory) {
         TargetBinding memory base = super._kernelQuoterBinding(_kernel);
 
         bytes4[] memory s = new bytes4[](base.selectors.length + 3);
