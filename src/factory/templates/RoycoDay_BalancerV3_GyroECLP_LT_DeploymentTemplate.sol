@@ -65,7 +65,7 @@ import {
 } from "./base/Components.sol";
 
 /**
- * @title BalancerV3DeploymentTemplate
+ * @title RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate
  * @author Ankur Dubey, Shivaansh Kapoor
  * @notice Abstract base for every Royco Day market deployment template (ST + JT + LT).
  * @dev The market's Gyro E-CLP pool is registered with no hook. An external pool operation needs no pre-operation
@@ -74,7 +74,7 @@ import {
  *      check, the redemption, and the premium read the manipulation-resistant BPT oracle and the committed checkpoint.
  *      So the pool is created with `address(0)` for its hooks argument, and no sync role is granted to any pool contract.
  */
-abstract contract BalancerV3DeploymentTemplate is BaseDeploymentTemplate {
+abstract contract RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTemplate {
     // ═══════════════════════════════════════════════════════════════════════════
     // PARAM STRUCTS
     // ═══════════════════════════════════════════════════════════════════════════
