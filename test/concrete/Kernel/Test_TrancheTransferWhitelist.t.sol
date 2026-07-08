@@ -26,8 +26,9 @@ contract Test_TrancheTransferWhitelist_Kernel is DayMarketTestBase {
     function setUp() public {
         // Every test in this suite runs on a market that enforces the tranche-transfer whitelist. All seeding is
         // done at flat PnL: a senior gain would make the next sync mint the liquidity premium as senior shares to
-        // the kernel, which this same whitelist hook rejects (pinned by test_DIVERGENCE_11 in
-        // Test_PremiumMintDivergences), and that unrelated brick would mask what these tests isolate
+        // the kernel, which this same whitelist hook allows (covered by
+        // test_whitelistMarket_premiumMintPassesWhitelist_syncsCleanlyAfterGain in
+        // Accountant/Test_WhitelistPremiumMint.t.sol), and that unrelated flow would mask what these tests isolate
         MarketParamsConfig memory p = defaultParams();
         p.enforceWhitelistOnTransfer = true;
         _deployMarket(cellA(), p);
@@ -108,8 +109,8 @@ contract Test_TrancheTransferWhitelist_Kernel is DayMarketTestBase {
      *         address(0), which holds no role, so the hook must skip the receiver whitelist for burns — if it were
      *         consulted, every redemption on an enforcing market would revert and holders could never exit
      * @dev The market is seeded at flat PnL so the redemption's pre-op sync books no senior gain: a gain would
-     *      mint the liquidity premium as senior shares to the kernel, and that mint's own whitelist rejection
-     *      (a separate, known behavior pinned in Test_PremiumMintDivergences) would mask this burn-path result
+     *      mint the liquidity premium as senior shares to the kernel, and that mint's own whitelist path
+     *      (a separate behavior covered by Accountant/Test_WhitelistPremiumMint.t.sol) would mask this burn-path result
      */
     function test_Redeem_SucceedsOnWhitelistEnforcingMarket_BurnSkipsReceiverWhitelist() public {
         // Seed 100e18 ST / 30e18 JT vault shares at the flat 1.0 rate and 1.0 feed, so 1 vault share == 1 NAV

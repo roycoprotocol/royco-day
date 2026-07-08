@@ -331,7 +331,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         }
 
         // Enforce the liquidity requirement for operations that can violate it (raise the senior exposure or reduce the depth of the liquidity tranche)
-        // An LT
         if (_op == Operation.ST_DEPOSIT || _op == Operation.LT_DEPOSIT || _op == Operation.LT_REDEEM) {
             require(state.liquidityUtilizationWAD <= WAD, LIQUIDITY_REQUIREMENT_VIOLATED());
         }

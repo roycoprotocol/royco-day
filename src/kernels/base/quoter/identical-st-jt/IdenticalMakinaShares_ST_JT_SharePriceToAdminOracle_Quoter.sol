@@ -26,6 +26,12 @@ abstract contract IdenticalMakinaShares_ST_JT_SharePriceToAdminOracle_Quoter is 
     /// @dev Thrown when the tranche asset is not the machine's share token
     error TRANCHE_ASSET_MUST_BE_MACHINE_SHARE();
 
+    /// @notice The quoter-specific initialization parameters
+    /// @custom:field initialConversionRateWAD - The initial conversion rate as defined by the oracle, scaled to WAD precision
+    struct ST_JT_QuoterSpecificParams {
+        uint256 initialConversionRateWAD;
+    }
+
     /// @notice Constructs the Makina machine shares oracle quoter
     /// @param _makinaMachine The Makina machine for the Royco market's tranche tokens
     constructor(address _makinaMachine) {
@@ -44,12 +50,6 @@ abstract contract IdenticalMakinaShares_ST_JT_SharePriceToAdminOracle_Quoter is 
         // OUTPUT_DECIMALS = WAD_DECIMALS
         MACHINE_SHARES_TO_CONVERT_TO_ASSETS =
             10 ** (WAD_DECIMALS + IERC20Metadata(ST_ASSET).decimals() - IERC20Metadata(IMachine(_makinaMachine).accountingToken()).decimals());
-    }
-
-    /// @notice The quoter-specific initialization parameters
-    /// @custom:field initialConversionRateWAD - The initial conversion rate as defined by the oracle, scaled to WAD precision
-    struct ST_JT_QuoterSpecificParams {
-        uint256 initialConversionRateWAD;
     }
 
     /// @notice Initializes the identical Makina machine shares admin oracle quoter and the base identical assets oracle quoter
@@ -76,6 +76,10 @@ abstract contract IdenticalMakinaShares_ST_JT_SharePriceToAdminOracle_Quoter is 
 
         // Retrieve the machine's accounting asset to NAV unit conversion rate from the admin set oracle, scaled to WAD precision
         uint256 accountingAssetToNAVUnitConversionRateWAD = getStoredConversionRateWAD();
+        // If the stored conversion rate is the sentinel value, query the oracle for the rate
+        if (accountingAssetToNAVUnitConversionRateWAD == SENTINEL_CONVERSION_RATE) {
+            accountingAssetToNAVUnitConversionRateWAD = _getConversionRateFromOracleWAD();
+        }
 
         // Calculate the conversion rate from tranche to NAV units, scaled to WAD precision
         trancheToNAVUnitConversionRateWAD =

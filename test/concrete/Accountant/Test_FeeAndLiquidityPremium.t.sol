@@ -341,23 +341,20 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     }
 
     /*//////////////////////////////////////////////////////////////////////
-                ZERO-BPT-SLICE LT REDEMPTION (DIVERGENCE PIN)
+                ZERO-BPT-SLICE LT REDEMPTION
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * DIVERGENCE 3: an in-kind LT redemption whose proportional BPT slice floors to zero NAV while the idle
-     * premium ST-share slice is positive still reverts. Handing idle ST shares to the redeemer moves no raw
-     * NAV — only share ownership shifts, no assets leave the vault — so the accountant sees deltaLTRawNAV == 0
-     * AND totalSTAndJTRedemptionNAV == 0, and the LT_REDEEM op-shape require (RoycoDayAccountant.sol:263)
-     * rejects the operation regardless of the enforcement flag. The zero-BPT-delta shape is admitted only when
-     * the redemption also unwinds raw value (positive total, the leg pinned by
+     * An in-kind LT redemption whose proportional BPT slice floors to zero NAV while the idle premium ST-share
+     * slice is positive still reverts. Handing idle ST shares to the redeemer moves no raw NAV — only share
+     * ownership shifts, no assets leave the vault — so the accountant sees deltaLTRawNAV == 0 AND
+     * totalSTAndJTRedemptionNAV == 0, and the LT_REDEEM op-shape require (RoycoDayAccountant.sol:263) rejects
+     * the operation regardless of the enforcement flag. The zero-BPT-delta shape is admitted only when the
+     * redemption also unwinds raw value (positive total, the leg covered by
      * test_PostOp_LTRedeem_zeroLTDeltaWithPositiveTotalPasses in Test_PostOpSync_Accountant), so the pure
      * idle-share hand-off remains blocked.
-     * Intended behavior: staged premium is claimable, not forfeited — a redeemer whose BPT slice floors to
-     * zero should still succeed and receive its pro-rata idle ST shares directly, so no premium is stranded.
-     * Pinned here as the current (diverging) revert
      */
-    function test_DIVERGENCE_3_ltRedeemZeroBPTSliceWithIdleShares_revertsInvalidPostOpState() public {
+    function test_LTRedeem_ZeroBPTSliceWithIdleSharesOnly_RevertsInvalidPostOpState() public {
         _seedSymmetric(1000e18, 200e18, 100e18);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_REDEEM));
         kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(uint256(1000e18)), toNAVUnits(uint256(200e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, false);

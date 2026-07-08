@@ -11,7 +11,7 @@ import {
 import { IERC20 } from "../../../../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "../../../../../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IRoycoDayKernel } from "../../../../../../interfaces/IRoycoDayKernel.sol";
-import { WAD } from "../../../../../../libraries/Constants.sol";
+import { WAD, ZERO_TRANCHE_UNITS } from "../../../../../../libraries/Constants.sol";
 import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toUint256 } from "../../../../../../libraries/Units.sol";
 import { ValuationLogic } from "../../../../../../libraries/logic/ValuationLogic.sol";
 import { IBalancerV3VenueCallbacks } from "../interfaces/IBalancerV3VenueCallbacks.sol";
@@ -182,6 +182,8 @@ library BalancerV3VenueLogic {
         // Mark that senior NAV to its fair BPT at the manipulation-resistant oracle, discounted by the max tolerated slippage
         TRANCHE_UNIT minLTAssetsOut = IRoycoDayKernel(address(this)).ltConvertNAVUnitsToTrancheUnits(stSharesToReinvestNAV)
             .mulDiv((WAD - _maxReinvestmentSlippageWAD), WAD, Math.Rounding.Ceil);
+        // Preemptively return if their exists no floor on the reinvested value
+        if (minLTAssetsOut == ZERO_TRANCHE_UNITS) return;
 
         // Single-sided add the ST shares through a low-level call into the Vault's callback
         // The inner unlock dispatches addBalancerV3Liquidity, which mints the BPT bounded by minLTAssetsOut and settles the shares in
@@ -192,7 +194,7 @@ library BalancerV3VenueLogic {
                     (abi.encodeCall(IBalancerV3VenueCallbacks.addBalancerV3Liquidity, (false, stSharesToReinvest, uint256(0), minLTAssetsOut)))
                 )
             );
-        // On a breached gate (or any add revert) the premium shares remain idle: no state mutated here, the inner frame rolled back
+        // On a breached gate, the premium shares remain idle: no state mutated here, the inner frame rolled back
         if (!reinvestmentSucceeded) {
             emit IRoycoDayKernel.LiquidityPremiumReinvestmentFailed(stSharesToReinvest, minLTAssetsOut, callbackReturnData);
             return;

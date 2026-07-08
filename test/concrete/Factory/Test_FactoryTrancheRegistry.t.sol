@@ -47,18 +47,15 @@ contract Test_FactoryTrancheRegistry is Test {
 
     /**
      * @notice A template result with `liquidityTranche == address(0)` (the documented shape for a market without a
-     *         liquidity tranche) registers the ZERO ADDRESS as a tranche key, so `getMarket(address(0))` stops
-     *         returning the documented all-zeros unknown-tranche sentinel and instead resolves a live market.
-     * @dev CURRENT: `executeMarketDeployment` writes all three result tranches into `trancheToKernel`
-     *      unconditionally, so `trancheToKernel[address(0)] = kernel` lands whenever any tranche member is zero,
-     *      and `getMarket(address(0))` — whose unknown-tranche branch only fires when the mapping is EMPTY — reads
-     *      the kernel's tranche getters and returns nonzero components for a key that names no tranche.
-     *      EXPECTED: zero tranche members are rejected (or skipped), leaving `address(0)` unmapped so the
-     *      all-zeros sentinel holds for it. Severity is bounded by the trust boundary: only an admin-registered
-     *      template can reach this write, so the poisoned key requires a template that emits a zero member —
-     *      but that is exactly the advertised ST/JT-only result shape, not a malicious one.
+     *         liquidity tranche) leaves the ZERO ADDRESS unmapped as a tranche key, so `getMarket(address(0))`
+     *         keeps returning the documented all-zeros unknown-tranche sentinel.
+     * @dev `executeMarketDeployment` skips the registry write for a zero tranche member, so
+     *      `trancheToKernel[address(0)]` stays unset and `getMarket(address(0))` — whose unknown-tranche branch
+     *      fires when the mapping is EMPTY — returns all zeros for a key that names no tranche. Severity context:
+     *      only an admin-registered template can reach this write, and a zero member is exactly the advertised
+     *      ST/JT-only result shape, not a malicious one.
      */
-    function test_DIVERGENCE_22_ZeroTrancheFromTemplate_PoisonsZeroAddressRegistryKeyAndGetMarketSentinel() external {
+    function test_ZeroTrancheFromTemplate_SkipsRegistryWrite_PreservesZeroAddressSentinel() external {
         address seniorTranche = makeAddr("SENIOR_TRANCHE");
         address juniorTranche = makeAddr("JUNIOR_TRANCHE");
         // The kernel stand-in reports the same ST/JT set the result carries, and no liquidity tranche.
@@ -87,12 +84,11 @@ contract Test_FactoryTrancheRegistry is Test {
         assertEq(factory.trancheToKernel(seniorTranche), address(kernel), "senior key -> kernel");
         assertEq(factory.trancheToKernel(juniorTranche), address(kernel), "junior key -> kernel");
 
-        // DIVERGENCE: the zero-tranche write poisoned the zero-address key. `trancheToKernel(address(0))` should be
-        // address(0) (no tranche lives at the zero address). FIXED: the zero-tranche registry write is skipped, so
-        // the zero-address key is never poisoned.
+        // The zero-tranche registry write is skipped, so the zero-address key is never poisoned:
+        // `trancheToKernel(address(0))` stays address(0), as no tranche lives at the zero address.
         assertEq(factory.trancheToKernel(address(0)), address(0), "zero-address key must not be poisoned");
 
-        // FIXED (consequence): `getMarket(address(0))` hits its unknown-tranche branch and returns all zeros.
+        // Consequently `getMarket(address(0))` hits its unknown-tranche branch and returns all zeros.
         (address st, address jt, address lt, address k) = factory.getMarket(address(0));
         assertEq(st, address(0), "sentinel intact: senior does not resolve for the zero key");
         assertEq(jt, address(0), "sentinel intact: junior does not resolve for the zero key");

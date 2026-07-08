@@ -145,4 +145,14 @@ library ValuationLogic {
         if (_totalSupply == 0) return ZERO_NAV_UNITS;
         return _totalValue.mulDiv(_shares, _totalSupply, _rounding);
     }
+
+    /**
+     * @notice Returns a tranche share rate: the NAV-unit value of one whole tranche share at the given tranche's total share supply and effective NAV
+     * @param _trancheTotalSupply The total tranche share supply the rate is computed against (for the senior tranche, the post-mint supply)
+     * @param _trancheEffectiveNAV The tranche's effective NAV backing all of its shares
+     * @return rate The NAV-unit value of one whole tranche share, rounded down
+     */
+    function _computeTrancheShareRate(uint256 _trancheTotalSupply, NAV_UNIT _trancheEffectiveNAV) internal pure returns (NAV_UNIT rate) {
+        return _convertToValue(WAD, _trancheTotalSupply, _trancheEffectiveNAV, Math.Rounding.Floor);
+    }
 }

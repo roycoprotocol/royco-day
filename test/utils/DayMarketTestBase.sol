@@ -842,7 +842,7 @@ abstract contract DayMarketTestBase is Assertions {
         accessManager.grantRole(SYNC_ROLE, address(accountant), 0);
         accessManager.grantRole(BURNER_ROLE, address(kernel), 0);
 
-        // Mirror the template's Divergence-11 fix: the kernel (premium senior-share mint recipient) and the protocol
+        // Mirror the template's role wiring: the kernel (premium senior-share mint recipient) and the protocol
         // fee recipient (fee-share mint recipient) hold the tranche LP roles so a whitelist-enforcing market does
         // not brick on the first fee/premium mint.
         accessManager.grantRole(ST_LP_ROLE, address(kernel), 0);

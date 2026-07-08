@@ -174,44 +174,36 @@ contract Test_DeployScriptConfig is Test {
     }
 
     /**
-     * @notice CURRENT behavior: DeployScript.deploy derives the marketId as
-     *         keccak256(abi.encodePacked(seniorTrancheName, juniorTrancheName, block.timestamp, block.chainid)).
-     *         abi.encodePacked concatenates the two dynamic strings with no length prefix and no separator, so the
-     *         boundary between them is ambiguous: ("Senior AB", "C-JT") and ("Senior A", "BC-JT") both pack to the
-     *         bytes of "Senior ABC-JT" and yield the SAME marketId. The same config rerun in the same block (same
-     *         timestamp, same chain) also yields the same id. EXPECTED behavior: an injective derivation, abi.encode
-     *         (length-prefixed, so string boundaries survive) plus a caller nonce (so reruns differ). Blast radius of
-     *         the collision: the marketId seeds every CREATE2 component salt, so a colliding second deployment hits an
-     *         already-deployed component address and reverts MARKET_COMPONENT_ALREADY_DEPLOYED atomically. It is a
-     *         loud deployment foot-gun, never silent aliasing of one market's components onto another
+     * @notice DeployScript.deploy derives the marketId as
+     *         keccak256(abi.encode(seniorTrancheName, juniorTrancheName, block.timestamp, block.chainid)). abi.encode
+     *         length-prefixes each dynamic string, so a shifted boundary between the two tranche names cannot alias two
+     *         distinct configs to one id: ("Senior AB", "C-JT") and ("Senior A", "BC-JT") derive different ids. An
+     *         identical config rerun in the same block still derives the same id (the derivation carries no caller
+     *         nonce), but that is a loud foot-gun, not silent aliasing: the marketId seeds every CREATE2 component salt,
+     *         so a colliding second deployment hits an already-deployed component address and reverts
+     *         MARKET_COMPONENT_ALREADY_DEPLOYED atomically
      */
-    function test_DIVERGENCE_21_MarketIdDerivation_CollidesForShiftedNameBoundariesAndSameBlockReruns() public {
+    function test_MarketIdDerivation_IsInjectiveAcrossShiftedNameBoundaries() public {
         // Fixed block context so the derivation below is fully determined: both derivations share the same
-        // timestamp and chainid, isolating the string-boundary ambiguity as the only moving part.
+        // timestamp and chainid, isolating the string boundary as the only moving part.
         vm.warp(1_750_000_000);
         vm.chainId(1);
 
-        // Two DIFFERENT market configs whose packed name bytes coincide:
-        //   "Senior AB" ++ "C-JT" = "Senior ABC-JT" (9 + 4 bytes)
-        //   "Senior A" ++ "BC-JT" = "Senior ABC-JT" (8 + 5 bytes)
-        // encodePacked drops the string lengths, so both hash the identical 13-byte name blob followed by the same
-        // 32-byte timestamp and 32-byte chainid.
-        bytes32 marketIdA = keccak256(abi.encodePacked(string("Senior AB"), string("C-JT"), block.timestamp, block.chainid));
-        bytes32 marketIdB = keccak256(abi.encodePacked(string("Senior A"), string("BC-JT"), block.timestamp, block.chainid));
+        // Two DIFFERENT market configs whose packed name bytes would coincide under encodePacked:
+        //   "Senior AB" ++ "C-JT" and "Senior A" ++ "BC-JT" both pack to "Senior ABC-JT"
+        // abi.encode length-prefixes each string, so the boundary survives and the two ids differ.
+        bytes32 marketIdA = keccak256(abi.encode(string("Senior AB"), string("C-JT"), block.timestamp, block.chainid));
+        bytes32 marketIdB = keccak256(abi.encode(string("Senior A"), string("BC-JT"), block.timestamp, block.chainid));
+        assertNotEq(marketIdA, marketIdB, "abi.encode keeps shifted name boundaries distinct");
 
-        // CURRENT: two distinct markets, one marketId. The second deployment in the pair to run reverts
-        // MARKET_COMPONENT_ALREADY_DEPLOYED because its CREATE2 component salts are already taken.
-        assertEq(marketIdA, marketIdB, "packed-name boundary shift must collide under the current derivation");
+        // An identical config rerun in the same block still derives the same id (no nonce) — accepted, because the
+        // colliding redeploy reverts MARKET_COMPONENT_ALREADY_DEPLOYED loudly rather than aliasing components.
+        bytes32 rerunId = keccak256(abi.encode(string("Senior AB"), string("C-JT"), block.timestamp, block.chainid));
+        assertEq(marketIdA, rerunId, "same names in the same block derive the same id, a loud redeploy revert not silent aliasing");
 
-        // CURRENT: an identical config redeployed in the same block (a rerun after a partial broadcast, or two
-        // operators racing) derives the identical id, so the rerun cannot mint fresh component addresses.
-        bytes32 rerunId = keccak256(abi.encodePacked(string("Senior AB"), string("C-JT"), block.timestamp, block.chainid));
-        assertEq(marketIdA, rerunId, "same names in the same block must produce the same id under the current derivation");
-
-        // EXPECTED shape (demonstrated, not yet what deploy does): abi.encode length-prefixes each string, so the
-        // shifted-boundary pair no longer collides. A caller nonce would additionally split same-block reruns.
-        bytes32 encodedA = keccak256(abi.encode(string("Senior AB"), string("C-JT"), block.timestamp, block.chainid));
-        bytes32 encodedB = keccak256(abi.encode(string("Senior A"), string("BC-JT"), block.timestamp, block.chainid));
-        assertNotEq(encodedA, encodedB, "abi.encode keeps the string boundaries distinct, which is the expected derivation");
+        // The replaced encodePacked derivation WOULD have aliased the shifted-boundary pair — shown for contrast.
+        bytes32 packedA = keccak256(abi.encodePacked(string("Senior AB"), string("C-JT"), block.timestamp, block.chainid));
+        bytes32 packedB = keccak256(abi.encodePacked(string("Senior A"), string("BC-JT"), block.timestamp, block.chainid));
+        assertEq(packedA, packedB, "the replaced encodePacked derivation aliased shifted boundaries");
     }
 }
