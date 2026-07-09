@@ -62,9 +62,9 @@ contract RoycoBlacklist is IRoycoBlacklist, RoycoBase {
 
     /// @inheritdoc IRoycoBlacklist
     function isBlacklisted(address _account) public view override(IRoycoBlacklist) returns (bool) {
-        // An account is blacklisted if it is locally blacklisted or screened by the configured Chainalysis sanctions list
+        // An account is blacklisted if it is locally blacklisted, screened by the configured Chainalysis sanctions list, or flagged by the exogenous blacklist check
         if (_account == address(0)) return false;
-        return (_getRoycoBlacklistStorage().accountToIsBlacklisted[_account] || _isSanctioned(_account));
+        return (_getRoycoBlacklistStorage().accountToIsBlacklisted[_account] || _isSanctioned(_account) || _isExogenouslyBlacklisted(_account));
     }
 
     /// @inheritdoc IRoycoBlacklist
@@ -130,6 +130,15 @@ contract RoycoBlacklist is IRoycoBlacklist, RoycoBase {
         address sanctionsList = _getRoycoBlacklistStorage().chainalysisSanctionsList;
         return (sanctionsList != address(0) && ISanctionsList(sanctionsList).isSanctioned(_account));
     }
+
+    /**
+     * @notice Checks if the specified account is blacklisted by an exogenous blacklist
+     * @dev Enables bespoke blacklist checks for external issuers and integrators
+     * @dev Intentionally implemented with an empty body since this function is optional and only adds to the basic blacklist's checks
+     * @param _account The address of the account to check
+     * @return blacklisted Whether the account is blacklisted by the exogenous blacklist
+     */
+    function _isExogenouslyBlacklisted(address _account) internal view virtual returns (bool blacklisted) { }
 
     // =============================
     // Blacklist State Accessor Functions

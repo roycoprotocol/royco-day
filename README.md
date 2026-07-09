@@ -26,9 +26,9 @@ Coverage Utilization =   ──────────────────�
 - MIN_COVERAGE: The minimum required coverage percentage, validated at initialization to be strictly less than 100% (eg. 20% means JT must be able to cover 20% of ST losses at all times)
 - β: A boolean co-investment flag capturing JT's sensitivity to the same downside stress that affects ST (0 if JT is in a risk-free investment, 1 if JT and ST are in the same underlying investment)
 
-Coverage utilization rounds up, in favor of the senior tranche. Intuitively, when coverage utilization is less than or equal to 100%, the market is fully collateralized from a coverage lens. Consequently, when coverage utilization breaches 100%, the market has suffered sufficient losses such that the minimum coverage requirement is violated.
+Intuitively, when coverage utilization is less than or equal to 100%, the senior tranche is fully collateralized from a coverage lens. Consequently, when coverage utilization breaches 100%, the market has suffered sufficient losses such that the minimum coverage requirement is violated.
 
-Markets target a slight excess of junior capital above the minimum coverage requirement to keep the junior tranche perpetually liquid. To maintain this target, the risk premium paid by seniors to juniors adapts to supply and demand signals. As coverage utilization approaches 100%, the junior's risk premium increases to attract more junior capital.
+Markets target a slight excess of junior capital above the minimum coverage requirement to keep the junior tranche perpetually liquid. To maintain this target, the risk premium paid by seniors to juniors adapts to supply and demand signals. As coverage utilization approaches 100%, the risk premium increases to attract more junior capital.
 
 Each market also defines a **liquidation coverage utilization**, validated to be strictly greater than 100% so the market is only considered unhealthy once the minimum coverage requirement is violated. When coverage utilization exceeds this threshold, the market is deemed unhealthy and ST redeemers receive a senior tranche self-liquidation bonus funded by JT effective NAV, incentivizing seniors to exit to restore the market into a healthy state. A threshold of 150% means the market enters liquidation when JT's remaining buffer can only cover two-thirds of the required coverage relative to senior exposure.
 
@@ -42,7 +42,9 @@ Liquidity Utilization = ──────────────────�
                                   LT_RAW_NAV
 ```
 
-A dedicated instance of the market's Yield Distribution Model (YDM), driven by liquidity utilization, prices the liquidity premium paid to the LT out of senior yield. The LT's raw NAV is read from the venue's manipulation-resistant oracle and committed on every accounting sync. Redemptions that reduce pooled depth are gated so the venue can't be drained below the senior tranche's required liquidity floor (bypassed once liquidation coverage utilization is breached). A market with zero minimum liquidity behaves exactly like a plain senior/junior market.
+When liquidity utilization is less than or equal to 100%, the senior tranche is considered sufficiently liquid. Markets target a slight excess of market-making capital above the minimum liquidity requirement to keep the senior tranche perpetually liquid. To maintain this target, the liquidity premium paid by seniors to the market makers adapts to supply and demand signals. As liquidity utilization approaches 100%, the liquidity premium increases to attract more market-making capital.
+
+The LT's raw NAV is read from the venue's manipulation-resistant oracle to ensure that trades and exogenous venue operations do not impact the instantaneous valuation of the market-making depth. Redemptions that reduce depth are gated so the venue can't be drained below the senior tranche's required liquidity floor (bypassed once liquidation coverage utilization is breached). A market with zero minimum liquidity behaves exactly like a plain senior/junior market.
 
 ## Architecture
 

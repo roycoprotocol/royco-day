@@ -135,7 +135,7 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         assertEq(ltYDM.lastYieldShareUtilizationWAD(), 0.5e18, "liquidity utilization from checkpoints");
     }
 
-    /// the accrual emits both yield-share events with the capped share and the new accumulator
+    /// the accrual emits the tranche yield-share event with the capped shares and the new accumulators
     function test_Accrual_emitsYieldShareAccruedEvents() public {
         _seedAndInitAccrual();
         jtYDM.setYieldShareReturn(0.9e18);
@@ -143,9 +143,7 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         vm.warp(block.timestamp + 500);
         // jt capped: min(0.9e18, 0.2e18) = 0.2e18, lt raw: 0.04e18 below the 0.1e18 cap
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.JuniorTrancheYieldShareAccrued(0.2e18, 0.2e18 * 500);
-        vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.LiquidityTrancheYieldShareAccrued(0.04e18, 0.04e18 * 500);
+        emit IRoycoDayAccountant.YieldSharesAccrued(0.2e18, 0.2e18 * 500, 0.04e18, 0.04e18 * 500);
         kernel.doPreOp(toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW));
     }
 
@@ -325,9 +323,7 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         vm.warp(block.timestamp + elapsed);
         kernel.doPreOp(toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW));
         assertEq(
-            uint256(accountant.getState().twJTYieldShareAccruedWAD),
-            644_555_535_965_487_104,
-            "oversized increment wraps modulo 2^192 instead of reverting"
+            uint256(accountant.getState().twJTYieldShareAccruedWAD), 644_555_535_965_487_104, "oversized increment wraps modulo 2^192 instead of reverting"
         );
     }
 
@@ -412,9 +408,7 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
 
         // First gain sync accrues and pays the time-weighted premium, consuming the window
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.JuniorTrancheYieldShareAccrued(0.1e18, 100e18);
-        vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.LiquidityTrancheYieldShareAccrued(0.05e18, 50e18);
+        emit IRoycoDayAccountant.YieldSharesAccrued(0.1e18, 100e18, 0.05e18, 50e18);
         SyncedAccountingState memory first = kernel.doPreOp(toNAVUnits(SEED_ST_RAW + 100e18), toNAVUnits(SEED_JT_RAW));
         assertEq(toUint256(first.jtEffectiveNAV), SEED_JT_RAW + 10e18, "first sync pays the time-weighted jt premium");
         assertEq(toUint256(first.ltLiquidityPremium), 5e18, "first sync pays the time-weighted lt premium");

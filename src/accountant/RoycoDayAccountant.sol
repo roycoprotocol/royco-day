@@ -69,31 +69,25 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Initialize the base state of the accountant
         __RoycoBase_init(_initialAuthority);
 
-        // Initialize the accountant state
+        // Validate the accountant initialization parameters
         // Ensure that the protocol fee percentages are valid
         require(
             _params.stProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD && _params.jtProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD
                 && _params.jtYieldShareProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD && _params.ltYieldShareProtocolFeeWAD <= MAX_PROTOCOL_FEE_WAD,
             MAX_PROTOCOL_FEE_EXCEEDED()
         );
-        // Ensure that the YDMs are not identical
-        // Each tranche requires its own YDM instance: the YDMs are initialized per market and the adaptive models keep per-market curve state, so sharing one instance would corrupt both premiums by interleaving coverage and liquidity driven updates
+        // Ensure that the YDMs are not identical: each tranche requires its own YDM instance: the YDMs are initialized per market and the adaptive models keep per-market curve state, so sharing one instance would corrupt both premiums by interleaving coverage and liquidity driven updates
         require(_params.jtYDM != _params.ltYDM, YDMS_CANNOT_BE_IDENTICAL());
-
-        // Validate the market's initial coverage, liquidity, and yield share configuration
-        // Validate that the coverage requirement must require less coverage than the entire senior exposure and the liquidation coverage utilization threshold can only be breached once the NAVs have experienced losses
+        // Ensure that the coverage requirement must require less coverage than the entire senior exposure and the liquidation coverage utilization threshold can only be breached once the NAVs have experienced losses
         require(_params.minCoverageWAD < WAD && _params.coverageLiquidationUtilizationWAD > WAD, INVALID_COVERAGE_CONFIG());
-        // The liquidity requirement must require less coverage than the entire senior exposure
+        // Ensure that the liquidity requirement must require less market-making depth than the entire senior tranche claims
         require(_params.minLiquidityWAD < WAD, INVALID_LIQUIDITY_CONFIG());
         // No market may commit users for longer than the governance long delay covers
         require(_params.fixedTermDurationSeconds <= MAX_FIXED_TERM_SECONDS, FIXED_TERM_DURATION_EXCEEDS_MAX());
+        // Ensure that the max JT and LT yield shares do not sum to greater than 100% of senior appreciation
         _validateYieldShareConfig(_params.maxJTYieldShareWAD, _params.maxLTYieldShareWAD);
 
-        // Initialize the JT and LT YDMs for this market
-        _initializeYDM(_params.jtYDM, _params.jtYDMInitializationData);
-        _initializeYDM(_params.ltYDM, _params.ltYDMInitializationData);
-
-        // Persist the initial accountant state, grouping the writes by storage slot so the packed fields in each slot coalesce into a single store
+        // Initialize the accountant and YDM state
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
 
         // Set the fields in slot 0 of storage
@@ -135,6 +129,10 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         emit LiquidationCoverageUtilizationUpdated(_params.coverageLiquidationUtilizationWAD);
         emit SeniorTrancheDustToleranceUpdated(_params.stNAVDustTolerance);
         emit JuniorTrancheDustToleranceUpdated(_params.jtNAVDustTolerance);
+
+        // Initialize the JT and LT YDMs for this market
+        _initializeYDM(_params.jtYDM, _params.jtYDMInitializationData);
+        _initializeYDM(_params.ltYDM, _params.ltYDMInitializationData);
     }
 
     // =============================
@@ -499,161 +497,165 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         NAV_UNIT stEffectiveNAV = $.lastSTEffectiveNAV;
         NAV_UNIT jtEffectiveNAV = $.lastJTEffectiveNAV;
         NAV_UNIT jtCoverageImpermanentLoss = $.lastJTCoverageImpermanentLoss;
-
-        // Cache the effective NAV dust tolerance: the worst-case dust is bounded by the sum of the raw NAV dust tolerances
-        NAV_UNIT effectiveNAVDustTolerance = $.effectiveNAVDustTolerance;
-
-        /// @dev STEP_APPLY_PNL_ATTRIBUTION: Attribute each tranche's raw NAV delta across the checkpointed claims, producing the signed effective NAV delta for each tranche
-        // The deltas are declared outside the scoped block so the intermediate claim decomposition is dropped before the waterfall below, bounding the stack depth
-        int256 deltaSTEffectiveNAV;
-        int256 deltaJTEffectiveNAV;
-        {
-            // Cache the last committed raw NAVs: the references the raw NAV deltas (unrealized PNL since the last sync) are measured against
-            NAV_UNIT lastSTRawNAV = $.lastSTRawNAV;
-            NAV_UNIT lastJTRawNAV = $.lastJTRawNAV;
-
-            // Decompose the last checkpointed senior claim into its self-backed portion (funded by ST's own raw NAV) and its cross-tranche portion (funded by JT's raw NAV)
-            // Only the two senior claims feed the PNL attribution below; the two junior claims the decomposition returns are discarded
-            (NAV_UNIT stClaimOnSTRawNAV, NAV_UNIT stClaimOnJTRawNAV,,) =
-                TrancheClaimsLogic._computeSTandJTClaimsOnRawNAVs(lastSTRawNAV, lastJTRawNAV, stEffectiveNAV, jtEffectiveNAV);
-
-            // Compute the deltas in the raw NAVs of each tranche: the unrealized PNL of the underlying investment since the last NAV checkpoints
-            int256 deltaSTRawNAV = RoycoUnitsMath.computeNAVDelta(_stRawNAV, lastSTRawNAV);
-            int256 deltaJTRawNAV = RoycoUnitsMath.computeNAVDelta(_jtRawNAV, lastJTRawNAV);
-
-            // Attribute each raw NAV's signed PNL to ST in proportion to its claim against that raw NAV
-            // The resulting deltas are rounded down: in favor of seniors on losses and juniors on gains
-            // When the last ST raw NAV is zero, conservation forces ST's claim on its raw NAV to zero: route the delta to ST if it has live effective claims, else leave it as residual to JT to avoid inflating NAV against zero ST shares outstanding
-            int256 deltaSTClaimOnSTRawNAV = lastSTRawNAV == ZERO_NAV_UNITS
-                ? (stEffectiveNAV > ZERO_NAV_UNITS ? deltaSTRawNAV : int256(0))
-                : _attributeDeltaToClaimOnRawNAV(deltaSTRawNAV, stClaimOnSTRawNAV, lastSTRawNAV);
-            int256 deltaSTClaimOnJTRawNAV = _attributeDeltaToClaimOnRawNAV(deltaJTRawNAV, stClaimOnJTRawNAV, lastJTRawNAV);
-
-            // ST's effective NAV delta is the sum of its claim-weighted shares of each pool's PNL and JT's effective NAV delta is computed as the residual
-            // NOTE: NAV conservation holds: positive and negative rounding drift is absorbed by juniors
-            deltaSTEffectiveNAV = deltaSTClaimOnSTRawNAV + deltaSTClaimOnJTRawNAV;
-            deltaJTEffectiveNAV = (deltaSTRawNAV + deltaJTRawNAV) - deltaSTEffectiveNAV;
-        }
-
-        // The liquidity premium and protocol fees accrued by this sync, settled by the waterfall below
+        // The liquidity premium and protocol fees accrued by this sync, settled by the mark-to-market step below
         NAV_UNIT ltLiquidityPremium;
         NAV_UNIT stProtocolFee;
         NAV_UNIT jtProtocolFee;
         NAV_UNIT ltProtocolFee;
+        // Cache the effective NAV dust tolerance: the worst-case dust is bounded by the sum of the raw NAV dust tolerances
+        NAV_UNIT effectiveNAVDustTolerance = $.effectiveNAVDustTolerance;
 
-        /// @dev STEP_APPLY_MARK_TO_MARKET: Mark the ST and JT NAVs to market based on their PnL and respective obligations to another in
-        // The net JT gains — the JT protocol fee accrued is calculated using this NAV
-        NAV_UNIT jtNetGain;
-        /// @dev STEP_APPLY_JT_LOSS: The JT assets depreciated in value
-        if (deltaJTEffectiveNAV < 0) {
-            /// @dev STEP_JT_ABSORB_LOSS: JT's remaning loss-absorption buffer incurs its loss fully
-            // NOTE: The PnL attribution step above guarantees that this will not underflow
-            NAV_UNIT jtLoss = toNAVUnits(-deltaJTEffectiveNAV);
-            jtEffectiveNAV = (jtEffectiveNAV - jtLoss);
-            /// @dev STEP_APPLY_JT_GAIN: The JT assets appreciated in value
-        } else if (deltaJTEffectiveNAV > 0) {
-            jtNetGain = toNAVUnits(deltaJTEffectiveNAV);
-            // Compute the protocol fee taken on this JT yield accrual if it is not attributable to any rounding/dust
-            if (jtNetGain > effectiveNAVDustTolerance) jtProtocolFee = jtNetGain.mulDiv($.jtProtocolFeeWAD, WAD, Math.Rounding.Floor);
-            // Book the gains to the JT
-            jtEffectiveNAV = (jtEffectiveNAV + jtNetGain);
-        }
+        {
+            /// @dev STEP_APPLY_PNL_ATTRIBUTION: Attribute each tranche's raw NAV delta across the checkpointed claims, producing the signed effective NAV delta for each tranche
+            // The deltas are declared outside the scoped block so the intermediate claim decomposition is dropped before the waterfall below, bounding the stack depth
+            int256 deltaSTEffectiveNAV;
+            int256 deltaJTEffectiveNAV;
+            {
+                // Cache the last committed raw NAVs: the references the raw NAV deltas (unrealized PNL since the last sync) are measured against
+                NAV_UNIT lastSTRawNAV = $.lastSTRawNAV;
+                NAV_UNIT lastJTRawNAV = $.lastJTRawNAV;
 
-        /// @dev STEP_APPLY_ST_LOSS: The ST assets depreciated in value
-        if (deltaSTEffectiveNAV < 0) {
-            NAV_UNIT stLoss = toNAVUnits(-deltaSTEffectiveNAV);
-            /// @dev STEP_APPLY_JT_COVERAGE_TO_ST: Apply any possible coverage to ST provided by JT's loss-absorption buffer
-            NAV_UNIT coverageApplied = RoycoUnitsMath.min(stLoss, jtEffectiveNAV);
-            if (coverageApplied != ZERO_NAV_UNITS) {
-                // If there was a JT protocol fee taken on their appreciation, recalculate it using the JT net gain after applying coverage applied
-                if (jtProtocolFee != ZERO_NAV_UNITS) {
-                    jtNetGain = jtNetGain.saturatingSub(coverageApplied);
-                    jtProtocolFee = (jtNetGain > effectiveNAVDustTolerance) ? jtNetGain.mulDiv($.jtProtocolFeeWAD, WAD, Math.Rounding.Floor) : ZERO_NAV_UNITS;
-                }
-                // Apply the coverage to JT effective NAV
-                jtEffectiveNAV = (jtEffectiveNAV - coverageApplied);
-                // Any coverage provided is a ST liability to JT
-                jtCoverageImpermanentLoss = (jtCoverageImpermanentLoss + coverageApplied);
-                stLoss = stLoss - coverageApplied;
+                // Decompose the last checkpointed senior claim into its self-backed portion (funded by ST's own raw NAV) and its cross-tranche portion (funded by JT's raw NAV)
+                // Only the two senior claims feed the PNL attribution below; the two junior claims the decomposition returns are discarded
+                (NAV_UNIT stClaimOnSTRawNAV, NAV_UNIT stClaimOnJTRawNAV,,) =
+                    TrancheClaimsLogic._computeSTandJTClaimsOnRawNAVs(lastSTRawNAV, lastJTRawNAV, stEffectiveNAV, jtEffectiveNAV);
+
+                // Compute the deltas in the raw NAVs of each tranche: the unrealized PNL of the underlying investment since the last NAV checkpoints
+                int256 deltaSTRawNAV = RoycoUnitsMath.computeNAVDelta(_stRawNAV, lastSTRawNAV);
+                int256 deltaJTRawNAV = RoycoUnitsMath.computeNAVDelta(_jtRawNAV, lastJTRawNAV);
+
+                // Attribute each raw NAV's signed PNL to ST in proportion to its claim against that raw NAV
+                // The resulting deltas are rounded down: in favor of seniors on losses and juniors on gains
+                // When the last ST raw NAV is zero, conservation forces ST's claim on its raw NAV to zero: route the delta to ST if it has live effective claims, else leave it as residual to JT to avoid inflating NAV against zero ST shares outstanding
+                int256 deltaSTClaimOnSTRawNAV = lastSTRawNAV == ZERO_NAV_UNITS
+                    ? (stEffectiveNAV > ZERO_NAV_UNITS ? deltaSTRawNAV : int256(0))
+                    : _attributeDeltaToClaimOnRawNAV(deltaSTRawNAV, stClaimOnSTRawNAV, lastSTRawNAV);
+                int256 deltaSTClaimOnJTRawNAV = _attributeDeltaToClaimOnRawNAV(deltaJTRawNAV, stClaimOnJTRawNAV, lastJTRawNAV);
+
+                // ST's effective NAV delta is the sum of its claim-weighted shares of each pool's PNL and JT's effective NAV delta is computed as the residual
+                // NOTE: NAV conservation holds: positive and negative rounding drift is absorbed by juniors
+                deltaSTEffectiveNAV = deltaSTClaimOnSTRawNAV + deltaSTClaimOnJTRawNAV;
+                deltaJTEffectiveNAV = (deltaSTRawNAV + deltaJTRawNAV) - deltaSTEffectiveNAV;
             }
-            /// @dev STEP_ST_INCURS_RESIDUAL_LOSSES: Apply any uncovered losses by JT to ST
-            if (stLoss != ZERO_NAV_UNITS) stEffectiveNAV = (stEffectiveNAV - stLoss);
-            /// @dev STEP_APPLY_ST_GAIN: The ST assets appreciated in value
-        } else if (deltaSTEffectiveNAV > 0) {
-            NAV_UNIT stGain = toNAVUnits(deltaSTEffectiveNAV);
-            /// @dev STEP_JT_COVERAGE_IMPERMANENT_LOSS_RECOVERY: First, recover any JT coverage inflicted impermanent losses (first claim on ST appreciation)
-            NAV_UNIT jtCoverageImpermanentLossRecovery = RoycoUnitsMath.min(stGain, jtCoverageImpermanentLoss);
-            if (jtCoverageImpermanentLossRecovery != ZERO_NAV_UNITS) {
-                // Recover as much of the JT coverage impermanent loss as possible
-                jtCoverageImpermanentLoss = (jtCoverageImpermanentLoss - jtCoverageImpermanentLossRecovery);
-                // Apply the JT coverage IL recovery
-                jtEffectiveNAV = (jtEffectiveNAV + jtCoverageImpermanentLossRecovery);
-                stGain = (stGain - jtCoverageImpermanentLossRecovery);
-            }
-            /// @dev STEP_PAY_PREMIUMS: There is no remaining JT coverage impermanent loss that ST yield is obligated to repay, the residual gains will be used to pay the risk and liquidity premium to the JT and LT respectively
-            if (stGain != ZERO_NAV_UNITS) {
-                // Mark yield as distributed if the gain is not attributable to any rounding/dust
-                if (stGain > effectiveNAVDustTolerance) premiumsPaid = true;
-                NAV_UNIT jtRiskPremium;
-                // The risk and liquidity premiums are always paid together, so they share a single elapsed window since the last premium payment
-                uint256 elapsedSinceLastPremiumPayments = (block.timestamp - $.lastPremiumPaymentTimestamp);
-                // If the last premium payments happened in the same block, use the instantaneous yield shares
-                // Else, use the time-weighted average yield shares since the last premium payments
-                if (elapsedSinceLastPremiumPayments == 0) {
-                    // Set the elapsed time to 1 second (instantaneous)
-                    elapsedSinceLastPremiumPayments = 1 seconds;
-                    // Query the instantaneous yield shares for the JT and LT
-                    _twJTYieldShareAccruedWAD = Math.min(
-                        IYDM($.jtYDM)
-                            .previewYieldShare(
-                                initialMarketState,
-                                UtilizationLogic._computeCoverageUtilization(
-                                    $.lastSTRawNAV, $.lastJTRawNAV, JT_COINVESTED, $.minCoverageWAD, $.lastJTEffectiveNAV
-                                )
-                            ),
-                        $.maxJTYieldShareWAD
-                    );
-                    // The LT YDM is driven by the market's liquidity utilization: the LT liquidity premium scales with how utilized the LT market-making inventory is
-                    _twLTYieldShareAccruedWAD = Math.min(
-                        IYDM($.ltYDM)
-                            .previewYieldShare(
-                                initialMarketState, UtilizationLogic._computeLiquidityUtilization($.lastSTEffectiveNAV, $.minLiquidityWAD, $.lastLTRawNAV)
-                            ),
-                        $.maxLTYieldShareWAD
-                    );
+
+            /// @dev STEP_APPLY_MARK_TO_MARKET: Mark the ST and JT NAVs to market via the PnL waterfall, based on their respective obligations to one another
+            {
+                // The net JT gains — the JT protocol fee accrued is calculated using this NAV
+                NAV_UNIT jtNetGain;
+                /// @dev STEP_APPLY_JT_LOSS: The JT assets depreciated in value
+                if (deltaJTEffectiveNAV < 0) {
+                    /// @dev STEP_JT_ABSORB_LOSS: JT's remaning loss-absorption buffer incurs its loss fully
+                    // NOTE: The PnL attribution step above guarantees that this will not underflow
+                    NAV_UNIT jtLoss = toNAVUnits(-deltaJTEffectiveNAV);
+                    jtEffectiveNAV = (jtEffectiveNAV - jtLoss);
+                    /// @dev STEP_APPLY_JT_GAIN: The JT assets appreciated in value
+                } else if (deltaJTEffectiveNAV > 0) {
+                    jtNetGain = toNAVUnits(deltaJTEffectiveNAV);
+                    // Compute the protocol fee taken on this JT yield accrual if it is not attributable to any rounding/dust
+                    if (jtNetGain > effectiveNAVDustTolerance) jtProtocolFee = jtNetGain.mulDiv($.jtProtocolFeeWAD, WAD, Math.Rounding.Floor);
+                    // Book the gains to the JT
+                    jtEffectiveNAV = (jtEffectiveNAV + jtNetGain);
                 }
-                // Compute the risk and liquidity premiums based on the yield shares and time elapsed since the last premium payments
-                jtRiskPremium = stGain.mulDiv(_twJTYieldShareAccruedWAD, (elapsedSinceLastPremiumPayments * WAD), Math.Rounding.Floor);
-                ltLiquidityPremium = stGain.mulDiv(_twLTYieldShareAccruedWAD, (elapsedSinceLastPremiumPayments * WAD), Math.Rounding.Floor);
-                // The combined premiums can never exceed the senior gain: the JT and LT yield shares are each capped so that they sum to at most 100% of senior appreciation
-                require((jtRiskPremium + ltLiquidityPremium) <= stGain, PREMIUMS_EXCEED_SENIOR_YIELD());
-                // Apply the risk premium to JT's effective NAV
-                if (jtRiskPremium != ZERO_NAV_UNITS) {
-                    // Compute the protocol fee taken on the yield share accrual if it is not attributable to any rounding/dust
-                    if (premiumsPaid) {
-                        jtProtocolFee = (jtProtocolFee + jtRiskPremium.mulDiv($.jtYieldShareProtocolFeeWAD, WAD, Math.Rounding.Floor));
+
+                /// @dev STEP_APPLY_ST_LOSS: The ST assets depreciated in value
+                if (deltaSTEffectiveNAV < 0) {
+                    NAV_UNIT stLoss = toNAVUnits(-deltaSTEffectiveNAV);
+                    /// @dev STEP_APPLY_JT_COVERAGE_TO_ST: Apply any possible coverage to ST provided by JT's loss-absorption buffer
+                    NAV_UNIT coverageApplied = RoycoUnitsMath.min(stLoss, jtEffectiveNAV);
+                    if (coverageApplied != ZERO_NAV_UNITS) {
+                        // If there was a JT protocol fee taken on their appreciation, recalculate it using the JT net gain after applying coverage applied
+                        if (jtProtocolFee != ZERO_NAV_UNITS) {
+                            jtNetGain = jtNetGain.saturatingSub(coverageApplied);
+                            jtProtocolFee =
+                                (jtNetGain > effectiveNAVDustTolerance) ? jtNetGain.mulDiv($.jtProtocolFeeWAD, WAD, Math.Rounding.Floor) : ZERO_NAV_UNITS;
+                        }
+                        // Apply the coverage to JT effective NAV
+                        jtEffectiveNAV = (jtEffectiveNAV - coverageApplied);
+                        // Any coverage provided is a ST liability to JT
+                        jtCoverageImpermanentLoss = (jtCoverageImpermanentLoss + coverageApplied);
+                        stLoss = stLoss - coverageApplied;
                     }
-                    jtEffectiveNAV = (jtEffectiveNAV + jtRiskPremium);
-                    stGain = (stGain - jtRiskPremium);
-                }
-                // Pay the liquidity premium to LT: it is minted as senior shares to LT, so it remains a senior claim within ST effective NAV (coverage-neutral) and is carved out of the residual only to size plain ST's retained yield and protocol fee
-                if (ltLiquidityPremium != ZERO_NAV_UNITS) {
-                    // Compute the protocol fee taken on the yield share accrual if it is not attributable to any rounding/dust
-                    if (premiumsPaid) {
-                        ltProtocolFee = ltLiquidityPremium.mulDiv($.ltYieldShareProtocolFeeWAD, WAD, Math.Rounding.Floor);
+                    /// @dev STEP_ST_INCURS_RESIDUAL_LOSSES: Apply any uncovered losses by JT to ST
+                    if (stLoss != ZERO_NAV_UNITS) stEffectiveNAV = (stEffectiveNAV - stLoss);
+                    /// @dev STEP_APPLY_ST_GAIN: The ST assets appreciated in value
+                } else if (deltaSTEffectiveNAV > 0) {
+                    NAV_UNIT stGain = toNAVUnits(deltaSTEffectiveNAV);
+                    /// @dev STEP_JT_COVERAGE_IMPERMANENT_LOSS_RECOVERY: First, recover any JT coverage inflicted impermanent losses (first claim on ST appreciation)
+                    NAV_UNIT jtCoverageImpermanentLossRecovery = RoycoUnitsMath.min(stGain, jtCoverageImpermanentLoss);
+                    if (jtCoverageImpermanentLossRecovery != ZERO_NAV_UNITS) {
+                        // Recover as much of the JT coverage impermanent loss as possible
+                        jtCoverageImpermanentLoss = (jtCoverageImpermanentLoss - jtCoverageImpermanentLossRecovery);
+                        // Apply the JT coverage IL recovery
+                        jtEffectiveNAV = (jtEffectiveNAV + jtCoverageImpermanentLossRecovery);
+                        stGain = (stGain - jtCoverageImpermanentLossRecovery);
                     }
-                    stGain = (stGain - ltLiquidityPremium);
+                    /// @dev STEP_PAY_PREMIUMS: There is no remaining JT coverage impermanent loss that ST yield is obligated to repay, the residual gains will be used to pay the risk and liquidity premium to the JT and LT respectively
+                    if (stGain != ZERO_NAV_UNITS) {
+                        // Mark yield as distributed if the gain is not attributable to any rounding/dust
+                        if (stGain > effectiveNAVDustTolerance) premiumsPaid = true;
+                        NAV_UNIT jtRiskPremium;
+                        // The risk and liquidity premiums are always paid together, so they share a single elapsed window since the last premium payment
+                        uint256 elapsedSinceLastPremiumPayments = (block.timestamp - $.lastPremiumPaymentTimestamp);
+                        // If the last premium payments happened in the same block, use the instantaneous yield shares
+                        // Else, use the time-weighted average yield shares since the last premium payments
+                        if (elapsedSinceLastPremiumPayments == 0) {
+                            // Set the elapsed time to 1 second (instantaneous)
+                            elapsedSinceLastPremiumPayments = 1 seconds;
+                            // Query the instantaneous yield shares for the JT and LT
+                            _twJTYieldShareAccruedWAD = Math.min(
+                                IYDM($.jtYDM)
+                                    .previewYieldShare(
+                                        initialMarketState,
+                                        UtilizationLogic._computeCoverageUtilization(
+                                            $.lastSTRawNAV, $.lastJTRawNAV, JT_COINVESTED, $.minCoverageWAD, $.lastJTEffectiveNAV
+                                        )
+                                    ),
+                                $.maxJTYieldShareWAD
+                            );
+                            // The LT YDM is driven by the market's liquidity utilization: the LT liquidity premium scales with how utilized the LT market-making inventory is
+                            _twLTYieldShareAccruedWAD = Math.min(
+                                IYDM($.ltYDM)
+                                    .previewYieldShare(
+                                        initialMarketState,
+                                        UtilizationLogic._computeLiquidityUtilization($.lastSTEffectiveNAV, $.minLiquidityWAD, $.lastLTRawNAV)
+                                    ),
+                                $.maxLTYieldShareWAD
+                            );
+                        }
+                        // Compute the risk and liquidity premiums based on the yield shares and time elapsed since the last premium payments
+                        jtRiskPremium = stGain.mulDiv(_twJTYieldShareAccruedWAD, (elapsedSinceLastPremiumPayments * WAD), Math.Rounding.Floor);
+                        ltLiquidityPremium = stGain.mulDiv(_twLTYieldShareAccruedWAD, (elapsedSinceLastPremiumPayments * WAD), Math.Rounding.Floor);
+                        // The combined premiums can never exceed the senior gain: the JT and LT yield shares are each capped so that they sum to at most 100% of senior appreciation
+                        require((jtRiskPremium + ltLiquidityPremium) <= stGain, PREMIUMS_EXCEED_SENIOR_YIELD());
+                        // Apply the risk premium to JT's effective NAV
+                        if (jtRiskPremium != ZERO_NAV_UNITS) {
+                            // Compute the protocol fee taken on the yield share accrual if it is not attributable to any rounding/dust
+                            if (premiumsPaid) {
+                                jtProtocolFee = (jtProtocolFee + jtRiskPremium.mulDiv($.jtYieldShareProtocolFeeWAD, WAD, Math.Rounding.Floor));
+                            }
+                            jtEffectiveNAV = (jtEffectiveNAV + jtRiskPremium);
+                            stGain = (stGain - jtRiskPremium);
+                        }
+                        // Pay the liquidity premium to LT: it is minted as senior shares to LT, so it remains a senior claim within ST effective NAV (coverage-neutral) and is carved out of the residual only to size plain ST's retained yield and protocol fee
+                        if (ltLiquidityPremium != ZERO_NAV_UNITS) {
+                            // Compute the protocol fee taken on the yield share accrual if it is not attributable to any rounding/dust
+                            if (premiumsPaid) {
+                                ltProtocolFee = ltLiquidityPremium.mulDiv($.ltYieldShareProtocolFeeWAD, WAD, Math.Rounding.Floor);
+                            }
+                            stGain = (stGain - ltLiquidityPremium);
+                        }
+                        // Compute the protocol fee taken on this ST yield accrual if it is not attributable to any rounding/dust
+                        if (premiumsPaid) stProtocolFee = stGain.mulDiv($.stProtocolFeeWAD, WAD, Math.Rounding.Floor);
+                        // Book the residual gain to the ST, including the liquidity premium that remains a senior claim now owned by LT (coverage neutral, so the two-term NAV conservation holds)
+                        // The liquidity premium is used to mint ST shares to the LT
+                        stEffectiveNAV = (stEffectiveNAV + stGain + ltLiquidityPremium);
+                    }
                 }
-                // Compute the protocol fee taken on this ST yield accrual if it is not attributable to any rounding/dust
-                if (premiumsPaid) stProtocolFee = stGain.mulDiv($.stProtocolFeeWAD, WAD, Math.Rounding.Floor);
-                // Book the residual gain to the ST, including the liquidity premium that remains a senior claim now owned by LT (coverage neutral, so the two-term NAV conservation holds)
-                // The liquidity premium is used to mint ST shares to the LT
-                stEffectiveNAV = (stEffectiveNAV + stGain + ltLiquidityPremium);
+
+                // Enforce the NAV conservation invariant
+                require((_stRawNAV + _jtRawNAV) == (stEffectiveNAV + jtEffectiveNAV), NAV_CONSERVATION_VIOLATION());
             }
         }
-
-        // Enforce the NAV conservation invariant
-        require((_stRawNAV + _jtRawNAV) == (stEffectiveNAV + jtEffectiveNAV), NAV_CONSERVATION_VIOLATION());
 
         /// @dev STEP_APPLY_MARKET_STATE_TRANSITION: Apply the market state transition resulting from this sync, then marshal the post-sync accounting state
         uint256 minCoverageWAD = $.minCoverageWAD;
@@ -766,8 +768,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         twLTYieldShareAccruedWAD = ($.twLTYieldShareAccruedWAD += uint192(ltYieldShareWAD * elapsed));
         $.lastYieldShareAccrualTimestamp = uint32(block.timestamp);
 
-        emit JuniorTrancheYieldShareAccrued(jtYieldShareWAD, twJTYieldShareAccruedWAD);
-        emit LiquidityTrancheYieldShareAccrued(ltYieldShareWAD, twLTYieldShareAccruedWAD);
+        emit YieldSharesAccrued(jtYieldShareWAD, twJTYieldShareAccruedWAD, ltYieldShareWAD, twLTYieldShareAccruedWAD);
     }
 
     /**
@@ -1007,8 +1008,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             (bool success, bytes memory data) = _ydm.call(_ydmInitializationData);
             require(success, FAILED_TO_INITIALIZE_YDM(data));
         }
-        // Verify the YDM is actually initialized for THIS market
-        IYDM(_ydm).previewYieldShare(MarketState.PERPETUAL, 0);
     }
 
     // =============================

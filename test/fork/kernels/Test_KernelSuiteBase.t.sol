@@ -3090,9 +3090,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         MarketSnapshot memory pre = _snap();
 
         vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
-        emit IRoycoDayAccountant.JuniorTrancheYieldShareAccrued(e.jtYieldShareWAD, e.twJTStart + e.jtYieldShareWAD * e.elapsed);
-        vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
-        emit IRoycoDayAccountant.LiquidityTrancheYieldShareAccrued(e.ltYieldShareWAD, e.twLTStart + e.ltYieldShareWAD * e.elapsed);
+        emit IRoycoDayAccountant.YieldSharesAccrued(
+            e.jtYieldShareWAD, e.twJTStart + e.jtYieldShareWAD * e.elapsed, e.ltYieldShareWAD, e.twLTStart + e.ltYieldShareWAD * e.elapsed
+        );
         vm.expectEmit(true, false, false, true, address(ST));
         emit IRoycoVaultTranche.ProtocolFeeSharesMinted(PROTOCOL_FEE_RECIPIENT_ADDRESS, stFeeShares, stSupplyPre + premShares + stFeeShares);
         vm.expectEmit(true, false, false, true, address(JT));
@@ -3412,7 +3412,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 feeRecipientJTPre = JT.balanceOf(PROTOCOL_FEE_RECIPIENT_ADDRESS);
 
         vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
-        emit IRoycoDayAccountant.JuniorTrancheYieldShareAccrued(e.jtYieldShareWAD, e.twJTStart + e.jtYieldShareWAD * e.elapsed);
+        emit IRoycoDayAccountant.YieldSharesAccrued(
+            e.jtYieldShareWAD, e.twJTStart + e.jtYieldShareWAD * e.elapsed, e.ltYieldShareWAD, e.twLTStart + e.ltYieldShareWAD * e.elapsed
+        );
         SyncedAccountingState memory state = _syncWithState();
 
         _assertSyncMatchesExpectation(state, e);
@@ -3475,7 +3477,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         MarketSnapshot memory pre = _snap();
 
         vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
-        emit IRoycoDayAccountant.LiquidityTrancheYieldShareAccrued(e.ltYieldShareWAD, e.twLTStart + e.ltYieldShareWAD * e.elapsed);
+        emit IRoycoDayAccountant.YieldSharesAccrued(
+            e.jtYieldShareWAD, e.twJTStart + e.jtYieldShareWAD * e.elapsed, e.ltYieldShareWAD, e.twLTStart + e.ltYieldShareWAD * e.elapsed
+        );
         vm.expectEmit(true, false, false, true, address(ST));
         emit IRoycoSeniorTranche.LiquidityPremiumSharesMinted(address(KERNEL), premShares, stSupplyPre + premShares);
         SyncedAccountingState memory state = _syncWithState();
@@ -3788,9 +3792,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(e.ltYieldShareWAD, capLTWAD, "the accrued LT yield share must bind at the cap");
 
         vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
-        emit IRoycoDayAccountant.JuniorTrancheYieldShareAccrued(capJTWAD, e.twJTStart + uint256(capJTWAD) * e.elapsed);
-        vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
-        emit IRoycoDayAccountant.LiquidityTrancheYieldShareAccrued(capLTWAD, e.twLTStart + uint256(capLTWAD) * e.elapsed);
+        emit IRoycoDayAccountant.YieldSharesAccrued(
+            capJTWAD, e.twJTStart + uint256(capJTWAD) * e.elapsed, capLTWAD, e.twLTStart + uint256(capLTWAD) * e.elapsed
+        );
         SyncedAccountingState memory state = _syncWithState();
 
         _assertSyncMatchesExpectation(state, e);
