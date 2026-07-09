@@ -138,13 +138,14 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         );
         // Ensure that the initial authority and protocol fee recipient are not null
         require(_params.initialAuthority != address(0) && _params.protocolFeeRecipient != address(0), NULL_ADDRESS());
+        // Ensure that the ST self-liquidiation bonus is less than 100% of its value
+        require(_params.stSelfLiquidationBonusWAD < WAD, INVALID_SELF_LIQUIDATION_BONUS());
 
         // Initialize the base state
         __RoycoBase_init(_params.initialAuthority);
 
         // Initialize the kernel state
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
-        require(_params.stSelfLiquidationBonusWAD <= WAD, INVALID_SELF_LIQUIDATION_BONUS());
         $.protocolFeeRecipient = _params.protocolFeeRecipient;
         $.stSelfLiquidationBonusWAD = _params.stSelfLiquidationBonusWAD;
         $.roycoBlacklist = _params.roycoBlacklist;
