@@ -382,9 +382,7 @@ contract Test_Setters_Accountant is AccountantTestBase {
         kernel.setSyncMode(MockAccountantKernel.SyncMode.SYNC);
         kernel.setSyncNAVs(toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW));
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.JuniorTrancheYieldShareAccrued(0.2e18, 200e18);
-        vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.LiquidityTrancheYieldShareAccrued(0.1e18, 100e18);
+        emit IRoycoDayAccountant.YieldSharesAccrued(0.2e18, 200e18, 0.1e18, 100e18);
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayAccountant.MaxYieldSharesUpdated(0, 0);
         accountant.setMaxYieldShares(0, 0);

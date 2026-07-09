@@ -122,18 +122,13 @@ interface IRoycoDayAccountant {
     }
 
     /**
-     * @notice Emitted when JT's share of ST yield is accrued based on the market's coverageUtilization since the last accrual
+     * @notice Emitted when the JT and LT shares of ST yield (the risk and liquidity premiums) are accrued based on the market's coverageUtilization and liquidityUtilization since the last accrual
      * @param jtYieldShareWAD JT's instantaneous yield share (JT YDM output) based on coverageUtilization since the last accrual
      * @param twJTYieldShareAccruedWAD The time-weighted JT yield share accrued since the last yield distribution
-     */
-    event JuniorTrancheYieldShareAccrued(uint256 jtYieldShareWAD, uint256 twJTYieldShareAccruedWAD);
-
-    /**
-     * @notice Emitted when LT's share of ST yield (the liquidity premium) is accrued based on the market's liquidityUtilization since the last accrual
      * @param ltYieldShareWAD LT's instantaneous yield share (LT YDM output) based on liquidityUtilization since the last accrual
      * @param twLTYieldShareAccruedWAD The time-weighted LT yield share accrued since the last liquidity premium payment
      */
-    event LiquidityTrancheYieldShareAccrued(uint256 ltYieldShareWAD, uint256 twLTYieldShareAccruedWAD);
+    event YieldSharesAccrued(uint256 jtYieldShareWAD, uint256 twJTYieldShareAccruedWAD, uint256 ltYieldShareWAD, uint256 twLTYieldShareAccruedWAD);
 
     /// @notice Emitted when a fixed term regime is commenced by this market
     /// @param fixedTermEndTimestamp The end timestamp of the new fixed term regime

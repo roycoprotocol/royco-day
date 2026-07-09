@@ -1,35 +1,35 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { ILPOracleFactoryBase } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleFactoryBase.sol";
-import { IGyroECLPPool } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
-import { IRateProvider } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/solidity-utils/helpers/IRateProvider.sol";
-import { IBasePool } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IBasePool.sol";
-import { IProtocolFeeController } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IProtocolFeeController.sol";
-import { IVault } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
-import { IVaultAdmin } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultAdmin.sol";
+import { ILPOracleFactoryBase } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleFactoryBase.sol";
+import { IGyroECLPPool } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
+import { IRateProvider } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/solidity-utils/helpers/IRateProvider.sol";
+import { IBasePool } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IBasePool.sol";
+import { IProtocolFeeController } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IProtocolFeeController.sol";
+import { IVault } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
+import { IVaultAdmin } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultAdmin.sol";
 import {
     PoolRoleAccounts as BalancerV3PoolRoleAccounts,
     TokenConfig as BalancerV3TokenConfig,
     TokenType as BalancerV3TokenType
-} from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
-import { ConstantPriceFeed } from "../../../lib/balancer-v3-monorepo/pkg/oracles/contracts/ConstantPriceFeed.sol";
-import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
-import { SingletonAuthentication } from "../../../lib/balancer-v3-monorepo/pkg/vault/contracts/SingletonAuthentication.sol";
+} from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
+import { ConstantPriceFeed } from "../../../../lib/balancer-v3-monorepo/pkg/oracles/contracts/ConstantPriceFeed.sol";
+import { GyroECLPPoolFactory } from "../../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
+import { SingletonAuthentication } from "../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/SingletonAuthentication.sol";
 import {
     AggregatorV3Interface as BalancerAggregatorV3Interface
-} from "../../../lib/chainlink-brownie-contracts/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
-import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
-import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
-import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import { IRoycoAuth } from "../../interfaces/IRoycoAuth.sol";
-import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
-import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
-import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
-import { IRoycoFactory } from "../../interfaces/factory/IRoycoFactory.sol";
-import { IRoycoProtocolTemplate } from "../../interfaces/factory/IRoycoProtocolTemplate.sol";
-import { BalancerV3_LT_BPTOracle_Quoter } from "../../kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
-import { RoycoLiquidityTranche } from "../../tranches/RoycoLiquidityTranche.sol";
+} from "../../../../lib/chainlink-brownie-contracts/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import { UUPSUpgradeable } from "../../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
+import { ERC20BurnableUpgradeable } from "../../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
+import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import { IRoycoAuth } from "../../../interfaces/IRoycoAuth.sol";
+import { IRoycoDayAccountant } from "../../../interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayKernel } from "../../../interfaces/IRoycoDayKernel.sol";
+import { IRoycoVaultTranche } from "../../../interfaces/IRoycoVaultTranche.sol";
+import { IRoycoFactory } from "../../../interfaces/factory/IRoycoFactory.sol";
+import { IRoycoProtocolTemplate } from "../../../interfaces/factory/IRoycoProtocolTemplate.sol";
+import { BalancerV3_LT_BPTOracle_Quoter } from "../../../kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
+import { RoycoLiquidityTranche } from "../../../tranches/RoycoLiquidityTranche.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
@@ -46,8 +46,8 @@ import {
     PUBLIC_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
-} from "../RolesConfiguration.sol";
-import { BaseDeploymentTemplate } from "./base/BaseDeploymentTemplate.sol";
+} from "../../RolesConfiguration.sol";
+import { BaseDeploymentTemplate } from "../base/BaseDeploymentTemplate.sol";
 import {
     TAG_ACCOUNTANT_IMPL,
     TAG_ACCOUNTANT_PROXY,
@@ -62,19 +62,19 @@ import {
     TAG_ST_IMPL,
     TAG_ST_PROXY,
     TAG_YDM
-} from "./base/Components.sol";
+} from "../base/Components.sol";
 
 /**
- * @title RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate
+ * @title BalancerV3_GyroECLP_LT_DeploymentTemplate
  * @author Ankur Dubey, Shivaansh Kapoor
- * @notice Abstract base for every Royco Day market deployment template (ST + JT + LT).
+ * @notice Abstract base for every Royco Day market that has their LT deployed into a Balancer V3 Gyroscope ECLP pool
  * @dev The market's Gyro E-CLP pool is registered with no hook. An external pool operation needs no pre-operation
  *      sync for any Day quantity to be correct: the senior-leg rate provider reads the kernel's `getRate`, whose
  *      cache-miss branch previews the current rate from the live marks, and the liquidity-tranche mark, the liquidity
  *      check, the redemption, and the premium read the manipulation-resistant BPT oracle and the committed checkpoint.
  *      So the pool is created with `address(0)` for its hooks argument, and no sync role is granted to any pool contract.
  */
-abstract contract RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTemplate {
+abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTemplate {
     // ═══════════════════════════════════════════════════════════════════════════
     // PARAM STRUCTS
     // ═══════════════════════════════════════════════════════════════════════════
@@ -283,7 +283,7 @@ abstract contract RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDepl
         _deployKernelImplAndProxy(p, result, balancerPool, bptOracle, _marketComponentSalt(p.marketId, TAG_KERNEL_PROXY));
 
         // 10. Apply selector->role bindings + post-init grants (SYNC_ROLE for the accountant, BURNER_ROLE for the kernel).
-        _applyRoleBindings(_buildRoleBindings(result, p.protocolFeeRecipient));
+        _applyRoleBindings(_buildRoleBindings(result));
 
         // 11. Record + verify-friendly extras.
         result.extras = abi.encode(ExtraContractsDeployedResult({ balancerPool: balancerPool, bptOracle: bptOracle }));
@@ -404,7 +404,7 @@ abstract contract RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDepl
     // ROLE BINDINGS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function _buildRoleBindings(DeploymentResult memory _r, address _protocolFeeRecipient) internal view virtual returns (RoleBindings memory) {
+    function _buildRoleBindings(DeploymentResult memory _r) internal view virtual returns (RoleBindings memory) {
         TargetBinding[] memory targets = new TargetBinding[](8);
         targets[0] = _trancheBinding(_r.seniorTranche, ST_LP_ROLE, ST_LP_ROLE, false);
         targets[1] = _trancheBinding(_r.juniorTranche, JT_LP_ROLE, JT_LP_ROLE, false);
@@ -415,18 +415,9 @@ abstract contract RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDepl
         targets[6] = _balancerProtocolFeeControllerBinding(address(BALANCER_V3_VAULT.getProtocolFeeController()));
         targets[7] = _kernelQuoterBinding(_r.kernel);
 
-        // The kernel (coverage-neutral premium senior-share mint recipient) and the protocol fee recipient (ST/JT/LT
-        // fee-share mint recipient) must hold the tranche LP roles, otherwise a whitelist-enforcing market bricks on
-        // the first fee/premium mint when the tranche `_update` whitelist screen rejects them
-        RoleGrant[] memory grants = new RoleGrant[](8);
+        RoleGrant[] memory grants = new RoleGrant[](2);
         grants[0] = RoleGrant({ roleId: SYNC_ROLE, account: _r.accountant, executionDelay: 0 });
         grants[1] = RoleGrant({ roleId: BURNER_ROLE, account: _r.kernel, executionDelay: 0 });
-        grants[2] = RoleGrant({ roleId: ST_LP_ROLE, account: _r.kernel, executionDelay: 0 });
-        grants[3] = RoleGrant({ roleId: JT_LP_ROLE, account: _r.kernel, executionDelay: 0 });
-        grants[4] = RoleGrant({ roleId: LT_LP_ROLE, account: _r.kernel, executionDelay: 0 });
-        grants[5] = RoleGrant({ roleId: ST_LP_ROLE, account: _protocolFeeRecipient, executionDelay: 0 });
-        grants[6] = RoleGrant({ roleId: JT_LP_ROLE, account: _protocolFeeRecipient, executionDelay: 0 });
-        grants[7] = RoleGrant({ roleId: LT_LP_ROLE, account: _protocolFeeRecipient, executionDelay: 0 });
 
         return RoleBindings({ targetBindings: targets, postInitGrants: grants });
     }

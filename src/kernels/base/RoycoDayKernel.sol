@@ -138,13 +138,14 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         );
         // Ensure that the initial authority and protocol fee recipient are not null
         require(_params.initialAuthority != address(0) && _params.protocolFeeRecipient != address(0), NULL_ADDRESS());
+        // Ensure that the ST self-liquidiation bonus is less than 100% of its value
+        require(_params.stSelfLiquidationBonusWAD < WAD, INVALID_SELF_LIQUIDATION_BONUS());
 
         // Initialize the base state
         __RoycoBase_init(_params.initialAuthority);
 
         // Initialize the kernel state
         RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
-        require(_params.stSelfLiquidationBonusWAD <= WAD, INVALID_SELF_LIQUIDATION_BONUS());
         $.protocolFeeRecipient = _params.protocolFeeRecipient;
         $.stSelfLiquidationBonusWAD = _params.stSelfLiquidationBonusWAD;
         $.roycoBlacklist = _params.roycoBlacklist;
@@ -541,11 +542,15 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         onlyTranche
         whenNotPaused
     {
-        // Batch screen the involved accounts against the market's blacklist
-        BlacklistLogic._enforceNotBlacklisted(_getRoycoDayKernelStorage(), _caller, _from, _to);
+        // Get the Royco kernel state
+        RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
 
-        // If transferring shares, ensure that the recipient is a whitelisted LP for the tranche or the kernel (Liquidity premium ST share mints require this)
-        if (_to != address(0) && _to != address(this) && ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER) {
+        // Batch screen the involved accounts against the market's blacklist
+        BlacklistLogic._enforceNotBlacklisted($, _caller, _from, _to);
+
+        // If transferring shares, ensure that the recipient is a whitelisted LP for the tranche
+        // The kernel and protocol fee recipient are exempt from this check
+        if (_to != address(0) && _to != address(this) && _to != $.protocolFeeRecipient && ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER) {
             // It is assumed that the sender is already a whitelisted LP
             address authority = authority();
             // Check if the to address can call the deposit function on the tranche

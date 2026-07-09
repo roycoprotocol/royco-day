@@ -1,18 +1,21 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
+import { ST_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
-import { defaultParams } from "../../utils/MarketParams.sol";
-import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";
-import { cellA } from "../../utils/TokenConfigs.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
+import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";
+import { defaultParams } from "../../utils/MarketParams.sol";
+import { cellA } from "../../utils/TokenConfigs.sol";
 
 /**
  * @title Test_WhitelistPremiumMint
- * @notice Two liquidity-premium-mint behaviors on the full mock market: a whitelist-transfer market syncs
- *         cleanly after a senior gain because the kernel and fee recipient hold the tranche LP roles, and a
+ * @notice Liquidity-premium- and fee-mint behaviors on the full mock market: a whitelist-transfer market syncs
+ *         cleanly after a senior gain because the kernel hook exempts the kernel and the fee recipient from the LP
+ *         receive-screen by address, a fee recipient without the LP role can receive but not redeem its fees, and a
  *         griefed reinvestment stages the premium as idle senior shares
  * @dev The premium is minted as senior tranche shares to the kernel on every pre-op sync that books a senior gain
  *      (FeeAndLiquidityPremiumLogic._processFeesAndLiquidityPremium), so both behaviors ride the same mint
@@ -38,10 +41,10 @@ contract Test_WhitelistPremiumMint is DayMarketTestBase {
      * @notice In a market that enforces the tranche-transfer whitelist, the liquidity-premium mint to the kernel
      *         and the protocol-fee mints to the fee recipient pass the tranche `_update` whitelist screen, so a
      *         senior gain syncs cleanly and the market keeps functioning
-     * @dev The deployment grants the kernel and the protocol fee recipient the tranche LP roles, so the premium
-     *      is minted as senior shares to the kernel and the mint's _update hook accepts the kernel and the fee
-     *      recipient as whitelisted recipients (RoycoDayKernel.preTrancheBalanceUpdateHook, the
-     *      ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER branch)
+     * @dev The kernel hook exempts the kernel and the fee recipient by address, not by LP role: the premium is
+     *      minted as senior shares to the kernel (_to == address(this)) and the fee shares to the fee recipient
+     *      (_to == protocolFeeRecipient), and both are exempt from the receive-screen
+     *      (RoycoDayKernel.preTrancheBalanceUpdateHook, the ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER branch)
      */
     function test_whitelistMarket_premiumMintPassesWhitelist_syncsCleanlyAfterGain() public {
         // Redeploy the market with the tranche-transfer whitelist enforced
@@ -67,6 +70,55 @@ contract Test_WhitelistPremiumMint is DayMarketTestBase {
         stJtVault.approve(address(seniorTranche), more);
         seniorTranche.deposit(toTrancheUnits(more), ST_PROVIDER);
         vm.stopPrank();
+    }
+
+    /**
+     * @notice On a whitelist-enforcing market, the protocol fee shares mint to a fee recipient that is NOT a
+     *         whitelisted tranche LP (the hook's `_to == protocolFeeRecipient` exemption lets the mint through, so
+     *         a fee accrual never bricks the sync), but the fee recipient cannot redeem those shares until it is
+     *         separately granted the tranche LP role — redemption stays gated by ST_LP_ROLE
+     * @dev This pins the accepted division of labor: the by-address exemption keeps the mint (and therefore every
+     *      deposit and withdrawal that pre-op syncs) alive for any fee recipient, while realizing the accrued fees
+     *      is an explicit, per-recipient whitelisting step the operator performs when needed. It is the mirror of
+     *      the kernel, which only ever receives its custody shares and so needs no redeem authorization at all
+     */
+    function test_whitelistMarket_feeRecipientReceivesFeesWithoutLpRole_butCannotRedeemUntilWhitelisted() public {
+        // Redeploy the market with the tranche-transfer whitelist enforced
+        MarketParamsConfig memory p = defaultParams();
+        p.enforceWhitelistOnTransfer = true;
+        _deployMarket(cellA(), p);
+        stUnit = 10 ** uint256(cell.stAsset.decimals);
+
+        // The fee recipient is deliberately NOT a whitelisted senior LP (matching the production template, which
+        // no longer grants it the tranche LP roles): its redeem authorization is left to the operator
+        (bool hasLpRole,) = accessManager.hasRole(ST_LP_ROLE, PROTOCOL_FEE_RECIPIENT);
+        assertFalse(hasLpRole, "the fee recipient must start without the senior LP role");
+
+        // Seed premium-free (flat rates), then book a +10% senior gain so the next sync carves a nonzero ST fee
+        _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
+        applySTPnL(1000);
+        _sync();
+
+        // The fee mint landed on the non-whitelisted recipient purely through the by-address hook exemption
+        uint256 feeShares = seniorTranche.balanceOf(PROTOCOL_FEE_RECIPIENT);
+        assertGt(feeShares, 0, "the ST protocol fee must mint senior shares to the fee recipient despite its missing LP role");
+
+        // But it cannot realize them: `redeem` is restricted to ST_LP_ROLE, which the recipient does not hold
+        vm.prank(PROTOCOL_FEE_RECIPIENT);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, PROTOCOL_FEE_RECIPIENT));
+        seniorTranche.redeem(feeShares, PROTOCOL_FEE_RECIPIENT, PROTOCOL_FEE_RECIPIENT);
+
+        // Once the operator whitelists the recipient (the accepted resolution), the same shares redeem
+        accessManager.grantRole(ST_LP_ROLE, PROTOCOL_FEE_RECIPIENT, 0);
+        uint256 redeemable = seniorTranche.maxRedeem(PROTOCOL_FEE_RECIPIENT);
+        assertGt(redeemable, 0, "a whitelisted fee recipient can now redeem its accrued fee shares");
+        uint256 vaultSharesBefore = stJtVault.balanceOf(PROTOCOL_FEE_RECIPIENT);
+        vm.prank(PROTOCOL_FEE_RECIPIENT);
+        seniorTranche.redeem(redeemable, PROTOCOL_FEE_RECIPIENT, PROTOCOL_FEE_RECIPIENT);
+        assertEq(seniorTranche.balanceOf(PROTOCOL_FEE_RECIPIENT), feeShares - redeemable, "the redeemed fee shares are burned from the recipient");
+        assertGt(
+            stJtVault.balanceOf(PROTOCOL_FEE_RECIPIENT) - vaultSharesBefore, 0, "redeeming the fee shares returns underlying vault shares to the recipient"
+        );
     }
 
     // =============================

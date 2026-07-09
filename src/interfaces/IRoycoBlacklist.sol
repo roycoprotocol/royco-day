@@ -46,22 +46,22 @@ interface IRoycoBlacklist {
 
     /**
      * @notice Checks if the specified account is blacklisted
-     * @dev Returns true if the account is locally blacklisted or is included in the configured Chainalysis sanctions designation
+     * @dev Returns true if the account is locally blacklisted, included in the configured Chainalysis sanctions designation, or flagged by the exogenous blacklist check
      * @param _account The address of the account to check
-     * @return isBlacklisted Whether the account is blacklisted
+     * @return blacklisted Whether the account is blacklisted
      */
-    function isBlacklisted(address _account) external view returns (bool);
+    function isBlacklisted(address _account) external view returns (bool blacklisted);
 
     /**
      * @notice Reverts if the specified account is blacklisted
-     * @dev Reverts if the account is locally blacklisted or is included in the configured Chainalysis sanctions designation
+     * @dev Reverts if the account is locally blacklisted, included in the configured Chainalysis sanctions designation, or flagged by the exogenous blacklist check
      * @param _account The address of the account to enforce against the blacklist
      */
     function enforceNotBlacklisted(address _account) external view;
 
     /**
      * @notice Reverts if any of the specified accounts is blacklisted
-     * @dev Reverts if an account is locally blacklisted or is included in the configured Chainalysis sanctions designation
+     * @dev Reverts if an account is locally blacklisted, included in the configured Chainalysis sanctions designation, or flagged by the exogenous blacklist check
      * @dev The null address is skipped so callers can pass sentinel mint/redeem counterparties without special casing
      * @param _accounts The addresses of the accounts to enforce against the blacklist
      */

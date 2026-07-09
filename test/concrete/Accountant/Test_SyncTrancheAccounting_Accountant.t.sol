@@ -6,8 +6,8 @@ import { IYDM } from "../../../src/interfaces/IYDM.sol";
 import { WAD, ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
 import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
-import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
+import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 
 /**
  * @title Test_SyncTrancheAccounting_Accountant
@@ -223,7 +223,11 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         // must equal the mirror's pass-through and the mirror's liquidity utilization is the RTM.liquidityUtilization view
         kernel.doCommit(_pre.lastLTRawNAV);
         assertEq(toUint256(accountant.getState().lastLTRawNAV), m.ltRawNAV, "mirror: committed lt raw NAV pass-through");
-        assertEq(m.liquidityUtilizationWAD, RoycoTestMath.computeLiquidityUtilization(m.stEffectiveNAV, in_.minLiquidityWAD, in_.ltRawNAVNew), "mirror: post-commit liquidity utilization");
+        assertEq(
+            m.liquidityUtilizationWAD,
+            RoycoTestMath.computeLiquidityUtilization(m.stEffectiveNAV, in_.minLiquidityWAD, in_.ltRawNAVNew),
+            "mirror: post-commit liquidity utilization"
+        );
     }
 
     /// @dev Independent coverage utilization math: ceil(stRawNAV * 0.1e18 / jtEffectiveNAV) with the default minimum coverage and no co-investment
@@ -320,7 +324,17 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         _runSyncVector(
             1000e18,
             180e18,
-            ExpectedSync({ stEffectiveNAV: 1000e18, jtEffectiveNAV: 180e18, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEndTimestamp: 0 })
+            ExpectedSync({
+                stEffectiveNAV: 1000e18,
+                jtEffectiveNAV: 180e18,
+                il: 0,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEndTimestamp: 0
+            })
         );
     }
 
@@ -330,7 +344,17 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         _runSyncVector(
             1000e18,
             200e18,
-            ExpectedSync({ stEffectiveNAV: 1000e18, jtEffectiveNAV: 200e18, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEndTimestamp: 0 })
+            ExpectedSync({
+                stEffectiveNAV: 1000e18,
+                jtEffectiveNAV: 200e18,
+                il: 0,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEndTimestamp: 0
+            })
         );
         // Literal anchor for the independent ceil helper: 1000e18 * 0.1e18 / 200e18 divides exactly to 0.5e18
         assertEq(_expectedCoverageUtilization(1000e18, 200e18), 0.5e18, "anchor: exact-division coverage utilization");
@@ -346,7 +370,15 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
             1000e18,
             220e18,
             ExpectedSync({
-                stEffectiveNAV: 1000e18, jtEffectiveNAV: 220e18, il: 0, ltPrem: 0, stFee: 0, jtFee: 2e18, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEndTimestamp: 0
+                stEffectiveNAV: 1000e18,
+                jtEffectiveNAV: 220e18,
+                il: 0,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 2e18,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEndTimestamp: 0
             })
         );
     }
@@ -513,7 +545,15 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
             1000e18,
             180e18,
             ExpectedSync({
-                stEffectiveNAV: 1000e18 + 5, jtEffectiveNAV: 180e18 - 5, il: 5, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEndTimestamp: 0
+                stEffectiveNAV: 1000e18 + 5,
+                jtEffectiveNAV: 180e18 - 5,
+                il: 5,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEndTimestamp: 0
             })
         );
     }
@@ -525,7 +565,15 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
             1000e18,
             200e18,
             ExpectedSync({
-                stEffectiveNAV: 1000e18 + 5, jtEffectiveNAV: 200e18 - 5, il: 5, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEndTimestamp: 0
+                stEffectiveNAV: 1000e18 + 5,
+                jtEffectiveNAV: 200e18 - 5,
+                il: 5,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEndTimestamp: 0
             })
         );
     }
@@ -540,7 +588,15 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
             1000e18,
             220e18,
             ExpectedSync({
-                stEffectiveNAV: 1000e18 + 5, jtEffectiveNAV: 220e18 - 5, il: 5, ltPrem: 0, stFee: 0, jtFee: 2e18, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEndTimestamp: 0
+                stEffectiveNAV: 1000e18 + 5,
+                jtEffectiveNAV: 220e18 - 5,
+                il: 5,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 2e18,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEndTimestamp: 0
             })
         );
     }
@@ -870,7 +926,17 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         _runSyncVector(
             950e18,
             80e18,
-            ExpectedSync({ stEffectiveNAV: 1000e18, jtEffectiveNAV: 30e18, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEndTimestamp: 0 })
+            ExpectedSync({
+                stEffectiveNAV: 1000e18,
+                jtEffectiveNAV: 30e18,
+                il: 0,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEndTimestamp: 0
+            })
         );
     }
 
@@ -884,7 +950,17 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         _runSyncVector(
             950e18,
             100e18,
-            ExpectedSync({ stEffectiveNAV: 1000e18, jtEffectiveNAV: 50e18, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEndTimestamp: 0 })
+            ExpectedSync({
+                stEffectiveNAV: 1000e18,
+                jtEffectiveNAV: 50e18,
+                il: 0,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEndTimestamp: 0
+            })
         );
     }
 
@@ -900,7 +976,17 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         _runSyncVector(
             950e18,
             120e18,
-            ExpectedSync({ stEffectiveNAV: 1000e18, jtEffectiveNAV: 70e18, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEndTimestamp: 0 })
+            ExpectedSync({
+                stEffectiveNAV: 1000e18,
+                jtEffectiveNAV: 70e18,
+                il: 0,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEndTimestamp: 0
+            })
         );
     }
 
@@ -918,7 +1004,15 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
             1000e18 - 1,
             80e18,
             ExpectedSync({
-                stEffectiveNAV: 1000e18, jtEffectiveNAV: 80e18 - 1, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEndTimestamp: 0
+                stEffectiveNAV: 1000e18,
+                jtEffectiveNAV: 80e18 - 1,
+                il: 0,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEndTimestamp: 0
             })
         );
     }
@@ -937,7 +1031,15 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
             1000e18 - 1,
             100e18,
             ExpectedSync({
-                stEffectiveNAV: 1000e18, jtEffectiveNAV: 100e18 - 1, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEndTimestamp: 0
+                stEffectiveNAV: 1000e18,
+                jtEffectiveNAV: 100e18 - 1,
+                il: 0,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEndTimestamp: 0
             })
         );
         assertEq(
@@ -959,7 +1061,15 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
             1000e18 - 1,
             120e18,
             ExpectedSync({
-                stEffectiveNAV: 1000e18, jtEffectiveNAV: 120e18 - 1, il: 0, ltPrem: 0, stFee: 0, jtFee: 2e18, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEndTimestamp: 0
+                stEffectiveNAV: 1000e18,
+                jtEffectiveNAV: 120e18 - 1,
+                il: 0,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 2e18,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEndTimestamp: 0
             })
         );
     }
@@ -1517,7 +1627,17 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         _runSyncVector(
             700e18,
             200e18,
-            ExpectedSync({ stEffectiveNAV: 900e18, jtEffectiveNAV: 0, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEndTimestamp: 0 })
+            ExpectedSync({
+                stEffectiveNAV: 900e18,
+                jtEffectiveNAV: 0,
+                il: 0,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEndTimestamp: 0
+            })
         );
     }
 
@@ -1534,7 +1654,17 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         _runSyncVector(
             800e18,
             200e18,
-            ExpectedSync({ stEffectiveNAV: 1000e18, jtEffectiveNAV: 0, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEndTimestamp: 0 })
+            ExpectedSync({
+                stEffectiveNAV: 1000e18,
+                jtEffectiveNAV: 0,
+                il: 0,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEndTimestamp: 0
+            })
         );
     }
 
@@ -1552,7 +1682,17 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         _runSyncVector(
             1000e18,
             300e18,
-            ExpectedSync({ stEffectiveNAV: 1000e18, jtEffectiveNAV: 300e18, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEndTimestamp: 0 })
+            ExpectedSync({
+                stEffectiveNAV: 1000e18,
+                jtEffectiveNAV: 300e18,
+                il: 0,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEndTimestamp: 0
+            })
         );
     }
 
@@ -1572,7 +1712,15 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
             1000e18 + 1,
             300e18,
             ExpectedSync({
-                stEffectiveNAV: 1000e18 + 1, jtEffectiveNAV: 300e18, il: 0, ltPrem: 0, stFee: 0, jtFee: 0, ltFee: 0, marketState: MarketState.PERPETUAL, fixedTermEndTimestamp: 0
+                stEffectiveNAV: 1000e18 + 1,
+                jtEffectiveNAV: 300e18,
+                il: 0,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEndTimestamp: 0
             })
         );
         // Pin the mirror's dust-gate outcome explicitly: the 1-wei gain clears the zero dust tolerance
@@ -1594,9 +1742,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         ltYDM.setYieldShareReturn(0.05e18);
         vm.warp(block.timestamp + 86_400);
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.JuniorTrancheYieldShareAccrued(0.1e18, 8640e18);
-        vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.LiquidityTrancheYieldShareAccrued(0.05e18, 4320e18);
+        emit IRoycoDayAccountant.YieldSharesAccrued(0.1e18, 8640e18, 0.05e18, 4320e18);
         _runSyncVector(
             1050e18,
             200e18,
@@ -1644,7 +1790,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         jtYDM.setRates(0.5e18);
         vm.warp(t0 + 86_400);
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.JuniorTrancheYieldShareAccrued(0.2e18, 12_960e18);
+        emit IRoycoDayAccountant.YieldSharesAccrued(0.2e18, 12_960e18, 0.05e18, 4320e18);
         _runSyncVector(
             1050e18,
             200e18,

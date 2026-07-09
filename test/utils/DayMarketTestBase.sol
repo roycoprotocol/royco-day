@@ -64,7 +64,7 @@ import { FixtureCell, MarketParamsConfig, TokenConfig } from "./FixtureTypes.sol
  * @notice The single parameterized market fixture every mock-market test layer inherits
  * @dev Deploys a full Day market — tokens per FixtureCell, mocks for every external surface, the five contracts
  *      (ST, JT, LT, kernel, accountant) behind ERC1967 proxies, and production-shaped role bindings mirroring
- *      RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate._buildRoleBindings minus the Balancer-governance targets
+ *      BalancerV3_GyroECLP_LT_DeploymentTemplate._buildRoleBindings minus the Balancer-governance targets
  * @dev PnL injection mutates mock rates and oracle answers, never `deal`, so PnL flows through the same quoter
  *      paths production uses. applySTPnL and applyJTPnL are documented aliases over the SHARED ERC4626 rate:
  *      this kernel family prices ST and JT off one vault share rate, so single-tranche PnL isolation is
@@ -222,7 +222,7 @@ abstract contract DayMarketTestBase is Assertions {
 
     /**
      * @notice Deploys the full Day market for the specified token shape and parameterization
-     * @dev Mirrors RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate.deployMarket's order, adapted to mocks: tokens, oracles, venue, YDMs,
+     * @dev Mirrors BalancerV3_GyroECLP_LT_DeploymentTemplate.deployMarket's order, adapted to mocks: tokens, oracles, venue, YDMs,
      *      predicted kernel address, impls, tranche and accountant proxies, pool registration, kernel impl (its
      *      constructor reads accountant.JT_COINVESTED and validates the registered pool), kernel proxy at the
      *      predicted address, then role bindings and grants
@@ -740,7 +740,7 @@ abstract contract DayMarketTestBase is Assertions {
     }
 
     // =============================
-    // Role Wiring (mirrors RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate._buildRoleBindings minus Balancer-governance targets)
+    // Role Wiring (mirrors BalancerV3_GyroECLP_LT_DeploymentTemplate._buildRoleBindings minus Balancer-governance targets)
     // =============================
 
     /// @notice Binds every production selector to its production role on the five market contracts
@@ -777,7 +777,7 @@ abstract contract DayMarketTestBase is Assertions {
             ADMIN_ORACLE_QUOTER_ROLE
         );
 
-        // Accountant (the template's 16-selector list, RoycoDay_BalancerV3_GyroECLP_LT_DeploymentTemplate.sol:525-561)
+        // Accountant (the template's 16-selector list, BalancerV3_GyroECLP_LT_DeploymentTemplate.sol:525-561)
         address a = address(accountant);
         accessManager.setTargetFunctionRole(
             a,
@@ -842,15 +842,10 @@ abstract contract DayMarketTestBase is Assertions {
         accessManager.grantRole(SYNC_ROLE, address(accountant), 0);
         accessManager.grantRole(BURNER_ROLE, address(kernel), 0);
 
-        // Mirror the template's role wiring: the kernel (premium senior-share mint recipient) and the protocol
-        // fee recipient (fee-share mint recipient) hold the tranche LP roles so a whitelist-enforcing market does
-        // not brick on the first fee/premium mint.
-        accessManager.grantRole(ST_LP_ROLE, address(kernel), 0);
-        accessManager.grantRole(JT_LP_ROLE, address(kernel), 0);
-        accessManager.grantRole(LT_LP_ROLE, address(kernel), 0);
-        accessManager.grantRole(ST_LP_ROLE, PROTOCOL_FEE_RECIPIENT, 0);
-        accessManager.grantRole(JT_LP_ROLE, PROTOCOL_FEE_RECIPIENT, 0);
-        accessManager.grantRole(LT_LP_ROLE, PROTOCOL_FEE_RECIPIENT, 0);
+        // The kernel (premium senior-share mint recipient) and the protocol fee recipient (fee-share mint
+        // recipient) are intentionally NOT granted the tranche LP roles, mirroring the deployment template which
+        // no longer grants them: the kernel whitelist hook exempts both by address (_to == address(this) and
+        // _to == protocolFeeRecipient), so a fee/premium mint never bricks a whitelist-enforcing market
 
         // Dedicated admin wallets
         PAUSER = _generateActor("PAUSER", ADMIN_PAUSER_ROLE);
