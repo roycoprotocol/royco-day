@@ -7,9 +7,9 @@ import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
 import { toTrancheUnits } from "../../../src/libraries/Units.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_AdminAndGates_Kernel
@@ -80,11 +80,6 @@ contract Test_AdminAndGates_Kernel is DayMarketTestBase {
         vm.prank(KERNEL_ADMIN);
         vm.expectRevert(IRoycoDayKernel.INVALID_SELF_LIQUIDATION_BONUS.selector);
         kernel.setSeniorTrancheSelfLiquidationBonus(uint64(1e18 + 1));
-
-        // Exactly WAD (100%) is the accepted upper bound.
-        vm.prank(KERNEL_ADMIN);
-        kernel.setSeniorTrancheSelfLiquidationBonus(uint64(1e18));
-        assertEq(kernel.getState().stSelfLiquidationBonusWAD, 1e18, "a 100% bonus (WAD) is accepted");
     }
 
     /// @notice The market ops admin can wire and unwire the blacklist contract, and each change lands with its event

@@ -505,7 +505,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @inheritdoc IRoycoDayKernel
     function setSeniorTrancheSelfLiquidationBonus(uint64 _stSelfLiquidationBonusWAD) external override(IRoycoDayKernel) restricted {
-        require(_stSelfLiquidationBonusWAD <= WAD, INVALID_SELF_LIQUIDATION_BONUS());
+        require(_stSelfLiquidationBonusWAD < WAD, INVALID_SELF_LIQUIDATION_BONUS());
         _getRoycoDayKernelStorage().stSelfLiquidationBonusWAD = _stSelfLiquidationBonusWAD;
         emit SeniorTrancheSelfLiquidationBonusUpdated(_stSelfLiquidationBonusWAD);
     }
