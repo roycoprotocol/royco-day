@@ -9,7 +9,7 @@ Balancer V3 vault and the real `GyroECLPPool` deployed locally from the vendored
 only the two rate providers mocked. Nothing is hand-derived and then trusted. Regenerate all of it:
 
 ```
-forge test --match-path test/concrete/Balancer/eclp/Test_ECLPExitLiquidityPoolEconomics.t.sol -vv | grep -E "METRIC|VERDICT"
+forge test --match-path test/research/eclp/Test_ECLPExitLiquidityPoolEconomics.t.sol -vv | grep -E "METRIC|VERDICT"
 ```
 
 *(Raw logs report `bp*1e4`; this document converts to plain bp. "The 99.99 pool" / "the 90/10

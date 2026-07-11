@@ -32,8 +32,8 @@ jobs:
           forge --version
 
       - name: Cache Forge build artifacts
-        # Incremental compiles: the vendored Balancer graph makes cold via_ir builds slow (serial for
-        # memory, see the build step). Exact key per commit; prefix restore reuses the newest prior build.
+        # Incremental compiles: cold via_ir builds are slow. Exact key per commit; prefix restore
+        # reuses the newest prior build.
         uses: actions/cache@v4
         with:
           path: |
@@ -52,12 +52,13 @@ jobs:
         continue-on-error: ${{ github.event_name != 'pull_request' }}
 
       - name: Run Forge build
-        # Full build first (tests, scripts, vendored mocks), then size-check only src/ —
-        # EIP-170 applies to deployed contracts; test-only mocks (e.g. Balancer's VaultMock) may exceed it.
-        # --threads 1: via_ir solc on the vendored Balancer vault graph needs multiple GB per process;
-        # parallel compiles OOM-kill the 7GB hosted runner (exit 143). Serial compile fits; later steps reuse the cache.
+        # Full build first (tests, scripts, mocks), then size-check only src/ —
+        # EIP-170 applies to deployed contracts; test-only mocks may exceed it.
+        # test/research/** is skipped by profile.ci (foundry.toml): those suites compile the
+        # vendored Balancer vault graph via_ir, which OOM-kills the 7GB hosted runner (exit 143).
+        # Research suites build and run locally only.
         run: |
-          forge build --threads 1
+          forge build
           forge build src/ --sizes
         id: build
 
