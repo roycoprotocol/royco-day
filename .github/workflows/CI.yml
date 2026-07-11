@@ -40,8 +40,11 @@ jobs:
         continue-on-error: ${{ github.event_name != 'pull_request' }}
 
       - name: Run Forge build
+        # Full build first (tests, scripts, vendored mocks), then size-check only src/ —
+        # EIP-170 applies to deployed contracts; test-only mocks (e.g. Balancer's VaultMock) may exceed it.
         run: |
-          forge build --sizes
+          forge build
+          forge build src/ --sizes
         id: build
 
       - name: Run Forge tests
