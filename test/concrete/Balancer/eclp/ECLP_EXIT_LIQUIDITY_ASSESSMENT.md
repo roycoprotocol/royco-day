@@ -1,197 +1,402 @@
-# Tilted E-CLP Exit-Liquidity Pool — Objective Assessment
+# The Senior-Share / Stablecoin E-CLP — Measured Assessment & Design Guide
 
-Every number in this document is measured by `Test_ECLPExitLiquidityPoolEconomics.t.sol` in this
-folder, against the **real Balancer V3 vault and real `GyroECLPPool`** deployed locally from the
-vendored monorepo — only the two rate providers are mocked. Regenerate everything with:
+A Gyro E-CLP pairing the senior-tranche share (**ST**, ~8%/yr, junior-protected so its rate
+effectively only rises) against a yield-bearing stablecoin (**~3%/yr**), tilted stable-heavy so it
+serves as **exit liquidity**: seniors dump ST into it, stables come out.
+
+Every number in this document is **measured on-chain** by the test file in this folder — the real
+Balancer V3 vault and the real `GyroECLPPool` deployed locally from the vendored monorepo, with
+only the two rate providers mocked. Nothing is hand-derived and then trusted. Regenerate all of it:
 
 ```
 forge test --match-path test/concrete/Balancer/eclp/Test_ECLPExitLiquidityPoolEconomics.t.sol -vv | grep -E "METRIC|VERDICT"
 ```
 
-**The two candidates**, both initialized exactly at their balance point, both with the senior-tranche
-share (ST) earning 8%/yr and a yield-bearing stablecoin quote earning 3%/yr, both legs `WITH_RATE`,
-1 bp swap fee, production band floor (α = peg − 15 bp), rotation at price 1, λ = 4000:
-
-| | **tilt9999** | **tilt9010** |
-|---|---|---|
-| Stablecoin share at balance | 99.99% (measured 99.9900%) | 90.00% (measured 90.0000%) |
-| β (solved for the tilt) | 1 + 4.74e-8 | 1 + 5.2988e-5 |
-| ST inventory at balance ($10M-quote pool) | ~$1,000 | ~$1.11M (1000×) |
-
-Units below: raw logs use `bp*1e4`; this document shows plain bp. Dollar figures assume the test
-fixtures ($10–11M TVL main pools; $500k whale pool).
+*(Raw logs report `bp*1e4`; this document converts to plain bp. "The 99.99 pool" / "the 90/10
+pool" refer to the two measured candidates defined in §2.)*
 
 ---
 
-## Decision 1 — Is single-sided stablecoin **initialization** valid?
+## 1. The mental model — three ideas that explain every number below
 
-**Max loss after fees and arb: $0.00 on both tilts, at every seed size tested.**
+### Idea 0: what "price 1.0" actually means (read this first)
 
-| Measured (T6) | tilt9999 | tilt9010 |
+The pool's price is **not a token ratio — it is NAV-for-NAV, in literal dollars**. In these pools
+a rate provider returns **NAV units: dollars with 18 decimals of precision** (1e18 = $1.00 per
+share/token). Balancer multiplies every raw balance by its rate before doing pool math, so the
+scaled balances the curve trades on are *dollar values*: the ST leg's marked NAV (growing ~8%/yr,
+the kernel's share rate = effective NAV / supply) against the stable's accrued dollar value
+(~3%/yr). **Price 1.0 therefore means one marked dollar of ST buys exactly one marked dollar of
+stablecoin** — an exiter is paid precisely what the oracle says their shares are worth. Every band number is relative to that: β = 1 + 0.53 bp reads "the pool will pay
+at most a 0.53 bp *premium over marked NAV* for ST"; α = 1 − 15 bp reads "it sells stables until
+ST trades 15 bp *under* its marked NAV, then stops."
+
+In raw tokens the exchange rate drifts on purpose: today 1 ST ≈ 1.00 stables; after a year of
+8%-vs-3% accrual the *same* scaled peg corresponds to 1 ST ≈ 1.049 stables. The rate providers
+absorb all appreciation so the band never has to — which is exactly why the two wiring failure
+modes exist: a STANDARD-registered stable has nowhere to put its 3%/yr except walking the scaled
+price itself out of the band (dead in 18 days), and a stale ST mark makes the pool trade at
+yesterday's NAV while reality moved (the ~2.19 bp/day drift that powers every arb figure in §4).
+Throughout this document, **"fair" means the true accrued rates**; the fair-vs-mark gap is the
+arbable edge.
+
+### Idea 1: the pool is an ellipse arc, and the tilt is just where the peg sits on it
+
+An E-CLP trades along a stretched, tilted circle. The price of ST (in stables) can only move
+inside a band **[α, β]**. Composition is pinned to position in the band:
+
+```
+ price:   α  ──────────────────────────────────────────  β
+          │                                              │
+  holds:  ALL ST  ......... mixed .........  ALL STABLES │
+          │                                              │
+          │  ←  the "drain runway": as seniors dump ST   │←  the peg (fair price 1.0)
+          │     and pull stables, price walks left       │    sits a hair below β
+```
+
+There is **no separate tilt knob**. "99.99% stables at balance" simply means the peg sits so close
+to β that the pool is one hair away from its all-stables corner. Both candidates in this document
+are built exactly this way; they differ only in the size of that hair.
+
+### The five knobs, intuitively
+
+An E-CLP is a circle that has been **stretched** (λ), **tilted** (the rotation c/s), and then
+**cropped** to a price window ([α, β]). Each knob answers one plain question:
+
+| Knob | The question it answers | Intuition | Value used here |
+|---|---|---|---|
+| **β** (upper price bound) | *How stable-heavy is the pool at balance, and how much room does the price have above the peg?* | At β the pool holds only stables. Jam the peg against β → almost-all-stables at rest. β − 1 is also the premium a pinned pool quotes for ST — keep it **below the fee** and the pinned state is unexploitable (the fee shield, Idea 3) | 1 + 4.74e-8 (99.99 pool) / 1 + 5.3e-5 (90/10) |
+| **α** (lower price bound) | *How far can exits push the price down before the pool runs out of stables to sell?* | The drain runway. A deeper α keeps quoting exits further below peg — at ever-worse prices. Production crops it at −15 bp: exits stay cheap (~2 bp worst case) but absorption stops there. A multi-% tail (the Python guide's α = 0.90) keeps absorbing at costs that grow to hundreds of bp. This is the §7 open product choice | peg − 15 bp |
+| **Rotation (c, s)** | *At which price is liquidity most concentrated?* | The tilt angle of the ellipse puts the "flat spot" of the curve — maximum depth — at one price. c = s = √2/2 is a 45° rotation: depth peaks at price 1.0, the peg. This is why concentration is highest exactly at the balance point and decays toward α (the "less concentrated as it drains" requirement — measured in ten density buckets) | 45° (peak at 1.0) |
+| **λ** (stretch) | *How flat is the flat spot?* | The zoom lens. High λ makes the curve nearly a straight line around the peg — huge depth, near-zero slippage for at-balance trades — at the cost of curving harder near the band edges. λ = 4000 is why at-balance exits and LP adds measure ~0 bp while 95%-drained trades pay ~2 bp | 4000 |
+| **Fee** | *Who pays whom for liquidity — and how stale can the oracle get?* | LP income per trade, but doing double duty here: it is the **shield** (must exceed β − 1) and the **staleness budget** (breakeven ST-mark staleness = fee ÷ 2.19 bp/day of drift → 0.73 days at 1 bp) | 1 bp |
+
+*(A sixth item you'll see in the code — `DerivedEclpParams`, the tau/u/v/w/z/dSq constants — is
+not a knob at all: it is the same five choices pre-chewed into 38-decimal trigonometry, computed
+offline at 100-digit precision and hardcoded because deriving it on-chain is infeasible. The
+pipeline that produced them first reproduced all nine mainnet production parameter sets before
+being trusted with these.)*
+
+The design tensions live *between* the knobs: β trades tilt against headroom; α trades exit-cost
+against exit-capacity; λ trades at-peg depth against edge behavior; the fee trades trader cost
+against shield margin and staleness tolerance. The rest of this document is those four tensions,
+priced by measurement.
+
+### Idea 2: this pool *lives* at β — and that's a feature, not a failure
+
+The ST leg out-earns the stable leg (8% vs 3%). Its oracle marks discretely (e.g. daily), so
+**between marks, the pool's ST price is stale-low relative to reality**. Arbitrageurs therefore
+always have the same trade available: buy the pool's (slightly underpriced) ST. Buying ST pushes
+the price **up, toward β**. The result — measured, not theorized — is that the pool spends nearly
+all of its life **pinned at β, holding almost pure stables**, with exit flow briefly pushing it
+down-band and arbers recycling it back up.
+
+Two consequences that recur everywhere below:
+
+- **Pinned-at-β is the operating state, not a brick.** A β-pinned pool is stables-full — which is
+  maximum readiness for its actual job (handing stables to exiting seniors). It never stops
+  quoting exits.
+- **Arbers are the pool's unpaid rebalancing bots.** Every unit of ST that exiters push in gets
+  bought back out by arbers within hours, at a margin capped by the fee. The pool self-restocks
+  its stables continuously.
+
+> Note for readers of the earlier Python guide: that analysis concluded price drifts *down toward
+> α*. That is what happens if rates were applied continuously with nobody trading. With
+> production's discrete ST marks and live arbitrage — what these tests actually simulate — the
+> drift between marks runs **up toward β**. Section 8 reconciles all such differences.
+
+### Idea 3: the fee shield — the single inequality that makes everything benign
+
+Since the pool lives at β, the question "can anyone extract from it there?" reduces to one number:
+the gap **β − 1** (how far above fair the pool prices ST when pinned). An arber's only move
+against a β-pinned pool is selling ST into it at β; that is profitable only if the premium beats
+the fee. So:
+
+**If `β − 1 < fee`, the band is fee-shielded**: nobody can profitably trade against the pinned
+pool, one-sided seeding cannot be exploited, and β-pinning is loss-free. Both candidates satisfy
+this with the production 1 bp fee:
+
+| | β − 1 | vs 1 bp fee |
 |---|---|---|
-| Seeder loss at production 1 bp fee ($10k / $100k / $1M seeds) | **0 / 0 / 0** | **0 / 0 / 0** |
-| Optimal-arb profit against the fresh pool | 0 | 0 |
-| Loss vs balanced (90/10 or 99.99/0.01) seeding | 0 | 0 |
-| Diagnostic: loss at the pool-minimum 0.01 bp fee | 0 | 0.0254 bp (scale-invariant) |
-| Conservation residual (seeder loss − arber profit) | 0 wei | 0 wei |
+| 99.99 pool | 0.0005 bp | **2000× margin** |
+| 90/10 pool | 0.53 bp | 2× margin |
 
-**Why (the intuition):** initializing with stables only opens the pool pinned at β — its
-most-expensive-ST corner. The *only* thing an arber can harvest is the gap between β and fair
-(1.0), because selling ST into the pool executes at most at β net of the fee. On both designs that
-gap (0.0005 bp and 0.53 bp respectively) is **smaller than the 1 bp fee**, so the arb is
-unprofitable at any size and never fires: **the fee shields the entire band**. This was asserted
-structurally (`β·(1−fee) < 1`) and then confirmed empirically with an optimal-size arb search.
-The 0.01 bp-fee diagnostic proves the machinery finds the arb the instant the shield is thinner
-than the band — tilt9010 then loses exactly the curve convexity (0.0254 bp, matching the offline
-invariant-math prediction), and the loss is scale-invariant, as AMM geometry demands.
-
-**Verdicts:** tilt9999 — **valid, loss-free**. tilt9010 — **valid, loss-free** (keep the fee ≥ β−1,
-i.e. ≥ 0.53 bp, which the production 1 bp satisfies).
+Every "loss = $0.00" result in this document is this inequality doing its work, and the tests
+prove it both ways: they assert `β·(1−fee) < 1` structurally, *and* they drop the fee to the pool
+minimum (0.01 bp) to confirm the loss appears the instant the shield is thinner than the band.
 
 ---
 
-## Decision 2 — Is **always LPing single-sided into stables** valid?
+## 2. The two measured candidates
 
-**Max lifecycle loss after fees and arb: ≈ 2 bp, and only when both entering and exiting a
-95%-drained pool. At or near balance the cost rounds to zero. Over a simulated year the LP beats
-the 3% stable-hold benchmark on both tilts.**
+Both use the production band floor (α = peg − 15 bp), rotation at price 1, λ = 4000, 1 bp fee,
+both legs registered `WITH_RATE`, initialized exactly at their balance points. Parameters were
+derived with a 100-digit mpmath pipeline that first reproduced all nine mainnet production
+parameter sets, then solved β for each tilt; the on-chain composition check confirms both to
+4+ decimal places.
 
-| Measured | tilt9999 | tilt9010 |
+| | **99.99 pool** (`tilt9999`) | **90/10 pool** (`tilt9010`) |
 |---|---|---|
-| Entry cost at balance (T3, spot-numeraire, 0.1–50% TVL adds) | 0.0000 bp | 0.096–0.100 bp |
-| Entry cost at 95% drained (worst state, 50% TVL add) | 1.90 bp | 2.01 bp |
-| Add + remove round trip at balance (T3) | 0.0001 bp | 0.198 bp |
+| Stables at balance (measured) | 99.9900% | 90.0000% |
+| β | 1 + 4.74e-8 | 1 + 5.2988e-5 |
+| ST inventory at balance (per $10M of stables) | ~$1,000 | ~$1.11M (≈1000×) |
+| What the ST inventory is | a rounding error | a real second leg |
+
+Everything the pool does on its stable side — the drain prices, the depth ladder, the exit costs —
+was measured **identical** between the two (it depends only on α/rotation/λ, which they share).
+The tilt decision is purely about how much ST the pool holds at rest, and §4–6 price exactly what
+that inventory costs and earns.
+
+---
+
+## 3. The three decisions
+
+### Decision 1 — Is single-sided stablecoin **initialization** valid?
+
+**Yes on both. Max loss after fees and arb: $0.00 — exactly, at every seed size.**
+
+| Measured (T6) | 99.99 pool | 90/10 pool |
+|---|---|---|
+| Seeder loss, production 1 bp fee — $10k / $100k / $1M seeds | 0 / 0 / 0 | 0 / 0 / 0 |
+| Optimal-arb profit available against the fresh pool | 0 | 0 |
+| Penalty vs seeding at the balanced ratio | 0 | 0 |
+| Diagnostic at the 0.01 bp pool-minimum fee | 0 | 0.0254 bp, scale-invariant |
+| Conservation check (seeder loss ≡ arber profit) | 0 wei residual | 0 wei residual |
+
+**Why.** Seeding stables-only opens the pool at its all-stables corner — pinned at β, quoting ST
+at a premium of β − 1. That premium is the *entire* prize available to an arber, and on both
+candidates it is smaller than the fee they would pay to collect it (Idea 3). The arb never fires;
+the seeder keeps 100.00% of the seed. The 0.01 bp-fee diagnostic proves this isn't a measurement
+blind spot: with the shield removed, the 90/10 pool loses exactly its curve convexity (0.0254 bp,
+matching the offline invariant-math prediction), identical at $10k and $1M — scale-invariance is
+what AMM geometry demands, and it held to the wei.
+
+*Practical note: this validates dust-seeding at deployment (e.g. $1 of USDC in the deploy script),
+closing the permissionless-initialization frontrun window at zero cost.*
+
+### Decision 2 — Is **always LPing single-sided into stables** valid?
+
+**Yes on both. Worst measured lifecycle cost ≈ 2 bp — and only for entering *and* exiting a
+95%-drained pool. At or near balance the cost rounds to zero, and over a simulated year the LP
+beats simply holding the stablecoin.**
+
+| Measured | 99.99 pool | 90/10 pool |
+|---|---|---|
+| Entry at balance (0.1%–50% of TVL adds) | 0.0000 bp | 0.096–0.100 bp |
+| Entry at 95% drained, 50%-of-TVL add (worst state) | 1.90 bp | 2.01 bp |
+| Add→remove round trip at balance | 0.0001 bp | 0.198 bp |
 | Round trip at 95% drained | 1.88 bp | 1.89 bp |
-| **Whale: $1M single-sided into a $500k pool (2× TVL)** (T5) | **0.0000 bp ($0.0033)** | **0.0391 bp ($3.92)** |
-| Whale round trip (add then single-sided remove) | 0.0000 bp | 0.0666 bp |
-| Whale ladder $100k → $2M (per-dollar slippage) | 0 at all sizes | 0.0869 → 0.0242 bp (falls with size) |
-| **1-year simulation: LP excess return vs 3% hold** (daily marks, exit flow, stress week) | **+1.85 bp** | **+16.87 bp** |
-| — of which lost to arbers | 0.36 bp/yr | 0.03 bp/yr |
+| **Whale: $1M single-sided into a $500k pool (2× TVL)** | **0.0000 bp = $0.0033** | **0.0391 bp = $3.92** |
+| Whale round trip | 0.0000 bp | 0.0666 bp |
+| Whale ladder $100k → $2M, per-dollar cost | 0 throughout | 0.087 → 0.024 bp (*falls* with size) |
+| **1-year sim: LP return vs 3% stable-hold** | **+1.85 bp/yr** | **+16.87 bp/yr** |
+| — lost to arbers within that year | 0.36 bp/yr | 0.03 bp/yr |
 
-**Why (the intuition):**
-- *Entry is nearly free because you are adding the token that already is the pool.* An unbalanced
-  add is charged fees only on its non-proportional fraction. Into a 99.99%-stable pool a stable add
-  is proportional to 4 decimal places → cost literally rounds to 0 wei. Into 90/10 the imbalanced
-  fraction is the 10% ST share → cost ≈ 10% × 1 bp fee ≈ 0.1 bp. The measured law `cost ≈ w_ST×fee
-  + impact` held at every drain state.
-- *The whale add gets cheaper per dollar as it gets bigger*, which surprises until you see that a
-  2×-TVL add mostly looks like re-seeding the pool proportionally — and the tiny β-gap caps how far
-  the implicit swap can move the price (post-add spot sits 1.6e-8 / 1.8e-5 below β).
-- *The real cost is exiting a drained pool* — 1.9 bp — and that is not a leak, it is the price of
-  demanding stables from a pool whose job was to hand stables to exiting seniors all week. The
-  15 bp band floor caps it: nothing in this design can make a single-sided LP lose more than
-  ~band-depth + fees, and measured worst case is ~2 bp.
-- *The LP beats holding* because fee income on exit flow exceeds arb leakage at sane oracle
-  cadence: tilt9010 earns ~9× more (+16.87 bp vs +1.85 bp) simply because 10% of its capital sits
-  in the 8% asset instead of 0.01% (`SIM_excess_carry`: $159.6k-equivalents vs $6.4k per year of sim).
+**Why, piece by piece:**
 
-**Verdicts:** tilt9999 — **valid; costs indistinguishable from zero at every size**, minimal carry.
-tilt9010 — **valid; ≤0.2 bp at balance, ~2 bp worst-case drained, and the best LP economics of the
-two** — *conditional on oracle cadence discipline (Decision 3)*.
+- *Entering costs ~nothing because you are adding the token the pool already is.* Balancer charges
+  fees only on the non-proportional slice of an unbalanced add. Adding stables to a 99.99%-stable
+  pool is proportional to four decimal places — the fee base is ~0. At 90/10 the imbalanced slice
+  is the 10% ST share, so cost ≈ 10% × 1 bp ≈ 0.1 bp. The measured costs matched the law
+  `cost ≈ w_ST · fee + impact` at every drain state.
+- *The whale add gets cheaper per dollar as it gets bigger* — backwards until you see that a
+  2×-TVL stable add mostly *is* proportional re-seeding, and the tiny β-gap caps how far its
+  implicit swap can push the price (post-add spot landed 1.6e-8 / 1.8e-5 under β). There is no
+  standing arb afterwards on either pool: the displacement is inside the fee shield.
+- *Exiting a drained pool costs ~2 bp, and that's the product working.* Withdrawing stables from a
+  pool whose job all week was handing stables to exiting seniors is demanding the scarce asset;
+  the 15 bp band floor caps even that at ~2 bp all-in. (Conversely — measured as the "documented
+  deviation (e)" in the test header — a *fair-valued* single-sided stable add into a drained pool
+  is a **gain**: you are the rebalancer the pool is paying. The 2 bp figure above is the
+  conservative spot-numeraire cost.)
+- *The LP beats holding because fee income plus carry outruns arb leakage* at disciplined oracle
+  cadence. The 90/10 pool earns ~9× more purely because ~3% of its capital (time-average; see §5)
+  sits in the 8% asset rather than ~0.25%.
+
+**The conditionality:** these results assume the oracle-cadence invariants of §5. They are wiring
+requirements, not tilt properties — but Decision 2's "yes" is contingent on them.
+
+### Decision 3 — Is the composition valid, and which tilt should ship?
+
+**Both compositions are economically sound under the required wiring. They fail identically (two
+wiring failure modes, §5) and differ in exactly two measured ways: LP carry, and sensitivity to
+operational failure.** The final recommendation is in §7.
+
+| | **99.99 pool** | **90/10 pool** |
+|---|---|---|
+| **Pros** | One-time arb per rate event: **$0.04**; every LP flow costs 0.00 bp; fee-shield margin 2000×; nearly immune to even *monthly*-stale ST marks (0.05 bp/yr) | Real two-sided depth (can sell users up to 10% of TVL in ST vs 0.01%); **+16.87 bp/yr** realized LP carry; *lower* relative arb leak in the year sim (0.03 vs 0.36 bp/yr — its fee income on real inventory swamps the leak) |
+| **Cons** | Effectively a one-way valve (buy-side inventory 0.01% of TVL); LP carry ≈ nil (+1.85 bp/yr) | 1000× the one-time recycle arb per exit batch ($14–$193, still fee-capped and non-repeatable); **50 bp/yr carry drag if ST marks ever go stale to ~monthly**; routine LP costs 0.1–0.2 bp instead of 0.00 |
+| **Identical between them** | Exit absorption and drain prices (shared quote ladder); concentration profile (peaks at balance, decays to 8% of peak at the −15 bp floor); 1.37 bp/day drift capture; ~2 bp round trip through a drained pool; both wiring failure modes | |
 
 ---
 
-## Decision 3 — Is the pool composition valid? Pros and cons
+## 4. The arb picture in full (what rate updates can and cannot extract)
 
-**Both compositions are economically sound under the required wiring (both legs `WITH_RATE`,
-synchronized marks at ≥daily cadence, 1 bp fee). They fail the same two ways (wiring, not tilt)
-and differ mainly in what they are *for*.**
-
-### The arb picture (T2, T7)
-
-| Rate-update scenario | tilt9999 | tilt9010 |
+| Scenario (T2, T7) | 99.99 pool | 90/10 pool |
 |---|---|---|
-| Synchronized daily marks: steady-state extraction (all 5 drain states) | **0** | **0** |
-| Synchronized daily: one-time recycle of fresh exit inventory | $0.04 at balance / ~$179 drained | $14.39 at balance / ~$193 drained |
-| Async 12h offset between the two providers | 0 | 0 |
-| **ST daily / quote weekly (cadence mismatch)** | **53.1 bp/yr — NASTY** | **49.9 bp/yr — NASTY** |
-| **Extreme: quote per-second, ST monthly (T7)** — arb margin | one-time $0.0096 | one-time $31.10 |
-| — **forced-rotation carry drag** | **0.05 bp/yr** | **50.0 bp/yr** |
-| — mid-cycle exiter execution haircut (day 15) | 33.8 bp | 33.2 bp |
-| — pool pinned/inert | 99% of horizon | 99% of horizon |
-| Breakeven ST cadence at 1 bp fee (0.5 / 1 / 1.5 bp) | 0.36 / **0.73** / 1.09 days | same (drift is tilt-independent) |
-| Quote leg registered STANDARD instead of WITH_RATE | **pool dead by day 18** | **pool dead by day 18** |
+| Synchronized daily marks — **steady-state extraction**, all 5 drain states | **0** | **0** |
+| Synchronized daily — one-time recycle of freshly-exited inventory | $0.04 at balance; ~$179 drained | $14.39 at balance; ~$193 drained |
+| Providers offset by 12h | 0 | 0 |
+| **ST daily / stable weekly (cadence mismatch)** | **53.1 bp/yr — NASTY** | **49.9 bp/yr — NASTY** |
+| **Extreme: stable per-second, ST monthly** — arb margin | one-time $0.0096 | one-time $31.10 |
+| — forced-rotation **carry drag** (see below) | **0.05 bp/yr** | **50.0 bp/yr** |
+| — exiter execution haircut at mid-month | 33.8 bp | 33.2 bp |
+| — pool pinned/inert | 99% of the horizon | 99% of the horizon |
+| Breakeven ST staleness at 0.5 / 1 / 1.5 bp fee | 0.36 / **0.73** / 1.09 days | identical (drift is tilt-independent) |
+| Stable leg registered STANDARD instead of WITH_RATE | **pool dead by day 18** | **pool dead by day 18** |
 
-**Why (the intuition):**
-- *Steady-state extraction is zero at sane cadence because of β-pinning.* The balance point sits
-  essentially at β. Fair value only ever drifts upward (8% > 3%), so the only arb is buying the
-  pool's ST — and the pool holds almost none (tilt9999) or a bounded amount (tilt9010). Once
-  bought, β·(1−fee) < 1 blocks re-selling it back, so **each unit of exit inventory can be recycled
-  at most once**. No inventory, no repeatable arb: the "LVR faucet" everyone fears simply has no
-  water supply.
-- *The nasty cases are cadence bugs, not tilt properties.* A weekly quote leg oscillates the fair
-  ratio both ways through the fee band and creates a genuinely repeatable ~50 bp/yr extraction on
-  **both** tilts; the fix is synchronizing the two providers, not choosing a tilt.
-- *Stale ST marks convert yield into arb-food.* Under monthly ST marks the arber strips the ST leg
-  within 12–18 hours of the mark going stale and simply *holds it instead of the LP*: the LP's
-  loss is not the strip margin (pennies) but ceding the 5%/yr ST-vs-stable yield spread on the
-  whole ST allocation — measured at exactly `inventory share × 5%`: 50.0 bp/yr for 90/10, 0.05
-  bp/yr for 99.99/0.01. Meanwhile exiters get executed against the stale mark: **−33 bp at
-  mid-month on both tilts**. Even where the LP barely bleeds (tilt9999), the pool stops being fair
-  exit liquidity. **Minimum safe ST update cadence at a 1 bp fee ≈ every 0.73 days; ship daily or
-  faster.**
-- *`STANDARD` quote wiring kills either pool in ~18 days* because the un-modeled 3%/yr quote drift
-  walks the scaled price out of the 15 bp band floor. This is a hard wiring requirement, not a knob.
+**Why steady-state extraction is zero (the anti-LVR result).** An arb needs two things: a stale
+price *and inventory to trade against it*. Drift only ever runs one way (up — Idea 2), so the only
+trade is buying the pool's ST. Once bought, the fee shield blocks selling it back (β·(1−fee) < 1),
+so **each unit of ST can be recycled at most once**. No refill, no repeat. The feared "LVR faucet"
+has no water supply. This held at every drain state, every cadence, both tilts — the tests
+measured literal zeros, with the one-time recycle explicitly separated out and itself fee-capped.
 
-### Pros and cons
+**Why cadence mismatch is the one genuine hazard.** If the stable's provider marks weekly while
+ST marks daily, the *ratio* of the two oracles oscillates in both directions through the fee band
+— and two-way oscillation is exactly the repeatable arb that one-way drift structurally forbids.
+Measured: ~50 bp/yr of TVL on both tilts. The fix is operational (synchronize the providers), not
+geometric.
 
-| | **tilt9999 (99.99/0.01)** | **tilt9010 (90/10)** |
-|---|---|---|
-| **Pros** | Arb surface is microscopic (one-time $0.04 at balance); every single-sided-LP cost measures 0.00 bp at balance incl. the 2×-TVL whale; genesis trivially safe; nearly immune even to *monthly* ST marks (0.05 bp/yr) | Real two-sided depth (max buyable ST = 10% of TVL vs 0.01%); 9× the LP carry (+16.87 bp/yr vs hold); *lower* relative arb leak in the year sim (0.03 vs 0.36 bp/yr — fee income on real inventory swamps it); genesis equally loss-free |
-| **Cons** | Effectively one-way: the buy side can absorb only 0.01% of TVL, so it is an exit valve, not a market; negligible LP carry; permanently parked at β (benign, but any ST buy interest hits a wall) | 1000× the one-time recycle arb per exit batch (~$14–193, still fee-capped); **50 bp/yr carry drag if ST marks ever go stale to ~monthly**; 0.1–0.2 bp routine LP costs instead of 0.00 |
-| **Choose it when** | The pool's only job is letting seniors exit into stables | You also want entry liquidity, LP yield, and a real order book against the band |
+**Why stale ST marks cost carry, not principal (the T7 discovery).** Under monthly ST marks the
+arber strips the ST leg within 12–18 hours of each mark going stale — and then simply *holds the
+ST instead of the LP* until the next mark. The strip margin itself is pennies; the real transfer
+is that the arber, not the LP, now earns the 8%-vs-3% spread on that inventory. Measured to three
+decimal places: carry drag = **ST inventory share × 5%/yr** (50.0 bp/yr at 90/10, 0.05 at 99.99).
+The LP's worst case is thus *forfeiting the upside*, landing ≈ at the plain stablecoin hold —
+principal is never in the blast radius. The second casualty is exiters: selling ST against a
+month-stale mark under-pays them by the accumulated drift (~33 bp mid-month, ~65 bp at month-end),
+so stale marks destroy execution quality even where the LP barely bleeds.
 
-Shared and independently confirmed on both: identical quote-side density ladder (concentration
-peaks at balance, decays monotonically to 8% of peak at the −15 bp floor — the "less concentrated
-as it drains" requirement), 1.37 bp/day drift capture, one-shot $1M exit haircut 1.24 bp, round
-trip through the drained pool ≈ 2.0 bp = exactly two fee legs.
+**The wiring invariants that fall out (tilt-independent, non-negotiable):**
+1. Both legs `WITH_RATE` — STANDARD quote wiring walks the pool out of its band in 18 days.
+2. Synchronized providers, ST marked at least daily (breakeven staleness 0.73 days at 1 bp fee).
+3. Fee ≥ β − 1 (1 bp covers both candidates) — this *is* the fee shield.
 
 ---
 
-## Reconciliation vs the independent Python benchmark
+## 5. LP yield, honestly: the balance point is not where the pool lives
+
+The naive carry calculation says the 90/10 pool should earn `10% × 5% = 50 bp/yr` over holding
+stables. The year simulation measured **+16.87 bp/yr**. The gap is not leakage — it's occupancy:
+
+| Measured (year sim, with exit flow + stress week) | 99.99 pool | 90/10 pool |
+|---|---|---|
+| ST share **at the balance point** (design intent) | 0.01% | 10% |
+| ST share **time-average under flow** (measured) | 0.25% | 3.28% |
+| Realized carry ≈ avg share × 5% | ~1.3 bp | ~16.4 bp |
+| Total LP excess vs 3% hold (carry + fees − costs) | **+1.85 bp/yr** | **+16.87 bp/yr** |
+
+Exit flow pushes ST in; arbers promptly recycle it out; the pool re-parks near β, stables-full.
+So *any* tilt's realized ST occupancy — and therefore its carry — sits well below its balance
+point. The tilt sets a ceiling; flow sets the realized average. Two implications:
+
+- The true yield gap between the candidates is **~15 bp/yr of TVL**, not ~50.
+- If LP yield is a first-class product goal, this pool is the wrong lever — its own mechanics
+  suppress inventory. In the Day system the LT holders' real compensation is the **liquidity
+  premium** the kernel mints; in-pool carry is a garnish at any tilt.
+
+---
+
+## 6. What doesn't change with tilt (confirmed tilt-invariants)
+
+Measured identical (not merely similar) between the two candidates:
+
+- **Exit absorption and drain pricing** — the quote-side ladder depends only on α/rotation/λ.
+  Every drain-anchor price, density bucket, and consumed-fraction matched between tilts.
+- **Concentration profile** — density peaks at the balance point and decays monotonically to ~8%
+  of peak at the −15 bp floor: the "concentrated at balance, less as it drains" requirement,
+  photographed in ten buckets.
+- **Round trip through a drained pool** ≈ 2.0 bp = exactly two fee legs.
+- **Both wiring failure modes** (STANDARD-quote death at day 18; cadence-mismatch extraction).
+- **One-shot $1M exit haircut** (1.24 bp) and daily drift capture (1.37 bp).
+
+The corollary is the sharpest sentence in this document: **choosing the tilt buys and risks
+nothing about exit liquidity itself.** It only chooses how much ST inventory sits in the pool at
+rest — which is simultaneously the LP's carry (§5) and the arber's food (§4).
+
+---
+
+## 7. Recommendation
+
+**Ship the 99.99/0.01 pool**: 1 bp fee, both legs `WITH_RATE`, synchronized daily-or-faster
+marks, production 15 bp α floor, dust-seeded single-sided in stables at deployment (Decision 1
+makes this free). Parameters: the `_eclpParamsA` / `_derivedParamsA` literals in the test file,
+already validated on-chain.
+
+The reasoning, given the goals (exit liquidity; no bricking; no meaningful arbs; LP yield as a
+secondary good):
+
+- Exit capacity is tilt-invariant (§6) — the extreme tilt gives up **zero** mandate performance.
+- Its arb surface is microscopic ($0.04/event) and its fee-shield margin (2000×) survives fee
+  changes, parameter drift, and rounding without anyone thinking about it.
+- It is nearly indifferent to the worst operational failure simulated: monthly-stale marks cost
+  0.05 bp/yr vs the 90/10's 50 bp/yr.
+- The price is ~15 bp/yr of realized LP carry (§5) — material only if in-pool LP yield becomes a
+  first-class goal, which Day's liquidity-premium design already serves elsewhere.
+- The pool "wants" to live stables-full regardless of tilt; 99.99 ratifies the equilibrium the
+  90/10 design would spend all year fighting.
+
+**When to revisit:** if in-pool LP carry is promoted to a primary goal, the measured fallback is
+90/10 at 1 bp (2× shield margin, +16.87 bp/yr, worst case ≈ the hold). Pushing further (e.g.
+85/15 with a 1.5–2 bp fee to re-widen the shield and the staleness breakeven) is *extrapolated,
+not measured* — re-run this battery on those parameters before believing it; that is what the
+suite is for. The other standing design question is band width: the production −15 bp floor caps
+all drain costs at ~2 bp but stops absorbing exits below −15 bp; a multi-% α-tail (as in the
+Python benchmark's family) keeps absorbing at costs that grow to hundreds of bp. That is a product
+choice about *how* exits should degrade, orthogonal to the tilt.
+
+---
+
+## 8. Reconciliation with the independent Python benchmark
+
+The benchmark (a high-precision offline model, validated to ~1e-48 against the library's price
+formulas) and this suite agree on the geometry and laws, and differ where its assumptions differ
+from production wiring or its parameter family (α = 0.90, λ = 1000) differs from production's
+(α = peg − 15 bp, λ = 4000).
 
 | Benchmark claim | On-chain result | Status |
 |---|---|---|
-| 99.99% tilt achievable only via band asymmetry (peg just under β), not rotation | Implemented exactly so; measured 99.9900% at peg | **Confirmed** |
-| Solved β = 1.00000231 (for α=0.90, λ=1000) | β = 1 + 4.74e-8 (for α=0.9985, λ=4000) | **Consistent** — different (α, λ) family, same geometry; β shrinks as λ and α tighten |
-| Composition ~insensitive to rate jumps at peg | Steady-state extraction 0 at every drain/cadence; max buyable ST 0.01% TVL | **Confirmed** (mechanism identical) |
-| Round trip = exactly two fee legs (−2.000 bp) | 1.9998 bp measured at D50 | **Confirmed** |
-| Single-sided fee leak ≈ (1−w)·fee ≈ 0 at 99.99% | 0.0000 bp measured (0.0999 bp at 90/10 = w_ST·fee) | **Confirmed, law generalizes** |
-| Price drifts *down toward α*; β is the fragile edge | **Diverges:** measured fair ratio drifts *up*; the pool pins at **β** within hours-to-days and that pinned state is the benign steady state (it is what caps every arb) | **Benchmark direction inverted**; its "β-fragility" case is in fact the operating mode, and it is protective |
-| Drain exit slippage 4.5 → 490 bp (3% → 83% drained) | 0.25 → 1.9 bp across D25 → D95 | **Both right — different bands.** Benchmark used a 10% α-tail; these tests keep the production 15 bp floor, which caps all drain costs at ~2 bp but stops absorbing exits ~15 bp below peg. This is the single biggest open *design choice*, not a math dispute |
-| STANDARD quote wiring exits the band "in ~months" | Dead by **day 18** on both tilts | **Direction confirmed, speed 3× worse** (again band-width: a 15 bp floor is crossed much sooner than a 10% one) |
-| EclpLPOracle curve-minimum mark coincides with peg | Not exercised — no LP oracle in this harness | **Untested here** (kernel-integration suite covers `computeTVL` separately) |
+| Tilt is achievable only via band asymmetry (peg jammed under β); rotation cannot do it | Implemented exactly so; 99.9900% / 90.0000% measured at peg | **Confirmed** |
+| Solved β = 1.0000023 for the 99.99% tilt | β = 1 + 4.74e-8 here | **Both right** — β for a given tilt shrinks as λ rises and α tightens; different family, same geometry |
+| Round trip = exactly two fee legs | 1.9998 bp measured | **Confirmed** |
+| Single-sided fee leak ≈ (1−w)·fee ≈ 0 at extreme tilt | 0.0000 bp (99.99), 0.0999 bp ≈ w·fee (90/10) | **Confirmed; law generalizes** |
+| Adding the scarce asset to a drained pool *pays you* (rebalancer's credit) | Fair-valued add cost measured negative at drained states | **Confirmed** |
+| BPT oracle's curve-minimum mark coincides with the peg | Analytically sound (min of x+y is where marginal price = 1); not exercised by this suite | **Plausible, untested here** |
+| Price always drifts *down toward α*; β never approached | **Inverted in production wiring**: between discrete ST marks fair value rises above the stale mark, arbers buy the ST leg, the pool pins at **β** ~99% of the time (measured). The downward-drift result holds only for continuously-applied rates with no trading | **Corrected** — and β-pinning is benign *because of the fee shield*, which the benchmark's 90% family (β−1 = 23.5 bp > fee) does not have |
+| "No arbs from rate changes" as a universal | True same-block; false across marks: 50 bp/yr under cadence mismatch, inventory-share × 5%/yr carry drag under stale marks | **Conditional** — it is an ops invariant, not a geometric one |
+| Deep-drain exit slippage 4.5 → 490 bp | 0.25 → 1.9 bp here | **Both right — band width**: 10% α-tail vs 15 bp floor. The open product choice flagged in §7 |
+| STANDARD quote wiring exits the band "in ~months" | Dead by **day 18** | Direction confirmed; speed is band-width-dependent (a 15 bp floor is crossed ~10× sooner than a 10% one) |
+| Whale add loses ~$81 to a standing arb (their 90% family) | $0 here — the displacement lands inside the fee shield | **Both right** — their 90% band's β-gap (23.5 bp) exceeds the fee; production's (0.53 bp) does not. Same physics, opposite regime |
+| `disableUnbalancedLiquidity` plausibly enabled for this pool | **Must stay off**: the Day kernel's own LT deposits and premium reinvestment *are* unbalanced adds | **Corrected** (product constraint) |
 
 ---
 
-## Caveats and limits
+## 9. Caveats — what these tests do *not* show
 
-- The harness prices **at external fair rates from mocked providers**; real-world senior NAV is
-  junior-protected but not literally monotonic — a genuine ST write-down (not modeled) would test α-side
-  behavior that these runs never reach.
-- Both tokens are 18-dec; USDC-style 6-dec plumbing is covered by the kernel fork suites, not here.
-- The EclpLPOracle/`computeTVL` marking claims from the benchmark remain unverified in this file.
-- The band-width question (15 bp production floor vs a multi-% tail) changes drain economics by two
-  orders of magnitude and deserves its own decision before mainnet.
+- **Senior write-downs are not modeled.** The junior-protected 8%-up-only rate is the design
+  premise; a genuine ST NAV drop would exercise α-side dynamics these runs never reach.
+- **The EclpLPOracle / `computeTVL` marking path is not in this harness** (the kernel fork suites
+  cover it); the benchmark's curve-minimum claim stays analytically-argued only.
+- **Both mock tokens are 18-dec**; 6-dec (USDC-style) decimal plumbing is covered elsewhere.
+- **The fair-value model is the mocked rates.** Real-world deviations between the marked rate and
+  tradable reality (venue basis, redemption queues) are outside scope.
 
-## Recommended production settings implied by the numbers
+---
 
-1. **Register both legs `WITH_RATE`.** STANDARD quote wiring is an 18-day time bomb at any tilt.
-2. **Synchronize the two rate providers and mark at least daily** (breakeven 0.73 days at 1 bp fee;
-   the only "nasty arb" found anywhere came from mismatched cadences, ~50 bp/yr).
-3. **Keep the fee ≥ β−1** (1 bp covers both candidates) — it is the shield that makes one-sided
-   genesis and β-pinning loss-free.
-4. **Seed single-sided in stables freely** — measured loss $0.00 at production fee, any size.
-5. **Pick the tilt by product intent**, not by fear of arbs: 99.99/0.01 as a pure exit valve,
-   90/10 for a two-sided venue with real LP carry. At disciplined cadence both are clean; only
-   stale ST marks separate them (0.05 vs 50 bp/yr), so if ST marks may ever lapse, that asymmetry
-   is the decision.
+## 10. Test map & glossary
 
-## Test map (all in `Test_ECLPExitLiquidityPoolEconomics.t.sol`)
-
-| Contract | Covers |
+| Contract (all in `Test_ECLPExitLiquidityPoolEconomics.t.sol`) | Covers |
 |---|---|
-| `Test_PoolEconomics_ECLPExitLiquidity` | T1 composition/concentration, T2 rate-update arbs + breakeven sweeps, T3 single-sided add/round-trip costs, T4 wiring & numeric edges |
-| `Test_YearSimulation_ECLPExitLiquidity` | T3 one-year LP PnL vs 3% hold (daily marks, exit flow, stress week) |
-| `Test_WhaleAddAndGenesis_ECLPExitLiquidity` | T5 $1M-into-$500k whale add + ladder + round trip; T6 one-sided genesis loss at $10k/$100k/$1M with optimal arb + conservation ledger |
-| `Test_ExtremeCadence_ECLPExitLiquidity` | T7 per-second quote / monthly ST marks: strip dynamics, carry drag, exiter haircut, min safe cadence |
+| `Test_PoolEconomics_ECLPExitLiquidity` | T1 composition & concentration profile; T2 rate-update arbs, cadence grids, breakeven sweeps; T3 single-sided add & round-trip costs across drain states; T4 wiring and numeric edge behavior |
+| `Test_YearSimulation_ECLPExitLiquidity` | T3 one-year LP PnL vs the 3% hold (daily marks, exit flow, stress week) |
+| `Test_WhaleAddAndGenesis_ECLPExitLiquidity` | T5 the $1M-into-$500k whale add, size ladder, round trip; T6 one-sided genesis at $10k/$100k/$1M with optimal arb + wei-exact conservation ledger |
+| `Test_ExtremeCadence_ECLPExitLiquidity` | T7 per-second stable / monthly ST marks: strip dynamics, carry drag, exiter haircuts, minimum safe cadence |
+
+**Glossary.** *Carry*: the 5%/yr yield spread earned by whoever holds ST instead of stables — the
+LP when marks are fresh, the arber when they're stale. *Fee shield*: the inequality β − 1 < fee
+that makes the β-pinned state unexploitable. *β-pinning*: the pool resting at its all-stables
+corner — the measured default state, benign under the shield. *One-time recycle*: the capped arb
+of buying freshly-exited ST inventory once; non-repeatable because the shield blocks refills.
+*Carry drag*: carry redirected to arbers under stale marks (= inventory share × 5%/yr). *Drain
+anchor Dxx*: the pool state after xx% of its stables have been taken by exiters.
