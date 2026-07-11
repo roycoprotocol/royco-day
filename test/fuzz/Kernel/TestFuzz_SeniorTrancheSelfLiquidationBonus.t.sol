@@ -5,8 +5,8 @@ import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/M
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { AssetClaims, MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
-import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 import { MarketFuzzTestBase } from "../../utils/MarketFuzzTestBase.sol";
+import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 
 /**
  * @title TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel
@@ -14,7 +14,7 @@ import { MarketFuzzTestBase } from "../../utils/MarketFuzzTestBase.sol";
  *         utilization breaches the liquidation threshold, a redeeming senior LP receives exactly the derived
  *         bonus on top of its pro-rata claims, and paying that bonus can never increase coverage utilization
  *         (the anti-bank-run property: one LP's exit sweetener must not eat into coverage for those who stay),
- *         both at the deployed 1% config and across the setter's full unvalidated range up to type(uint64).max
+ *         both at the deployed 1% config and across the setter's full validated range up to WAD - 1 (~100%)
  * @dev The market is driven into liquidation with a fuzzed shared drawdown at a fixed 30% junior seed ratio.
  *      With jt = 0.3 x st, a drawdown r in [-23%, -20.8%] leaves the junior buffer positive but thin:
  *      jtEffectiveNAV = 0.3 x st x r - st x (1 - r) and coverage utilization 1.3 x st x r x 0.2 / jtEffectiveNAV evaluates to at least
@@ -46,7 +46,13 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
      * tranche holds no cross-claim on senior raw NAV after paying coverage). Afterwards the committed marks
      * must show coverage utilization at or below its pre-redemption value.
      */
-    function testFuzz_SeniorTrancheSelfLiquidationBonus_PaysExactBonusAndNeverRaisesCoverageUtilization(uint256 _stSeed, uint256 _drawdownBps, uint256 _sharesSeed) public {
+    function testFuzz_SeniorTrancheSelfLiquidationBonus_PaysExactBonusAndNeverRaisesCoverageUtilization(
+        uint256 _stSeed,
+        uint256 _drawdownBps,
+        uint256 _sharesSeed
+    )
+        public
+    {
         uint256 st = bound(_stSeed, 1e18, 1e26); // uniform over 8 orders of magnitude of senior seed size
         // uniform drawdowns from -23% to -20.8%: always past the liquidation threshold, never exhausting the
         // junior buffer (exhaustion sits at -23.077% for the 30% junior ratio)
@@ -110,7 +116,9 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         assertLe(expectedBonus, baseNav / 100, "the bonus can never exceed the configured 1% of the redeemed claim NAV");
         assertLe(expectedBonus, toUint256(state.jtEffectiveNAV), "the bonus can never exceed the junior buffer that sources it");
         assertLe(
-            expectedBonus, baseNav.mulDiv(toUint256(state.jtEffectiveNAV), st), "the bonus can never exceed the claim scaled by the junior buffer per unit of senior seed"
+            expectedBonus,
+            baseNav.mulDiv(toUint256(state.jtEffectiveNAV), st),
+            "the bonus can never exceed the claim scaled by the junior buffer per unit of senior seed"
         );
 
         uint256 balBefore = stJtVault.balanceOf(ST_PROVIDER);
@@ -142,15 +150,15 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
     }
 
     /**
-     * Scenario: governance stores a self-liquidation bonus of 100% or more of the redeemed NAV. The kernel's
-     * setter accepts any uint64 with no upper-bound validation, so the whole range up to ~1844% of the claim is
-     * storable, and this fuzz drives every such config through the full redemption stack. The clamp - not the
-     * config - must be what protects remaining LPs: the paid bonus lands at
-     * min(desired, junior buffer, the largest bonus that keeps coverage utilization from rising), so even an
-     * absurd config cannot let one exiting senior LP drain coverage from everyone who stays (bank-run neutrality
-     * across the entire unvalidated setter range).
+     * Scenario: governance stores the largest self-liquidation bonuses the kernel accepts. The setter validates
+     * strictly below WAD (RoycoDayKernel.setSeniorTrancheSelfLiquidationBonus reverts INVALID_SELF_LIQUIDATION_BONUS
+     * at 100%+), so this fuzz drives the upper half of the storable range [50%, WAD - 1] through the full
+     * redemption stack. The clamp - not the config - must be what protects remaining LPs: the paid bonus lands at
+     * min(desired, junior buffer, the largest bonus that keeps coverage utilization from rising), so even a
+     * near-100% config cannot let one exiting senior LP drain coverage from everyone who stays (bank-run
+     * neutrality across the entire validated setter range).
      */
-    function testFuzz_SelfLiquidationBonus_AboveWADConfigNeverIncreasesCoverageUtilization(
+    function testFuzz_SelfLiquidationBonus_MaxValidConfigNeverIncreasesCoverageUtilization(
         uint256 _stSeed,
         uint256 _drawdownBps,
         uint256 _sharesSeed,
@@ -173,9 +181,10 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         assertGe(covPre, LIQUIDATION_COVERAGE_THRESHOLD_WAD, "the drawdown must breach the liquidation coverage threshold by construction");
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "a liquidation breach forces the market PERPETUAL so withdrawals stay open");
 
-        // The setter now caps the bonus at WAD (100%). Drive the maximal end of the valid range so the redemption
-        // clamp is still shown to keep an exiting senior LP from raising coverage utilization even at a 100% bonus.
-        uint64 bonusWAD = uint64(bound(_bonusSeed, 0.5e18, 1e18));
+        // The setter caps the bonus strictly below WAD (exactly 1e18 reverts INVALID_SELF_LIQUIDATION_BONUS).
+        // Drive the maximal end of the valid range so the redemption clamp is still shown to keep an exiting
+        // senior LP from raising coverage utilization even at a just-under-100% bonus.
+        uint64 bonusWAD = uint64(bound(_bonusSeed, 0.5e18, 1e18 - 1));
         vm.prank(KERNEL_ADMIN);
         kernel.setSeniorTrancheSelfLiquidationBonus(bonusWAD);
 
@@ -215,14 +224,15 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
             })
         );
 
-        // Independent caps derived without the sizing formula: the config demands at least the full claim over
-        // again (bonusWAD >= WAD so desired >= baseNav), but the utilization-neutral cap is at most the claim
-        // scaled by the junior buffer per unit of senior seed - under 3% of the claim across this band, because
-        // the redeemed raw exposure is at most the claim and what remains covering the buffer is exactly st.
-        // The demanded bonus therefore NEVER pays in full, and the payout stays inside the junior buffer
+        // Independent caps derived without the sizing formula: the config demands up to just under the full
+        // claim over again (bonusWAD in [0.5e18, WAD - 1] so desired is 50-100% of baseNav), but the
+        // utilization-neutral cap is at most the claim scaled by the junior buffer per unit of senior seed -
+        // under 3% of the claim across this band, because the redeemed raw exposure is at most the claim and
+        // what remains covering the buffer is exactly st. The demanded bonus therefore NEVER pays in full,
+        // and the payout stays inside the junior buffer
         assertLe(expectedBonus, baseNav.mulDiv(jtEffHand, st), "the bonus can never exceed the claim scaled by the junior buffer per unit of senior seed");
         assertLe(expectedBonus, jtEffHand, "the bonus can never exceed the junior buffer that sources it");
-        assertLt(expectedBonus, baseNav, "an at-or-above-100% configured bonus must still pay out only a small fraction of the claim");
+        assertLt(expectedBonus, baseNav, "a near-100% configured bonus must still pay out only a small fraction of the claim");
 
         uint256 balBefore = stJtVault.balanceOf(ST_PROVIDER);
         _expectBonusBoostedRedeemEvent(baseSTAssets, baseJTAssets, baseNav, expectedBonus, rate, shares);
@@ -233,7 +243,9 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         // on senior raw NAV here to source from first) and the wallet delta matches both legs
         assertEq(toUint256(claims.nav), baseNav + expectedBonus, "the redeemed NAV must be the pro-rata slice plus exactly the clamped bonus");
         assertEq(toUint256(claims.stAssets), baseSTAssets, "the senior-asset leg must be the unboosted pro-rata slice");
-        assertEq(toUint256(claims.jtAssets), baseJTAssets + expectedBonus.mulDiv(1e18, rate), "the junior-asset leg must carry the bonus at the drawn-down rate");
+        assertEq(
+            toUint256(claims.jtAssets), baseJTAssets + expectedBonus.mulDiv(1e18, rate), "the junior-asset leg must carry the bonus at the drawn-down rate"
+        );
         assertEq(
             stJtVault.balanceOf(ST_PROVIDER) - balBefore,
             toUint256(claims.stAssets) + toUint256(claims.jtAssets),
@@ -272,7 +284,9 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
     function _assertCoverageUtilizationNeutralWithinCeilRounding(uint256 _covPre, uint256 _covPost, uint256 _jtEffPost) private pure {
         uint256 roundingSlackWei = 2;
         uint256 toleranceWAD = _jtEffPost == 0 ? 0 : Math.mulDiv(roundingSlackWei, 0.2e18, _jtEffPost, Math.Rounding.Ceil);
-        assertLe(_covPost, _covPre + toleranceWAD, "paying the self-liquidation bonus must never increase coverage utilization beyond the ceil-rounding envelope");
+        assertLe(
+            _covPost, _covPre + toleranceWAD, "paying the self-liquidation bonus must never increase coverage utilization beyond the ceil-rounding envelope"
+        );
     }
 
     /// @notice Arms the exact-args Redeem event check: the emitted claims must be the pro-rata slice with the
