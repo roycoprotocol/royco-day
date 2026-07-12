@@ -7,117 +7,117 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { ECLPExitLiquidityBase } from "./Test_ECLPExitLiquidityPoolEconomics.t.sol";
 
 /**
- * @title Test_C1FullBattery
- * @notice T9: the full T2-T7 battery re-run against candidate C1 (alpha = 1/1.015 ~ peg - 148 bp,
+ * @title Test_C4FullBattery
+ * @notice T9: the full T2-T7 battery re-run against candidate C4 (alpha = 1/1.02 ~ peg - 196 bp,
  *         lambda = 300, beta re-solved for the 99.99% tilt, 1 bp fee) — the band selected in the T8
  *         band-width study to make arb-driven restoration compelling (arbs are Day's only exit-liquidity
  *         restorer). The shipped suite's probe fixtures are A-band-specific, so each decision-critical
- *         measurement body is replicated here against C1 with C1's own probe fixtures (same 100-digit
+ *         measurement body is replicated here against C4 with C4's own probe fixtures (same 100-digit
  *         mpmath pipeline that reproduces every committed literal exactly). Contrast values quoted in
  *         comments are candidate A's recorded battery results.
  *
  *         Physics expected to differ from A (and measured here):
- *           - flow-impact "crumbs" scale with 1/density: C1's peak density is ~178x lower (lambda^2
+ *           - flow-impact "crumbs" scale with 1/density: C4's peak density is ~178x lower (lambda^2
  *             ratio), so sub-breakeven flow leaks more crumbs but the cadence-mismatch NASTY leak
  *             (arbers oscillating through the dense band) should shrink by roughly the same factor.
  *           - drained-state LP add/remove costs carry real price impact instead of A's ~0.
  *           - everything gated by the fee shield (steady-state zeros, genesis, whale) must be unchanged:
- *             beta - 1 = 0.0061 bp << 1 bp fee.
+ *             beta - 1 = 0.0063 bp << 1 bp fee.
  *
- *         Regenerate: forge test --match-path test/research/eclp/Test_C1FullBattery.t.sol -vv | grep -E "METRIC|VERDICT"
+ *         Regenerate: forge test --match-path test/research/eclp/Test_C4FullBattery.t.sol -vv | grep -E "METRIC|VERDICT"
  */
-abstract contract C1BatteryBase is ECLPExitLiquidityBase {
+abstract contract C4BatteryBase is ECLPExitLiquidityBase {
     using FixedPoint for uint256;
 
-    uint256 internal constant X0_C1B = 1_000_100_010_000_524_809_194; // ST at the peg for Y0 quote (pipeline)
-    uint256 internal constant BETA_C1 = 1_000_000_607_199_568_608;
+    uint256 internal constant X0_C4B = 1_000_100_010_001_551_384_104; // ST at the peg for Y0 quote (pipeline)
+    uint256 internal constant BETA_C4 = 1_000_000_630_371_029_932;
     /// Peak stable density per unit invariant for lambda = 300: lambda^2 * s / 2.
-    uint256 internal constant RHO_PEAK_COEF_C1 = 31_820;
+    uint256 internal constant RHO_PEAK_COEF_C4 = 31_820;
 
-    address internal poolC1;
+    address internal poolC4;
 
-    function _eclpParamsC1() internal pure returns (IGyroECLPPool.EclpParams memory) {
+    function _eclpParamsC4() internal pure returns (IGyroECLPPool.EclpParams memory) {
         return IGyroECLPPool.EclpParams({
-            alpha: 985_221_674_876_847_291,
-            beta: 1_000_000_607_199_568_608,
+            alpha: 980_392_156_862_745_098,
+            beta: 1_000_000_630_371_029_932,
             c: 707_106_781_186_547_524,
             s: 707_106_781_186_547_524,
             lambda: 300_000_000_000_000_000_000
         });
     }
 
-    function _derivedParamsC1() internal pure returns (IGyroECLPPool.DerivedEclpParams memory) {
+    function _derivedParamsC4() internal pure returns (IGyroECLPPool.DerivedEclpParams memory) {
         return IGyroECLPPool.DerivedEclpParams({
-            tauAlpha: IGyroECLPPool.Vector2({ x: -91_267_892_998_666_575_227_947_523_567_959_487_520, y: 40_867_734_309_402_922_018_736_502_219_875_192_745 }),
-            tauBeta: IGyroECLPPool.Vector2({ x: 9_107_990_726_158_074_397_951_031_994_383_804, y: 99_999_999_585_222_523_744_202_835_739_725_890_028 }),
-            u: 45_638_500_494_696_366_599_429_673_579_047_544_153,
-            v: 70_433_866_947_312_722_801_614_633_734_070_095_692,
-            w: 29_566_132_637_909_800_829_212_295_818_019_633_854,
-            z: -45_629_392_503_970_208_525_042_048_814_117_258_959,
+            tauAlpha: IGyroECLPPool.Vector2({ x: -94_773_130_622_350_963_793_914_596_098_909_867_472, y: 31_906_953_976_191_491_143_951_247_353_299_655_382 }),
+            tauBeta: IGyroECLPPool.Vector2({ x: 9_455_562_426_453_687_808_195_961_460_162_005, y: 99_999_999_552_961_694_941_282_054_418_046_780_509 }),
+            u: 47_391_293_092_388_708_687_131_087_809_789_479_979,
+            v: 65_953_476_764_576_592_967_841_298_631_431_128_073,
+            w: 34_046_522_788_385_101_860_064_849_635_555_499_105,
+            z: -47_381_837_529_962_254_999_333_612_177_959_912_994,
             dSq: 99_999_999_999_999_999_886_624_093_342_106_115_200
         });
     }
 
     function setUp() public virtual override {
         super.setUp();
-        poolC1 = _createPool(_eclpParamsC1(), _derivedParamsC1(), false, bytes32(uint256(91)));
+        poolC4 = _createPool(_eclpParamsC4(), _derivedParamsC4(), false, bytes32(uint256(91)));
         address[4] memory actors = [lp, arber, exiter, address(this)];
         for (uint256 i = 0; i < 4; ++i) {
             vm.prank(actors[i]);
-            IERC20(poolC1).approve(address(router), type(uint256).max);
+            IERC20(poolC4).approve(address(router), type(uint256).max);
         }
-        router.initialize(poolC1, address(this), _tokens(), _two(X0_C1B, Y0));
-        _useC1();
-        assertApproxEqAbs(_spotPrice(), 1e18, 1e9, "C1 must initialize on the peg");
-        assertApproxEqAbs(_stableShare(), 999_900_000_000_000_000, 1e12, "C1 must hold the 99.99% tilt at the peg");
+        router.initialize(poolC4, address(this), _tokens(), _two(X0_C4B, Y0));
+        _useC4();
+        assertApproxEqAbs(_spotPrice(), 1e18, 1e9, "C4 must initialize on the peg");
+        assertApproxEqAbs(_stableShare(), 999_900_000_000_000_000, 1e12, "C4 must hold the 99.99% tilt at the peg");
     }
 
-    function _useC1() internal {
-        pool = poolC1;
+    function _useC4() internal {
+        pool = poolC4;
     }
 
     /*//////////////////////////////////////////////////////////////////////////
-                        C1 DRAIN ANCHORS (PIPELINE FIXTURES)
+                        C4 DRAIN ANCHORS (PIPELINE FIXTURES)
     //////////////////////////////////////////////////////////////////////////*/
 
-    /// Pipeline-derived scaled spot at the C1 anchor (same consumed-quote ladder as the A-band anchors).
+    /// Pipeline-derived scaled spot at the C4 anchor (same consumed-quote ladder as the A-band anchors).
     function _c1AnchorSpot(uint256 i) internal pure returns (uint256) {
         if (i == 0) return 1e18;
-        if (i == 1) return 998_441_797_056_819_702;
-        if (i == 2) return 996_592_652_630_176_685;
-        if (i == 3) return 993_769_619_237_187_764;
-        return 988_475_943_654_568_944;
+        if (i == 1) return 998_378_906_117_078_151;
+        if (i == 2) return 996_426_142_773_492_615;
+        if (i == 3) return 993_299_391_412_224_142;
+        return 986_323_639_708_372_321;
     }
 
-    /// ST value share at the C1 anchor (model input for the fee+impact add-cost model).
+    /// ST value share at the C4 anchor (model input for the fee+impact add-cost model).
     function _c1AnchorStShareWad(uint256 i) internal pure returns (uint256) {
         if (i == 0) return 1e14;
-        if (i == 1) return 249_926_799_639_717_152;
-        if (i == 2) return 499_598_471_957_049_533;
-        if (i == 3) return 749_346_817_567_623_115;
-        return 949_636_336_977_573_933;
+        if (i == 1) return 249_920_652_364_487_836;
+        if (i == 2) return 499_574_069_344_651_135;
+        if (i == 3) return 749_284_516_126_226_526;
+        return 949_547_459_141_909_278;
     }
 
-    /// Stable density at the C1 anchor, normalized to the peak (monotone decay toward alpha preserved).
+    /// Stable density at the C4 anchor, normalized to the peak (monotone decay toward alpha preserved).
     function _c1AnchorDensityWad(uint256 i) internal pure returns (uint256) {
         if (i == 0) return 1e18;
-        if (i == 1) return 923_922_311_739_704_801;
-        if (i == 2) return 706_463_066_282_493_583;
-        if (i == 3) return 389_500_229_609_811_332;
-        return 124_651_883_272_096_514;
+        if (i == 1) return 918_057_110_388_453_188;
+        if (i == 2) return 685_005_712_308_800_831;
+        if (i == 3) return 350_259_508_946_100_030;
+        return 83_303_244_936_996_575;
     }
 
-    /// Drain C1 to an anchor with a single exiter EXACT_OUT sell; assert the landing on the pipeline spot.
-    function _drainC1(uint256 anchorId) internal {
+    /// Drain C4 to an anchor with a single exiter EXACT_OUT sell; assert the landing on the pipeline spot.
+    function _drainC4(uint256 anchorId) internal {
         if (anchorId == 0) return;
         router.swapExactOut(pool, exiter, IERC20(address(st)), IERC20(address(quoteToken)), _anchorConsumed(anchorId), type(uint256).max);
-        assertApproxEqAbs(_spotPrice(), _c1AnchorSpot(anchorId), 2e13, "the drain swap must land the spot on the pipeline-derived C1 anchor price");
+        assertApproxEqAbs(_spotPrice(), _c1AnchorSpot(anchorId), 2e13, "the drain swap must land the spot on the pipeline-derived C4 anchor price");
     }
 
-    /// Fee+impact model of the spot-numeraire add cost for C1 (the suite's model with C1 fixtures).
+    /// Fee+impact model of the spot-numeraire add cost for C4 (the suite's model with C4 fixtures).
     function _c1AddCostModelBpE4(uint256 anchorId, uint256 sizeRaw) internal view returns (uint256) {
         uint256 w = _c1AnchorStShareWad(anchorId);
-        uint256 rho = _invariant() / 1e18 * RHO_PEAK_COEF_C1 * _c1AnchorDensityWad(anchorId) / 1e18 * 1e18;
+        uint256 rho = _invariant() / 1e18 * RHO_PEAK_COEF_C4 * _c1AnchorDensityWad(anchorId) / 1e18 * 1e18;
         uint256 dpWad = sizeRaw.mulDown(w) * 1e18 / rho;
         uint256 costWad = SWAP_FEE.mulDown(w) + w.mulDown(dpWad) / 2;
         return costWad / 1e10;
@@ -125,19 +125,19 @@ abstract contract C1BatteryBase is ECLPExitLiquidityBase {
 }
 
 /**
- * @notice T9/T2 — rate-update arbs on C1: sync daily across drain states, sync 12h, async 12h offset,
+ * @notice T9/T2 — rate-update arbs on C4: sync daily across drain states, sync 12h, async 12h offset,
  *         the ST-daily/quote-weekly NASTY cadence, the static breakeven grid, and the standing discount.
  */
-contract Test_C1Battery_Arbs is C1BatteryBase {
+contract Test_C4Battery_Arbs is C4BatteryBase {
     using FixedPoint for uint256;
 
-    /// Sync daily at 1 bp across all five drain anchors: steady-state extraction must stay ZERO on C1 —
+    /// Sync daily at 1 bp across all five drain anchors: steady-state extraction must stay ZERO on C4 —
     /// the fee-shield/one-way-drift logic is band-independent (A recorded literal zeros here too).
     function test_T9_T2_RateStepArb_SyncDaily1bpFee_AcrossDrainStates() public {
         for (uint256 i = 0; i < 5; ++i) {
             (uint256 snap, uint256 snapTs) = _snapState();
-            _useC1();
-            _drainC1(i);
+            _useC4();
+            _drainC4(i);
             uint256 equil0 = _arbToFeeEdge();
             uint256 tvl = _poolTvlAtFair();
             (int256[] memory jumps, uint256[] memory profits, uint256 invFair) = _runSyncEvents(7);
@@ -150,14 +150,14 @@ contract Test_C1Battery_Arbs is C1BatteryBase {
             uint256 steadyAvg = steadySum / 5;
             assertGt(profits[0], 0, "the first post-equilibration update must recycle inventory for a positive one-time profit");
             assertLe(profits[0], invFair.mulDown(uint256(jumps[0]) * 1e10), "the one-time recycle cannot exceed inventory x jump");
-            assertLe(steadyAvg, DUST_PROFIT, "steady-state per-update extraction must be zero on C1: the recycle is one-time");
-            assertLe(_bpE4(steadyAvg * 365, tvl), 100_000, "VERDICT: sync-daily at 1 bp must not be a nasty arb on C1");
+            assertLe(steadyAvg, DUST_PROFIT, "steady-state per-update extraction must be zero on C4: the recycle is one-time");
+            assertLe(_bpE4(steadyAvg * 365, tvl), 100_000, "VERDICT: sync-daily at 1 bp must not be a nasty arb on C4");
             _restoreState(snap, snapTs);
 
             _logMetric(
                 "T9_ARB",
                 string.concat(
-                    "pool=C1|drain=",
+                    "pool=C4|drain=",
                     _anchorLabel(i),
                     "|cadence=24h|equil_recycle=",
                     _u(equil0),
@@ -170,16 +170,16 @@ contract Test_C1Battery_Arbs is C1BatteryBase {
                 )
             );
         }
-        _logVerdict("T9_Q2_sync_daily_1bp_C1", "nasty=false", "steady_state_extraction~0_at_all_drain_states");
+        _logVerdict("T9_Q2_sync_daily_1bp_C4", "nasty=false", "steady_state_extraction~0_at_all_drain_states");
     }
 
-    /// Async daily updates with the quote offset 12h (D0 and D50): beta-pinning must starve the arb on C1 too.
+    /// Async daily updates with the quote offset 12h (D0 and D50): beta-pinning must starve the arb on C4 too.
     function test_T9_T2_RateStepArb_AsyncDaily12hOffset() public {
         uint256[2] memory anchors = [uint256(0), 2];
         for (uint256 a = 0; a < 2; ++a) {
             (uint256 snap, uint256 snapTs) = _snapState();
-            _useC1();
-            _drainC1(anchors[a]);
+            _useC4();
+            _drainC4(anchors[a]);
             _arbToFeeEdge();
             uint256 tvl = _poolTvlAtFair();
 
@@ -195,29 +195,29 @@ contract Test_C1Battery_Arbs is C1BatteryBase {
                 _warpTo(qMarkTs + 1 days - 1);
                 (, uint256 qP) = _runEvent(false, true);
                 if (d >= 2) {
-                    assertLe(stP, DUST_PROFIT, "steady-state async ST-update events must find no extractable trade on C1");
-                    assertLe(qP, DUST_PROFIT, "steady-state async quote-update events must find no extractable trade on C1");
+                    assertLe(stP, DUST_PROFIT, "steady-state async ST-update events must find no extractable trade on C4");
+                    assertLe(qP, DUST_PROFIT, "steady-state async quote-update events must find no extractable trade on C4");
                     steadySum += stP + qP;
                 }
             }
             uint256 bpYr = _bpE4(steadySum * 365 / 5, tvl);
-            assertLe(bpYr, 100_000, "VERDICT: async daily/12h-offset must not sustain repeatable extraction on C1");
+            assertLe(bpYr, 100_000, "VERDICT: async daily/12h-offset must not sustain repeatable extraction on C4");
             _restoreState(snap, snapTs);
-            _logMetric("T9_ARB", string.concat("pool=C1|drain=", _anchorLabel(anchors[a]), "|cadence=async12h|steady_bp_yr_e4=", _u(bpYr)));
+            _logMetric("T9_ARB", string.concat("pool=C4|drain=", _anchorLabel(anchors[a]), "|cadence=async12h|steady_bp_yr_e4=", _u(bpYr)));
         }
-        _logVerdict("T9_Q2_async_12h_offset_C1", "nasty=false", "beta_pinning_caps_the_snap;steady_extraction~0");
+        _logVerdict("T9_Q2_async_12h_offset_C4", "nasty=false", "beta_pinning_caps_the_snap;steady_extraction~0");
     }
 
     /**
      * @notice The A-band's one genuine hazard: ST daily / quote weekly at D50 (A recorded ~53.1 bp/yr NASTY).
      *         Extraction is arbers oscillating inventory through the band around the peg, which scales with
-     *         the density there — C1's is ~178x lower, so the leak is predicted to COLLAPSE. Measured either
+     *         the density there — C4's is ~178x lower, so the leak is predicted to COLLAPSE. Measured either
      *         way and classified against the same 10 bp/yr nasty threshold; no pre-registered A-band range.
      */
     function test_T9_T2_RateStepArb_StDailyQuoteWeekly() public {
         (uint256 snap, uint256 snapTs) = _snapState();
-        _useC1();
-        _drainC1(2);
+        _useC4();
+        _drainC4(2);
         _arbToFeeEdge();
         uint256 tvl = _poolTvlAtFair();
         _setQuoteCadence(Q_STEP_7D, 7 days);
@@ -239,10 +239,10 @@ contract Test_C1Battery_Arbs is C1BatteryBase {
 
         _logMetric(
             "T9_ARB",
-            string.concat("pool=C1|drain=D50|cadence=st1d_q7d|week1_profit=", _u(week1), "|week2_profit=", _u(week2), "|arb_bp_yr_e4=", _u(bpYrE4))
+            string.concat("pool=C4|drain=D50|cadence=st1d_q7d|week1_profit=", _u(week1), "|week2_profit=", _u(week2), "|arb_bp_yr_e4=", _u(bpYrE4))
         );
         _logVerdict(
-            "T9_Q2_st_daily_quote_weekly_C1",
+            "T9_Q2_st_daily_quote_weekly_C4",
             bpYrE4 > 100_000 ? "nasty=true" : "nasty=false",
             string.concat("bp_yr_e4=", _u(bpYrE4), "|A_recorded=531000")
         );
@@ -258,16 +258,16 @@ contract Test_C1Battery_Arbs is C1BatteryBase {
 
         for (uint256 c = 0; c < 4; ++c) {
             (uint256 snap, uint256 snapTs) = _snapState();
-            _useC1();
-            _drainC1(2);
+            _useC4();
+            _drainC4(2);
             _arbToFeeEdge();
             _setStCadence(stSteps[c], periods[c]);
             _setQuoteCadence(qSteps[c], periods[c]);
             (, uint256[] memory profits,) = _runSyncEvents(3);
             event1[c] = profits[0];
-            assertLe(profits[2], DUST_PROFIT, "no cadence sustains steady-state extraction on a static C1 pool");
+            assertLe(profits[2], DUST_PROFIT, "no cadence sustains steady-state extraction on a static C4 pool");
             _restoreState(snap, snapTs);
-            _logMetric("T9_BREAKEVEN", string.concat("pool=C1|cadence=", labels[c], "|event1_recycle=", _u(profits[0]), "|steady_event=", _u(profits[2])));
+            _logMetric("T9_BREAKEVEN", string.concat("pool=C4|cadence=", labels[c], "|event1_recycle=", _u(profits[0]), "|steady_event=", _u(profits[2])));
         }
         assertLe(event1[0], event1[1], "the one-time recycle margin must be nondecreasing in staleness (6h <= 12h)");
         assertLe(event1[1], event1[2], "the one-time recycle margin must be nondecreasing in staleness (12h <= 24h)");
@@ -278,8 +278,8 @@ contract Test_C1Battery_Arbs is C1BatteryBase {
     function test_T9_T2_StandingDiscountArb_AtDrainStates() public {
         for (uint256 i = 0; i < 5; ++i) {
             (uint256 snap, uint256 snapTs) = _snapState();
-            _useC1();
-            _drainC1(i);
+            _useC4();
+            _drainC4(i);
             uint256 preSpot = _spotPrice();
             uint256 tvl = _poolTvlAtFair();
             uint256 profit = _arbToFeeEdge();
@@ -288,7 +288,7 @@ contract Test_C1Battery_Arbs is C1BatteryBase {
             if (i == 0) {
                 assertLe(profit, DUST_PROFIT, "at the balance point the pool is at fair and the fee blocks any arb");
             } else {
-                assertGt(profit, 0, "a drained C1 pool must offer a positive standing restock arb (the design goal)");
+                assertGt(profit, 0, "a drained C4 pool must offer a positive standing restock arb (the design goal)");
                 assertGe(postSpot, 1e18 - 1e14 - 1e13, "the standing arb must run the spot up to the buy-side fee edge");
                 assertLe(postSpot, 1e18 - 1e14 + 1e13, "the standing arb must stop at the buy-side fee edge");
             }
@@ -296,7 +296,7 @@ contract Test_C1Battery_Arbs is C1BatteryBase {
             _logMetric(
                 "T9_DISCOUNT",
                 string.concat(
-                    "pool=C1|drain=",
+                    "pool=C4|drain=",
                     _anchorLabel(i),
                     "|discount_bp_e4=",
                     _u((1e18 - preSpot) / 1e10),
@@ -313,16 +313,16 @@ contract Test_C1Battery_Arbs is C1BatteryBase {
 }
 
 /**
- * @notice T9/T2 — the sustained-flow breakeven sweep on C1 (own contract so forge parallelizes the 9 grid
- *         simulations against the other batteries). C1's beta gap (0.0061 bp) pins every supra-breakeven
+ * @notice T9/T2 — the sustained-flow breakeven sweep on C4 (own contract so forge parallelizes the 9 grid
+ *         simulations against the other batteries). C4's beta gap (0.0063 bp) pins every supra-breakeven
  *         point exactly like A's; the flow-impact crumbs at sub-breakeven points are structurally larger
- *         (impact ~ 1/density), so the materiality floor for the unpinned classification is C1-specific.
+ *         (impact ~ 1/density), so the materiality floor for the unpinned classification is C4-specific.
  */
-contract Test_C1Battery_FlowBreakeven is C1BatteryBase {
+contract Test_C4Battery_FlowBreakeven is C4BatteryBase {
     using FixedPoint for uint256;
 
-    /// C1 crumb materiality ceiling: 0.5 bp/yr of TVL (A used 0.05 bp/yr; impact scales with 1/density).
-    uint256 internal constant C1_CRUMB_CEILING_BP_YR_E4 = 5_000;
+    /// C4 crumb materiality ceiling: 0.5 bp/yr of TVL (A used 0.05 bp/yr; impact scales with 1/density).
+    uint256 internal constant C4_CRUMB_CEILING_BP_YR_E4 = 5_000;
 
     function test_T9_T2_FlowBreakevenSweep() public {
         uint256[9] memory stSteps = [ST_STEP_6H, ST_STEP_12H, ST_STEP_1D, ST_STEP_6H, ST_STEP_12H, ST_STEP_1D, ST_STEP_2D, ST_STEP_1D, ST_STEP_2D];
@@ -334,7 +334,7 @@ contract Test_C1Battery_FlowBreakeven is C1BatteryBase {
 
         for (uint256 k = 0; k < 9; ++k) {
             (uint256 snap, uint256 snapTs) = _snapState();
-            _useC1();
+            _useC4();
             (uint256 bpYrK, uint256 sProfit, uint256 spotEnd, uint256 stRawEnd) = _flowScenario(stSteps[k], qSteps[k], periods[k], fees[k]);
             _restoreState(snap, snapTs);
             bpYr[k] = bpYrK;
@@ -342,24 +342,24 @@ contract Test_C1Battery_FlowBreakeven is C1BatteryBase {
             uint256 jump = EXCESS_CARRY_PER_DAY * periods[k] / 1 days;
             bool supra = jump > fees[k];
             uint256 target = (1e18 + jump).mulDown(1e18 - fees[k]);
-            bool pinned = supra && target >= BETA_C1; // every supra point is pinned: beta gap 0.0061 bp
+            bool pinned = supra && target >= BETA_C4; // every supra point is pinned: beta gap 0.0063 bp
             uint256 analyticE4 = pinned ? FLOW_PCT * (jump - fees[k]) / 1e18 * 365 / 1e10 : 0;
             if (pinned) {
                 assertGt(bpYrK, FLOW_MATERIAL_BP_YR_E4, "a slower-than-breakeven cadence with beta pinning must extract materially under flow");
-                assertGe(bpYrK + C1_CRUMB_CEILING_BP_YR_E4, analyticE4 * 3 / 10, "pinned supra extraction must be >= 0.3x the flow x (jump - fee) margin");
-                assertLe(bpYrK, analyticE4 * 3 + C1_CRUMB_CEILING_BP_YR_E4, "pinned supra extraction must be <= 3x the margin plus the C1 crumb ceiling");
+                assertGe(bpYrK + C4_CRUMB_CEILING_BP_YR_E4, analyticE4 * 3 / 10, "pinned supra extraction must be >= 0.3x the flow x (jump - fee) margin");
+                assertLe(bpYrK, analyticE4 * 3 + C4_CRUMB_CEILING_BP_YR_E4, "pinned supra extraction must be <= 3x the margin plus the C4 crumb ceiling");
                 assertGt(spotEnd, 1e18, "a pinned supra-breakeven pool must rest above the peg after every boundary arb");
                 assertLe(stRawEnd, 1e19, "a beta-pinned supra-breakeven boundary arb must strip the ST leg to dust");
             } else {
-                assertGt(sProfit, 0, "sub-breakeven C1 pools still leak the flow-impact crumb");
-                assertLe(bpYrK, C1_CRUMB_CEILING_BP_YR_E4, "a sub-breakeven point must leak only flow-impact crumbs (C1 ceiling 0.5 bp/yr)");
-                assertApproxEqAbs(spotEnd, target, 5e12, "a sub-breakeven C1 pool must rest at its analytic (1+jump)(1-fee) spot");
-                assertGt(stRawEnd, 1e22, "a sub-breakeven C1 pool must retain its ST inventory");
+                assertGt(sProfit, 0, "sub-breakeven C4 pools still leak the flow-impact crumb");
+                assertLe(bpYrK, C4_CRUMB_CEILING_BP_YR_E4, "a sub-breakeven point must leak only flow-impact crumbs (C4 ceiling 0.5 bp/yr)");
+                assertApproxEqAbs(spotEnd, target, 5e12, "a sub-breakeven C4 pool must rest at its analytic (1+jump)(1-fee) spot");
+                assertGt(stRawEnd, 1e22, "a sub-breakeven C4 pool must retain its ST inventory");
             }
             _logMetric(
                 "T9_FLOWBREAKEVEN",
                 string.concat(
-                    "pool=C1|grid=",
+                    "pool=C4|grid=",
                     labels[k],
                     "|analytic_margin_bp_yr_e4=",
                     _u(analyticE4),
@@ -376,26 +376,26 @@ contract Test_C1Battery_FlowBreakeven is C1BatteryBase {
         }
 
         // The breakeven bracket (fee / drift) is band-independent; re-assert it brackets the measured flips.
-        assertLe(bpYr[3], bpYr[4] + C1_CRUMB_CEILING_BP_YR_E4, "flow extraction must be nondecreasing in the update interval (6h <= 12h at 1 bp)");
-        assertLe(bpYr[4], bpYr[5] + C1_CRUMB_CEILING_BP_YR_E4, "flow extraction must be nondecreasing in the update interval (12h <= 24h at 1 bp)");
-        assertLe(bpYr[5], bpYr[6] + C1_CRUMB_CEILING_BP_YR_E4, "flow extraction must be nondecreasing in the update interval (24h <= 48h at 1 bp)");
-        _logVerdict("T9_Q2_flow_breakeven_C1", "breakeven=fee_div_excess_drift", "same_0.73d_at_1bp;sub_breakeven_leak=impact_crumbs_only");
+        assertLe(bpYr[3], bpYr[4] + C4_CRUMB_CEILING_BP_YR_E4, "flow extraction must be nondecreasing in the update interval (6h <= 12h at 1 bp)");
+        assertLe(bpYr[4], bpYr[5] + C4_CRUMB_CEILING_BP_YR_E4, "flow extraction must be nondecreasing in the update interval (12h <= 24h at 1 bp)");
+        assertLe(bpYr[5], bpYr[6] + C4_CRUMB_CEILING_BP_YR_E4, "flow extraction must be nondecreasing in the update interval (24h <= 48h at 1 bp)");
+        _logVerdict("T9_Q2_flow_breakeven_C4", "breakeven=fee_div_excess_drift", "same_0.73d_at_1bp;sub_breakeven_leak=impact_crumbs_only");
     }
 }
 
 /**
- * @notice T9/T3 — single-sided stable LP statics on C1: one-way add costs across drain states and sizes
- *         against the fee+impact model with C1 fixtures, and the add/remove round trip per anchor.
+ * @notice T9/T3 — single-sided stable LP statics on C4: one-way add costs across drain states and sizes
+ *         against the fee+impact model with C4 fixtures, and the add/remove round trip per anchor.
  */
-contract Test_C1Battery_LPStatics is C1BatteryBase {
+contract Test_C4Battery_LPStatics is C4BatteryBase {
     using FixedPoint for uint256;
 
     function test_T9_T3_SingleSidedStableAdd_AcrossDrainStatesAndSizes() public {
         uint256[3] memory sizePctWad = [uint256(1e15), 1e16, 5e16];
         for (uint256 i = 0; i < 5; ++i) {
             (uint256 snapOuter, uint256 snapOuterTs) = _snapState();
-            _useC1();
-            _drainC1(i);
+            _useC4();
+            _drainC4(i);
             for (uint256 sIdx = 0; sIdx < 3; ++sIdx) {
                 (uint256 snapInner, uint256 snapInnerTs) = _snapState();
                 uint256 size = _poolTvlAtFair().mulDown(sizePctWad[sIdx]);
@@ -403,17 +403,17 @@ contract Test_C1Battery_LPStatics is C1BatteryBase {
                 (int256 costFair, int256 costSpot, uint256 bptOut) = _singleSidedAdd(size);
 
                 if (i == 0) {
-                    assertLt(costFair, 1000, "a single-sided quote add at C1's 99.99%-stable balance point must cost < 0.1 bp at fair");
+                    assertLt(costFair, 1000, "a single-sided quote add at C4's 99.99%-stable balance point must cost < 0.1 bp at fair");
                     assertGt(costFair, -1000, "the balance-point add cost cannot be meaningfully negative (spot == fair at the peg)");
                 } else {
-                    assertGe(costSpot, int256(model * 3 / 10), "the spot-numeraire add cost must be at least 0.3x the C1 fee+impact model");
-                    assertLe(costSpot, int256(model * 3), "the spot-numeraire add cost must be at most 3x the C1 fee+impact model");
+                    assertGe(costSpot, int256(model * 3 / 10), "the spot-numeraire add cost must be at least 0.3x the C4 fee+impact model");
+                    assertLe(costSpot, int256(model * 3), "the spot-numeraire add cost must be at most 3x the C4 fee+impact model");
                 }
                 _restoreState(snapInner, snapInnerTs);
                 _logMetric(
                     "T9_ADD",
                     string.concat(
-                        "pool=C1|drain=",
+                        "pool=C4|drain=",
                         _anchorLabel(i),
                         "|size_pct_e4=",
                         _u(sizePctWad[sIdx] / 1e12),
@@ -436,8 +436,8 @@ contract Test_C1Battery_LPStatics is C1BatteryBase {
         int256 d0;
         for (uint256 i = 0; i < 5; ++i) {
             (uint256 snap, uint256 snapTs) = _snapState();
-            _useC1();
-            _drainC1(i);
+            _useC4();
+            _drainC4(i);
             uint256 size = _poolTvlAtFair().mulDown(1e16);
             (, int256 costSpot, uint256 bptOut) = _singleSidedAdd(size);
             uint256 qOut = router.removeLiquiditySingleTokenExactIn(pool, lp, bptOut, _tokens(), 1, 0);
@@ -448,27 +448,27 @@ contract Test_C1Battery_LPStatics is C1BatteryBase {
             assertLe(roundTripE4, 2 * oneWay + 10_000, "the round trip must not exceed twice the one-way cost plus 1 bp of slack");
             if (i == 0) {
                 d0 = roundTripE4;
-                assertLt(roundTripE4, 50_000, "VERDICT input: the C1 balance-point round trip must cost < 5 bp");
+                assertLt(roundTripE4, 50_000, "VERDICT input: the C4 balance-point round trip must cost < 5 bp");
             }
             _restoreState(snap, snapTs);
-            _logMetric("T9_ROUNDTRIP", string.concat("pool=C1|drain=", _anchorLabel(i), "|oneWay_spot_bp_e4=", _i(costSpot), "|roundTrip_bp_e4=", _i(roundTripE4)));
+            _logMetric("T9_ROUNDTRIP", string.concat("pool=C4|drain=", _anchorLabel(i), "|oneWay_spot_bp_e4=", _i(costSpot), "|roundTrip_bp_e4=", _i(roundTripE4)));
         }
-        _logVerdict("T9_Q3_round_trip_C1", "meaningful_loss_at_balance=false", string.concat("balance_point_roundTrip_bp_e4=", _i(d0)));
+        _logVerdict("T9_Q3_round_trip_C4", "meaningful_loss_at_balance=false", string.concat("balance_point_roundTrip_bp_e4=", _i(d0)));
     }
 }
 
 /**
- * @notice T9/T3b — the 365-day single-sided-LP simulation on C1 (sync daily marks, 0.2%/day exit flow,
- *         3%/day stress week at day 180), identical procedure to the A/D year sim. C1's wide band converts
+ * @notice T9/T3b — the 365-day single-sided-LP simulation on C4 (sync daily marks, 0.2%/day exit flow,
+ *         3%/day stress week at day 180), identical procedure to the A/D year sim. C4's wide band converts
  *         part of the exiters' deeper haircuts into pool-side spread (the pool buys low from exiters, sells
  *         high to arbers), so the LP is predicted to do BETTER than A's +1.85 bp/yr.
  */
-contract Test_C1Battery_YearSim is C1BatteryBase {
+contract Test_C4Battery_YearSim is C4BatteryBase {
     using FixedPoint for uint256;
 
     function test_T9_T3_LPOneYear_SyncDailyUpdates_VsStableHoldBenchmark() public {
         (uint256 snap, uint256 snapTs) = _snapState();
-        _useC1();
+        _useC4();
         uint256 deposit = 100_000e18;
         (, uint256 bpt) = router.addLiquidityUnbalanced(pool, lp, _tokens(), _two(0, deposit), 0);
         uint256 addCost = deposit.mulDown(_fairQRate()) - _bptFairValue(bpt);
@@ -518,15 +518,15 @@ contract Test_C1Battery_YearSim is C1BatteryBase {
         uint256 arbBpYrE4 = _bpE4(arbSum, sumTvl / 365);
 
         assertLe(residual >= 0 ? residual : -residual, int256(deposit / 1e4), "the fair-value ledger must close to within 1 bp of the deposit");
-        assertGe(lpExcessBpE4, -50_000, "VERDICT: the C1 single-sided stable LP must not lose more than 5 bp/yr vs holding the 3% stable");
-        assertLe(arbBpYrE4, 100_000, "VERDICT: total arb extraction under sync daily updates with real flow must stay under 10 bp/yr on C1");
-        assertEq(clampedDays, 0, "no exit-flow day may be clamped: C1's wider band absorbs the stress week with room to spare");
+        assertGe(lpExcessBpE4, -50_000, "VERDICT: the C4 single-sided stable LP must not lose more than 5 bp/yr vs holding the 3% stable");
+        assertLe(arbBpYrE4, 100_000, "VERDICT: total arb extraction under sync daily updates with real flow must stay under 10 bp/yr on C4");
+        assertEq(clampedDays, 0, "no exit-flow day may be clamped: C4's wider band absorbs the stress week with room to spare");
         _restoreState(snap, snapTs);
 
         _logMetric(
             "T9_SIM",
             string.concat(
-                "pool=C1|lpExcess_bp_e4=",
+                "pool=C4|lpExcess_bp_e4=",
                 _i(lpExcessBpE4),
                 "|exiter_transfer=",
                 _i(transferSum),
@@ -543,7 +543,7 @@ contract Test_C1Battery_YearSim is C1BatteryBase {
             )
         );
         _logVerdict(
-            "T9_Q3_lp_year_C1",
+            "T9_Q3_lp_year_C4",
             lpExcessBpE4 >= -50_000 ? "meaningful_loss=no" : "meaningful_loss=yes",
             string.concat("lpExcess_bp_e4=", _i(lpExcessBpE4), "|A_recorded=+18500")
         );
@@ -551,12 +551,12 @@ contract Test_C1Battery_YearSim is C1BatteryBase {
 }
 
 /**
- * @notice T9/T5+T6 — one-sided genesis and the whale add on C1. Both are pure fee-shield theorems
- *         (beta - 1 = 0.0061 bp << fee), so the A-band zeros must reproduce exactly. The min-fee
- *         diagnostic is C1's twist: at the 0.01 bp pool-minimum fee the shield still (barely) holds
- *         (0.01 > 0.0061), so unlike the 90/10 pool C1 loses nothing even with the shield thinned.
+ * @notice T9/T5+T6 — one-sided genesis and the whale add on C4. Both are pure fee-shield theorems
+ *         (beta - 1 = 0.0063 bp << fee), so the A-band zeros must reproduce exactly. The min-fee
+ *         diagnostic is C4's twist: at the 0.01 bp pool-minimum fee the shield still (barely) holds
+ *         (0.01 > 0.0063), so unlike the 90/10 pool C4 loses nothing even with the shield thinned.
  */
-contract Test_C1Battery_WhaleGenesis is C1BatteryBase {
+contract Test_C4Battery_WhaleGenesis is C4BatteryBase {
     using FixedPoint for uint256;
 
     function test_T9_T6_OneSidedGenesis_StablesOnlyInit_FeeShieldsTheBand() public {
@@ -565,7 +565,7 @@ contract Test_C1Battery_WhaleGenesis is C1BatteryBase {
         for (uint256 f = 0; f < 2; ++f) {
             for (uint256 s = 0; s < 3; ++s) {
                 (uint256 snap, uint256 snapTs) = _snapState();
-                address g = _createPool(_eclpParamsC1(), _derivedParamsC1(), false, bytes32(uint256(910 + f * 10 + s)));
+                address g = _createPool(_eclpParamsC4(), _derivedParamsC4(), false, bytes32(uint256(910 + f * 10 + s)));
                 router.initialize(g, address(this), _tokens(), _two(0, seeds[s]));
                 pool = g;
                 if (feesWad[f] != SWAP_FEE) vault.manualUnsafeSetStaticSwapFeePercentage(pool, feesWad[f]);
@@ -580,13 +580,13 @@ contract Test_C1Battery_WhaleGenesis is C1BatteryBase {
                     else router.swapExactIn(pool, arber, IERC20(address(quoteToken)), IERC20(address(st)), amt, 0);
                     seederLoss = tvl0 > _poolTvlAtFair() ? tvl0 - _poolTvlAtFair() : 0;
                 }
-                assertLe(profit, DUST_PROFIT, "one-sided C1 genesis must offer no extractable arb: beta - 1 < fee at BOTH fee levels");
-                assertLe(seederLoss, DUST_PROFIT, "the C1 seeder must keep 100.00% of a stables-only seed");
+                assertLe(profit, DUST_PROFIT, "one-sided C4 genesis must offer no extractable arb: beta - 1 < fee at BOTH fee levels");
+                assertLe(seederLoss, DUST_PROFIT, "the C4 seeder must keep 100.00% of a stables-only seed");
                 _restoreState(snap, snapTs);
                 _logMetric(
                     "T9_GENESIS",
                     string.concat(
-                        "pool=C1|seed=",
+                        "pool=C4|seed=",
                         _u(seeds[s]),
                         "|fee_bp_e4=",
                         _u(feesWad[f] / 1e10),
@@ -600,29 +600,29 @@ contract Test_C1Battery_WhaleGenesis is C1BatteryBase {
                 );
             }
         }
-        _logVerdict("T9_Q6_genesis_C1", "loss=0_at_1bp_AND_at_min_fee", "beta_gap_0.0061bp_shielded_at_0.01bp_min_fee");
+        _logVerdict("T9_Q6_genesis_C4", "loss=0_at_1bp_AND_at_min_fee", "beta_gap_0.0063bp_shielded_at_0.01bp_min_fee");
     }
 
     function test_T9_T5_WhaleAdd_1MSingleSidedOn500kPool() public {
         (uint256 snap, uint256 snapTs) = _snapState();
-        address w = _createPool(_eclpParamsC1(), _derivedParamsC1(), false, bytes32(uint256(95)));
+        address w = _createPool(_eclpParamsC4(), _derivedParamsC4(), false, bytes32(uint256(95)));
         vm.prank(lp);
         IERC20(w).approve(address(router), type(uint256).max);
-        router.initialize(w, address(this), _tokens(), _two(X0_C1B / 20, Y0 / 20)); // $500k at the balance ratio
+        router.initialize(w, address(this), _tokens(), _two(X0_C4B / 20, Y0 / 20)); // $500k at the balance ratio
         pool = w;
 
         (int256 costFair, int256 costSpot, uint256 bptOut) = _singleSidedAdd(1_000_000e18); // 2x TVL
         (uint256 standingArb,,) = _optimalArb();
         uint256 spotAfter = _spotPrice();
 
-        assertLe(standingArb, DUST_PROFIT, "the whale's displacement must land inside the fee shield: no standing arb on C1");
-        assertLt(spotAfter, BETA_C1, "the post-add spot must remain under beta");
-        assertLt(costFair < 0 ? -costFair : costFair, 10_000, "the 2x-TVL whale add must cost less than 1 bp at fair on C1");
+        assertLe(standingArb, DUST_PROFIT, "the whale's displacement must land inside the fee shield: no standing arb on C4");
+        assertLt(spotAfter, BETA_C4, "the post-add spot must remain under beta");
+        assertLt(costFair < 0 ? -costFair : costFair, 10_000, "the 2x-TVL whale add must cost less than 1 bp at fair on C4");
         _restoreState(snap, snapTs);
         _logMetric(
             "T9_WHALE",
             string.concat(
-                "pool=C1|add=1M_on_500k|costFair_bp_e4=",
+                "pool=C4|add=1M_on_500k|costFair_bp_e4=",
                 _i(costFair),
                 "|costSpot_bp_e4=",
                 _i(costSpot),
@@ -634,16 +634,16 @@ contract Test_C1Battery_WhaleGenesis is C1BatteryBase {
                 _u(spotAfter)
             )
         );
-        _logVerdict("T9_Q5_whale_C1", "no_standing_arb", string.concat("costFair_bp_e4=", _i(costFair), "|A_recorded=0.0000bp"));
+        _logVerdict("T9_Q5_whale_C4", "no_standing_arb", string.concat("costFair_bp_e4=", _i(costFair), "|A_recorded=0.0000bp"));
     }
 }
 
 /**
- * @notice T9/T7 — the production marking calendar on C1: per-second (6h-checkpointed) quote marks,
+ * @notice T9/T7 — the production marking calendar on C4: per-second (6h-checkpointed) quote marks,
  *         monthly ST marks, 3 cycles. The strip/carry-drag dynamics are tilt-driven (inventory share x
- *         5%/yr), so C1 must land at A's ~0.05 bp/yr — the wide band must NOT reopen the stale-mark leak.
+ *         5%/yr), so C4 must land at A's ~0.05 bp/yr — the wide band must NOT reopen the stale-mark leak.
  */
-contract Test_C1Battery_ExtremeCadence is C1BatteryBase {
+contract Test_C4Battery_ExtremeCadence is C4BatteryBase {
     using FixedPoint for uint256;
 
     uint256 internal constant ST_STEP_30D = 1_006_575_342_465_753_424;
@@ -658,7 +658,7 @@ contract Test_C1Battery_ExtremeCadence is C1BatteryBase {
 
     function test_T9_T7_ExtremeCadence_PerSecondQuote_MonthlyStMarks() public {
         (uint256 snap, uint256 ts0) = _snapState();
-        _useC1();
+        _useC4();
         _setStCadence(ST_STEP_30D, CYCLE);
         _setQuoteCadence(Q_STEP_6H, CHECKPOINT);
 
@@ -708,14 +708,14 @@ contract Test_C1Battery_ExtremeCadence is C1BatteryBase {
         }
 
         uint256 lpEnd = _poolTvlAtFair();
-        uint256 benchEnd = X0_C1B.mulDown(_fairStRate()) + Y0.mulDown(_fairQRate());
+        uint256 benchEnd = X0_C4B.mulDown(_fairStRate()) + Y0.mulDown(_fairQRate());
         (uint256 stRawEnd,) = _rawBalances();
         uint256 strippedRaw = stRaw0 - stRawEnd;
         int256 lpNetWei = int256(lpEnd) - int256(benchEnd);
         int256 residualWei = (int256(benchEnd) - int256(lpEnd)) - int256(extraction);
 
         assertLe(timeToStrip, 1 days, "the ST leg must be stripped within a day of drift crossing the fee");
-        assertLe(snapReverseArb, CYCLES * DUST_PROFIT, "beta*(1-fee) < 1 must fee-block the post-snap refill arb on C1");
+        assertLe(snapReverseArb, CYCLES * DUST_PROFIT, "beta*(1-fee) < 1 must fee-block the post-snap refill arb on C4");
         assertLe(laterExtraction, extraction / 10 + DUST_PROFIT, "cycles 2-3 must extract ~nothing: the one-time strip is the whole leak");
         assertLe(extraction, stInventoryFair0.mulDown(CYCLES * (ST_STEP_30D - 1e18)) * 2, "extraction must be capped by inventory x cumulative drift");
         assertGe(pinnedCheckpoints, (CYCLES * CHECKPOINTS_PER_CYCLE * 8) / 10, "the pool must sit pinned and inert for >= 80% of the horizon");
@@ -724,14 +724,14 @@ contract Test_C1Battery_ExtremeCadence is C1BatteryBase {
             exiterHaircutE4,
             int256(PROBE_HAIRCUT_PREDICTION_E4),
             PROBE_HAIRCUT_PREDICTION_E4 / 10,
-            "the C1 day-15 exiter haircut must match the pinned-pool execution identity within 10%"
+            "the C4 day-15 exiter haircut must match the pinned-pool execution identity within 10%"
         );
         _restoreState(snap, ts0);
 
         _logMetric(
             "T9_T7",
             string.concat(
-                "pool=C1|extraction_total=",
+                "pool=C4|extraction_total=",
                 _u(extraction),
                 "|time_to_strip_s=",
                 _u(timeToStrip),
@@ -752,7 +752,7 @@ contract Test_C1Battery_ExtremeCadence is C1BatteryBase {
             )
         );
         _logVerdict(
-            "T9_T7_extreme_cadence_C1",
+            "T9_T7_extreme_cadence_C4",
             "carry_drag_tilt_driven_not_band_driven",
             string.concat("carry_drag_bp_yr_e4=", _u(_bpE4(uint256(residualWei > 0 ? residualWei : int256(0)) * 365 / 90, tvl0)), "|A_recorded=500")
         );

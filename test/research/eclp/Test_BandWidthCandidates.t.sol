@@ -37,10 +37,12 @@ contract Test_BandWidthCandidates_ECLPExitLiquidity is ECLPExitLiquidityBase {
     uint256 internal constant X0_C1 = 1_000_100_010_000_524_809_194;
     uint256 internal constant X0_C2 = 1_000_100_010_001_395_082_958;
     uint256 internal constant X0_C3 = 1_000_100_010_000_673_267_521;
+    uint256 internal constant X0_C4 = 1_000_100_010_001_551_384_104;
 
     address internal poolC1;
     address internal poolC2;
     address internal poolC3;
+    address internal poolC4;
 
     /*//////////////////////////////////////////////////////////////////////////
                        CANDIDATE PARAMS (mpmath pipeline output)
@@ -115,6 +117,29 @@ contract Test_BandWidthCandidates_ECLPExitLiquidity is ECLPExitLiquidityBase {
         });
     }
 
+    /// C4 (SELECTED, see the assessment's §7): alpha = 1/1.02 (floor ~196 bp), lambda = 300; beta re-solved.
+    function _eclpParamsC4() internal pure returns (IGyroECLPPool.EclpParams memory) {
+        return IGyroECLPPool.EclpParams({
+            alpha: 980_392_156_862_745_098,
+            beta: 1_000_000_630_371_029_932,
+            c: 707_106_781_186_547_524,
+            s: 707_106_781_186_547_524,
+            lambda: 300_000_000_000_000_000_000
+        });
+    }
+
+    function _derivedParamsC4() internal pure returns (IGyroECLPPool.DerivedEclpParams memory) {
+        return IGyroECLPPool.DerivedEclpParams({
+            tauAlpha: IGyroECLPPool.Vector2({ x: -94_773_130_622_350_963_793_914_596_098_909_867_472, y: 31_906_953_976_191_491_143_951_247_353_299_655_382 }),
+            tauBeta: IGyroECLPPool.Vector2({ x: 9_455_562_426_453_687_808_195_961_460_162_005, y: 99_999_999_552_961_694_941_282_054_418_046_780_509 }),
+            u: 47_391_293_092_388_708_687_131_087_809_789_479_979,
+            v: 65_953_476_764_576_592_967_841_298_631_431_128_073,
+            w: 34_046_522_788_385_101_860_064_849_635_555_499_105,
+            z: -47_381_837_529_962_254_999_333_612_177_959_912_994,
+            dSq: 99_999_999_999_999_999_886_624_093_342_106_115_200
+        });
+    }
+
     /*//////////////////////////////////////////////////////////////////////////
                                        SETUP
     //////////////////////////////////////////////////////////////////////////*/
@@ -125,11 +150,12 @@ contract Test_BandWidthCandidates_ECLPExitLiquidity is ECLPExitLiquidityBase {
         poolC1 = _createPool(_eclpParamsC1(), _derivedParamsC1(), false, bytes32(uint256(31)));
         poolC2 = _createPool(_eclpParamsC2(), _derivedParamsC2(), false, bytes32(uint256(32)));
         poolC3 = _createPool(_eclpParamsC3(), _derivedParamsC3(), false, bytes32(uint256(33)));
+        poolC4 = _createPool(_eclpParamsC4(), _derivedParamsC4(), false, bytes32(uint256(34)));
 
-        address[3] memory pools = [poolC1, poolC2, poolC3];
-        uint256[3] memory x0s = [X0_C1, X0_C2, X0_C3];
+        address[4] memory pools = [poolC1, poolC2, poolC3, poolC4];
+        uint256[4] memory x0s = [X0_C1, X0_C2, X0_C3, X0_C4];
         address[4] memory actors = [lp, arber, exiter, address(this)];
-        for (uint256 p = 0; p < 3; ++p) {
+        for (uint256 p = 0; p < 4; ++p) {
             for (uint256 i = 0; i < 4; ++i) {
                 vm.prank(actors[i]);
                 IERC20(pools[p]).approve(address(router), type(uint256).max);
@@ -143,14 +169,15 @@ contract Test_BandWidthCandidates_ECLPExitLiquidity is ECLPExitLiquidityBase {
     //////////////////////////////////////////////////////////////////////////*/
 
     function _useCandidate(uint256 i) internal {
-        pool = i == 0 ? poolTilt9999 : i == 1 ? poolC1 : i == 2 ? poolC2 : poolC3;
+        pool = i == 0 ? poolTilt9999 : i == 1 ? poolC1 : i == 2 ? poolC2 : i == 3 ? poolC3 : poolC4;
     }
 
     function _candidateLabel(uint256 i) internal pure returns (string memory) {
         if (i == 0) return "A_15bp_lam4000";
         if (i == 1) return "C1_148bp_lam300";
         if (i == 2) return "C2_100bp_lam300";
-        return "C3_148bp_lam500";
+        if (i == 3) return "C3_148bp_lam500";
+        return "C4_196bp_lam300";
     }
 
     /*//////////////////////////////////////////////////////////////////////////
@@ -159,7 +186,7 @@ contract Test_BandWidthCandidates_ECLPExitLiquidity is ECLPExitLiquidityBase {
 
     /// Wiring: every candidate initializes on the peg at the 99.99% tilt and keeps the fee shield.
     function test_T8_Candidates_TiltAndFeeShield() public {
-        for (uint256 i = 0; i < 4; ++i) {
+        for (uint256 i = 0; i < 5; ++i) {
             _useCandidate(i);
             assertApproxEqAbs(_spotPrice(), 1e18, 1e9, "candidate must initialize on the peg");
             assertApproxEqAbs(_stableShare(), 999_900_000_000_000_000, 1e12, "candidate must hold the 99.99% tilt at the peg");
@@ -186,7 +213,7 @@ contract Test_BandWidthCandidates_ECLPExitLiquidity is ECLPExitLiquidityBase {
      */
     function test_T8_Candidates_DrainLadder_RestockMargins() public {
         uint256[5] memory fracsPct = [uint256(10), 25, 50, 75, 95];
-        for (uint256 i = 0; i < 4; ++i) {
+        for (uint256 i = 0; i < 5; ++i) {
             _useCandidate(i);
             for (uint256 a = 0; a < 5; ++a) {
                 (uint256 snap, uint256 ts) = _snapState();
