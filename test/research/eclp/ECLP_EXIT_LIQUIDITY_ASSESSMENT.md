@@ -4,12 +4,12 @@ A Gyro E-CLP pairing the senior-tranche share (**ST**, ~8%/yr, junior-protected 
 effectively only rises) against a yield-bearing stablecoin (**~3%/yr**), tilted stable-heavy so it
 serves as **exit liquidity**: seniors dump ST into it, stables come out.
 
-Every number in this document is **measured on-chain** by the test file in this folder — the real
+Every number in this document is **measured on-chain** by the test files in this folder — the real
 Balancer V3 vault and the real `GyroECLPPool` deployed locally from the vendored monorepo, with
 only the two rate providers mocked. Nothing is hand-derived and then trusted. Regenerate all of it:
 
 ```
-forge test --match-path test/research/eclp/Test_ECLPExitLiquidityPoolEconomics.t.sol -vv | grep -E "METRIC|VERDICT"
+forge test --match-path 'test/research/eclp/*' -vv | grep -E "METRIC|VERDICT"
 ```
 
 *(Raw logs report `bp*1e4`; this document converts to plain bp. "The 99.99 pool" / "the 90/10
@@ -33,9 +33,11 @@ share/token). Balancer multiplies every raw balance by its rate before doing poo
 scaled balances the curve trades on are *dollar values*: the ST leg's marked NAV (growing ~8%/yr,
 the kernel's share rate = effective NAV / supply) against the stable's accrued dollar value
 (~3%/yr). **Price 1.0 therefore means one marked dollar of ST buys exactly one marked dollar of
-stablecoin** — an exiter is paid precisely what the oracle says their shares are worth. Every band number is relative to that: β = 1 + 0.53 bp reads "the pool will pay
-at most a 0.53 bp *premium over marked NAV* for ST"; α = 1 − 15 bp reads "it sells stables until
-ST trades 15 bp *under* its marked NAV, then stops."
+stablecoin** — an exiter is paid precisely what the oracle says their shares are worth. Every band number is relative to that: the shipping β = 1 + 0.0063 bp reads
+"the pool will pay at most a 0.0063 bp *premium over marked NAV* for ST — essentially zero"; the shipping α = 1/1.02
+reads "it keeps selling stables until a refilling dollar buys $1.02 of *marked ST NAV*, then
+stops" (equivalently: ST trading ~196 bp under its mark). §§2–6's candidates use their own band
+numbers — e.g. the 90/10's β = 1 + 0.53 bp reads "at most a 0.53 bp premium."
 
 In raw tokens the exchange rate drifts on purpose: today 1 ST ≈ 1.00 stables; after a year of
 8%-vs-3% accrual the *same* scaled peg corresponds to 1 ST ≈ 1.049 stables. The rate providers
@@ -63,21 +65,22 @@ inside a band **[α, β]**. Composition is pinned to position in the band:
 ```
 
 There is **no separate tilt knob**. "99.99% stables at balance" simply means the peg sits so close
-to β that the pool is one hair away from its all-stables corner. Both candidates in this document
-are built exactly this way; they differ only in the size of that hair.
+to β that the pool is one hair away from its all-stables corner. Every pool in this document —
+both tilts and every band candidate — is built exactly this way; they differ only in the size of
+that hair and in how far left the runway reaches.
 
 ### The five knobs, intuitively
 
 An E-CLP is a circle that has been **stretched** (λ), **tilted** (the rotation c/s), and then
 **cropped** to a price window ([α, β]). Each knob answers one plain question:
 
-| Knob | The question it answers | Intuition | Value used here |
-|---|---|---|---|
-| **β** (upper price bound) | *How stable-heavy is the pool at balance, and how much room does the price have above the peg?* | At β the pool holds only stables. Jam the peg against β → almost-all-stables at rest. β − 1 is also the premium a pinned pool quotes for ST — keep it **below the fee** and the pinned state is unexploitable (the fee shield, Idea 3) | 1 + 4.74e-8 (99.99 pool) / 1 + 5.3e-5 (90/10) |
-| **α** (lower price bound) | *How far can exits push the price down before the pool runs out of stables to sell?* | The drain runway. A deeper α keeps quoting exits further below peg — at ever-worse prices. Production crops it at −15 bp: exits stay cheap (~2 bp worst case) but absorption stops there. A multi-% tail (the Python guide's α = 0.90) keeps absorbing at costs that grow to hundreds of bp. This is the §7 open product choice | peg − 15 bp |
-| **Rotation (c, s)** | *At which price is liquidity most concentrated?* | The tilt angle of the ellipse puts the "flat spot" of the curve — maximum depth — at one price. c = s = √2/2 is a 45° rotation: depth peaks at price 1.0, the peg. This is why concentration is highest exactly at the balance point and decays toward α (the "less concentrated as it drains" requirement — measured in ten density buckets) | 45° (peak at 1.0) |
-| **λ** (stretch) | *How flat is the flat spot?* | The zoom lens. High λ makes the curve nearly a straight line around the peg — huge depth, near-zero slippage for at-balance trades — at the cost of curving harder near the band edges. λ = 4000 is why at-balance exits and LP adds measure ~0 bp while 95%-drained trades pay ~2 bp | 4000 |
-| **Fee** | *Who pays whom for liquidity — and how stale can the oracle get?* | LP income per trade, but doing double duty here: it is the **shield** (must exceed β − 1) and the **staleness budget** (breakeven ST-mark staleness = fee ÷ 2.19 bp/day of drift → 0.73 days at 1 bp) | 1 bp |
+| Knob | The question it answers | Intuition | **Shipping value (§7)** | §§2–6 measured at |
+|---|---|---|---|---|
+| **β** (upper price bound) | *How stable-heavy is the pool at balance, and how much room does the price have above the peg?* | At β the pool holds only stables. Jam the peg against β → almost-all-stables at rest. β − 1 is also the premium a pinned pool quotes for ST — keep it **below the fee** and the pinned state is unexploitable (the fee shield, Idea 3) | 1 + 6.30e-7 (solved for the 99.99 tilt) | 1 + 4.74e-8 (99.99) / 1 + 5.3e-5 (90/10) |
+| **α** (lower price bound) | *How far can exits push the price down before the pool runs out of stables to sell?* | The drain runway. A deeper α keeps quoting exits further below peg — at ever-worse prices — and that worsening price is the **arb restock signal** (arbs are the system's only exit-liquidity restorer). The original −15 bp floor kept exits ~free but the restock arb couldn't even fire below ~20% drained; the shipped floor pays a refilling dollar up to $1.02 of marked ST NAV. Resolved by the T8/T9 studies (§7.3) | 1/1.02 (≈ peg − 196 bp) | peg − 15 bp |
+| **Rotation (c, s)** | *At which price is liquidity most concentrated?* | The tilt angle of the ellipse puts the "flat spot" of the curve — maximum depth — at one price. c = s = √2/2 is a 45° rotation: depth peaks at price 1.0, the peg. This is why concentration is highest exactly at the balance point and decays toward α (the "less concentrated as it drains" requirement — measured in ten density buckets) | 45° (peak at 1.0) | 45° (unchanged) |
+| **λ** (stretch) | *How flat is the flat spot?* | The zoom lens. High λ makes the curve nearly a straight line around the peg — huge depth, near-zero slippage at balance — but it also hoards the stables at the peg, so no meaningful discount (arb signal) appears until the pool is nearly empty. λ = 300 hands stables out along the drain: a $1M clip still costs ~4 bp, and the discount crosses 10 bp while the pool is still ~85% full. λ = 4000 is why §§2–6's at-balance flows measure ~0 bp and drained trades only ~2 bp | 300 | 4000 |
+| **Fee** | *Who pays whom for liquidity — and how stale can the oracle get?* | LP income per trade, but doing triple duty: it is the **shield** (must exceed β − 1), the **staleness budget** (breakeven ST-mark staleness = fee ÷ 2.19 bp/day of drift → 0.73 days at 1 bp), and the **arb hurdle** (don't raise it — restoration must clear it) | 1 bp | 1 bp (unchanged) |
 
 *(A sixth item you'll see in the code — `DerivedEclpParams`, the tau/u/v/w/z/dSq constants — is
 not a knob at all: it is the same five choices pre-chewed into 38-decimal trigonometry, computed
@@ -90,10 +93,11 @@ against exit-capacity; λ trades at-peg depth against edge behavior; the fee tra
 against shield margin and staleness tolerance. The rest of this document is those four tensions,
 priced by measurement.
 
-*(The "Value used here" column above describes the A/D candidates that §§2–6 measure. The final
-shipping values differ on exactly the two knobs the band-width studies revisited — **α = 1/1.02
-and λ = 300** — chosen so the drain discount becomes a compelling arb restock signal early; see
-§7 for those values and their measurements.)*
+*(Two columns because this document records two eras: §§2–6 measure the tilt decision on the
+original A/D band, and the T8/T9 band studies then moved α and λ to the shipping values. Every
+§§2–6 number quoted at λ = 4000 / α = peg − 15 bp remains a valid measurement of that band — the
+tilt conclusions it supports are band-invariant (§6) — while §7 carries the measurements for the
+shipping band.)*
 
 ### Idea 2: this pool *lives* at β — and that's a feature, not a failure
 
@@ -126,13 +130,14 @@ against a β-pinned pool is selling ST into it at β; that is profitable only if
 the fee. So:
 
 **If `β − 1 < fee`, the band is fee-shielded**: nobody can profitably trade against the pinned
-pool, one-sided seeding cannot be exploited, and β-pinning is loss-free. Both candidates satisfy
-this with the production 1 bp fee:
+pool, one-sided seeding cannot be exploited, and β-pinning is loss-free. Every candidate in this
+document satisfies it at the 1 bp fee:
 
 | | β − 1 | vs 1 bp fee |
 |---|---|---|
-| 99.99 pool | 0.0005 bp | **2000× margin** |
-| 90/10 pool | 0.53 bp | 2× margin |
+| 99.99 pool (§2) | 0.0005 bp | **2000× margin** |
+| 90/10 pool (§2) | 0.53 bp | 2× margin |
+| **Shipping band (C4, §7)** | 0.0063 bp | **159× margin** — still shielded at the 0.01 bp pool-minimum fee |
 
 Every "loss = $0.00" result in this document is this inequality doing its work, and the tests
 prove it both ways: they assert `β·(1−fee) < 1` structurally, *and* they drop the fee to the pool
@@ -142,7 +147,7 @@ minimum (0.01 bp) to confirm the loss appears the instant the shield is thinner 
 
 ## 2. The two measured candidates
 
-Both use the production band floor (α = peg − 15 bp), rotation at price 1, λ = 4000, 1 bp fee,
+Both use the original band floor (α = peg − 15 bp), rotation at price 1, λ = 4000, 1 bp fee,
 both legs registered `WITH_RATE`, initialized exactly at their balance points. Parameters were
 derived with a 100-digit mpmath pipeline that first reproduced all nine mainnet production
 parameter sets, then solved β for each tilt; the on-chain composition check confirms both to
@@ -298,8 +303,9 @@ above, so read them as the operating case, not a stress case. Three consequences
    the next mark (post-strip, the arber). But it does mean intra-month exit pricing inherits the
    marking calendar, at any tilt.
 
-**The one non-negotiable invariant left: fee ≥ β − 1** (1 bp covers both candidates) — the fee
-shield is what keeps the permanently-β-pinned, monthly-marked pool unexploitable.
+**The one non-negotiable invariant left: fee ≥ β − 1** (1 bp covers every candidate in this
+document, the shipping band included — §7.1) — the fee shield is what keeps the
+permanently-β-pinned, monthly-marked pool unexploitable.
 
 ---
 
@@ -353,7 +359,7 @@ rest — which is simultaneously the LP's carry (§5) and the arber's food (§4)
 
 ## 7. The final configuration (what to ship, and why every value is what it is)
 
-*Updated 2026-07-11 after the band-width studies. Two design decisions were made in sequence:
+*Updated 2026-07-12 after the band-width studies. Two design decisions were made in sequence:
 the **tilt** (§§3–5: 99.99/0.01 beats 90/10) and then the **band** (T8/T9, below: the wide-ramp
 C4 band replaces the production −15 bp floor; an intermediate C1 selection was widened to C4
 after sizing the deep-tail carrot against real arb hurdles — deepening α buys deep-drain margin
@@ -367,7 +373,7 @@ Every C4 number below is measured on the real vault by `Test_BandWidthCandidates
 | Knob | Value (18-dec on-chain literal) | Why this value |
 |---|---|---|
 | **α** (band floor) | `980_392_156_862_745_098` = 1/1.02 | The pool keeps quoting exits until a refilling dollar of stables buys **$1.02 of marked ST NAV** (a ~196 bp floor), and that discount is the **restock carrot**: at 95% drained the pool quotes −137 bp and an arber refilling it nets 41.6 bp per dollar of stables returned on average — the *first* dollars in earn the full 137, and the deep tranche (95→75% refill) averages ~100 bp. The old −15 bp floor paid 2.9 bp — nobody's hurdle |
-| **λ** (concentration) | `300_000_000_000_000_000_000` (= 300) | How *early* the carrot ramps. At λ=300 the discount crosses 10 bp by ~15% drained and 25 bp by ~40% — arbs wake while the pool is still mostly full. At the old λ=4000, the restock arb could not even fire (discount < fee) until ~20% drained. λ also sets depth: a $1M clip on $10M TVL still costs ~4 bp all-in. λ was deliberately *not* pushed lower: deepening α buys deep-tail margin almost free, while lowering λ taxes every mid-drain exiter (~+5 bp at half-drain per 50-point λ cut) |
+| **λ** (concentration) | `300_000_000_000_000_000_000` (= 300) | How *early* the carrot ramps. At λ=300 the discount crosses 10 bp by ~15% drained and 25 bp by ~35% — arbs wake while the pool is still mostly full. At the old λ=4000, the restock arb could not even fire (discount < fee) until ~20% drained. λ also sets depth: a $1M clip on $10M TVL still costs ~4 bp all-in. λ was deliberately *not* pushed lower: deepening α buys deep-tail margin almost free, while lowering λ taxes every mid-drain exiter (~+5 bp at half-drain per 50-point λ cut) |
 | **β** (upper bound) | `1_000_000_630_371_029_932` | Not a free choice — solved (100-digit pipeline) so the peg sits exactly at the 99.99% stable corner. β−1 = 0.0063 bp is the entire premium a pinned pool ever quotes |
 | **Rotation c, s** | `707_106_781_186_547_524` (both) | 45°: maximum depth exactly at price 1.0, decaying monotonically toward α (measured: ~8% of peak density at D95) |
 | **Fee** | 1 bp (`1e14`) | Must satisfy the one non-negotiable invariant **fee > β−1** (margin here: 159×). Do not raise it to chase LP income — the fee is the arb *hurdle*, and arbs are the restoration mechanism this whole design buys |
@@ -387,7 +393,7 @@ of stables.
 - **`disableUnbalancedLiquidity` stays off** — the kernel's own LT deposits and premium
   reinvestment *are* unbalanced adds.
 - **Genesis: dust-seed single-sided in stables** at deployment (e.g. $1). Measured loss: $0.00 at
-  every size — *and still $0.00 at the 0.01 bp pool-minimum fee* (C1's 0.0061 bp β-gap stays
+  every size — *and still $0.00 at the 0.01 bp pool-minimum fee* (C4's 0.0063 bp β-gap stays
   inside even a floored fee, so a fee-governance mistake cannot open the seeding attack the 90/10
   candidate was exposed to). This closes the permissionless-initialization frontrun window free.
 - **Band edges cannot brick the pool (T10, measured).** Params are immutable, so this was proven
@@ -405,7 +411,7 @@ of stables.
   tilt-driven 0.05 bp/yr carry drag plus the ~33 bp mid-month exiter haircut that any venue
   transacting at marked NAV inherits. But the one hazard that used to make synchronized provider
   cadences a hard invariant — the ST-daily/quote-weekly two-way oscillation — collapsed from
-  53.1 bp/yr to **5.7 bp/yr, below the 10 bp/yr nastiness threshold**: that leak is arbers
+  53.1 bp/yr to **5.5 bp/yr, below the 10 bp/yr nastiness threshold**: that leak is arbers
   cycling inventory through the band around the peg, and it scales with density there (~178×
   lower at λ=300). Synchronization is now hygiene, not survival.
 
@@ -417,7 +423,7 @@ redeemed at NAV: realistically 5–15 bp in calm markets, more in the stress tha
 From first principles the discount curve must therefore:
 
 1. **Cross the hurdle while the pool is still mostly full.** C4: 10 bp at ~15% drained, 25 bp at
-   ~40%. (Old band: the arb cannot fire below ~20% drained and never pays more than ~10 bp.)
+   ~35%. (Old band: the arb cannot fire below ~20% drained and never pays more than ~10 bp.)
 2. **Peak before exhaustion, with stress headroom.** C4: 137 bp at 95% drained, rising to ~196 at
    the floor — the deep tranche of a refill (95→75%) averages ~100 bp, the original design target
    for "very one-sided," with the floor itself as stress headroom. (C2's 100 bp cap flattens the
@@ -475,7 +481,7 @@ identically to A (same 0.73-day breakeven); sub-breakeven leak is impact crumbs 
   expensive in stress): deepen α again toward 1/1.03 — the offline grid prices it at a ~163 bp
   discount at 95% drained for roughly +1.4 bp on mid-drain haircuts. Re-run T8/T9 first; every
   parameter change re-earns its numbers or it doesn't ship.
-- **The open risk (unchanged, §9): senior write-downs are unmodeled.** C1's deep α is exactly the
+- **The open risk (unchanged, §9): senior write-downs are unmodeled.** C4's deep α is exactly the
   region a genuine ST NAV drop would exercise — that is the feature — but trading *through* a
   write-down mark has never been measured. If write-downs are realistic before launch, that is
   the next battery.
@@ -486,8 +492,10 @@ identically to A (same 0.73-day breakeven); sub-breakeven leak is impact crumbs 
 
 The benchmark (a high-precision offline model, validated to ~1e-48 against the library's price
 formulas) and this suite agree on the geometry and laws, and differ where its assumptions differ
-from production wiring or its parameter family (α = 0.90, λ = 1000) differs from production's
-(α = peg − 15 bp, λ = 4000).
+from production wiring or its parameter family (α = 0.90, λ = 1000) differs from the A/D
+candidates' (α = peg − 15 bp, λ = 4000). Notably, the final shipping band (§7) moved *toward* the
+benchmark's philosophy — a deep α as a graceful-degradation runway — after the T8/T9 studies
+quantified what the tight floor cost in arb restock incentive.
 
 | Benchmark claim | On-chain result | Status |
 |---|---|---|
@@ -499,8 +507,8 @@ from production wiring or its parameter family (α = 0.90, λ = 1000) differs fr
 | BPT oracle's curve-minimum mark coincides with the peg | Analytically sound (min of x+y is where marginal price = 1); not exercised by this suite | **Plausible, untested here** |
 | Price always drifts *down toward α*; β never approached | **Inverted in production wiring**: between discrete ST marks fair value rises above the stale mark, arbers buy the ST leg, the pool pins at **β** ~99% of the time (measured). The downward-drift result holds only for continuously-applied rates with no trading | **Corrected** — and β-pinning is benign *because of the fee shield*, which the benchmark's 90% family (β−1 = 23.5 bp > fee) does not have |
 | "No arbs from rate changes" as a universal | True same-block; false across marks: 50 bp/yr under cadence mismatch, inventory-share × 5%/yr carry drag under stale marks | **Conditional** — it is an ops invariant, not a geometric one |
-| Deep-drain exit slippage 4.5 → 490 bp | 0.25 → 1.9 bp here | **Both right — band width**: 10% α-tail vs 15 bp floor. The open product choice flagged in §7 |
-| Whale add loses ~$81 to a standing arb (their 90% family) | $0 here — the displacement lands inside the fee shield | **Both right** — their 90% band's β-gap (23.5 bp) exceeds the fee; production's (0.53 bp) does not. Same physics, opposite regime |
+| Deep-drain exit slippage 4.5 → 490 bp | 0.25 → 1.9 bp on the A/D band; 6.3 → 137 bp on the shipping band (T8) | **Both right — band width**, and since resolved: the T8/T9 studies chose a middle course (α = 1/1.02), shallower than the benchmark's 10% tail, far deeper than the 15 bp floor (§7.3) |
+| Whale add loses ~$81 to a standing arb (their 90% family) | $0 here — the displacement lands inside the fee shield | **Both right** — their 90% band's β-gap (23.5 bp) exceeds the fee; every band measured here keeps the gap under it (≤ 0.53 bp). Same physics, opposite regime |
 | `disableUnbalancedLiquidity` plausibly enabled for this pool | **Must stay off**: the Day kernel's own LT deposits and premium reinvestment *are* unbalanced adds | **Corrected** (product constraint) |
 
 ---
@@ -508,7 +516,8 @@ from production wiring or its parameter family (α = 0.90, λ = 1000) differs fr
 ## 9. Caveats — what these tests do *not* show
 
 - **Senior write-downs are not modeled.** The junior-protected 8%-up-only rate is the design
-  premise; a genuine ST NAV drop would exercise α-side dynamics these runs never reach.
+  premise; a genuine ST NAV drop would exercise α-side dynamics these runs never reach — and the
+  shipping band's deliberately deep α (§7) makes that the most consequential gap here (§7.6).
 - **The EclpLPOracle / `computeTVL` marking path is not in this harness** (the kernel fork suites
   cover it); the benchmark's curve-minimum claim stays analytically-argued only.
 - **Both mock tokens are 18-dec**; 6-dec (USDC-style) decimal plumbing is covered elsewhere.
@@ -519,13 +528,13 @@ from production wiring or its parameter family (α = 0.90, λ = 1000) differs fr
 
 ## 10. Test map & glossary
 
-| Contract (all in `Test_ECLPExitLiquidityPoolEconomics.t.sol`) | Covers |
+| Contract (in `Test_ECLPExitLiquidityPoolEconomics.t.sol` unless noted) | Covers |
 |---|---|
 | `Test_PoolEconomics_ECLPExitLiquidity` | T1 composition & concentration profile; T2 rate-update arbs, cadence grids, breakeven sweeps; T3 single-sided add & round-trip costs across drain states; T4 wiring and numeric edge behavior |
 | `Test_YearSimulation_ECLPExitLiquidity` | T3 one-year LP PnL vs the 3% hold (daily marks, exit flow, stress week) |
 | `Test_WhaleAddAndGenesis_ECLPExitLiquidity` | T5 the $1M-into-$500k whale add, size ladder, round trip; T6 one-sided genesis at $10k/$100k/$1M with optimal arb + wei-exact conservation ledger |
 | `Test_ExtremeCadence_ECLPExitLiquidity` | T7 per-second stable / monthly ST marks: strip dynamics, carry drag, exiter haircuts, minimum safe cadence |
-| `Test_BandWidthCandidates_ECLPExitLiquidity` (in `Test_BandWidthCandidates.t.sol`) | T8 band-width candidates C1–C3 vs production: drain-ladder spot discounts, exiter haircuts, arb restock margins to the fee edge |
+| `Test_BandWidthCandidates_ECLPExitLiquidity` (in `Test_BandWidthCandidates.t.sol`) | T8 band-width candidates C1–C4 vs the original band, head-to-head: drain-ladder spot discounts, exiter haircuts, arb restock margins to the fee edge |
 | `Test_C4Battery_*` (six contracts in `Test_C4FullBattery.t.sol`) | T9 full battery re-run on the selected C4 band: T2 arb/cadence grids, flow breakeven sweep, T3 statics + year sim, T5/T6 whale + genesis (incl. min-fee shield diagnostic), T7 monthly-ST marks |
 | `Test_BandEdgeLiveness` (in `Test_BandEdgeLiveness.t.sol`) | T10 no-brick proof: every operation class probed with the pool pinned at the α floor (stables exhausted) and at the β corner; graceful reverts, working restocks/adds/removes, service restoration |
 
@@ -535,4 +544,6 @@ that makes the β-pinned state unexploitable. *β-pinning*: the pool resting at 
 corner — the measured default state, benign under the shield. *One-time recycle*: the capped arb
 of buying freshly-exited ST inventory once; non-repeatable because the shield blocks refills.
 *Carry drag*: carry redirected to arbers under stale marks (= inventory share × 5%/yr). *Drain
-anchor Dxx*: the pool state after xx% of its stables have been taken by exiters.
+anchor Dxx*: the pool state after xx% of its stables have been taken by exiters. *Restock
+carrot*: the drain discount read from the buyer's side — the below-NAV price at which a drained
+pool sells ST to whoever returns stables; the shipping band's reason for existing (§7.3).
