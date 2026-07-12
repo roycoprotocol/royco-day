@@ -390,6 +390,16 @@ of stables.
   every size — *and still $0.00 at the 0.01 bp pool-minimum fee* (C1's 0.0061 bp β-gap stays
   inside even a floored fee, so a fee-governance mistake cannot open the seeding attack the 90/10
   candidate was exposed to). This closes the permissionless-initialization frontrun window free.
+- **Band edges cannot brick the pool (T10, measured).** Params are immutable, so this was proven
+  on-chain rather than assumed: with the stables exhausted to dust and the spot resting ON the α
+  floor, exit swaps revert gracefully (the exiter keeps their ST), while restock swaps,
+  single-sided stable adds (a fair-value *gain* — the rebalancer's credit), and proportional
+  removes all keep working — and a single restock swap restores exit service. The β corner (the
+  pool's everyday resting state) passes the same probe. LPs are never locked in at any band
+  state. The residual liveness dependency is not the band at all: a **reverting rate provider**
+  halts a WITH_RATE pool's operations until fixed; Balancer V3's Recovery Mode
+  (`enableRecoveryMode` → proportional withdrawals that bypass pool math and rate providers) is
+  the vault-level backstop for even that.
 - **Oracle cadence — the requirements got *softer*.** Breakeven ST staleness is unchanged at
   0.73 days (fee ÷ 2.19 bp/day drift, band-independent); monthly ST marks still cost only the
   tilt-driven 0.05 bp/yr carry drag plus the ~33 bp mid-month exiter haircut that any venue
@@ -517,6 +527,7 @@ from production wiring or its parameter family (α = 0.90, λ = 1000) differs fr
 | `Test_ExtremeCadence_ECLPExitLiquidity` | T7 per-second stable / monthly ST marks: strip dynamics, carry drag, exiter haircuts, minimum safe cadence |
 | `Test_BandWidthCandidates_ECLPExitLiquidity` (in `Test_BandWidthCandidates.t.sol`) | T8 band-width candidates C1–C3 vs production: drain-ladder spot discounts, exiter haircuts, arb restock margins to the fee edge |
 | `Test_C4Battery_*` (six contracts in `Test_C4FullBattery.t.sol`) | T9 full battery re-run on the selected C4 band: T2 arb/cadence grids, flow breakeven sweep, T3 statics + year sim, T5/T6 whale + genesis (incl. min-fee shield diagnostic), T7 monthly-ST marks |
+| `Test_BandEdgeLiveness` (in `Test_BandEdgeLiveness.t.sol`) | T10 no-brick proof: every operation class probed with the pool pinned at the α floor (stables exhausted) and at the β corner; graceful reverts, working restocks/adds/removes, service restoration |
 
 **Glossary.** *Carry*: the 5%/yr yield spread earned by whoever holds ST instead of stables — the
 LP when marks are fresh, the arber when they're stale. *Fee shield*: the inequality β − 1 < fee
