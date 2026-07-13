@@ -4,6 +4,8 @@ pragma solidity ^0.8.28;
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
+    ADMIN_ENTRY_POINT_ROLE,
+    ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE,
     ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
@@ -86,6 +88,11 @@ abstract contract RoleConfigUtils {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
         } else if (role == ADMIN_MARKET_OPS_ROLE) {
             return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 2 days });
+        } else if (role == ADMIN_ENTRY_POINT_ROLE) {
+            // The delay lives on the member grant (FNDN 24h, WCE + factory immediate), not the role itself
+            return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        } else if (role == ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE) {
+            return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         } else {
             revert UNKNOWN_ROLE(role);
         }

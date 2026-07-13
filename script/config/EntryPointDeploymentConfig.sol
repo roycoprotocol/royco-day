@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
+import { IRoycoDayEntryPoint } from "../../src/interfaces/IRoycoDayEntryPoint.sol";
 
 /**
- * @title UpdateConfig
- * @notice Registry mapping market names to deployed kernel addresses per chain
- * @dev All other addresses (accountant, tranches) are derived from the kernel at runtime.
- *      Add new markets by extending `_initializeDeployedMarkets()`.
+ * @title EntryPointDeploymentConfig
+ * @notice Multi-chain configuration for RoycoDayEntryPoint deployments
+ * @dev Configures every deployment by populating `_entryPointConfigs[chainId]` in
+ *      `_initializeEntryPointConfigs()`. At runtime, `getEntryPointConfig()` resolves the
+ *      config for the current `block.chainid`, so the same script works on any chain.
  */
-abstract contract UpdateConfig {
+abstract contract EntryPointDeploymentConfig {
     // ═══════════════════════════════════════════════════════════════════════════
     // CHAIN IDs
     // ═══════════════════════════════════════════════════════════════════════════
@@ -27,101 +28,117 @@ abstract contract UpdateConfig {
     /// @dev TODO: set the deployed Day factory address once the first Day market is live.
     address internal constant ROYCO_FACTORY = address(0);
 
-    /// @dev The Day entry point proxy (CREATE3 — same address on every chain).
-    /// @dev TODO: set the deployed Day entry point address once DeployEntryPoint has run.
-    address internal constant ROYCO_ENTRY_POINT = address(0);
-
     // ═══════════════════════════════════════════════════════════════════════════
     // MULTISIG ADDRESSES
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev Root multisig — holds the timelocked admin roles (ADMIN_ACCOUNTANT_ROLE, ADMIN_KERNEL_ROLE, etc.)
     address internal constant ROOT_MULTISIG = 0x7c405bbD131e42af506d14e752f2e59B19D49997;
-
-    /// @dev Executor multisig — holds the GUARDIAN_ROLE (can cancel pending operations)
-    address internal constant EXECUTOR_MULTISIG = 0x84d37A25e46029CE161111420E07cEb78880119e;
-
-    /// @dev WCE multisig — operations multisig holding immediate-delay admin roles
-    ///      (e.g. ADMIN_ENTRY_POINT_ROLE with 0 delay).
     address internal constant WCE_MULTISIG = 0x84d37A25e46029CE161111420E07cEb78880119e;
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // MARKET NAMES
+    // DEFAULT DELAYS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    // Add Day market names here as they ship (e.g. `string internal constant SNUSD = "snUSD";`).
+    uint24 internal constant DEFAULT_DEPOSIT_DELAY = 5 minutes;
+    uint24 internal constant DEFAULT_REDEMPTION_DELAY = 5 minutes;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // TYPES
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Resolved market addresses (derived from kernel at runtime)
-    struct MarketAddresses {
-        address kernel;
-        address accountant;
-        address seniorTranche;
-        address juniorTranche;
+    /// @notice A single tranche + its entry point configuration
+    struct TrancheInitConfig {
+        address tranche;
+        IRoycoDayEntryPoint.TrancheConfig config;
+    }
+
+    /// @notice Full deployment configuration for an entry point on a single chain
+    struct EntryPointConfig {
+        uint256 chainId;
+        /// @dev The Royco factory used to validate tranche provenance (its ROYCO_AUTHORITY is the access manager)
+        address roycoFactory;
+        /// @dev Initial tranches and their configurations
+        TrancheInitConfig[] tranches;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // STORAGE
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev chainId → marketName → kernel address
-    mapping(uint256 chainId => mapping(string marketName => address kernel)) internal _deployedKernels;
-
-    /// @dev Chainlink-style aggregators (`latestRoundData()`) that need to stay "fresh" through the
-    ///      2-day simulation warp. The harness captures `latestRoundData` for each entry pre-warp,
-    ///      then `vm.mockCall`s the oracle post-warp to keep the same `answer` but report
-    ///      `updatedAt = block.timestamp`, defeating downstream staleness checks.
-    mapping(uint256 chainId => address[] oracles) internal _chainlinkOracles;
+    /// @dev Per-chain deployment configs (populated in constructor)
+    mapping(uint256 chainId => EntryPointConfig) internal _entryPointConfigs;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // ERRORS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    error MarketNotFound(string marketName, uint256 chainId);
+    error EntryPointConfigNotFound(uint256 chainId);
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CONSTRUCTOR
     // ═══════════════════════════════════════════════════════════════════════════
 
     constructor() {
-        _initializeDeployedMarkets();
+        _initializeEntryPointConfigs();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // GETTERS
+    // GETTER
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Returns the Chainlink-style oracles to keep fresh during simulation for `_chainId`.
-    function getChainlinkOracles(uint256 _chainId) public view returns (address[] memory oracles) {
-        oracles = _chainlinkOracles[_chainId];
+    /// @notice Returns the entry point config for the current chain
+    function getEntryPointConfig() public view returns (EntryPointConfig memory) {
+        return _getEntryPointConfig(block.chainid);
     }
 
-    /**
-     * @notice Resolves all market addresses from the kernel for the current chain
-     * @param _marketName The market name (must match a configured entry)
-     * @return addrs The resolved kernel, accountant, and tranche addresses
-     */
-    function getMarketAddresses(string memory _marketName) public view returns (MarketAddresses memory addrs) {
-        addrs.kernel = _deployedKernels[block.chainid][_marketName];
-        require(addrs.kernel != address(0), MarketNotFound(_marketName, block.chainid));
-
-        IRoycoDayKernel kernel = IRoycoDayKernel(addrs.kernel);
-        addrs.accountant = kernel.ACCOUNTANT();
-        addrs.seniorTranche = kernel.SENIOR_TRANCHE();
-        addrs.juniorTranche = kernel.JUNIOR_TRANCHE();
+    /// @notice Returns the entry point config for the specified chain
+    function _getEntryPointConfig(uint256 _chainId) internal view returns (EntryPointConfig memory cfg) {
+        EntryPointConfig storage stored = _entryPointConfigs[_chainId];
+        require(stored.roycoFactory != address(0), EntryPointConfigNotFound(_chainId));
+        cfg.chainId = stored.chainId;
+        cfg.roycoFactory = stored.roycoFactory;
+        cfg.tranches = new TrancheInitConfig[](stored.tranches.length);
+        for (uint256 i = 0; i < stored.tranches.length; i++) {
+            cfg.tranches[i] = stored.tranches[i];
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // INITIALIZATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function _initializeDeployedMarkets() internal {
-        // Register deployed Day markets here as they ship, e.g.:
-        //   _deployedKernels[MAINNET][SNUSD] = 0x...;
-        // and push any Chainlink/RedStone aggregators that must stay fresh through the 2-day simulation warp:
-        //   _chainlinkOracles[MAINNET].push(0x...);
+    /**
+     * @notice Populate `_entryPointConfigs[chainId]` for every chain you intend to deploy on.
+     * @dev Use `_addMarketTranches` to push a market's (ST, JT, LT) triple with the standard
+     *      `5 minutes` deposit/redemption delays. Override this in deploy scripts.
+     */
+    function _initializeEntryPointConfigs() internal virtual;
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // HELPERS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev Pushes a market's senior, junior, and liquidity tranches with the default delays
+    function _addMarketTranches(EntryPointConfig storage _cfg, address _seniorTranche, address _juniorTranche, address _liquidityTranche) internal {
+        _addTrancheWithDefaultDelays(_cfg, _seniorTranche);
+        _addTrancheWithDefaultDelays(_cfg, _juniorTranche);
+        _addTrancheWithDefaultDelays(_cfg, _liquidityTranche);
+    }
+
+    /// @dev Pushes a tranche with the default 5-minute deposit/redemption delays and
+    ///      `PROTOCOL` as the yield recipient (queued yield accrues to the protocol).
+    function _addTrancheWithDefaultDelays(EntryPointConfig storage _cfg, address _tranche) internal {
+        _cfg.tranches
+            .push(
+                TrancheInitConfig({
+                    tranche: _tranche,
+                    config: IRoycoDayEntryPoint.TrancheConfig({
+                        enabled: true,
+                        yieldRecipient: IRoycoDayEntryPoint.AccruedYieldRecipient.PROTOCOL,
+                        depositDelaySeconds: DEFAULT_DEPOSIT_DELAY,
+                        redemptionDelaySeconds: DEFAULT_REDEMPTION_DELAY
+                    })
+                })
+            );
     }
 }
