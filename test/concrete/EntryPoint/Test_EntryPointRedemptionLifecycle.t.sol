@@ -75,6 +75,27 @@ contract Test_EntryPointRedemptionLifecycle is EntryPointTestBase {
         entryPoint.requestRedemption(makeAddr("UNKNOWN"), 1, USER_A, 0);
     }
 
+    function test_requestRedemption_revertsOnNullTrancheOrReceiver() public {
+        vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
+        vm.prank(USER_A);
+        entryPoint.requestRedemption(address(0), 1, USER_A, 0);
+
+        vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
+        vm.prank(USER_A);
+        entryPoint.requestRedemption(address(seniorTranche), 1, address(0), 0);
+    }
+
+    function test_requestRedemption_revertsOnInvalidBonus() public {
+        // The bonus must be strictly less than 100%: at exactly WAD the user's claim remainder would be zero
+        vm.expectRevert(IRoycoDayEntryPoint.INVALID_EXECUTOR_BONUS.selector);
+        vm.prank(USER_A);
+        entryPoint.requestRedemption(address(seniorTranche), 1, USER_A, uint64(1e18));
+
+        vm.expectRevert(IRoycoDayEntryPoint.INVALID_EXECUTOR_BONUS.selector);
+        vm.prank(USER_A);
+        entryPoint.requestRedemption(address(seniorTranche), 1, USER_A, uint64(1e18 + 1));
+    }
+
     // ---------------------------------------------------------------------
     // executeRedemption — self execution
     // ---------------------------------------------------------------------
@@ -97,6 +118,32 @@ contract Test_EntryPointRedemptionLifecycle is EntryPointTestBase {
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.INVALID_REQUEST.selector, nonce));
         vm.prank(USER_A);
         entryPoint.executeRedemption(USER_A, nonce, type(uint256).max);
+    }
+
+    function test_executeRedemption_revertsOnZeroShares() public {
+        (, uint256 nonce) = _acquireAndRequest(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
+        _warpPastRedemptionDelay();
+        vm.expectRevert(IRoycoDayEntryPoint.ZERO_AMOUNT.selector);
+        vm.prank(USER_A);
+        entryPoint.executeRedemption(USER_A, nonce, 0);
+    }
+
+    function test_executeRedemption_revertsWhenTrancheDisabledAfterRequest() public {
+        (uint256 shares, uint256 nonce) = _acquireAndRequest(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
+        _warpPastRedemptionDelay();
+
+        // Disable the tranche
+        (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
+        configs[1].enabled = false;
+        vm.prank(ENTRY_POINT_ADMIN);
+        entryPoint.modifyTrancheConfigs(tranches, configs);
+
+        vm.expectRevert(IRoycoDayEntryPoint.TRANCHE_NOT_ENABLED.selector);
+        vm.prank(USER_A);
+        entryPoint.executeRedemption(USER_A, nonce, shares);
+
+        // The escrowed shares remain cancellable
+        _cancelRedemption(USER_A, nonce, USER_A);
     }
 
     function test_executeRedemption_partialThenFull_scalesNavProRata() public {

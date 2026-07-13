@@ -309,7 +309,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
         for (uint256 i = 0; i < numTranches; ++i) {
             address tranche = _tranches[i];
-            uint256 sharesToClaim = (_sharesToClaim[i] == type(uint256).max) ? $.trancheToProtocolFeeShares[tranche] : _sharesToClaim[i];
+            uint256 sharesToClaim = ((_sharesToClaim[i] == type(uint256).max) ? $.trancheToProtocolFeeShares[tranche] : _sharesToClaim[i]);
             if (sharesToClaim == 0) continue;
             $.trancheToProtocolFeeShares[tranche] -= sharesToClaim;
             IERC20(tranche).safeTransfer(_receiver, sharesToClaim);

@@ -27,7 +27,23 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
     function testFuzz_depositYieldNeutrality(uint256 _assets, uint256 _gainBps) public {
         _assets = bound(_assets, stUnit, 100 * stUnit);
         _gainBps = bound(_gainBps, 1, 5000);
+        _checkDepositYieldNeutrality(_assets, _gainBps);
+    }
 
+    /// @notice Pins a once-failing fuzz counterexample: the JT's compounded effective yield (own PnL plus its share
+    ///         of senior yield) must be captured by the forfeiture basis, not just the raw asset PnL
+    /// @dev Deposit and redemption pins are separate tests: via-IR CSE caches block.timestamp within one test
+    ///      function, so a second relative warp in the same test would silently no-op
+    function test_depositYieldNeutrality_regressionCounterexample() public {
+        _checkDepositYieldNeutrality(11_292_100_492_600_944_813, 141);
+    }
+
+    /// @notice The redemption half of the pinned counterexample (see the deposit pin above)
+    function test_redemptionYieldNeutrality_regressionCounterexample() public {
+        _checkRedemptionYieldNeutrality(11_292_100_492_600_944_813, 141);
+    }
+
+    function _checkDepositYieldNeutrality(uint256 _assets, uint256 _gainBps) internal {
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), _assets, USER_A, 0);
         uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).navAtRequestTime);
 
@@ -36,8 +52,9 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
         uint256 userShares = _executeDepositMax(USER_A, USER_A, nonce);
 
         // The user's share value is pinned to the request-time NAV: forfeiture flooring may leave them dust above,
-        // bounded by one share-wei of NAV, so assert a tight relative envelope with the upper bound favoring the pool
+        // bounded by one share-wei of NAV, so assert the hard gain-direction ceiling plus a tight relative envelope
         uint256 userNav = toUint256(juniorTranche.convertToAssets(userShares).nav);
+        assertLe(userNav, navAtRequest + toUint256(juniorTranche.convertToAssets(1).nav) + 1, "the depositor must never clear more than the snapshot plus rounding dust");
         assertApproxEqRel(userNav, navAtRequest, 0.001e18, "the depositor's proceeds must be pinned to the request-time NAV");
         assertGt(entryPoint.getProtocolFeeSharesPendingCollection(address(juniorTranche)), 0, "a queued gain must always forfeit");
     }
@@ -46,7 +63,10 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
     function testFuzz_redemptionYieldNeutrality(uint256 _assets, uint256 _gainBps) public {
         _assets = bound(_assets, stUnit, 100 * stUnit);
         _gainBps = bound(_gainBps, 1, 5000);
+        _checkRedemptionYieldNeutrality(_assets, _gainBps);
+    }
 
+    function _checkRedemptionYieldNeutrality(uint256 _assets, uint256 _gainBps) internal {
         uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), _assets);
         (uint256 nonce,) = _requestRedemption(USER_A, address(juniorTranche), shares, USER_A, 0);
         uint256 navAtRequest = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).navAtRequestTime);

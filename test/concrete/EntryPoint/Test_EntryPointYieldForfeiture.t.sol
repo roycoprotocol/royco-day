@@ -234,6 +234,23 @@ contract Test_EntryPointYieldForfeiture is EntryPointTestBase {
         assertEq(juniorTranche.balanceOf(FEE_COLLECTOR), accrued, "the collector must hold every accrued fee share");
     }
 
+    function test_collectProtocolFees_overClaimReverts() public {
+        // Accrue a known amount, then claiming more than accrued must underflow-revert rather than draw on escrow
+        (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
+        applySTPnL(1000);
+        _warpPastDepositDelay();
+        _executeDepositMax(USER_A, USER_A, nonce);
+        uint256 accrued = entryPoint.getProtocolFeeSharesPendingCollection(address(juniorTranche));
+
+        address[] memory tranches = new address[](1);
+        tranches[0] = address(juniorTranche);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = accrued + 1;
+        vm.expectRevert();
+        vm.prank(FEE_COLLECTOR);
+        entryPoint.collectProtocolFees(tranches, amounts, FEE_COLLECTOR);
+    }
+
     function test_collectProtocolFees_zeroAccrualIsSkipped() public {
         address[] memory tranches = new address[](1);
         tranches[0] = address(seniorTranche);
