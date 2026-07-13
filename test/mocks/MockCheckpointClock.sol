@@ -21,4 +21,8 @@ contract MockCheckpointClock is OracleCheckpointClockBase {
     function _readSource() internal view override returns (uint256 value) {
         return SOURCE.getValue();
     }
+
+    function description() external pure override returns (string memory clockDescription) {
+        return "Checkpoint clock over a mock value source";
+    }
 }

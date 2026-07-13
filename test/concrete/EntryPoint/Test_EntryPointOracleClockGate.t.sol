@@ -198,13 +198,14 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
     }
 
     function test_modifyTrancheConfigs_revertsWhenClockIsNotLive() public {
-        // A clock over an uninitialized feed (zero updatedAt) would produce the zero-snapshot sentinel that disables
-        // the gate: the configuration must fail shut so requests never queue against a dead clock
-        MockAggregatorV3 deadFeed = new MockAggregatorV3(8, 1e8);
-        deadFeed.setUpdatedAt(0);
+        // The clock is live at its own construction but its feed dies before configuration: a zero snapshot would
+        // silently disable the gate, so the configuration must fail shut rather than wire a dead clock
+        MockAggregatorV3 feed2 = new MockAggregatorV3(8, 1e8);
+        address clock = address(new ChainlinkOracleClock(address(feed2)));
+        feed2.setUpdatedAt(0);
         (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
         for (uint256 i = 0; i < configs.length; ++i) {
-            configs[i].oracleClock = address(new ChainlinkOracleClock(address(deadFeed)));
+            configs[i].oracleClock = clock;
         }
         vm.expectRevert(IRoycoDayEntryPoint.ORACLE_CLOCK_NOT_LIVE.selector);
         vm.prank(ENTRY_POINT_ADMIN);

@@ -61,9 +61,25 @@ contract Test_OracleClocks is Test {
         assertEq(clock.poke(), 123_999, "a feed push must advance the clock");
     }
 
-    function test_chainlinkClock_revertsOnNullOracle() public {
-        vm.expectRevert(ChainlinkOracleClock.NULL_ADDRESS.selector);
+    function test_chainlinkClock_describesViaTheUnderlyingFeed() public {
+        ChainlinkOracleClock clock = new ChainlinkOracleClock(address(feed));
+        assertEq(
+            clock.description(),
+            string(abi.encodePacked("Oracle clock reporting the update timestamps of the following feed: ", feed.description())),
+            "the clock must compose its description over the underlying feed's"
+        );
+    }
+
+    function test_chainlinkClock_constructionRequiresALiveOracle() public {
+        // The construction poke is the config validation: a null oracle fails the read outright
+        vm.expectRevert();
         new ChainlinkOracleClock(address(0));
+
+        // A feed reporting a zero update timestamp is not a valid clock source
+        MockAggregatorV3 deadFeed = new MockAggregatorV3(8, 1e8);
+        deadFeed.setUpdatedAt(0);
+        vm.expectRevert(ChainlinkOracleClock.INVALID_ORACLE.selector);
+        new ChainlinkOracleClock(address(deadFeed));
     }
 
     // ---------------------------------------------------------------------
@@ -116,14 +132,14 @@ contract Test_OracleClocks is Test {
         MockCheckpointClock clock = _deployCheckpointClock(0.05e18);
         uint32 seededAt = _lastUpdatedAt(clock);
 
-        // A 1% move is sub-threshold under the initial 5% configuration
+        // A 1% move is sub-threshold uMinDeviationUpdatednfiguration
         vm.warp(block.timestamp + 1 hours);
         source.setValue(1e18 + 0.01e18);
         assertEq(clock.poke(), seededAt, "a sub-threshold move must not advance the clock");
 
         // Tightening the threshold to 1% makes the same deviation count
         vm.expectEmit(address(clock));
-        emit OracleCheckpointClockBase.MinDeviationWADUpdated(0.01e18);
+        emit OracleCheckpointClockBase.MinDeviationUpdated(0.01e18);
         clock.setMinDeviationWAD(0.01e18);
         assertEq(clock.getOracleCheckpointClockState().minDeviationWAD, 0.01e18, "the threshold must be updated in storage");
         assertEq(clock.poke(), uint32(block.timestamp), "the same deviation must checkpoint under the tightened threshold");
@@ -148,7 +164,7 @@ contract Test_OracleClocks is Test {
         vm.warp(block.timestamp + 1 hours);
         source.setValue(1e18 + 1);
         vm.expectEmit(address(clock));
-        emit OracleCheckpointClockBase.Checkpointed(1e18 + 1, uint32(block.timestamp));
+        emit OracleCheckpointClockBase.Checkpointed(1e18 + 1);
         assertEq(clock.poke(), uint32(block.timestamp), "a one-wei change must checkpoint under a zero threshold");
         assertEq(_lastValue(clock), 1e18 + 1, "the checkpointed value must track the source");
     }
@@ -177,13 +193,25 @@ contract Test_OracleClocks is Test {
         assertEq(clock.poke(), uint32(block.timestamp), "a downward deviation must count the same as an upward one");
     }
 
-    function test_checkpointClock_changeFromZeroAlwaysCounts() public {
+    function test_checkpointClock_initializeRejectsZeroValueSource() public {
+        // A source reading zero cannot seed a live clock: initialization must fail loudly rather than deploy not-live
         source.setValue(0);
+        address implementation = address(new MockCheckpointClock(address(source)));
+        vm.expectRevert(OracleCheckpointClockBase.INVALID_ORACLE.selector);
+        new ERC1967Proxy(implementation, abi.encodeCall(MockCheckpointClock.initialize, (address(accessManager), 0.01e18)));
+    }
+
+    function test_checkpointClock_changeFromZeroAlwaysCounts() public {
+        // The source round-trips through zero mid-life: the drop checkpoints as a full deviation, and any change
+        // from the zero checkpoint counts as a full deviation regardless of the threshold
         MockCheckpointClock clock = _deployCheckpointClock(0.01e18);
 
         vm.warp(block.timestamp + 1 hours);
+        source.setValue(0);
+        clock.poke();
         source.setValue(1);
         assertEq(clock.poke(), uint32(block.timestamp), "any change from a zero checkpoint must count as a full deviation");
+        assertEq(_lastValue(clock), 1, "the checkpoint must move off zero");
     }
 
     function test_checkpointClock_missedRoundTripStaysConservative() public {

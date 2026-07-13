@@ -11,8 +11,12 @@ pragma solidity ^0.8.28;
 interface IOracleClock {
     /**
      * @notice Observes the underlying source, checkpointing a new update timestamp if its value has changed
-     * @dev Permissionless — the entry point pokes on every request and execution, so queue traffic drives the clock
+     * @dev Permissionless — the entry point pokes on every request and execution, so queue traffic organically drives the clock
      * @return lastUpdatedAt The timestamp of the last observed update of the underlying source
      */
     function poke() external returns (uint32 lastUpdatedAt);
+
+    /// @notice Gets the description of the oracle clock
+    /// @return clockDescription The description of the oracle clock
+    function description() external view returns (string memory clockDescription);
 }

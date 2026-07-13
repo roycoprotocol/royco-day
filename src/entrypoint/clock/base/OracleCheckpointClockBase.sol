@@ -36,43 +36,42 @@ abstract contract OracleCheckpointClockBase is RoycoBase, IOracleClock {
         uint32 lastUpdatedAt;
     }
 
-    /**
-     * @notice Emitted when a poke observes a deviated value and checkpoints it
-     * @param value The newly checkpointed value
-     * @param updatedAt The timestamp of the checkpoint
-     */
-    event Checkpointed(uint256 value, uint32 updatedAt);
+    /// @notice Emitted when a poke observes a deviated value and checkpoints it
+    /// @param value The newly checkpointed value
+    event Checkpointed(uint256 value);
 
     /// @notice Emitted when the minimum deviation threshold is updated
-    event MinDeviationWADUpdated(uint256 minDeviationWAD);
+    event MinDeviationUpdated(uint256 minDeviationWAD);
+
+    /// @notice Thrown when the source oracle returns an invalid update timestamp
+    error INVALID_ORACLE();
 
     /// @notice Thrown when the minimum deviation threshold is not strictly less than 100% (WAD)
     error INVALID_MIN_DEVIATION_WAD();
 
     /**
      * @notice Initializes the oracle checkpoint clock state and seeds the first checkpoint
-     * @dev Must be called after the concrete clock's read wiring is set so the seed read observes the live source
+     * @dev Must be called after the concrete clock's read wiring is set so the seed poke observes the live source
+     *      A source reading zero at initialization leaves the clock not live (a zero last updated timestamp) until its
+     *      first nonzero observation — the entry point refuses to configure or request against a not-live clock
      * @param _minDeviationWAD The minimum relative deviation that counts as an update, scaled to WAD precision (zero counts any change)
      */
     function __OracleCheckpointClockBase_init_unchained(uint256 _minDeviationWAD) internal onlyInitializing {
         // Initialize the minimum deviation
         _setMinDeviationWAD(_minDeviationWAD);
-
         // Seed the first checkpoint so the clock starts live at initialization time
-        OracleCheckpointClockBaseState storage $ = _getOracleCheckpointClockBaseStorage();
-        $.lastValue = _readSource();
-        $.lastUpdatedAt = uint32(block.timestamp);
+        require(poke() > 0, INVALID_ORACLE());
     }
 
     /// @inheritdoc IOracleClock
-    function poke() external override(IOracleClock) returns (uint32 lastUpdatedAt) {
+    function poke() public override(IOracleClock) returns (uint32 lastUpdatedAt) {
         // Read the source and checkpoint the value if it deviated beyond the threshold since the last checkpoint
         OracleCheckpointClockBaseState storage $ = _getOracleCheckpointClockBaseStorage();
         uint256 value = _readSource();
         if (_hasDeviated(value, $.lastValue, $.minDeviationWAD)) {
             $.lastValue = value;
             $.lastUpdatedAt = uint32(block.timestamp);
-            emit Checkpointed(value, uint32(block.timestamp));
+            emit Checkpointed(value);
         }
         return $.lastUpdatedAt;
     }
@@ -97,7 +96,7 @@ abstract contract OracleCheckpointClockBase is RoycoBase, IOracleClock {
     function _setMinDeviationWAD(uint256 _minDeviationWAD) internal {
         require(_minDeviationWAD < WAD, INVALID_MIN_DEVIATION_WAD());
         _getOracleCheckpointClockBaseStorage().minDeviationWAD = _minDeviationWAD;
-        emit MinDeviationWADUpdated(_minDeviationWAD);
+        emit MinDeviationUpdated(_minDeviationWAD);
     }
 
     /**
@@ -112,7 +111,7 @@ abstract contract OracleCheckpointClockBase is RoycoBase, IOracleClock {
         // Any change counts when no threshold is configured, and any change from zero is a full deviation
         if (_minDeviationWAD == 0 || _checkpointValue == 0) return true;
         uint256 delta = (_value > _checkpointValue) ? (_value - _checkpointValue) : (_checkpointValue - _value);
-        return WAD.mulDiv(delta, _checkpointValue) >= _minDeviationWAD;
+        return (WAD.mulDiv(delta, _checkpointValue) >= _minDeviationWAD);
     }
 
     /// @notice Reads the source's current value, implemented by the concrete clock
