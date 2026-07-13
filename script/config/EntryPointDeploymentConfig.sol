@@ -127,6 +127,7 @@ abstract contract EntryPointDeploymentConfig {
 
     /// @dev Pushes a tranche with the default 5-minute deposit/redemption delays and
     ///      `PROTOCOL` as the yield recipient (queued yield accrues to the protocol).
+    ///      Oracle clocks are deployed per market and wired post-deployment via `modifyTrancheConfigs`.
     function _addTrancheWithDefaultDelays(EntryPointConfig storage _cfg, address _tranche) internal {
         _cfg.tranches
             .push(
@@ -136,7 +137,8 @@ abstract contract EntryPointDeploymentConfig {
                         enabled: true,
                         yieldRecipient: IRoycoDayEntryPoint.AccruedYieldRecipient.PROTOCOL,
                         depositDelaySeconds: DEFAULT_DEPOSIT_DELAY,
-                        redemptionDelaySeconds: DEFAULT_REDEMPTION_DELAY
+                        redemptionDelaySeconds: DEFAULT_REDEMPTION_DELAY,
+                        oracleClock: address(0)
                     })
                 })
             );

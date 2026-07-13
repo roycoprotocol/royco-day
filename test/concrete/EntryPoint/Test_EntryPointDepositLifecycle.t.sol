@@ -57,7 +57,7 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
             assertEq(request.baseRequest.receiver, USER_A, "request receiver");
             assertEq(request.baseRequest.executableAtTimestamp, executableAt, "request executableAt");
             assertEq(executableAt, uint32(block.timestamp + DEFAULT_DEPOSIT_DELAY), "executableAt must be now + deposit delay");
-            assertGt(toUint256(request.navAtRequestTime), 0, "nav snapshot must be taken under a forfeiting yield recipient");
+            assertGt(toUint256(request.baseRequest.navAtRequestTime), 0, "nav snapshot must be taken under a forfeiting yield recipient");
         }
     }
 
@@ -80,7 +80,7 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
     }
 
     function test_requestDeposit_revertsOnZeroAmount() public {
-        vm.expectRevert(IRoycoDayEntryPoint.ZERO_AMOUNT.selector);
+        vm.expectRevert(IRoycoDayEntryPoint.MUST_EXECUTE_NON_ZERO_AMOUNT.selector);
         vm.prank(USER_A);
         entryPoint.requestDeposit(address(seniorTranche), toTrancheUnits(0), USER_A, 0);
     }
@@ -141,7 +141,7 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
     function test_executeDeposit_revertsOnZeroAmount() public {
         (uint256 nonce,) = _requestDepositDefault(USER_A, address(juniorTranche), _depositAmount(address(juniorTranche)));
         _warpPastDepositDelay();
-        vm.expectRevert(IRoycoDayEntryPoint.ZERO_AMOUNT.selector);
+        vm.expectRevert(IRoycoDayEntryPoint.MUST_EXECUTE_NON_ZERO_AMOUNT.selector);
         vm.prank(USER_A);
         entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(0));
     }
@@ -190,11 +190,11 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
     function test_executeDeposit_partial_scalesNavSnapshotProRata() public {
         uint256 amount = _depositAmount(address(juniorTranche));
         (uint256 nonce,) = _requestDepositDefault(USER_A, address(juniorTranche), amount);
-        uint256 navBefore = toUint256(entryPoint.getDepositRequest(USER_A, nonce).navAtRequestTime);
+        uint256 navBefore = toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime);
         _warpPastDepositDelay();
 
         _executeDeposit(USER_A, USER_A, nonce, amount / 2);
-        uint256 navAfter = toUint256(entryPoint.getDepositRequest(USER_A, nonce).navAtRequestTime);
+        uint256 navAfter = toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime);
         assertApproxEqAbs(navAfter, navBefore / 2, 1, "nav snapshot must scale pro-rata with the remaining assets");
     }
 

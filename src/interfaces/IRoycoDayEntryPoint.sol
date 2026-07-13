@@ -43,12 +43,14 @@ interface IRoycoDayEntryPoint {
      * @custom:field yieldRecipient - The recipient of yield accrued during the deposit or redemption delay period
      * @custom:field depositDelaySeconds - The delay in seconds between deposit request and execution
      * @custom:field redemptionDelaySeconds - The delay in seconds between redemption request and execution
+     * @custom:field oracleClock - The oracle clock gating execution on at least one observed oracle update after the request (the null address disables the gate)
      */
     struct TrancheConfig {
         bool enabled;
         AccruedYieldRecipient yieldRecipient;
         uint24 depositDelaySeconds;
         uint24 redemptionDelaySeconds;
+        address oracleClock;
     }
 
     /**
@@ -68,40 +70,40 @@ interface IRoycoDayEntryPoint {
     /**
      * @notice A pending deposit request
      * @custom:field assets - The amount of assets requested to be deposited
-     * @custom:field navAtRequestTime - The total NAV of escrowed assets at request time, used to calculate yield forfeiture on execution
      * @custom:field baseRequest - The base request data shared across request types
      */
     struct DepositRequest {
         TRANCHE_UNIT assets;
-        NAV_UNIT navAtRequestTime;
         BaseRequest baseRequest;
     }
 
     /**
      * @notice A pending redemption request
      * @custom:field shares - The amount of escrowed shares pending redemption
-     * @custom:field navAtRequestTime - The total NAV of escrowed shares at request time, used to calculate yield forfeiture on execution
      * @custom:field baseRequest - The base request data shared across request types
      */
     struct RedemptionRequest {
         uint256 shares;
-        NAV_UNIT navAtRequestTime;
         BaseRequest baseRequest;
     }
 
     /**
      * @notice Base request data shared across deposit and redemption requests
      * @custom:field tranche - The Royco tranche that this request is for
-     * @custom:field receiver - The address that will receive the output assets or shares
+     * @custom:field oracleClockSnapshot - The oracle clock timestamp observed when the request was placed (zero when the tranche had no oracle clock)
      * @custom:field executableAtTimestamp - The timestamp after which the request can be executed
      * @custom:field executorBonusWAD - The bonus percentage (0-100%) paid to third-party executors, scaled to WAD precision
      *                                  Set to type(uint64).max to restrict execution to the request owner only
+     * @custom:field receiver - The address that will receive the output assets or shares
+     * @custom:field navAtRequestTime - The total NAV of the escrowed assets or shares at request time, used to calculate yield forfeiture on execution
      */
     struct BaseRequest {
         address tranche;
-        address receiver;
+        uint32 oracleClockSnapshot;
         uint32 executableAtTimestamp;
         uint64 executorBonusWAD;
+        address receiver;
+        NAV_UNIT navAtRequestTime;
     }
 
     /**
@@ -214,7 +216,7 @@ interface IRoycoDayEntryPoint {
     error INVALID_TRANCHE();
 
     /// @dev Thrown when passing a zero amount as input
-    error ZERO_AMOUNT();
+    error MUST_EXECUTE_NON_ZERO_AMOUNT();
 
     /// @dev Thrown when the lengths of provided arrays do not match
     error ARRAY_LENGTH_MISMATCH();
@@ -224,6 +226,9 @@ interface IRoycoDayEntryPoint {
 
     /// @dev Thrown when a request does not exist, was already executed/cancelled, or is not yet executable
     error INVALID_REQUEST(uint256 requestNonce);
+
+    /// @dev Thrown when executing a request before the tranche's oracle clock has observed an oracle update after the request was placed
+    error ORACLE_CLOCK_NOT_ADVANCED(uint256 requestNonce);
 
     /// @dev Thrown when the executor bonus is not strictly less than 100% (WAD) and is not the opt-out sentinel value
     error INVALID_EXECUTOR_BONUS();

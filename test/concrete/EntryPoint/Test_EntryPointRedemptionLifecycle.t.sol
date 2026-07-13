@@ -56,7 +56,7 @@ contract Test_EntryPointRedemptionLifecycle is EntryPointTestBase {
             IRoycoDayEntryPoint.RedemptionRequest memory request = entryPoint.getRedemptionRequest(USER_A, nonce);
             assertEq(request.shares, shares, "request shares");
             assertEq(request.baseRequest.tranche, tranche, "request tranche");
-            assertGt(toUint256(request.navAtRequestTime), 0, "nav snapshot must be taken under a forfeiting yield recipient");
+            assertGt(toUint256(request.baseRequest.navAtRequestTime), 0, "nav snapshot must be taken under a forfeiting yield recipient");
 
             // Clean up the escrow so the next tranche iteration starts from zero balances
             _cancelRedemption(USER_A, nonce, USER_A);
@@ -64,7 +64,7 @@ contract Test_EntryPointRedemptionLifecycle is EntryPointTestBase {
     }
 
     function test_requestRedemption_revertsOnZeroShares() public {
-        vm.expectRevert(IRoycoDayEntryPoint.ZERO_AMOUNT.selector);
+        vm.expectRevert(IRoycoDayEntryPoint.MUST_EXECUTE_NON_ZERO_AMOUNT.selector);
         vm.prank(USER_A);
         entryPoint.requestRedemption(address(seniorTranche), 0, USER_A, 0);
     }
@@ -123,7 +123,7 @@ contract Test_EntryPointRedemptionLifecycle is EntryPointTestBase {
     function test_executeRedemption_revertsOnZeroShares() public {
         (, uint256 nonce) = _acquireAndRequest(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
         _warpPastRedemptionDelay();
-        vm.expectRevert(IRoycoDayEntryPoint.ZERO_AMOUNT.selector);
+        vm.expectRevert(IRoycoDayEntryPoint.MUST_EXECUTE_NON_ZERO_AMOUNT.selector);
         vm.prank(USER_A);
         entryPoint.executeRedemption(USER_A, nonce, 0);
     }
@@ -148,13 +148,13 @@ contract Test_EntryPointRedemptionLifecycle is EntryPointTestBase {
 
     function test_executeRedemption_partialThenFull_scalesNavProRata() public {
         (uint256 shares, uint256 nonce) = _acquireAndRequest(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
-        uint256 navBefore = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).navAtRequestTime);
+        uint256 navBefore = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).baseRequest.navAtRequestTime);
         _warpPastRedemptionDelay();
 
         _executeRedemption(USER_A, USER_A, nonce, shares / 2);
         IRoycoDayEntryPoint.RedemptionRequest memory request = entryPoint.getRedemptionRequest(USER_A, nonce);
         assertEq(request.shares, shares - shares / 2, "remaining shares must be tracked after partial execution");
-        assertApproxEqAbs(toUint256(request.navAtRequestTime), navBefore / 2, 1, "nav snapshot must scale pro-rata with the remaining shares");
+        assertApproxEqAbs(toUint256(request.baseRequest.navAtRequestTime), navBefore / 2, 1, "nav snapshot must scale pro-rata with the remaining shares");
 
         AssetClaims memory claims = _executeRedemptionMax(USER_A, USER_A, nonce);
         assertGt(toUint256(claims.nav), 0, "the second slice must produce claims");

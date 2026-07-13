@@ -46,7 +46,7 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
 
     function _checkDepositYieldNeutrality(uint256 _assets, uint256 _gainBps) internal {
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), _assets, USER_A, 0);
-        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).navAtRequestTime);
+        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime);
 
         applySTPnL(int256(_gainBps));
         _warpPastDepositDelay();
@@ -70,7 +70,7 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
     function _checkRedemptionYieldNeutrality(uint256 _assets, uint256 _gainBps) internal {
         uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), _assets);
         (uint256 nonce,) = _requestRedemption(USER_A, address(juniorTranche), shares, USER_A, 0);
-        uint256 navAtRequest = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).navAtRequestTime);
+        uint256 navAtRequest = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).baseRequest.navAtRequestTime);
 
         applySTPnL(int256(_gainBps));
         _warpPastRedemptionDelay();
@@ -95,7 +95,7 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
         entryPoint.modifyTrancheConfigs(tranches, configs);
 
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), _assets, USER_A, 0);
-        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).navAtRequestTime);
+        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime);
 
         applySTPnL(int256(_gainBps));
         _warpPastDepositDelay();
@@ -140,7 +140,7 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
 
         uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), _assets);
         (uint256 nonce,) = _requestRedemption(USER_A, address(juniorTranche), shares, USER_A, 0);
-        uint256 navBefore = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).navAtRequestTime);
+        uint256 navBefore = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).baseRequest.navAtRequestTime);
         _warpPastRedemptionDelay();
 
         uint256 slice = (shares * _splitBps) / 10_000;
@@ -148,7 +148,7 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
         _executeRedemption(USER_A, USER_A, nonce, slice);
 
         // remaining snapshot == floor(navBefore * remainingShares / shares); the executed slice consumed the rest
-        uint256 navAfter = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).navAtRequestTime);
+        uint256 navAfter = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).baseRequest.navAtRequestTime);
         uint256 expectedRemaining = (navBefore * (shares - slice)) / shares;
         assertEq(navAfter, expectedRemaining, "the remaining nav snapshot must be the floor-scaled pro-rata value");
     }

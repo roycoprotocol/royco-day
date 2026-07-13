@@ -44,7 +44,7 @@ contract Test_EntryPointYieldForfeiture is EntryPointTestBase {
     function test_depositForfeiture_yieldAccruedInQueue_accruesToProtocol() public {
         uint256 amount = 10 * stUnit;
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), amount, USER_A, 0);
-        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).navAtRequestTime);
+        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime);
 
         // The escrowed vault shares appreciate 10% while queued
         applySTPnL(1000);
@@ -126,7 +126,7 @@ contract Test_EntryPointYieldForfeiture is EntryPointTestBase {
         // hand the depositor's fresh shares back ~90% of the forfeited yield
         uint256 amount = 500 * stUnit;
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), amount, USER_A, 0);
-        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).navAtRequestTime);
+        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime);
 
         applySTPnL(1000);
         _warpPastDepositDelay();
@@ -149,7 +149,7 @@ contract Test_EntryPointYieldForfeiture is EntryPointTestBase {
 
         uint256 amount = 10 * stUnit;
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), amount, USER_A, 0);
-        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).navAtRequestTime);
+        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime);
 
         applySTPnL(1000);
         _warpPastDepositDelay();
@@ -191,7 +191,7 @@ contract Test_EntryPointYieldForfeiture is EntryPointTestBase {
     function test_redemptionForfeiture_yieldAccruedInQueue_accruesToProtocol() public {
         uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), 10 * stUnit);
         (uint256 nonce,) = _requestRedemption(USER_A, address(juniorTranche), shares, USER_A, 0);
-        uint256 navAtRequest = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).navAtRequestTime);
+        uint256 navAtRequest = toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).baseRequest.navAtRequestTime);
 
         applySTPnL(1000);
         _warpPastRedemptionDelay();

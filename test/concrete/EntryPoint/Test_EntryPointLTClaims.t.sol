@@ -88,7 +88,7 @@ contract Test_EntryPointLTClaims is EntryPointTestBase {
         // The quote basis is pinned to the BPT-only floor: the idle premium is excluded from the snapshot
         IRoycoDayEntryPoint.RedemptionRequest memory request = entryPoint.getRedemptionRequest(USER_A, nonce);
         assertEq(
-            toUint256(request.navAtRequestTime),
+            toUint256(request.baseRequest.navAtRequestTime),
             toUint256(liquidityTranche.convertToAssets(shares).nav),
             "the LT nav snapshot must use the convertToAssets BPT-only floor"
         );
@@ -116,7 +116,7 @@ contract Test_EntryPointLTClaims is EntryPointTestBase {
         // EFFECTIVE value, so the closed form must settle on the effective basis — solving on the floor basis would let
         // the depositor redeem ~5% more than the snapshot in this scenario
         (uint256 nonce,) = _requestDeposit(USER_A, address(liquidityTranche), 10e18, USER_A, 0);
-        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).navAtRequestTime);
+        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime);
 
         applyLTPnL(1000);
         _warpPastDepositDelay();
@@ -136,7 +136,7 @@ contract Test_EntryPointLTClaims is EntryPointTestBase {
     function test_ltDepositForfeiture_protocol_monetizableValuePinnedToSnapshot() public {
         // PROTOCOL retains the forfeited shares (no burn), so the proportional split is exact in redeemable terms too
         (uint256 nonce,) = _requestDeposit(USER_A, address(liquidityTranche), 10e18, USER_A, 0);
-        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).navAtRequestTime);
+        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime);
 
         applyLTPnL(1000);
         _warpPastDepositDelay();

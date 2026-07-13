@@ -35,6 +35,10 @@ contract UpdateTrancheConfigs is ParameterUpdateBase {
     uint24 internal constant NEW_DEPOSIT_DELAY = 5 minutes;
     uint24 internal constant NEW_REDEMPTION_DELAY = 5 minutes;
 
+    /// @dev The oracle clock applied to every configured tranche (the null address disables the execution gate).
+    /// @dev TODO: point at per-market oracle clocks once they are deployed.
+    address internal constant NEW_ORACLE_CLOCK = address(0);
+
     string internal constant OUTPUT_SUBDIR = "entrypoint";
     string internal constant OUTPUT_PREFIX = "update_tranche_configs";
     string internal constant BATCH_DESCRIPTION = "Royco Day Entry Point: update tranche configurations";
@@ -95,7 +99,8 @@ contract UpdateTrancheConfigs is ParameterUpdateBase {
                     enabled: true,
                     yieldRecipient: IRoycoDayEntryPoint.AccruedYieldRecipient.PROTOCOL,
                     depositDelaySeconds: NEW_DEPOSIT_DELAY,
-                    redemptionDelaySeconds: NEW_REDEMPTION_DELAY
+                    redemptionDelaySeconds: NEW_REDEMPTION_DELAY,
+                    oracleClock: NEW_ORACLE_CLOCK
                 });
             }
         }
@@ -141,6 +146,7 @@ contract UpdateTrancheConfigs is ParameterUpdateBase {
             require(ec.baseConfig.yieldRecipient == configs[i].yieldRecipient, VerificationFailed("yieldRecipient mismatch"));
             require(ec.baseConfig.depositDelaySeconds == configs[i].depositDelaySeconds, VerificationFailed("depositDelay mismatch"));
             require(ec.baseConfig.redemptionDelaySeconds == configs[i].redemptionDelaySeconds, VerificationFailed("redemptionDelay mismatch"));
+            require(ec.baseConfig.oracleClock == configs[i].oracleClock, VerificationFailed("oracleClock mismatch"));
         }
         console2.log("    [OK] Post-state verified for", tranches.length, "tranches");
     }

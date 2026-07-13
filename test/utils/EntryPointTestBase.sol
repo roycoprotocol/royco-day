@@ -159,7 +159,8 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
                 enabled: true,
                 yieldRecipient: _defaultYieldRecipient(),
                 depositDelaySeconds: DEFAULT_DEPOSIT_DELAY,
-                redemptionDelaySeconds: DEFAULT_REDEMPTION_DELAY
+                redemptionDelaySeconds: DEFAULT_REDEMPTION_DELAY,
+                oracleClock: address(0)
             });
         }
     }
