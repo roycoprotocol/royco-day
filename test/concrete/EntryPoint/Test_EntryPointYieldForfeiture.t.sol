@@ -134,8 +134,41 @@ contract Test_EntryPointYieldForfeiture is EntryPointTestBase {
 
         // The whale's post-burn share value must be pinned to the request-time NAV at ANY pool share
         uint256 userNav = toUint256(juniorTranche.convertToAssets(userShares).nav);
-        assertLe(userNav, navAtRequest + toUint256(juniorTranche.convertToAssets(1).nav) + 1, "the whale must never clear more than the snapshot plus rounding dust");
+        assertLe(
+            userNav, navAtRequest + toUint256(juniorTranche.convertToAssets(1).nav) + 1, "the whale must never clear more than the snapshot plus rounding dust"
+        );
         assertApproxEqRel(userNav, navAtRequest, 0.0001e18, "the whale's post-burn share value must be pinned to the request-time NAV (no burn recapture)");
+    }
+
+    function test_depositForfeiture_remainingLps_soleDepositor_fallsBackToProtocol() public {
+        // Redeploy a VIRGIN market (no seeding): the queued depositor is the tranche's only holder at execution,
+        // so a burn would hand the forfeited yield straight back to their own shares
+        _deployMarket(cellA(), defaultParams());
+        _deployEntryPoint();
+        _setYieldRecipient(IRoycoDayEntryPoint.AccruedYieldRecipient.REMAINING_LPS);
+
+        uint256 amount = 10 * stUnit;
+        (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), amount, USER_A, 0);
+        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).navAtRequestTime);
+
+        applySTPnL(1000);
+        _warpPastDepositDelay();
+        uint256 userShares = _executeDepositMax(USER_A, USER_A, nonce);
+
+        // The requester is never a valid yield recipient: with no remaining LPs the forfeiture accrues to the protocol
+        uint256 accrued = entryPoint.getProtocolFeeSharesPendingCollection(address(juniorTranche));
+        assertGt(accrued, 0, "the sole-depositor forfeiture must fall back to the protocol");
+        assertEq(juniorTranche.balanceOf(address(entryPoint)), accrued, "the forfeited shares must be retained, not burned");
+
+        // Yield neutrality holds even for the sole holder: the redeemable value is pinned to the snapshot
+        vm.prank(USER_A);
+        AssetClaims memory redeemed = juniorTranche.redeem(userShares, USER_A, USER_A);
+        assertLe(
+            toUint256(redeemed.nav),
+            navAtRequest + toUint256(juniorTranche.convertToAssets(1).nav) + 1,
+            "the sole depositor must never redeem more than the snapshot plus rounding dust"
+        );
+        assertApproxEqRel(toUint256(redeemed.nav), navAtRequest, 0.001e18, "the sole depositor's redeemable value must be pinned to the request-time NAV");
     }
 
     function test_depositForfeiture_remainingLps_revertsWithoutBurnerRole() public {

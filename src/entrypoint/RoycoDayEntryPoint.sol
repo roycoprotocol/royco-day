@@ -528,12 +528,15 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         } else {
             // Mint the shares to the entry point and compute the tranche shares to forfeit for the yield accrued since placing the request
             userTrancheShares = IRoycoVaultTranche(_tranche).deposit(_assets, address(this));
+            // With no pre-existing holders, the forfeiture falls back to the protocol
+            uint256 preexistingShares = IRoycoVaultTranche(_tranche).totalSupply() - userTrancheShares;
+            AccruedYieldRecipient yieldRecipient = (preexistingShares == 0) ? AccruedYieldRecipient.PROTOCOL : _config.baseConfig.yieldRecipient;
             forfeitedYieldShares =
-                _computeDepositForfeiture(_tranche, _config.baseConfig.yieldRecipient, userTrancheShares, _navAtRequestTime, navAtExecutionTime);
+                _computeDepositForfeiture(_tranche, yieldRecipient, userTrancheShares, preexistingShares, _navAtRequestTime, navAtExecutionTime);
             // Transfer the shares the user is entitled to after deducting the forfeited yield shares
             if ((userTrancheShares -= forfeitedYieldShares) != 0) IERC20(_tranche).safeTransfer(_receiver, userTrancheShares);
             // If yield was accrued, handle it using the configured method
-            _routeForfeitedYieldShares(_tranche, _config.baseConfig.yieldRecipient, forfeitedYieldShares);
+            _routeForfeitedYieldShares(_tranche, yieldRecipient, forfeitedYieldShares);
         }
     }
 
@@ -544,8 +547,9 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
      *      Shares forfeited to the remaining LPs are burned, appreciating the receiver's own shares, so the receiver's share count is
      *      instead solved against the post-burn share price, leaving them shares worth exactly the NAV at request time with no claim on the burn
      * @param _tranche The tranche that the deposit was executed on
-     * @param _yieldRecipient The configured recipient of yield accrued during the request lifecycle
+     * @param _yieldRecipient The recipient of the forfeited yield shares (normalized to the protocol when no pre-existing holders exist)
      * @param _mintedTrancheShares The tranche shares minted to the entry point upon executing the deposit
+     * @param _preexistingTrancheShares The tranche shares held by everyone except this deposit's mint
      * @param _navAtRequestTime The NAV of the assets being deposited at the time the deposit was requested
      * @param _navAtExecutionTime The NAV of the assets being deposited at execution time (strictly greater than the NAV at request time)
      * @return forfeitedYieldShares The tranche shares to forfeit from the minted shares
@@ -554,6 +558,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         address _tranche,
         AccruedYieldRecipient _yieldRecipient,
         uint256 _mintedTrancheShares,
+        uint256 _preexistingTrancheShares,
         NAV_UNIT _navAtRequestTime,
         NAV_UNIT _navAtExecutionTime
     )
@@ -561,17 +566,13 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         view
         returns (uint256 forfeitedYieldShares)
     {
-        // Pre-existing holders exclude this deposit's mint
-        // with none there is no pool to donate a burn to, so the
-        // proportional split applies there as well as under PROTOCOL
-        uint256 totalTrancheShares = IRoycoVaultTranche(_tranche).totalSupply();
-        uint256 preexistingShares = totalTrancheShares - _mintedTrancheShares;
-        if (_yieldRecipient == AccruedYieldRecipient.PROTOCOL || preexistingShares == 0) {
+        // Shares forfeited to the protocol leave the total supply unchanged, so the proportional split is exact
+        if (_yieldRecipient == AccruedYieldRecipient.PROTOCOL) {
             return _mintedTrancheShares.mulDiv((_navAtExecutionTime - _navAtRequestTime), _navAtExecutionTime, Math.Rounding.Floor);
         } else {
             // The pre-existing holders settle at exactly (totalNAV - navAtRequestTime) across their unchanged share count post-burn
             NAV_UNIT totalNAV = IRoycoVaultTranche(_tranche).totalAssets().nav;
-            uint256 userTrancheShares = _navAtRequestTime.mulDiv(preexistingShares, (totalNAV - _navAtRequestTime), Math.Rounding.Floor);
+            uint256 userTrancheShares = _navAtRequestTime.mulDiv(_preexistingTrancheShares, (totalNAV - _navAtRequestTime), Math.Rounding.Floor);
             // Clamp so the forfeiture never underflows
             return (userTrancheShares >= _mintedTrancheShares) ? 0 : (_mintedTrancheShares - userTrancheShares);
         }
