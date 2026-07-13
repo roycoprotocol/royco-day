@@ -10,13 +10,13 @@ import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
 
 /**
  * @title UpdateTrancheConfigs
- * @notice Updates every configured market's entry-point tranche configurations (delays, yield routing, enablement)
+ * @notice Updates every configured market's entry-point tranche configurations (delays, oracle clocks, enablement)
  *         in one batched `modifyTrancheConfigs` call per chain.
  *
  * @dev Hooks into `ParameterUpdateBase`'s direct-call harness:
  *      - Resolves ST/JT addresses per market via `getMarketAddresses(name)` and the LT via the kernel's
  *        LIQUIDITY_TRANCHE immutable.
- *      - Auto-classifies each tranche via `TRANCHE_TYPE()` to pick the yield recipient per slot.
+ *      - Sanity-checks each tranche's slot ordering (ST, JT, LT) via `TRANCHE_TYPE()`.
  *      - Encodes a single batched `modifyTrancheConfigs(tranches, configs)` call to the entry point per chain.
  *      - Runs the call via `_processChainDirect` pranking `WCE_MULTISIG` (immediate role).
  *      - Writes one Safe JSON per chain at `output/update/entrypoint/{chainId}_update_tranche_configs.json`.
@@ -96,11 +96,7 @@ contract UpdateTrancheConfigs is ParameterUpdateBase {
             tranches[3 * i + 2] = IRoycoDayKernel(addrs.kernel).LIQUIDITY_TRANCHE();
             for (uint256 j = 0; j < 3; j++) {
                 configs[3 * i + j] = IRoycoDayEntryPoint.TrancheConfig({
-                    enabled: true,
-                    yieldRecipient: IRoycoDayEntryPoint.AccruedYieldRecipient.PROTOCOL,
-                    depositDelaySeconds: NEW_DEPOSIT_DELAY,
-                    redemptionDelaySeconds: NEW_REDEMPTION_DELAY,
-                    oracleClock: NEW_ORACLE_CLOCK
+                    enabled: true, depositDelaySeconds: NEW_DEPOSIT_DELAY, redemptionDelaySeconds: NEW_REDEMPTION_DELAY, oracleClock: NEW_ORACLE_CLOCK
                 });
             }
         }
@@ -143,7 +139,6 @@ contract UpdateTrancheConfigs is ParameterUpdateBase {
         for (uint256 i = 0; i < tranches.length; i++) {
             IRoycoDayEntryPoint.EnrichedTrancheConfig memory ec = IRoycoDayEntryPoint(_params.target).getTrancheConfig(tranches[i]);
             require(ec.baseConfig.enabled == configs[i].enabled, VerificationFailed("enabled mismatch"));
-            require(ec.baseConfig.yieldRecipient == configs[i].yieldRecipient, VerificationFailed("yieldRecipient mismatch"));
             require(ec.baseConfig.depositDelaySeconds == configs[i].depositDelaySeconds, VerificationFailed("depositDelay mismatch"));
             require(ec.baseConfig.redemptionDelaySeconds == configs[i].redemptionDelaySeconds, VerificationFailed("redemptionDelay mismatch"));
             require(ec.baseConfig.oracleClock == configs[i].oracleClock, VerificationFailed("oracleClock mismatch"));

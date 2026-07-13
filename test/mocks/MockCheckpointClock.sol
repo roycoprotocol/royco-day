@@ -5,14 +5,17 @@ import { OracleCheckpointClockBase } from "../../src/entrypoint/clock/base/Oracl
 import { MockValueSource } from "./MockValueSource.sol";
 
 /// @notice Minimal concrete checkpoint clock over a settable value source, exercising the base contract's
-///         change-detection semantics and its end-of-constructor seeding contract
+///         change-detection semantics and its initialization-time seeding
 contract MockCheckpointClock is OracleCheckpointClockBase {
     MockValueSource public immutable SOURCE;
 
-    constructor(address _source, uint256 _minDeviationWAD) OracleCheckpointClockBase(_minDeviationWAD) {
+    constructor(address _source) {
         SOURCE = MockValueSource(_source);
-        // Seed the first checkpoint at the END of construction, after the read wiring is set
-        _seedCheckpoint();
+    }
+
+    function initialize(address _initialAuthority, uint256 _minDeviationWAD) external initializer {
+        __RoycoBase_init(_initialAuthority);
+        __OracleCheckpointClockBase_init_unchained(_minDeviationWAD);
     }
 
     function _readSource() internal view override returns (uint256 value) {

@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { ChainlinkOracleClock } from "../../../src/entrypoint/clock/ChainlinkOracleClock.sol";
-import { MockCheckpointClock } from "../../mocks/MockCheckpointClock.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { MockAggregatorV3 } from "../../mocks/MockAggregatorV3.sol";
+import { MockCheckpointClock } from "../../mocks/MockCheckpointClock.sol";
 import { MockValueSource } from "../../mocks/MockValueSource.sol";
 import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
@@ -32,6 +34,14 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
         _deployEntryPoint();
         // The market's Chainlink feed is the steppy pricing layer for every tranche in this kernel family
         chainlinkClock = new ChainlinkOracleClock(address(priceFeed));
+    }
+
+    /// @dev Deploys a checkpoint clock over the specified source behind an ERC1967 proxy, mirroring the production pattern
+    function _deployCheckpointClock(address _source, uint256 _minDeviationWAD) internal returns (MockCheckpointClock) {
+        address implementation = address(new MockCheckpointClock(_source));
+        return MockCheckpointClock(
+            address(new ERC1967Proxy(implementation, abi.encodeCall(MockCheckpointClock.initialize, (address(accessManager), _minDeviationWAD))))
+        );
     }
 
     /// @dev Rewrites all three tranche configs with the specified oracle clock (everything else unchanged)
@@ -129,7 +139,7 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
     function test_requestTimePoke_foldsPendingUnobservedChangeIntoSnapshot() public {
         // A checkpoint clock over a pull source: changes are only observed when someone pokes
         MockValueSource source = new MockValueSource(1e18);
-        MockCheckpointClock checkpointClock = new MockCheckpointClock(address(source), 0);
+        MockCheckpointClock checkpointClock = _deployCheckpointClock(address(source), 0);
         _setOracleClock(address(checkpointClock));
 
         // The source changes BEFORE the request with nobody poking: that change is already priced into the
@@ -187,6 +197,33 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
         assertGt(sharesMinted, 0, "requests placed before the clock was set must stay delay-gated only");
     }
 
+    function test_modifyTrancheConfigs_revertsWhenClockIsNotLive() public {
+        // A clock over an uninitialized feed (zero updatedAt) would produce the zero-snapshot sentinel that disables
+        // the gate: the configuration must fail shut so requests never queue against a dead clock
+        MockAggregatorV3 deadFeed = new MockAggregatorV3(8, 1e8);
+        deadFeed.setUpdatedAt(0);
+        (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
+        for (uint256 i = 0; i < configs.length; ++i) {
+            configs[i].oracleClock = address(new ChainlinkOracleClock(address(deadFeed)));
+        }
+        vm.expectRevert(IRoycoDayEntryPoint.ORACLE_CLOCK_NOT_LIVE.selector);
+        vm.prank(ENTRY_POINT_ADMIN);
+        entryPoint.modifyTrancheConfigs(tranches, configs);
+    }
+
+    function test_request_revertsWhenConfiguredClockGoesDead() public {
+        // The clock is live at configuration time but its feed dies afterwards (e.g. an aggregator migration to an
+        // uninitialized feed): the request-time observation must still fail shut instead of silently queueing ungated
+        MockAggregatorV3 feed2 = new MockAggregatorV3(8, 1e8);
+        feed2.setUpdatedAt(block.timestamp);
+        _setOracleClock(address(new ChainlinkOracleClock(address(feed2))));
+        feed2.setUpdatedAt(0);
+
+        vm.expectRevert(IRoycoDayEntryPoint.ORACLE_CLOCK_NOT_LIVE.selector);
+        vm.prank(USER_A);
+        entryPoint.requestDeposit(address(juniorTranche), toTrancheUnits(10 * stUnit), USER_A, 0);
+    }
+
     function test_cancellation_isUngatedWhileExecutionIsBlocked() public {
         _setOracleClock(address(chainlinkClock));
         uint256 amount = 10 * stUnit;
@@ -197,6 +234,70 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
         uint256 balanceBefore = stJtVault.balanceOf(USER_A);
         _cancelDeposit(USER_A, nonce, USER_A);
         assertEq(stJtVault.balanceOf(USER_A) - balanceBefore, amount, "cancellation must return the escrow while the gate is shut");
+    }
+
+    function test_updateBeforeDelay_delayFloorStillBinds_redemption() public {
+        _setOracleClock(address(chainlinkClock));
+        uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), 10 * stUnit);
+        (uint256 nonce,) = _requestRedemption(USER_A, address(juniorTranche), shares, USER_A, 0);
+
+        // The oracle updates immediately: the gate opens but the redemption delay floor must still hold
+        vm.warp(block.timestamp + 10);
+        priceFeed.setUpdatedAt(block.timestamp);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.INVALID_REQUEST.selector, nonce));
+        vm.prank(USER_A);
+        entryPoint.executeRedemption(USER_A, nonce, type(uint256).max);
+    }
+
+    function test_requestRedemption_revertsWhenConfiguredClockGoesDead() public {
+        uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), 10 * stUnit);
+        MockAggregatorV3 feed2 = new MockAggregatorV3(8, 1e8);
+        feed2.setUpdatedAt(block.timestamp);
+        _setOracleClock(address(new ChainlinkOracleClock(address(feed2))));
+        feed2.setUpdatedAt(0);
+
+        vm.expectRevert(IRoycoDayEntryPoint.ORACLE_CLOCK_NOT_LIVE.selector);
+        vm.prank(USER_A);
+        entryPoint.requestRedemption(address(juniorTranche), shares, USER_A, 0);
+    }
+
+    function test_adminZeroingClock_degradesInFlightRedemptionsToPureDelay() public {
+        _setOracleClock(address(chainlinkClock));
+        uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), 10 * stUnit);
+        (uint256 nonce,) = _requestRedemption(USER_A, address(juniorTranche), shares, USER_A, 0);
+        _setOracleClock(address(0));
+
+        vm.warp(block.timestamp + DEFAULT_REDEMPTION_DELAY + 1);
+        AssetClaims memory claims = _executeRedemptionMax(USER_A, USER_A, nonce);
+        assertGt(toUint256(claims.nav), 0, "zeroing the clock must degrade in-flight redemptions to pure-delay gating");
+    }
+
+    function test_adminEnablingClockMidFlight_doesNotGatePriorRedemptions() public {
+        uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), 10 * stUnit);
+        (uint256 nonce,) = _requestRedemption(USER_A, address(juniorTranche), shares, USER_A, 0);
+        _setOracleClock(address(chainlinkClock));
+
+        vm.warp(block.timestamp + DEFAULT_REDEMPTION_DELAY + 1);
+        AssetClaims memory claims = _executeRedemptionMax(USER_A, USER_A, nonce);
+        assertGt(toUint256(claims.nav), 0, "redemptions placed before the clock was set must stay delay-gated only");
+    }
+
+    function test_blockedRedemption_poisonsBatchLikeAnUnmaturedOne() public {
+        _setOracleClock(address(chainlinkClock));
+        uint256 shares = _acquireTrancheShares(USER_A, address(juniorTranche), 10 * stUnit);
+        (uint256 nonce,) = _requestRedemption(USER_A, address(juniorTranche), shares, USER_A, 0);
+
+        vm.warp(block.timestamp + DEFAULT_REDEMPTION_DELAY + 1);
+        address[] memory users = new address[](1);
+        users[0] = USER_A;
+        uint256[] memory nonces = new uint256[](1);
+        nonces[0] = nonce;
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = type(uint256).max;
+
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.ORACLE_CLOCK_NOT_ADVANCED.selector, nonce));
+        vm.prank(USER_A);
+        entryPoint.executeRedemptions(users, nonces, amounts);
     }
 
     function test_blockedRequest_poisonsBatchLikeAnUnmaturedOne() public {

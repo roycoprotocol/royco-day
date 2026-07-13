@@ -7,6 +7,7 @@ import { NAV_UNIT, TRANCHE_UNIT } from "../libraries/Units.sol";
 /**
  * @title IRoycoDayEntryPoint
  * @notice Interface for the RoycoDayEntryPoint contract enabling asynchronous deposit and redemption flows on Royco Tranches
+ * @dev Requests escrow assets or shares behind per-tranche delays and oracle-clock gating, with queued yield forfeited to the protocol as fee shares
  */
 interface IRoycoDayEntryPoint {
     /**
@@ -26,28 +27,14 @@ interface IRoycoDayEntryPoint {
     }
 
     /**
-     * @notice Defines the recipient of yield accrued during the deposit or redemption delay period
-     * @dev Accrued yield is any positive delta between the execution NAV and the NAV at request time for the assets being deposited or the shares being redeemed
-     * @dev The requesting LP is never a valid recipient: a queued request that captures its own yield is a free option on stale-oracle NAV, defeating the delay
-     * @custom:type PROTOCOL - Accrued yield is sent to the protocol fee recipient
-     * @custom:type REMAINING_LPS - Accrued yield stays in the pool for remaining tranche LPs
-     */
-    enum AccruedYieldRecipient {
-        PROTOCOL,
-        REMAINING_LPS
-    }
-
-    /**
      * @notice Configuration for a tranche on this entry point
      * @custom:field enabled - Whether the tranche is enabled for deposits and redemptions
-     * @custom:field yieldRecipient - The recipient of yield accrued during the deposit or redemption delay period
      * @custom:field depositDelaySeconds - The delay in seconds between deposit request and execution
      * @custom:field redemptionDelaySeconds - The delay in seconds between redemption request and execution
      * @custom:field oracleClock - The oracle clock gating execution on at least one observed oracle update after the request (the null address disables the gate)
      */
     struct TrancheConfig {
         bool enabled;
-        AccruedYieldRecipient yieldRecipient;
         uint24 depositDelaySeconds;
         uint24 redemptionDelaySeconds;
         address oracleClock;
@@ -126,7 +113,7 @@ interface IRoycoDayEntryPoint {
      * @param executor The address that executed the request (user or executor)
      * @param assetsDeposited The amount of assets deposited into the tranche (after bonus deduction if applicable)
      * @param sharesMinted The amount of tranche shares minted to the receiver (after yield forfeiture if applicable)
-     * @param forfeitedYieldShares The shares forfeited equating to the yield accrued during the request lifecycle (zero if NAV decreased)
+     * @param protocolFeeShares The shares forfeited to the protocol equating to the yield accrued during the request lifecycle (zero if NAV decreased)
      * @param bonusAssets The amount of assets paid to the executor as a bonus (0 if self-executed)
      */
     event DepositExecuted(
@@ -135,7 +122,7 @@ interface IRoycoDayEntryPoint {
         address indexed executor,
         TRANCHE_UNIT assetsDeposited,
         uint256 sharesMinted,
-        uint256 forfeitedYieldShares,
+        uint256 protocolFeeShares,
         TRANCHE_UNIT bonusAssets
     );
 
@@ -167,7 +154,7 @@ interface IRoycoDayEntryPoint {
      * @param nonce The nonce identifying the executed request
      * @param executor The address that executed the request (user or executor)
      * @param sharesRedeemed The shares redeemed for the user which equate to the user claims
-     * @param forfeitedYieldShares The shares forfeited equating to the yield accrued during the request lifecycle (zero if NAV decreased)
+     * @param protocolFeeShares The shares forfeited to the protocol equating to the yield accrued during the request lifecycle (zero if NAV decreased)
      * @param userClaims The asset claims withdrawn to the receiver
      * @param bonusClaims The asset claims paid to the executor as a bonus (zero if self-executed)
      */
@@ -176,7 +163,7 @@ interface IRoycoDayEntryPoint {
         uint256 indexed nonce,
         address indexed executor,
         uint256 sharesRedeemed,
-        uint256 forfeitedYieldShares,
+        uint256 protocolFeeShares,
         AssetClaims userClaims,
         AssetClaims bonusClaims
     );
@@ -196,13 +183,6 @@ interface IRoycoDayEntryPoint {
      * @param config The new tranche configuration
      */
     event TrancheConfigUpdated(address indexed tranche, TrancheConfig config);
-
-    /**
-     * @notice Emitted when protocol fee shares are accrued from a deposit's or redemption's accrued yield
-     * @param tranche The tranche for which protocol fee shares were accrued
-     * @param shares The amount of shares accrued as protocol fees
-     */
-    event ProtocolFeeSharesAccrued(address indexed tranche, uint256 shares);
 
     /**
      * @notice Emitted when protocol fee shares are collected
@@ -229,6 +209,9 @@ interface IRoycoDayEntryPoint {
 
     /// @dev Thrown when executing a request before the tranche's oracle clock has observed an oracle update after the request was placed
     error ORACLE_CLOCK_NOT_ADVANCED(uint256 requestNonce);
+
+    /// @dev Thrown when configuring or requesting against a tranche whose oracle clock reports a zero update timestamp
+    error ORACLE_CLOCK_NOT_LIVE();
 
     /// @dev Thrown when the executor bonus is not strictly less than 100% (WAD) and is not the opt-out sentinel value
     error INVALID_EXECUTOR_BONUS();
@@ -374,10 +357,8 @@ interface IRoycoDayEntryPoint {
     /// @return roycoFactory The address of the canonical Royco factory
     function ROYCO_FACTORY() external view returns (address roycoFactory);
 
-    /**
-     * @notice Returns the last assigned request nonce
-     * @return nonce The last request nonce that was assigned
-     */
+    /// @notice Returns the last assigned request nonce
+    /// @return nonce The last request nonce that was assigned
     function getLastRequestNonce() external view returns (uint256 nonce);
 
     /**

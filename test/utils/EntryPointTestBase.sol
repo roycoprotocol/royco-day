@@ -11,7 +11,6 @@ import {
     ADMIN_PAUSER_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
-    BURNER_ROLE,
     JT_LP_ROLE,
     LT_LP_ROLE,
     PUBLIC_ROLE,
@@ -76,16 +75,10 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
     // Deployment
     // =============================
 
-    /// @notice The yield recipient the fixture's tranche configs are deployed with (override per suite)
-    function _defaultYieldRecipient() internal pure virtual returns (IRoycoDayEntryPoint.AccruedYieldRecipient) {
-        return IRoycoDayEntryPoint.AccruedYieldRecipient.PROTOCOL;
-    }
-
     /**
      * @notice Deploys the entry point proxy over the already-deployed market and wires its production role bindings
      * @dev Must be called after _deployMarket. Registers all three tranches (ST, JT, LT) enabled with the default
-     *      delays and _defaultYieldRecipient(), grants the entry point the three LP roles plus BURNER_ROLE, and
-     *      creates the user/executor/admin actors
+     *      delays, grants the entry point the three LP roles, and creates the user/executor/admin actors
      */
     function _deployEntryPoint() internal virtual {
         // Register the market's tranches on the mock factory so the entry point's provenance validation passes
@@ -131,11 +124,10 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         accessManager.setTargetFunctionRole(ep, _sels(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
         accessManager.setTargetFunctionRole(ep, _sels(UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE);
 
-        // The entry point deposits, redeems, receives escrowed shares, and burns forfeited yield shares
+        // The entry point deposits, redeems, and receives escrowed shares
         accessManager.grantRole(ST_LP_ROLE, ep, 0);
         accessManager.grantRole(JT_LP_ROLE, ep, 0);
         accessManager.grantRole(LT_LP_ROLE, ep, 0);
-        accessManager.grantRole(BURNER_ROLE, ep, 0);
 
         // Entry point admin actors
         ENTRY_POINT_ADMIN = _generateActor("ENTRY_POINT_ADMIN", ADMIN_ENTRY_POINT_ROLE);
@@ -147,7 +139,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         EXECUTOR = _generateEntryPointUser("EXECUTOR");
     }
 
-    /// @notice Builds the default 3-tranche (ST, JT, LT) config arrays: enabled, default delays, _defaultYieldRecipient()
+    /// @notice Builds the default 3-tranche (ST, JT, LT) config arrays: enabled, default delays, no oracle clock
     function _defaultTrancheConfigs() internal view returns (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) {
         tranches = new address[](3);
         tranches[0] = address(seniorTranche);
@@ -157,7 +149,6 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         for (uint256 i = 0; i < 3; ++i) {
             configs[i] = IRoycoDayEntryPoint.TrancheConfig({
                 enabled: true,
-                yieldRecipient: _defaultYieldRecipient(),
                 depositDelaySeconds: DEFAULT_DEPOSIT_DELAY,
                 redemptionDelaySeconds: DEFAULT_REDEMPTION_DELAY,
                 oracleClock: address(0)
@@ -207,10 +198,8 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
     // Funding Helpers
     // =============================
 
-    /**
-     * @notice Funds an account with a tranche's asset: shared vault shares for ST/JT, quote-backed BPT for LT
-     * @dev The BPT leg is minted against a value-matched quote-only pool leg so the pool's NAV-per-BPT stays ~1.0
-     */
+    /// @notice Funds an account with a tranche's asset: shared vault shares for ST/JT, quote-backed BPT for LT
+    /// @dev The BPT leg is minted against a value-matched quote-only pool leg so the pool's NAV-per-BPT stays ~1.0
     function _fundTrancheAssets(address _to, address _tranche, uint256 _amount) internal virtual {
         if (_tranche == address(liquidityTranche)) {
             uint256 quoteUnit = 10 ** uint256(cell.quoteAsset.decimals);

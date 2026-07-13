@@ -2,7 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { Math } from "../../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { ITrancheOracleClock } from "../../../interfaces/ITrancheOracleClock.sol";
+import { RoycoBase } from "../../../base/RoycoBase.sol";
+import { IOracleClock } from "../../../interfaces/IOracleClock.sol";
 import { WAD } from "../../../libraries/Constants.sol";
 
 /**
@@ -13,19 +14,27 @@ import { WAD } from "../../../libraries/Constants.sol";
  *      deriving the update times the source itself does not report
  *      A missed round trip (the value changing and reverting between pokes) goes unobserved, which only delays the clock — it can never advance without an
  *      observed change, so the entry point's execution gate never opens falsely
- *      Concrete clocks implement _readSource and must call _seedCheckpoint at the end of construction, after their read wiring is set
+ *      Concrete clocks implement _readSource and initialize the base via __OracleCheckpointClockBase_init_unchained, which seeds the first checkpoint
  */
-abstract contract OracleCheckpointClockBase is ITrancheOracleClock {
+abstract contract OracleCheckpointClockBase is RoycoBase, IOracleClock {
     using Math for uint256;
 
-    /// @notice The minimum relative deviation from the checkpointed value that counts as an update, scaled to WAD precision (zero counts any change)
-    uint256 public immutable MIN_DEVIATION_WAD;
+    /// @dev Storage slot for OracleCheckpointClockBaseState using ERC-7201 pattern
+    // keccak256(abi.encode(uint256(keccak256("Royco.storage.OracleCheckpointClockBaseState")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant ORACLE_CHECKPOINT_CLOCK_BASE_STORAGE_SLOT = 0xa682b467b794ac04ad0ae81cdd5d19290cac44f38027b63b9b08663f46a6ec00;
 
-    /// @notice The value observed at the last checkpoint
-    uint256 public lastValue;
-
-    /// @notice The timestamp of the last checkpoint
-    uint32 public lastUpdatedAt;
+    /**
+     * @dev Storage state for the Royco oracle checkpoint clock
+     * @custom:storage-location erc7201:Royco.storage.OracleCheckpointClockBaseState
+     * @custom:field minDeviationWAD - The minimum relative deviation from the checkpointed value that counts as an update, scaled to WAD precision (zero counts any change)
+     * @custom:field lastValue - The value observed at the last checkpoint
+     * @custom:field lastUpdatedAt - The timestamp of the last checkpoint
+     */
+    struct OracleCheckpointClockBaseState {
+        uint256 minDeviationWAD;
+        uint256 lastValue;
+        uint32 lastUpdatedAt;
+    }
 
     /**
      * @notice Emitted when a poke observes a deviated value and checkpoints it
@@ -34,49 +43,90 @@ abstract contract OracleCheckpointClockBase is ITrancheOracleClock {
      */
     event Checkpointed(uint256 value, uint32 updatedAt);
 
-    /// @notice Constructs the base checkpoint clock state
-    /// @param _minDeviationWAD The minimum relative deviation that counts as an update, scaled to WAD precision (zero counts any change)
-    constructor(uint256 _minDeviationWAD) {
-        // Set the immutable state
-        MIN_DEVIATION_WAD = _minDeviationWAD;
+    /// @notice Emitted when the minimum deviation threshold is updated
+    event MinDeviationWADUpdated(uint256 minDeviationWAD);
+
+    /// @notice Thrown when the minimum deviation threshold is not strictly less than 100% (WAD)
+    error INVALID_MIN_DEVIATION_WAD();
+
+    /**
+     * @notice Initializes the oracle checkpoint clock state and seeds the first checkpoint
+     * @dev Must be called after the concrete clock's read wiring is set so the seed read observes the live source
+     * @param _minDeviationWAD The minimum relative deviation that counts as an update, scaled to WAD precision (zero counts any change)
+     */
+    function __OracleCheckpointClockBase_init_unchained(uint256 _minDeviationWAD) internal onlyInitializing {
+        // Initialize the minimum deviation
+        _setMinDeviationWAD(_minDeviationWAD);
+
+        // Seed the first checkpoint so the clock starts live at initialization time
+        OracleCheckpointClockBaseState storage $ = _getOracleCheckpointClockBaseStorage();
+        $.lastValue = _readSource();
+        $.lastUpdatedAt = uint32(block.timestamp);
     }
 
-    /// @inheritdoc ITrancheOracleClock
-    function poke() external override(ITrancheOracleClock) returns (uint32) {
+    /// @inheritdoc IOracleClock
+    function poke() external override(IOracleClock) returns (uint32 lastUpdatedAt) {
         // Read the source and checkpoint the value if it deviated beyond the threshold since the last checkpoint
+        OracleCheckpointClockBaseState storage $ = _getOracleCheckpointClockBaseStorage();
         uint256 value = _readSource();
-        if (_hasDeviated(value, lastValue)) {
-            lastValue = value;
-            lastUpdatedAt = uint32(block.timestamp);
+        if (_hasDeviated(value, $.lastValue, $.minDeviationWAD)) {
+            $.lastValue = value;
+            $.lastUpdatedAt = uint32(block.timestamp);
             emit Checkpointed(value, uint32(block.timestamp));
         }
-        return lastUpdatedAt;
+        return $.lastUpdatedAt;
+    }
+
+    /// @notice Sets the minimum deviation threshold that counts as an update
+    /// @param _minDeviationWAD The new minimum relative deviation, scaled to WAD precision (zero counts any change)
+    function setMinDeviationWAD(uint256 _minDeviationWAD) external restricted {
+        _setMinDeviationWAD(_minDeviationWAD);
+    }
+
+    /// @notice Returns the oracle checkpoint clock state
+    /// @return state The oracle checkpoint clock state
+    function getOracleCheckpointClockState() external view returns (OracleCheckpointClockBaseState memory state) {
+        return _getOracleCheckpointClockBaseStorage();
     }
 
     /**
-     * @notice Seeds the first checkpoint so the clock starts at construction time
-     * @dev NOTE: Must be called at the end of the concrete clock's constructor, after its read wiring is set — the base constructor cannot seed itself because _readSource dispatches into the concrete clock before its immutables are assigned
+     * @notice Sets the new minimum deviation threshold
+     * @dev A threshold at or above 100% would mute all downward updates (a downward deviation caps at exactly WAD), making the clock asymmetric
+     * @param _minDeviationWAD The new minimum relative deviation, scaled to WAD precision
      */
-    function _seedCheckpoint() internal {
-        lastValue = _readSource();
-        lastUpdatedAt = uint32(block.timestamp);
+    function _setMinDeviationWAD(uint256 _minDeviationWAD) internal {
+        require(_minDeviationWAD < WAD, INVALID_MIN_DEVIATION_WAD());
+        _getOracleCheckpointClockBaseStorage().minDeviationWAD = _minDeviationWAD;
+        emit MinDeviationWADUpdated(_minDeviationWAD);
     }
 
     /**
      * @notice Returns whether the observed value deviated from the checkpointed value beyond the configured threshold
      * @param _value The value observed by this poke
      * @param _checkpointValue The value observed at the last checkpoint
-     * @return Whether the deviation counts as an update
+     * @param _minDeviationWAD The minimum relative deviation that counts as an update, scaled to WAD precision
+     * @return deviated Whether the deviation counts as an update
      */
-    function _hasDeviated(uint256 _value, uint256 _checkpointValue) internal view returns (bool) {
+    function _hasDeviated(uint256 _value, uint256 _checkpointValue, uint256 _minDeviationWAD) internal pure returns (bool deviated) {
         if (_value == _checkpointValue) return false;
         // Any change counts when no threshold is configured, and any change from zero is a full deviation
-        if (MIN_DEVIATION_WAD == 0 || _checkpointValue == 0) return true;
+        if (_minDeviationWAD == 0 || _checkpointValue == 0) return true;
         uint256 delta = (_value > _checkpointValue) ? (_value - _checkpointValue) : (_checkpointValue - _value);
-        return WAD.mulDiv(delta, _checkpointValue) >= MIN_DEVIATION_WAD;
+        return WAD.mulDiv(delta, _checkpointValue) >= _minDeviationWAD;
     }
 
     /// @notice Reads the source's current value, implemented by the concrete clock
     /// @return value The source's current value
     function _readSource() internal view virtual returns (uint256 value);
+
+    /**
+     * @notice Returns a storage pointer to the OracleCheckpointClockBaseState storage
+     * @dev Uses ERC-7201 storage slot pattern for collision-resistant storage
+     * @return $ Storage pointer
+     */
+    function _getOracleCheckpointClockBaseStorage() private pure returns (OracleCheckpointClockBaseState storage $) {
+        assembly ("memory-safe") {
+            $.slot := ORACLE_CHECKPOINT_CLOCK_BASE_STORAGE_SLOT
+        }
+    }
 }

@@ -31,10 +31,12 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
         _checkDepositYieldNeutrality(_assets, _gainBps);
     }
 
-    /// @notice Pins a once-failing fuzz counterexample: the JT's compounded effective yield (own PnL plus its share
-    ///         of senior yield) must be captured by the forfeiture basis, not just the raw asset PnL
-    /// @dev Deposit and redemption pins are separate tests: via-IR CSE caches block.timestamp within one test
-    ///      function, so a second relative warp in the same test would silently no-op
+    /**
+     * @notice Pins a once-failing fuzz counterexample: the JT's compounded effective yield (own PnL plus its share
+     *         of senior yield) must be captured by the forfeiture basis, not just the raw asset PnL
+     * @dev Deposit and redemption pins are separate tests: via-IR CSE caches block.timestamp within one test
+     *      function, so a second relative warp in the same test would silently no-op
+     */
     function test_depositYieldNeutrality_regressionCounterexample() public {
         _checkDepositYieldNeutrality(11_292_100_492_600_944_813, 141);
     }
@@ -80,19 +82,11 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
         assertLe(toUint256(claims.nav), navAtRequest + toUint256(juniorTranche.convertToAssets(1).nav) + 1, "the redeemer must never clear more than the snapshot plus rounding dust");
     }
 
-    /// @notice Under REMAINING_LPS the burn must not hand queued yield back to the depositor at ANY pool share:
-    ///         the deposit sweeps from dust to whale territory (~10x the seeded JT pool) where a naive proportional
-    ///         split would recapture up to ~90% of the forfeiture through the burn's supply reduction
-    function testFuzz_depositForfeiture_remainingLps_noRecapture(uint256 _assets, uint256 _gainBps) public {
+    /// @notice The deposit-side forfeiture must pin the depositor to the request-time NAV at ANY pool share:
+    ///         the deposit sweeps from dust to whale territory (~10x the seeded JT pool)
+    function testFuzz_depositForfeiture_neutralityAtAnyPoolShare(uint256 _assets, uint256 _gainBps) public {
         _assets = bound(_assets, stUnit, 5000 * stUnit);
         _gainBps = bound(_gainBps, 1, 5000);
-
-        (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
-        for (uint256 i = 0; i < configs.length; ++i) {
-            configs[i].yieldRecipient = IRoycoDayEntryPoint.AccruedYieldRecipient.REMAINING_LPS;
-        }
-        vm.prank(ENTRY_POINT_ADMIN);
-        entryPoint.modifyTrancheConfigs(tranches, configs);
 
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), _assets, USER_A, 0);
         uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime);
@@ -103,8 +97,7 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
 
         uint256 userNav = toUint256(juniorTranche.convertToAssets(userShares).nav);
         assertLe(userNav, navAtRequest + toUint256(juniorTranche.convertToAssets(1).nav) + 1, "the depositor must never clear more than the snapshot plus rounding dust");
-        assertApproxEqRel(userNav, navAtRequest, 0.001e18, "the depositor's post-burn share value must be pinned to the request-time NAV");
-        assertEq(entryPoint.getProtocolFeeSharesPendingCollection(address(juniorTranche)), 0, "REMAINING_LPS must not accrue protocol fees");
+        assertApproxEqRel(userNav, navAtRequest, 0.001e18, "the depositor's share value must be pinned to the request-time NAV");
     }
 
     /// @notice Splitting an execution into two arbitrary slices forfeits the same total as a single execution

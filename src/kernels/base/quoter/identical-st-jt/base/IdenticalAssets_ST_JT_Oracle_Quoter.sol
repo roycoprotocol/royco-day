@@ -21,7 +21,7 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
 
     /// @dev Storage slot for IdenticalAssets_ST_JT_Oracle_QuoterState using ERC-7201 pattern
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.IdenticalAssets_ST_JT_Oracle_QuoterState")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant IDENTICAL_ASSETS_ST_JT_ORACLE_QUOTER_STORAGE_SLOT = 0x54cd05a2c27d5d9c9a9737f8c40012d3aaaf930bf3bd4a6472e48a5cd4447600;
+    bytes32 private constant IDENTICAL_ASSETS_ST_JT_ORACLE_QUOTER_STORAGE_SLOT = 0x09820a96686ecbf2203b68231b00af65c2e5b81b45cb24437dd576a5972ea300;
 
     /// @notice A sentinel value for the conversion rate, indicating that the conversion rate should be queried in real time from the specified oracle
     uint256 internal constant SENTINEL_CONVERSION_RATE = 0;

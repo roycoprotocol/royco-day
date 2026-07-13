@@ -308,9 +308,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         result.extras = abi.encode(ExtraContractsDeployedResult({ balancerPool: balancerPool, balancerHook: balancerHook, bptOracle: bptOracle }));
     }
 
-    /**
-     * @notice Deploys the market's E-CLP BPT TVL oracle through Balancer's LP oracle factory
-     */
+    /// @notice Deploys the market's E-CLP BPT TVL oracle through Balancer's LP oracle factory
     function _deployBPTOracle(address _balancerPool) internal returns (address) {
         IERC20[] memory poolTokens = BALANCER_V3_VAULT.getPoolTokens(_balancerPool);
         BalancerAggregatorV3Interface[] memory feeds = new BalancerAggregatorV3Interface[](poolTokens.length);

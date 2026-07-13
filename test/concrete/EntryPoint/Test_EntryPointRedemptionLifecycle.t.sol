@@ -56,7 +56,7 @@ contract Test_EntryPointRedemptionLifecycle is EntryPointTestBase {
             IRoycoDayEntryPoint.RedemptionRequest memory request = entryPoint.getRedemptionRequest(USER_A, nonce);
             assertEq(request.shares, shares, "request shares");
             assertEq(request.baseRequest.tranche, tranche, "request tranche");
-            assertGt(toUint256(request.baseRequest.navAtRequestTime), 0, "nav snapshot must be taken under a forfeiting yield recipient");
+            assertGt(toUint256(request.baseRequest.navAtRequestTime), 0, "the nav snapshot must be taken on every request");
 
             // Clean up the escrow so the next tranche iteration starts from zero balances
             _cancelRedemption(USER_A, nonce, USER_A);

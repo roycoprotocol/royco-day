@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { ITrancheOracleClock } from "../../interfaces/ITrancheOracleClock.sol";
+import { IOracleClock } from "../../interfaces/IOracleClock.sol";
 import { AggregatorV3Interface } from "../../interfaces/external/chainlink/AggregatorV3Interface.sol";
 
 /**
@@ -10,7 +10,7 @@ import { AggregatorV3Interface } from "../../interfaces/external/chainlink/Aggre
  * @notice Oracle clock backed by a push-based Chainlink (compatible) oracle
  * @dev The oracle network timestamps its own updates, so the clock passes the feed's latest update timestamp
  */
-contract ChainlinkOracleClock is ITrancheOracleClock {
+contract ChainlinkOracleClock is IOracleClock {
     /// @notice The Chainlink (compatible) oracle whose update timestamps this clock reports
     AggregatorV3Interface public immutable ORACLE;
 
@@ -27,8 +27,8 @@ contract ChainlinkOracleClock is ITrancheOracleClock {
         ORACLE = AggregatorV3Interface(_oracle);
     }
 
-    /// @inheritdoc ITrancheOracleClock
-    function poke() external view override(ITrancheOracleClock) returns (uint32 lastUpdatedAt) {
+    /// @inheritdoc IOracleClock
+    function poke() external view override(IOracleClock) returns (uint32 lastUpdatedAt) {
         (,,, uint256 updatedAt,) = ORACLE.latestRoundData();
         return uint32(updatedAt);
     }

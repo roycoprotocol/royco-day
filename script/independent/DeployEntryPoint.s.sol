@@ -13,7 +13,6 @@ import {
     ADMIN_PAUSER_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
-    BURNER_ROLE,
     JT_LP_ROLE,
     LT_LP_ROLE,
     PUBLIC_ROLE,
@@ -153,15 +152,15 @@ contract DeployEntryPointScript is EntryPointDeploymentConfig, AccessManagerConf
         bytes4[] memory upgraderSelectors = new bytes4[](1);
         upgraderSelectors[0] = UUPSUpgradeable.upgradeToAndCall.selector;
 
-        // 6 setTargetFunctionRole + 7 grantRole = 13 total
+        // 6 setTargetFunctionRole + 6 grantRole = 12 total
         //   - LP -> PUBLIC_ROLE
         //   - modifyTrancheConfigs   -> ADMIN_ENTRY_POINT_ROLE (Standard 24h; the factory already holds it at 0 delay from its init)
         //   - collectProtocolFees    -> ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE (Immediate)
         //   - pause / unpause / upgrade -> respective roles
         //   - grant ADMIN_ENTRY_POINT_ROLE to ROOT_MULTISIG (Standard) and WCE_MULTISIG (Immediate)
         //   - grant ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE to ROOT_MULTISIG (Immediate)
-        //   - grant ST_LP_ROLE / JT_LP_ROLE / LT_LP_ROLE / BURNER_ROLE to the entry point itself
-        transactions = new SafeTransaction[](13);
+        //   - grant ST_LP_ROLE / JT_LP_ROLE / LT_LP_ROLE to the entry point itself
+        transactions = new SafeTransaction[](12);
         transactions[0] = buildSetTargetFunctionRole(_accessManager, _entryPoint, lpSelectors, PUBLIC_ROLE);
         transactions[1] = buildSetTargetFunctionRole(_accessManager, _entryPoint, adminSelectors, ADMIN_ENTRY_POINT_ROLE);
         transactions[2] = buildSetTargetFunctionRole(_accessManager, _entryPoint, entryPointClaimFeeSelectors, ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE);
@@ -175,11 +174,10 @@ contract DeployEntryPointScript is EntryPointDeploymentConfig, AccessManagerConf
         // Grant ADMIN_ENTRY_POINT_ROLE to WCE_MULTISIG with immediate delay
         transactions[8] = buildGrantRole(_accessManager, ADMIN_ENTRY_POINT_ROLE, WCE_MULTISIG, 0);
         // The entry point itself needs LP roles to call tranche.deposit/redeem (and to receive escrowed shares on
-        // whitelist-enforcing markets) and BURNER_ROLE for yield forfeiture
+        // whitelist-enforcing markets)
         transactions[9] = buildGrantRole(_accessManager, ST_LP_ROLE, _entryPoint, 0);
         transactions[10] = buildGrantRole(_accessManager, JT_LP_ROLE, _entryPoint, 0);
         transactions[11] = buildGrantRole(_accessManager, LT_LP_ROLE, _entryPoint, 0);
-        transactions[12] = buildGrantRole(_accessManager, BURNER_ROLE, _entryPoint, 0);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -323,9 +321,7 @@ contract DeployEntryPointScript is EntryPointDeploymentConfig, AccessManagerConf
         selectors[9] = IRoycoDayEntryPoint.cancelRedemptionRequests.selector;
     }
 
-    /**
-     * @dev Unpacks TrancheInitConfig[] into separate arrays for the initialize call
-     */
+    /// @dev Unpacks TrancheInitConfig[] into separate arrays for the initialize call
     function _unpackTrancheConfigs(EntryPointConfig memory _config)
         internal
         pure

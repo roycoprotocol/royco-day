@@ -17,23 +17,70 @@ jobs:
     name: Foundry project
     runs-on: ubuntu-latest
     steps:
+      # Submodules are intentionally NOT fetched here: they are restored from a content-addressed
+      # cache below and only fetched from source on a cache miss (i.e. when a submodule pin moves).
       - uses: actions/checkout@v4
+
+      - name: Compute submodule cache key
+        # The key digests the gitlink SHAs recorded in this commit's tree, so it is an exact
+        # content address for lib/: any submodule bump (including nested pins, which are part of
+        # the parent submodule's tree) produces a new key. Exact-match only — a stale lib/ must
+        # never be reused since forge compiles whatever sources are on disk.
+        id: submodule-key
+        run: echo "hash=$(git ls-tree HEAD lib/ | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache submodule dependencies
+        id: deps-cache
+        uses: actions/cache@v4
         with:
-          submodules: recursive
+          path: lib
+          key: forge-deps-${{ runner.os }}-${{ steps.submodule-key.outputs.hash }}
+
+      - name: Install submodule dependencies
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: git submodule update --init --recursive
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
           # Pinned to stable 1.7.1.
           version: "1.7.1"
+          # The toolchain's built-in cache only covers ~/.foundry/cache/rpc; we manage that
+          # explicitly below (alongside solc binaries) so all cache keys live in this file.
+          cache: false
 
       - name: Show Forge version
         run: |
           forge --version
 
+      - name: Cache solc binaries
+        # svm-managed compilers are immutable per version; the key proxies the pinned
+        # solc_version through foundry.toml. The prefix restore is safe — forge downloads any
+        # missing version itself, and extra cached versions are inert.
+        uses: actions/cache@v4
+        with:
+          path: ~/.svm
+          key: svm-${{ runner.os }}-${{ hashFiles('foundry.toml') }}
+          restore-keys: |
+            svm-${{ runner.os }}-
+
+      - name: Cache RPC fork state
+        # Fork suites pin block numbers, and RPC responses for a pinned (chain, block) are
+        # immutable, so reusing them cannot change test outcomes — it only removes archive-node
+        # round trips. Exact key per commit; prefix restore reuses (and accumulates onto) the
+        # newest prior state. No-op until the fork RPC secrets are configured.
+        uses: actions/cache@v4
+        with:
+          path: ~/.foundry/cache/rpc
+          key: forge-rpc-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            forge-rpc-${{ runner.os }}-
+
       - name: Cache Forge build artifacts
         # Incremental compiles: cold via_ir builds are slow. Exact key per commit; prefix restore
-        # reuses the newest prior build.
+        # reuses the newest prior build. Veracity is unaffected: forge revalidates every cached
+        # artifact against the content hash of its sources, so a stale restore can only save
+        # work, never compile the wrong code.
         uses: actions/cache@v4
         with:
           path: |
@@ -87,4 +134,4 @@ jobs:
           AVALANCHE_RPC_URL: ${{ secrets.AVALANCHE_RPC_URL }}
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
           ARBITRUM_RPC_URL: ${{ secrets.ARBITRUM_RPC_URL }}
-          FOUNDRY_FUZZ_RUNS: ${{ secrets.FOUNDRY_FUZZ_RUNS || 200 }}
+          FOUNDRY_FUZZ_RUNS: ${{ secrets.FOUNDRY_FUZZ_RUNS || 1000 }}

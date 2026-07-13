@@ -57,7 +57,7 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
             assertEq(request.baseRequest.receiver, USER_A, "request receiver");
             assertEq(request.baseRequest.executableAtTimestamp, executableAt, "request executableAt");
             assertEq(executableAt, uint32(block.timestamp + DEFAULT_DEPOSIT_DELAY), "executableAt must be now + deposit delay");
-            assertGt(toUint256(request.baseRequest.navAtRequestTime), 0, "nav snapshot must be taken under a forfeiting yield recipient");
+            assertGt(toUint256(request.baseRequest.navAtRequestTime), 0, "the nav snapshot must be taken on every request");
         }
     }
 
