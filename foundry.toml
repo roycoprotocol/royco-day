@@ -57,11 +57,14 @@ exclude_lints = ["mixed-case-function", "mixed-case-variable", "unsafe-typecast"
 runs = 200
 show_logs = true
 
-# CI profile: the PR gate — 1,000 fuzz runs per test, 256x64 invariant runs
+# CI profile: the PR gate — 1,000 fuzz runs per test, 256x64 invariant runs.
+# test/research/** is local-only: its suites compile the vendored Balancer vault graph via_ir,
+# which needs more solc memory than the 7GB hosted runner has (exit 143).
 [profile.ci]
 fuzz = { runs = 1000, show_logs = false }
 invariant = { runs = 256, depth = 64, fail_on_revert = false }
 show_progress = false
+skip = ["test/research/**"]
 
 # Nightly profile: deep fuzz/invariant sweeps across token decimal configurations
 [profile.nightly]
