@@ -526,13 +526,54 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         if (navAtExecutionTime <= _navAtRequestTime) {
             userTrancheShares = IRoycoVaultTranche(_tranche).deposit(_assets, _receiver);
         } else {
-            // Mint the shares to the entry point and compute the tranche shares equivalent to the value of the yield accrued since placing the request
+            // Mint the shares to the entry point and compute the tranche shares to forfeit for the yield accrued since placing the request
             userTrancheShares = IRoycoVaultTranche(_tranche).deposit(_assets, address(this));
-            forfeitedYieldShares = userTrancheShares.mulDiv((navAtExecutionTime - _navAtRequestTime), navAtExecutionTime, Math.Rounding.Floor);
+            forfeitedYieldShares =
+                _computeDepositForfeiture(_tranche, _config.baseConfig.yieldRecipient, userTrancheShares, _navAtRequestTime, navAtExecutionTime);
             // Transfer the shares the user is entitled to after deducting the forfeited yield shares
             if ((userTrancheShares -= forfeitedYieldShares) != 0) IERC20(_tranche).safeTransfer(_receiver, userTrancheShares);
             // If yield was accrued, handle it using the configured method
             _routeForfeitedYieldShares(_tranche, _config.baseConfig.yieldRecipient, forfeitedYieldShares);
+        }
+    }
+
+    /**
+     * @dev Computes the tranche shares to forfeit from a deposit's mint, equating to the value of the yield accrued since placing the request
+     *      Shares forfeited to the protocol are retained, leaving the total supply unchanged, so a proportional split leaves the receiver
+     *      with shares worth exactly the NAV at request time
+     *      Shares forfeited to the remaining LPs are burned, appreciating the receiver's own shares, so the receiver's share count is
+     *      instead solved against the post-burn share price, leaving them shares worth exactly the NAV at request time with no claim on the burn
+     * @param _tranche The tranche that the deposit was executed on
+     * @param _yieldRecipient The configured recipient of yield accrued during the request lifecycle
+     * @param _mintedTrancheShares The tranche shares minted to the entry point upon executing the deposit
+     * @param _navAtRequestTime The NAV of the assets being deposited at the time the deposit was requested
+     * @param _navAtExecutionTime The NAV of the assets being deposited at execution time (strictly greater than the NAV at request time)
+     * @return forfeitedYieldShares The tranche shares to forfeit from the minted shares
+     */
+    function _computeDepositForfeiture(
+        address _tranche,
+        AccruedYieldRecipient _yieldRecipient,
+        uint256 _mintedTrancheShares,
+        NAV_UNIT _navAtRequestTime,
+        NAV_UNIT _navAtExecutionTime
+    )
+        internal
+        view
+        returns (uint256 forfeitedYieldShares)
+    {
+        // Pre-existing holders exclude this deposit's mint
+        // with none there is no pool to donate a burn to, so the
+        // proportional split applies there as well as under PROTOCOL
+        uint256 totalTrancheShares = IRoycoVaultTranche(_tranche).totalSupply();
+        uint256 preexistingShares = totalTrancheShares - _mintedTrancheShares;
+        if (_yieldRecipient == AccruedYieldRecipient.PROTOCOL || preexistingShares == 0) {
+            return _mintedTrancheShares.mulDiv((_navAtExecutionTime - _navAtRequestTime), _navAtExecutionTime, Math.Rounding.Floor);
+        } else {
+            // The pre-existing holders settle at exactly (totalNAV - navAtRequestTime) across their unchanged share count post-burn
+            NAV_UNIT totalNAV = IRoycoVaultTranche(_tranche).totalAssets().nav;
+            uint256 userTrancheShares = _navAtRequestTime.mulDiv(preexistingShares, (totalNAV - _navAtRequestTime), Math.Rounding.Floor);
+            // Clamp so the forfeiture never underflows
+            return (userTrancheShares >= _mintedTrancheShares) ? 0 : (_mintedTrancheShares - userTrancheShares);
         }
     }
 

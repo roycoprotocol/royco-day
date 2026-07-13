@@ -4,9 +4,9 @@ pragma solidity ^0.8.28;
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
+import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 
 /**
  * @title Test_EntryPointLTClaims
@@ -101,6 +101,55 @@ contract Test_EntryPointLTClaims is EntryPointTestBase {
             0,
             "an idle premium held constant across the request lifecycle must not be forfeited as yield"
         );
+    }
+
+    function test_ltDepositForfeiture_remainingLps_monetizableValuePinnedToSnapshot() public {
+        // Switch the tranches to REMAINING_LPS so the deposit-side forfeiture burns through the closed form
+        (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
+        for (uint256 i = 0; i < configs.length; ++i) {
+            configs[i].yieldRecipient = IRoycoDayEntryPoint.AccruedYieldRecipient.REMAINING_LPS;
+        }
+        vm.prank(ENTRY_POINT_ADMIN);
+        entryPoint.modifyTrancheConfigs(tranches, configs);
+
+        // With the idle premium staged, the LT's effective NAV exceeds its convertToAssets floor: the burn redistributes
+        // EFFECTIVE value, so the closed form must settle on the effective basis — solving on the floor basis would let
+        // the depositor redeem ~5% more than the snapshot in this scenario
+        (uint256 nonce,) = _requestDeposit(USER_A, address(liquidityTranche), 10e18, USER_A, 0);
+        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).navAtRequestTime);
+
+        applyLTPnL(1000);
+        _warpPastDepositDelay();
+        uint256 userShares = _executeDepositMax(USER_A, USER_A, nonce);
+
+        // The spec is MONETIZABLE neutrality: what the depositor can actually redeem is pinned to the snapshot
+        vm.prank(USER_A);
+        AssetClaims memory redeemed = liquidityTranche.redeem(userShares, USER_A, USER_A);
+        assertLe(
+            toUint256(redeemed.nav),
+            navAtRequest + toUint256(liquidityTranche.convertToAssets(1).nav) + 1,
+            "the LT depositor must never redeem more than the snapshot plus rounding dust"
+        );
+        assertApproxEqRel(toUint256(redeemed.nav), navAtRequest, 0.001e18, "the LT depositor's redeemable value must be pinned to the request-time NAV");
+    }
+
+    function test_ltDepositForfeiture_protocol_monetizableValuePinnedToSnapshot() public {
+        // PROTOCOL retains the forfeited shares (no burn), so the proportional split is exact in redeemable terms too
+        (uint256 nonce,) = _requestDeposit(USER_A, address(liquidityTranche), 10e18, USER_A, 0);
+        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).navAtRequestTime);
+
+        applyLTPnL(1000);
+        _warpPastDepositDelay();
+        uint256 userShares = _executeDepositMax(USER_A, USER_A, nonce);
+
+        vm.prank(USER_A);
+        AssetClaims memory redeemed = liquidityTranche.redeem(userShares, USER_A, USER_A);
+        assertLe(
+            toUint256(redeemed.nav),
+            navAtRequest + toUint256(liquidityTranche.convertToAssets(1).nav) + 1,
+            "the LT depositor must never redeem more than the snapshot plus rounding dust"
+        );
+        assertApproxEqRel(toUint256(redeemed.nav), navAtRequest, 0.001e18, "the LT depositor's redeemable value must be pinned to the request-time NAV");
     }
 
     function test_stRedemption_coveredLoss_claimsCarryJtAssetsLeg() public {

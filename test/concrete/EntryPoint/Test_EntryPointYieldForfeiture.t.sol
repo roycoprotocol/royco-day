@@ -120,6 +120,24 @@ contract Test_EntryPointYieldForfeiture is EntryPointTestBase {
         assertEq(juniorTranche.totalSupply(), supplyBefore + userShares, "the forfeited shares must be burned out of the supply");
     }
 
+    function test_depositForfeiture_remainingLps_whaleDepositor_cannotRecaptureViaBurn() public {
+        _setYieldRecipient(IRoycoDayEntryPoint.AccruedYieldRecipient.REMAINING_LPS);
+        // A deposit ~10x the existing JT pool: under a naive proportional split the burn's supply reduction would
+        // hand the depositor's fresh shares back ~90% of the forfeited yield
+        uint256 amount = 500 * stUnit;
+        (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), amount, USER_A, 0);
+        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).navAtRequestTime);
+
+        applySTPnL(1000);
+        _warpPastDepositDelay();
+        uint256 userShares = _executeDepositMax(USER_A, USER_A, nonce);
+
+        // The whale's post-burn share value must be pinned to the request-time NAV at ANY pool share
+        uint256 userNav = toUint256(juniorTranche.convertToAssets(userShares).nav);
+        assertLe(userNav, navAtRequest + toUint256(juniorTranche.convertToAssets(1).nav) + 1, "the whale must never clear more than the snapshot plus rounding dust");
+        assertApproxEqRel(userNav, navAtRequest, 0.0001e18, "the whale's post-burn share value must be pinned to the request-time NAV (no burn recapture)");
+    }
+
     function test_depositForfeiture_remainingLps_revertsWithoutBurnerRole() public {
         _setYieldRecipient(IRoycoDayEntryPoint.AccruedYieldRecipient.REMAINING_LPS);
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);

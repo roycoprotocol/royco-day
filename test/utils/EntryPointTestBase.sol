@@ -174,6 +174,35 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
     }
 
     // =============================
+    // PnL Injection (transaction-boundary faithful)
+    // =============================
+
+    /**
+     * @notice Applies senior PnL and re-syncs, so quoter-cache state models the real transaction boundary
+     * @dev The kernel's transient quoter cache clears at transaction end on-chain, but a forge test without isolation
+     *      runs as ONE transaction: a cache warmed by an earlier kernel call in the same test would leak the pre-PnL
+     *      rate into the entry point's execution-time forfeiture quotes (making forfeitures silently read as zero)
+     *      Syncing after the PnL re-initializes the cache at the fresh rate, matching what any real cross-transaction
+     *      sequence observes
+     */
+    function applySTPnL(int256 _bps) internal virtual override {
+        super.applySTPnL(_bps);
+        _sync();
+    }
+
+    /// @notice Applies junior PnL and re-syncs (see applySTPnL for the transaction-boundary rationale)
+    function applyJTPnL(int256 _bps) internal virtual override {
+        super.applyJTPnL(_bps);
+        _sync();
+    }
+
+    /// @notice Applies liquidity tranche PnL and re-syncs (see applySTPnL for the transaction-boundary rationale)
+    function applyLTPnL(int256 _bps) internal virtual override {
+        super.applyLTPnL(_bps);
+        _sync();
+    }
+
+    // =============================
     // Funding Helpers
     // =============================
 

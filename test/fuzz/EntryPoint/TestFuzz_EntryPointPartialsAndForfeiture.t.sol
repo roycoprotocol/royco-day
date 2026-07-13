@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
@@ -77,6 +78,33 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
 
         assertApproxEqRel(toUint256(claims.nav), navAtRequest, 0.001e18, "the redeemer's proceeds must be pinned to the request-time NAV");
         assertLe(toUint256(claims.nav), navAtRequest + toUint256(juniorTranche.convertToAssets(1).nav) + 1, "the redeemer must never clear more than the snapshot plus rounding dust");
+    }
+
+    /// @notice Under REMAINING_LPS the burn must not hand queued yield back to the depositor at ANY pool share:
+    ///         the deposit sweeps from dust to whale territory (~10x the seeded JT pool) where a naive proportional
+    ///         split would recapture up to ~90% of the forfeiture through the burn's supply reduction
+    function testFuzz_depositForfeiture_remainingLps_noRecapture(uint256 _assets, uint256 _gainBps) public {
+        _assets = bound(_assets, stUnit, 5000 * stUnit);
+        _gainBps = bound(_gainBps, 1, 5000);
+
+        (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
+        for (uint256 i = 0; i < configs.length; ++i) {
+            configs[i].yieldRecipient = IRoycoDayEntryPoint.AccruedYieldRecipient.REMAINING_LPS;
+        }
+        vm.prank(ENTRY_POINT_ADMIN);
+        entryPoint.modifyTrancheConfigs(tranches, configs);
+
+        (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), _assets, USER_A, 0);
+        uint256 navAtRequest = toUint256(entryPoint.getDepositRequest(USER_A, nonce).navAtRequestTime);
+
+        applySTPnL(int256(_gainBps));
+        _warpPastDepositDelay();
+        uint256 userShares = _executeDepositMax(USER_A, USER_A, nonce);
+
+        uint256 userNav = toUint256(juniorTranche.convertToAssets(userShares).nav);
+        assertLe(userNav, navAtRequest + toUint256(juniorTranche.convertToAssets(1).nav) + 1, "the depositor must never clear more than the snapshot plus rounding dust");
+        assertApproxEqRel(userNav, navAtRequest, 0.001e18, "the depositor's post-burn share value must be pinned to the request-time NAV");
+        assertEq(entryPoint.getProtocolFeeSharesPendingCollection(address(juniorTranche)), 0, "REMAINING_LPS must not accrue protocol fees");
     }
 
     /// @notice Splitting an execution into two arbitrary slices forfeits the same total as a single execution
