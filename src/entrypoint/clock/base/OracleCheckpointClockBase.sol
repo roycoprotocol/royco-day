@@ -55,8 +55,7 @@ abstract contract OracleCheckpointClockBase is ITrancheOracleClock {
 
     /**
      * @notice Seeds the first checkpoint so the clock starts at construction time
-     * @dev Must be called at the end of the concrete clock's constructor, after its read wiring is set — the base constructor cannot seed itself
-     *      because _readSource dispatches into the concrete clock before its immutables are assigned
+     * @dev NOTE: Must be called at the end of the concrete clock's constructor, after its read wiring is set — the base constructor cannot seed itself because _readSource dispatches into the concrete clock before its immutables are assigned
      */
     function _seedCheckpoint() internal {
         lastValue = _readSource();
