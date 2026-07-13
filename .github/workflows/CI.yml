@@ -31,6 +31,18 @@ jobs:
         run: |
           forge --version
 
+      - name: Cache Forge build artifacts
+        # Incremental compiles: cold via_ir builds are slow. Exact key per commit; prefix restore
+        # reuses the newest prior build.
+        uses: actions/cache@v4
+        with:
+          path: |
+            cache
+            out
+          key: forge-build-${{ runner.os }}-${{ hashFiles('foundry.toml', 'remappings.txt') }}-${{ github.sha }}
+          restore-keys: |
+            forge-build-${{ runner.os }}-${{ hashFiles('foundry.toml', 'remappings.txt') }}-
+
       - name: Run Forge fmt
         run: |
           forge fmt --check
@@ -40,8 +52,14 @@ jobs:
         continue-on-error: ${{ github.event_name != 'pull_request' }}
 
       - name: Run Forge build
+        # Full build first (tests, scripts, mocks), then size-check only src/ —
+        # EIP-170 applies to deployed contracts; test-only mocks may exceed it.
+        # test/research/** is skipped by profile.ci (foundry.toml): those suites compile the
+        # vendored Balancer vault graph via_ir, which OOM-kills the 7GB hosted runner (exit 143).
+        # Research suites build and run locally only.
         run: |
-          forge build --sizes
+          forge build
+          forge build src/ --sizes
         id: build
 
       - name: Run Forge tests
