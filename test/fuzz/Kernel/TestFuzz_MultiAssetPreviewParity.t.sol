@@ -103,7 +103,10 @@ contract TestFuzz_MultiAssetPreviewParity_Kernel is MarketFuzzTestBase {
         public
     {
         _setupEvolvedMarket(_stSeed, _jtSeed, _vaultBps, _elapsed);
-        uint256 maxShares = liquidityTranche.maxRedeem(LT_PROVIDER);
+        // Size by the multi-asset bound so the sweep also exercises the wedge past the in-kind maximum,
+        // and pin the bounds' dominance across every evolved market the fuzzer constructs
+        uint256 maxShares = liquidityTranche.maxRedeemMultiAsset(LT_PROVIDER);
+        assertGe(maxShares, liquidityTranche.maxRedeem(LT_PROVIDER), "the multi-asset bound must weakly dominate the in-kind bound");
         if (maxShares < 1e6) return; // no liquidity-respecting redemption capacity this run
         uint256 shares = bound(_sharesSeed, 1e6, maxShares); // dust floor avoids a zero-asset payout the accountant rejects
 

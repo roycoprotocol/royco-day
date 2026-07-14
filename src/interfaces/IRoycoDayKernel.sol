@@ -329,7 +329,7 @@ interface IRoycoDayKernel {
 
     /**
      * @notice Previews a multi-asset LT deposit of (ST underlying + quote) by simulating the venue add
-     * @dev NON-VIEW: routes the venue add through its simulation/query mode, so callers must staticcall it
+     * @dev NON-VIEW: routes the venue add through its execute-and-unwind preview, which mutates no state net
      * @param _stAssets The ST underlying leg, in the ST asset's native units
      * @param _quoteAssets The quote asset leg
      * @return valueAllocated The NAV value of the LT assets the add would mint
@@ -346,7 +346,7 @@ interface IRoycoDayKernel {
 
     /**
      * @notice Previews a multi-asset LT redemption of _ltShares by simulating the proportional venue removal and the senior unwind
-     * @dev NON-VIEW: routes the venue removal through its simulation/query mode, so callers must staticcall it
+     * @dev NON-VIEW: routes the venue removal through its execute-and-unwind preview, which mutates no state net
      * @param _ltShares The number of LT shares to redeem
      * @return stClaims The ST redemption asset claims that would be transferred to the receiver, denominated in the respective tranches' tranche units
      * @return quoteAssets The quote assets the removal would withdraw to the receiver
@@ -429,6 +429,22 @@ interface IRoycoDayKernel {
     function ltMaxWithdrawable(address _owner)
         external
         view
+        returns (NAV_UNIT claimOnLTNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees);
+
+    /**
+     * @notice Returns the maximum amount of assets that can be withdrawn from the liquidity tranche via a multi-asset redemption
+     * @dev A multi-asset redemption redeems its senior tranche share legs (the proportional removal's ST leg and the idle liquidity
+     *      premium pile) in-flow, shrinking the liquidity requirement alongside the withdrawal — so its bound is at least the
+     *      in-kind bound, and strictly exceeds it whenever the liquidity requirement binds and the removal's senior-share
+     *      legs carry value
+     * @dev NON-VIEW: sizes the requirement reduction through the venue removal's execute-and-unwind preview, which mutates no state net
+     * @param _owner The address that is withdrawing the assets
+     * @return claimOnLTNAV The notional claims on LT assets that the liquidity tranche has denominated in kernel's NAV units
+     * @return ltMaxWithdrawableNAV The maximum amount of assets that can be withdrawn multi-asset, denominated in the kernel's NAV units
+     * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the liquidity tranche after minting any protocol fee shares post-sync
+     */
+    function ltMaxWithdrawableMultiAsset(address _owner)
+        external
         returns (NAV_UNIT claimOnLTNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees);
 
     /**

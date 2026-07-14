@@ -184,26 +184,58 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
 
     /**
      * @inheritdoc IRoycoDayKernel
-     * @dev Routes the add through the Vault's query mode (`quote`) so it simulates the BPT minted without settling balances or moving tokens
+     * @dev Routes the add through the unlocked Vault so it simulates the BPT minted under the Vault's real semantics; the
+     *      preview-mode callback unwinds every transient balance change by reverting with the result decoded here, so the
+     *      preview is callable inside a transaction (the Vault's query mode is restricted to static calls)
      * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
      */
     function previewAddLiquidity(uint256 _seniorShares, uint256 _quoteAssets) external override(IRoycoDayKernel) onlySelf returns (TRANCHE_UNIT ltAssets) {
-        bytes memory callbackReturnData = _vault.quote(abi.encodeCall(this.addBalancerV3Liquidity, (true, _seniorShares, _quoteAssets, ZERO_TRANCHE_UNITS)));
-        assembly ("memory-safe") {
-            ltAssets := mload(add(callbackReturnData, 0x20))
+        try _vault.unlock(abi.encodeCall(this.addBalancerV3Liquidity, (true, _seniorShares, _quoteAssets, ZERO_TRANCHE_UNITS))) {
+        // Unreachable: a preview-mode callback always unwinds via its result-carrying revert
+        }
+        catch (bytes memory callbackRevertData) {
+            _requirePreviewResult(callbackRevertData, BalancerV3VenueLogic.PREVIEW_ADD_LIQUIDITY_RESULT.selector);
+            assembly ("memory-safe") {
+                ltAssets := mload(add(callbackRevertData, 0x24))
+            }
         }
     }
 
     /**
      * @inheritdoc IRoycoDayKernel
-     * @dev Routes the removal through the Vault's query mode (`quote`) so it simulates the constituents withdrawn without settling balances or moving tokens
+     * @dev Routes the removal through the unlocked Vault so it simulates the constituents withdrawn under the Vault's real
+     *      semantics; the preview-mode callback unwinds every transient balance change by reverting with the result decoded
+     *      here, so the preview is callable inside a transaction (the Vault's query mode is restricted to static calls)
      * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
      */
     function previewRemoveLiquidity(TRANCHE_UNIT _ltAssets) external override(IRoycoDayKernel) onlySelf returns (uint256 stShares, uint256 quoteAssets) {
-        bytes memory callbackReturnData = _vault.quote(abi.encodeCall(this.removeBalancerV3Liquidity, (true, _ltAssets, uint256(0), uint256(0), address(0))));
+        try _vault.unlock(abi.encodeCall(this.removeBalancerV3Liquidity, (true, _ltAssets, uint256(0), uint256(0), address(0)))) {
+        // Unreachable: a preview-mode callback always unwinds via its result-carrying revert
+        }
+        catch (bytes memory callbackRevertData) {
+            _requirePreviewResult(callbackRevertData, BalancerV3VenueLogic.PREVIEW_REMOVE_LIQUIDITY_RESULT.selector);
+            assembly ("memory-safe") {
+                stShares := mload(add(callbackRevertData, 0x24))
+                quoteAssets := mload(add(callbackRevertData, 0x44))
+            }
+        }
+    }
+
+    /**
+     * @dev Asserts that a caught preview revert carries the expected result, bubbling any genuine venue failure unchanged
+     * @param _callbackRevertData The revert data caught from the vault callback
+     * @param _expectedErrorSelector The expected preview result error selector
+     */
+    function _requirePreviewResult(bytes memory _callbackRevertData, bytes4 _expectedErrorSelector) internal pure {
+        bytes4 selector;
         assembly ("memory-safe") {
-            stShares := mload(add(callbackReturnData, 0x20))
-            quoteAssets := mload(add(callbackReturnData, 0x40))
+            selector := mload(add(_callbackRevertData, 0x20))
+        }
+        // Bubble any genuine venue failure unchanged
+        if (selector != _expectedErrorSelector) {
+            assembly ("memory-safe") {
+                revert(add(_callbackRevertData, 0x20), mload(_callbackRevertData))
+            }
         }
     }
 

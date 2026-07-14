@@ -305,6 +305,16 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         return RedemptionLogic.ltMaxWithdrawable(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _owner);
     }
 
+    /// @inheritdoc IRoycoDayKernel
+    function ltMaxWithdrawableMultiAsset(address _owner)
+        public
+        virtual
+        override(IRoycoDayKernel)
+        returns (NAV_UNIT claimOnLTNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheShares)
+    {
+        return RedemptionLogic.ltMaxWithdrawableMultiAsset(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _owner);
+    }
+
     // =============================
     // Tranche Accounting and Synchronization Functions
     // =============================

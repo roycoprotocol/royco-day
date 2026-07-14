@@ -1281,9 +1281,9 @@ contract Test_RoycoTestMath is Test {
         assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18 + 1, 5e16, 0, 5e17, 1.1e18), 50e18 - 1, "ceil bites one wei");
     }
 
-    /// The stDust slack subtracts on top of the required depth: 100e18 − (50e18 + 3) = 50e18 − 3.
+    /// The stDust folds into the senior NAV before μ-scaling: required = ⌈(1000e18 + 3)·0.05⌉ = 50e18 + 1 ⇒ 50e18 − 1.
     function test_MaxLTWithdrawal_StDustSlack() public pure {
-        assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18, 5e16, 3, 5e17, 1.1e18), 50e18 - 3, "dust slack");
+        assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18, 5e16, 3, 5e17, 1.1e18), 50e18 - 1, "dust slack");
     }
 
     /// minLiq == 0 bypasses the gate entirely: the whole ltRawNAV is withdrawable.

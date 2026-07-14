@@ -191,11 +191,11 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     }
 
     /// @inheritdoc IRoycoDayAccountant
-    function commitLiquidityTrancheRawNAV(NAV_UNIT _freshLtRawNAV) external override(IRoycoDayAccountant) onlyRoycoKernel {
+    function commitLiquidityTrancheRawNAV(NAV_UNIT _freshLTRawNAV) external override(IRoycoDayAccountant) onlyRoycoKernel {
         // Commit the freshly marked liquidity tranche raw NAV: the kernel marks it after the sync commits the senior/junior NAVs and mints any fee shares
         // The LT raw NAV is dependent on the fresh ST share price which is resolved on the preceding pre-op synchronization
-        _getRoycoDayAccountantStorage().lastLTRawNAV = _freshLtRawNAV;
-        emit LiquidityTrancheRawNAVCommitted(_freshLtRawNAV);
+        _getRoycoDayAccountantStorage().lastLTRawNAV = _freshLTRawNAV;
+        emit LiquidityTrancheRawNAVCommitted(_freshLTRawNAV);
     }
 
     /// @inheritdoc IRoycoDayAccountant
@@ -454,10 +454,11 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // If there is no minimum liquidity requirement or the coverage liquiditation threshold has been breached, there is no LT withdrawal restriction
         if (state.minLiquidityWAD == 0 || (state.coverageUtilizationWAD >= state.coverageLiquidationUtilizationWAD)) return state.ltRawNAV;
         // Compute the minimum market-making depth required to satisfy the market's liquidity requirement, rounding in favor of senior protection
-        NAV_UNIT requiredLTValue = state.stEffectiveNAV.mulDiv(state.minLiquidityWAD, WAD, Math.Rounding.Ceil);
-        // Compute the surplus depth that can be withdrawn while retaining minimum liquidity
         // Also account for ST's dust tolerance to preclude reverts due to rounding after LT redemptions
-        ltWithdrawableNAV = state.ltRawNAV.saturatingSub(requiredLTValue + _getRoycoDayAccountantStorage().stNAVDustTolerance);
+        NAV_UNIT requiredLTValue =
+            (state.stEffectiveNAV + _getRoycoDayAccountantStorage().stNAVDustTolerance).mulDiv(state.minLiquidityWAD, WAD, Math.Rounding.Ceil);
+        // Compute the surplus depth that can be withdrawn while retaining minimum liquidity
+        ltWithdrawableNAV = state.ltRawNAV.saturatingSub(requiredLTValue);
     }
 
     // =============================

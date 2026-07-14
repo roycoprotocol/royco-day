@@ -94,9 +94,10 @@ library AccountingSyncLogic {
                 FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(_immutables.seniorTranche).totalSupply());
         } else if (_trancheType == TrancheType.JUNIOR) {
             // Compute JT share supply after the JT protocol fee shares are minted
-            uint256 jtTotalSupply = IERC20(_immutables.juniorTranche).totalSupply();
-            totalTrancheShares = jtTotalSupply
-                + ValuationLogic._convertToShares(state.jtProtocolFee, (state.jtEffectiveNAV - state.jtProtocolFee), jtTotalSupply, Math.Rounding.Floor);
+            totalTrancheShares = IERC20(_immutables.juniorTranche).totalSupply();
+            totalTrancheShares += ValuationLogic._convertToShares(
+                state.jtProtocolFee, (state.jtEffectiveNAV - state.jtProtocolFee), totalTrancheShares, Math.Rounding.Floor
+            );
         } else {
             // Compute LT share supply after the LT protocol fee shares are minted
             (uint256 liquidityPremiumShares,, uint256 stTotalSupplyAfterMints) =
@@ -105,14 +106,13 @@ library AccountingSyncLogic {
             uint256 ltOwnedSeniorTrancheShares = $.ltOwnedSeniorTrancheShares + liquidityPremiumShares;
             claims.stShares = ltOwnedSeniorTrancheShares;
             totalTrancheShares = IERC20(_immutables.liquidityTranche).totalSupply();
-            totalTrancheShares = totalTrancheShares
-                + ValuationLogic._convertToShares(
-                    state.ltProtocolFee,
-                    (ValuationLogic._getLiquidityTrancheEffectiveNAV($, state.stEffectiveNAV, stTotalSupplyAfterMints, ltOwnedSeniorTrancheShares)
-                            - state.ltProtocolFee),
-                    totalTrancheShares,
-                    Math.Rounding.Floor
-                );
+            totalTrancheShares += ValuationLogic._convertToShares(
+                state.ltProtocolFee,
+                (ValuationLogic._getLiquidityTrancheEffectiveNAV($, state.stEffectiveNAV, stTotalSupplyAfterMints, ltOwnedSeniorTrancheShares)
+                        - state.ltProtocolFee),
+                totalTrancheShares,
+                Math.Rounding.Floor
+            );
         }
     }
 

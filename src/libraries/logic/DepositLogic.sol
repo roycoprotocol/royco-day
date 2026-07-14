@@ -261,7 +261,7 @@ library DepositLogic {
 
     /**
      * @notice Previews a multi-asset LT deposit of (ST underlying + quote) by simulating the venue add
-     * @dev NON-VIEW: routes the venue add through its simulation/query mode, so callers must staticcall it
+     * @dev NON-VIEW: routes the venue add through its execute-and-unwind preview, which mutates no state net
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _stAssets The ST underlying leg, in the ST asset's native units

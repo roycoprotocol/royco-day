@@ -52,12 +52,23 @@ interface IRoycoLiquidityTranche is IRoycoVaultTranche {
 
     /**
      * @notice Previews a multi-asset LT deposit of (ST underlying + quote): the LT shares it would mint
-     * @dev NON-VIEW: simulates the venue add via its query mode, so callers must staticcall it (mirrors Balancer's `query*` convention)
+     * @dev NON-VIEW: simulates the venue add by executing it and unwinding via a result-carrying revert, mutating no state net
      * @param _stAssets The ST underlying leg, denominated in the ST asset's native units
      * @param _quoteAssets The quote asset leg
      * @return shares The LT shares that would be minted to a receiver
      */
     function previewDepositMultiAsset(uint256 _stAssets, uint256 _quoteAssets) external returns (uint256 shares);
+
+    /**
+     * @notice Returns the maximum number of LT shares that can be redeemed from the specified owner's balance via a multi-asset redemption
+     * @dev A multi-asset redemption redeems its senior tranche share legs in-flow, shrinking the market's liquidity requirement
+     *      alongside the withdrawal — so this bound is at least maxRedeem, and strictly exceeds it whenever the liquidity
+     *      requirement binds and the removal's senior-share legs carry value
+     * @dev NON-VIEW: sizes the requirement reduction through the venue removal's execute-and-unwind preview, which mutates no state net
+     * @param _owner The address that owns the LT shares being redeemed
+     * @return shares The maximum number of LT shares that can be redeemed multi-asset
+     */
+    function maxRedeemMultiAsset(address _owner) external returns (uint256 shares);
 
     /**
      * @notice Exits the LT to the LP token's constituent assets: ST underlying + quote
@@ -83,7 +94,7 @@ interface IRoycoLiquidityTranche is IRoycoVaultTranche {
 
     /**
      * @notice Previews a multi-asset LT redemption of _shares: the ST underlying claims and quote it would yield
-     * @dev NON-VIEW: simulates the venue removal via its query mode, so callers must staticcall it (mirrors Balancer's `query*` convention)
+     * @dev NON-VIEW: simulates the venue removal by executing it and unwinding via a result-carrying revert, mutating no state net
      * @param _shares The number of LT shares to redeem
      * @return stClaims The ST redemption asset claims that would be transferred to the receiver
      * @return quoteAssets The quote assets that would be transferred to the receiver

@@ -44,12 +44,18 @@ library BalancerV3VenueLogic {
     using RoycoUnitsMath for TRANCHE_UNIT;
     using SafeERC20 for IERC20;
 
+    /// @notice Carries a previewed add's minted BPT out of the vault callback, unwinding the preview's transient accounting
+    error PREVIEW_ADD_LIQUIDITY_RESULT(uint256 ltAssets);
+
+    /// @notice Carries a previewed removal's withdrawn constituents out of the vault callback, unwinding the preview's transient accounting
+    error PREVIEW_REMOVE_LIQUIDITY_RESULT(uint256 stShares, uint256 quoteAssets);
+
     /**
      * @notice Callback that performs the unbalanced BPT mint inside the unlocked Balancer V3 Vault's context
      * @dev Only callable by the Balancer V3 Vault
      * @dev This callback must settle all credit and debt created in the vault's accounting by the end of its execution
      * @dev The kernel supplies the senior tranche shares and quote assets it already holds and receives the minted BPT for the liquidity tranche
-     * @param _isPreview Whether this is a query-mode simulation, which computes the amounts but skips settling the credit and debt with the Vault
+     * @param _isPreview Whether this is a preview, which computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling
      * @param _seniorShares The exact amount of senior tranche shares to add into the pool from this kernel's balance
      * @param _quoteAssets The exact amount of quote assets to add into the pool from this kernel's balance
      * @param _minLTAssetsOut The minimum BPT (LT assets) that must be minted, bounding the add's slippage at the Vault
@@ -83,19 +89,19 @@ library BalancerV3VenueLogic {
                 })
             );
 
-        // If this is not a preview call, the credit and debt created must be settled with the vault
-        if (!_isPreview) {
-            // Settle the senior tranche shares and quote assets this kernel owes the Vault for the add by transferring them in and cancelling the debt
-            if (_seniorShares > 0) {
-                IERC20(_venue.seniorTranche).safeTransfer(address(_venue.vault), _seniorShares);
-                _venue.vault.settle(IERC20(_venue.seniorTranche), _seniorShares);
-            }
-            if (_quoteAssets > 0) {
-                IERC20(_venue.quoteAsset).safeTransfer(address(_venue.vault), _quoteAssets);
-                _venue.vault.settle(IERC20(_venue.quoteAsset), _quoteAssets);
-            }
-            /// @dev All credit and debt created during this callback has been settled
+        // A preview carries its result out via this revert, unwinding every transient balance change before settlement is due
+        if (_isPreview) revert PREVIEW_ADD_LIQUIDITY_RESULT(ltAssets);
+
+        // Settle the senior tranche shares and quote assets this kernel owes the Vault for the add by transferring them in and cancelling the debt
+        if (_seniorShares > 0) {
+            IERC20(_venue.seniorTranche).safeTransfer(address(_venue.vault), _seniorShares);
+            _venue.vault.settle(IERC20(_venue.seniorTranche), _seniorShares);
         }
+        if (_quoteAssets > 0) {
+            IERC20(_venue.quoteAsset).safeTransfer(address(_venue.vault), _quoteAssets);
+            _venue.vault.settle(IERC20(_venue.quoteAsset), _quoteAssets);
+        }
+        /// @dev All credit and debt created during this callback has been settled
     }
 
     /**
@@ -103,7 +109,7 @@ library BalancerV3VenueLogic {
      * @dev Only callable by the Balancer V3 Vault
      * @dev This callback must settle all credit and debt created in the vault's accounting by the end of its execution
      * @dev The kernel receives any ST shares withdrawn and is responsible for converting them to the base assets before remitting them to the user
-     * @param _isPreview Whether this is a query-mode simulation, which computes the amounts but skips settling the credit and debt with the Vault
+     * @param _isPreview Whether this is a preview, which computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling
      * @param _ltAssets The exact BPT amount (LT assets) to burn from this kernel's balance
      * @param _minSTSharesOut The minimum senior tranche shares that must be withdrawn, bounding the removal's slippage at the Vault
      * @param _minQuoteAssetsOut The minimum quote assets that must be withdrawn, bounding the removal's slippage at the Vault
@@ -144,14 +150,14 @@ library BalancerV3VenueLogic {
         stShares = amountsOut[_venue.stSharePoolIndex];
         quoteAssets = amountsOut[_venue.quoteAssetPoolIndex];
 
-        // If this is not a preview call, the credit and debt created must be settled with the vault
-        if (!_isPreview) {
-            // Credit the ST shares withdrawn to the kernel for downstream redemption before remitting assets to the user
-            if (stShares > 0) _venue.vault.sendTo(IERC20(_venue.seniorTranche), address(this), stShares);
-            // Credit the quote assets withdrawn to its specified receiver
-            if (quoteAssets > 0) _venue.vault.sendTo(IERC20(_venue.quoteAsset), _quoteAssetsReceiver, quoteAssets);
-            /// @dev All credit and debt created during this callback has been settled
-        }
+        // A preview carries its result out via this revert, unwinding every transient balance change before settlement is due
+        if (_isPreview) revert PREVIEW_REMOVE_LIQUIDITY_RESULT(stShares, quoteAssets);
+
+        // Credit the ST shares withdrawn to the kernel for downstream redemption before remitting assets to the user
+        if (stShares > 0) _venue.vault.sendTo(IERC20(_venue.seniorTranche), address(this), stShares);
+        // Credit the quote assets withdrawn to its specified receiver
+        if (quoteAssets > 0) _venue.vault.sendTo(IERC20(_venue.quoteAsset), _quoteAssetsReceiver, quoteAssets);
+        /// @dev All credit and debt created during this callback has been settled
     }
 
     /**

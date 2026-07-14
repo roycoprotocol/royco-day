@@ -313,9 +313,9 @@ interface IRoycoDayAccountant {
      *      attribution and out of the senior share rate provider's dependency loop
      *      The kernel derives the resulting liquidity
      *      utilization from this mark and the synced senior effective NAV it already holds, avoiding an extra storage read
-     * @param _freshLtRawNAV The liquidity tranche's freshly marked raw NAV (the oracle value of the AMM or another market-making venue)
+     * @param _freshLTRawNAV The liquidity tranche's freshly marked raw NAV (the oracle value of the AMM or another market-making venue)
      */
-    function commitLiquidityTrancheRawNAV(NAV_UNIT _freshLtRawNAV) external;
+    function commitLiquidityTrancheRawNAV(NAV_UNIT _freshLTRawNAV) external;
 
     /**
      * @notice Returns the maximum assets depositable into the senior tranche without violating the market's coverage or liquidity requirements

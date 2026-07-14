@@ -108,9 +108,11 @@ jobs:
         # EIP-170 applies to deployed contracts; test-only mocks may exceed it.
         # test/research/** is excluded by the default profile in foundry.toml (offline-analysis suites
         # that OOM-kill the 7GB hosted runner); run them deliberately via FOUNDRY_PROFILE=research.
+        # --threads 1: two parallel via_ir solc processes exceed the 7GB runner on a COLD build (exit 143);
+        # warm builds are incremental so the single-threaded cost only ever hits cache-miss builds.
         run: |
-          forge build
-          forge build src/ --sizes
+          forge build --threads 1
+          forge build src/ --sizes --threads 1
         id: build
 
       - name: Run Forge tests

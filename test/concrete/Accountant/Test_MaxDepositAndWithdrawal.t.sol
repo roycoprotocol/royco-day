@@ -6,8 +6,8 @@ import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant
 import { MAX_NAV_UNITS, WAD, ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
 import { MarketState, Operation, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
-import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
+import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 
 /**
  * @title Test_MaxDepositAndWithdrawal_Accountant
@@ -278,11 +278,12 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
 
     /**
      * The LT-withdrawal gate boundary with a live ST dust tolerance (RoycoDayAccountant.sol:459-462) — the
-     * slack is stDust, and the reported max is exact against the real post-op liquidity gate.
-     * Seed 1000e18/200e18 flat with 100e18 of LT depth, stDust 3: required = ceil(1000e18 * 0.05) = 50e18 exact,
-     * max = 100e18 - (50e18 + 3) = 50e18 - 3.
-     * Redeeming max leaves ltRawNAV = 50e18 + 3: liquidityUtilization = ceil(5e37 / (5e19 + 3)) = WAD (ceil absorbs the
-     * shortfall). Consuming the 3 wei slack leaves ltRawNAV = 50e18 exactly on WAD, and one more wei computes
+     * dust folds into the senior NAV before the requirement scaling, and the reported max is exact against the
+     * real post-op liquidity gate.
+     * Seed 1000e18/200e18 flat with 100e18 of LT depth, stDust 3: required = ceil((1000e18 + 3) * 0.05) = 50e18 + 1,
+     * max = 100e18 - (50e18 + 1) = 50e18 - 1.
+     * Redeeming max leaves ltRawNAV = 50e18 + 1: liquidityUtilization = ceil(5e37 / (5e19 + 1)) = WAD (ceil absorbs the
+     * shortfall). Consuming the 1 wei slack leaves ltRawNAV = 50e18 exactly on WAD, and one more wei computes
      * liquidityUtilization = WAD + 1 and violates
      */
     function test_MaxLTWithdrawal_STDustSlackGateBoundary() public {
@@ -292,7 +293,7 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
         _seedSymmetric(1000e18, 200e18, 100e18);
 
         NAV_UNIT max = accountant.maxLTWithdrawal(_checkpointState());
-        assertEq(toUint256(max), 50e18 - 3, "closed form minus the stDust slack");
+        assertEq(toUint256(max), 50e18 - 1, "closed form off the dust-padded required depth");
         // coverageUtilization at the flat seed = ceil(1000e18 * 0.1 / 200e18) = 0.5e18, below the 1.1e18 threshold: no bypass
         assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18, 0.05e18, 3, 0.5e18, 1.1e18), toUint256(max), "RTM parity");
 
@@ -301,7 +302,7 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
             Operation.LT_REDEEM, toNAVUnits(uint256(1000e18)), toNAVUnits(uint256(200e18)), toNAVUnits(100e18 - toUint256(max)), ZERO_NAV_UNITS, true
         );
         assertEq(state.liquidityUtilizationWAD, WAD, "the exact max lands liquidity utilization on WAD via the ceil");
-        // Consume the 3 wei stDust slack, landing exactly on the algebraic boundary
+        // Consume the 1 wei of ceil slack, landing exactly on the algebraic boundary
         state =
             kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(uint256(1000e18)), toNAVUnits(uint256(200e18)), toNAVUnits(uint256(50e18)), ZERO_NAV_UNITS, true);
         assertEq(state.liquidityUtilizationWAD, WAD, "the slack consumed lands exactly on WAD");
@@ -555,7 +556,8 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
      * the closed form ceils the required depth and saturates to zero
      * Derivation: required = ceil((1000e18 + 7) * 0.05e18 / 1e18) = 50e18 + 1 (the 0.35 wei product remainder
      * rounds up), so 100e18 of inventory leaves 50e18 - 1 withdrawable, an inventory of 40e18 saturates to
-     * zero, and an st dust of 3 shrinks the withdrawable to 50e18 - 4
+     * zero, and an st dust of 100 folds into the senior NAV before scaling: required = ceil((1000e18 + 107) * 0.05)
+     * = 50e18 + 6, shrinking the withdrawable to 50e18 - 6
      */
     function test_MaxLTWithdrawal_closedFormCeilAndSaturation() public {
         SyncedAccountingState memory st = _bareState(1000e18, 200e18, 100e18, 1000e18 + 7, 200e18, false, 0.1e18, 0.05e18);
@@ -563,10 +565,10 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
         st.ltRawNAV = toNAVUnits(uint256(40e18));
         assertEq(toUint256(accountant.maxLTWithdrawal(st)), 0, "under-provisioned inventory saturates to zero");
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
-        p.stNAVDustTolerance = toNAVUnits(uint256(3));
+        p.stNAVDustTolerance = toNAVUnits(uint256(100));
         _deploy(false, p);
         st.ltRawNAV = toNAVUnits(uint256(100e18));
-        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 50e18 - 4, "st dust tolerance shrinks the withdrawable depth");
+        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 50e18 - 6, "st dust tolerance shrinks the withdrawable depth");
     }
 
     /**
