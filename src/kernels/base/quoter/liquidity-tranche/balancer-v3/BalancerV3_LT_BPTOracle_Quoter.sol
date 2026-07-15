@@ -192,7 +192,15 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
      *      preview is callable inside a transaction (the Vault's query mode is restricted to static calls)
      * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
      */
-    function previewAddLiquidity(uint256 _seniorShares, uint256 _quoteAssets) external override(IRoycoDayKernel) onlySelf returns (TRANCHE_UNIT ltAssets) {
+    function previewAddLiquidity(
+        uint256 _seniorShares,
+        uint256 _quoteAssets
+    )
+        external
+        override(IRoycoDayKernel)
+        onlySelf
+        returns (TRANCHE_UNIT ltAssets, NAV_UNIT valueAllocated)
+    {
         try _vault.unlock(abi.encodeCall(this.addBalancerV3Liquidity, (true, _seniorShares, _quoteAssets, ZERO_TRANCHE_UNITS))) {
             // Unreachable: a preview-mode callback always unwinds via its result-carrying revert
             revert PREVIEW_CAN_NEVER_MUTATE_STATE();
@@ -200,6 +208,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
             _validatePreviewResult(callbackRevertData, BalancerV3VenueLogic.PREVIEW_ADD_LIQUIDITY_RESULT.selector);
             assembly ("memory-safe") {
                 ltAssets := mload(add(callbackRevertData, 0x24))
+                valueAllocated := mload(add(callbackRevertData, 0x44))
             }
         }
     }
@@ -370,13 +379,9 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
      * @param _expectedErrorSelector The expected preview result error selector
      */
     function _validatePreviewResult(bytes memory _callbackRevertData, bytes4 _expectedErrorSelector) internal pure {
-        bytes4 selector;
         assembly ("memory-safe") {
-            selector := mload(add(_callbackRevertData, 0x20))
-        }
-        // Bubble any genuine venue failure unchanged
-        if (selector != _expectedErrorSelector) {
-            assembly ("memory-safe") {
+            // Revert with any genuine, unexpected venue failure
+            if iszero(eq(shr(224, mload(add(_callbackRevertData, 0x20))), shr(224, _expectedErrorSelector))) {
                 revert(add(_callbackRevertData, 0x20), mload(_callbackRevertData))
             }
         }

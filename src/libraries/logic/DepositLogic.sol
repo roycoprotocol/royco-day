@@ -299,9 +299,8 @@ library DepositLogic {
                 IRoycoDayKernel(address(this)).stConvertTrancheUnitsToNAVUnits(_stAssets), state.stEffectiveNAV, totalSTShares, Math.Rounding.Floor
             );
         // Quote the venue add for the senior shares and quote assets (simulation only: no slippage gate, no settlement)
-        ltAssetsOut = IRoycoDayKernel(address(this)).previewAddLiquidity(stSharesToAdd, _quoteAssets);
-        // The value allocated is the value of the LT assets the add would mint
-        valueAllocated = IRoycoDayKernel(address(this)).ltConvertTrancheUnitsToNAVUnits(ltAssetsOut);
+        // The venue values the minted LT assets against the post-add state inside the preview, exactly as execution does
+        (ltAssetsOut, valueAllocated) = IRoycoDayKernel(address(this)).previewAddLiquidity(stSharesToAdd, _quoteAssets);
     }
 
     // =============================

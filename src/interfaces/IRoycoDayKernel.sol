@@ -582,8 +582,9 @@ interface IRoycoDayKernel {
      * @param _seniorShares The senior tranche shares the add would inject
      * @param _quoteAssets The quote assets the add would inject
      * @return ltAssets The liquidity tranche assets the add would mint
+     * @return valueAllocated The value of the minted liquidity tranche assets against the post-add venue state
      */
-    function previewAddLiquidity(uint256 _seniorShares, uint256 _quoteAssets) external returns (TRANCHE_UNIT ltAssets);
+    function previewAddLiquidity(uint256 _seniorShares, uint256 _quoteAssets) external returns (TRANCHE_UNIT ltAssets, NAV_UNIT valueAllocated);
 
     /**
      * @notice Simulates a proportional removal of liquidity tranche assets and returns the senior tranche share and quote asset constituents it would withdraw

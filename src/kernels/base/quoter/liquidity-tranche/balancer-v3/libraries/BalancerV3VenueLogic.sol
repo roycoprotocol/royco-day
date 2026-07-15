@@ -12,7 +12,7 @@ import { IERC20 } from "../../../../../../../lib/openzeppelin-contracts/contract
 import { SafeERC20 } from "../../../../../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IRoycoDayKernel } from "../../../../../../interfaces/IRoycoDayKernel.sol";
 import { WAD, ZERO_TRANCHE_UNITS } from "../../../../../../libraries/Constants.sol";
-import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toUint256 } from "../../../../../../libraries/Units.sol";
+import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../../../../libraries/Units.sol";
 import { ValuationLogic } from "../../../../../../libraries/logic/ValuationLogic.sol";
 import { IBalancerV3VenueCallbacks } from "../interfaces/IBalancerV3VenueCallbacks.sol";
 
@@ -44,8 +44,8 @@ library BalancerV3VenueLogic {
     using RoycoUnitsMath for TRANCHE_UNIT;
     using SafeERC20 for IERC20;
 
-    /// @notice Carries a previewed add's minted BPT out of the vault callback, unwinding the preview's transient accounting
-    error PREVIEW_ADD_LIQUIDITY_RESULT(uint256 ltAssets);
+    /// @notice Carries a previewed add's minted BPT and its post-add valuation out of the vault callback, unwinding the preview's transient accounting
+    error PREVIEW_ADD_LIQUIDITY_RESULT(uint256 ltAssets, NAV_UNIT valueAllocated);
 
     /// @notice Carries a previewed removal's withdrawn constituents out of the vault callback, unwinding the preview's transient accounting
     error PREVIEW_REMOVE_LIQUIDITY_RESULT(uint256 stShares, uint256 quoteAssets);
@@ -62,7 +62,7 @@ library BalancerV3VenueLogic {
      * @return ltAssets The BPT (LT assets) minted to this kernel by the add
      */
     function addBalancerV3Liquidity(
-        BalancerV3VenueImmutableState memory _venue,
+        BalancerV3VenueImmutableState memory _immutables,
         bool _isPreview,
         uint256 _seniorShares,
         uint256 _quoteAssets,
@@ -73,14 +73,14 @@ library BalancerV3VenueLogic {
     {
         // The exact senior tranche share and quote asset amounts to add, ordered by the pool's token registration
         uint256[] memory exactAmountsIn = new uint256[](2);
-        exactAmountsIn[_venue.stSharePoolIndex] = _seniorShares;
-        exactAmountsIn[_venue.quoteAssetPoolIndex] = _quoteAssets;
+        exactAmountsIn[_immutables.stSharePoolIndex] = _seniorShares;
+        exactAmountsIn[_immutables.quoteAssetPoolIndex] = _quoteAssets;
 
         // Credit this kernel with the BPT minted by the unbalanced add of the specified senior tranche shares and quote assets
-        (, ltAssets,) = _venue.vault
+        (, ltAssets,) = _immutables.vault
             .addLiquidity(
                 AddLiquidityParams({
-                    pool: _venue.ltAsset, // The Balancer pool to add liquidity to is the liquidity tranche's asset (BPT)
+                    pool: _immutables.ltAsset, // The Balancer pool to add liquidity to is the liquidity tranche's asset (BPT)
                     to: address(this), // The kernel custodies the BPT balance of the entire liquidity tranche, so the minted BPT is credited to it
                     maxAmountsIn: exactAmountsIn, // For UNBALANCED adds the Vault treats these as the exact amounts in (not upper bounds)
                     minBptAmountOut: toUint256(_minLTAssetsOut), // The Vault reverts the add if it would mint fewer BPT than this, bounding the add's slippage
@@ -90,16 +90,19 @@ library BalancerV3VenueLogic {
             );
 
         // A preview carries its result out via this revert, unwinding every transient balance change before settlement is due
-        if (_isPreview) revert PREVIEW_ADD_LIQUIDITY_RESULT(ltAssets);
+        // NOTE: We ensure that the BPT is valued after the liquidity provision which can mutate the invariant
+        if (_isPreview) {
+            revert PREVIEW_ADD_LIQUIDITY_RESULT(ltAssets, IRoycoDayKernel(address(this)).ltConvertTrancheUnitsToNAVUnits(toTrancheUnits(ltAssets)));
+        }
 
         // Settle the senior tranche shares and quote assets this kernel owes the Vault for the add by transferring them in and cancelling the debt
         if (_seniorShares > 0) {
-            IERC20(_venue.seniorTranche).safeTransfer(address(_venue.vault), _seniorShares);
-            _venue.vault.settle(IERC20(_venue.seniorTranche), _seniorShares);
+            IERC20(_immutables.seniorTranche).safeTransfer(address(_immutables.vault), _seniorShares);
+            _immutables.vault.settle(IERC20(_immutables.seniorTranche), _seniorShares);
         }
         if (_quoteAssets > 0) {
-            IERC20(_venue.quoteAsset).safeTransfer(address(_venue.vault), _quoteAssets);
-            _venue.vault.settle(IERC20(_venue.quoteAsset), _quoteAssets);
+            IERC20(_immutables.quoteAsset).safeTransfer(address(_immutables.vault), _quoteAssets);
+            _immutables.vault.settle(IERC20(_immutables.quoteAsset), _quoteAssets);
         }
         /// @dev All credit and debt created during this callback has been settled
     }
@@ -118,7 +121,7 @@ library BalancerV3VenueLogic {
      * @return quoteAssets The quote assets withdrawn directly to the specified receiver
      */
     function removeBalancerV3Liquidity(
-        BalancerV3VenueImmutableState memory _venue,
+        BalancerV3VenueImmutableState memory _immutables,
         bool _isPreview,
         TRANCHE_UNIT _ltAssets,
         uint256 _minSTSharesOut,
@@ -130,14 +133,14 @@ library BalancerV3VenueLogic {
     {
         // The minimum senior tranche share and quote asset amounts out, ordered by the pool's token registration
         uint256[] memory minAmountsOut = new uint256[](2);
-        minAmountsOut[_venue.stSharePoolIndex] = _minSTSharesOut;
-        minAmountsOut[_venue.quoteAssetPoolIndex] = _minQuoteAssetsOut;
+        minAmountsOut[_immutables.stSharePoolIndex] = _minSTSharesOut;
+        minAmountsOut[_immutables.quoteAssetPoolIndex] = _minQuoteAssetsOut;
 
         // Debit this kernel with the proportional constituent claims tied to the specified amount of LT assets
-        (, uint256[] memory amountsOut,) = _venue.vault
+        (, uint256[] memory amountsOut,) = _immutables.vault
             .removeLiquidity(
                 RemoveLiquidityParams({
-                    pool: _venue.ltAsset, // The Balancer pool to remove liquidity from is the liquidity tranche's asset (BPT)
+                    pool: _immutables.ltAsset, // The Balancer pool to remove liquidity from is the liquidity tranche's asset (BPT)
                     from: address(this), // The kernel custodies the BPT balance of the entire liquidity tranche, so the BPT constituents are debited from its claims
                     maxBptAmountIn: toUint256(_ltAssets), // For PROPORTIONAL removals the Vault treats this as the exact BPT amount to burn (not an upper bound)
                     minAmountsOut: minAmountsOut, // The Vault reverts the removal if any constituent comes out below these floors, bounding the removal's slippage
@@ -147,16 +150,16 @@ library BalancerV3VenueLogic {
             );
 
         // Set the amounts out to be returned to the caller
-        stShares = amountsOut[_venue.stSharePoolIndex];
-        quoteAssets = amountsOut[_venue.quoteAssetPoolIndex];
+        stShares = amountsOut[_immutables.stSharePoolIndex];
+        quoteAssets = amountsOut[_immutables.quoteAssetPoolIndex];
 
         // A preview carries its result out via this revert, unwinding every transient balance change before settlement is due
         if (_isPreview) revert PREVIEW_REMOVE_LIQUIDITY_RESULT(stShares, quoteAssets);
 
         // Credit the ST shares withdrawn to the kernel for downstream redemption before remitting assets to the user
-        if (stShares > 0) _venue.vault.sendTo(IERC20(_venue.seniorTranche), address(this), stShares);
+        if (stShares > 0) _immutables.vault.sendTo(IERC20(_immutables.seniorTranche), address(this), stShares);
         // Credit the quote assets withdrawn to its specified receiver
-        if (quoteAssets > 0) _venue.vault.sendTo(IERC20(_venue.quoteAsset), _quoteAssetsReceiver, quoteAssets);
+        if (quoteAssets > 0) _immutables.vault.sendTo(IERC20(_immutables.quoteAsset), _quoteAssetsReceiver, quoteAssets);
         /// @dev All credit and debt created during this callback has been settled
     }
 
@@ -169,7 +172,7 @@ library BalancerV3VenueLogic {
      */
     function attemptLiquidityPremiumReinvestment(
         IRoycoDayKernel.RoycoDayKernelState storage $,
-        BalancerV3VenueImmutableState memory _venue,
+        BalancerV3VenueImmutableState memory _immutables,
         uint64 _maxReinvestmentSlippageWAD,
         uint256 _stSharesToReinvest,
         NAV_UNIT _stEffectiveNAV,
@@ -193,10 +196,10 @@ library BalancerV3VenueLogic {
 
         // Single-sided add the ST shares through a low-level call into the Vault's callback
         // The inner unlock dispatches addBalancerV3Liquidity, which mints the BPT bounded by minLTAssetsOut and settles the shares in
-        (bool reinvestmentSucceeded, bytes memory callbackReturnData) = address(_venue.vault)
+        (bool reinvestmentSucceeded, bytes memory callbackReturnData) = address(_immutables.vault)
             .call(
                 abi.encodeCall(
-                    _venue.vault.unlock,
+                    _immutables.vault.unlock,
                     (abi.encodeCall(IBalancerV3VenueCallbacks.addBalancerV3Liquidity, (false, stSharesToReinvest, uint256(0), minLTAssetsOut)))
                 )
             );
