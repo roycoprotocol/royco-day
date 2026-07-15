@@ -88,7 +88,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         EnrichedTrancheConfig memory config = $.trancheToConfig[_tranche];
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
 
-        // Poke the tranche's oracle clock, folding any pending unobserved source update into the pre-request past
+        // Poke the tranche's oracle clock so that a source update that predates this request can never open its execution gate
         _pokeOracleClock(_tranche, config.baseConfig.oracleClock);
 
         // Register the user's deposit request with a fresh nonce
@@ -203,7 +203,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         EnrichedTrancheConfig memory config = $.trancheToConfig[_tranche];
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
 
-        // Poke the tranche's oracle clock, folding any pending unobserved source update into the pre-request past
+        // Poke the tranche's oracle clock so that a source update that predates this request can never open its execution gate
         _pokeOracleClock(_tranche, config.baseConfig.oracleClock);
 
         // Register the user's redemption request with a fresh nonce
