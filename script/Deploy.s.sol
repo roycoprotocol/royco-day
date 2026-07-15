@@ -549,8 +549,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         });
 
         params.gyroECLPPoolParams = _config.gyroECLPPoolParams;
-        params.jtYDMTargetUtilizationWAD = _config.jtYdmTargetUtilizationWAD;
-        params.ltYDMTargetUtilizationWAD = _config.ltYdmTargetUtilizationWAD;
+        params.jtYdmConstructorArgs = _ydmConstructorArgs(_config.ydmType, _config.jtYdmTargetUtilizationWAD);
+        params.ltYdmConstructorArgs = _ydmConstructorArgs(_config.ydmType, _config.ltYdmTargetUtilizationWAD);
         // Select the YDM bytecode the template deploys from the configured model, so the deployed contract is the configured type (not a stand-in that shares a selector)
         params.ydmComponentId = _ydmComponentId(_config.ydmType);
         params.kernelSpecificParams = _config.kernelSpecificParams; // template KernelParams are field-identical to the config blobs
@@ -581,6 +581,37 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         } else {
             revert UnsupportedYDMType(_ydmType);
         }
+    }
+
+    /// @notice The adaptive curve YDMs' canonical adaptation bounds: the yield share at target adapts within [0.01%, 100%]
+    uint256 internal constant ADAPTIVE_YDM_MIN_YIELD_SHARE_AT_TARGET_WAD = 0.0001e18;
+    uint256 internal constant ADAPTIVE_YDM_MAX_YIELD_SHARE_AT_TARGET_WAD = 1e18;
+
+    /// @notice The adaptive curve YDMs' canonical boundary adaptation speeds, per second at 0% and 100% utilization
+    uint256 internal constant ADAPTIVE_YDM_V1_ADAPTATION_SPEED_WAD = 50e18 / uint256(365 days);
+    uint256 internal constant ADAPTIVE_YDM_V2_ADAPTATION_SPEED_WAD = 100e18 / uint256(365 days);
+
+    /// @notice Builds the ABI-encoded constructor args for a YDM model at the given target utilization
+    /// @dev Kept in lockstep with `_ydmComponentId` so the deployed contract type and its constructor args always agree
+    function _ydmConstructorArgs(YDMType _ydmType, uint256 _targetUtilizationWAD) internal pure returns (bytes memory ydmConstructorArgs) {
+        if (_ydmType == YDMType.StaticCurve) return abi.encode(_targetUtilizationWAD);
+        if (_ydmType == YDMType.AdaptiveCurve_V1) {
+            return abi.encode(
+                _targetUtilizationWAD,
+                ADAPTIVE_YDM_MIN_YIELD_SHARE_AT_TARGET_WAD,
+                ADAPTIVE_YDM_MAX_YIELD_SHARE_AT_TARGET_WAD,
+                ADAPTIVE_YDM_V1_ADAPTATION_SPEED_WAD
+            );
+        }
+        if (_ydmType == YDMType.AdaptiveCurve_V2) {
+            return abi.encode(
+                _targetUtilizationWAD,
+                ADAPTIVE_YDM_MIN_YIELD_SHARE_AT_TARGET_WAD,
+                ADAPTIVE_YDM_MAX_YIELD_SHARE_AT_TARGET_WAD,
+                ADAPTIVE_YDM_V2_ADAPTATION_SPEED_WAD
+            );
+        }
+        revert UnsupportedYDMType(_ydmType);
     }
 
     /// @notice Maps a YDM model to the component id whose registered bytecode the template deploys for it

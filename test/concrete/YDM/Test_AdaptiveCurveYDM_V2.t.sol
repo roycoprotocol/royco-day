@@ -58,7 +58,7 @@ contract Test_AdaptiveCurveYDM_V2 is Test {
     // ---------------------------------------------------------------------
 
     function _deploy(uint256 target) internal returns (AdaptiveCurveYDM_V2) {
-        return new AdaptiveCurveYDM_V2(target);
+        return new AdaptiveCurveYDM_V2(target, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
     }
 
     /// Canonical curve: target=0.5, y0=0.1, yT=0.3, yFull=0.9 => FD=0.2, FP=0.6. Clean powers of ten.
@@ -128,7 +128,7 @@ contract Test_AdaptiveCurveYDM_V2 is Test {
     /// A zero target utilization is rejected: the curve needs a positive kink to interpolate around
     function test_RevertIf_ConstructorTargetZero() public {
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
-        new AdaptiveCurveYDM_V2(0);
+        new AdaptiveCurveYDM_V2(0, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
     }
 
     /// One wei is the smallest accepted target utilization
@@ -146,13 +146,13 @@ contract Test_AdaptiveCurveYDM_V2 is Test {
     /// A target above WAD is meaningless (utilization is capped at WAD) and rejected
     function test_RevertIf_ConstructorTargetAboveWad() public {
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
-        new AdaptiveCurveYDM_V2(WAD + 1);
+        new AdaptiveCurveYDM_V2(WAD + 1, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
     }
 
     /// The extreme uint256 max target is rejected by the same gate
     function test_RevertIf_ConstructorTargetUintMax() public {
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
-        new AdaptiveCurveYDM_V2(type(uint256).max);
+        new AdaptiveCurveYDM_V2(type(uint256).max, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
     }
 
     /// V2's fixed speed is exactly the deploy-time limit (100e18/365days). No per-market speed field.

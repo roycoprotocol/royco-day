@@ -139,7 +139,7 @@ contract AdaptiveV1Handler is BaseYDMHandler {
     uint256 internal constant MIN_YT = 1e14;
 
     constructor(uint256 _targetWAD) {
-        model = new AdaptiveCurveYDM_V1(_targetWAD);
+        model = new AdaptiveCurveYDM_V1(_targetWAD, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
         // Valid V1 init for any target: yT in [1e14, WAD], yT <= yFull <= WAD.
         model.initializeYDMForMarket(1e17, 8e17);
     }
@@ -189,7 +189,7 @@ contract AdaptiveV2Handler is BaseYDMHandler {
     uint256 internal constant MIN_YT = 1e14;
 
     constructor(uint256 _targetWAD) {
-        model = new AdaptiveCurveYDM_V2(_targetWAD);
+        model = new AdaptiveCurveYDM_V2(_targetWAD, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
         // Valid V2 init for any target: y0 <= yT, yT >= 1e14, yT <= yFull <= WAD.
         model.initializeYDMForMarket(0, 1e17, 8e17);
     }

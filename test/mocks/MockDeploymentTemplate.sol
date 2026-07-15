@@ -44,7 +44,8 @@ contract MockDeploymentTemplate is BaseDeploymentTemplate {
     {
         if (_params.length != 0) {
             (bytes32 salt, uint256 targetUtilizationWAD) = abi.decode(_params, (bytes32, uint256));
-            (lastDeployedYDM, lastYDMAlreadyDeployed) = _deployYDM(salt, targetUtilizationWAD, COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2);
+            bytes memory ydmConstructorArgs = abi.encode(targetUtilizationWAD, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
+            (lastDeployedYDM, lastYDMAlreadyDeployed) = _deployYDM(salt, ydmConstructorArgs, COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2);
         }
         result = _result;
     }

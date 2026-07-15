@@ -189,17 +189,18 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
     }
 
     /**
-     * @notice Deploys a YDM instance of the selected component type at the caller-supplied salt, pinning its target utilization (the curve kink)
-     * @dev The registered creation code is the bare YDM bytecode for `_ydmComponentId` — the target utilization is a constructor arg
-     *      appended here (per market) rather than baked into the registered creation code, and every YDM type shares this one constructor
+     * @notice Deploys a YDM instance of the selected component type at the caller-supplied salt, pinning its model-specific constructor params
+     * @dev The registered creation code is the bare YDM bytecode for `_ydmComponentId` — the constructor args are appended here
+     *      (per market) rather than baked into the registered creation code, ABI-encoded per the selected model's constructor
+     *      (the static curve takes its target utilization; the adaptive curves additionally take their adaptation bounds and speed)
      * @dev An unregistered YDM component id reverts loud in `_readCreationCode` (CREATION_CODE_NOT_SET), so an unsupported type can never silently deploy the wrong model
      * @param _salt The CREATE3 salt for this YDM instance
-     * @param _targetUtilizationWAD The utilization at which the YDM curve's "target" yield share applies, scaled to WAD
+     * @param _ydmConstructorArgs The ABI-encoded constructor args for the selected YDM model
      * @param _ydmComponentId The component id of the YDM creation code to deploy, selecting the market's YDM model
      */
-    function _deployYDM(bytes32 _salt, uint256 _targetUtilizationWAD, bytes32 _ydmComponentId) internal returns (address ydm, bool alreadyDeployed) {
+    function _deployYDM(bytes32 _salt, bytes memory _ydmConstructorArgs, bytes32 _ydmComponentId) internal returns (address ydm, bool alreadyDeployed) {
         bytes memory creationCode = _readCreationCode(_ydmComponentId);
-        (ydm, alreadyDeployed) = ROYCO_FACTORY.deployDeterministicContract(abi.encodePacked(creationCode, abi.encode(_targetUtilizationWAD)), _salt);
+        (ydm, alreadyDeployed) = ROYCO_FACTORY.deployDeterministicContract(abi.encodePacked(creationCode, _ydmConstructorArgs), _salt);
     }
 
     /// @notice Deploys the senior-tranche impl, pinning its (asset, kernel) immutables

@@ -692,7 +692,7 @@ abstract contract DayMarketTestBase is Assertions {
             ydm = IYDM(address(new StaticCurveYDM(_targetUtilizationWAD)));
             initData = abi.encodeCall(StaticCurveYDM.initializeYDMForMarket, (_curve[0], _curve[1], _curve[2]));
         } else if (_kind == 2) {
-            ydm = IYDM(address(new AdaptiveCurveYDM_V2(_targetUtilizationWAD)));
+            ydm = IYDM(address(new AdaptiveCurveYDM_V2(_targetUtilizationWAD, 0.0001e18, 1e18, (100e18 / uint256(365 days)))));
             initData = abi.encodeCall(AdaptiveCurveYDM_V2.initializeYDMForMarket, (_curve[0], _curve[1], _curve[2]));
         } else {
             revert("DayMarketTestBase: unknown YDM kind");

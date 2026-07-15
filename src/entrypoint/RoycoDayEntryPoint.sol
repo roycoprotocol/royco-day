@@ -423,7 +423,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
             if (bonusAssets != ZERO_TRANCHE_UNITS) IERC20(config.asset).safeTransfer(msg.sender, toUint256(bonusAssets));
             // Scale the NAV at request time to the assets being deposited after remitting the bonus
             request.baseRequest.navAtRequestTime =
-                request.baseRequest.navAtRequestTime.mulDiv(_assetsToDeposit - bonusAssets, _assetsToDeposit, Math.Rounding.Floor);
+                request.baseRequest.navAtRequestTime.mulDiv((_assetsToDeposit - bonusAssets), _assetsToDeposit, Math.Rounding.Floor);
             // Deposit the remaining assets, forfeiting accrued yield as protocol fees
             _assetsToDeposit = _assetsToDeposit - bonusAssets;
             (trancheSharesMinted, protocolFeeShares) =
@@ -725,7 +725,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         if (_quoteAssets != 0) {
             bonusQuoteAssets = Math.mulDiv(_quoteAssets, _executorBonusWAD, WAD, Math.Rounding.Floor);
             address quoteAsset = IRoycoDayKernel(_kernel).QUOTE_ASSET();
-            IERC20(quoteAsset).safeTransfer(_receiver, _quoteAssets - bonusQuoteAssets);
+            IERC20(quoteAsset).safeTransfer(_receiver, (_quoteAssets - bonusQuoteAssets));
             if (bonusQuoteAssets != 0) IERC20(quoteAsset).safeTransfer(msg.sender, bonusQuoteAssets);
         }
     }

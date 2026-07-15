@@ -50,7 +50,7 @@ contract Test_AdaptiveCurveYDM_V1 is Test {
     // ---------------------------------------------------------------------
 
     function _deploy(uint256 target) internal returns (AdaptiveCurveYDM_V1) {
-        return new AdaptiveCurveYDM_V1(target);
+        return new AdaptiveCurveYDM_V1(target, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
     }
 
     /// Canonical curve: target=0.5, yT=0.2, yFull=0.8 => S=4e18. Clean powers of ten.
@@ -122,7 +122,7 @@ contract Test_AdaptiveCurveYDM_V1 is Test {
     /// A zero target utilization is rejected: the curve needs a positive kink to interpolate around
     function test_RevertIf_ConstructorTargetZero() public {
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
-        new AdaptiveCurveYDM_V1(0);
+        new AdaptiveCurveYDM_V1(0, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
     }
 
     /// One wei is the smallest accepted target utilization
@@ -140,13 +140,13 @@ contract Test_AdaptiveCurveYDM_V1 is Test {
     /// A target above WAD is meaningless (utilization is capped at WAD) and rejected
     function test_RevertIf_ConstructorTargetAboveWad() public {
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
-        new AdaptiveCurveYDM_V1(WAD + 1);
+        new AdaptiveCurveYDM_V1(WAD + 1, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
     }
 
     /// The extreme uint256 max target is rejected by the same gate
     function test_RevertIf_ConstructorTargetUintMax() public {
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
-        new AdaptiveCurveYDM_V1(type(uint256).max);
+        new AdaptiveCurveYDM_V1(type(uint256).max, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
     }
 
     /// The hardcoded model constants land in the immutables exactly as mirrored from source

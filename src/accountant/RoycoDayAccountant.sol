@@ -420,7 +420,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Also account for the effective dust tolerance required to preclude reverts due to rounding after JT redemptions
         // Additionally absorb the worst case inner-ceil rounding in the coverageUtilization computation
         surplusJTValue = state.jtEffectiveNAV
-            .saturatingSub(requiredJTValue + $.stNAVDustTolerance + (state.jtCoinvested ? $.jtNAVDustTolerance : ZERO_NAV_UNITS) + toNAVUnits(uint256(2)));
+            .saturatingSub((requiredJTValue + $.stNAVDustTolerance + (state.jtCoinvested ? $.jtNAVDustTolerance : ZERO_NAV_UNITS) + toNAVUnits(uint256(2))));
         if (surplusJTValue == ZERO_NAV_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         // Compute the total JT claim on NAV and preemptively return if zero

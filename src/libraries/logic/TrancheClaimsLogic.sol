@@ -99,7 +99,7 @@ library TrancheClaimsLogic {
         if (stAssetsToClaim + jtAssetsToClaim != ZERO_TRANCHE_UNITS) {
             // Do one batch transfer if they are the same asset, else do two separate transfers
             if (_immutables.stAsset == _immutables.jtAsset) {
-                IERC20(_immutables.stAsset).safeTransfer(_receiver, toUint256(stAssetsToClaim + jtAssetsToClaim));
+                IERC20(_immutables.stAsset).safeTransfer(_receiver, toUint256((stAssetsToClaim + jtAssetsToClaim)));
             } else {
                 if (stAssetsToClaim != ZERO_TRANCHE_UNITS) IERC20(_immutables.stAsset).safeTransfer(_receiver, toUint256(stAssetsToClaim));
                 if (jtAssetsToClaim != ZERO_TRANCHE_UNITS) IERC20(_immutables.jtAsset).safeTransfer(_receiver, toUint256(jtAssetsToClaim));

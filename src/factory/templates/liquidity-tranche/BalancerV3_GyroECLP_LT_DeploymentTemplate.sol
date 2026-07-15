@@ -116,8 +116,8 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
      * @custom:field jtCoinvested - Whether the junior tranche is co-invested in the same yield-bearing asset as the senior tranche
      * @custom:field accountant - The accountant initialization params (coverage, premiums, and state machine config)
      * @custom:field gyroECLPPoolParams - The Gyro E-CLP pool params for the liquidity tranche's `{ST_share, quote}` pool
-     * @custom:field jtYDMTargetUtilizationWAD - The junior tranche YDM's target coverage utilization, scaled to WAD
-     * @custom:field ltYDMTargetUtilizationWAD - The liquidity tranche LDM's target liquidity utilization, scaled to WAD
+     * @custom:field jtYdmConstructorArgs - The ABI-encoded constructor args for the junior tranche's YDM, per the selected model's constructor
+     * @custom:field ltYdmConstructorArgs - The ABI-encoded constructor args for the liquidity tranche's LDM, per the selected model's constructor
      * @custom:field ydmComponentId - The component id selecting the YDM model bytecode deployed for both the JT YDM and the LT LDM
      * @custom:field protocolFeeRecipient - The market's protocol fee recipient
      * @custom:field stSelfLiquidationBonusWAD - The ST self-liquidation bonus remitted to redeeming ST LPs once the liquidation coverage threshold is breached, scaled to WAD
@@ -135,8 +135,8 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         bool jtCoinvested;
         IRoycoDayAccountant.RoycoDayAccountantInitParams accountant;
         GyroECLPPoolParams gyroECLPPoolParams;
-        uint256 jtYDMTargetUtilizationWAD;
-        uint256 ltYDMTargetUtilizationWAD;
+        bytes jtYdmConstructorArgs;
+        bytes ltYdmConstructorArgs;
         bytes32 ydmComponentId;
         address protocolFeeRecipient;
         uint64 stSelfLiquidationBonusWAD;
@@ -262,8 +262,8 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
 
         // 2. Deploy the JT YDM (driven by coverage utilization) and the LT YDM / LDM (driven by liquidity utilization), each
         //    pinning its own target-utilization curve kink
-        (result.ydm,) = _deployYDM(_marketComponentSalt(p.marketId, TAG_YDM), p.jtYDMTargetUtilizationWAD, p.ydmComponentId);
-        (result.ltYdm,) = _deployYDM(_marketComponentSalt(p.marketId, TAG_LDM), p.ltYDMTargetUtilizationWAD, p.ydmComponentId);
+        (result.ydm,) = _deployYDM(_marketComponentSalt(p.marketId, TAG_YDM), p.jtYdmConstructorArgs, p.ydmComponentId);
+        (result.ltYdm,) = _deployYDM(_marketComponentSalt(p.marketId, TAG_LDM), p.ltYdmConstructorArgs, p.ydmComponentId);
 
         // 3. Deploy ST impl + proxy first — the pool needs ST_PROXY as one of its tokens
         address stImpl = _deploySeniorTrancheImpl(p.stAsset, result.kernel, _marketComponentSalt(p.marketId, TAG_ST_IMPL));

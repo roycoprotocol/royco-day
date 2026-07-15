@@ -89,6 +89,9 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     /// @notice Thrown when the BPT oracle prices a pool other than this market's registered liquidity tranche pool
     error BPT_ORACLE_POOL_MISMATCH();
 
+    /// @notice Thrown when a preview-mode venue callback returns instead of unwinding via its result-carrying revert
+    error PREVIEW_CAN_NEVER_MUTATE_STATE();
+
     /// @notice Constructs the Balancer V3 liquidity tranche quoter
     /// @param _balancerV3Vault The instance of the singleton Balancer V3 Vault
     constructor(IVault _balancerV3Vault) VaultGuard(_balancerV3Vault) {
@@ -191,10 +194,10 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
      */
     function previewAddLiquidity(uint256 _seniorShares, uint256 _quoteAssets) external override(IRoycoDayKernel) onlySelf returns (TRANCHE_UNIT ltAssets) {
         try _vault.unlock(abi.encodeCall(this.addBalancerV3Liquidity, (true, _seniorShares, _quoteAssets, ZERO_TRANCHE_UNITS))) {
-        // Unreachable: a preview-mode callback always unwinds via its result-carrying revert
-        }
-        catch (bytes memory callbackRevertData) {
-            _requirePreviewResult(callbackRevertData, BalancerV3VenueLogic.PREVIEW_ADD_LIQUIDITY_RESULT.selector);
+            // Unreachable: a preview-mode callback always unwinds via its result-carrying revert
+            revert PREVIEW_CAN_NEVER_MUTATE_STATE();
+        } catch (bytes memory callbackRevertData) {
+            _validatePreviewResult(callbackRevertData, BalancerV3VenueLogic.PREVIEW_ADD_LIQUIDITY_RESULT.selector);
             assembly ("memory-safe") {
                 ltAssets := mload(add(callbackRevertData, 0x24))
             }
@@ -210,31 +213,13 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
      */
     function previewRemoveLiquidity(TRANCHE_UNIT _ltAssets) external override(IRoycoDayKernel) onlySelf returns (uint256 stShares, uint256 quoteAssets) {
         try _vault.unlock(abi.encodeCall(this.removeBalancerV3Liquidity, (true, _ltAssets, uint256(0), uint256(0), address(0)))) {
-        // Unreachable: a preview-mode callback always unwinds via its result-carrying revert
-        }
-        catch (bytes memory callbackRevertData) {
-            _requirePreviewResult(callbackRevertData, BalancerV3VenueLogic.PREVIEW_REMOVE_LIQUIDITY_RESULT.selector);
+            // Unreachable: a preview-mode callback always unwinds via its result-carrying revert
+            revert PREVIEW_CAN_NEVER_MUTATE_STATE();
+        } catch (bytes memory callbackRevertData) {
+            _validatePreviewResult(callbackRevertData, BalancerV3VenueLogic.PREVIEW_REMOVE_LIQUIDITY_RESULT.selector);
             assembly ("memory-safe") {
                 stShares := mload(add(callbackRevertData, 0x24))
                 quoteAssets := mload(add(callbackRevertData, 0x44))
-            }
-        }
-    }
-
-    /**
-     * @dev Asserts that a caught preview revert carries the expected result, bubbling any genuine venue failure unchanged
-     * @param _callbackRevertData The revert data caught from the vault callback
-     * @param _expectedErrorSelector The expected preview result error selector
-     */
-    function _requirePreviewResult(bytes memory _callbackRevertData, bytes4 _expectedErrorSelector) internal pure {
-        bytes4 selector;
-        assembly ("memory-safe") {
-            selector := mload(add(_callbackRevertData, 0x20))
-        }
-        // Bubble any genuine venue failure unchanged
-        if (selector != _expectedErrorSelector) {
-            assembly ("memory-safe") {
-                revert(add(_callbackRevertData, 0x20), mload(_callbackRevertData))
             }
         }
     }
@@ -375,6 +360,28 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         _setMaxReinvestmentSlippage(_maxReinvestmentSlippageWAD);
     }
 
+    // =============================
+    // Internal Utility Functions
+    // =============================
+
+    /**
+     * @dev Asserts that a caught preview revert carries the expected result, bubbling any genuine venue failure unchanged
+     * @param _callbackRevertData The revert data caught from the vault callback
+     * @param _expectedErrorSelector The expected preview result error selector
+     */
+    function _validatePreviewResult(bytes memory _callbackRevertData, bytes4 _expectedErrorSelector) internal pure {
+        bytes4 selector;
+        assembly ("memory-safe") {
+            selector := mload(add(_callbackRevertData, 0x20))
+        }
+        // Bubble any genuine venue failure unchanged
+        if (selector != _expectedErrorSelector) {
+            assembly ("memory-safe") {
+                revert(add(_callbackRevertData, 0x20), mload(_callbackRevertData))
+            }
+        }
+    }
+
     /// @notice Sets the new BPT oracle
     /// @param _bptOracle The new manipulation-resistant balancer pool token (BPT) oracle
     function _setBPTOracle(address _bptOracle) internal {
@@ -390,6 +397,10 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         _getBalancerV3_LT_BPTOracle_QuoterStorage().maxReinvestmentSlippageWAD = _maxReinvestmentSlippageWAD;
         emit MaxReinvestmentSlippageUpdated(_maxReinvestmentSlippageWAD);
     }
+
+    // =============================
+    // State Accessor Functions
+    // =============================
 
     /**
      * @notice Builds the immutables carrier threaded into the Balancer V3 venue's delegatecall logic library

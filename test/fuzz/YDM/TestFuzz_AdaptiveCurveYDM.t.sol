@@ -53,7 +53,7 @@ contract TestFuzz_YieldShare_AdaptiveCurveYDM is Test {
         c.y0 = c.yT - bound(_spreadDown, 0, c.yT); // uniform over the feasible zero-utilization discounts incl. flat
         c.yFull = c.yT + bound(_spreadUp, 0, WAD - c.yT); // uniform over the feasible full-utilization premiums incl. flat
 
-        c.ydm = new AdaptiveCurveYDM_V2(c.targetU);
+        c.ydm = new AdaptiveCurveYDM_V2(c.targetU, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
         c.ydm.initializeYDMForMarket(uint64(c.y0), uint64(c.yT), uint64(c.yFull));
 
         // The deployment constants the envelope below is derived from, pinned against the live instance
