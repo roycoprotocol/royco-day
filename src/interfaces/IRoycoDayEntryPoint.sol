@@ -361,8 +361,6 @@ interface IRoycoDayEntryPoint {
 
     /**
      * @notice Pokes the tranche's oracle clock, checkpointing any pending source update
-     * @dev Permissionless: anyone may drive a tranche's clock directly, and an eth_call simulation reads the
-     *      timestamp the clock would report. A tranche with no configured clock is a no-op reporting zero
      * @param _tranche The tranche whose oracle clock to poke
      * @return lastUpdatedAt The clock's last update timestamp after the poke (zero when the tranche has no clock or it has observed no update yet)
      */

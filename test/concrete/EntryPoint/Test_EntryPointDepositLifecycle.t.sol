@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
+import { stdError } from "../../../lib/forge-std/src/StdError.sol";
 import { EntryPointTestBase, IERC20Like } from "../../utils/EntryPointTestBase.sol";
 
 /**
@@ -195,14 +197,37 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
 
         _executeDeposit(USER_A, USER_A, nonce, amount / 2);
         uint256 navAfter = toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime);
-        assertApproxEqAbs(navAfter, navBefore / 2, 1, "nav snapshot must scale pro-rata with the remaining assets");
+        // Exact floor: the remaining slice floors so the executed slice keeps the rounding, keeping forfeiture conservative
+        assertEq(navAfter, Math.mulDiv(navBefore, amount - (amount / 2), amount), "nav snapshot must floor-scale by the remaining assets");
+    }
+
+    function test_executeDeposit_maxSentinel_capacityBound_partialFillsAndQueuesRemainder() public {
+        // Request more than the market's deposit capacity: the sentinel must fill exactly the capacity and queue the rest
+        uint256 capacity = toUint256(seniorTranche.maxDeposit(address(entryPoint)));
+        assertGt(capacity, 0, "arrange: the market must have senior deposit capacity");
+        uint256 amount = capacity * 2;
+        (uint256 nonce,) = _requestDeposit(USER_A, address(seniorTranche), amount, USER_A, 0);
+        uint256 navBefore = toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime);
+        _warpPastDepositDelay();
+
+        uint256 minted = _executeDepositMax(USER_A, USER_A, nonce);
+        assertGt(minted, 0, "the capacity-bound fill must mint shares");
+        uint256 executed = amount - toUint256(entryPoint.getDepositRequest(USER_A, nonce).assets);
+        assertGt(executed, 0, "the sentinel must fill the market's capacity");
+        assertLt(executed, amount, "the capacity, not the request, must bind the fill");
+        assertEq(
+            toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime),
+            Math.mulDiv(navBefore, amount - executed, amount),
+            "the queued remainder's snapshot must floor-scale by the unfilled assets"
+        );
     }
 
     function test_executeDeposit_overExecutionReverts() public {
         uint256 amount = _depositAmount(address(juniorTranche));
         (uint256 nonce,) = _requestDepositDefault(USER_A, address(juniorTranche), amount);
         _warpPastDepositDelay();
-        vm.expectRevert();
+        // Specifically the escrow-remainder underflow: over-execution must never be admitted by an earlier gate
+        vm.expectRevert(stdError.arithmeticError);
         vm.prank(USER_A);
         entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(amount + 1));
     }

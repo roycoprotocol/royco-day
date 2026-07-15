@@ -338,6 +338,50 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
         vm.stopPrank();
     }
 
+    function test_execution_rejectsFutureReportingClock() public {
+        // The execution-gate poke is where the future check is load-bearing: a future timestamp trivially
+        // satisfies the strictly-after comparison, so it must fail shut before the gate ever reads it
+        _setOracleClock(address(chainlinkClock));
+        (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
+        vm.warp(block.timestamp + DEFAULT_DEPOSIT_DELAY + 1);
+        priceFeed.setUpdatedAt(block.timestamp + 1 days);
+
+        vm.expectRevert(IRoycoDayEntryPoint.ORACLE_CLOCK_IN_THE_FUTURE.selector);
+        vm.prank(USER_A);
+        entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(type(uint256).max));
+
+        // The standalone poke fails shut on the same clock
+        vm.expectRevert(IRoycoDayEntryPoint.ORACLE_CLOCK_IN_THE_FUTURE.selector);
+        entryPoint.pokeOracleClock(address(juniorTranche));
+
+        // An honest update reopens execution
+        priceFeed.setUpdatedAt(block.timestamp);
+        uint256 sharesMinted = _executeDepositMax(USER_A, USER_A, nonce);
+        assertGt(sharesMinted, 0, "an honest update must reopen execution");
+    }
+
+    function test_configAndExecutionPokes_emitOracleClockTick() public {
+        // The config-time poke announces the tick for each tranche it validates
+        (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
+        for (uint256 i = 0; i < configs.length; ++i) {
+            configs[i].oracleClock = address(chainlinkClock);
+        }
+        uint32 feedUpdatedAt = chainlinkClock.poke();
+        vm.expectEmit(address(entryPoint));
+        emit IRoycoDayEntryPoint.OracleClockTick(tranches[0], feedUpdatedAt);
+        vm.prank(ENTRY_POINT_ADMIN);
+        entryPoint.modifyTrancheConfigs(tranches, configs);
+
+        // The execution-gate poke announces the tick it opened on
+        (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
+        vm.warp(block.timestamp + DEFAULT_DEPOSIT_DELAY + 1);
+        priceFeed.setUpdatedAt(block.timestamp);
+        vm.expectEmit(address(entryPoint));
+        emit IRoycoDayEntryPoint.OracleClockTick(address(juniorTranche), uint32(block.timestamp));
+        vm.prank(USER_A);
+        entryPoint.executeDeposit(USER_A, nonce, toTrancheUnits(type(uint256).max));
+    }
+
     // ---------------------------------------------------------------------
     // Clock rotation: no pending request may open without a genuine update
     // ---------------------------------------------------------------------

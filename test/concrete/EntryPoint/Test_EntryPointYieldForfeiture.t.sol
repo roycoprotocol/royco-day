@@ -5,7 +5,7 @@ import { ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE } from "../../../src/factory/RolesConf
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
-import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
+import { EntryPointTestBase, IERC20Like } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
 
@@ -234,6 +234,96 @@ contract Test_EntryPointYieldForfeiture is EntryPointTestBase {
     // ---------------------------------------------------------------------
     // collectProtocolFees
     // ---------------------------------------------------------------------
+
+    // ---------------------------------------------------------------------
+    // The zero-NAV-snapshot edge: full forfeiture settles, never bricks
+    // ---------------------------------------------------------------------
+
+    function test_redemptionForfeiture_zeroNavRemainder_fullyForfeitsThroughBonusSplitAndBatch() public {
+        // A sub-par LP-token mark makes a one-share remainder's floor-scaled snapshot exactly zero
+        // (staged on the LT: senior-side losses would enter a fixed term and gate the queue; the position is
+        // acquired at par FIRST, since acquisition itself cushions the pool's mark)
+        // A small request slice keeps the near-total partial fill inside the market's liquidity gate
+        uint256 shares = _acquireTrancheShares(USER_A, address(liquidityTranche), 10e18) / 10;
+        uint256 siblingShares = _acquireTrancheShares(USER_A, address(liquidityTranche), 5e18);
+        applyLTPnL(-2000);
+        (uint256 dustNonce,) = _requestRedemption(USER_A, address(liquidityTranche), shares, USER_B, DEFAULT_EXECUTOR_BONUS);
+        (uint256 siblingNonce,) = _requestRedemption(USER_A, address(liquidityTranche), siblingShares, USER_B, DEFAULT_EXECUTOR_BONUS);
+        _warpPastRedemptionDelay();
+
+        // Execute all but one share, flooring the remainder's snapshot to zero
+        _executeRedemption(EXECUTOR, USER_A, dustNonce, shares - 1);
+        require(
+            toUint256(entryPoint.getRedemptionRequest(USER_A, dustNonce).baseRequest.navAtRequestTime) == 0,
+            "arrange: the remainder's snapshot must floor to zero"
+        );
+
+        // The mark recovers past par: the remainder reads as pure yield and forfeits whole
+        applyLTPnL(3000);
+
+        // A third-party batch containing the fully forfeited remainder settles BOTH requests: the zero-claims
+        // remainder pays the executor nothing, forfeits its share, and never poisons the sibling
+        address[] memory users = new address[](2);
+        users[0] = USER_A;
+        users[1] = USER_A;
+        uint256[] memory nonces = new uint256[](2);
+        nonces[0] = dustNonce;
+        nonces[1] = siblingNonce;
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = type(uint256).max;
+        amounts[1] = type(uint256).max;
+
+        vm.prank(EXECUTOR);
+        (AssetClaims[] memory claims,) = entryPoint.executeRedemptions(users, nonces, amounts);
+
+        assertEq(toUint256(claims[0].nav), 0, "the fully forfeited remainder must settle no claims");
+        assertGt(toUint256(claims[1].nav), 0, "the sibling request must settle normally in the same batch");
+        assertEq(entryPoint.getRedemptionRequest(USER_A, dustNonce).shares, 0, "the remainder must be consumed, not bricked");
+        assertGt(entryPoint.getProtocolFeeSharesPendingCollection(address(liquidityTranche)), 0, "the remainder must forfeit to the protocol");
+    }
+
+    function test_depositForfeiture_zeroNavRemainder_fullyForfeitsWithoutReverting() public {
+        // A near-wiped LP-token mark makes a 50-wei deposit remainder's floor-scaled snapshot exactly zero while
+        // leaving the remainder large enough to mint shares at the recovered mark (staged on the LT: senior-side
+        // losses would enter a fixed term; the assets are funded at par FIRST, since funding cushions the mark)
+        uint256 amount = 1e18;
+        _fundTrancheAssets(USER_A, address(liquidityTranche), amount);
+        applyLTPnL(-9900);
+        vm.startPrank(USER_A);
+        IERC20Like(address(bpt)).approve(address(entryPoint), amount);
+        (uint256 nonce,) = entryPoint.requestDeposit(address(liquidityTranche), toTrancheUnits(amount), USER_A, 0);
+        vm.stopPrank();
+        _warpPastDepositDelay();
+        _executeDeposit(USER_A, USER_A, nonce, amount - 50);
+        require(
+            toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime) == 0,
+            "arrange: the remainder's snapshot must floor to zero"
+        );
+
+        // The mark recovers: the remainder reads as pure yield, forfeits whole, and settles without a user transfer
+        applyLTPnL(20_000);
+        uint256 minted = _executeDepositMax(USER_A, USER_A, nonce);
+        assertEq(minted, 0, "a fully forfeited deposit remainder must mint the user nothing");
+        assertEq(toUint256(entryPoint.getDepositRequest(USER_A, nonce).assets), 0, "the remainder must be consumed, not bricked");
+        assertGt(entryPoint.getProtocolFeeSharesPendingCollection(address(liquidityTranche)), 0, "the remainder must forfeit to the protocol");
+    }
+
+    function test_redemptionForfeiture_thirdPartyExecution_lossPaysBonusAndForfeitsNothing() public {
+        // Staged on the LT: senior-side losses would enter a fixed term and gate the queue
+        uint256 shares = _acquireTrancheShares(USER_A, address(liquidityTranche), 10e18);
+        (uint256 nonce,) = _requestRedemption(USER_A, address(liquidityTranche), shares, USER_B, DEFAULT_EXECUTOR_BONUS);
+
+        // The escrowed shares depreciate while queued: no yield to forfeit, and the receiver bears the loss
+        applyLTPnL(-500);
+        _warpPastRedemptionDelay();
+
+        uint256 executorAssetsBefore = bpt.balanceOf(EXECUTOR);
+        _executeRedemptionMax(EXECUTOR, USER_A, nonce);
+
+        assertEq(entryPoint.getProtocolFeeSharesPendingCollection(address(liquidityTranche)), 0, "a loss must forfeit nothing");
+        assertGt(bpt.balanceOf(EXECUTOR) - executorAssetsBefore, 0, "the executor bonus must still pay on a depreciated redemption");
+        assertGt(bpt.balanceOf(USER_B), 0, "the receiver must get the post-bonus remainder");
+    }
 
     function test_collectProtocolFees_specificAndMaxSweep() public {
         // Accrue protocol fee shares via a deposit-queue forfeiture
