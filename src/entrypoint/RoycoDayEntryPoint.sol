@@ -87,12 +87,15 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         EnrichedTrancheConfig memory config = $.trancheToConfig[_tranche];
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
 
+        // Poke the tranche's oracle clock, folding any pending unobserved source update into the pre-request past
+        _pokeOracleClock(_tranche, config.baseConfig.oracleClock);
+
         // Register the user's deposit request with a fresh nonce
         DepositRequest storage request = $.userToNonceToDepositRequest[msg.sender][(requestNonce = ++$.lastRequestNonce)];
         request.assets = _assets;
         request.baseRequest = BaseRequest({
             tranche: _tranche,
-            oracleClockSnapshot: _observeOracleClock(config.baseConfig.oracleClock),
+            queuedAtTimestamp: uint32(block.timestamp),
             // Snapshot the NAV of the escrowed assets, used to forfeit any yield they accrue during the request lifecycle
             navAtRequestTime: _convertAssetsToNAV(config.kernel, config.trancheType, _assets),
             receiver: _receiver,
@@ -199,12 +202,15 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         EnrichedTrancheConfig memory config = $.trancheToConfig[_tranche];
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
 
+        // Poke the tranche's oracle clock, folding any pending unobserved source update into the pre-request past
+        _pokeOracleClock(_tranche, config.baseConfig.oracleClock);
+
         // Register the user's redemption request with a fresh nonce
         RedemptionRequest storage request = $.userToNonceToRedemptionRequest[msg.sender][(requestNonce = ++$.lastRequestNonce)];
         request.shares = _shares;
         request.baseRequest = BaseRequest({
             tranche: _tranche,
-            oracleClockSnapshot: _observeOracleClock(config.baseConfig.oracleClock),
+            queuedAtTimestamp: uint32(block.timestamp),
             // Snapshot the NAV of the escrowed shares, used to forfeit any yield they accrue during the request lifecycle
             navAtRequestTime: IRoycoVaultTranche(_tranche).convertToAssets(_shares).nav,
             receiver: _receiver,
@@ -286,6 +292,11 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     /// =============================
     /// Admin Functions
     /// =============================
+
+    /// @inheritdoc IRoycoDayEntryPoint
+    function pokeOracleClock(address _tranche) external override(IRoycoDayEntryPoint) whenNotPaused restricted returns (uint32 lastUpdatedAtTimestamp) {
+        return _pokeOracleClock(_tranche, _getRoycoDayEntryPointStorage().trancheToConfig[_tranche].baseConfig.oracleClock);
+    }
 
     /// @inheritdoc IRoycoDayEntryPoint
     function modifyTrancheConfigs(address[] calldata _tranches, TrancheConfig[] calldata _configs) external override(IRoycoDayEntryPoint) restricted {
@@ -479,9 +490,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
                 _redeemWithYieldForfeiture(tranche, _sharesToRedeem, request.baseRequest.navAtRequestTime, address(this));
 
             // Split the redeemed claims into the executor's bonus and the receiver's portion, then remit both
-            bonusClaims = _remitRedemptionAndBonusClaims(
-                config.trancheType, config.kernel, userClaims, request.baseRequest.executorBonusWAD, request.baseRequest.receiver
-            );
+            bonusClaims = _remitRedemptionAndBonusClaims(config.kernel, userClaims, request.baseRequest.executorBonusWAD, request.baseRequest.receiver);
         }
 
         // Emit the redemption execution event
@@ -490,8 +499,9 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
 
     /**
      * @dev Asserts that a request exists and is executable: not executed already or cancelled, past its delay, and
-     *      the tranche's oracle clock has observed at least one oracle update since the request was placed, so any
-     *      information known at request time is priced into the mark before execution
+     *      the tranche's oracle clock has observed at least one oracle update strictly after the request was queued,
+     *      so any information known at request time is priced into the mark before execution
+     *      A clock reporting no update yet (a zero timestamp) conservatively holds the gate shut
      * @param _requestNonce The nonce of the request being validated
      * @param _baseRequest The base request data shared across request types
      * @param _oracleClock The tranche's oracle clock (the null address disables the gate)
@@ -499,22 +509,24 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     function _validateRequestExecution(uint256 _requestNonce, BaseRequest memory _baseRequest, address _oracleClock) internal {
         // Ensure the request exists and the configured delay period has elapsed
         require(_baseRequest.executableAtTimestamp != 0 && _baseRequest.executableAtTimestamp <= block.timestamp, INVALID_REQUEST(_requestNonce));
-        // Ensure the tranche's oracle clock has observed an oracle update since the request was placed
-        if (_oracleClock == address(0) || _baseRequest.oracleClockSnapshot == 0) return;
-        require(IOracleClock(_oracleClock).poke() > _baseRequest.oracleClockSnapshot, ORACLE_CLOCK_NOT_ADVANCED(_requestNonce));
+        // Ensure the tranche's oracle clock has observed an oracle update strictly after the request was queued
+        require(
+            _oracleClock == address(0) || (_pokeOracleClock(_baseRequest.tranche, _oracleClock) > _baseRequest.queuedAtTimestamp),
+            ORACLE_CLOCK_NOT_ADVANCED(_requestNonce)
+        );
     }
 
     /**
-     * @dev Observes the tranche's oracle clock at request time, folding any pending unobserved oracle update into the
-     *      snapshot so a pre-request update can never satisfy the execution gate
-     * @param _oracleClock The tranche's oracle clock (the null address disables the gate)
-     * @return oracleClockSnapshot The clock timestamp observed for the request (zero when the tranche has no oracle clock)
+     * @dev Pokes the tranche's oracle clock
+     * @param _tranche The tranche whose oracle clock is being poked
+     * @param _oracleClock The tranche's oracle clock (the null address disables the gate and makes the poke a no-op)
+     * @return lastUpdatedAtTimestamp The clock's last update timestamp after the poke (zero when the tranche has no clock or it has observed no update yet)
      */
-    function _observeOracleClock(address _oracleClock) internal returns (uint32 oracleClockSnapshot) {
+    function _pokeOracleClock(address _tranche, address _oracleClock) internal returns (uint32 lastUpdatedAtTimestamp) {
         if (_oracleClock == address(0)) return 0;
-        oracleClockSnapshot = IOracleClock(_oracleClock).poke();
-        // A configured clock must be live: a zero snapshot would silently disable the execution gate for this request
-        require(oracleClockSnapshot != 0, ORACLE_CLOCK_NOT_LIVE());
+        // The clock must never report a future update timestamp: it would satisfy the execution gate without a genuine update
+        require((lastUpdatedAtTimestamp = IOracleClock(_oracleClock).poke()) <= block.timestamp, ORACLE_CLOCK_IN_THE_FUTURE());
+        emit OracleClockTick(_tranche, lastUpdatedAtTimestamp);
     }
 
     /**
@@ -603,10 +615,9 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
 
     /**
      * @dev Splits a redemption's claims into the executor's bonus and the receiver's portion, then remits both
-     *      The claim legs are transferred per tranche type: senior and junior tranche redemptions only ever carry the ST and JT
-     *      asset legs, and liquidity tranche redemptions only ever carry the LT asset and senior tranche share legs — the kernel's
-     *      claims derivation assigns legs categorically by tranche type, so the cross-type legs are structurally zero
-     * @param _trancheType The type of the tranche that was redeemed from
+     *      Transfers are gated on the receiver's post-bonus legs alone: the bonus floors every leg and the bonus
+     *      percentage is strictly under WAD, so a nonzero bonus leg implies a nonzero receiver leg — a zero receiver
+     *      leg therefore proves the whole leg is empty, and no bonus can be stranded behind the gate
      * @param _kernel The kernel of the market that the redeemed tranche belongs to, used to resolve the claim assets
      * @param _userClaims The redemption's total asset claims, reduced in place to the receiver's post-bonus portion
      * @param _executorBonusWAD The bonus percentage (0-100%) paid to the executor (the caller), scaled to WAD precision
@@ -614,7 +625,6 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
      * @return bonusClaims The asset claims remitted to the executor (the caller)
      */
     function _remitRedemptionAndBonusClaims(
-        TrancheType _trancheType,
         address _kernel,
         AssetClaims memory _userClaims,
         uint64 _executorBonusWAD,
@@ -626,45 +636,41 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         // Scale the asset claims to compute the executor bonus and the receiver's portion
         bonusClaims = TrancheClaimsLogic._scaleAssetClaims(_userClaims, _executorBonusWAD, WAD);
         // Deduct the NAV of the bonus claims from the user's claims
-        // NOTE: The individual asset claims are updated in the subsequent branches
+        _userClaims.stAssets = _userClaims.stAssets - bonusClaims.stAssets;
+        _userClaims.jtAssets = _userClaims.jtAssets - bonusClaims.jtAssets;
+        _userClaims.ltAssets = _userClaims.ltAssets - bonusClaims.ltAssets;
+        _userClaims.stShares = _userClaims.stShares - bonusClaims.stShares;
         _userClaims.nav = _userClaims.nav - bonusClaims.nav;
 
-        if (_trancheType != TrancheType.LIQUIDITY) {
-            // Deduct the ST and JT assets payed as an execution bonus from the user's claims
-            _userClaims.stAssets = _userClaims.stAssets - bonusClaims.stAssets;
-            _userClaims.jtAssets = _userClaims.jtAssets - bonusClaims.jtAssets;
+        // Transfer the ST and JT asset claims to the executor and receiver respectively
+        if (_userClaims.stAssets != ZERO_TRANCHE_UNITS || _userClaims.jtAssets != ZERO_TRANCHE_UNITS) {
             // Transfer the ST and JT asset claims to the executor and receiver respectively
             address stAsset = IRoycoDayKernel(_kernel).ST_ASSET();
             address jtAsset = IRoycoDayKernel(_kernel).JT_ASSET();
             // If ST and JT have the same asset, do a batch transfer, else, transfer them separately
             if (stAsset == jtAsset) {
-                TRANCHE_UNIT totalBonus = bonusClaims.stAssets + bonusClaims.jtAssets;
                 TRANCHE_UNIT totalUserAssets = _userClaims.stAssets + _userClaims.jtAssets;
+                TRANCHE_UNIT totalBonus = bonusClaims.stAssets + bonusClaims.jtAssets;
+                IERC20(stAsset).safeTransfer(_receiver, toUint256(totalUserAssets));
                 if (totalBonus != ZERO_TRANCHE_UNITS) IERC20(stAsset).safeTransfer(msg.sender, toUint256(totalBonus));
-                if (totalUserAssets != ZERO_TRANCHE_UNITS) IERC20(stAsset).safeTransfer(_receiver, toUint256(totalUserAssets));
             } else {
-                if (bonusClaims.stAssets != ZERO_TRANCHE_UNITS) IERC20(stAsset).safeTransfer(msg.sender, toUint256(bonusClaims.stAssets));
-                if (bonusClaims.jtAssets != ZERO_TRANCHE_UNITS) IERC20(jtAsset).safeTransfer(msg.sender, toUint256(bonusClaims.jtAssets));
                 if (_userClaims.stAssets != ZERO_TRANCHE_UNITS) IERC20(stAsset).safeTransfer(_receiver, toUint256(_userClaims.stAssets));
                 if (_userClaims.jtAssets != ZERO_TRANCHE_UNITS) IERC20(jtAsset).safeTransfer(_receiver, toUint256(_userClaims.jtAssets));
+                if (bonusClaims.stAssets != ZERO_TRANCHE_UNITS) IERC20(stAsset).safeTransfer(msg.sender, toUint256(bonusClaims.stAssets));
+                if (bonusClaims.jtAssets != ZERO_TRANCHE_UNITS) IERC20(jtAsset).safeTransfer(msg.sender, toUint256(bonusClaims.jtAssets));
             }
-        } else {
-            // Transfer the LT asset claims to the executor and receiver respectively
-            if (bonusClaims.ltAssets != ZERO_TRANCHE_UNITS || _userClaims.ltAssets != ZERO_TRANCHE_UNITS) {
-                address ltAsset = IRoycoDayKernel(_kernel).LT_ASSET();
-                // Deduct the LT assets payed as an execution bonus from the user's claims
-                _userClaims.ltAssets = _userClaims.ltAssets - bonusClaims.ltAssets;
-                if (bonusClaims.ltAssets != ZERO_TRANCHE_UNITS) IERC20(ltAsset).safeTransfer(msg.sender, toUint256(bonusClaims.ltAssets));
-                if (_userClaims.ltAssets != ZERO_TRANCHE_UNITS) IERC20(ltAsset).safeTransfer(_receiver, toUint256(_userClaims.ltAssets));
-            }
-            // Transfer the senior tranche share claims to the executor and receiver respectively
-            if (bonusClaims.stShares != 0 || _userClaims.stShares != 0) {
-                address seniorTranche = IRoycoDayKernel(_kernel).SENIOR_TRANCHE();
-                // Deduct the ST shares payed as an execution bonus from the user's claims
-                _userClaims.stShares = _userClaims.stShares - bonusClaims.stShares;
-                if (bonusClaims.stShares != 0) IERC20(seniorTranche).safeTransfer(msg.sender, bonusClaims.stShares);
-                if (_userClaims.stShares != 0) IERC20(seniorTranche).safeTransfer(_receiver, _userClaims.stShares);
-            }
+        }
+        // Transfer the LT asset claims to the executor and receiver respectively
+        if (_userClaims.ltAssets != ZERO_TRANCHE_UNITS) {
+            address ltAsset = IRoycoDayKernel(_kernel).LT_ASSET();
+            IERC20(ltAsset).safeTransfer(_receiver, toUint256(_userClaims.ltAssets));
+            if (bonusClaims.ltAssets != ZERO_TRANCHE_UNITS) IERC20(ltAsset).safeTransfer(msg.sender, toUint256(bonusClaims.ltAssets));
+        }
+        // Transfer the senior tranche share claims to the executor and receiver respectively
+        if (_userClaims.stShares != 0) {
+            address seniorTranche = IRoycoDayKernel(_kernel).SENIOR_TRANCHE();
+            IERC20(seniorTranche).safeTransfer(_receiver, _userClaims.stShares);
+            if (bonusClaims.stShares != 0) IERC20(seniorTranche).safeTransfer(msg.sender, bonusClaims.stShares);
         }
     }
 
@@ -689,9 +695,8 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
             address kernel = IRoycoFactory(ROYCO_FACTORY).trancheToKernel(tranche);
             require(kernel != address(0), INVALID_TRANCHE());
 
-            // A configured oracle clock must be live at configuration time so requests never queue against a dead clock
-            address oracleClock = _configs[i].oracleClock;
-            if (oracleClock != address(0)) require(IOracleClock(oracleClock).poke() != 0, ORACLE_CLOCK_NOT_LIVE());
+            // A configured oracle clock must never report a future update timestamp
+            _pokeOracleClock(tranche, _configs[i].oracleClock);
 
             // Set the tranche configuration
             $.trancheToConfig[tranche] = EnrichedTrancheConfig({

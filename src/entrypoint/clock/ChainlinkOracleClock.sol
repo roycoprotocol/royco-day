@@ -14,20 +14,15 @@ contract ChainlinkOracleClock is IOracleClock {
     /// @notice The Chainlink (compatible) oracle whose update timestamps this clock reports
     AggregatorV3Interface public immutable ORACLE;
 
-    /// @notice Thrown when the provided Chainlink (compatible) oracle returns an invalid update timestamp
-    error INVALID_ORACLE();
-
     /// @notice Constructs the clock over the specified Chainlink (compatible) oracle
     /// @param _oracle The Chainlink (compatible) oracle whose update timestamps this clock reports
     constructor(address _oracle) {
         // Set the immutable state
         ORACLE = AggregatorV3Interface(_oracle);
-        // Ensure that poking returns a valid update timestamp
-        require(poke() > 0, INVALID_ORACLE());
     }
 
     /// @inheritdoc IOracleClock
-    function poke() public view override(IOracleClock) returns (uint32 lastUpdatedAt) {
+    function poke() external view override(IOracleClock) returns (uint32 lastUpdatedAt) {
         (,,, uint256 updatedAt,) = ORACLE.latestRoundData();
         return uint32(updatedAt);
     }

@@ -77,7 +77,7 @@ interface IRoycoDayEntryPoint {
     /**
      * @notice Base request data shared across deposit and redemption requests
      * @custom:field tranche - The Royco tranche that this request is for
-     * @custom:field oracleClockSnapshot - The oracle clock timestamp observed when the request was placed (zero when the tranche had no oracle clock)
+     * @custom:field queuedAtTimestamp - The timestamp at which the request was queued: execution requires the tranche's oracle clock to report an update strictly after it
      * @custom:field executableAtTimestamp - The timestamp after which the request can be executed
      * @custom:field executorBonusWAD - The bonus percentage (0-100%) paid to third-party executors, scaled to WAD precision
      *                                  Set to type(uint64).max to restrict execution to the request owner only
@@ -86,7 +86,7 @@ interface IRoycoDayEntryPoint {
      */
     struct BaseRequest {
         address tranche;
-        uint32 oracleClockSnapshot;
+        uint32 queuedAtTimestamp;
         uint32 executableAtTimestamp;
         uint64 executorBonusWAD;
         address receiver;
@@ -185,6 +185,13 @@ interface IRoycoDayEntryPoint {
     event TrancheConfigUpdated(address indexed tranche, TrancheConfig config);
 
     /**
+     * @notice Emitted when a tranche's oracle clock is poked
+     * @param tranche The tranche whose oracle clock was poked
+     * @param lastUpdateTimestamp The clock's last update timestamp after the poke
+     */
+    event OracleClockTick(address indexed tranche, uint32 lastUpdateTimestamp);
+
+    /**
      * @notice Emitted when protocol fee shares are collected
      * @param tranche The tranche from which protocol fee shares were collected
      * @param receiver The address that received the collected shares
@@ -210,8 +217,8 @@ interface IRoycoDayEntryPoint {
     /// @dev Thrown when executing a request before the tranche's oracle clock has observed an oracle update after the request was placed
     error ORACLE_CLOCK_NOT_ADVANCED(uint256 requestNonce);
 
-    /// @dev Thrown when configuring or requesting against a tranche whose oracle clock reports a zero update timestamp
-    error ORACLE_CLOCK_NOT_LIVE();
+    /// @dev Thrown when configuring or requesting against a tranche whose oracle clock reports a future update timestamp
+    error ORACLE_CLOCK_IN_THE_FUTURE();
 
     /// @dev Thrown when the executor bonus is not strictly less than 100% (WAD) and is not the opt-out sentinel value
     error INVALID_EXECUTOR_BONUS();
@@ -333,6 +340,15 @@ interface IRoycoDayEntryPoint {
      * @param _receiver The address to receive the returned escrowed shares
      */
     function cancelRedemptionRequest(uint256 _requestNonce, address _receiver) external;
+
+    /**
+     * @notice Pokes the tranche's oracle clock, checkpointing any pending source update
+     * @dev Permissionless: anyone may drive a tranche's clock directly, and an eth_call simulation reads the
+     *      timestamp the clock would report. A tranche with no configured clock is a no-op reporting zero
+     * @param _tranche The tranche whose oracle clock to poke
+     * @return lastUpdatedAt The clock's last update timestamp after the poke (zero when the tranche has no clock or it has observed no update yet)
+     */
+    function pokeOracleClock(address _tranche) external returns (uint32 lastUpdatedAt);
 
     /**
      * @notice Modifies the entry point configuration for the specified tranches

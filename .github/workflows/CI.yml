@@ -38,8 +38,14 @@ jobs:
         id: deps-cache
         uses: actions/cache@v4
         with:
-          path: lib
-          key: forge-deps-${{ runner.os }}-${{ steps.submodule-key.outputs.hash }}
+          # lib/ holds the submodule worktrees and .git/modules holds their git directories (each
+          # lib/*/.git is a gitdir pointer file into .git/modules). Both must be cached together:
+          # restoring the worktrees alone leaves the pointers dangling, and forge then fails to
+          # resolve each dependency's git revision ("Failed to get git revision" warnings).
+          path: |
+            lib
+            .git/modules
+          key: forge-deps-v2-${{ runner.os }}-${{ steps.submodule-key.outputs.hash }}
 
       - name: Install submodule dependencies
         if: steps.deps-cache.outputs.cache-hit != 'true'

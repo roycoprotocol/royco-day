@@ -308,7 +308,7 @@ contract DeployEntryPointScript is EntryPointDeploymentConfig, AccessManagerConf
     // ═══════════════════════════════════════════════════════════════════════════
 
     function _buildLPSelectors() internal pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](10);
+        selectors = new bytes4[](11);
         selectors[0] = IRoycoDayEntryPoint.requestDeposit.selector;
         selectors[1] = IRoycoDayEntryPoint.executeDeposit.selector;
         selectors[2] = IRoycoDayEntryPoint.executeDeposits.selector;
@@ -319,6 +319,7 @@ contract DeployEntryPointScript is EntryPointDeploymentConfig, AccessManagerConf
         selectors[7] = IRoycoDayEntryPoint.executeRedemptions.selector;
         selectors[8] = IRoycoDayEntryPoint.cancelRedemptionRequest.selector;
         selectors[9] = IRoycoDayEntryPoint.cancelRedemptionRequests.selector;
+        selectors[10] = IRoycoDayEntryPoint.pokeOracleClock.selector;
     }
 
     /// @dev Unpacks TrancheInitConfig[] into separate arrays for the initialize call

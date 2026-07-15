@@ -2,17 +2,17 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
-import { AssetClaims, TrancheType } from "../../../src/libraries/Types.sol";
+import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { EntryPointRemitClaimsHarness, MockKernelAssets } from "../../mocks/EntryPointRemitClaimsHarness.sol";
 import { MockERC20C } from "../../mocks/MockERC20C.sol";
 
 /**
  * @title Test_EntryPointRemitClaims
- * @notice Unit-pins the claim-remittance matrix of _remitRedemptionAndBonusClaims: the bonus split, the tranche-type
- *         leg branching (ST/JT redemptions carry only asset legs, LT redemptions carry only the LT and senior-share
- *         legs), and the DIFFERENT-asset ST/JT branch that the shipped identical-ST/JT-asset kernel family can never
- *         produce through a real market
+ * @notice Unit-pins the claim-remittance matrix of _remitRedemptionAndBonusClaims: the bonus split, the per-leg
+ *         transfer gating (every nonzero leg is paid, gated on the receiver's post-bonus portion alone), and the
+ *         DIFFERENT-asset ST/JT branch that the shipped identical-ST/JT-asset kernel family can never produce
+ *         through a real market
  */
 contract Test_EntryPointRemitClaims is Test {
     uint64 internal constant TEN_PERCENT_WAD = 0.1e18;
@@ -50,14 +50,14 @@ contract Test_EntryPointRemitClaims is Test {
         if (_stShares != 0) seniorShare.mint(address(harness), _stShares);
     }
 
-    function test_remit_seniorType_differentAssets_transfersEachLegSeparately() public {
+    function test_remit_differentAssets_transfersEachLegSeparately() public {
         MockKernelAssets kernel = new MockKernelAssets(address(stAsset), address(jtAsset), address(ltAsset), address(seniorShare));
         _fundHarness(110, 220, 0, 0);
 
         // A 10% bonus on totals (110, 220): the executor gets (11, 22) and the receiver gets the (99, 198) remainder
         vm.prank(EXECUTOR);
         (AssetClaims memory bonusClaims, AssetClaims memory userClaims) =
-            harness.remitRedemptionAndBonusClaims(TrancheType.SENIOR, address(kernel), _claims(110, 220, 0, 0), TEN_PERCENT_WAD, RECEIVER);
+            harness.remitRedemptionAndBonusClaims(address(kernel), _claims(110, 220, 0, 0), TEN_PERCENT_WAD, RECEIVER);
 
         assertEq(stAsset.balanceOf(RECEIVER), 99, "receiver ST asset leg");
         assertEq(jtAsset.balanceOf(RECEIVER), 198, "receiver JT asset leg");
@@ -69,23 +69,23 @@ contract Test_EntryPointRemitClaims is Test {
         assertEq(toUint256(userClaims.jtAssets), 198, "returned user JT leg");
     }
 
-    function test_remit_seniorType_sameAsset_batchesStAndJtLegs() public {
+    function test_remit_sameAsset_batchesStAndJtLegs() public {
         MockKernelAssets kernel = new MockKernelAssets(address(stAsset), address(stAsset), address(ltAsset), address(seniorShare));
         _fundHarness(330, 0, 0, 0);
 
         vm.prank(EXECUTOR);
-        harness.remitRedemptionAndBonusClaims(TrancheType.SENIOR, address(kernel), _claims(110, 220, 0, 0), TEN_PERCENT_WAD, RECEIVER);
+        harness.remitRedemptionAndBonusClaims(address(kernel), _claims(110, 220, 0, 0), TEN_PERCENT_WAD, RECEIVER);
 
         assertEq(stAsset.balanceOf(RECEIVER), 297, "receiver must get one batched ST+JT transfer");
         assertEq(stAsset.balanceOf(EXECUTOR), 33, "executor must get one batched ST+JT transfer");
     }
 
-    function test_remit_liquidityType_transfersLtAndSeniorShareLegs() public {
+    function test_remit_transfersLtAndSeniorShareLegs() public {
         MockKernelAssets kernel = new MockKernelAssets(address(stAsset), address(jtAsset), address(ltAsset), address(seniorShare));
         _fundHarness(0, 0, 300, 400);
 
         vm.prank(EXECUTOR);
-        harness.remitRedemptionAndBonusClaims(TrancheType.LIQUIDITY, address(kernel), _claims(0, 0, 300, 400), TEN_PERCENT_WAD, RECEIVER);
+        harness.remitRedemptionAndBonusClaims(address(kernel), _claims(0, 0, 300, 400), TEN_PERCENT_WAD, RECEIVER);
 
         assertEq(ltAsset.balanceOf(RECEIVER), 270, "receiver LT asset leg");
         assertEq(seniorShare.balanceOf(RECEIVER), 360, "receiver senior share leg");
@@ -98,7 +98,7 @@ contract Test_EntryPointRemitClaims is Test {
         _fundHarness(100, 200, 0, 0);
 
         vm.prank(EXECUTOR);
-        harness.remitRedemptionAndBonusClaims(TrancheType.JUNIOR, address(kernel), _claims(100, 200, 0, 0), 0, RECEIVER);
+        harness.remitRedemptionAndBonusClaims(address(kernel), _claims(100, 200, 0, 0), 0, RECEIVER);
 
         assertEq(stAsset.balanceOf(RECEIVER), 100, "receiver must get the full ST leg under a zero bonus");
         assertEq(jtAsset.balanceOf(RECEIVER), 200, "receiver must get the full JT leg under a zero bonus");
@@ -109,26 +109,25 @@ contract Test_EntryPointRemitClaims is Test {
         // The harness holds NO tokens: any attempted transfer would revert, so success proves every leg was skipped
         MockKernelAssets kernel = new MockKernelAssets(address(stAsset), address(jtAsset), address(ltAsset), address(seniorShare));
         vm.prank(EXECUTOR);
-        harness.remitRedemptionAndBonusClaims(TrancheType.SENIOR, address(kernel), _claims(0, 0, 0, 0), TEN_PERCENT_WAD, RECEIVER);
-        vm.prank(EXECUTOR);
-        harness.remitRedemptionAndBonusClaims(TrancheType.LIQUIDITY, address(kernel), _claims(0, 0, 0, 0), TEN_PERCENT_WAD, RECEIVER);
+        harness.remitRedemptionAndBonusClaims(address(kernel), _claims(0, 0, 0, 0), TEN_PERCENT_WAD, RECEIVER);
     }
 
-    function test_remit_crossTypeLegs_areNotTransferred() public {
-        // The kernel's claims derivation assigns legs categorically by tranche type, so the cross-type legs are
-        // structurally zero — the remitter only touches the type's own legs. The harness holds NO cross-type tokens:
-        // success proves a (structurally impossible) cross-type leg is never transferred rather than reverting on it
+    function test_remit_everyNonZeroLegIsPaid_legDrivenNotTypeDriven() public {
+        // The remitter is leg-driven: every nonzero leg is split and paid regardless of which tranche type produced
+        // the claims (the kernel's categorical derivation makes cross-type legs structurally zero in production, so
+        // relying on the type bought nothing — and a hypothetical cross-type leg is paid out rather than stranded)
         MockKernelAssets kernel = new MockKernelAssets(address(stAsset), address(jtAsset), address(ltAsset), address(seniorShare));
-        _fundHarness(110, 220, 0, 0);
+        _fundHarness(110, 220, 300, 400);
         vm.prank(EXECUTOR);
-        harness.remitRedemptionAndBonusClaims(TrancheType.SENIOR, address(kernel), _claims(110, 220, 300, 400), TEN_PERCENT_WAD, RECEIVER);
-        assertEq(ltAsset.balanceOf(RECEIVER), 0, "a senior-type remit must not touch the LT leg");
-        assertEq(seniorShare.balanceOf(RECEIVER), 0, "a senior-type remit must not touch the senior-share leg");
+        harness.remitRedemptionAndBonusClaims(address(kernel), _claims(110, 220, 300, 400), TEN_PERCENT_WAD, RECEIVER);
 
-        _fundHarness(0, 0, 300, 400);
-        vm.prank(EXECUTOR);
-        harness.remitRedemptionAndBonusClaims(TrancheType.LIQUIDITY, address(kernel), _claims(100, 200, 300, 400), TEN_PERCENT_WAD, RECEIVER);
-        assertEq(ltAsset.balanceOf(RECEIVER), 270, "the liquidity-type remit must pay the LT leg");
-        assertEq(stAsset.balanceOf(EXECUTOR), 11, "the ST balance must only reflect the earlier senior-type remit");
+        assertEq(stAsset.balanceOf(RECEIVER), 99, "receiver ST asset leg");
+        assertEq(jtAsset.balanceOf(RECEIVER), 198, "receiver JT asset leg");
+        assertEq(ltAsset.balanceOf(RECEIVER), 270, "receiver LT asset leg");
+        assertEq(seniorShare.balanceOf(RECEIVER), 360, "receiver senior share leg");
+        assertEq(stAsset.balanceOf(EXECUTOR), 11, "executor ST asset leg");
+        assertEq(jtAsset.balanceOf(EXECUTOR), 22, "executor JT asset leg");
+        assertEq(ltAsset.balanceOf(EXECUTOR), 30, "executor LT asset leg");
+        assertEq(seniorShare.balanceOf(EXECUTOR), 40, "executor senior share leg");
     }
 }

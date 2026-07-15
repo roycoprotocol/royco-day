@@ -118,6 +118,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
             ),
             PUBLIC_ROLE
         );
+        accessManager.setTargetFunctionRole(ep, _sels(IRoycoDayEntryPoint.pokeOracleClock.selector), PUBLIC_ROLE);
         accessManager.setTargetFunctionRole(ep, _sels(IRoycoDayEntryPoint.modifyTrancheConfigs.selector), ADMIN_ENTRY_POINT_ROLE);
         accessManager.setTargetFunctionRole(ep, _sels(IRoycoDayEntryPoint.collectProtocolFees.selector), ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE);
         accessManager.setTargetFunctionRole(ep, _sels(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
@@ -148,10 +149,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         configs = new IRoycoDayEntryPoint.TrancheConfig[](3);
         for (uint256 i = 0; i < 3; ++i) {
             configs[i] = IRoycoDayEntryPoint.TrancheConfig({
-                enabled: true,
-                depositDelaySeconds: DEFAULT_DEPOSIT_DELAY,
-                redemptionDelaySeconds: DEFAULT_REDEMPTION_DELAY,
-                oracleClock: address(0)
+                enabled: true, depositDelaySeconds: DEFAULT_DEPOSIT_DELAY, redemptionDelaySeconds: DEFAULT_REDEMPTION_DELAY, oracleClock: address(0)
             });
         }
     }
