@@ -337,7 +337,7 @@ library RedemptionLogic {
         claimOnSTNAV = IRoycoDayKernel(address(this)).stConvertTrancheUnitsToNAVUnits(stClaims.stAssets);
         claimOnJTNAV = IRoycoDayKernel(address(this)).jtConvertTrancheUnitsToNAVUnits(stClaims.jtAssets);
 
-        // Bound the claims by the max withdrawable assets globally for each tranche and compute the cumulative NAV
+        // The max withdrawable assets globally for each tranche is its entire raw NAV (ST redemptions are otherwise unrestricted in a PERPETUAL state)
         stMaxWithdrawableNAV = ValuationLogic._getSeniorTrancheRawNAV($);
         jtMaxWithdrawableNAV = ValuationLogic._getJuniorTrancheRawNAV($);
     }
@@ -350,7 +350,7 @@ library RedemptionLogic {
      * @return claimOnJTNAV The notional claims on JT assets that the junior tranche has denominated in kernel's NAV units
      * @return stMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the senior tranche, denominated in the kernel's NAV units
      * @return jtMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the junior tranche, denominated in the kernel's NAV units
-     * @return totalTrancheShares The total number of shares that exist in the junior tranche after minting any protocol fee shares post-sync, including virtual shares
+     * @return totalTrancheShares The total number of shares that exist in the junior tranche after minting any protocol fee shares post-sync
      */
     function jtMaxWithdrawable(
         IRoycoDayKernel.RoycoDayKernelState storage $,

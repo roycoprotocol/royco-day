@@ -105,7 +105,7 @@ abstract contract BaseAdaptiveCurveYDM is BaseYDM {
         // Retrieve the concrete model's yield share at target and last adaptation timestamp for the market
         (uint256 initialYieldShareAtTargetWAD, uint256 lastAdaptationTimestamp) = _readAdaptiveCurve();
         require(initialYieldShareAtTargetWAD != 0, UNINITIALIZED_YDM());
-        // Only adapt the curve if the market is in a perpetual state and market forces are enabled to affect utilization
+        // Only adapt the curve if the market is in a perpetual state, where market forces can affect utilization
         uint256 avgYieldShareAtTargetWAD;
         if (_marketState == MarketState.PERPETUAL) {
             // Compute the adaptation speed based on the normalized delta: scale the boundary adaptation speed by the relative delta from the target based on the region

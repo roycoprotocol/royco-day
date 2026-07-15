@@ -68,7 +68,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         (bool factoryIsAdmin,) = am.hasRole(ADMIN_ROLE, address(this));
         require(factoryIsAdmin, FACTORY_NOT_ADMIN_ON_ACCESS_MANAGER());
 
-        // Wire the factory's authority the specified access manager
+        // Wire the factory's authority to the specified access manager
         __RoycoBase_init(_roycoAccessManager);
 
         // Bind factory-level gated selectors to their roles

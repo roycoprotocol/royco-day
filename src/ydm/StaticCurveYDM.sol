@@ -58,7 +58,7 @@ contract StaticCurveYDM is BaseYDM {
 
     /**
      * @notice Sets the per-instance target utilization (the kink) shared by every market this YDM serves
-     * @dev Must be greater than zero so the curve regions are well defined when utilization is zero, concrete models may further constrain it
+     * @dev Must be greater than zero so the curve regions are well defined when utilization is zero
      * @param _targetUtilizationWAD The target utilization (the kink) for this model, in the range (0, 100%], scaled to WAD precision
      */
     constructor(uint256 _targetUtilizationWAD) BaseYDM(_targetUtilizationWAD) { }
@@ -79,7 +79,7 @@ contract StaticCurveYDM is BaseYDM {
             INVALID_YDM_INITIALIZATION()
         );
 
-        // Initialize the YDM curve for this market (2 SSTOREs: slot0 = y0 + slopeLt, slot1 = yT + slopeGte)
+        // Initialize the YDM curve for this market (all four fields pack into one storage slot)
         StaticYieldCurve storage curve = accountantToCurve[msg.sender];
         curve.yieldShareAtZeroUtilWAD = _yieldShareAtZeroUtilWAD;
         curve.slopeLtTargetUtilWAD = _computeSlope(_yieldShareAtZeroUtilWAD, _yieldShareAtTargetWAD, 0, TARGET_UTILIZATION_WAD);

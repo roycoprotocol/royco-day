@@ -23,7 +23,7 @@ import {
  * @notice Abstract base every Royco protocol template inherits from, standardizing:
  *           - Component param shapes (ST / JT / Accountant / YDM) so concrete templates
  *             share a vocabulary for the bits that don't vary across recipes
- *           - SSTORE2-backed bytecode storage loaded once via factory-driven `initialize`
+ *           - SSTORE2-backed bytecode storage loaded once via the deployer-driven `initialize` before factory registration
  *           - Salt-derivation helper (`_marketComponentSalt`)
  *           - Internal deployment helpers that call back into the factory's primitives
  *           - A declarative role-bindings struct + a generic `_applyRoleBindings` loop
@@ -145,7 +145,7 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
      *         same address regardless of template
      * @param _marketId Caller-supplied stable identifier for the market
      * @param _componentTag E.g. `bytes32("ST")`, `bytes32("JT")`, `bytes32("KERNEL")`,
-     *        `bytes32("ACCOUNTANT")`, `bytes32("HOOKS")`
+     *        `bytes32("ACCOUNTANT")`, `bytes32("BALANCER_HOOK")`
      */
     function _marketComponentSalt(bytes32 _marketId, bytes32 _componentTag) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked("ROYCO_MARKET_", _marketId, _componentTag));

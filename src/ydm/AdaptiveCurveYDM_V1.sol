@@ -51,7 +51,7 @@ contract AdaptiveCurveYDM_V1 is BaseAdaptiveCurveYDM {
     event YdmAdaptedOutput(address indexed accountant, uint256 avgYieldShareWAD, uint256 newYieldShareAtTargetWAD);
 
     /**
-     * @notice Sets the per-instance target utilization (the kink) and adaptation bounds shared by every market this YDM serves
+     * @notice Sets the per-instance target utilization (the kink), the bounds on the adaptive yield share at target, and the boundary adaptation speed shared by every market this YDM serves
      * @dev Must be greater than zero so the curve regions are well defined when utilization is zero
      * @param _targetUtilizationWAD The target utilization (the kink) for this model, in the range (0, 100%], scaled to WAD precision
      * @param _minYieldShareAtTargetWAD The minimum yield share at target utilization, in the range (0, _maxYieldShareAtTargetWAD], scaled to WAD precision
