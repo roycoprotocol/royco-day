@@ -147,6 +147,22 @@ abstract contract BaseAdaptiveCurveYDM is BaseYDM {
     }
 
     /**
+     * @notice Validates the curve anchors an adaptive market initializes with: the yield share at target sits within the market's
+     *         adaptive bounds, and the curve is monotonic across the zero, target, and full utilization anchors
+     * @param _yieldShareAtZeroUtilWAD The initial yield share at 0% utilization, scaled to WAD precision
+     * @param _yieldShareAtTargetUtilWAD The initial yield share at target utilization, scaled to WAD precision
+     * @param _yieldShareAtFullUtilWAD The initial yield share at 100% utilization, scaled to WAD precision
+     */
+    function _validateYDMInitialization(uint256 _yieldShareAtZeroUtilWAD, uint256 _yieldShareAtTargetUtilWAD, uint256 _yieldShareAtFullUtilWAD) internal view {
+        require(
+            _yieldShareAtTargetUtilWAD >= MIN_YIELD_SHARE_AT_TARGET_WAD && _yieldShareAtTargetUtilWAD <= MAX_YIELD_SHARE_AT_TARGET_WAD
+                && _yieldShareAtZeroUtilWAD <= _yieldShareAtTargetUtilWAD && _yieldShareAtTargetUtilWAD <= _yieldShareAtFullUtilWAD
+                && _yieldShareAtFullUtilWAD <= WAD,
+            INVALID_YDM_INITIALIZATION()
+        );
+    }
+
+    /**
      * @notice Computes the concrete model's curve output at the current utilization
      * @param _normalizedDeltaFromTargetWAD The normalized signed distance of the current utilization from the target, in [-WAD, WAD]
      * @param _avgYieldShareAtTargetWAD The time-averaged yield share at target over the elapsed period, scaled to WAD precision

@@ -75,11 +75,8 @@ contract AdaptiveCurveYDM_V1 is BaseAdaptiveCurveYDM {
      */
     function initializeYDMForMarket(uint64 _yieldShareAtTargetUtilWAD, uint64 _yieldShareAtFullUtilWAD) external {
         // Ensure that the initial YDM curve is valid
-        require(
-            _yieldShareAtTargetUtilWAD >= MIN_YIELD_SHARE_AT_TARGET_WAD && _yieldShareAtTargetUtilWAD <= MAX_YIELD_SHARE_AT_TARGET_WAD
-                && _yieldShareAtTargetUtilWAD <= _yieldShareAtFullUtilWAD && _yieldShareAtFullUtilWAD <= WAD,
-            INVALID_YDM_INITIALIZATION()
-        );
+        // This YDM derives its zero-utilization anchor from the steepness rather than taking it as an input which is guaranteed to be less than or equal to the yield share at target utilization, so it passes 0 to trivially clear the zero-below-target check
+        _validateYDMInitialization(0, _yieldShareAtTargetUtilWAD, _yieldShareAtFullUtilWAD);
 
         // Initialize the YDM curve for this market
         AdaptiveYieldCurve storage curve = accountantToCurve[msg.sender];
