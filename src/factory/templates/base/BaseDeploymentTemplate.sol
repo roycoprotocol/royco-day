@@ -35,7 +35,7 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
 
     /**
      * @notice Thrown when a market component (everything except YDM) was already deployed at
-     *         its CREATE3 address — signals a `marketId` collision that would re-use the
+     *         its CREATE3 address, signals a `marketId` collision that would re-use the
      *         pre-existing contract instead of producing a fresh market
      */
     error MARKET_COMPONENT_ALREADY_DEPLOYED(address deployedAt, bytes32 salt);
@@ -46,7 +46,7 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
 
     /**
      * @notice One target's selector→role map
-     * @dev `selectors[i]` is bound to `roleIds[i]` — lengths must match
+     * @dev `selectors[i]` is bound to `roleIds[i]`, lengths must match
      * @custom:field target - The contract whose functions are being access-gated
      * @custom:field selectors - The function selectors on `target` to bind, index-aligned with `roleIds`
      * @custom:field roleIds - The role id required to call each corresponding selector, index-aligned with `selectors`
@@ -90,7 +90,7 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
     // STORAGE
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev SSTORE2 pointer table — one pointer per component ID, set during `initialize`
+    /// @dev SSTORE2 pointer table, one pointer per component ID, set during `initialize`
     mapping(bytes32 componentId => address sstore2Pointer) private _bytecodePointers;
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -141,7 +141,7 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Per-market component salt — same `(marketId, componentTag)` always produces the
+     * @notice Per-market component salt, same `(marketId, componentTag)` always produces the
      *         same address regardless of template
      * @param _marketId Caller-supplied stable identifier for the market
      * @param _componentTag E.g. `bytes32("ST")`, `bytes32("JT")`, `bytes32("KERNEL")`,
@@ -164,8 +164,8 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
 
     /**
      * @notice Deploys an impl whose creation code lives at `_componentId`, with no constructor args
-     * @dev Reverts if a contract already exists at the CREATE3 address — every market component
-     *      must be a fresh deployment — the YDM is the only exception and uses `_deployYDM`
+     * @dev Reverts if a contract already exists at the CREATE3 address, every market component
+     *      must be a fresh deployment, the YDM is the only exception and uses `_deployYDM`
      */
     function _deployImpl(bytes32 _componentId, bytes32 _salt) internal returns (address impl) {
         return _deployImpl(_componentId, "", _salt);
@@ -190,9 +190,9 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
 
     /**
      * @notice Deploys a YDM instance of the selected component type at the caller-supplied salt, pinning its model-specific constructor params
-     * @dev The registered creation code is the bare YDM bytecode for `_ydmComponentId` — the constructor args are appended here
+     * @dev The registered creation code is the bare YDM bytecode for `_ydmComponentId`, the constructor args are appended here
      *      (per market) rather than baked into the registered creation code, ABI-encoded per the selected model's constructor
-     *      (the static curve takes its target utilization; the adaptive curves additionally take their adaptation bounds and speed)
+     *      (the static curve takes its target utilization, and the adaptive curves additionally take their adaptation bounds and speed)
      * @dev An unregistered YDM component id reverts loud in `_readCreationCode` (CREATION_CODE_NOT_SET), so an unsupported type can never silently deploy the wrong model
      * @param _salt The CREATE3 salt for this YDM instance
      * @param _ydmConstructorArgs The ABI-encoded constructor args for the selected YDM model
@@ -228,7 +228,7 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Builds `initialize(...)` calldata for a tranche proxy from its canonical init params, forcing the market authority
-    /// @dev The caller-supplied `initialAuthority` is ignored/overwritten — the market's authority is always the factory's authority
+    /// @dev The caller-supplied `initialAuthority` is ignored/overwritten, the market's authority is always the factory's authority
     function _encodeTrancheInitData(IRoycoVaultTranche.RoycoTrancheInitParams memory _params) internal view returns (bytes memory) {
         _params.initialAuthority = ROYCO_FACTORY.ROYCO_AUTHORITY();
         return abi.encodeCall(RoycoSeniorTranche.initialize, (_params));
@@ -237,10 +237,10 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
     /**
      * @notice Builds `initialize(...)` calldata for an accountant proxy from its canonical init params
      * @dev The caller supplies the full accountant configuration (including both the JT and LT YDM initialization data, so
-     *      both YDMs are initialized) — the template injects only the deployment-derived YDM addresses and the market authority
+     *      both YDMs are initialized), the template injects only the deployment-derived YDM addresses and the market authority
      * @param _params The accountant's canonical init params (its `jtYDM`/`ltYDM` fields are overwritten with the deployed instances)
      * @param _jtYdm The JT YDM (risk-premium model) instance
-     * @param _ltYdm The LT YDM (liquidity-premium model / LDM) instance — a distinct instance from `_jtYdm`
+     * @param _ltYdm The LT YDM (liquidity-premium model / LDM) instance, a distinct instance from `_jtYdm`
      */
     function _encodeAccountantInitData(
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory _params,

@@ -103,7 +103,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
             _spendAllowance(_owner, msg.sender, _shares);
         }
 
-        // Orchestrate the multi-asset redemption in the kernel, bounding the removal's slippage by the caller's minimum senior shares and quote out — it transfers the assets directly to the receiver
+        // Orchestrate the multi-asset redemption in the kernel, bounding the removal's slippage by the caller's minimum senior shares and quote out, it transfers the assets directly to the receiver
         (stClaims, quoteAssets) = IRoycoDayKernel(KERNEL).ltRedeemMultiAsset(_shares, _minSTSharesOut, _minQuoteAssetsOut, _receiver);
 
         // Burn shares after the kernel processes the redemption (kernel depends on pre-burn total supply)
@@ -121,7 +121,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         // Simulate the kernel's multi-asset deposit for the value allocated, the pre-deposit LT effective NAV per share, and the LT supply the pre-op sync will have minted
         (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt,, uint256 ltTotalSupplyAfterMints) =
             IRoycoDayKernel(KERNEL).ltPreviewDepositMultiAsset(toTrancheUnits(_stAssets), _quoteAssets);
-        // Mint LT shares at the pre-deposit LT effective NAV per share against that post-sync supply — identical to depositMultiAsset's share math
+        // Mint LT shares at the pre-deposit LT effective NAV per share against that post-sync supply, identical to depositMultiAsset's share math
         shares = ValuationLogic._convertToShares(valueAllocated, navToMintSharesAt, ltTotalSupplyAfterMints, Math.Rounding.Floor);
     }
 
@@ -132,7 +132,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         override(IRoycoLiquidityTranche)
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
-        // Simulate the kernel's multi-asset redemption for the ST claims and quote assets the receiver would get — identical to redeemMultiAsset's outputs
+        // Simulate the kernel's multi-asset redemption for the ST claims and quote assets the receiver would get, identical to redeemMultiAsset's outputs
         (stClaims, quoteAssets) = IRoycoDayKernel(KERNEL).ltPreviewRedeemMultiAsset(_shares);
     }
 

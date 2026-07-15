@@ -438,8 +438,10 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
      * @notice Executes a pending redemption request for the specified user
      * @dev The request must exist and the configured delay period must have elapsed
      *      A maximal liquidity tranche redemption exits in-kind whenever the in-kind bound serves the entire
-     *      remaining request, and otherwise exits by the dominant multi-asset bound (the LP token's constituents),
-     *      so a redemption the market can serve is never left behind by the in-kind gate; explicit amounts always exit in-kind
+     *      remaining request, and otherwise fills up to the dominant bound capped at the remaining request,
+     *      exiting to the LP token's constituents only when the multi-asset bound is strictly wider (equal bounds
+     *      stay in-kind), so a redemption the market can serve is never left behind by the in-kind gate. Explicit
+     *      amounts always exit in-kind
      * @param _user The user whose redemption request should be executed
      * @param _requestNonce The nonce of the redemption request to execute
      * @param _sharesToRedeem The amount of shares to redeem (use type(uint256).max to redeem the maximum possible)
@@ -662,8 +664,8 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     /**
      * @dev Splits a redemption's claims into the executor's bonus and the receiver's portion, then remits both
      *      Transfers are gated on the receiver's post-bonus legs alone: the bonus floors every leg and the bonus
-     *      percentage is strictly under WAD, so a nonzero bonus leg implies a nonzero receiver leg — a zero receiver
-     *      leg therefore proves the whole leg is empty, and no bonus can be stranded behind the gate
+     *      percentage is strictly under WAD, so a nonzero bonus leg implies a nonzero receiver leg, and a zero
+     *      receiver leg proves the whole leg is empty, so no bonus can be stranded behind the gate
      * @param _kernel The kernel of the market that the redeemed tranche belongs to, used to resolve the claim assets
      * @param _userClaims The redemption's total asset claims, reduced in place to the receiver's post-bonus portion
      * @param _quoteAssets The redemption's total quote leg (zero unless a liquidity tranche redemption exits multi-asset)

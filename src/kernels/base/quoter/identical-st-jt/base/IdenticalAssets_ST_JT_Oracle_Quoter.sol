@@ -120,7 +120,7 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
     }
 
     /// @notice Initializes the quoter cache for the operation
-    /// @dev Called at the start of a synchronized operation to cache the tranche unit to NAV unit conversion rate, so every conversion in the operation values against one consistent rate — no teardown is needed, since each operation re-caches and the transient cache auto-clears at transaction end
+    /// @dev Called at the start of a synchronized operation to cache the tranche unit to NAV unit conversion rate, so every conversion in the operation values against one consistent rate, no teardown is needed, since each operation re-caches and the transient cache auto-clears at transaction end
     function _initializeQuoterCache() internal virtual override {
         // Cache the tranche unit to NAV unit conversion rate for the operation
         Cache._write(CacheKey.IDENTICAL_ST_JT_TRANCHE_TO_NAV_UNIT_RATE, getTrancheUnitToNAVUnitConversionRateWAD());

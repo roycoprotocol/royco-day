@@ -15,11 +15,11 @@ import { UUPSUpgradeable } from "../../../../../../../lib/openzeppelin-contracts
  *      kernel, the kernel derives the quote asset from the pool, and the pool is created before the kernel exists), and
  *      the real hook's `onRegister` returns `false` so it cannot be registered directly
  *      The Vault calls `onRegister` (which this returns `true` for) and freezes the pool's callback set from
- *      `getHookFlags` AT REGISTRATION TIME — so this stand-in advertises the EXACT SAME flags as the real hook
+ *      `getHookFlags` AT REGISTRATION TIME, so this stand-in advertises the EXACT SAME flags as the real hook
  *      After the kernel is deployed, the deploy template upgrades this proxy to the real `RoycoDayBalancerV3Hooks`
  *      implementation, and the frozen flags then match the real hook's callbacks
  *      `_authorizeUpgrade` is intentionally open because the proxy is upgraded to the real,
- *      access-controlled hook within the same deployment transaction — the open window never survives the deploy
+ *      access-controlled hook within the same deployment transaction, the open window never survives the deploy
  */
 contract RoycoDayBalancerV3HooksStandIn is BaseHooks, UUPSUpgradeable {
     /// @inheritdoc BaseHooks
@@ -48,7 +48,7 @@ contract RoycoDayBalancerV3HooksStandIn is BaseHooks, UUPSUpgradeable {
         });
     }
 
-    /// @dev Open by design — see contract-level notice: the proxy is upgraded to the real hook during the deploy tx
+    /// @dev Open by design, see contract-level notice: the proxy is upgraded to the real hook during the deploy tx
     function _authorizeUpgrade(address) internal pure override(UUPSUpgradeable) { }
 
     /// noop fallback to prevent the proxy from reverting if it receives a call

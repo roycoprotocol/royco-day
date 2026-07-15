@@ -6,7 +6,7 @@ pragma solidity ^0.8.28;
  * @author Ankur Dubey, Shivaansh Kapoor
  * @notice Interface every Royco market deployment template implements
  *         The deployer initializes the template once
- *         (loading its component creation codes) before registering it with the factory; the factory then drives it
+ *         (loading its component creation codes) before registering it with the factory, and the factory then drives it
  *         through `deployMarket` inside an `executeMarketDeployment` window
  */
 interface IRoycoProtocolTemplate {
@@ -36,7 +36,7 @@ interface IRoycoProtocolTemplate {
     error INVALID_PARAMS();
 
     /**
-     * @notice Loads the template's SSTORE2-backed component creation codes — called once by the deployer before the
+     * @notice Loads the template's SSTORE2-backed component creation codes, called once by the deployer before the
      *         template is registered with the factory
      * @param _componentIds The component IDs to populate
      * @param _creationCodes The creation code for each component, index-aligned with `_componentIds`
@@ -44,7 +44,7 @@ interface IRoycoProtocolTemplate {
     function initialize(bytes32[] calldata _componentIds, bytes[] calldata _creationCodes) external;
 
     /**
-     * @notice Deploys a market from an ABI-encoded params blob — only callable by the factory
+     * @notice Deploys a market from an ABI-encoded params blob, only callable by the factory
      * @param _params The ABI-encoded template-specific params
      * @return result The deployed market's contracts
      */

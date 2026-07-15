@@ -9,7 +9,7 @@ import { IRoycoVaultTranche } from "./IRoycoVaultTranche.sol";
  * @notice Interface for the liquidity tranche (LT): the standard share-token surface (inherited from IRoycoVaultTranche)
  *         plus the LT-specific multi-asset entrypoints that let an LP enter/exit with the LP token's constituent assets
  *         (ST underlying + quote) directly
- * @dev The LT's base asset is a market-making LP token — the kernel keeps the specific venue (e.g. the AMM) behind its
+ * @dev The LT's base asset is a market-making LP token, the kernel keeps the specific venue (e.g. the AMM) behind its
  *      own hooks, so this surface stays venue-agnostic
  */
 interface IRoycoLiquidityTranche is IRoycoVaultTranche {
@@ -40,8 +40,8 @@ interface IRoycoLiquidityTranche is IRoycoVaultTranche {
 
     /**
      * @notice Enters the LT with the LP token's constituent assets: ST underlying + quote
-     * @dev Pulls the ST underlying and quote from the caller to the kernel, which mints senior shares, single-sided
-     *      adds them with the quote into the liquidity venue to mint the LT tranche assets (LP token), and deposits them into the LT
+     * @dev Pulls the ST underlying and quote from the caller to the kernel, which mints senior shares, adds them
+     *      together with the quote into the liquidity venue to mint the LT tranche assets (LP token), and deposits them into the LT
      * @param _stAssets The amount of ST underlying (the senior tranche's base asset) to deposit, denominated in the ST asset's native units
      * @param _quoteAssets The amount of quote asset to pair against the minted senior shares
      * @param _minLTAssetsOut The minimum LP token the liquidity add must mint (slippage bound against an unfavorable pool state), denominated in the LT asset's native units
@@ -62,7 +62,7 @@ interface IRoycoLiquidityTranche is IRoycoVaultTranche {
     /**
      * @notice Returns the maximum number of LT shares that can be redeemed from the specified owner's balance via a multi-asset redemption
      * @dev A multi-asset redemption redeems its senior tranche share legs in-flow, shrinking the market's liquidity requirement
-     *      alongside the withdrawal — so this bound is at least maxRedeem, and strictly exceeds it whenever the liquidity
+     *      alongside the withdrawal, so this bound is at least maxRedeem, and strictly exceeds it whenever the liquidity
      *      requirement binds and the removal's senior-share legs carry value
      * @dev NON-VIEW: sizes the requirement reduction through the venue removal's execute-and-unwind preview, which mutates no state net
      * @param _owner The address that owns the LT shares being redeemed
@@ -73,7 +73,7 @@ interface IRoycoLiquidityTranche is IRoycoVaultTranche {
     /**
      * @notice Exits the LT to the LP token's constituent assets: ST underlying + quote
      * @dev The kernel proportionally removes the LP-token slice, redeems the pooled senior shares to ST underlying, and
-     *      transfers the ST underlying and quote directly to the receiver — the LT shares are burned afterwards
+     *      transfers the ST underlying and quote directly to the receiver, the LT shares are burned afterwards
      * @param _shares The number of LT shares to redeem
      * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must yield (slippage bound)
      * @param _minQuoteAssetsOut The minimum quote to receive (slippage bound)

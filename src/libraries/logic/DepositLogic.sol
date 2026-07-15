@@ -89,7 +89,7 @@ library DepositLogic {
         // Credit the deposited assets to the junior tranche
         $.jtOwnedYieldBearingAssets = $.jtOwnedYieldBearingAssets + _assets;
 
-        // Execute a post-deposit sync on accounting; a JT deposit grows the loss-absorption buffer and only improves coverage, so no requirements are enforced
+        // Execute a post-deposit sync on accounting. A JT deposit grows the loss-absorption buffer and only improves coverage, so no requirements are enforced
         AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.JT_DEPOSIT, ZERO_NAV_UNITS, false);
     }
 
@@ -131,7 +131,7 @@ library DepositLogic {
      *         shares), adds (senior shares + quote) into the liquidity venue to mint the LT tranche assets, then deposits them into the LT
      * @dev Assumes the ST underlying and quote have been transferred to the kernel before this call (by the LT tranche)
      * @dev Enabled in a PERPETUAL market state, and in a fixed-term market only for a quote-only deposit that mints no senior shares
-     * @dev The combined new senior exposure is gated by the market's coverage and liquidity requirements — reverts if either is unsatisfied
+     * @dev The combined new senior exposure is gated by the market's coverage and liquidity requirements, reverts if either is unsatisfied
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _stAssets The amount of ST underlying (the senior tranche's base asset) to deposit, denominated in ST tranche units
@@ -283,11 +283,11 @@ library DepositLogic {
         // Preview the sync and the LT supply after this sync mints the LT protocol fee shares, exactly as depositMultiAsset reads totalSupply() post-sync
         SyncedAccountingState memory state;
         (state,, ltTotalSupplyAfterMints) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
-        // During a fixed-term market state only a quote-only deposit is permitted; an ST-leg deposit reverts, so return zero before quoting the venue add to match it
+        // During a fixed-term market state only a quote-only deposit is permitted and an ST-leg deposit reverts, so return zero before quoting the venue add to match it
         if (state.marketState == MarketState.FIXED_TERM && _stAssets != ZERO_TRANCHE_UNITS) {
             return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS, ltTotalSupplyAfterMints);
         }
-        // The NAV to mint LT shares at is the pre-deposit LT effective NAV (market-making depth plus the idle premium senior shares); the senior supply is taken after its premium and protocol fee mint
+        // The NAV to mint LT shares at is the pre-deposit LT effective NAV (market-making depth plus the idle premium senior shares), and the senior supply is taken after its premium and protocol fee mint
         (uint256 liquidityPremiumShares,, uint256 totalSTShares) =
             FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(_immutables.seniorTranche).totalSupply());
         navToMintSharesAt =

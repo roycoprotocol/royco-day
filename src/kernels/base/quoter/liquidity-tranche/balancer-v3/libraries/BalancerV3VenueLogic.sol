@@ -55,6 +55,7 @@ library BalancerV3VenueLogic {
      * @dev Only callable by the Balancer V3 Vault
      * @dev This callback must settle all credit and debt created in the vault's accounting by the end of its execution
      * @dev The kernel supplies the senior tranche shares and quote assets it already holds and receives the minted BPT for the liquidity tranche
+     * @param _immutables The immutable Balancer V3 venue configuration carried in from the kernel mixin
      * @param _isPreview Whether this is a preview, which computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling
      * @param _seniorShares The exact amount of senior tranche shares to add into the pool from this kernel's balance
      * @param _quoteAssets The exact amount of quote assets to add into the pool from this kernel's balance
@@ -112,6 +113,7 @@ library BalancerV3VenueLogic {
      * @dev Only callable by the Balancer V3 Vault
      * @dev This callback must settle all credit and debt created in the vault's accounting by the end of its execution
      * @dev The kernel receives any ST shares withdrawn and is responsible for converting them to the base assets before remitting them to the user
+     * @param _immutables The immutable Balancer V3 venue configuration carried in from the kernel mixin
      * @param _isPreview Whether this is a preview, which computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling
      * @param _ltAssets The exact BPT amount (LT assets) to burn from this kernel's balance
      * @param _minSTSharesOut The minimum senior tranche shares that must be withdrawn, bounding the removal's slippage at the Vault
@@ -191,7 +193,7 @@ library BalancerV3VenueLogic {
         // Mark that senior NAV to its fair BPT at the manipulation-resistant oracle, discounted by the max tolerated slippage
         TRANCHE_UNIT minLTAssetsOut = IRoycoDayKernel(address(this)).ltConvertNAVUnitsToTrancheUnits(stSharesToReinvestNAV)
             .mulDiv((WAD - _maxReinvestmentSlippageWAD), WAD, Math.Rounding.Ceil);
-        // Preemptively return if their exists no floor on the reinvested value
+        // Preemptively return if there exists no floor on the reinvested value
         if (minLTAssetsOut == ZERO_TRANCHE_UNITS) return;
 
         // Single-sided add the ST shares through a low-level call into the Vault's callback

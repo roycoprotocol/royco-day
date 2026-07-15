@@ -91,7 +91,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
      * @custom:field enableDonation - Whether unbalanced donation-style adds are permitted on the pool
      * @custom:field disableUnbalancedLiquidity - Whether to disable unbalanced add/remove liquidity, forcing proportional-only
      * @custom:field quoteAsset - The quote asset (stablecoin) paired against the senior tranche share in the pool
-     * @custom:field quoteAssetRateProvider - The rate provider supplying the quote leg's rate to the pool — the BPT oracle then prices this leg with the shared constant-1.0 feed
+     * @custom:field quoteAssetRateProvider - The rate provider supplying the quote leg's rate to the pool, the BPT oracle then prices this leg with the shared constant-1.0 feed
      */
     struct GyroECLPPoolParams {
         string name;
@@ -232,8 +232,8 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
 
     /**
      * @dev Returns the ABI-encoded kernel `initialize(...)` calldata for the concrete Day kernel
-     * @param _bptOracle The template-deployed E-CLP BPT oracle for this market's pool — the concrete template must
-     *        inject it into the kernel's LT-quoter init params (overwriting any caller-supplied value)
+     * @param _bptOracle The template-deployed E-CLP BPT oracle for this market's pool, which the concrete template must
+     *        inject into the kernel's LT-quoter init params (overwriting any caller-supplied value)
      */
     function _kernelInitData(
         IRoycoDayKernel.RoycoDayKernelInitParams memory _kip,
@@ -265,16 +265,16 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         (result.ydm,) = _deployYDM(_marketComponentSalt(p.marketId, TAG_YDM), p.jtYdmConstructorArgs, p.ydmComponentId);
         (result.ltYdm,) = _deployYDM(_marketComponentSalt(p.marketId, TAG_LDM), p.ltYdmConstructorArgs, p.ydmComponentId);
 
-        // 3. Deploy ST impl + proxy first — the pool needs ST_PROXY as one of its tokens
+        // 3. Deploy ST impl + proxy first, the pool needs ST_PROXY as one of its tokens
         address stImpl = _deploySeniorTrancheImpl(p.stAsset, result.kernel, _marketComponentSalt(p.marketId, TAG_ST_IMPL));
         _deployProxy(stImpl, _encodeTrancheInitData(p.stTranche), _marketComponentSalt(p.marketId, TAG_ST_PROXY));
 
         // 4. Deploy the pool hooks proxy against the shared stand-in implementation (returns true from onRegister and advertises
-        //    the real hook's flags) so the pool can register now; it is upgraded to the real kernel-bound hook after step 9
+        //    the real hook's flags) so the pool can register now, and it is upgraded to the real kernel-bound hook after step 9
         address balancerHook = _deployProxy(BALANCER_HOOK_STANDIN_IMPL, bytes("no-op"), _marketComponentSalt(p.marketId, TAG_BALANCER_HOOK));
 
         // 5. Create the Gyro E-CLP pool `{ST_share, quote}`: senior leg WITH_RATE (rate provider = the predicted kernel),
-        //    hooked to the stand-in proxy — LT asset = pool
+        //    hooked to the stand-in proxy, LT asset = pool
         address balancerPool = _createBalancerV3Pool(
             p.gyroECLPPoolParams, result.seniorTranche, result.kernel, balancerHook, _marketComponentSalt(p.marketId, TAG_BALANCER_V3_POOL)
         );
@@ -399,7 +399,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         );
     }
 
-    /// @dev Token config for a pool leg: the senior-tranche leg is `WITH_RATE` (priced by the kernel rate provider) — every other leg is `STANDARD`
+    /// @dev Token config for a pool leg: the senior-tranche leg is `WITH_RATE` (priced by the kernel rate provider), every other leg is `STANDARD`
     function _buildTokenConfig(
         address _token,
         address _seniorTranche,
@@ -443,7 +443,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         return RoleBindings({ targetBindings: targets, postInitGrants: grants });
     }
 
-    /// @dev The concrete Day kernel's quoter admin selectors (its ST/JT quoter family varies per kernel type) — the
+    /// @dev The concrete Day kernel's quoter admin selectors (its ST/JT quoter family varies per kernel type): the
     ///      base binds the universal Balancer LT-quoter setters, and subclasses extend with their ST/JT quoter setters
     function _kernelQuoterBinding(address _kernel) internal view virtual returns (TargetBinding memory) {
         bytes4[] memory s = new bytes4[](2);
@@ -469,7 +469,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
     }
 
     /// @dev `mint` carries no binding: it is gated by the tranche's own `onlyKernel` check (an immutable-address
-    ///      check), which scopes minting to THIS market's kernel — a shared AccessManager role could not
+    ///      check), which scopes minting to THIS market's kernel in a way a shared AccessManager role could not
     function _trancheBinding(address _tranche, uint64 _depositRole, uint64 _redeemRole, bool _isLiquidity) private pure returns (TargetBinding memory) {
         // Base tranche surface (7 selectors) + the two LT-only multi-asset selectors when binding the liquidity tranche
         uint256 n = _isLiquidity ? 9 : 7;

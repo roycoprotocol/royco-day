@@ -391,7 +391,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
      *
      * @dev Coverage Requirement: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_COINVESTED ? JT_RAW_NAV : 0)) * MIN_COVERAGE
      * @dev When assets are claimed from the JT, they are always liquidated in the same proportion as the tranche's total claims on the ST and JT assets
-     * @dev Let JT_CLAIM_ON_ST and JT_CLAIM_ON_JT be the JT's total claims on the ST and JT assets respectively, in NAV units — the JT's total claims are JT_CLAIM_ON_ST + JT_CLAIM_ON_JT
+     * @dev Let JT_CLAIM_ON_ST and JT_CLAIM_ON_JT be the JT's total claims on the ST and JT assets respectively, in NAV units, the JT's total claims are JT_CLAIM_ON_ST + JT_CLAIM_ON_JT
      * @dev Let ST_CLAIM_FRACTION be JT_CLAIM_ON_ST / (JT_CLAIM_ON_ST + JT_CLAIM_ON_JT) and JT_CLAIM_FRACTION be JT_CLAIM_ON_JT / (JT_CLAIM_ON_ST + JT_CLAIM_ON_JT)
      * @dev Therefore, if a total NAV of y is claimed from the JT, ST_CLAIM_FRACTION * y is claimed from the ST_RAW_NAV and JT_CLAIM_FRACTION * y is claimed from the JT_RAW_NAV
      * @dev Max assets withdrawable from JT, y: (JT_EFFECTIVE_NAV - y) = ((ST_RAW_NAV - ST_CLAIM_FRACTION * y) + (JT_COINVESTED ? (JT_RAW_NAV - JT_CLAIM_FRACTION * y) : 0)) * MIN_COVERAGE
@@ -515,7 +515,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
                 NAV_UNIT lastJTRawNAV = $.lastJTRawNAV;
 
                 // Decompose the last checkpointed senior claim into its self-backed portion (funded by ST's own raw NAV) and its cross-tranche portion (funded by JT's raw NAV)
-                // Only the two senior claims feed the PNL attribution below; the two junior claims the decomposition returns are discarded
+                // Only the two senior claims feed the PNL attribution below, the two junior claims the decomposition returns are discarded
                 (NAV_UNIT stClaimOnSTRawNAV, NAV_UNIT stClaimOnJTRawNAV,,) =
                     TrancheClaimsLogic._computeSTandJTClaimsOnRawNAVs(lastSTRawNAV, lastJTRawNAV, stEffectiveNAV, jtEffectiveNAV);
 
@@ -539,7 +539,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
 
             /// @dev STEP_APPLY_MARK_TO_MARKET: Mark the ST and JT NAVs to market via the PnL waterfall, based on their respective obligations to one another
             {
-                // The net JT gains — the JT protocol fee accrued is calculated using this NAV
+                // The net JT gains, the JT protocol fee accrued is calculated using this NAV
                 NAV_UNIT jtNetGain;
                 /// @dev STEP_APPLY_JT_LOSS: The JT assets depreciated in value
                 if (deltaJTEffectiveNAV < 0) {

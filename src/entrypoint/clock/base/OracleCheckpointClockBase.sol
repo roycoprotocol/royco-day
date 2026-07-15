@@ -44,6 +44,7 @@ abstract contract OracleCheckpointClockBase is RoycoBase, IOracleClock {
      * @notice Initializes the oracle checkpoint clock state and records the source's current value as the baseline
      * @dev Must be called after the concrete clock's read wiring is set so the baseline read observes the live source
      * @dev The baseline is recorded WITHOUT an update timestamp: an initialization read carries no new pricing information, so recording it would be incorrect
+     * @param _minDeviationWAD The minimum relative deviation from the checkpointed value that counts as an update, scaled to WAD precision (zero counts any change)
      */
     function __OracleCheckpointClockBase_init_unchained(uint256 _minDeviationWAD) internal onlyInitializing {
         // Initialize the minimum deviation

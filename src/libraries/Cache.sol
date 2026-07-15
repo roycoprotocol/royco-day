@@ -54,7 +54,7 @@ library Cache {
 
     /**
      * @notice Writes a value to the unified transient cache for the remainder of the transaction
-     * @dev The value is stored as `_value | CACHE_SET_MASK` — re-callable to overwrite
+     * @dev The value is stored as `_value | CACHE_SET_MASK`, re-callable to overwrite
      * @dev The value must be strictly less than 2^255 so the populated marker is unambiguous
      * @param _key The key in this cache to write to
      * @param _value The value to cache
@@ -67,7 +67,7 @@ library Cache {
 
     /**
      * @notice Returns the transient slot holding the cached value for the specified cache key
-     * @dev Offsets the cache base slot by the key's ordinal — the reserved 256-slot ERC-7201 window guarantees keys never collide
+     * @dev Offsets the cache base slot by the key's ordinal, the reserved 256-slot ERC-7201 window guarantees keys never collide
      * @param _key The key in this cache to derive the transient storage slot for
      * @return The transient slot for the specified cache key
      */

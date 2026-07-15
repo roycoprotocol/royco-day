@@ -76,7 +76,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         _;
     }
 
-    /// @dev Permissions the function to only be callable by the market's junior tranche
+    /// @dev Permissions the function to only be callable by the market's liquidity tranche
     /// @dev Should be placed on LT deposit and redeem functions
     modifier onlyLiquidityTranche() {
         require(msg.sender == LIQUIDITY_TRANCHE, ONLY_LIQUIDITY_TRANCHE());
@@ -89,7 +89,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         _;
     }
 
-    /// @dev Initializes the quoter cache at the start of the call — no teardown is needed since the transient cache auto-clears at transaction end
+    /// @dev Initializes the quoter cache at the start of the call, no teardown is needed since the transient cache auto-clears at transaction end
     /// @dev Should be placed on all functions that use the quoter cache
     modifier withQuoterCache() {
         _initializeQuoterCache();

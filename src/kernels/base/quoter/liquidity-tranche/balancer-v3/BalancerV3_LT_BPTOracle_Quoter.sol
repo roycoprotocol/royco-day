@@ -47,7 +47,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     /**
      * @notice The namespaced storage for the BalancerV3_LT_BPTOracle_Quoter
      * @custom:field bptOracle - The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity tranche assets
-     * @custom:field maxReinvestmentSlippageWAD - The maximum slippage tolerated when single-sided reinvesting the liquidity premium ST shares into the BPT, scaled to WAD precision — above this threshold the reinvestment defers to the auction fallback
+     * @custom:field maxReinvestmentSlippageWAD - The maximum slippage tolerated when single-sided reinvesting the liquidity premium ST shares into the BPT, scaled to WAD precision, above this threshold the reinvestment defers to the auction fallback
      */
     struct BalancerV3_LT_BPTOracle_QuoterState {
         address bptOracle;
@@ -100,7 +100,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         // Ensure that the Balancer V3 Pool is registered with the vault
         require(_vault.isPoolRegistered(LT_ASSET), POOL_NOT_REGISTERED());
 
-        // Retrieve the constituent tokens of this kernel's Balancer V3 pool and ensure that their are exactly 2
+        // Retrieve the constituent tokens of this kernel's Balancer V3 pool and ensure that there are exactly 2
         IERC20[] memory tokens = _vault.getPoolTokens(LT_ASSET);
         require(tokens.length == 2, POOL_MUST_HAVE_TWO_TOKENS());
 
@@ -158,7 +158,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
      * @dev Within a synchronized operation the returned rate is the one the pre-op sync cached, so an inline senior share mint or burn (a multi-asset deposit or redemption) cannot transiently move the senior-leg mark before the matching effective NAV is committed
      * @dev Before the first sync of a transaction the cache is unset, so a standalone pool interaction or an off-chain read previews the fresh rate the next sync would resolve from committed state
      * @dev The rate is floored to a minimum of 1 wei so the pool never receives a zero rate, which it would reject
-     * @dev Before the senior tranche is seeded (zero ST supply) the rate resolves to that 1-wei floor rather than a neutral 1.0 — this is inert because with no ST shares in existence the pool's ST leg is empty, so the rate only ever scales a zero balance until the tranche is seeded
+     * @dev Before the senior tranche is seeded (zero ST supply) the rate resolves to that 1-wei floor rather than a neutral 1.0, this is inert because with no ST shares in existence the pool's ST leg is empty, so the rate only ever scales a zero balance until the tranche is seeded
      */
     function getRate() external view virtual override(IRateProvider) returns (uint256 rate) {
         // Query the cache for the ST share rate
@@ -187,9 +187,10 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
 
     /**
      * @inheritdoc IRoycoDayKernel
-     * @dev Routes the add through the unlocked Vault so it simulates the BPT minted under the Vault's real semantics; the
-     *      preview-mode callback unwinds every transient balance change by reverting with the result decoded here, so the
-     *      preview is callable inside a transaction (the Vault's query mode is restricted to static calls)
+     * @dev Routes the add through the unlocked Vault so it simulates the BPT minted, and their valuation against the
+     *      post-add pool state, under the Vault's real semantics. The preview-mode callback unwinds every transient balance
+     *      change by reverting with the result decoded here, so the preview is callable inside a transaction (the Vault's
+     *      query mode is restricted to static calls)
      * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
      */
     function previewAddLiquidity(
@@ -216,7 +217,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     /**
      * @inheritdoc IRoycoDayKernel
      * @dev Routes the removal through the unlocked Vault so it simulates the constituents withdrawn under the Vault's real
-     *      semantics; the preview-mode callback unwinds every transient balance change by reverting with the result decoded
+     *      semantics. The preview-mode callback unwinds every transient balance change by reverting with the result decoded
      *      here, so the preview is callable inside a transaction (the Vault's query mode is restricted to static calls)
      * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
      */

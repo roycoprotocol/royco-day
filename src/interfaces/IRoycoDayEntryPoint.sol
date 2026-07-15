@@ -222,7 +222,7 @@ interface IRoycoDayEntryPoint {
     /// @dev Thrown when executing a request before the tranche's oracle clock has observed an oracle update after the request was placed
     error ORACLE_CLOCK_NOT_ADVANCED(uint256 requestNonce);
 
-    /// @dev Thrown when configuring or requesting against a tranche whose oracle clock reports a future update timestamp
+    /// @dev Thrown when a poked oracle clock reports a future update timestamp
     error ORACLE_CLOCK_IN_THE_FUTURE();
 
     /// @dev Thrown when the executor bonus is not strictly less than 100% (WAD) and is not the opt-out sentinel value
@@ -309,8 +309,8 @@ interface IRoycoDayEntryPoint {
 
     /**
      * @notice Executes multiple pending redemption requests across the specified users
-     * @dev A maximal liquidity tranche redemption falls back to the multi-asset exit when the in-kind bound cannot
-     *      serve the entire remaining request — see executeRedemption
+     * @dev A maximal liquidity tranche redemption may fall back to the multi-asset exit when the in-kind bound
+     *      cannot serve the entire remaining request (see executeRedemption)
      * @param _users The users whose redemption requests should be executed
      * @param _requestNonces The nonces of the redemption requests to execute
      * @param _sharesToRedeem The amount of shares to redeem for the redemption requests to execute (use type(uint256).max to redeem the maximum possible)
@@ -329,8 +329,10 @@ interface IRoycoDayEntryPoint {
      * @notice Executes a pending redemption request for the specified user
      * @dev The request must exist and the configured delay period must have elapsed
      *      A maximal liquidity tranche redemption exits in-kind whenever the in-kind bound serves the entire
-     *      remaining request, and otherwise exits by the dominant multi-asset bound (the LP token's constituents),
-     *      so a redemption the market can serve is never left behind by the in-kind gate; explicit amounts always exit in-kind
+     *      remaining request, and otherwise fills up to the dominant bound capped at the remaining request,
+     *      exiting to the LP token's constituents only when the multi-asset bound is strictly wider (equal bounds
+     *      stay in-kind), so a redemption the market can serve is never left behind by the in-kind gate. Explicit
+     *      amounts always exit in-kind
      * @param _user The user whose redemption request should be executed
      * @param _requestNonce The nonce of the redemption request to execute
      * @param _sharesToRedeem The amount of shares to redeem (use type(uint256).max to redeem the maximum possible)
