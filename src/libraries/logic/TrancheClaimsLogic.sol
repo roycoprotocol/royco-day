@@ -72,7 +72,7 @@ library TrancheClaimsLogic {
      * @notice Withdraws any specified assets from each tranche and transfer them to the receiver
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @param _claims The ST and JT assets to withdraw and transfer to the specified receiver
+     * @param _claims The ST assets, JT assets, LT assets, and ST shares to withdraw and transfer to the specified receiver
      * @param _receiver The receiver of the tranche asset claims
      */
     function _withdrawAssets(
@@ -112,11 +112,11 @@ library TrancheClaimsLogic {
     }
 
     /**
-     * @notice Scales the claims on ST and JT assets of a tranche by a given shares assuming total shares in a vault
-     * @param _claims The claims on ST and JT assets of the tranche
+     * @notice Scales a tranche's asset claims (ST/JT/LT assets, ST shares, and NAV) by a given shares assuming total shares in a vault
+     * @param _claims The asset claims of the tranche
      * @param _shares The number of shares to scale the claims by
      * @param _totalTrancheShares The total number of shares that exist in the tranche
-     * @return scaledClaims The scaled claims on ST and JT assets of the tranche
+     * @return scaledClaims The scaled asset claims of the tranche
      */
     function _scaleAssetClaims(
         AssetClaims memory _claims,
@@ -127,7 +127,7 @@ library TrancheClaimsLogic {
         pure
         returns (AssetClaims memory scaledClaims)
     {
-        // If the total tranche shares is zero, it has no claims on the assets, so return the claims as is
+        // If the total tranche shares is zero, it has no claims on the assets, so return zero claims
         if (_totalTrancheShares == 0) return scaledClaims;
 
         // Scale the claims by the given shares

@@ -252,7 +252,7 @@ interface IRoycoDayAccountant {
     /**
      * @notice Synchronizes the effective NAVs and impermanent losses of both tranches by marking them to market
      * @dev Must be called before any NAV mutating operation
-     * @dev Accrues JT yield share over time based on the market's JT YDM output
+     * @dev Accrues the JT and LT yield shares over time based on the market's JT and LT YDM outputs
      * @dev Persists updated NAV and impermanent loss checkpoints for the next sync to use as reference
      * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
      * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets

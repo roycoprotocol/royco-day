@@ -29,7 +29,7 @@ enum MarketState {
 
 /**
  * @title AssetClaims
- * @dev A struct representing claims on senior tranche assets, junior tranche assets, liquidity tranche assets, and NAV
+ * @dev A struct representing claims on senior tranche assets, junior tranche assets, liquidity tranche assets, senior tranche shares, and NAV
  * @custom:field stAssets - The claim on senior tranche assets denominated in ST's tranche units (only applicable for the ST and JT)
  * @custom:field jtAssets - The claim on junior tranche assets denominated in JT's tranche units (only applicable for the ST and JT)
  * @custom:field ltAssets - The claim on liquidity tranche assets denominated in LT's tranche units (only applicable for the LT)

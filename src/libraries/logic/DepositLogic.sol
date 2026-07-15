@@ -33,7 +33,7 @@ library DepositLogic {
      * @param _assets The amount of assets to deposit, denominated in the senior tranche's tranche units
      * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
      * @return navToMintSharesAt The NAV at which the shares will be minted, exclusive of valueAllocated
-     * @dev ST deposits are enabled only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-deposit
+     * @dev ST deposits are enabled only in a PERPETUAL market state, granted that the market's coverage and liquidity requirements are satisfied post-deposit
      */
     function stDeposit(
         IRoycoDayKernel.RoycoDayKernelState storage $,
@@ -313,7 +313,7 @@ library DepositLogic {
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _receiver The address that will receive the ST shares equating to the deposited assets
      * @return assets The maximum amount of assets that can be deposited into the senior tranche, denominated in the senior tranche's tranche units
-     * @dev ST deposits are allowed only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-deposit
+     * @dev ST deposits are allowed only in a PERPETUAL market state, granted that the market's coverage and liquidity requirements are satisfied post-deposit
      */
     function stMaxDeposit(
         IRoycoDayKernel.RoycoDayKernelState storage $,
@@ -329,7 +329,7 @@ library DepositLogic {
         SyncedAccountingState memory state = AccountingSyncLogic._previewSyncTrancheAccounting($, _immutables);
         // ST deposits are disabled during a fixed-term market state
         if (state.marketState == MarketState.FIXED_TERM) return ZERO_TRANCHE_UNITS;
-        // ST deposits are enabled as long as the market's coverage requirement is satisfied
+        // ST deposits are enabled as long as the market's coverage and liquidity requirements are satisfied
         NAV_UNIT stMaxDepositableNAV = IRoycoDayAccountant(_immutables.accountant).maxSTDeposit(state);
         return
             ((stMaxDepositableNAV == MAX_NAV_UNITS) ? MAX_TRANCHE_UNITS : IRoycoDayKernel(address(this)).stConvertNAVUnitsToTrancheUnits(stMaxDepositableNAV));

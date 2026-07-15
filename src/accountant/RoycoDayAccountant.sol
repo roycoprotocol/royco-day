@@ -373,7 +373,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // If there is no minimum liquidity requirement, there is no ST capacity restriction
         NAV_UNIT maxSTDepositGivenLiquidity = MAX_NAV_UNITS;
         if (state.minLiquidityWAD != 0) {
-            // Solve for y, rounding in favor of senior protection
+            // Solve for x', rounding in favor of senior protection
             // Compute the maximum value ownable by the senior tranche given the current value of the market making inventory
             NAV_UNIT maxSTEffectiveNAV = state.ltRawNAV.mulDiv(WAD, state.minLiquidityWAD, Math.Rounding.Floor);
             // Compute the value of assets that can be deposited into senior while retaining minimum liquidity
@@ -412,7 +412,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Get the surplus JT assets in NAV units
         // The exposure and requirement intermediates live in a scoped block so their stack slots are released before the fraction math below
         NAV_UNIT surplusJTValue;
-        // Compute the total covered exposure of the underlying investment, rounding in favor of senior protection
+        // Compute the total covered exposure of the underlying investment
         NAV_UNIT totalCoveredExposure = state.stRawNAV + (state.jtCoinvested ? state.jtRawNAV : ZERO_NAV_UNITS);
         // Compute the minimum junior tranche assets required to cover the exposure as per the market's coverage requirement
         NAV_UNIT requiredJTValue = totalCoveredExposure.mulDiv(state.minCoverageWAD, WAD, Math.Rounding.Ceil);

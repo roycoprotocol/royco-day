@@ -427,6 +427,7 @@ library RedemptionLogic {
      * @return claimOnLTNAV The notional claims on LT assets that the liquidity tranche has denominated in kernel's NAV units
      * @return ltMaxWithdrawableNAV The maximum amount of assets that can be withdrawn multi-asset, denominated in the kernel's NAV units
      * @return totalTrancheShares The total number of shares that exist in the liquidity tranche after minting any protocol fee shares post-sync
+     * @dev NON-VIEW: routes the venue removal through its execute-and-unwind preview, which mutates no state net
      */
     function ltMaxWithdrawableMultiAsset(
         IRoycoDayKernel.RoycoDayKernelState storage $,

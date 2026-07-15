@@ -52,7 +52,7 @@ library FeeAndLiquidityPremiumLogic {
             // Attempt to deploy the entire staged premium into the LT's market-making inventory, valuing the idle senior shares at the synced senior share rate (effective NAV over the post-mint supply)
             IRoycoDayKernel(address(this)).attemptLiquidityPremiumReinvestment(type(uint256).max, _state.stEffectiveNAV, stTotalSupplyAfterMints);
         }
-        // Mint the ST protocol fee shares to the protocol fee recipient and LT liquidity premium fee shares to the kernel at an identical price
+        // Mint the ST protocol fee shares to the protocol fee recipient, priced identically to the premium shares minted above
         if (stProtocolFeeShares != 0) {
             IRoycoVaultTranche(_immutables.seniorTranche).mintProtocolFeeShares(protocolFeeRecipient, stProtocolFeeShares);
         }

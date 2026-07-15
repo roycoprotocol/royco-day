@@ -106,7 +106,7 @@ library SelfLiquidationLogic {
         NAV_UNIT jtEffectiveNAV = _state.jtEffectiveNAV;
         if (jtEffectiveNAV == ZERO_NAV_UNITS) return ZERO_NAV_UNITS;
 
-        // Compute the total covered exposure of the market, rounding up to be conservative
+        // Compute the total covered exposure of the market
         NAV_UNIT totalCoveredExposure = _state.stRawNAV + (_state.jtCoinvested ? _state.jtRawNAV : ZERO_NAV_UNITS);
 
         // Compute the ST LP's NAV claim on real exposure (including the junior leg only when the junior tranche is co-invested)
