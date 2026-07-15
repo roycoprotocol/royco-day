@@ -193,6 +193,23 @@ contract Test_AdaptiveCurveYDM_V2 is Test {
         ydm.initializeYDMForMarket(4e17, 3e17, 9e17); // y0 > yT
     }
 
+    /// A yield-share-at-target above the governance cap is rejected at initialization, matching V1: the cap must
+    /// hold even in the fixed-term branch, where the stored yT is used unclamped
+    function test_RevertIf_InitializeYTargetAboveMax() public {
+        // Deploy with a sub-WAD cap so the ceiling is reachable below yFull
+        AdaptiveCurveYDM_V2 ydm = new AdaptiveCurveYDM_V2(5e17, 0.0001e18, 0.3e18, SPEED_V2);
+        vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
+        ydm.initializeYDMForMarket(1e17, 4e17, 9e17); // yT (0.4) > MAX (0.3)
+    }
+
+    /// The cap itself is an accepted yield-share-at-target
+    function test_Initialize_YTargetAtMax() public {
+        AdaptiveCurveYDM_V2 ydm = new AdaptiveCurveYDM_V2(5e17, 0.0001e18, 0.3e18, SPEED_V2);
+        ydm.initializeYDMForMarket(1e17, 3e17, 9e17); // yT == MAX (0.3)
+        (uint64 yT,,,) = _readCurve(ydm, address(this));
+        assertEq(yT, 3e17, "yT stored at the cap");
+    }
+
     /// yT above yFull would give a downward upper segment and is rejected
     function test_RevertIf_InitializeYTargetAboveYFull() public {
         AdaptiveCurveYDM_V2 ydm = _deploy(5e17);

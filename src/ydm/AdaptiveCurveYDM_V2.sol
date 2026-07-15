@@ -82,8 +82,9 @@ contract AdaptiveCurveYDM_V2 is BaseAdaptiveCurveYDM {
     function initializeYDMForMarket(uint64 _yieldShareAtZeroUtilWAD, uint64 _yieldShareAtTargetUtilWAD, uint64 _yieldShareAtFullUtilWAD) external {
         // Ensure that the YDM curve is valid
         require(
-            _yieldShareAtTargetUtilWAD >= MIN_YIELD_SHARE_AT_TARGET_WAD && _yieldShareAtZeroUtilWAD <= _yieldShareAtTargetUtilWAD
-                && _yieldShareAtTargetUtilWAD <= _yieldShareAtFullUtilWAD && _yieldShareAtFullUtilWAD <= WAD,
+            _yieldShareAtTargetUtilWAD >= MIN_YIELD_SHARE_AT_TARGET_WAD && _yieldShareAtTargetUtilWAD <= MAX_YIELD_SHARE_AT_TARGET_WAD
+                && _yieldShareAtZeroUtilWAD <= _yieldShareAtTargetUtilWAD && _yieldShareAtTargetUtilWAD <= _yieldShareAtFullUtilWAD
+                && _yieldShareAtFullUtilWAD <= WAD,
             INVALID_YDM_INITIALIZATION()
         );
 
