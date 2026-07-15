@@ -62,6 +62,15 @@ contract Test_OracleClocks is Test {
         assertEq(clock.poke(), 123_999, "a feed push must advance the clock");
     }
 
+    function test_chainlinkClock_oversizedUpdatedAtFailsLoudly() public {
+        // A garbage timestamp past uint32 must revert, never truncate: a truncated future time could masquerade
+        // as a past one and slip the entry point's fail-shut future-timestamp check
+        ChainlinkOracleClock clock = new ChainlinkOracleClock(address(feed));
+        feed.setUpdatedAt(uint256(type(uint32).max) + 1 + block.timestamp);
+        vm.expectRevert();
+        clock.poke();
+    }
+
     function test_chainlinkClock_describesViaTheUnderlyingFeed() public {
         ChainlinkOracleClock clock = new ChainlinkOracleClock(address(feed));
         assertEq(

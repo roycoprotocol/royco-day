@@ -16,13 +16,14 @@ contract EntryPointRemitClaimsHarness is RoycoDayEntryPoint {
     function remitRedemptionAndBonusClaims(
         address _kernel,
         AssetClaims memory _totalClaims,
+        uint256 _quoteAssets,
         uint64 _executorBonusWAD,
         address _receiver
     )
         external
-        returns (AssetClaims memory bonusClaims, AssetClaims memory userClaims)
+        returns (AssetClaims memory bonusClaims, uint256 bonusQuoteAssets, AssetClaims memory userClaims)
     {
-        bonusClaims = _remitRedemptionAndBonusClaims(_kernel, _totalClaims, _executorBonusWAD, _receiver);
+        (bonusClaims, bonusQuoteAssets) = _remitRedemptionAndBonusClaims(_kernel, _totalClaims, _quoteAssets, _executorBonusWAD, _receiver);
         // The claims struct is reduced in place to the receiver's post-bonus portion
         userClaims = _totalClaims;
     }
@@ -34,11 +35,13 @@ contract MockKernelAssets {
     address public immutable JT_ASSET;
     address public immutable LT_ASSET;
     address public immutable SENIOR_TRANCHE;
+    address public immutable QUOTE_ASSET;
 
-    constructor(address _stAsset, address _jtAsset, address _ltAsset, address _seniorTranche) {
+    constructor(address _stAsset, address _jtAsset, address _ltAsset, address _seniorTranche, address _quoteAsset) {
         ST_ASSET = _stAsset;
         JT_ASSET = _jtAsset;
         LT_ASSET = _ltAsset;
         SENIOR_TRANCHE = _seniorTranche;
+        QUOTE_ASSET = _quoteAsset;
     }
 }

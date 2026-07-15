@@ -26,6 +26,16 @@ jobs:
       # cache below and only fetched from source on a cache miss (i.e. when a submodule pin moves).
       - uses: actions/checkout@v4
 
+      - name: Add swap space
+        # A cold via_ir build of the full tree exceeds the 7GB hosted runner even single-threaded and
+        # gets OOM-killed (exit 143). Swap trades speed for survival on the cold path; warm (incremental)
+        # builds never touch it. The temp disk at /mnt has the free space for it.
+        run: |
+          sudo fallocate -l 8G /mnt/extra-swap
+          sudo chmod 600 /mnt/extra-swap
+          sudo mkswap /mnt/extra-swap
+          sudo swapon /mnt/extra-swap
+
       - name: Compute submodule cache key
         # The key digests the gitlink SHAs recorded in this commit's tree, so it is an exact
         # content address for lib/: any submodule bump (including nested pins, which are part of
@@ -34,9 +44,9 @@ jobs:
         id: submodule-key
         run: echo "hash=$(git ls-tree HEAD lib/ | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
-      - name: Cache submodule dependencies
+      - name: Restore submodule dependencies
         id: deps-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           # lib/ holds the submodule worktrees and .git/modules holds their git directories (each
           # lib/*/.git is a gitdir pointer file into .git/modules). Both must be cached together:
@@ -50,6 +60,17 @@ jobs:
       - name: Install submodule dependencies
         if: steps.deps-cache.outputs.cache-hit != 'true'
         run: git submodule update --init --recursive
+
+      - name: Save submodule dependencies
+        # Saved immediately (not post-job): the content-addressed key is fully determined by the tree,
+        # and saving before the build means a red run still banks the fetch for the next one.
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            lib
+            .git/modules
+          key: forge-deps-v2-${{ runner.os }}-${{ steps.submodule-key.outputs.hash }}
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
@@ -75,31 +96,33 @@ jobs:
           restore-keys: |
             svm-${{ runner.os }}-
 
-      - name: Cache RPC fork state
+      - name: Restore RPC fork state
         # Fork suites pin block numbers, and RPC responses for a pinned (chain, block) are
         # immutable, so reusing them cannot change test outcomes — it only removes archive-node
         # round trips. Exact key per commit; prefix restore reuses (and accumulates onto) the
         # newest prior state. No-op until the fork RPC secrets are configured.
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.foundry/cache/rpc
           key: forge-rpc-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
             forge-rpc-${{ runner.os }}-
 
-      - name: Cache Forge build artifacts
-        # Incremental compiles: cold via_ir builds are slow. Exact key per commit; prefix restore
-        # reuses the newest prior build. Veracity is unaffected: forge revalidates every cached
-        # artifact against the content hash of its sources, so a stale restore can only save
-        # work, never compile the wrong code.
-        uses: actions/cache@v4
+      - name: Restore Forge build artifacts
+        # Incremental compiles: cold via_ir builds are slow enough to OOM the runner, so the newest
+        # prior build must ALWAYS restore. The restore prefix deliberately carries no settings hash:
+        # forge's own compilation cache revalidates every artifact against its sources' content hash,
+        # compiler version, AND settings, so a cache built under old foundry.toml settings can only
+        # save work, never compile the wrong code — keying the prefix on the toml would instead force
+        # a guaranteed-cold (OOM-prone) build on every config tweak.
+        uses: actions/cache/restore@v4
         with:
           path: |
             cache
             out
-          key: forge-build-${{ runner.os }}-${{ hashFiles('foundry.toml', 'remappings.txt') }}-${{ github.sha }}
+          key: forge-build-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
-            forge-build-${{ runner.os }}-${{ hashFiles('foundry.toml', 'remappings.txt') }}-
+            forge-build-${{ runner.os }}-
 
       - name: Run Forge fmt
         run: |
@@ -150,3 +173,22 @@ jobs:
           # local `FOUNDRY_PROFILE=ci forge test` keeps the full depth, CI pins 200 for runtime, and the
           # secret can raise it without a workflow change.
           FOUNDRY_FUZZ_RUNS: ${{ secrets.FOUNDRY_FUZZ_RUNS || 200 }}
+
+      - name: Save Forge build artifacts
+        # always(): a red run (failed fmt, build, or tests) still banks whatever compiled, so the next
+        # run resumes incrementally instead of paying the OOM-prone cold build again. actions/cache's
+        # combined post-step save only fires on job success, which is exactly the wrong semantics here.
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            cache
+            out
+          key: forge-build-${{ runner.os }}-${{ github.sha }}
+
+      - name: Save RPC fork state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.foundry/cache/rpc
+          key: forge-rpc-${{ runner.os }}-${{ github.sha }}

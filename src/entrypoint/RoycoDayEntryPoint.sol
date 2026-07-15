@@ -7,6 +7,7 @@ import { RoycoBase } from "../base/RoycoBase.sol";
 import { IOracleClock } from "../interfaces/IOracleClock.sol";
 import { IRoycoDayEntryPoint } from "../interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
+import { IRoycoLiquidityTranche } from "../interfaces/IRoycoLiquidityTranche.sol";
 import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 import { IRoycoFactory } from "../interfaces/factory/IRoycoFactory.sol";
 import { MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../libraries/Constants.sol";
@@ -235,14 +236,15 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         override(IRoycoDayEntryPoint)
         whenNotPaused
         restricted
-        returns (AssetClaims[] memory userClaims)
+        returns (AssetClaims[] memory userClaims, uint256[] memory quoteAssets)
     {
         // Execute the user specified redemption requests
         uint256 numRequestsToExecute = _requestNonces.length;
         require(numRequestsToExecute == _users.length && numRequestsToExecute == _sharesToRedeem.length, ARRAY_LENGTH_MISMATCH());
         userClaims = new AssetClaims[](numRequestsToExecute);
+        quoteAssets = new uint256[](numRequestsToExecute);
         for (uint256 i = 0; i < numRequestsToExecute; ++i) {
-            userClaims[i] = _executeRedemption(_users[i], _requestNonces[i], _sharesToRedeem[i]);
+            (userClaims[i], quoteAssets[i]) = _executeRedemption(_users[i], _requestNonces[i], _sharesToRedeem[i]);
         }
     }
 
@@ -256,7 +258,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         override(IRoycoDayEntryPoint)
         whenNotPaused
         restricted
-        returns (AssetClaims memory userClaims)
+        returns (AssetClaims memory userClaims, uint256 quoteAssets)
     {
         return _executeRedemption(_user, _requestNonce, _sharesToRedeem);
     }
@@ -435,12 +437,23 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     /**
      * @notice Executes a pending redemption request for the specified user
      * @dev The request must exist and the configured delay period must have elapsed
+     *      A maximal liquidity tranche redemption exits in-kind whenever the in-kind bound serves the entire
+     *      remaining request, and otherwise exits by the dominant multi-asset bound (the LP token's constituents),
+     *      so a redemption the market can serve is never left behind by the in-kind gate; explicit amounts always exit in-kind
      * @param _user The user whose redemption request should be executed
      * @param _requestNonce The nonce of the redemption request to execute
      * @param _sharesToRedeem The amount of shares to redeem (use type(uint256).max to redeem the maximum possible)
      * @return userClaims The assets withdrawn to the request-specific receiver upon executing this redemption request
+     * @return quoteAssets The quote withdrawn to the request-specific receiver (zero unless the redemption exits multi-asset)
      */
-    function _executeRedemption(address _user, uint256 _requestNonce, uint256 _sharesToRedeem) internal returns (AssetClaims memory userClaims) {
+    function _executeRedemption(
+        address _user,
+        uint256 _requestNonce,
+        uint256 _sharesToRedeem
+    )
+        internal
+        returns (AssetClaims memory userClaims, uint256 quoteAssets)
+    {
         require(_sharesToRedeem != 0, MUST_EXECUTE_NON_ZERO_AMOUNT());
 
         // Retrieve the user's specified redemption request and its tranche's config
@@ -453,11 +466,29 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         _validateRequestExecution(_requestNonce, request.baseRequest, config.baseConfig.oracleClock);
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
 
-        // Resolve the actual amount of shares to redeem
-        _sharesToRedeem =
-            (_sharesToRedeem == type(uint256).max) ? Math.min(IRoycoVaultTranche(tranche).maxRedeem(address(this)), request.shares) : _sharesToRedeem;
-        // Return early without reverting if maxRedeem is 0 due to market conditions
-        if (_sharesToRedeem == 0) return AssetClaims(ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, 0, ZERO_NAV_UNITS);
+        // Resolve the actual amount of shares to redeem and the exit route for liquidity tranche redemptions specifically
+        bool isMultiAssetRedemption;
+        if (_sharesToRedeem == type(uint256).max) {
+            // If the tranche being redeemed from is a LT, default to the in-kind mode if it satisfies the redemption, and fallback to the multiasset flow if it provides a higher redeemable amount
+            if (config.trancheType == TrancheType.LIQUIDITY) {
+                // Use the in-kind flow if it is sufficient for this redemption
+                uint256 maxRedeemInKind = IRoycoVaultTranche(tranche).maxRedeem(address(this));
+                if (maxRedeemInKind >= request.shares) {
+                    _sharesToRedeem = request.shares;
+                } else {
+                    // Use the multiasset flow if it allows for a larger redemption
+                    uint256 maxRedeemMultiAsset = IRoycoLiquidityTranche(tranche).maxRedeemMultiAsset(address(this));
+                    _sharesToRedeem = Math.min(Math.max(maxRedeemInKind, maxRedeemMultiAsset), request.shares);
+                    isMultiAssetRedemption = (maxRedeemMultiAsset > maxRedeemInKind);
+                }
+            }
+            // If the tranche being redeemed from is not a LT, redeem the maximum amount that can be redeemed in-kind, up to the requested amount
+            else {
+                _sharesToRedeem = Math.min(IRoycoVaultTranche(tranche).maxRedeem(address(this)), request.shares);
+            }
+        }
+        // Return early without reverting if the maximum redeemable is 0 due to market conditions
+        if (_sharesToRedeem == 0) return (AssetClaims(ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, 0, ZERO_NAV_UNITS), 0);
 
         // Mark the shares as redeemed
         uint256 sharesLeftToRedeem = request.shares - _sharesToRedeem;
@@ -475,10 +506,12 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         uint256 userSharesRedeemed;
         uint256 protocolFeeShares;
         AssetClaims memory bonusClaims;
+        uint256 bonusQuoteAssets;
         if (_user == msg.sender || request.baseRequest.executorBonusWAD == 0) {
             // Redeem shares directly to the receiver, forfeiting accrued yield as protocol fees
-            (userSharesRedeemed, protocolFeeShares, userClaims) =
-                _redeemWithYieldForfeiture(tranche, _sharesToRedeem, request.baseRequest.navAtRequestTime, request.baseRequest.receiver);
+            (userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets) = _redeemWithYieldForfeiture(
+                tranche, _sharesToRedeem, request.baseRequest.navAtRequestTime, request.baseRequest.receiver, isMultiAssetRedemption
+            );
         }
         // Else, if this is a third party execution, withdraw the assets, forfeit any accrued yield as protocol fees, and remit the executor bonus
         else {
@@ -486,15 +519,17 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
             require(request.baseRequest.executorBonusWAD != type(uint64).max, THIRD_PARTY_EXECUTION_DISABLED());
 
             // Redeem shares to this contract for bonus calculation, forfeiting accrued yield as protocol fees
-            (userSharesRedeemed, protocolFeeShares, userClaims) =
-                _redeemWithYieldForfeiture(tranche, _sharesToRedeem, request.baseRequest.navAtRequestTime, address(this));
+            (userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets) =
+                _redeemWithYieldForfeiture(tranche, _sharesToRedeem, request.baseRequest.navAtRequestTime, address(this), isMultiAssetRedemption);
 
-            // Split the redeemed claims into the executor's bonus and the receiver's portion, then remit both
-            bonusClaims = _remitRedemptionAndBonusClaims(config.kernel, userClaims, request.baseRequest.executorBonusWAD, request.baseRequest.receiver);
+            // Split the redeemed claims and quote into the executor's bonus and the receiver's portion, then remit both
+            (bonusClaims, bonusQuoteAssets) =
+                _remitRedemptionAndBonusClaims(config.kernel, userClaims, quoteAssets, request.baseRequest.executorBonusWAD, request.baseRequest.receiver);
+            quoteAssets -= bonusQuoteAssets;
         }
 
         // Emit the redemption execution event
-        emit RedemptionExecuted(_user, _requestNonce, msg.sender, userSharesRedeemed, protocolFeeShares, userClaims, bonusClaims);
+        emit RedemptionExecuted(_user, _requestNonce, msg.sender, userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets, bonusClaims, bonusQuoteAssets);
     }
 
     /**
@@ -574,18 +609,21 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
      * @param _shares The amount of shares to redeem from the tranche
      * @param _navAtRequestTime The NAV of the shares being redeemed at the time the redemption was requested
      * @param _receiver The address to receive the redeemed assets
+     * @param _isMultiAssetRedemption Whether to exit a liquidity tranche redemption to the LP token's constituents instead of in-kind
      * @return userSharesRedeemed The shares actually redeemed for the user (total minus forfeited)
      * @return protocolFeeShares The shares forfeited to the protocol equating to the yield accrued during the request lifecycle (zero if NAV decreased)
      * @return userClaims The assets withdrawn from the tranche for the user after forfeiting accrued yield
+     * @return quoteAssets The quote withdrawn from the tranche for the user (zero unless the redemption exits multi-asset)
      */
     function _redeemWithYieldForfeiture(
         address _tranche,
         uint256 _shares,
         NAV_UNIT _navAtRequestTime,
-        address _receiver
+        address _receiver,
+        bool _isMultiAssetRedemption
     )
         internal
-        returns (uint256 userSharesRedeemed, uint256 protocolFeeShares, AssetClaims memory userClaims)
+        returns (uint256 userSharesRedeemed, uint256 protocolFeeShares, AssetClaims memory userClaims, uint256 quoteAssets)
     {
         // Initialize the user's shares redeemed as the input
         userSharesRedeemed = _shares;
@@ -595,7 +633,15 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
             protocolFeeShares = _shares.mulDiv((navAtExecutionTime - _navAtRequestTime), navAtExecutionTime, Math.Rounding.Floor);
         }
         // Redeem the shares the user is entitled to after deducting the protocol fee shares
-        userClaims = IRoycoVaultTranche(_tranche).redeem((userSharesRedeemed -= protocolFeeShares), _receiver, address(this));
+        // A fully forfeited redemption (a zero-NAV snapshot) settles without a redeem call, mirroring the deposit path
+        if ((userSharesRedeemed -= protocolFeeShares) != 0) {
+            if (_isMultiAssetRedemption) {
+                // Multi-asset redemptions mandate that liquidity is removed in a way that cannot render less value than promised at present NAV values
+                (userClaims, quoteAssets) = IRoycoLiquidityTranche(_tranche).redeemMultiAsset(userSharesRedeemed, 0, 0, _receiver, address(this));
+            } else {
+                userClaims = IRoycoVaultTranche(_tranche).redeem(userSharesRedeemed, _receiver, address(this));
+            }
+        }
         // Accrue the forfeited shares as protocol fees
         if (protocolFeeShares != 0) _getRoycoDayEntryPointStorage().trancheToProtocolFeeShares[_tranche] += protocolFeeShares;
     }
@@ -620,18 +666,21 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
      *      leg therefore proves the whole leg is empty, and no bonus can be stranded behind the gate
      * @param _kernel The kernel of the market that the redeemed tranche belongs to, used to resolve the claim assets
      * @param _userClaims The redemption's total asset claims, reduced in place to the receiver's post-bonus portion
+     * @param _quoteAssets The redemption's total quote leg (zero unless a liquidity tranche redemption exits multi-asset)
      * @param _executorBonusWAD The bonus percentage (0-100%) paid to the executor (the caller), scaled to WAD precision
      * @param _receiver The address to receive the user's claims
      * @return bonusClaims The asset claims remitted to the executor (the caller)
+     * @return bonusQuoteAssets The quote remitted to the executor (the caller)
      */
     function _remitRedemptionAndBonusClaims(
         address _kernel,
         AssetClaims memory _userClaims,
+        uint256 _quoteAssets,
         uint64 _executorBonusWAD,
         address _receiver
     )
         internal
-        returns (AssetClaims memory bonusClaims)
+        returns (AssetClaims memory bonusClaims, uint256 bonusQuoteAssets)
     {
         // Scale the asset claims to compute the executor bonus and the receiver's portion
         bonusClaims = TrancheClaimsLogic._scaleAssetClaims(_userClaims, _executorBonusWAD, WAD);
@@ -671,6 +720,13 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
             address seniorTranche = IRoycoDayKernel(_kernel).SENIOR_TRANCHE();
             IERC20(seniorTranche).safeTransfer(_receiver, _userClaims.stShares);
             if (bonusClaims.stShares != 0) IERC20(seniorTranche).safeTransfer(msg.sender, bonusClaims.stShares);
+        }
+        // Transfer the quote leg to the executor and receiver respectively
+        if (_quoteAssets != 0) {
+            bonusQuoteAssets = Math.mulDiv(_quoteAssets, _executorBonusWAD, WAD, Math.Rounding.Floor);
+            address quoteAsset = IRoycoDayKernel(_kernel).QUOTE_ASSET();
+            IERC20(quoteAsset).safeTransfer(_receiver, _quoteAssets - bonusQuoteAssets);
+            if (bonusQuoteAssets != 0) IERC20(quoteAsset).safeTransfer(msg.sender, bonusQuoteAssets);
         }
     }
 

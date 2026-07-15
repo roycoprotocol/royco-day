@@ -12,6 +12,7 @@ import { NAV_UNIT, TRANCHE_UNIT } from "../libraries/Units.sol";
 interface IRoycoDayEntryPoint {
     /**
      * @notice Storage state for the Royco entry point
+     * @custom:storage-location erc7201:Royco.storage.RoycoDayEntryPoint
      * @custom:field lastRequestNonce - The last assigned request nonce
      * @custom:field trancheToConfig - A mapping of tranches to their enriched entry point configurations
      * @custom:field userToNonceToDepositRequest - A mapping tracking each user's deposit requests by nonce
@@ -153,10 +154,12 @@ interface IRoycoDayEntryPoint {
      * @param user The user whose redemption request was executed
      * @param nonce The nonce identifying the executed request
      * @param executor The address that executed the request (user or executor)
-     * @param sharesRedeemed The shares redeemed for the user which equate to the user claims
+     * @param sharesRedeemed The shares redeemed for the user (the receiver's and the executor's portions combined)
      * @param protocolFeeShares The shares forfeited to the protocol equating to the yield accrued during the request lifecycle (zero if NAV decreased)
      * @param userClaims The asset claims withdrawn to the receiver
+     * @param quoteAssets The quote withdrawn to the receiver (zero unless a liquidity tranche redemption exits multi-asset)
      * @param bonusClaims The asset claims paid to the executor as a bonus (zero if self-executed)
+     * @param bonusQuoteAssets The quote paid to the executor as a bonus (zero if self-executed)
      */
     event RedemptionExecuted(
         address indexed user,
@@ -165,7 +168,9 @@ interface IRoycoDayEntryPoint {
         uint256 sharesRedeemed,
         uint256 protocolFeeShares,
         AssetClaims userClaims,
-        AssetClaims bonusClaims
+        uint256 quoteAssets,
+        AssetClaims bonusClaims,
+        uint256 bonusQuoteAssets
     );
 
     /**
@@ -304,10 +309,13 @@ interface IRoycoDayEntryPoint {
 
     /**
      * @notice Executes multiple pending redemption requests across the specified users
+     * @dev A maximal liquidity tranche redemption falls back to the multi-asset exit when the in-kind bound cannot
+     *      serve the entire remaining request — see executeRedemption
      * @param _users The users whose redemption requests should be executed
      * @param _requestNonces The nonces of the redemption requests to execute
      * @param _sharesToRedeem The amount of shares to redeem for the redemption requests to execute (use type(uint256).max to redeem the maximum possible)
      * @return userClaims The assets withdrawn to the request-specific receiver upon executing each executed request
+     * @return quoteAssets The quote withdrawn to the request-specific receiver by each executed request (zero unless a liquidity tranche redemption exits multi-asset)
      */
     function executeRedemptions(
         address[] calldata _users,
@@ -315,17 +323,27 @@ interface IRoycoDayEntryPoint {
         uint256[] calldata _sharesToRedeem
     )
         external
-        returns (AssetClaims[] memory userClaims);
+        returns (AssetClaims[] memory userClaims, uint256[] memory quoteAssets);
 
     /**
      * @notice Executes a pending redemption request for the specified user
      * @dev The request must exist and the configured delay period must have elapsed
+     *      A maximal liquidity tranche redemption exits in-kind whenever the in-kind bound serves the entire
+     *      remaining request, and otherwise exits by the dominant multi-asset bound (the LP token's constituents),
+     *      so a redemption the market can serve is never left behind by the in-kind gate; explicit amounts always exit in-kind
      * @param _user The user whose redemption request should be executed
      * @param _requestNonce The nonce of the redemption request to execute
      * @param _sharesToRedeem The amount of shares to redeem (use type(uint256).max to redeem the maximum possible)
      * @return userClaims The assets withdrawn to the request-specific receiver upon executing this redemption request
+     * @return quoteAssets The quote withdrawn to the request-specific receiver (zero unless the redemption exits multi-asset)
      */
-    function executeRedemption(address _user, uint256 _requestNonce, uint256 _sharesToRedeem) external returns (AssetClaims memory userClaims);
+    function executeRedemption(
+        address _user,
+        uint256 _requestNonce,
+        uint256 _sharesToRedeem
+    )
+        external
+        returns (AssetClaims memory userClaims, uint256 quoteAssets);
 
     /**
      * @notice Cancels multiple pending redemption requests for the caller, returning escrowed shares

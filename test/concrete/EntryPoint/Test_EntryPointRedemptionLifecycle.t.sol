@@ -239,7 +239,7 @@ contract Test_EntryPointRedemptionLifecycle is EntryPointTestBase {
         sharesToRedeem[1] = type(uint256).max;
 
         vm.prank(USER_A);
-        AssetClaims[] memory claims = entryPoint.executeRedemptions(users, nonces, sharesToRedeem);
+        (AssetClaims[] memory claims,) = entryPoint.executeRedemptions(users, nonces, sharesToRedeem);
         assertGt(toUint256(claims[0].nav), 0, "USER_A's redemption must produce claims");
         assertGt(toUint256(claims[1].nav), 0, "USER_B's redemption must produce claims");
     }

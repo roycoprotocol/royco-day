@@ -305,13 +305,27 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
     /// @notice Executes a redemption request as _executor for the specified amount of shares
     function _executeRedemption(address _executor, address _user, uint256 _nonce, uint256 _shares) internal virtual returns (AssetClaims memory claims) {
         vm.prank(_executor);
-        claims = entryPoint.executeRedemption(_user, _nonce, _shares);
+        (claims,) = entryPoint.executeRedemption(_user, _nonce, _shares);
     }
 
     /// @notice Executes a redemption request as _executor for the maximum possible amount of shares
     function _executeRedemptionMax(address _executor, address _user, uint256 _nonce) internal virtual returns (AssetClaims memory claims) {
         vm.prank(_executor);
-        claims = entryPoint.executeRedemption(_user, _nonce, type(uint256).max);
+        (claims,) = entryPoint.executeRedemption(_user, _nonce, type(uint256).max);
+    }
+
+    /// @notice Executes a redemption request as _executor for the maximum possible amount of shares, returning the quote leg alongside the claims
+    function _executeRedemptionMaxWithQuote(
+        address _executor,
+        address _user,
+        uint256 _nonce
+    )
+        internal
+        virtual
+        returns (AssetClaims memory claims, uint256 quoteAssets)
+    {
+        vm.prank(_executor);
+        (claims, quoteAssets) = entryPoint.executeRedemption(_user, _nonce, type(uint256).max);
     }
 
     /// @notice Cancels a redemption request as _user, returning escrow to _receiver
