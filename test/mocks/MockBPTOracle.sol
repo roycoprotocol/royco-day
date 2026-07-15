@@ -46,6 +46,9 @@ contract MockBPTOracle {
     /// @dev Whether computeTVL reverts
     bool private _revertMode;
 
+    /// @dev Whether the oracle reverts its reads while the vault is unlocked, the LPOracleBase flag the quoter rejects at wiring
+    bool private _shouldRevertIfVaultUnlocked;
+
     /// @dev Per-token WAD prices used in AUTO mode, zero reads as the WAD (1.0) default
     mapping(address token => uint256 priceWAD) private _priceWAD;
 
@@ -67,6 +70,11 @@ contract MockBPTOracle {
     /// @notice Returns the pool this oracle values, the LPOracleBase surface the kernel quoter validates when the oracle is wired
     function pool() external view returns (address) {
         return POOL;
+    }
+
+    /// @notice Returns whether the oracle reverts its reads while the vault is unlocked, the LPOracleBase surface the kernel quoter rejects when true
+    function getShouldRevertIfVaultUnlocked() external view returns (bool) {
+        return _shouldRevertIfVaultUnlocked;
     }
 
     /**
@@ -144,6 +152,11 @@ contract MockBPTOracle {
                 _priceWAD[token] = getPriceWAD(token).mulDiv(uint256(factorWAD), WAD, Math.Rounding.Floor);
             }
         }
+    }
+
+    /// @notice Arms or disarms the unlocked-vault revert flag the quoter rejects at wiring
+    function setShouldRevertIfVaultUnlocked(bool _shouldRevert) external {
+        _shouldRevertIfVaultUnlocked = _shouldRevert;
     }
 
     /// @notice Arms or disarms the revert mode on computeTVL

@@ -40,6 +40,17 @@ contract Test_OracleGuardAndConversions_BPTOracleQuoter is DayMarketTestBase {
         kernel.setBPTOracle(address(foreignOracle), false);
     }
 
+    /// @notice An oracle that reverts its reads while the vault is unlocked is rejected: the venue reads it mid-unlock
+    ///         (the execute-and-unwind previews and the pool hooks), so such an oracle would brick the whole venue
+    function test_RevertIf_BPTOracleRevertsWhileVaultUnlocked() public {
+        MockBPTOracle strictOracle = new MockBPTOracle(balancerVault, address(bpt));
+        strictOracle.setShouldRevertIfVaultUnlocked(true);
+
+        vm.prank(ORACLE_QUOTER_ADMIN);
+        vm.expectRevert(BalancerV3_LT_BPTOracle_Quoter.BPT_ORACLE_CANNOT_REVERT_WHILE_VAULT_UNLOCKED.selector);
+        kernel.setBPTOracle(address(strictOracle), false);
+    }
+
     /**
      * @notice A right-pool oracle lands in storage with its event, and on BOTH sync-flag paths the trailing sync
      *         re-commits the LT raw NAV against the INCOMING oracle's mark

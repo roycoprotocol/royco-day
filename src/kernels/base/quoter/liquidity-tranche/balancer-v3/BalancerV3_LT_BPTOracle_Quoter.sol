@@ -89,8 +89,11 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     /// @notice Thrown when the BPT oracle prices a pool other than this market's registered liquidity tranche pool
     error BPT_ORACLE_POOL_MISMATCH();
 
+    /// @notice Thrown when the BPT oracle reverts while the vault is unlocked, which the venue reads it through (previews and hooks)
+    error BPT_ORACLE_CANNOT_REVERT_WHILE_VAULT_UNLOCKED();
+
     /// @notice Thrown when a preview-mode venue callback returns instead of unwinding via its result-carrying revert
-    error PREVIEW_CAN_NEVER_MUTATE_STATE();
+    error PREVIEW_CANNOT_MUTATE_STATE();
 
     /// @notice Constructs the Balancer V3 liquidity tranche quoter
     /// @param _balancerV3Vault The instance of the singleton Balancer V3 Vault
@@ -204,7 +207,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     {
         try _vault.unlock(abi.encodeCall(this.addBalancerV3Liquidity, (true, _seniorShares, _quoteAssets, ZERO_TRANCHE_UNITS))) {
             // Unreachable: a preview-mode callback always unwinds via its result-carrying revert
-            revert PREVIEW_CAN_NEVER_MUTATE_STATE();
+            revert PREVIEW_CANNOT_MUTATE_STATE();
         } catch (bytes memory callbackRevertData) {
             _validatePreviewResult(callbackRevertData, BalancerV3VenueLogic.PREVIEW_ADD_LIQUIDITY_RESULT.selector);
             assembly ("memory-safe") {
@@ -224,7 +227,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     function previewRemoveLiquidity(TRANCHE_UNIT _ltAssets) external override(IRoycoDayKernel) onlySelf returns (uint256 stShares, uint256 quoteAssets) {
         try _vault.unlock(abi.encodeCall(this.removeBalancerV3Liquidity, (true, _ltAssets, uint256(0), uint256(0), address(0)))) {
             // Unreachable: a preview-mode callback always unwinds via its result-carrying revert
-            revert PREVIEW_CAN_NEVER_MUTATE_STATE();
+            revert PREVIEW_CANNOT_MUTATE_STATE();
         } catch (bytes memory callbackRevertData) {
             _validatePreviewResult(callbackRevertData, BalancerV3VenueLogic.PREVIEW_REMOVE_LIQUIDITY_RESULT.selector);
             assembly ("memory-safe") {
@@ -392,6 +395,8 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     /// @param _bptOracle The new manipulation-resistant balancer pool token (BPT) oracle
     function _setBPTOracle(address _bptOracle) internal {
         require(address(LPOracleBase(_bptOracle).pool()) == LT_ASSET, BPT_ORACLE_POOL_MISMATCH());
+        // The venue reads the oracle while the vault is unlocked, so it must not revert on an unlocked vault
+        require(!LPOracleBase(_bptOracle).getShouldRevertIfVaultUnlocked(), BPT_ORACLE_CANNOT_REVERT_WHILE_VAULT_UNLOCKED());
         _getBalancerV3_LT_BPTOracle_QuoterStorage().bptOracle = _bptOracle;
         emit BPTOracleUpdated(_bptOracle);
     }
