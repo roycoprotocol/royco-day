@@ -50,18 +50,19 @@ abstract contract EntryPointConfigurer {
         internal
     {
         // Over-allocate to the input length, then pack the present tranches and their paired configs, dropping any null tranches
-        address[] memory tranches = new address[](_tranches.length);
+        uint256 numTranches = _tranches.length;
+        address[] memory tranches = new address[](numTranches);
         IRoycoDayEntryPoint.TrancheConfig[] memory configs = new IRoycoDayEntryPoint.TrancheConfig[](_tranches.length);
-        uint256 present;
-        for (uint256 i = 0; i < _tranches.length; ++i) {
+        uint256 numNonNullTranches;
+        for (uint256 i = 0; i < numTranches; ++i) {
             if (_tranches[i] == address(0)) continue;
-            (tranches[present], configs[present]) = (_tranches[i], _configs[i]);
-            ++present;
+            (tranches[numNonNullTranches], configs[numNonNullTranches]) = (_tranches[i], _configs[i]);
+            ++numNonNullTranches;
         }
         // Set the size of the tranches and configs arrays to the final size after pruning the null tranches
         assembly ("memory-safe") {
-            mstore(tranches, present)
-            mstore(configs, present)
+            mstore(tranches, numNonNullTranches)
+            mstore(configs, numNonNullTranches)
         }
 
         _factory.executeAsFactory(ROYCO_DAY_ENTRY_POINT, abi.encodeCall(IRoycoDayEntryPoint.modifyTrancheConfigs, (tranches, configs)));
