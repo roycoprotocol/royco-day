@@ -15,7 +15,6 @@ import {
 } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
 import { ConstantPriceFeed } from "../../../../lib/balancer-v3-monorepo/pkg/oracles/contracts/ConstantPriceFeed.sol";
 import { GyroECLPPoolFactory } from "../../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
-import { BalancerPoolToken } from "../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/BalancerPoolToken.sol";
 import { SingletonAuthentication } from "../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/SingletonAuthentication.sol";
 import {
     AggregatorV3Interface as BalancerAggregatorV3Interface
@@ -33,7 +32,6 @@ import { IRoycoProtocolTemplate } from "../../../interfaces/factory/IRoycoProtoc
 import { BalancerV3_LT_BPTOracle_Quoter } from "../../../kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 import { RoycoDayBalancerV3Hooks } from "../../../kernels/base/quoter/liquidity-tranche/balancer-v3/hooks/RoycoDayBalancerV3Hooks.sol";
 import { RoycoDayBalancerV3HooksStandIn } from "../../../kernels/base/quoter/liquidity-tranche/balancer-v3/hooks/RoycoDayBalancerV3HooksStandIn.sol";
-import { TrancheType } from "../../../libraries/Types.sol";
 import { RoycoLiquidityTranche } from "../../../tranches/RoycoLiquidityTranche.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
@@ -178,26 +176,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
     // ERRORS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    error INVALID_ACCESS_MANAGER();
-    error INVALID_TRANCHE_TYPE_ON_SENIOR_TRANCHE();
-    error INVALID_TRANCHE_TYPE_ON_JUNIOR_TRANCHE();
-    error INVALID_TRANCHE_TYPE_ON_LIQUIDITY_TRANCHE();
-    error INVALID_KERNEL_ON_SENIOR_TRANCHE();
-    error INVALID_KERNEL_ON_JUNIOR_TRANCHE();
-    error INVALID_KERNEL_ON_LIQUIDITY_TRANCHE();
-    error INVALID_SENIOR_TRANCHE_ON_KERNEL();
-    error INVALID_JUNIOR_TRANCHE_ON_KERNEL();
-    error INVALID_LIQUIDITY_TRANCHE_ON_KERNEL();
-    error INVALID_ST_ASSET_ON_KERNEL();
-    error INVALID_JT_ASSET_ON_KERNEL();
-    error INVALID_LT_ASSET_ON_KERNEL();
-    error INVALID_ACCOUNTANT_ON_KERNEL();
-    error INVALID_KERNEL_ON_ACCOUNTANT();
-    error POOL_NOT_REGISTERED_WITH_VAULT();
-    error POOL_TOKEN_CONFIGURATION_MISMATCH();
-    error INVALID_KERNEL_ON_BALANCER_HOOK();
     error INVALID_ECLP_LP_ORACLE_FACTORY();
-    error INVALID_BPT_ORACLE_ON_KERNEL();
 
     // ═══════════════════════════════════════════════════════════════════════════
     // IMMUTABLES

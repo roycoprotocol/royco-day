@@ -5,7 +5,6 @@ import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/E
 import { IRoycoAuth } from "../../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../../src/interfaces/IRoycoDayKernel.sol";
-import { IRoycoVaultTranche } from "../../../../src/interfaces/IRoycoVaultTranche.sol";
 import { AssetClaims, MarketState, SyncedAccountingState, TrancheType } from "../../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
 import {

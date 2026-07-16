@@ -139,9 +139,6 @@ interface IRoycoDayKernel {
     /// @notice Thrown when a venue driver restricted to kernel self-calls is invoked by any other caller
     error ONLY_SELF();
 
-    /// @notice Thrown when the specified account is the null address
-    error NULL_DEPOSITOR();
-
     /// @notice Thrown when the to address is not whitelisted on the tranche
     error ACCOUNT_NOT_WHITELISTED_TRANCHE_LP(address to);
 

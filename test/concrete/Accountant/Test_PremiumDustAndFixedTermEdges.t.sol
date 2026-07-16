@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
-import { NAV_UNIT, toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
 
 /**

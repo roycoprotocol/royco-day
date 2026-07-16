@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
 import { AssetClaims, Operation, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
@@ -21,7 +20,6 @@ import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
  *      bonus-exceeds-buffer panics live in test/concrete/Accountant/Test_PostOpSync_Accountant.t.sol
  */
 contract Test_SeniorTrancheSelfLiquidationBonus_Accountant is AccountantTestBase {
-    uint256 internal constant WAD_ = 1e18;
     uint256 internal constant LIQ_THRESHOLD = 1.1e18;
 
     SelfLiquidationHarness internal sll;

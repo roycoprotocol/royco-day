@@ -777,8 +777,6 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         uint256 quoteSpot0 = Math.mulDiv(WAD, WAD, _spotSTinQuoteWAD()); // internal price of quote vs its 1.0 feed
         uint256 quoteLeg = _rawBalances()[_quotePoolIndex()] / 10;
         uint256 contributed = _quoteToNAV(quoteLeg);
-        uint256 supply0 = LT.totalSupply();
-        uint256 nav0 = toUint256(LT.totalAssets().nav);
 
         uint256 shares = _doDepositLTMulti(LT_ALICE_ADDRESS, 0, quoteLeg, 0).shares;
         assertGt(shares, 0, "the quote-only deposit must mint in-term");

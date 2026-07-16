@@ -32,9 +32,6 @@ interface IRoycoProtocolTemplate {
         bytes extras;
     }
 
-    /// @notice Thrown when the supplied deployment params fail template-specific validation
-    error INVALID_PARAMS();
-
     /**
      * @notice Loads the template's SSTORE2-backed component creation codes, called once by the deployer before the
      *         template is registered with the factory

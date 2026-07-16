@@ -43,7 +43,7 @@ import { IdenticalAssets_ST_JT_Oracle_Quoter } from "../../src/kernels/base/quot
 import { BalancerV3_LT_BPTOracle_Quoter } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
 import { SyncedAccountingState } from "../../src/libraries/Types.sol";
-import { NAV_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../src/libraries/Units.sol";
+import { toNAVUnits, toTrancheUnits, toUint256 } from "../../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoLiquidityTranche } from "../../src/tranches/RoycoLiquidityTranche.sol";
 import { RoycoSeniorTranche } from "../../src/tranches/RoycoSeniorTranche.sol";

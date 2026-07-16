@@ -228,7 +228,6 @@ contract DayMarketHandler is DayMarketTestBase {
     bytes4 internal constant SEL_INVALID_POST_OP = IRoycoDayAccountant.INVALID_POST_OP_STATE.selector;
     bytes4 internal constant SEL_ZERO_SHARES = IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES.selector;
     bytes4 internal constant SEL_ZERO_VALUE = IRoycoVaultTranche.INVALID_VALUE_ALLOCATED.selector;
-    bytes4 internal constant SEL_ZERO_REDEEM = IRoycoVaultTranche.MUST_REQUEST_NON_ZERO_SHARES.selector;
     bytes4 internal constant SEL_ERC20_BALANCE = IERC20Errors.ERC20InsufficientBalance.selector;
     bytes4 internal constant SEL_AMOUNT_OUT_BELOW_MIN = IVaultErrors.AmountOutBelowMin.selector;
     bytes4 internal constant SEL_PANIC = bytes4(0x4e487b71);

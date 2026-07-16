@@ -20,8 +20,8 @@ import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayEntryPoint } from "../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
-import { AssetClaims, MarketState, SyncedAccountingState, TrancheType } from "../../src/libraries/Types.sol";
-import { TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../src/libraries/Units.sol";
+import { AssetClaims, MarketState, SyncedAccountingState } from "../../src/libraries/Types.sol";
+import { toTrancheUnits, toUint256 } from "../../src/libraries/Units.sol";
 import { MockRoycoFactory } from "../mocks/MockRoycoFactory.sol";
 import { DayMarketTestBase } from "./DayMarketTestBase.sol";
 
@@ -288,11 +288,6 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         vm.stopPrank();
     }
 
-    /// @notice Requests a redemption as _user with the default executor bonus, receiving to self
-    function _requestRedemptionDefault(address _user, address _tranche, uint256 _shares) internal virtual returns (uint256 nonce, uint32 executableAt) {
-        return _requestRedemption(_user, _tranche, _shares, _user, DEFAULT_EXECUTOR_BONUS);
-    }
-
     // =============================
     // Execution and Cancellation Helpers
     // =============================
@@ -378,15 +373,6 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
     // =============================
     // Assertion Helpers
     // =============================
-
-    /// @notice Asserts wei-exact equality of two AssetClaims across all five legs
-    function assertAssetClaimsEq(AssetClaims memory _left, AssetClaims memory _right, string memory _err) internal pure {
-        assertEq(_left.stAssets, _right.stAssets, string.concat(_err, ": stAssets"));
-        assertEq(_left.jtAssets, _right.jtAssets, string.concat(_err, ": jtAssets"));
-        assertEq(_left.ltAssets, _right.ltAssets, string.concat(_err, ": ltAssets"));
-        assertEq(_left.stShares, _right.stShares, string.concat(_err, ": stShares"));
-        assertEq(_left.nav, _right.nav, string.concat(_err, ": nav"));
-    }
 
     /// @notice Asserts every leg of an AssetClaims is zero
     function assertAssetClaimsZero(AssetClaims memory _claims, string memory _err) internal pure {

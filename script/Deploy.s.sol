@@ -38,7 +38,6 @@ import { RoycoFactory } from "../src/factory/RoycoFactory.sol";
 import {
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
 } from "../src/factory/templates/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
-import { BaseDeploymentTemplate } from "../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import {
     COMPONENT_ID_ACCOUNTANT_IMPL,
     COMPONENT_ID_DAY_BALANCER_HOOKS,

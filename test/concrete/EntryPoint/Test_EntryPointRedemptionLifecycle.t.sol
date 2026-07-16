@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
-import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { toUint256 } from "../../../src/libraries/Units.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
 import { EntryPointTestBase, IERC20Like } from "../../utils/EntryPointTestBase.sol";

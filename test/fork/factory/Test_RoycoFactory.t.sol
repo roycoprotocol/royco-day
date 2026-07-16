@@ -13,7 +13,6 @@ import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/acc
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import { CREATE3 } from "../../../lib/solady/src/utils/CREATE3.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../../script/config/MarketDeploymentConfig.sol";
@@ -31,7 +30,7 @@ import {
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate } from "../../../src/factory/templates/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
 import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
-import { COMPONENT_ID_SENIOR_TRANCHE_IMPL, TAG_ST_IMPL, TAG_ST_PROXY } from "../../../src/factory/templates/base/Components.sol";
+import { COMPONENT_ID_SENIOR_TRANCHE_IMPL, TAG_ST_PROXY } from "../../../src/factory/templates/base/Components.sol";
 import { EntryPointConfigurer } from "../../../src/factory/templates/periphery/EntryPointConfigurer.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
