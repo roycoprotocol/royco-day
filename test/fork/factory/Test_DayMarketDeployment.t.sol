@@ -19,13 +19,18 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { SafeCast } from "../../../lib/openzeppelin-contracts/contracts/utils/math/SafeCast.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
 import {
+    ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
+    ADMIN_CONVERSION_RATE_ROLE,
     ADMIN_ENTRY_POINT_ROLE,
     ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
     ADMIN_ORACLE_QUOTER_ROLE,
     ADMIN_PAUSER_ROLE,
+    ADMIN_PROTOCOL_FEE_SETTER_ROLE,
+    ADMIN_REINVESTMENT_ROLE,
+    ADMIN_SANCTIONS_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     BURNER_ROLE,
@@ -43,6 +48,7 @@ import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.s
 import { RoycoDayKernel } from "../../../src/kernels/base/RoycoDayKernel.sol";
 import { BalancerV3_LT_BPTOracle_Quoter } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 import { RoycoDayBalancerV3Hooks } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3Hooks.sol";
+import { LONG_DELAY_SECONDS, MAX_FIXED_TERM_SECONDS, SHORT_DELAY_SECONDS } from "../../../src/libraries/Constants.sol";
 import { TrancheType } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "../../../src/libraries/Units.sol";
 import { RoycoLiquidityTranche } from "../../../src/tranches/RoycoLiquidityTranche.sol";
@@ -345,16 +351,19 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         _assertRole(address(KERNEL), IRoycoDayKernel.syncTrancheAccounting.selector, SYNC_ROLE);
         _assertRole(address(KERNEL), IRoycoAuth.pause.selector, ADMIN_PAUSER_ROLE);
 
-        // Operational maintenance surface -> ADMIN_MARKET_OPS_ROLE.
-        _assertRole(address(KERNEL), IRoycoDayKernel.reinvestLiquidityPremium.selector, ADMIN_MARKET_OPS_ROLE);
+        // Operational maintenance surface -> ADMIN_MARKET_OPS_ROLE, except the reinvest keeper action, which is
+        // on the dedicated zero-delay reinvestment role.
+        _assertRole(address(KERNEL), IRoycoDayKernel.reinvestLiquidityPremium.selector, ADMIN_REINVESTMENT_ROLE);
         _assertRole(address(KERNEL), IRoycoDayKernel.setRoycoBlacklist.selector, ADMIN_MARKET_OPS_ROLE);
         _assertRole(address(ACCOUNTANT), IRoycoDayAccountant.setSeniorTrancheDustTolerance.selector, ADMIN_MARKET_OPS_ROLE);
         _assertRole(address(ACCOUNTANT), IRoycoDayAccountant.setJuniorTrancheDustTolerance.selector, ADMIN_MARKET_OPS_ROLE);
 
-        // Quoter admin surface -> ADMIN_ORACLE_QUOTER_ROLE (previously unbound => silently defaulted to ADMIN_ROLE).
+        // Quoter admin surface -> ADMIN_ORACLE_QUOTER_ROLE, except the direct conversion-rate override, which is a
+        // pricing change bound to ADMIN_CONVERSION_RATE_ROLE at the long delay (previously unbound => silently
+        // defaulted to ADMIN_ROLE).
         _assertRole(address(KERNEL), BalancerV3_LT_BPTOracle_Quoter.setBPTOracle.selector, ADMIN_ORACLE_QUOTER_ROLE);
         _assertRole(address(KERNEL), BalancerV3_LT_BPTOracle_Quoter.setMaxReinvestmentSlippage.selector, ADMIN_ORACLE_QUOTER_ROLE);
-        _assertRole(address(KERNEL), bytes4(keccak256("setConversionRate(uint256,bool)")), ADMIN_ORACLE_QUOTER_ROLE);
+        _assertRole(address(KERNEL), bytes4(keccak256("setConversionRate(uint256,bool)")), ADMIN_CONVERSION_RATE_ROLE);
         _assertRole(address(KERNEL), bytes4(keccak256("setChainlinkOracle(address,uint48,bool)")), ADMIN_ORACLE_QUOTER_ROLE);
         _assertRole(address(KERNEL), bytes4(keccak256("setSequencerUptimeFeed(address,uint48)")), ADMIN_ORACLE_QUOTER_ROLE);
 
@@ -381,6 +390,8 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertTrue(poolMgr, "balancer pool manager granted");
         (bool marketOps,) = ACCESS_MANAGER.hasRole(ADMIN_MARKET_OPS_ROLE, KERNEL_ADMIN_ADDRESS);
         assertTrue(marketOps, "market ops granted");
+        (bool reinvestor,) = ACCESS_MANAGER.hasRole(ADMIN_REINVESTMENT_ROLE, KERNEL_ADMIN_ADDRESS);
+        assertTrue(reinvestor, "reinvestment role granted");
     }
 
     /// The deploy script renounces the hot deployer key's super-admin surface, keeping only DEPLOYER_ROLE
@@ -485,6 +496,166 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         vm.prank(DEPLOYER_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(IAccessManager.AccessManagerUnauthorizedAccount.selector, DEPLOYER_ADDRESS, uint64(0)));
         ACCESS_MANAGER.grantRole(0, DEPLOYER_ADDRESS, 0);
+    }
+
+    // ============================================================================================================
+    // 10. AUTH: governance delays (admin execution delay, grant delays, target admin delays)
+    // ============================================================================================================
+
+    /// @notice The long delay must cover the maximum fixed-term duration any market may carry, so a governance
+    ///         change cannot take effect faster than a committed user can exit, and must cover every execution
+    ///         delay in the role configuration. Locks the deployed values of the three delay constants, and asserts
+    ///         the moved per-role delays: the oracle quoter, market ops, and Balancer pool manager roles on the
+    ///         short execution delay, the upgrader on the long one, and the oracle quoter carrying the long grant
+    ///         delay.
+    function test_delays_longDelayCalibration() public {
+        assertEq(LONG_DELAY_SECONDS, 15 days, "long delay value changed; recheck it against the maximum fixed term and the short delay");
+        assertEq(SHORT_DELAY_SECONDS, 2 days, "short delay value changed; recheck the roles that carry it");
+        assertEq(MAX_FIXED_TERM_SECONDS, 14 days, "maximum fixed term changed; recheck the long delay");
+        assertGe(LONG_DELAY_SECONDS, SHORT_DELAY_SECONDS, "long delay must cover the short delay");
+        assertGe(LONG_DELAY_SECONDS, MAX_FIXED_TERM_SECONDS, "long delay must cover the maximum fixed term");
+        assertGe(LONG_DELAY_SECONDS, DEPLOY_SCRIPT.getRoleConfig(ADMIN_UPGRADER_ROLE).executionDelay, "must cover the upgrader delay");
+        assertGe(LONG_DELAY_SECONDS, DEPLOY_SCRIPT.getRoleConfig(ADMIN_KERNEL_ROLE).executionDelay, "must cover the kernel admin delay");
+        assertGe(LONG_DELAY_SECONDS, DEPLOY_SCRIPT.getRoleConfig(ADMIN_ACCOUNTANT_ROLE).executionDelay, "must cover the accountant admin delay");
+        assertGe(LONG_DELAY_SECONDS, DEPLOY_SCRIPT.getRoleConfig(ADMIN_PROTOCOL_FEE_SETTER_ROLE).executionDelay, "must cover the fee setter delay");
+        assertGe(LONG_DELAY_SECONDS, DEPLOY_SCRIPT.getRoleConfig(ADMIN_UNPAUSER_ROLE).executionDelay, "must cover the unpauser delay");
+        assertGe(LONG_DELAY_SECONDS, DEPLOY_SCRIPT.getRoleConfig(ADMIN_ORACLE_QUOTER_ROLE).executionDelay, "must cover the oracle quoter delay");
+        assertGe(LONG_DELAY_SECONDS, DEPLOY_SCRIPT.getRoleConfig(ADMIN_MARKET_OPS_ROLE).executionDelay, "must cover the market ops delay");
+        assertGe(LONG_DELAY_SECONDS, DEPLOY_SCRIPT.getRoleConfig(ADMIN_BALANCER_POOL_MANAGER_ROLE).executionDelay, "must cover the pool manager delay");
+        assertGe(LONG_DELAY_SECONDS, DEPLOY_SCRIPT.getRoleConfig(ADMIN_REINVESTMENT_ROLE).executionDelay, "must cover the reinvestment delay");
+
+        // The moved execution delays, read from the deployed AccessManager.
+        (, uint32 oracleQuoterDelay) = ACCESS_MANAGER.hasRole(ADMIN_ORACLE_QUOTER_ROLE, ORACLE_QUOTER_ADMIN_ADDRESS);
+        assertEq(oracleQuoterDelay, SHORT_DELAY_SECONDS, "oracle quoter execution delay");
+        (, uint32 marketOpsDelay) = ACCESS_MANAGER.hasRole(ADMIN_MARKET_OPS_ROLE, KERNEL_ADMIN_ADDRESS);
+        assertEq(marketOpsDelay, SHORT_DELAY_SECONDS, "market ops execution delay");
+        (, uint32 poolManagerDelay) = ACCESS_MANAGER.hasRole(ADMIN_BALANCER_POOL_MANAGER_ROLE, KERNEL_ADMIN_ADDRESS);
+        assertEq(poolManagerDelay, SHORT_DELAY_SECONDS, "balancer pool manager execution delay");
+        (, uint32 upgraderDelay) = ACCESS_MANAGER.hasRole(ADMIN_UPGRADER_ROLE, UPGRADER_ADDRESS);
+        assertEq(upgraderDelay, LONG_DELAY_SECONDS, "upgrader execution delay");
+
+        // The oracle quoter's grant delay becomes readable once minSetback passes.
+        vm.warp(block.timestamp + ACCESS_MANAGER.minSetback() + 1);
+        assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_ORACLE_QUOTER_ROLE), LONG_DELAY_SECONDS, "oracle quoter grant delay");
+    }
+
+    /// @notice The root multisig holds ADMIN_ROLE with the long execution delay, so every admin operation on the
+    ///         AccessManager must be scheduled and wait rather than execute at once.
+    function test_delays_rootAdminCarriesLongExecutionDelay() public view {
+        (bool isAdmin, uint32 executionDelay) = ACCESS_MANAGER.hasRole(0, FACTORY_ADMIN); // ADMIN_ROLE == 0
+        assertTrue(isAdmin, "root not ADMIN_ROLE");
+        assertEq(executionDelay, LONG_DELAY_SECONDS, "root admin execution delay");
+    }
+
+    /// @notice The roles that control upgrades and accounting carry the long grant delay; the roles that must act
+    ///         or be replaced quickly, including the pauser, keep a zero grant delay. A new grant delay becomes
+    ///         effective `minSetback()` after the deploy.
+    function test_delays_upgradeAndAccountingRolesCarryGrantDelay() public {
+        vm.warp(block.timestamp + ACCESS_MANAGER.minSetback() + 1);
+        uint32 d = LONG_DELAY_SECONDS;
+        assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_UPGRADER_ROLE), d, "upgrader grant delay");
+        assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_KERNEL_ROLE), d, "kernel admin grant delay");
+        assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_ACCOUNTANT_ROLE), d, "accountant admin grant delay");
+        assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_PROTOCOL_FEE_SETTER_ROLE), d, "fee setter grant delay");
+        assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_ORACLE_QUOTER_ROLE), d, "oracle quoter grant delay");
+        // The consequential roles the hardening added: template registration, the sanctions source, and the
+        // conversion-rate override all carry the long grant delay.
+        assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_FACTORY_ROLE), d, "template registration grant delay");
+        assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_SANCTIONS_ROLE), d, "sanctions source grant delay");
+        assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_CONVERSION_RATE_ROLE), d, "conversion rate grant delay");
+
+        assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_PAUSER_ROLE), 0, "pauser grant delay must stay zero");
+        assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_UNPAUSER_ROLE), 0, "unpauser grant delay must stay zero");
+        assertEq(ACCESS_MANAGER.getRoleGrantDelay(SYNC_ROLE), 0, "sync grant delay must stay zero");
+        assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_MARKET_OPS_ROLE), 0, "market ops grant delay must stay zero");
+        assertEq(ACCESS_MANAGER.getRoleGrantDelay(ADMIN_REINVESTMENT_ROLE), 0, "reinvestment grant delay must stay zero");
+        assertEq(ACCESS_MANAGER.getRoleGrantDelay(ST_LP_ROLE), 0, "ST LP grant delay must stay zero");
+        assertEq(ACCESS_MANAGER.getRoleGrantDelay(DEPLOYER_ROLE), 0, "deployer grant delay must stay zero");
+    }
+
+    /// @notice Every proxy the deploy created carries the long target admin delay, so the admin calls that
+    ///         reassign which role may call it (setTargetFunctionRole), block all calls to it (setTargetClosed),
+    ///         or point it at a different authority (updateAuthority) wait at least that long.
+    function test_delays_deployedProxiesCarryTargetAdminDelay() public {
+        vm.warp(block.timestamp + ACCESS_MANAGER.minSetback() + 1);
+        uint32 d = LONG_DELAY_SECONDS;
+        assertEq(ACCESS_MANAGER.getTargetAdminDelay(address(FACTORY)), d, "factory target admin delay");
+        assertEq(ACCESS_MANAGER.getTargetAdminDelay(address(BLACKLIST)), d, "blacklist target admin delay");
+        assertEq(ACCESS_MANAGER.getTargetAdminDelay(address(ST)), d, "ST target admin delay");
+        assertEq(ACCESS_MANAGER.getTargetAdminDelay(address(JT)), d, "JT target admin delay");
+        assertEq(ACCESS_MANAGER.getTargetAdminDelay(address(LT)), d, "LT target admin delay");
+        assertEq(ACCESS_MANAGER.getTargetAdminDelay(address(KERNEL)), d, "kernel target admin delay");
+        assertEq(ACCESS_MANAGER.getTargetAdminDelay(address(ACCOUNTANT)), d, "accountant target admin delay");
+        assertEq(ACCESS_MANAGER.getTargetAdminDelay(BALANCER_HOOK), d, "balancer hook target admin delay");
+    }
+
+    /// @notice The operational roles carry the short execution delay and the pauser carries zero (security actions
+    ///         are taken fast and undone slowly, so pausing is immediate while unpausing waits); the upgrader alone
+    ///         sits on the long execution delay, because an upgrade can change anything in the system.
+    function test_delays_operationalExecutionDelays() public view {
+        uint32 d = SHORT_DELAY_SECONDS;
+        (, uint32 kernelDelay) = ACCESS_MANAGER.hasRole(ADMIN_KERNEL_ROLE, KERNEL_ADMIN_ADDRESS);
+        assertEq(kernelDelay, d, "kernel admin execution delay");
+        (, uint32 accountantDelay) = ACCESS_MANAGER.hasRole(ADMIN_ACCOUNTANT_ROLE, ACCOUNTANT_ADMIN_ADDRESS);
+        assertEq(accountantDelay, d, "accountant admin execution delay");
+        (, uint32 feeSetterDelay) = ACCESS_MANAGER.hasRole(ADMIN_PROTOCOL_FEE_SETTER_ROLE, PROTOCOL_FEE_SETTER_ADDRESS);
+        assertEq(feeSetterDelay, d, "fee setter execution delay");
+        (, uint32 unpauserDelay) = ACCESS_MANAGER.hasRole(ADMIN_UNPAUSER_ROLE, UNPAUSER_ADDRESS);
+        assertEq(unpauserDelay, d, "unpauser execution delay");
+        (, uint32 oracleQuoterDelay) = ACCESS_MANAGER.hasRole(ADMIN_ORACLE_QUOTER_ROLE, ORACLE_QUOTER_ADMIN_ADDRESS);
+        assertEq(oracleQuoterDelay, d, "oracle quoter execution delay");
+        (, uint32 marketOpsDelay) = ACCESS_MANAGER.hasRole(ADMIN_MARKET_OPS_ROLE, KERNEL_ADMIN_ADDRESS);
+        assertEq(marketOpsDelay, d, "market ops execution delay");
+        (, uint32 poolManagerDelay) = ACCESS_MANAGER.hasRole(ADMIN_BALANCER_POOL_MANAGER_ROLE, KERNEL_ADMIN_ADDRESS);
+        assertEq(poolManagerDelay, d, "balancer pool manager execution delay");
+        (, uint32 upgraderDelay) = ACCESS_MANAGER.hasRole(ADMIN_UPGRADER_ROLE, UPGRADER_ADDRESS);
+        assertEq(upgraderDelay, LONG_DELAY_SECONDS, "upgrader execution delay");
+        (, uint32 reinvestorDelay) = ACCESS_MANAGER.hasRole(ADMIN_REINVESTMENT_ROLE, KERNEL_ADMIN_ADDRESS);
+        assertEq(reinvestorDelay, 0, "reinvestment role must keep a zero execution delay");
+        (bool isPauser, uint32 pauserDelay) = ACCESS_MANAGER.hasRole(ADMIN_PAUSER_ROLE, PAUSER_ADDRESS);
+        assertTrue(isPauser, "pauser granted");
+        assertEq(pauserDelay, 0, "pauser must keep a zero execution delay");
+    }
+
+    /// @notice An admin operation cannot run before the admin's execution delay elapses: a direct call reverts
+    ///         because nothing was scheduled, a scheduled call cannot execute early, and after it executes the
+    ///         role's grant delay still keeps the new holder unusable until that delay passes too.
+    function test_delays_adminOperationMustScheduleAndWait() public {
+        uint32 d = LONG_DELAY_SECONDS;
+        address newUpgrader = makeAddr("newUpgrader");
+        bytes memory data = abi.encodeCall(ACCESS_MANAGER.grantRole, (ADMIN_UPGRADER_ROLE, newUpgrader, 0));
+        bytes32 operationId = ACCESS_MANAGER.hashOperation(FACTORY_ADMIN, address(ACCESS_MANAGER), data);
+
+        // A direct admin call reverts: nothing was scheduled.
+        vm.prank(FACTORY_ADMIN);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManager.AccessManagerNotScheduled.selector, operationId));
+        ACCESS_MANAGER.grantRole(ADMIN_UPGRADER_ROLE, newUpgrader, 0);
+
+        // Scheduled, but not executable one second before the ready timepoint. The timepoint is read back from the
+        // AccessManager rather than computed from a cached block.timestamp, because the via-IR optimizer may
+        // re-read block.timestamp after vm.warp has changed it instead of keeping the cached value.
+        vm.prank(FACTORY_ADMIN);
+        ACCESS_MANAGER.schedule(address(ACCESS_MANAGER), data, 0);
+        uint48 readyAt = ACCESS_MANAGER.getSchedule(operationId);
+        vm.warp(uint256(readyAt) - 1);
+        vm.prank(FACTORY_ADMIN);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManager.AccessManagerNotReady.selector, operationId));
+        ACCESS_MANAGER.execute(address(ACCESS_MANAGER), data);
+
+        // Executable once the delay has elapsed.
+        vm.warp(readyAt);
+        vm.prank(FACTORY_ADMIN);
+        ACCESS_MANAGER.execute(address(ACCESS_MANAGER), data);
+
+        // The grant executed, but the upgrader role's grant delay (effective minSetback() after the deploy, well
+        // before this grant) keeps the new holder unusable until that delay passes too.
+        (bool isMember,) = ACCESS_MANAGER.hasRole(ADMIN_UPGRADER_ROLE, newUpgrader);
+        assertFalse(isMember, "new upgrader must not be usable at once");
+        (uint48 since,,,) = ACCESS_MANAGER.getAccess(ADMIN_UPGRADER_ROLE, newUpgrader);
+        assertEq(since, uint256(readyAt) + d, "grant delay start");
+        vm.warp(since);
+        (isMember,) = ACCESS_MANAGER.hasRole(ADMIN_UPGRADER_ROLE, newUpgrader);
+        assertTrue(isMember, "upgrader usable after the grant delay");
     }
 
     function _assertRole(address _target, bytes4 _selector, uint64 _expectedRole) internal view {

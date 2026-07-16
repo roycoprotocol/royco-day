@@ -12,7 +12,7 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
-import { ADMIN_ACCOUNTANT_ROLE, ADMIN_UNPAUSER_ROLE, LT_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { ADMIN_ACCOUNTANT_ROLE, ADMIN_MARKET_OPS_ROLE, ADMIN_UNPAUSER_ROLE, LT_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoBlacklist } from "../../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
@@ -856,10 +856,12 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         KERNEL.setSeniorTrancheSelfLiquidationBonus(0.005e18);
     }
 
-    /// @notice Raises ST's dust tolerance via the delay-0 market ops role (held by the kernel admin wallet).
+    /// @notice Raises ST's dust tolerance via the market ops role (held by the kernel admin wallet), scheduling
+    ///         through the AccessManager and warping past the role's execution delay.
     function _raiseSTDustTolerance(NAV_UNIT _tol) internal {
-        vm.prank(KERNEL_ADMIN_ADDRESS);
-        ACCOUNTANT.setSeniorTrancheDustTolerance(_tol);
+        bytes memory data = abi.encodeCall(ACCOUNTANT.setSeniorTrancheDustTolerance, (_tol));
+        _scheduleMarketOpsOperation(address(ACCOUNTANT), data);
+        _executeScheduledMarketOpsOperation(address(ACCOUNTANT), data);
     }
 
     /**
@@ -1004,11 +1006,12 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /// @notice Blacklists `_account` on the market's shared blacklist via the AccessManager admin.
-    /// @dev The blacklist's restricted selectors are unbound, so they resolve to the AccessManager ADMIN_ROLE holder.
+    /// @dev blacklistAccounts is restricted to ADMIN_BLACKLIST_ROLE, which the deploy script grants to the
+    ///      market-ops admin with no execution delay, so the helper calls straight through.
     function _blacklist(address _account) internal {
         address[] memory accounts = new address[](1);
         accounts[0] = _account;
-        // The blacklist admin surface is gated by ADMIN_BLACKLIST_ROLE, granted to the market-ops admin.
+        // blacklistAccounts is restricted to ADMIN_BLACKLIST_ROLE, held by the market-ops admin with no delay.
         vm.prank(KERNEL_ADMIN_ADDRESS);
         BLACKLIST.blacklistAccounts(accounts);
     }
@@ -1043,10 +1046,24 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      *      a wrong role binding), which fails the test loudly instead of silently skipping the premium tests.
      */
     function _trySetReinvestmentSlippage(uint64 _slippageWAD) internal virtual returns (bool ok) {
-        vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
-        bytes memory returnData;
-        (ok, returnData) = address(KERNEL).call(abi.encodeWithSignature("setMaxReinvestmentSlippage(uint64)", _slippageWAD));
-        if (!ok && returnData.length != 0) fail("the reinvestment slippage seam exists but its setter reverted");
+        bytes4 selector = bytes4(keccak256("setMaxReinvestmentSlippage(uint64)"));
+        bytes memory data = abi.encodeWithSelector(selector, _slippageWAD);
+        (, uint32 executionDelay) = ACCESS_MANAGER.canCall(ORACLE_QUOTER_ADMIN_ADDRESS, address(KERNEL), selector);
+        if (executionDelay == 0) {
+            vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
+            bytes memory returnData;
+            (ok, returnData) = address(KERNEL).call(data);
+            if (!ok && returnData.length != 0) fail("the reinvestment slippage seam exists but its setter reverted");
+        } else {
+            // A nonzero delay means the seam exists and is bound to the oracle quoter role: schedule the setter,
+            // warp past the role's execution delay, and execute it.
+            vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
+            ACCESS_MANAGER.schedule(address(KERNEL), data, 0);
+            _warpForward(uint256(executionDelay) + 1);
+            vm.prank(ORACLE_QUOTER_ADMIN_ADDRESS);
+            ACCESS_MANAGER.execute(address(KERNEL), data);
+            ok = true;
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -3807,6 +3824,21 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function _executeScheduledAccountantOperation(bytes memory _data) internal {
         vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
         ACCESS_MANAGER.execute(address(ACCOUNTANT), _data);
+    }
+
+    /// @notice Schedules a market-ops operation (the role is held by the kernel admin wallet) and warps past the
+    ///         role's execution delay, re-stamping the oracles so the operation quotes fresh values at execute time.
+    function _scheduleMarketOpsOperation(address _target, bytes memory _data) internal {
+        (, uint32 executionDelay) = ACCESS_MANAGER.hasRole(ADMIN_MARKET_OPS_ROLE, KERNEL_ADMIN_ADDRESS);
+        vm.prank(KERNEL_ADMIN_ADDRESS);
+        ACCESS_MANAGER.schedule(_target, _data, 0);
+        _warpForward(uint256(executionDelay) + 1);
+    }
+
+    /// @notice Executes a previously scheduled market-ops operation.
+    function _executeScheduledMarketOpsOperation(address _target, bytes memory _data) internal {
+        vm.prank(KERNEL_ADMIN_ADDRESS);
+        ACCESS_MANAGER.execute(_target, _data);
     }
 
     /**

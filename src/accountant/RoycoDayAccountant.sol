@@ -5,7 +5,7 @@ import { RoycoBase } from "../base/RoycoBase.sol";
 import { IRoycoDayAccountant } from "../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
 import { IYDM } from "../interfaces/IYDM.sol";
-import { MAX_NAV_UNITS, MAX_PROTOCOL_FEE_WAD, WAD, ZERO_NAV_UNITS } from "../libraries/Constants.sol";
+import { MAX_FIXED_TERM_SECONDS, MAX_NAV_UNITS, MAX_PROTOCOL_FEE_WAD, WAD, ZERO_NAV_UNITS } from "../libraries/Constants.sol";
 import { MarketState, NAV_UNIT, Operation, SyncedAccountingState } from "../libraries/Types.sol";
 import { Math, RoycoUnitsMath, toNAVUnits } from "../libraries/Units.sol";
 import { TrancheClaimsLogic } from "../libraries/logic/TrancheClaimsLogic.sol";
@@ -82,6 +82,8 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         require(_params.minCoverageWAD < WAD && _params.coverageLiquidationUtilizationWAD > WAD, INVALID_COVERAGE_CONFIG());
         // Ensure that the liquidity requirement must require less market-making depth than the entire senior tranche claims
         require(_params.minLiquidityWAD < WAD, INVALID_LIQUIDITY_CONFIG());
+        // No market may commit users for longer than the governance long delay covers
+        require(_params.fixedTermDurationSeconds <= MAX_FIXED_TERM_SECONDS, FIXED_TERM_DURATION_EXCEEDS_MAX());
         // Ensure that the max JT and LT yield shares do not sum to greater than 100% of senior appreciation
         _validateYieldShareConfig(_params.maxJTYieldShareWAD, _params.maxLTYieldShareWAD);
 
@@ -919,6 +921,8 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
 
     /// @inheritdoc IRoycoDayAccountant
     function setFixedTermDuration(uint24 _fixedTermDurationSeconds) external override(IRoycoDayAccountant) restricted withSyncedAccounting {
+        // No market may commit users for longer than the governance long delay covers
+        require(_fixedTermDurationSeconds <= MAX_FIXED_TERM_SECONDS, FIXED_TERM_DURATION_EXCEEDS_MAX());
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
         $.fixedTermDurationSeconds = _fixedTermDurationSeconds;
         // If the specified duration is 0, the market will permanently be in a perpetual state

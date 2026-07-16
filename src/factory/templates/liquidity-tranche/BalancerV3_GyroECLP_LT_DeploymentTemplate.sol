@@ -42,6 +42,7 @@ import {
     ADMIN_ORACLE_QUOTER_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
+    ADMIN_REINVESTMENT_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     BURNER_ROLE,
@@ -516,7 +517,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         s[5] = IRoycoDayKernel.setSeniorTrancheSelfLiquidationBonus.selector;
         r[5] = ADMIN_KERNEL_ROLE;
         s[6] = IRoycoDayKernel.reinvestLiquidityPremium.selector;
-        r[6] = ADMIN_MARKET_OPS_ROLE;
+        r[6] = ADMIN_REINVESTMENT_ROLE;
         s[7] = IRoycoDayKernel.setRoycoBlacklist.selector;
         r[7] = ADMIN_MARKET_OPS_ROLE;
         return TargetBinding({ target: _kernel, selectors: s, roleIds: r });

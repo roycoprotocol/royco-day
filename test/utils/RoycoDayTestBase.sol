@@ -14,7 +14,9 @@ import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.so
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
-import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
+import { MAX_FIXED_TERM_SECONDS } from "../../src/libraries/Constants.sol";
+import { AssetClaims, TrancheType } from "../../src/libraries/Types.sol";
+import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toUint256 } from "../../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoSeniorTranche } from "../../src/tranches/RoycoSeniorTranche.sol";
 import { Assertions } from "./Assertions.sol";
@@ -142,7 +144,7 @@ abstract contract RoycoDayTestBase is Test, Assertions {
      *      far above any utilization a healthy seeded state in this suite reads
      */
     uint256 internal LIQUIDATION_COVERAGE_UTILIZATION_WAD = 6.4667e18;
-    uint24 internal FIXED_TERM_DURATION_SECONDS = 2 weeks; // 2 weeks in seconds
+    uint24 internal FIXED_TERM_DURATION_SECONDS = uint24(MAX_FIXED_TERM_SECONDS); // at the protocol-wide fixed-term cap
     NAV_UNIT internal DUST_TOLERANCE = toNAVUnits(uint256(1));
 
     modifier prankModifier(address _pranker) {

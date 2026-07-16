@@ -216,6 +216,9 @@ interface IRoycoDayAccountant {
     /// @notice Thrown when the accountant's yield share configuration is invalid (the maximum JT and LT yield shares must sum to at most 100%)
     error INVALID_MAX_YIELD_SHARE_CONFIG();
 
+    /// @notice Thrown when a fixed-term duration exceeds the maximum any market may carry (MAX_FIXED_TERM_SECONDS)
+    error FIXED_TERM_DURATION_EXCEEDS_MAX();
+
     /// @notice Thrown when the configured protocol fee exceeds the maximum
     error MAX_PROTOCOL_FEE_EXCEEDED();
 

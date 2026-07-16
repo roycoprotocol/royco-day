@@ -55,3 +55,26 @@ uint256 constant MAX_PROTOCOL_FEE_WAD = 1e18;
  *        not underwritable anyway
  */
 uint256 constant MAX_MINT_DILUTION_WAD = WAD - 1e6;
+
+/// @dev The execution delay for the operational admin roles that change a live market's configuration (the
+///      kernel, accountant, protocol fee setter, unpauser, oracle quoter, market ops, and Balancer pool manager
+///      roles). It is the common operational timelock.
+uint32 constant SHORT_DELAY_SECONDS = 2 days;
+
+/// @dev The root admin's execution delay on the AccessManager, the grant delay on the consequential roles, and
+///      the target admin delay on every deployed proxy. It is the conservative delay for changes that
+///      restructure the system.
+uint32 constant LONG_DELAY_SECONDS = 15 days;
+
+// NOTE: the deploy asserts the long delay is at least this cap, and the accountant rejects any fixed term above it, so
+// at deploy a committed user can always exit before a governance change takes effect. A later reduction of the long
+// delay below this cap cannot take effect faster than the long delay itself, so the cap is self-protecting through the
+// AccessManager and needs no separate runtime check: the AccessManager applies every delay change through
+// Time.Delay.withUpdate, which makes a reduction wait a setback equal to the amount reduced, and every admin path that
+// could reduce it is itself bounded by the long delay (the governance admin's execution delay is the long delay, and
+// the factory's retained admin can only be driven by a registered template, whose registration now waits the long
+// delay). Keep the long delay at least this cap at deploy.
+
+/// @dev The maximum fixed-term duration any market may carry. The long delay must be at least this, so a
+///      governance change cannot take effect faster than a committed user can exit.
+uint32 constant MAX_FIXED_TERM_SECONDS = 14 days;

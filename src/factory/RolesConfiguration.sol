@@ -31,6 +31,7 @@ uint64 constant BURNER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_BURNER_
 uint64 constant SYNC_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_SYNC_ROLE"))));
 uint64 constant ADMIN_KERNEL_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_KERNEL_ROLE"))));
 uint64 constant ADMIN_MARKET_OPS_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_MARKET_OPS_ROLE"))));
+uint64 constant ADMIN_REINVESTMENT_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_REINVESTMENT_ROLE"))));
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ACCOUNTANT ROLES
@@ -44,6 +45,11 @@ uint64 constant ADMIN_PROTOCOL_FEE_SETTER_ROLE = uint64(uint256(keccak256(abi.en
 // ═══════════════════════════════════════════════════════════════════════════════
 
 uint64 constant ADMIN_ORACLE_QUOTER_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_ORACLE_QUOTER_ROLE"))));
+
+/// @dev The role for the manual conversion-rate override (setConversionRate): setting the ST-asset conversion rate directly
+///      is a pricing change, a consequential operation, so it waits the long delay. Repointing the oracle source
+///      (setChainlinkOracle) stays operational under ADMIN_ORACLE_QUOTER_ROLE.
+uint64 constant ADMIN_CONVERSION_RATE_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_CONVERSION_RATE_ROLE"))));
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ENTRY POINT ROLES
@@ -73,10 +79,19 @@ uint64 constant DEPLOYER_ROLE_ADMIN_ROLE = uint64(uint256(keccak256(abi.encode("
 uint64 constant LP_ROLE_ADMIN_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_LP_ROLE_ADMIN_ROLE"))));
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// BLACKLIST ROLE
+// BLACKLIST ROLES
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// @dev The role for the instant, protective blacklist add (blacklistAccounts): fast to block a threat, so it carries no delay.
 uint64 constant ADMIN_BLACKLIST_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_BLACKLIST_ROLE"))));
+
+/// @dev The role for the delayed blacklist removal (unblacklistAccounts): removing an account's protection is operational,
+///      not a system-security change, so it waits the short delay and cannot take effect without notice.
+uint64 constant ADMIN_UNBLACKLIST_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_UNBLACKLIST_ROLE"))));
+
+/// @dev The role for the screening-source change (setSanctionsList): repointing the Chainalysis sanctions source changes
+///      how every account is screened, a system-level change, so it waits the long delay.
+uint64 constant ADMIN_SANCTIONS_ROLE = uint64(uint256(keccak256(abi.encode("ROYCO_ADMIN_SANCTIONS_ROLE"))));
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GUARDIAN ROLE

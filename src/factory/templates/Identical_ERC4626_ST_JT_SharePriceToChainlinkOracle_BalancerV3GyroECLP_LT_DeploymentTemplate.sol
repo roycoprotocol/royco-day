@@ -10,7 +10,7 @@ import {
 } from "../../kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
 import { IdenticalAssets_ST_JT_ChainlinkOracle_Quoter } from "../../kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol";
 import { IdenticalAssets_ST_JT_Oracle_Quoter } from "../../kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_Oracle_Quoter.sol";
-import { ADMIN_ORACLE_QUOTER_ROLE } from "../RolesConfiguration.sol";
+import { ADMIN_CONVERSION_RATE_ROLE, ADMIN_ORACLE_QUOTER_ROLE } from "../RolesConfiguration.sol";
 import { COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK } from "./base/Components.sol";
 import { BalancerV3_GyroECLP_LT_DeploymentTemplate } from "./liquidity-tranche/BalancerV3_GyroECLP_LT_DeploymentTemplate.sol";
 
@@ -53,8 +53,10 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_
 
     /**
      * @inheritdoc BalancerV3_GyroECLP_LT_DeploymentTemplate
-     * @dev Extends the base's LT-quoter setters with this kernel family's ST/JT Chainlink quoter setters, all bound
-     *      to ADMIN_ORACLE_QUOTER_ROLE. (Every restricted selector must be explicitly bound: an unbound selector
+     * @dev Extends the base's LT-quoter setters with this kernel family's ST/JT Chainlink quoter setters. The oracle
+     *      source setters (setChainlinkOracle, setSequencerUptimeFeed) are operational under ADMIN_ORACLE_QUOTER_ROLE;
+     *      the direct conversion-rate override (setConversionRate) is a pricing change, bound to ADMIN_CONVERSION_RATE_ROLE
+     *      at the long delay. (Every restricted selector must be explicitly bound: an unbound selector
      *      silently defaults to ADMIN_ROLE under OZ AccessManager.)
      */
     function _kernelQuoterBinding(address _kernel) internal view override(BalancerV3_GyroECLP_LT_DeploymentTemplate) returns (TargetBinding memory) {
@@ -68,7 +70,7 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_
         }
         uint256 j = base.selectors.length;
         s[j] = IdenticalAssets_ST_JT_Oracle_Quoter.setConversionRate.selector;
-        r[j] = ADMIN_ORACLE_QUOTER_ROLE;
+        r[j] = ADMIN_CONVERSION_RATE_ROLE;
         s[j + 1] = IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.setChainlinkOracle.selector;
         r[j + 1] = ADMIN_ORACLE_QUOTER_ROLE;
         s[j + 2] = IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.setSequencerUptimeFeed.selector;

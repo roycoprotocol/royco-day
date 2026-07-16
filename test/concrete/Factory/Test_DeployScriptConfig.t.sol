@@ -8,13 +8,17 @@ import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
     ADMIN_BLACKLIST_ROLE,
+    ADMIN_CONVERSION_RATE_ROLE,
     ADMIN_ENTRY_POINT_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
     ADMIN_ORACLE_QUOTER_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
+    ADMIN_REINVESTMENT_ROLE,
     ADMIN_ROLE,
+    ADMIN_SANCTIONS_ROLE,
+    ADMIN_UNBLACKLIST_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
     BURNER_ROLE,
@@ -62,8 +66,8 @@ contract Test_DeployScriptConfig is Test {
      */
     function test_GetRoleConfig_ResolvesEveryGeneratedRoleAssignment() public view {
         // 15 distinct dummy addresses, one per RoleAssignmentAddresses field (the struct's full address surface).
-        // The fee recipient deliberately carries three LP roles (ST/JT/LT) and market ops carries the blacklist
-        // admin role alongside its own, which is how 15 addresses fan out to 18 assignments.
+        // The fee recipient deliberately carries three LP roles (ST/JT/LT) and market ops carries the blacklist,
+        // reinvestment, and unblacklist roles alongside its own, which is how 15 addresses fan out to 20 assignments.
         DeployScript.RoleAssignmentAddresses memory addresses = DeployScript.RoleAssignmentAddresses({
             pauserAddress: address(0x1001),
             unpauserAddress: address(0x1002),
@@ -85,9 +89,10 @@ contract Test_DeployScriptConfig is Test {
         DeployScript.RoleAssignment[] memory assignments = deployScript.generateRolesAssignments(addresses);
 
         // Independently derived count: the address surface is 15 fields, of which the fee recipient maps to the
-        // three LP roles, market ops maps to its own role plus the blacklist admin role, and the other 13 map
-        // one-to-one, so 13 + 3 + 2 = 18 assignments.
-        assertEq(assignments.length, 18, "one assignment per (role, assignee) pair: 13 one-to-one + 3 LP roles on the fee recipient + 2 on market ops");
+        // three LP roles, market ops maps to its own role plus the blacklist admin, reinvestment, unblacklist, and
+        // sanctions-source roles (5), the oracle-quoter address maps to two (the operational quoter role and the
+        // long-delayed conversion-rate role), and the other 12 map one-to-one, so 12 + 3 + 5 + 2 = 22 assignments.
+        assertEq(assignments.length, 22, "one assignment per (role, assignee) pair: 12 one-to-one + 3 LP roles on the fee recipient + 5 on market ops + 2 on the oracle quoter");
 
         for (uint256 i; i < assignments.length; ++i) {
             uint64 role = assignments[i].role;
@@ -126,9 +131,9 @@ contract Test_DeployScriptConfig is Test {
 
         // The emitted role set itself, hand-listed from the deployment's operational surface (pause/unpause,
         // upgrade, sync, kernel/accountant/fee/quoter admin, LP admin + the three LP roles, guardian, deployer +
-        // its admin, Balancer pool manager, market ops + blacklist admin). Order-pinned so a silent drop or
-        // reorder is loud.
-        uint64[18] memory expectedRoles = [
+        // its admin, Balancer pool manager, market ops + blacklist admin + reinvestment + unblacklist). Order-pinned
+        // so a silent drop or reorder is loud.
+        uint64[22] memory expectedRoles = [
             ADMIN_PAUSER_ROLE,
             ADMIN_UPGRADER_ROLE,
             SYNC_ROLE,
@@ -146,7 +151,11 @@ contract Test_DeployScriptConfig is Test {
             LT_LP_ROLE,
             ADMIN_BALANCER_POOL_MANAGER_ROLE,
             ADMIN_MARKET_OPS_ROLE,
-            ADMIN_BLACKLIST_ROLE
+            ADMIN_BLACKLIST_ROLE,
+            ADMIN_REINVESTMENT_ROLE,
+            ADMIN_UNBLACKLIST_ROLE,
+            ADMIN_SANCTIONS_ROLE,
+            ADMIN_CONVERSION_RATE_ROLE
         ];
         for (uint256 i; i < expectedRoles.length; ++i) {
             assertEq(assignments[i].role, expectedRoles[i], "generated role set diverged from the deployment role surface");

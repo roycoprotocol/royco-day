@@ -240,6 +240,16 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         AccessManager(authority()).grantRole(_roleId, _account, _executionDelay);
     }
 
+    // GOVERNANCE RESIDUAL: this is the point where a registered template acts as the factory. The factory holds
+    // ADMIN_ROLE at execution delay 0 and keeps it after a deployment, so during a template's deployment window the
+    // template can drive any admin operation through this call at zero delay. This standing zero-delay admin is retained
+    // (rather than acquired per deployment and renounced) for simplicity, and is bounded on both sides: executeAsFactory
+    // is onlyActiveTemplate, reachable only inside executeMarketDeployment, which is restricted to ADMIN_FACTORY_ROLE;
+    // and ADMIN_FACTORY_ROLE (template registration) carries the long execution delay, so no new template can be
+    // registered inside the reaction window. The residual is therefore a trusted, already-registered template acting
+    // during its own deployment window. Removing it would mean the factory acquiring ADMIN_ROLE at the start of each
+    // deployment and renouncing at the end; deferred here as defense-in-depth against a template bug, not a
+    // compromised-key path.
     /// @inheritdoc IRoycoFactory
     function executeAsFactory(
         address _target,

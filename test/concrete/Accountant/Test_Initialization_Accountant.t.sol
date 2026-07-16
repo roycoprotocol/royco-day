@@ -5,7 +5,7 @@ import { Initializable } from "../../../lib/openzeppelin-contracts-upgradeable/c
 import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
-import { MAX_PROTOCOL_FEE_WAD, WAD } from "../../../src/libraries/Constants.sol";
+import { MAX_FIXED_TERM_SECONDS, MAX_PROTOCOL_FEE_WAD, WAD } from "../../../src/libraries/Constants.sol";
 import { MarketState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { MockAccountantKernel } from "../../mocks/MockAccountantKernel.sol";
@@ -156,6 +156,24 @@ contract Test_Initialization_Accountant is AccountantTestBase {
         p.minLiquidityWAD = uint64(WAD);
         vm.expectRevert(IRoycoDayAccountant.INVALID_LIQUIDITY_CONFIG.selector);
         acct.initialize(p, address(authority));
+    }
+
+    /// a fixed-term duration above the protocol-wide cap reverts at initialize
+    function test_Initialize_reverts_fixedTermAboveMax() public {
+        RoycoDayAccountant acct = _deployUninitialized(false);
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
+        p.fixedTermDurationSeconds = uint24(MAX_FIXED_TERM_SECONDS + 1);
+        vm.expectRevert(IRoycoDayAccountant.FIXED_TERM_DURATION_EXCEEDS_MAX.selector);
+        acct.initialize(p, address(authority));
+    }
+
+    /// a fixed-term duration at the protocol-wide cap initializes and is written
+    function test_Initialize_fixedTermAtMaxPasses() public {
+        RoycoDayAccountant acct = _deployUninitialized(false);
+        IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
+        p.fixedTermDurationSeconds = uint24(MAX_FIXED_TERM_SECONDS);
+        acct.initialize(p, address(authority));
+        assertEq(acct.getState().fixedTermDurationSeconds, uint24(MAX_FIXED_TERM_SECONDS), "duration at the cap written");
     }
 
     /// minLiquidity = WAD - 1 passes
