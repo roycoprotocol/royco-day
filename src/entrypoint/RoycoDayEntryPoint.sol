@@ -478,8 +478,16 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
                 if (maxRedeemInKind >= request.shares) {
                     _sharesToRedeem = request.shares;
                 } else {
-                    // Use the multiasset flow if it allows for a larger redemption
-                    uint256 maxRedeemMultiAsset = IRoycoLiquidityTranche(tranche).maxRedeemMultiAsset(address(this));
+                    // Probe the multi-asset bound through a low-level call: the multi-asset preview can revert on venue constraints, but must not revert the redemption from utilizing the in-kind flow
+                    (bool multiAssetProbeSucceeded, bytes memory multiAssetProbeReturnData) =
+                        tranche.call(abi.encodeCall(IRoycoLiquidityTranche.maxRedeemMultiAsset, (address(this))));
+                    // A reverted probe leaves the multi-asset route unavailable, fall back to the in-kind bound so the portion the market can serve is never left behind
+                    uint256 maxRedeemMultiAsset;
+                    assembly ("memory-safe") {
+                        if not(iszero(multiAssetProbeSucceeded)) {
+                            maxRedeemMultiAsset := mload(add(multiAssetProbeReturnData, 0x20))
+                        }
+                    }
                     _sharesToRedeem = Math.min(Math.max(maxRedeemInKind, maxRedeemMultiAsset), request.shares);
                     isMultiAssetRedemption = (maxRedeemMultiAsset > maxRedeemInKind);
                 }

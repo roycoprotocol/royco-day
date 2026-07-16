@@ -7,7 +7,7 @@ import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
-import { AssetClaims, MarketState, Operation } from "../../../src/libraries/Types.sol";
+import { AssetClaims, MarketState } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
 import { MockBalancerVault } from "../../mocks/MockBalancerVault.sol";
@@ -408,10 +408,24 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         liquidityTranche.redeemMultiAsset(sharesToRedeem, 0, 0, LT_PROVIDER, LT_PROVIDER);
         assertGt(stJtVault.balanceOf(LT_PROVIDER) - vaultSharesBefore, 0, "the premium slice must pay out through the carve-out");
 
-        // The in-kind path transfers the premium instead of redeeming it, so the carve-out cannot admit it
+        // The in-kind path delivers the same premium: handing the idle senior shares over in kind moves no raw NAV
+        // (they stay in the senior supply), so the LT_REDEEM shape check commits it as a NAV-neutral redemption
+        uint256 idleBeforeInKind = kernel.getState().ltOwnedSeniorTrancheShares;
+        uint256 supplyBeforeInKind = liquidityTranche.totalSupply();
+        uint256 seniorBeforeInKind = seniorTranche.balanceOf(LT_PROVIDER);
+        uint256 expectedIdleSlice = Math.mulDiv(1e18, idleBeforeInKind, supplyBeforeInKind, Math.Rounding.Floor);
+        assertGt(expectedIdleSlice, 0, "the in-kind idle slice must be nonzero");
+
         vm.prank(LT_PROVIDER);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_REDEEM));
-        liquidityTranche.redeem(1e18, LT_PROVIDER, LT_PROVIDER);
+        AssetClaims memory inKindClaims = liquidityTranche.redeem(1e18, LT_PROVIDER, LT_PROVIDER);
+
+        // Exactly the pro-rata idle senior shares are handed over in kind, the wiped BPT leg pays nothing, and the
+        // kernel's idle pile drops by exactly that slice
+        assertEq(inKindClaims.stShares, expectedIdleSlice, "the in-kind redeem must pay exactly the pro-rata idle senior share slice");
+        assertEq(toUint256(inKindClaims.ltAssets), 0, "the wiped BPT leg must pay nothing in kind");
+        assertEq(seniorTranche.balanceOf(LT_PROVIDER) - seniorBeforeInKind, expectedIdleSlice, "the redeemer must receive exactly its idle senior share slice");
+        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleBeforeInKind - expectedIdleSlice, "the kernel's idle pile must drop by exactly the redeemed slice");
+        assertEq(bpt.balanceOf(LT_PROVIDER), 0, "no BPT can be delivered against a zero pool-depth mark");
     }
 
     // =============================

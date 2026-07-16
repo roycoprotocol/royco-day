@@ -346,17 +346,27 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
 
     /**
      * An in-kind LT redemption whose proportional BPT slice floors to zero NAV while the idle premium ST-share
-     * slice is positive still reverts. Handing idle ST shares to the redeemer moves no raw NAV — only share
-     * ownership shifts, no assets leave the vault — so the accountant sees deltaLTRawNAV == 0 AND
-     * totalSTAndJTRedemptionNAV == 0, and the LT_REDEEM op-shape require (RoycoDayAccountant.sol:263) rejects
-     * the operation regardless of the enforcement flag. The zero-BPT-delta shape is admitted only when the
-     * redemption also unwinds raw value (positive total, the leg covered by
-     * test_PostOp_LTRedeem_zeroLTDeltaWithPositiveTotalPasses in Test_PostOpSync_Accountant), so the pure
-     * idle-share hand-off remains blocked.
+     * slice is positive commits as a NAV-neutral redemption. Handing idle ST shares to the redeemer moves no raw
+     * NAV, only share ownership shifts and no assets leave the vault, so the accountant sees deltaLTRawNAV == 0 AND
+     * totalSTAndJTRedemptionNAV == 0. The LT_REDEEM op-shape require enforces only that a redemption never grows the
+     * LT's deployed raw NAV (deltaLTRawNAV <= 0), which this satisfies, so the operation commits with every raw and
+     * effective NAV untouched and conservation intact. The redeemer's rightful idle-premium claim is delivered, not
+     * stranded on the shape check.
      */
-    function test_LTRedeem_ZeroBPTSliceWithIdleSharesOnly_RevertsInvalidPostOpState() public {
+    function test_LTRedeem_ZeroBPTSliceWithIdleSharesOnly_CommitsNavNeutral() public {
         _seedSymmetric(1000e18, 200e18, 100e18);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_REDEEM));
-        kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(uint256(1000e18)), toNAVUnits(uint256(200e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, false);
+        SyncedAccountingState memory state = kernel.doPostOp(
+            Operation.LT_REDEEM, toNAVUnits(uint256(1000e18)), toNAVUnits(uint256(200e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, false
+        );
+        // No tranche NAV moved: the idle senior shares only changed hands, so every raw and effective NAV is untouched
+        assertEq(toUint256(state.ltRawNAV), 100e18, "the LT deployed raw NAV must be untouched (a redemption never grows it)");
+        assertEq(toUint256(state.stEffectiveNAV), 1000e18, "senior effective NAV must be untouched (the shares stay in supply)");
+        assertEq(toUint256(state.jtEffectiveNAV), 200e18, "junior effective NAV must be untouched");
+        // Conservation holds across the commit
+        assertEq(
+            toUint256(state.stRawNAV) + toUint256(state.jtRawNAV),
+            toUint256(state.stEffectiveNAV) + toUint256(state.jtEffectiveNAV),
+            "NAV conservation must hold"
+        );
     }
 }

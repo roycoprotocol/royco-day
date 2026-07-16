@@ -357,19 +357,24 @@ contract Test_EntryPointLTMultiAssetRouting is EntryPointTestBase {
     /// @notice A venue that cannot even be previewed fails the maximal redemption shut: a market whose venue is
     ///         broken is not one to move funds through, and the failure bubbles verbatim — while an explicit
     ///         in-kind amount, which never touches the venue, remains the deliberate escape hatch
-    function test_ltRedemption_maxSentinel_venueFailureFailsShut() public {
+    /// @notice A venue that reverts the multi-asset probe never bricks the maximal redemption, the probe is a
+    ///         low-level call whose failure demotes the multi-asset bound to zero, so the maximizer falls back to
+    ///         the in-kind bound and partially fills the request in-kind rather than leaving the servable portion behind
+    function test_ltRedemption_maxSentinel_venueFailureFallsBackToInKind() public {
         (uint256 nonce, uint256 maxInKindShares,) = _requestWholePosition(0);
+        uint256 escrowedShares = entryPoint.getRedemptionRequest(USER_A, nonce).shares;
 
-        // The venue's removal path reverts outright: the maximal execution must bubble the venue's own failure
+        // The venue's removal path reverts outright: the probe swallows the failure and the maximizer stays in-kind
         balancerVault.setRevertMode(MockBalancerVault.RevertMode.REMOVE);
-        vm.prank(USER_A);
-        vm.expectRevert(MockBalancerVault.FORCED_REMOVE_REVERT.selector);
-        entryPoint.executeRedemption(USER_A, nonce, type(uint256).max);
+        (AssetClaims memory claims, uint256 quoteAssets) = _executeRedemptionMaxWithQuote(USER_A, USER_A, nonce);
 
-        // The explicit in-kind escape hatch stays open: it never touches the venue
-        (AssetClaims memory claims, uint256 quoteAssets) = _executeRedemptionWithQuote(USER_A, USER_A, nonce, maxInKindShares / 2);
-        assertEq(quoteAssets, 0, "the escape hatch must exit in-kind");
-        assertGt(toUint256(claims.ltAssets), 0, "the escape hatch must pay the LP-token leg");
+        // The execution must fill exactly the in-kind bound in-kind, never touching the reverting venue
+        uint256 sharesExecuted = escrowedShares - entryPoint.getRedemptionRequest(USER_A, nonce).shares;
+        assertEq(sharesExecuted, maxInKindShares, "the fallback must fill exactly the in-kind bound");
+        assertEq(quoteAssets, 0, "the fallback must exit in-kind");
+        assertGt(toUint256(claims.ltAssets), 0, "the fallback must pay the LP-token leg");
+        assertEq(bpt.balanceOf(USER_B), toUint256(claims.ltAssets), "the in-kind fill must land on the receiver");
+        assertGt(entryPoint.getRedemptionRequest(USER_A, nonce).shares, 0, "the unservable remainder must stay queued, not bricked");
     }
 
     /// @notice A remainder whose floor-scaled snapshot hits zero is fully forfeited and settles without a redeem

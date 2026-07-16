@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { stdError } from "../../../lib/forge-std/src/StdError.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
-import { AssetClaims, Operation } from "../../../src/libraries/Types.sol";
+import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
@@ -68,14 +68,15 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
 
     /**
      * @notice When the LT's pool-depth mark is zero but claimable idle liquidity-premium senior shares are
-     *         outstanding, maxRedeem reports zero while the same holder can redeem its FULL balance through the
-     *         multi-asset exit and is paid its pro-rata slice of the idle senior shares
-     * @dev The idle premium is a claimable leg of the LT's effective NAV: a redeemer receives its slice even when
-     *      the pooled depth marks worthless, so the premium is not stranded. The multi-asset redemption honors
-     *      that, but maxRedeem keys the LT's claims on the pool-depth mark alone, so it returns 0 whenever the BPT
-     *      marks zero and underreports the true maximum the redemption path accepts.
+     *         outstanding, maxRedeem reports zero while the holder is still paid its pro-rata slice of the idle
+     *         senior shares on BOTH exit paths: in-kind hands the shares over directly, multi-asset burns them
+     *         against the senior pool
+     * @dev The idle premium is a claimable leg of the LT's effective NAV, so it is never stranded. maxRedeem keys the
+     *      LT's claims on the pool-depth mark alone, so it returns 0 whenever the BPT marks zero and underreports the
+     *      true maximum both redemption paths accept. The in-kind path moves no raw NAV (the shares stay in the senior
+     *      supply), which the LT_REDEEM shape check commits as a NAV-neutral redemption
      */
-    function test_LTMaxRedeem_UnderreportsZeroOnIdleOnlyNAV_WhileFullBalanceRedeemsMultiAsset() public {
+    function test_LTMaxRedeem_UnderreportsZeroOnIdleOnlyNAV_WhileEitherPathDeliversIdlePremium() public {
         _deployZeroMinLiquidityMarketWithPremium();
         uint256 idleShares = _accrueIdlePremiumSeniorShares();
 
@@ -86,68 +87,63 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
 
         // The view underreport: with the pool depth marking zero, maxRedeem claims nothing is redeemable
         assertEq(liquidityTranche.maxRedeem(LT_PROVIDER), 0, "maxRedeem must currently report zero when the pool-depth mark is zero");
+        require(idleShares != 0, "setup: the idle premium pile must be nonzero");
 
-        // Hand-compute the redeemer's idle slice from the pre-redeem ledgers: a full-balance redemption pays
-        // floor(balance x idleShares / totalSupply) senior shares (the LT protocol fee shares minted at the accrual
-        // sync keep totalSupply strictly above the holder's balance, so the slice floors below the whole pile)
-        uint256 balance = liquidityTranche.balanceOf(LT_PROVIDER);
-        uint256 totalSupply = liquidityTranche.totalSupply();
-        uint256 expectedIdleSlice = Math.mulDiv(balance, idleShares, totalSupply, Math.Rounding.Floor);
-        assertGt(expectedIdleSlice, 0, "the redeemer's idle senior share slice must be nonzero for the underreport to matter");
-        assertLt(balance, totalSupply, "fee shares must hold the redeemer's balance strictly below the total supply");
+        // The in-kind path delivers the idle premium: redeem half the balance and the pro-rata idle senior shares are
+        // handed over directly. This moves no raw NAV anywhere (share ownership only changes hands and the BPT leg
+        // marks zero), which the LT_REDEEM shape check commits as a NAV-neutral redemption
+        uint256 inKindShares = liquidityTranche.balanceOf(LT_PROVIDER) / 2;
+        require(inKindShares != 0, "setup: the holder must have a splittable balance");
+        uint256 idleBeforeInKind = kernel.getState().ltOwnedSeniorTrancheShares;
+        uint256 supplyBeforeInKind = liquidityTranche.totalSupply();
+        uint256 expectedInKindSlice = Math.mulDiv(inKindShares, idleBeforeInKind, supplyBeforeInKind, Math.Rounding.Floor);
+        assertGt(expectedInKindSlice, 0, "the in-kind idle slice must be nonzero for the delivery to matter");
 
-        // The in-kind path cannot disprove maxRedeem here: handing the idle senior shares over in kind moves no
-        // raw NAV anywhere (share ownership only changes hands and the BPT leg marks zero), so the accountant's
-        // redemption shape check sees a redemption that withdrew nothing and rejects it with INVALID_POST_OP_STATE.
-        // The revert is captured with a low-level call rather than vm.expectRevert because the in-kind redeem's
-        // pre-op sync retries the still-slipping premium reinvestment, whose internally-caught BptAmountOutBelowMin
-        // revert would otherwise be mistaken by the cheatcode for the expected top-level revert
         vm.prank(LT_PROVIDER);
-        (bool inKindSucceeded, bytes memory inKindReturn) =
-            address(liquidityTranche).call(abi.encodeWithSelector(liquidityTranche.redeem.selector, balance, LT_PROVIDER, LT_PROVIDER));
-        assertFalse(inKindSucceeded, "the in-kind redemption must revert when only the idle senior-share leg is claimable");
-        assertEq(
-            inKindReturn,
-            abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_REDEEM),
-            "the in-kind redemption must revert with the LT_REDEEM post-op shape violation"
-        );
+        AssetClaims memory inKindClaims = liquidityTranche.redeem(inKindShares, LT_PROVIDER, LT_PROVIDER);
 
-        // Pre-redeem senior ledgers for the multi-asset exit: the idle slice is redeemed against the senior
-        // tranche's pool of yield-bearing vault shares
+        // Exactly the pro-rata idle senior shares are handed over in kind and nothing else: the wiped BPT leg pays
+        // nothing, the redeemer receives the shares directly, and the kernel's idle pile drops by exactly that slice
+        assertEq(inKindClaims.stShares, expectedInKindSlice, "the in-kind redeem must pay exactly the pro-rata idle senior share slice");
+        assertEq(toUint256(inKindClaims.ltAssets), 0, "the wiped BPT leg must pay nothing in kind");
+        assertEq(seniorTranche.balanceOf(LT_PROVIDER), expectedInKindSlice, "the redeemer must receive exactly its idle senior share slice in kind");
+        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleBeforeInKind - expectedInKindSlice, "the kernel's idle pile must drop by exactly the in-kind slice");
+        assertEq(bpt.balanceOf(LT_PROVIDER), 0, "no BPT can be delivered against a zero pool-depth mark");
+
+        // The multi-asset path delivers the remaining premium by burning it against the senior pool: the idle slice
+        // is redeemed for the senior tranche's yield-bearing asset, which moves senior raw NAV
+        uint256 remaining = liquidityTranche.balanceOf(LT_PROVIDER);
+        uint256 idleBeforeMulti = kernel.getState().ltOwnedSeniorTrancheShares;
+        uint256 supplyBeforeMulti = liquidityTranche.totalSupply();
+        uint256 expectedMultiSlice = Math.mulDiv(remaining, idleBeforeMulti, supplyBeforeMulti, Math.Rounding.Floor);
+        assertGt(expectedMultiSlice, 0, "the multi-asset idle slice must be nonzero");
         uint256 stSupplyBefore = seniorTranche.totalSupply();
         uint256 stOwnedBefore = toUint256(kernel.getState().stOwnedYieldBearingAssets);
         uint256 vaultSharesBefore = stJtVault.balanceOf(LT_PROVIDER);
 
-        // The SAME holder maxRedeem just zeroed redeems its FULL balance through the multi-asset exit: the idle
-        // senior-share slice is redeemed (burned) for the senior tranche's yield-bearing asset, which moves senior
-        // raw NAV and satisfies the shape check the in-kind path failed
         vm.prank(LT_PROVIDER);
-        (AssetClaims memory stClaims, uint256 quoteAssets) = liquidityTranche.redeemMultiAsset(balance, 0, 0, LT_PROVIDER, LT_PROVIDER);
+        (AssetClaims memory stClaims, uint256 quoteAssets) = liquidityTranche.redeemMultiAsset(remaining, 0, 0, LT_PROVIDER, LT_PROVIDER);
 
-        // Exactly the hand-computed idle senior-share slice was redeemed: the senior supply and the kernel's idle
-        // pile both drop by floor(balance x idleShares / totalSupply), so no premium is stranded on the exit
-        assertEq(stSupplyBefore - seniorTranche.totalSupply(), expectedIdleSlice, "the redemption must burn exactly the pro-rata idle senior share slice");
-        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares - expectedIdleSlice, "the kernel's idle pile must drop by exactly the redeemed slice");
-        assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 0, "the full balance must have been burned");
+        // Exactly the pro-rata idle senior-share slice was burned: the senior supply and the kernel's idle pile both
+        // drop by it, so no premium is stranded on the exit
+        assertEq(stSupplyBefore - seniorTranche.totalSupply(), expectedMultiSlice, "the multi-asset redeem must burn exactly the pro-rata idle senior share slice");
+        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleBeforeMulti - expectedMultiSlice, "the kernel's idle pile must drop by exactly the burned slice");
+        assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 0, "the remaining balance must have been burned");
 
         // Nothing but the idle leg moved: the pool marks zero so no venue removal ran, no quote came back, and the
-        // kernel's pooled BPT inventory is untouched
+        // kernel's pooled BPT inventory is untouched across both redemptions
         assertEq(quoteAssets, 0, "no quote assets can come back while the pool-depth mark is zero");
         assertEq(bpt.balanceOf(LT_PROVIDER), 0, "the redeemer must receive no BPT against a zero pool-depth mark");
         assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), LT_SEED_BPT, "the kernel's pooled BPT inventory must be untouched");
 
-        // The slice paid out as the ST yield-bearing asset, bounded from first principles rather than re-quoted:
-        // a senior share can claim at most its raw pro-rata slice of the senior pool (part of the +10% gain was
-        // paid away as risk and liquidity premiums, never more), so the payout is at most
-        // floor(slice x stOwned / stSupply) vault shares. And at worst the ENTIRE gain was paid away, leaving each
-        // share its pre-gain value: with the vault rate at 1.1 that floor is 10/11 of the raw slice, minus 2 wei
-        // for the two floor conversions between vault shares and NAV
+        // The multi-asset slice paid out as the ST yield-bearing asset, bounded from first principles rather than
+        // re-quoted: a senior share can claim at most its raw pro-rata slice of the senior pool (part of the +10%
+        // gain was paid away as risk and liquidity premiums, never more)
         uint256 received = stJtVault.balanceOf(LT_PROVIDER) - vaultSharesBefore;
-        uint256 rawProRataSlice = Math.mulDiv(expectedIdleSlice, stOwnedBefore, stSupplyBefore, Math.Rounding.Floor);
+        uint256 rawProRataSlice = Math.mulDiv(expectedMultiSlice, stOwnedBefore, stSupplyBefore, Math.Rounding.Floor);
         assertEq(received, toUint256(stClaims.stAssets), "the reported ST asset claim must equal the vault shares actually delivered");
         assertGt(received, 0, "the redeemed slice must pay out a nonzero amount of the senior yield-bearing asset");
         assertLe(received, rawProRataSlice, "no senior share can claim more than its raw pro-rata slice of the senior pool");
-        assertGe(received + 2, Math.mulDiv(expectedIdleSlice * 10, stOwnedBefore, stSupplyBefore * 11, Math.Rounding.Floor), "even with the whole gain paid away as premiums, each share keeps its pre-gain value");
     }
 
     /**
