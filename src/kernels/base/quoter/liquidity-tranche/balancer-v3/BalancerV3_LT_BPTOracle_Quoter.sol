@@ -46,6 +46,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
 
     /**
      * @notice The namespaced storage for the BalancerV3_LT_BPTOracle_Quoter
+     * @custom:storage-location erc7201:Royco.storage.BalancerV3_LT_BPTOracle_QuoterState
      * @custom:field bptOracle - The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity tranche assets
      * @custom:field maxReinvestmentSlippageWAD - The maximum slippage tolerated when single-sided reinvesting the liquidity premium ST shares into the BPT, scaled to WAD precision, above this threshold the reinvestment defers to the auction fallback
      */
