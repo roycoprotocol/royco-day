@@ -49,4 +49,12 @@ interface IRoycoProtocolTemplate {
      * @return result The deployed market's contracts
      */
     function deployMarket(bytes calldata _params) external returns (DeploymentResult memory result);
+
+    /**
+     * @notice Configures pre-deployed periphery singletons (entry point tranche configs, syncer kernel registration)
+     *         for a just-deployed market, only callable by the factory
+     * @param _result The market's deployment result, as returned by `deployMarket`
+     * @param _params The same ABI-encoded template-specific params passed to `deployMarket`
+     */
+    function configureMarketPeriphery(DeploymentResult calldata _result, bytes calldata _params) external;
 }

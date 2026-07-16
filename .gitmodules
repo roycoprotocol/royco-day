@@ -23,3 +23,6 @@
 [submodule "lib/chainlink-brownie-contracts"]
 	path = lib/chainlink-brownie-contracts
 	url = https://github.com/smartcontractkit/chainlink-brownie-contracts
+[submodule "lib/royco-periphery"]
+	path = lib/royco-periphery
+	url = https://github.com/roycoprotocol/royco-periphery

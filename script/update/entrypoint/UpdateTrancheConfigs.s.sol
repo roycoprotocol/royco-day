@@ -28,8 +28,8 @@ contract UpdateTrancheConfigs is ParameterUpdateBase {
     // CONSTANTS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev CREATE3-deterministic entry-point proxy address (same on every chain).
-    /// @dev TODO: set the deployed Day entry point address once DeployEntryPoint has run.
+    /// @dev Deterministic entry-point proxy address (same on every chain).
+    /// @dev TODO: set the deployed Day entry point address once the market deployment script (Deploy.s.sol) has run.
     address internal constant ENTRY_POINT = address(0);
 
     uint24 internal constant NEW_DEPOSIT_DELAY = 5 minutes;

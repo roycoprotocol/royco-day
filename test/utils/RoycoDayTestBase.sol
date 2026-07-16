@@ -387,7 +387,9 @@ abstract contract RoycoDayTestBase is Test, Assertions {
                 deployerAdminAddress: DEPLOYER_ADMIN_ADDRESS,
                 protocolFeeRecipientAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS,
                 balancerPoolManagerAddress: KERNEL_ADMIN_ADDRESS,
-                marketOpsAddress: KERNEL_ADMIN_ADDRESS
+                marketOpsAddress: KERNEL_ADMIN_ADDRESS,
+                adminEntryPointAddress: KERNEL_ADMIN_ADDRESS,
+                entryPointFeeCollectorAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS
             })
         );
     }

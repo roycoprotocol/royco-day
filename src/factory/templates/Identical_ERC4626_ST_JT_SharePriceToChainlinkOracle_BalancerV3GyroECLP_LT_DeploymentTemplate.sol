@@ -23,9 +23,11 @@ contract Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_
     constructor(
         IRoycoFactory _factory,
         GyroECLPPoolFactory _balancerV3PoolFactory,
-        ILPOracleFactoryBase _eclpLPOracleFactory
+        ILPOracleFactoryBase _eclpLPOracleFactory,
+        address _roycoDayEntryPoint,
+        address _roycoMarketSyncer
     )
-        BalancerV3_GyroECLP_LT_DeploymentTemplate(_factory, _balancerV3PoolFactory, _eclpLPOracleFactory)
+        BalancerV3_GyroECLP_LT_DeploymentTemplate(_factory, _balancerV3PoolFactory, _eclpLPOracleFactory, _roycoDayEntryPoint, _roycoMarketSyncer)
     { }
 
     /// @inheritdoc BalancerV3_GyroECLP_LT_DeploymentTemplate

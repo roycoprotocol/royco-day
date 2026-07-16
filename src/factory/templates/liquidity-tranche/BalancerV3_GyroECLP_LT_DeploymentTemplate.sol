@@ -25,6 +25,7 @@ import { ERC20BurnableUpgradeable } from "../../../../lib/openzeppelin-contracts
 import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IRoycoAuth } from "../../../interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayEntryPoint } from "../../../interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../interfaces/IRoycoVaultTranche.sol";
 import { IRoycoFactory } from "../../../interfaces/factory/IRoycoFactory.sol";
@@ -70,13 +71,15 @@ import {
     TAG_ST_PROXY,
     TAG_YDM
 } from "../base/Components.sol";
+import { EntryPointConfigurer } from "../periphery/EntryPointConfigurer.sol";
+import { MarketSyncerConfigurer } from "../periphery/MarketSyncerConfigurer.sol";
 
 /**
  * @title BalancerV3_GyroECLP_LT_DeploymentTemplate
  * @author Ankur Dubey, Shivaansh Kapoor
  * @notice Abstract base for every Royco Day market that has their LT deployed into a Balancer V3 Gyroscope ECLP pool
  */
-abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTemplate {
+abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTemplate, EntryPointConfigurer, MarketSyncerConfigurer {
     // ═══════════════════════════════════════════════════════════════════════════
     // PARAM STRUCTS
     // ═══════════════════════════════════════════════════════════════════════════
@@ -106,6 +109,18 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
     }
 
     /**
+     * @notice Per-tranche entry point configurations applied on the pre-deployed entry point after the market is deployed
+     * @custom:field st - The entry point configuration for the senior tranche
+     * @custom:field jt - The entry point configuration for the junior tranche
+     * @custom:field lt - The entry point configuration for the liquidity tranche
+     */
+    struct EntryPointTrancheConfigs {
+        IRoycoDayEntryPoint.TrancheConfig st;
+        IRoycoDayEntryPoint.TrancheConfig jt;
+        IRoycoDayEntryPoint.TrancheConfig lt;
+    }
+
+    /**
      * @notice Top-level params struct passed to `deployMarket(bytes)`
      * @custom:field marketId - A caller-supplied identifier for the market, mixed into the deterministic deployment salts
      * @custom:field stTranche - The senior tranche initialization params
@@ -124,6 +139,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
      * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables screening)
      * @custom:field kernelSpecificParams - ABI-encoded kernel/quoter-specific initialization params
      * @custom:field enforceVaultSharesTransferWhitelist - Whether to enforce the vault shares transfer whitelist
+     * @custom:field entryPointTrancheConfigs - The per-tranche entry point configurations applied after the market is deployed (any oracle clock is deployed externally and passed by address)
      */
     struct DayParams {
         bytes32 marketId;
@@ -143,6 +159,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         address roycoBlacklist;
         bytes kernelSpecificParams;
         bool enforceVaultSharesTransferWhitelist;
+        EntryPointTrancheConfigs entryPointTrancheConfigs;
     }
 
     /**
@@ -211,9 +228,13 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
     constructor(
         IRoycoFactory _factory,
         GyroECLPPoolFactory _balancerV3PoolFactory,
-        ILPOracleFactoryBase _eclpLPOracleFactory
+        ILPOracleFactoryBase _eclpLPOracleFactory,
+        address _roycoDayEntryPoint,
+        address _roycoMarketSyncer
     )
         BaseDeploymentTemplate(_factory)
+        EntryPointConfigurer(_roycoDayEntryPoint, _factory)
+        MarketSyncerConfigurer(_roycoMarketSyncer)
     {
         BALANCER_V3_POOL_FACTORY = _balancerV3PoolFactory;
         BALANCER_V3_VAULT = IVault(address(_balancerV3PoolFactory.getVault()));
@@ -306,6 +327,22 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
 
         // 13. Record + verify-friendly extras
         result.extras = abi.encode(ExtraContractsDeployedResult({ balancerPool: balancerPool, balancerHook: balancerHook, bptOracle: bptOracle }));
+    }
+
+    /// @inheritdoc BaseDeploymentTemplate
+    function _configureMarketPeriphery(DeploymentResult calldata _result, bytes calldata _params) internal override(BaseDeploymentTemplate) {
+        DayParams memory p = abi.decode(_params, (DayParams));
+
+        // Decode the market's tranches and entry point configs
+        address[] memory tranches = new address[](3);
+        IRoycoDayEntryPoint.TrancheConfig[] memory configs = new IRoycoDayEntryPoint.TrancheConfig[](3);
+        (tranches[0], configs[0]) = (_result.seniorTranche, p.entryPointTrancheConfigs.st);
+        (tranches[1], configs[1]) = (_result.juniorTranche, p.entryPointTrancheConfigs.jt);
+        (tranches[2], configs[2]) = (_result.liquidityTranche, p.entryPointTrancheConfigs.lt);
+
+        // Configure the market's tranches on the entry point and register its kernel on the market syncer
+        _configureEntryPointTrancheConfigs(ROYCO_FACTORY, tranches, configs);
+        _registerMarketKernelOnSyncer(ROYCO_FACTORY, _result.kernel);
     }
 
     /// @notice Deploys the market's E-CLP BPT TVL oracle through Balancer's LP oracle factory

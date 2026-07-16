@@ -88,10 +88,17 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         entryPointFactory.setTrancheKernel(address(liquidityTranche), address(kernel));
         vm.label(address(entryPointFactory), "MockRoycoFactory");
 
-        // Deploy the entry point behind an ERC1967 proxy, initialized with all three tranches enabled
-        (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
+        // Deploy the entry point behind an ERC1967 proxy, initialized with no tranche configs: the initial
+        // configuration flows through the factory below, mirroring the production market deployment path
         entryPointImpl = new RoycoDayEntryPoint(address(entryPointFactory));
-        entryPoint = IRoycoDayEntryPoint(address(new ERC1967Proxy(address(entryPointImpl), abi.encodeCall(RoycoDayEntryPoint.initialize, (tranches, configs)))));
+        entryPoint = IRoycoDayEntryPoint(
+            address(
+                new ERC1967Proxy(
+                    address(entryPointImpl),
+                    abi.encodeCall(RoycoDayEntryPoint.initialize, (new address[](0), new IRoycoDayEntryPoint.TrancheConfig[](0)))
+                )
+            )
+        );
         vm.label(address(entryPoint), "EntryPoint");
 
         // Wire the production-shaped role bindings on the entry point itself
@@ -129,6 +136,12 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         accessManager.grantRole(ST_LP_ROLE, ep, 0);
         accessManager.grantRole(JT_LP_ROLE, ep, 0);
         accessManager.grantRole(LT_LP_ROLE, ep, 0);
+
+        // Apply the initial tranche configs through the factory, as production market deployments do: the factory
+        // holds ADMIN_ENTRY_POINT_ROLE (mirroring RoycoFactory.initialize) and forwards the admin-gated call
+        accessManager.grantRole(ADMIN_ENTRY_POINT_ROLE, address(entryPointFactory), 0);
+        (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
+        entryPointFactory.executeAsFactory(ep, abi.encodeCall(IRoycoDayEntryPoint.modifyTrancheConfigs, (tranches, configs)));
 
         // Entry point admin actors
         ENTRY_POINT_ADMIN = _generateActor("ENTRY_POINT_ADMIN", ADMIN_ENTRY_POINT_ROLE);
