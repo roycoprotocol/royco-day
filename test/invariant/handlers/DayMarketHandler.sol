@@ -1025,11 +1025,12 @@ contract DayMarketHandler is DayMarketTestBase {
         if (s.fixedTerm) {
             _expect(p, SEL_DISABLED_FT);
         } else if (s.ltSupply == 0 || s.stSupply == 0) {
-            // A degenerate market with no senior or LT supply: a multi-asset exit either divides by zero in the
-            // senior valuation (Panic) or, when its BPT/idle slices floor to zero first, trips the post-op no-op
-            // guard (INVALID_POST_OP_STATE) before any panic. Both mean the exit did not settle.
+            // A degenerate market with no senior or LT supply, a multi-asset exit either divides by zero in the
+            // senior valuation (Panic) or computes an all-zero claim that clears the post-op no-op guard and
+            // reaches the share burn, which reverts on the redeemer's empty LT balance. None of these settle the exit
             _expect(p, SEL_PANIC);
             _expect(p, SEL_INVALID_POST_OP);
+            _expect(p, SEL_ERC20_BALANCE);
         } else {
             RemovalMirror memory r = _mirrorVenueRemoval(s, _shares);
             if (r.bonusNAV > 0) ghost_jtLossSinceLastCheck = true;

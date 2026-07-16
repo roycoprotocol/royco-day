@@ -483,11 +483,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
                         tranche.call(abi.encodeCall(IRoycoLiquidityTranche.maxRedeemMultiAsset, (address(this))));
                     // A reverted probe leaves the multi-asset route unavailable, fall back to the in-kind bound so the portion the market can serve is never left behind
                     uint256 maxRedeemMultiAsset;
-                    assembly ("memory-safe") {
-                        if multiAssetProbeSucceeded {
-                            maxRedeemMultiAsset := mload(add(multiAssetProbeReturnData, 0x20))
-                        }
-                    }
+                    assembly ("memory-safe") { if multiAssetProbeSucceeded { maxRedeemMultiAsset := mload(add(multiAssetProbeReturnData, 0x20)) } }
                     _sharesToRedeem = Math.min(Math.max(maxRedeemInKind, maxRedeemMultiAsset), request.shares);
                     isMultiAssetRedemption = (maxRedeemMultiAsset > maxRedeemInKind);
                 }
