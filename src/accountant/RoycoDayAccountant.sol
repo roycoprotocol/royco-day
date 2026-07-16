@@ -257,11 +257,8 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             // Compute the total value redeemed from ST and JT
             NAV_UNIT totalSTAndJTRedemptionNAV = (toNAVUnits(-deltaSTRawNAV) + toNAVUnits(-deltaJTRawNAV));
             if (_op == Operation.ST_REDEEM || _op == Operation.LT_REDEEM) {
-                if (_op == Operation.LT_REDEEM) {
-                    require(deltaLTRawNAV < 0 || (deltaLTRawNAV <= 0 && totalSTAndJTRedemptionNAV > ZERO_NAV_UNITS), INVALID_POST_OP_STATE(_op));
-                } else {
-                    require(deltaLTRawNAV == 0 && totalSTAndJTRedemptionNAV > ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
-                }
+                if (_op == Operation.LT_REDEEM) require(deltaLTRawNAV <= 0, INVALID_POST_OP_STATE(_op));
+                else require(deltaLTRawNAV == 0 && totalSTAndJTRedemptionNAV > ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
                 // Reduce JT effective NAV by the the bonus provided from its assets
                 jtEffectiveNAV = jtEffectiveNAV - _stSelfLiquidationBonusNAV;
                 // Reduce ST effective NAV by the total redemptions without the bonus provided from JT effective NAV
