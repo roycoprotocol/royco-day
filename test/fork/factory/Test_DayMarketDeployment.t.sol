@@ -42,7 +42,6 @@ import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { RoycoDayKernel } from "../../../src/kernels/base/RoycoDayKernel.sol";
 import { BalancerV3_LT_BPTOracle_Quoter } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
-import { RoycoDayBalancerV3Hooks } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3Hooks.sol";
 import { TrancheType } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "../../../src/libraries/Units.sol";
 import { RoycoLiquidityTranche } from "../../../src/tranches/RoycoLiquidityTranche.sol";
@@ -78,7 +77,6 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
     // ── Deployed market (RoycoDayTestBase sets FACTORY/ACCESS_MANAGER/ST/JT/KERNEL/ACCOUNTANT/YDM/BLACKLIST via _setDeployedMarket) ──
     IRoycoVaultTranche internal LT;
     address internal POOL; // the Gyro E-CLP BPT (== kernel.LT_ASSET())
-    address internal BALANCER_HOOK; // the pool's hooks contract (the kernel-bound RoycoDayBalancerV3Hooks proxy)
     address internal LT_YDM; // the LDM
     IVault internal VAULT;
 
@@ -111,7 +109,6 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         POOL = KERNEL.LT_ASSET();
         LT_YDM = ACCOUNTANT.getState().ltYDM;
         VAULT = IVault(address(GyroECLPPoolFactory(DEPLOY_SCRIPT.getChainConfig(block.chainid).gyroECLPPoolFactory).getVault()));
-        BALANCER_HOOK = VAULT.getHooksConfig(POOL).hooksContract;
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -120,7 +117,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
 
     /// @notice Every component the deployment must produce is a distinct live contract with code
     function test_Deployment_AllAddressesLive() public view {
-        address[12] memory a = [
+        address[11] memory a = [
             address(FACTORY),
             address(ACCESS_MANAGER),
             address(BLACKLIST),
@@ -131,8 +128,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
             address(ACCOUNTANT),
             address(YDM),
             LT_YDM,
-            POOL,
-            BALANCER_HOOK
+            POOL
         ];
         for (uint256 i = 0; i < a.length; ++i) {
             assertTrue(a[i] != address(0), "zero address");
@@ -216,20 +212,14 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(VAULT.getStaticSwapFeePercentage(POOL), SWAP_FEE, "swap fee");
     }
 
-    /// The pool's hooks proxy was upgraded to the kernel-bound implementation with the registration-frozen flags
-    function test_Pool_HookUpgradedAndBound() public view {
+    /// The pool ships with no hook: an external pool operation needs no pre-operation sync, so the pool registers the
+    /// zero hooks address and no before-operation callback flags
+    function test_Pool_NoHook() public view {
         HooksConfig memory hc = VAULT.getHooksConfig(POOL);
-        assertEq(hc.hooksContract, BALANCER_HOOK, "pool hook mismatch");
-        // The stand-in advertised the real hook's flags; they are frozen at registration.
-        assertTrue(hc.shouldCallBeforeSwap, "beforeSwap flag");
-        assertTrue(hc.shouldCallBeforeAddLiquidity, "beforeAdd flag");
-        assertTrue(hc.shouldCallBeforeRemoveLiquidity, "beforeRemove flag");
-
-        // The proxy was upgraded to the real kernel-bound hook and initialized.
-        RoycoDayBalancerV3Hooks hook = RoycoDayBalancerV3Hooks(BALANCER_HOOK);
-        assertEq(hook.ROYCO_DAY_KERNEL(), address(KERNEL), "hook -> kernel");
-        assertEq(hook.LIQUIDITY_TRANCHE_BALANCER_V3_POOL(), POOL, "hook -> pool");
-        assertEq(AccessManagedUpgradeable(BALANCER_HOOK).authority(), address(ACCESS_MANAGER), "hook authority");
+        assertEq(hc.hooksContract, address(0), "pool must ship with no hook");
+        assertFalse(hc.shouldCallBeforeSwap, "beforeSwap flag must be unset");
+        assertFalse(hc.shouldCallBeforeAddLiquidity, "beforeAdd flag must be unset");
+        assertFalse(hc.shouldCallBeforeRemoveLiquidity, "beforeRemove flag must be unset");
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -302,7 +292,6 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(AccessManagedUpgradeable(address(ST)).authority(), am, "ST authority");
         assertEq(AccessManagedUpgradeable(address(JT)).authority(), am, "JT authority");
         assertEq(AccessManagedUpgradeable(address(LT)).authority(), am, "LT authority");
-        assertEq(AccessManagedUpgradeable(BALANCER_HOOK).authority(), am, "balancer hook authority");
     }
 
     /// @notice The factory retains ADMIN_ROLE and ADMIN_ENTRY_POINT_ROLE on the AccessManager after deployment
@@ -338,8 +327,8 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         }
     }
 
-    /// @notice The kernel setters, sync, market-ops, quoter-admin, and hook surfaces carry their intended role bindings
-    function test_Auth_KernelAndHookSelectorRoleBindings() public view {
+    /// @notice The kernel setters, sync, market-ops, and quoter-admin surfaces carry their intended role bindings
+    function test_Auth_KernelSelectorRoleBindings() public view {
         _assertRole(address(KERNEL), IRoycoDayKernel.setProtocolFeeRecipient.selector, ADMIN_KERNEL_ROLE);
         _assertRole(address(KERNEL), IRoycoDayKernel.setSeniorTrancheSelfLiquidationBonus.selector, ADMIN_KERNEL_ROLE);
         _assertRole(address(KERNEL), IRoycoDayKernel.syncTrancheAccounting.selector, SYNC_ROLE);
@@ -357,18 +346,12 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         _assertRole(address(KERNEL), bytes4(keccak256("setConversionRate(uint256,bool)")), ADMIN_ORACLE_QUOTER_ROLE);
         _assertRole(address(KERNEL), bytes4(keccak256("setChainlinkOracle(address,uint48,bool)")), ADMIN_ORACLE_QUOTER_ROLE);
         _assertRole(address(KERNEL), bytes4(keccak256("setSequencerUptimeFeed(address,uint48)")), ADMIN_ORACLE_QUOTER_ROLE);
-
-        _assertRole(BALANCER_HOOK, IRoycoAuth.pause.selector, ADMIN_PAUSER_ROLE);
-        _assertRole(BALANCER_HOOK, IRoycoAuth.unpause.selector, ADMIN_UNPAUSER_ROLE);
-        _assertRole(BALANCER_HOOK, UUPSUpgradeable.upgradeToAndCall.selector, ADMIN_UPGRADER_ROLE);
     }
 
-    /// @notice Key grants exist (accountant+hook can sync, kernel can burn) and every bound role has a live grantee
+    /// @notice Key grants exist (the accountant can sync, the kernel can burn) and every bound role has a live grantee
     function test_Auth_EveryBoundRoleHasALiveGrantee() public view {
         (bool syncAcc,) = ACCESS_MANAGER.hasRole(SYNC_ROLE, address(ACCOUNTANT));
         assertTrue(syncAcc, "accountant SYNC_ROLE");
-        (bool syncHook,) = ACCESS_MANAGER.hasRole(SYNC_ROLE, BALANCER_HOOK);
-        assertTrue(syncHook, "balancer hook SYNC_ROLE");
         (bool burner,) = ACCESS_MANAGER.hasRole(BURNER_ROLE, address(KERNEL));
         assertTrue(burner, "kernel BURNER_ROLE");
 

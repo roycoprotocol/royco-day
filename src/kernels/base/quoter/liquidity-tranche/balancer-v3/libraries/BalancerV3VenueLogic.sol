@@ -79,7 +79,7 @@ library BalancerV3VenueLogic {
                     maxAmountsIn: exactAmountsIn, // For UNBALANCED adds the Vault treats these as the exact amounts in (not upper bounds)
                     minBptAmountOut: toUint256(_minLTAssetsOut), // The Vault reverts the add if it would mint fewer BPT than this, bounding the add's slippage
                     kind: AddLiquidityKind.UNBALANCED, // Unbalanced add: the Vault charges the pool's swap fee on the imbalanced portion
-                    userData: "" // UNBALANCED adds skip the pool's compute callback and this kernel's hooks do not consume userData
+                    userData: "" // UNBALANCED adds skip the pool's custom-add callback, so userData is unused
                 })
             );
 
@@ -136,7 +136,7 @@ library BalancerV3VenueLogic {
                     maxBptAmountIn: toUint256(_ltAssets), // For PROPORTIONAL removals the Vault treats this as the exact BPT amount to burn (not an upper bound)
                     minAmountsOut: minAmountsOut, // The Vault reverts the removal if any constituent comes out below these floors, bounding the removal's slippage
                     kind: RemoveLiquidityKind.PROPORTIONAL, // Proportional removals preserve the pool's composition, so the unwrap requires no pricing
-                    userData: "" // PROPORTIONAL removals skip the pool's compute callback and this kernel's hooks do not consume userData
+                    userData: "" // PROPORTIONAL removals skip the pool's custom-remove callback, so userData is unused
                 })
             );
 

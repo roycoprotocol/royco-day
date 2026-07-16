@@ -15,7 +15,6 @@ import {
 } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
 import { ConstantPriceFeed } from "../../../../lib/balancer-v3-monorepo/pkg/oracles/contracts/ConstantPriceFeed.sol";
 import { GyroECLPPoolFactory } from "../../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
-import { BalancerPoolToken } from "../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/BalancerPoolToken.sol";
 import { SingletonAuthentication } from "../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/SingletonAuthentication.sol";
 import {
     AggregatorV3Interface as BalancerAggregatorV3Interface
@@ -30,9 +29,6 @@ import { IRoycoVaultTranche } from "../../../interfaces/IRoycoVaultTranche.sol";
 import { IRoycoFactory } from "../../../interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../interfaces/factory/IRoycoProtocolTemplate.sol";
 import { BalancerV3_LT_BPTOracle_Quoter } from "../../../kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
-import { RoycoDayBalancerV3Hooks } from "../../../kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3Hooks.sol";
-import { RoycoDayBalancerV3HooksStandIn } from "../../../kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3HooksStandIn.sol";
-import { TrancheType } from "../../../libraries/Types.sol";
 import { RoycoLiquidityTranche } from "../../../tranches/RoycoLiquidityTranche.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
@@ -53,11 +49,8 @@ import {
 } from "../../RolesConfiguration.sol";
 import { BaseDeploymentTemplate } from "../base/BaseDeploymentTemplate.sol";
 import {
-    COMPONENT_ID_DAY_BALANCER_HOOKS,
     TAG_ACCOUNTANT_IMPL,
     TAG_ACCOUNTANT_PROXY,
-    TAG_BALANCER_HOOK,
-    TAG_BALANCER_HOOK_IMPL,
     TAG_BALANCER_V3_POOL,
     TAG_JT_IMPL,
     TAG_JT_PROXY,
@@ -75,6 +68,11 @@ import {
  * @title BalancerV3_GyroECLP_LT_DeploymentTemplate
  * @author Ankur Dubey, Shivaansh Kapoor
  * @notice Abstract base for every Royco Day market that has their LT deployed into a Balancer V3 Gyroscope ECLP pool
+ * @dev The market's Gyro E-CLP pool is registered with no hook. An external pool operation needs no pre-operation
+ *      sync for any Day quantity to be correct: the senior-leg rate provider reads the kernel's `getRate`, whose
+ *      cache-miss branch previews the current rate from the live marks, and the liquidity-tranche mark, the liquidity
+ *      check, the redemption, and the premium read the manipulation-resistant BPT oracle and the committed checkpoint.
+ *      So the pool is created with `address(0)` for its hooks argument, and no sync role is granted to any pool contract.
  */
 abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTemplate {
     // ═══════════════════════════════════════════════════════════════════════════
@@ -146,14 +144,12 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
     }
 
     /**
-     * @notice Balancer V3-specific addresses recorded for verification
-     * @custom:field balancerPool - The deployed Gyro E-CLP pool (the liquidity tranche's BPT)
-     * @custom:field balancerHook - The deployed pool hook enforcing the kernel-only LP and same-block-swap rules
-     * @custom:field bptOracle - The deployed BPT oracle adapter that reports ltRawNAV
+     * @notice Balancer V3-specific addresses recorded for verification.
+     * @custom:field balancerPool - The deployed Gyro E-CLP pool (the liquidity tranche's BPT).
+     * @custom:field bptOracle - The deployed BPT oracle adapter that reports ltRawNAV.
      */
     struct ExtraContractsDeployedResult {
         address balancerPool;
-        address balancerHook;
         address bptOracle;
     }
 
@@ -178,7 +174,6 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
     error INVALID_KERNEL_ON_ACCOUNTANT();
     error POOL_NOT_REGISTERED_WITH_VAULT();
     error POOL_TOKEN_CONFIGURATION_MISMATCH();
-    error INVALID_KERNEL_ON_BALANCER_HOOK();
     error INVALID_ECLP_LP_ORACLE_FACTORY();
     error INVALID_BPT_ORACLE_ON_KERNEL();
 
@@ -191,10 +186,6 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
 
     /// @notice The Balancer V3 vault
     IVault public immutable BALANCER_V3_VAULT;
-
-    /// @notice Shared registration-time stand-in hook implementation, deployed once here and reused as the initial
-    ///         implementation behind every market's pool-hook proxy (it is stateless, so one instance serves all markets)
-    address public immutable BALANCER_HOOK_STANDIN_IMPL;
 
     /// @notice Balancer's E-CLP LP oracle factory: the template deploys each market's manipulation-resistant BPT
     ///         TVL oracle through it, immediately after the market's pool is created
@@ -217,7 +208,6 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
     {
         BALANCER_V3_POOL_FACTORY = _balancerV3PoolFactory;
         BALANCER_V3_VAULT = IVault(address(_balancerV3PoolFactory.getVault()));
-        BALANCER_HOOK_STANDIN_IMPL = address(new RoycoDayBalancerV3HooksStandIn());
         require(address(SingletonAuthentication(address(_eclpLPOracleFactory)).getVault()) == address(BALANCER_V3_VAULT), INVALID_ECLP_LP_ORACLE_FACTORY());
         ECLP_LP_ORACLE_FACTORY = _eclpLPOracleFactory;
         CONSTANT_PRICE_FEED = address(new ConstantPriceFeed());
@@ -269,43 +259,34 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         address stImpl = _deploySeniorTrancheImpl(p.stAsset, result.kernel, _marketComponentSalt(p.marketId, TAG_ST_IMPL));
         _deployProxy(stImpl, _encodeTrancheInitData(p.stTranche), _marketComponentSalt(p.marketId, TAG_ST_PROXY));
 
-        // 4. Deploy the pool hooks proxy against the shared stand-in implementation (returns true from onRegister and advertises
-        //    the real hook's flags) so the pool can register now; it is upgraded to the real kernel-bound hook after step 9
-        address balancerHook = _deployProxy(BALANCER_HOOK_STANDIN_IMPL, bytes("no-op"), _marketComponentSalt(p.marketId, TAG_BALANCER_HOOK));
+        // 4. Create the Gyro E-CLP pool `{ST_share, quote}`: senior leg WITH_RATE (rate provider = the predicted kernel),
+        //    registered with no hook. LT asset = pool.
+        address balancerPool =
+            _createBalancerV3Pool(p.gyroECLPPoolParams, result.seniorTranche, result.kernel, _marketComponentSalt(p.marketId, TAG_BALANCER_V3_POOL));
 
-        // 5. Create the Gyro E-CLP pool `{ST_share, quote}`: senior leg WITH_RATE (rate provider = the predicted kernel),
-        //    hooked to the stand-in proxy — LT asset = pool
-        address balancerPool = _createBalancerV3Pool(
-            p.gyroECLPPoolParams, result.seniorTranche, result.kernel, balancerHook, _marketComponentSalt(p.marketId, TAG_BALANCER_V3_POOL)
-        );
-
-        // 6. Now that the pool is registered, deploy its manipulation-resistant BPT TVL oracle through Balancer's E-CLP LP oracle factory
+        // 5. Now that the pool is registered, deploy its manipulation-resistant BPT TVL oracle through Balancer's E-CLP LP oracle factory
         address bptOracle = _deployBPTOracle(balancerPool);
 
-        // 7. Deploy JT impl + proxy (plain first-loss asset)
+        // 6. Deploy JT impl + proxy (plain first-loss asset).
         address jtImpl = _deployJuniorTrancheImpl(p.jtAsset, result.kernel, _marketComponentSalt(p.marketId, TAG_JT_IMPL));
         _deployProxy(jtImpl, _encodeTrancheInitData(p.jtTranche), _marketComponentSalt(p.marketId, TAG_JT_PROXY));
 
-        // 8. Deploy LT impl + proxy (asset = the pool BPT)
+        // 7. Deploy LT impl + proxy (asset = the pool BPT).
         address ltImpl = _deployLiquidityTrancheImpl(balancerPool, result.kernel, _marketComponentSalt(p.marketId, TAG_LT_IMPL));
         _deployProxy(ltImpl, _encodeTrancheInitData(p.ltTranche), _marketComponentSalt(p.marketId, TAG_LT_PROXY));
 
-        // 9. Deploy accountant impl + proxy (Day accountant bytecode registered under the accountant component ID)
+        // 8. Deploy accountant impl + proxy (Day accountant bytecode registered under the accountant component ID).
         address accountantImpl = _deployAccountantImpl(result.kernel, p.jtCoinvested, _marketComponentSalt(p.marketId, TAG_ACCOUNTANT_IMPL));
         _deployProxy(accountantImpl, _encodeAccountantInitData(p.accountant, result.ydm, result.ltYdm), _marketComponentSalt(p.marketId, TAG_ACCOUNTANT_PROXY));
 
-        // 10. Deploy kernel impl + proxy, injecting the template-deployed BPT oracle into the kernel's LT quoter init
+        // 9. Deploy kernel impl + proxy, injecting the template-deployed BPT oracle into the kernel's LT quoter init.
         _deployKernelImplAndProxy(p, result, balancerPool, bptOracle, _marketComponentSalt(p.marketId, TAG_KERNEL_PROXY));
 
-        // 11. Now that the kernel exists, deploy the real kernel-bound hook implementation and upgrade the pool hook proxy to it
-        address realHookImpl = _deployImpl(COMPONENT_ID_DAY_BALANCER_HOOKS, abi.encode(result.kernel), _marketComponentSalt(p.marketId, TAG_BALANCER_HOOK_IMPL));
-        UUPSUpgradeable(balancerHook).upgradeToAndCall(realHookImpl, abi.encodeCall(RoycoDayBalancerV3Hooks.initialize, (ROYCO_FACTORY.ROYCO_AUTHORITY())));
+        // 10. Apply selector->role bindings + post-init grants (SYNC_ROLE for the accountant, BURNER_ROLE for the kernel).
+        _applyRoleBindings(_buildRoleBindings(result));
 
-        // 12. Apply selector->role bindings + post-init grants (including SYNC_ROLE for the pool hook so it can sync the kernel)
-        _applyRoleBindings(_buildRoleBindings(result, balancerHook));
-
-        // 13. Record + verify-friendly extras
-        result.extras = abi.encode(ExtraContractsDeployedResult({ balancerPool: balancerPool, balancerHook: balancerHook, bptOracle: bptOracle }));
+        // 11. Record + verify-friendly extras.
+        result.extras = abi.encode(ExtraContractsDeployedResult({ balancerPool: balancerPool, bptOracle: bptOracle }));
     }
 
     /**
@@ -357,11 +338,10 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
     }
 
     /**
-     * @notice Creates the Gyro E-CLP pool with tokens `{ST_share, quote}`:
+     * @notice Creates the Gyro E-CLP pool with tokens `{ST_share, quote}`, registered with no hook.
      * @param _p The Gyro E-CLP pool parameters
      * @param _seniorTranche The senior tranche address
      * @param _rateProvider The rate provider address
-     * @param _hook The hook address
      * @param _salt The salt for the pool
      * @return balancerV3Pool The address of the created Gyro E-CLP pool
      */
@@ -369,7 +349,6 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         GyroECLPPoolParams memory _p,
         address _seniorTranche,
         address _rateProvider,
-        address _hook,
         bytes32 _salt
     )
         internal
@@ -394,7 +373,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
             _p.derivedEclpParams,
             roleAccounts,
             _p.swapFeePercentage,
-            _hook,
+            address(0), // no hook: external ops need no pre-operation sync (see the contract-level docs)
             _p.enableDonation,
             _p.disableUnbalancedLiquidity,
             _salt
@@ -425,8 +404,8 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
     // ROLE BINDINGS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function _buildRoleBindings(DeploymentResult memory _r, address _balancerHook) internal view virtual returns (RoleBindings memory) {
-        TargetBinding[] memory targets = new TargetBinding[](9);
+    function _buildRoleBindings(DeploymentResult memory _r) internal view virtual returns (RoleBindings memory) {
+        TargetBinding[] memory targets = new TargetBinding[](8);
         targets[0] = _trancheBinding(_r.seniorTranche, ST_LP_ROLE, ST_LP_ROLE, false);
         targets[1] = _trancheBinding(_r.juniorTranche, JT_LP_ROLE, JT_LP_ROLE, false);
         targets[2] = _trancheBinding(_r.liquidityTranche, PUBLIC_ROLE, LT_LP_ROLE, true);
@@ -434,13 +413,11 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         targets[4] = _accountantBinding(_r.accountant);
         targets[5] = _balancerVaultBinding(address(BALANCER_V3_VAULT));
         targets[6] = _balancerProtocolFeeControllerBinding(address(BALANCER_V3_VAULT.getProtocolFeeController()));
-        targets[7] = _balancerHookBinding(_balancerHook);
-        targets[8] = _kernelQuoterBinding(_r.kernel);
+        targets[7] = _kernelQuoterBinding(_r.kernel);
 
-        RoleGrant[] memory grants = new RoleGrant[](3);
+        RoleGrant[] memory grants = new RoleGrant[](2);
         grants[0] = RoleGrant({ roleId: SYNC_ROLE, account: _r.accountant, executionDelay: 0 });
         grants[1] = RoleGrant({ roleId: BURNER_ROLE, account: _r.kernel, executionDelay: 0 });
-        grants[2] = RoleGrant({ roleId: SYNC_ROLE, account: _balancerHook, executionDelay: 0 });
 
         return RoleBindings({ targetBindings: targets, postInitGrants: grants });
     }
@@ -455,19 +432,6 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         s[1] = BalancerV3_LT_BPTOracle_Quoter.setMaxReinvestmentSlippage.selector;
         r[1] = ADMIN_ORACLE_QUOTER_ROLE;
         return TargetBinding({ target: _kernel, selectors: s, roleIds: r });
-    }
-
-    /// @notice Admin surface for the Balancer pool hook (a RoycoBase UUPS contract): pause/unpause/upgrade
-    function _balancerHookBinding(address _hook) private pure returns (TargetBinding memory) {
-        bytes4[] memory s = new bytes4[](3);
-        uint64[] memory r = new uint64[](3);
-        s[0] = IRoycoAuth.pause.selector;
-        r[0] = ADMIN_PAUSER_ROLE;
-        s[1] = IRoycoAuth.unpause.selector;
-        r[1] = ADMIN_UNPAUSER_ROLE;
-        s[2] = UUPSUpgradeable.upgradeToAndCall.selector;
-        r[2] = ADMIN_UPGRADER_ROLE;
-        return TargetBinding({ target: _hook, selectors: s, roleIds: r });
     }
 
     /// @dev `mint` carries no binding: it is gated by the tranche's own `onlyKernel` check (an immutable-address

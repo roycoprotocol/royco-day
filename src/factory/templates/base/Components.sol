@@ -21,11 +21,6 @@ bytes32 constant COMPONENT_ID_YDM_STATIC_CURVE = keccak256("ROYCO_COMPONENT_YDM_
 bytes32 constant COMPONENT_ID_YDM_ADAPTIVE_CURVE_V1 = keccak256("ROYCO_COMPONENT_YDM_ADAPTIVE_CURVE_V1");
 bytes32 constant COMPONENT_ID_YDM_ADAPTIVE_CURVE_V2 = keccak256("ROYCO_COMPONENT_YDM_ADAPTIVE_CURVE_V2");
 
-// ─── Day-Balancer ────────────────────────────────────────────────────────────
-
-/// @dev The real kernel-bound Balancer V3 pool hook (`RoycoDayBalancerV3Hooks`)
-bytes32 constant COMPONENT_ID_DAY_BALANCER_HOOKS = keccak256("ROYCO_COMPONENT_DAY_BALANCER_HOOKS");
-
 // ─── Day kernels ─────────────────────────────────────────────────────────────
 
 /// @dev Creation-code id for `Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel`
@@ -45,6 +40,4 @@ bytes32 constant TAG_KERNEL_IMPL = "KERNEL_IMPL";
 bytes32 constant TAG_ACCOUNTANT_IMPL = "ACCOUNTANT_IMPL";
 bytes32 constant TAG_YDM = "YDM";
 bytes32 constant TAG_LDM = "LDM";
-bytes32 constant TAG_BALANCER_HOOK = "BALANCER_HOOK";
-bytes32 constant TAG_BALANCER_HOOK_IMPL = "BALANCER_HOOK_IMPL";
 bytes32 constant TAG_BALANCER_V3_POOL = "BALANCER_V3_POOL";
