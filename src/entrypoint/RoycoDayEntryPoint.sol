@@ -484,7 +484,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
                     // A reverted probe leaves the multi-asset route unavailable, fall back to the in-kind bound so the portion the market can serve is never left behind
                     uint256 maxRedeemMultiAsset;
                     assembly ("memory-safe") {
-                        if not(iszero(multiAssetProbeSucceeded)) {
+                        if multiAssetProbeSucceeded {
                             maxRedeemMultiAsset := mload(add(multiAssetProbeReturnData, 0x20))
                         }
                     }
