@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: LicenseRef-PolyForm-Perimeter-1.0.1
 pragma solidity ^0.8.28;
 
 import { FixedPointMathLib } from "../../../lib/solady/src/utils/FixedPointMathLib.sol";

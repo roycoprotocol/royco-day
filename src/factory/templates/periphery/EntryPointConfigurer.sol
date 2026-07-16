@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: LicenseRef-PolyForm-Perimeter-1.0.1
 pragma solidity ^0.8.28;
 
 import { IRoycoDayEntryPoint } from "../../../interfaces/IRoycoDayEntryPoint.sol";
@@ -50,19 +50,19 @@ abstract contract EntryPointConfigurer {
         internal
     {
         // Over-allocate to the input length, then pack the present tranches and their paired configs, dropping any null tranches
-        uint256 numTranches = _tranches.length;
-        address[] memory tranches = new address[](numTranches);
-        IRoycoDayEntryPoint.TrancheConfig[] memory configs = new IRoycoDayEntryPoint.TrancheConfig[](_tranches.length);
-        uint256 numNonNullTranches;
-        for (uint256 i = 0; i < numTranches; ++i) {
+        uint256 ostensibleNumTranches = _tranches.length;
+        address[] memory tranches = new address[](ostensibleNumTranches);
+        IRoycoDayEntryPoint.TrancheConfig[] memory configs = new IRoycoDayEntryPoint.TrancheConfig[](ostensibleNumTranches);
+        uint256 numTranches;
+        for (uint256 i = 0; i < ostensibleNumTranches; ++i) {
             if (_tranches[i] == address(0)) continue;
-            (tranches[numNonNullTranches], configs[numNonNullTranches]) = (_tranches[i], _configs[i]);
-            ++numNonNullTranches;
+            (tranches[numTranches], configs[numTranches]) = (_tranches[i], _configs[i]);
+            ++numTranches;
         }
         // Set the size of the tranches and configs arrays to the final size after pruning the null tranches
         assembly ("memory-safe") {
-            mstore(tranches, numNonNullTranches)
-            mstore(configs, numNonNullTranches)
+            mstore(tranches, numTranches)
+            mstore(configs, numTranches)
         }
 
         _factory.executeAsFactory(ROYCO_DAY_ENTRY_POINT, abi.encodeCall(IRoycoDayEntryPoint.modifyTrancheConfigs, (tranches, configs)));
