@@ -101,6 +101,16 @@ Day supports multiple YDM implementations:
 
 **Adaptive Curve YDM V2**: Similar to V1, but the entire curve translates vertically rather than scaling. The slopes remain constant because the fixed discount (reduction from target yield share at 0% utilization) and fixed premium (addition to target yield share at 100% utilization) are set at initialization.
 
+### Entry Point
+
+The **Entry Point** enables asynchronous deposit and redemption flows on Royco tranches. Instead of transacting on a tranche directly, users queue a request that escrows their assets or shares. The request only becomes executable after a per-tranche delay. This delay prevents oracle front-running: entering or exiting on information the market's oracles haven't priced in yet. Tranches configured with an **oracle clock** add a second gate. Execution waits for at least one oracle update observed after the request, so anything known at request time is priced into the mark first. Push-based oracles timestamp their own updates. For pull-based sources, the clock derives conservative update times from observed value deviations.
+
+Requests are yield-neutral. Any yield accrued on the escrowed assets or shares while a request waits is forfeited to the protocol. A request can never be worth more at execution than at request time, though losses still pass through. Without this, the queue itself would be a free option: queue a request, watch the market, and execute only if it wins. Yield neutrality makes queueing costless for a user who intends to transact, and worthless for one who doesn't.
+
+Together, the delay and yield neutrality enable Royco market to employ effective T+n settlement. No request settles against a freshly published price, and nothing is gained by queueing ahead of one. A faulty price update on the tranched asset stays contained locally rather than settling into mints and redemptions.
+
+Requests are flexible. They fill incrementally as tranche capacity frees up. Third-party keepers can execute them in exchange for an opt-in bonus, so a user needs to take no further action after queueing. A request can be cancelled at any time to reclaim the originally escrowed assets or shares.
+
 ## Market Dynamics
 
 ### Market States

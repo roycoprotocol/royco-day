@@ -559,8 +559,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         BlacklistLogic._enforceNotBlacklisted($, _caller, _from, _to);
 
         // If transferring shares, ensure that the recipient is a whitelisted LP for the tranche
-        // The kernel and protocol fee recipient are exempt from this check
-        if (_to != address(0) && _to != address(this) && _to != $.protocolFeeRecipient && ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER) {
+        // The kernel, the protocol fee recipient, and any market-specific tranche share custodian are exempt from this check
+        if (
+            ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER && _to != address(0) && _to != address(this) && _to != $.protocolFeeRecipient
+                && !_isTrancheShareCustodian(_to)
+        ) {
             // It is assumed that the sender is already a whitelisted LP
             address authority = authority();
             // Check if the to address can call the deposit function on the tranche
@@ -577,13 +580,21 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @notice Pre-balance update hook for the kernel
      * @dev Intentionally implemented with an empty body since inheriting contracts are not required to override this function
      * @dev Should be overridden by concrete kernel implementations to perform any additional checks or actions
-     * @dev The caller is the address that initiated the balance update
-     * @param _caller The address that initiated the balance update
-     * @param _from The address from which the balance is being updated
-     * @param _to The address to which the balance is being updated
+     * @dev The caller is the account that initiated the balance update
+     * @param _caller The account that initiated the balance update
+     * @param _from The account from which the balance is being updated
+     * @param _to The account to which the balance is being updated
      * @param _value The amount of the balance being updated
      */
     function _preTrancheBalanceUpdate(address _caller, address _from, address _to, uint256 _value) internal virtual { }
+
+    /**
+     * @notice Returns whether an account is a market-specific custodian of tranche shares such as the LT venue
+     * @dev Intentionally implemented with an empty body since inheriting contracts are not required to override this function
+     * @param _account The account to check
+     * @return True if the account is a market-specific tranche share custodian
+     */
+    function _isTrancheShareCustodian(address _account) internal view virtual returns (bool) { }
 
     /**
      * @notice Initializes the quoter
@@ -592,6 +603,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @dev Intentionally implemented with an empty body since inheriting contracts are not required to override this function: the cache is a pure optimization and quoters that do not cache read live
      */
     function _initializeQuoterCache() internal virtual { }
+
+    // =============================
+    // State Accessor Functions
+    // =============================
 
     /**
      * @notice Builds the immutables carrier threaded into the kernel's delegatecall logic libraries

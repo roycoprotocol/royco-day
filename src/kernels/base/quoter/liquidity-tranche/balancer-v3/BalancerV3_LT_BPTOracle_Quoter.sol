@@ -377,6 +377,12 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     // Internal Utility Functions
     // =============================
 
+    /// @inheritdoc RoycoDayKernel
+    /// @dev The Balancer V3 Vault escrows every pool's constituent assets, making the vault the custodian of the senior tranche shares backing the BPT
+    function _isTrancheShareCustodian(address _account) internal view virtual override(RoycoDayKernel) returns (bool) {
+        return (_account == address(_vault));
+    }
+
     /**
      * @dev Asserts that a caught preview revert carries the expected result, bubbling any genuine venue failure unchanged
      * @param _callbackRevertData The revert data caught from the vault callback
