@@ -35,6 +35,9 @@
       "rev": "fd81a96f01cc42ef1c9a5399364968d0e07e9e90"
     }
   },
+  "lib/royco-periphery": {
+    "rev": "0e106445497bcd742781d88b6c92f5bfaa1d529e"
+  },
   "lib/solady": {
     "tag": {
       "name": "v0.1.26",

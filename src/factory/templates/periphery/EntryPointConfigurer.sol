@@ -35,9 +35,12 @@ abstract contract EntryPointConfigurer {
 
     /**
      * @notice Applies the specified tranche configurations on the entry point through the factory
+     * @dev A market always has a senior tranche but may lack a junior or liquidity tranche, so any zero-address
+     *      tranche and its paired config are dropped before the call, the entry point rejects a zero tranche and a
+     *      caller passes zero for an absent one
      * @param _factory The Royco factory driving the deployment, used to execute the admin-gated call
-     * @param _tranches The freshly deployed tranches to configure on the entry point
-     * @param _configs The entry point configuration for each tranche
+     * @param _tranches The freshly deployed tranches to configure on the entry point, an absent tranche is the zero address
+     * @param _configs The entry point configuration for each tranche, index-aligned with `_tranches`
      */
     function _configureEntryPointTrancheConfigs(
         IRoycoFactory _factory,
@@ -46,6 +49,21 @@ abstract contract EntryPointConfigurer {
     )
         internal
     {
-        _factory.executeAsFactory(ROYCO_DAY_ENTRY_POINT, abi.encodeCall(IRoycoDayEntryPoint.modifyTrancheConfigs, (_tranches, _configs)));
+        // Over-allocate to the input length, then pack the present tranches and their paired configs, dropping any null tranches
+        address[] memory tranches = new address[](_tranches.length);
+        IRoycoDayEntryPoint.TrancheConfig[] memory configs = new IRoycoDayEntryPoint.TrancheConfig[](_tranches.length);
+        uint256 present;
+        for (uint256 i = 0; i < _tranches.length; ++i) {
+            if (_tranches[i] == address(0)) continue;
+            (tranches[present], configs[present]) = (_tranches[i], _configs[i]);
+            ++present;
+        }
+        // Set the size of the tranches and configs arrays to the final size after pruning the null tranches
+        assembly ("memory-safe") {
+            mstore(tranches, present)
+            mstore(configs, present)
+        }
+
+        _factory.executeAsFactory(ROYCO_DAY_ENTRY_POINT, abi.encodeCall(IRoycoDayEntryPoint.modifyTrancheConfigs, (tranches, configs)));
     }
 }
