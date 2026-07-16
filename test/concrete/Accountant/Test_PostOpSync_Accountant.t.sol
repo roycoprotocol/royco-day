@@ -342,11 +342,21 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
         assertEq(toUint256(state.ltRawNAV), SEED_LT_RAW - 40e18, "lt raw NAV reflects the burned BPT slice");
     }
 
-    /// an LT redemption with a zero liquidity delta and a zero total violates the shape require
-    function test_RevertIf_LTRedeemZeroLTDeltaZeroTotal() public {
+    /**
+     * an LT redemption with a zero liquidity delta and a zero total passes: the in-kind senior-shares-only leg,
+     * where the redeemer takes idle premium senior shares in kind. The shares stay in the senior supply, so no
+     * raw NAV moves on any tranche and every effective NAV is left untouched
+     * NOTE: this pins the fix for the previously flagged edge where a pure senior-share in-kind LT redemption
+     * tripped INVALID_POST_OP_STATE despite moving no raw NAV
+     */
+    function test_PostOp_LTRedeem_zeroLTDeltaZeroTotalPasses() public {
         _seedFlatWithLT(SEED_LT_RAW);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_REDEEM));
-        kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+        assertEq(toUint256(state.ltRawNAV), SEED_LT_RAW, "lt raw NAV untouched (no BPT slice burned)");
+        assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW, "st effective NAV untouched (senior shares stay in supply)");
+        assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW, "jt effective NAV untouched");
+        assertEq(toUint256(accountant.getState().lastLTRawNAV), SEED_LT_RAW, "committed lt raw NAV untouched");
     }
 
     /// an LT redemption with a positive liquidity delta violates the shape require

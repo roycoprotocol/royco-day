@@ -43,7 +43,7 @@ import { IdenticalAssets_ST_JT_Oracle_Quoter } from "../../src/kernels/base/quot
 import { BalancerV3_LT_BPTOracle_Quoter } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 import { WAD } from "../../src/libraries/Constants.sol";
 import { SyncedAccountingState } from "../../src/libraries/Types.sol";
-import { NAV_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../src/libraries/Units.sol";
+import { toNAVUnits, toTrancheUnits, toUint256 } from "../../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoLiquidityTranche } from "../../src/tranches/RoycoLiquidityTranche.sol";
 import { RoycoSeniorTranche } from "../../src/tranches/RoycoSeniorTranche.sol";
@@ -692,7 +692,7 @@ abstract contract DayMarketTestBase is Assertions {
             ydm = IYDM(address(new StaticCurveYDM(_targetUtilizationWAD)));
             initData = abi.encodeCall(StaticCurveYDM.initializeYDMForMarket, (_curve[0], _curve[1], _curve[2]));
         } else if (_kind == 2) {
-            ydm = IYDM(address(new AdaptiveCurveYDM_V2(_targetUtilizationWAD)));
+            ydm = IYDM(address(new AdaptiveCurveYDM_V2(_targetUtilizationWAD, 0.0001e18, 1e18, (100e18 / uint256(365 days)))));
             initData = abi.encodeCall(AdaptiveCurveYDM_V2.initializeYDMForMarket, (_curve[0], _curve[1], _curve[2]));
         } else {
             revert("DayMarketTestBase: unknown YDM kind");

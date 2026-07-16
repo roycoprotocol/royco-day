@@ -33,7 +33,7 @@ library DepositLogic {
      * @param _assets The amount of assets to deposit, denominated in the senior tranche's tranche units
      * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
      * @return navToMintSharesAt The NAV at which the shares will be minted, exclusive of valueAllocated
-     * @dev ST deposits are enabled only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-deposit
+     * @dev ST deposits are enabled only in a PERPETUAL market state, granted that the market's coverage and liquidity requirements are satisfied post-deposit
      */
     function stDeposit(
         IRoycoDayKernel.RoycoDayKernelState storage $,
@@ -89,7 +89,7 @@ library DepositLogic {
         // Credit the deposited assets to the junior tranche
         $.jtOwnedYieldBearingAssets = $.jtOwnedYieldBearingAssets + _assets;
 
-        // Execute a post-deposit sync on accounting; a JT deposit grows the loss-absorption buffer and only improves coverage, so no requirements are enforced
+        // Execute a post-deposit sync on accounting. A JT deposit grows the loss-absorption buffer and only improves coverage, so no requirements are enforced
         AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.JT_DEPOSIT, ZERO_NAV_UNITS, false);
     }
 
@@ -131,7 +131,7 @@ library DepositLogic {
      *         shares), adds (senior shares + quote) into the liquidity venue to mint the LT tranche assets, then deposits them into the LT
      * @dev Assumes the ST underlying and quote have been transferred to the kernel before this call (by the LT tranche)
      * @dev Enabled in a PERPETUAL market state, and in a fixed-term market only for a quote-only deposit that mints no senior shares
-     * @dev The combined new senior exposure is gated by the market's coverage and liquidity requirements — reverts if either is unsatisfied
+     * @dev The combined new senior exposure is gated by the market's coverage and liquidity requirements, reverts if either is unsatisfied
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _stAssets The amount of ST underlying (the senior tranche's base asset) to deposit, denominated in ST tranche units
@@ -261,7 +261,7 @@ library DepositLogic {
 
     /**
      * @notice Previews a multi-asset LT deposit of (ST underlying + quote) by simulating the venue add
-     * @dev NON-VIEW: routes the venue add through its simulation/query mode, so callers must staticcall it
+     * @dev NON-VIEW: routes the venue add through its execute-and-unwind preview, which mutates no state net
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _stAssets The ST underlying leg, in the ST asset's native units
@@ -283,11 +283,11 @@ library DepositLogic {
         // Preview the sync and the LT supply after this sync mints the LT protocol fee shares, exactly as depositMultiAsset reads totalSupply() post-sync
         SyncedAccountingState memory state;
         (state,, ltTotalSupplyAfterMints) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
-        // During a fixed-term market state only a quote-only deposit is permitted; an ST-leg deposit reverts, so return zero before quoting the venue add to match it
+        // During a fixed-term market state only a quote-only deposit is permitted and an ST-leg deposit reverts, so return zero before quoting the venue add to match it
         if (state.marketState == MarketState.FIXED_TERM && _stAssets != ZERO_TRANCHE_UNITS) {
             return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS, ltTotalSupplyAfterMints);
         }
-        // The NAV to mint LT shares at is the pre-deposit LT effective NAV (market-making depth plus the idle premium senior shares); the senior supply is taken after its premium and protocol fee mint
+        // The NAV to mint LT shares at is the pre-deposit LT effective NAV (market-making depth plus the idle premium senior shares), and the senior supply is taken after its premium and protocol fee mint
         (uint256 liquidityPremiumShares,, uint256 totalSTShares) =
             FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(_immutables.seniorTranche).totalSupply());
         navToMintSharesAt =
@@ -299,9 +299,8 @@ library DepositLogic {
                 IRoycoDayKernel(address(this)).stConvertTrancheUnitsToNAVUnits(_stAssets), state.stEffectiveNAV, totalSTShares, Math.Rounding.Floor
             );
         // Quote the venue add for the senior shares and quote assets (simulation only: no slippage gate, no settlement)
-        ltAssetsOut = IRoycoDayKernel(address(this)).previewAddLiquidity(stSharesToAdd, _quoteAssets);
-        // The value allocated is the value of the LT assets the add would mint
-        valueAllocated = IRoycoDayKernel(address(this)).ltConvertTrancheUnitsToNAVUnits(ltAssetsOut);
+        // The venue values the minted LT assets against the post-add state inside the preview, exactly as execution does
+        (ltAssetsOut, valueAllocated) = IRoycoDayKernel(address(this)).previewAddLiquidity(stSharesToAdd, _quoteAssets);
     }
 
     // =============================
@@ -314,7 +313,7 @@ library DepositLogic {
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _receiver The address that will receive the ST shares equating to the deposited assets
      * @return assets The maximum amount of assets that can be deposited into the senior tranche, denominated in the senior tranche's tranche units
-     * @dev ST deposits are allowed only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-deposit
+     * @dev ST deposits are allowed only in a PERPETUAL market state, granted that the market's coverage and liquidity requirements are satisfied post-deposit
      */
     function stMaxDeposit(
         IRoycoDayKernel.RoycoDayKernelState storage $,
@@ -330,7 +329,7 @@ library DepositLogic {
         SyncedAccountingState memory state = AccountingSyncLogic._previewSyncTrancheAccounting($, _immutables);
         // ST deposits are disabled during a fixed-term market state
         if (state.marketState == MarketState.FIXED_TERM) return ZERO_TRANCHE_UNITS;
-        // ST deposits are enabled as long as the market's coverage requirement is satisfied
+        // ST deposits are enabled as long as the market's coverage and liquidity requirements are satisfied
         NAV_UNIT stMaxDepositableNAV = IRoycoDayAccountant(_immutables.accountant).maxSTDeposit(state);
         return
             ((stMaxDepositableNAV == MAX_NAV_UNITS) ? MAX_TRANCHE_UNITS : IRoycoDayKernel(address(this)).stConvertNAVUnitsToTrancheUnits(stMaxDepositableNAV));

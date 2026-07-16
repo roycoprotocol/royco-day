@@ -709,17 +709,6 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertSolvency();
     }
 
-    /// @notice Executes an in-kind LT deposit of `_bptAssets` for `_lp`, snapshotting around it.
-    function _doDepositLT(address _lp, uint256 _bptAssets) internal returns (OpReceipt memory r) {
-        r.pre = _snap(_actorArray(_lp));
-        vm.startPrank(_lp);
-        IERC20(POOL).approve(address(LT), _bptAssets);
-        r.shares = LT.deposit(toTrancheUnits(_bptAssets), _lp);
-        vm.stopPrank();
-        r.post = _snap(_actorArray(_lp));
-        _assertSolvency();
-    }
-
     /// @notice Executes a multi-asset LT deposit for `_lp` with exact approvals, snapshotting around it.
     function _doDepositLTMulti(address _lp, uint256 _stAssets, uint256 _quoteAssets, uint256 _minLTAssetsOut) internal returns (OpReceipt memory r) {
         r.pre = _snap(_actorArray(_lp));
@@ -3830,7 +3819,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      */
     function _expectedMaxLTWithdrawalNAV() internal view returns (NAV_UNIT) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        uint256 requiredValue = Math.mulDiv(toUint256(a.lastSTEffectiveNAV), a.minLiquidityWAD, WAD, Math.Rounding.Ceil) + toUint256(a.stNAVDustTolerance);
+        uint256 requiredValue =
+            Math.mulDiv((toUint256(a.lastSTEffectiveNAV) + toUint256(a.stNAVDustTolerance)), a.minLiquidityWAD, WAD, Math.Rounding.Ceil);
         uint256 ltRawValue = toUint256(a.lastLTRawNAV);
         return toNAVUnits(ltRawValue > requiredValue ? ltRawValue - requiredValue : 0);
     }
@@ -4133,9 +4123,13 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     // ── Pinned edge cases ──
 
     /**
-     * @notice PINS the zero-BPT-slice edge: an LT redemption whose BPT slice floors to zero while its idle
-     *         premium slice is nonzero reverts with `INVALID_POST_OP_STATE(LT_REDEEM)` and leaves the market untouched.
-     * @dev The venue removal of a zero BPT slice moves no committed LT mark, which the post-op state check rejects.
+     * @notice PINS the zero-BPT-slice edge: an LT redemption whose BPT slice floors to zero while its idle premium
+     *         slice is nonzero commits as a NAV-neutral redemption, handing the redeemer exactly its pro-rata idle
+     *         senior-share slice while the floored BPT leg pays nothing.
+     * @dev The idle premium is a claimable leg of the LT's effective NAV. Handing the senior shares over moves no raw
+     *      NAV (they stay in the senior supply), so the LT_REDEEM shape check (a redemption never grows the LT's
+     *      deployed raw NAV) commits it. The arranged market is liquidity-healthy (utilization ~0.8), so the liquidity
+     *      requirement passes and the premium is delivered rather than stranded.
      */
     function test_LTRedeem_zeroBPTSlice_nonzeroIdle_pinned() public whenLT {
         uint256 idleShares = _arrangeStagedIdleLiquidityPremium();
@@ -4147,13 +4141,19 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertGt(shares, 0, "arrange: the BPT-per-share ratio must make a zero-BPT slice representable");
         assertLe(shares, LT.balanceOf(LT_ALICE_ADDRESS), "arrange: the redeemer must afford the dust redemption");
         assertEq(Math.mulDiv(ltOwnedAssets, shares, ltSupply), 0, "arrange: the BPT slice must floor to zero");
-        assertGt(Math.mulDiv(idleShares, shares, ltSupply), 0, "arrange: the idle liquidity premium slice must be nonzero");
-        MarketSnapshot memory pre = _snap();
+        uint256 expectedIdleSlice = Math.mulDiv(idleShares, shares, ltSupply);
+        assertGt(expectedIdleSlice, 0, "arrange: the idle liquidity premium slice must be nonzero");
 
-        vm.prank(LT_ALICE_ADDRESS);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_REDEEM));
-        LT.redeem(shares, LT_ALICE_ADDRESS, LT_ALICE_ADDRESS);
-        _assertMarketUnchanged(pre);
+        uint256 aliceSTPre = ST.balanceOf(LT_ALICE_ADDRESS);
+        OpReceipt memory r = _doRedeemLT(LT_ALICE_ADDRESS, shares);
+
+        // Exactly the pro-rata idle senior shares are handed over in kind, the floored BPT leg pays nothing, and the
+        // kernel's idle pile drops by exactly that slice
+        assertEq(r.claims.stShares, expectedIdleSlice, "the in-kind redeem must pay exactly the pro-rata idle senior share slice");
+        assertEq(toUint256(r.claims.ltAssets), 0, "the floored BPT leg must pay nothing in kind");
+        assertEq(ST.balanceOf(LT_ALICE_ADDRESS) - aliceSTPre, expectedIdleSlice, "the redeemer must receive exactly its idle senior share slice");
+        assertEq(r.post.ltOwnedSeniorTrancheShares, idleShares - expectedIdleSlice, "the kernel's idle pile must drop by exactly the redeemed slice");
+        _assertCommittedConservation();
     }
 
     /**

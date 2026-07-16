@@ -12,8 +12,8 @@ import { NAV_UNIT, TRANCHE_UNIT } from "../libraries/Units.sol";
  */
 interface IRoycoVaultTranche is IERC20Metadata {
     /**
-     * @custom:field name - The name of the tranche share token (should be prefixed with "Royco-ST" or "Royco-JT")
-     * @custom:field symbol - The symbol of the tranche share token (should be prefixed with "ST" or "JT")
+     * @custom:field name - The name of the tranche share token (should be prefixed with "Royco-ST", "Royco-JT", or "Royco-LT")
+     * @custom:field symbol - The symbol of the tranche share token (should be prefixed with "ST", "JT", or "LT")
      * @custom:field initialAuthority - The initial authority for the tranche
      */
     struct RoycoTrancheInitParams {
@@ -82,8 +82,8 @@ interface IRoycoVaultTranche is IERC20Metadata {
     /// @return asset The address of the ERC20 token used as the base asset for deposits into this tranche
     function asset() external view returns (address asset);
 
-    /// @notice Returns the tranche type indicating whether this is a senior or junior tranche
-    /// @return trancheType An enumerator indicating SENIOR or JUNIOR tranche type
+    /// @notice Returns the tranche type indicating whether this is a senior, junior, or liquidity tranche
+    /// @return trancheType An enumerator indicating SENIOR, JUNIOR, or LIQUIDITY tranche type
     function TRANCHE_TYPE() external view returns (TrancheType trancheType);
 
     /**
@@ -121,7 +121,7 @@ interface IRoycoVaultTranche is IERC20Metadata {
     /**
      * @notice Converts a specified amount of assets to shares using the current exchange rate
      * @dev Does not mutate any state
-     * @dev For the liquidity tranche the exchange rate is BPT-only (the raw NAV): the claimable idle
+     * @dev For the liquidity tranche the exchange rate is LT-asset-only (the raw NAV): the claimable idle
      *      liquidity-premium senior shares are excluded, so the quoted rate cannot dip when a staged premium deploys
      *      Use `previewDeposit` for the accurate deposit quote, which prices at the idle-inclusive effective NAV
      * @param _assets The amount of assets to convert, denominated in the tranche's base asset units
@@ -132,10 +132,10 @@ interface IRoycoVaultTranche is IERC20Metadata {
     /**
      * @notice Converts a specified number of shares to asset claims using the current exchange rate
      * @dev Does not mutate any state
-     * @dev For the liquidity tranche this is the composability-facing exchange rate and is BPT-only (the raw NAV,
+     * @dev For the liquidity tranche this is the composability-facing exchange rate and is LT-asset-only (the raw NAV,
      *      `stShares` always zero): the claimable idle liquidity-premium senior shares are excluded, so the quoted
      *      price is a conservative floor that cannot dip when a staged premium deploys into the pool
-     *      Use `previewRedeem` for the accurate redemption quote, which includes the idle slice paid in-kind — the two
+     *      Use `previewRedeem` for the accurate redemption quote, which includes the idle slice paid in-kind, the two
      *      coincide exactly when no premium is staged
      * @param _shares The number of shares to convert
      * @return claims The equivalent asset claims for the specified share amount, including claims on ST assets, JT assets, and their total NAV value
@@ -163,8 +163,8 @@ interface IRoycoVaultTranche is IERC20Metadata {
 
     /**
      * @notice Mints tranche shares to the specified account
-     * @dev Authorized via the AccessManager `restricted` modifier — the deploy template grants the market's kernel the role
-     *      for this selector so the kernel can mint senior shares to itself when seeding the LT's Balancer pool
+     * @dev Authorized via the AccessManager `restricted` modifier, the deploy template grants the market's kernel the role
+     *      for this selector so the kernel can mint senior shares to itself when seeding the LT's liquidity venue
      * @dev Takes a raw share count: the caller (kernel) is responsible for computing a fair, non-diluting amount
      * @param _to The account to mint the shares to
      * @param _shares The number of shares to mint

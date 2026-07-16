@@ -15,7 +15,6 @@ import {
 } from "../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/VaultTypes.sol";
 import { ConstantPriceFeed } from "../../../../lib/balancer-v3-monorepo/pkg/oracles/contracts/ConstantPriceFeed.sol";
 import { GyroECLPPoolFactory } from "../../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
-import { BalancerPoolToken } from "../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/BalancerPoolToken.sol";
 import { SingletonAuthentication } from "../../../../lib/balancer-v3-monorepo/pkg/vault/contracts/SingletonAuthentication.sol";
 import {
     AggregatorV3Interface as BalancerAggregatorV3Interface
@@ -25,14 +24,14 @@ import { ERC20BurnableUpgradeable } from "../../../../lib/openzeppelin-contracts
 import { IERC20 } from "../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IRoycoAuth } from "../../../interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayEntryPoint } from "../../../interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../interfaces/IRoycoVaultTranche.sol";
 import { IRoycoFactory } from "../../../interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../interfaces/factory/IRoycoProtocolTemplate.sol";
 import { BalancerV3_LT_BPTOracle_Quoter } from "../../../kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
-import { RoycoDayBalancerV3Hooks } from "../../../kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3Hooks.sol";
-import { RoycoDayBalancerV3HooksStandIn } from "../../../kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3HooksStandIn.sol";
-import { TrancheType } from "../../../libraries/Types.sol";
+import { RoycoDayBalancerV3Hooks } from "../../../kernels/base/quoter/liquidity-tranche/balancer-v3/hooks/RoycoDayBalancerV3Hooks.sol";
+import { RoycoDayBalancerV3HooksStandIn } from "../../../kernels/base/quoter/liquidity-tranche/balancer-v3/hooks/RoycoDayBalancerV3HooksStandIn.sol";
 import { RoycoLiquidityTranche } from "../../../tranches/RoycoLiquidityTranche.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
@@ -70,13 +69,15 @@ import {
     TAG_ST_PROXY,
     TAG_YDM
 } from "../base/Components.sol";
+import { EntryPointConfigurer } from "../periphery/EntryPointConfigurer.sol";
+import { MarketSyncerConfigurer } from "../periphery/MarketSyncerConfigurer.sol";
 
 /**
  * @title BalancerV3_GyroECLP_LT_DeploymentTemplate
  * @author Ankur Dubey, Shivaansh Kapoor
  * @notice Abstract base for every Royco Day market that has their LT deployed into a Balancer V3 Gyroscope ECLP pool
  */
-abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTemplate {
+abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTemplate, EntryPointConfigurer, MarketSyncerConfigurer {
     // ═══════════════════════════════════════════════════════════════════════════
     // PARAM STRUCTS
     // ═══════════════════════════════════════════════════════════════════════════
@@ -91,7 +92,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
      * @custom:field enableDonation - Whether unbalanced donation-style adds are permitted on the pool
      * @custom:field disableUnbalancedLiquidity - Whether to disable unbalanced add/remove liquidity, forcing proportional-only
      * @custom:field quoteAsset - The quote asset (stablecoin) paired against the senior tranche share in the pool
-     * @custom:field quoteAssetRateProvider - The rate provider supplying the quote leg's rate to the pool — the BPT oracle then prices this leg with the shared constant-1.0 feed
+     * @custom:field quoteAssetRateProvider - The rate provider supplying the quote leg's rate to the pool, the BPT oracle then prices this leg with the shared constant-1.0 feed
      */
     struct GyroECLPPoolParams {
         string name;
@@ -106,6 +107,18 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
     }
 
     /**
+     * @notice Per-tranche entry point configurations applied on the pre-deployed entry point after the market is deployed
+     * @custom:field st - The entry point configuration for the senior tranche
+     * @custom:field jt - The entry point configuration for the junior tranche
+     * @custom:field lt - The entry point configuration for the liquidity tranche
+     */
+    struct EntryPointTrancheConfigs {
+        IRoycoDayEntryPoint.TrancheConfig st;
+        IRoycoDayEntryPoint.TrancheConfig jt;
+        IRoycoDayEntryPoint.TrancheConfig lt;
+    }
+
+    /**
      * @notice Top-level params struct passed to `deployMarket(bytes)`
      * @custom:field marketId - A caller-supplied identifier for the market, mixed into the deterministic deployment salts
      * @custom:field stTranche - The senior tranche initialization params
@@ -116,14 +129,15 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
      * @custom:field jtCoinvested - Whether the junior tranche is co-invested in the same yield-bearing asset as the senior tranche
      * @custom:field accountant - The accountant initialization params (coverage, premiums, and state machine config)
      * @custom:field gyroECLPPoolParams - The Gyro E-CLP pool params for the liquidity tranche's `{ST_share, quote}` pool
-     * @custom:field jtYDMTargetUtilizationWAD - The junior tranche YDM's target coverage utilization, scaled to WAD
-     * @custom:field ltYDMTargetUtilizationWAD - The liquidity tranche LDM's target liquidity utilization, scaled to WAD
+     * @custom:field jtYdmConstructorArgs - The ABI-encoded constructor args for the junior tranche's YDM, per the selected model's constructor
+     * @custom:field ltYdmConstructorArgs - The ABI-encoded constructor args for the liquidity tranche's LDM, per the selected model's constructor
      * @custom:field ydmComponentId - The component id selecting the YDM model bytecode deployed for both the JT YDM and the LT LDM
      * @custom:field protocolFeeRecipient - The market's protocol fee recipient
      * @custom:field stSelfLiquidationBonusWAD - The ST self-liquidation bonus remitted to redeeming ST LPs once the liquidation coverage threshold is breached, scaled to WAD
      * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables screening)
      * @custom:field kernelSpecificParams - ABI-encoded kernel/quoter-specific initialization params
      * @custom:field enforceVaultSharesTransferWhitelist - Whether to enforce the vault shares transfer whitelist
+     * @custom:field entryPointTrancheConfigs - The per-tranche entry point configurations applied after the market is deployed (any oracle clock is deployed externally and passed by address)
      */
     struct DayParams {
         bytes32 marketId;
@@ -135,14 +149,15 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         bool jtCoinvested;
         IRoycoDayAccountant.RoycoDayAccountantInitParams accountant;
         GyroECLPPoolParams gyroECLPPoolParams;
-        uint256 jtYDMTargetUtilizationWAD;
-        uint256 ltYDMTargetUtilizationWAD;
+        bytes jtYdmConstructorArgs;
+        bytes ltYdmConstructorArgs;
         bytes32 ydmComponentId;
         address protocolFeeRecipient;
         uint64 stSelfLiquidationBonusWAD;
         address roycoBlacklist;
         bytes kernelSpecificParams;
         bool enforceVaultSharesTransferWhitelist;
+        EntryPointTrancheConfigs entryPointTrancheConfigs;
     }
 
     /**
@@ -161,26 +176,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
     // ERRORS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    error INVALID_ACCESS_MANAGER();
-    error INVALID_TRANCHE_TYPE_ON_SENIOR_TRANCHE();
-    error INVALID_TRANCHE_TYPE_ON_JUNIOR_TRANCHE();
-    error INVALID_TRANCHE_TYPE_ON_LIQUIDITY_TRANCHE();
-    error INVALID_KERNEL_ON_SENIOR_TRANCHE();
-    error INVALID_KERNEL_ON_JUNIOR_TRANCHE();
-    error INVALID_KERNEL_ON_LIQUIDITY_TRANCHE();
-    error INVALID_SENIOR_TRANCHE_ON_KERNEL();
-    error INVALID_JUNIOR_TRANCHE_ON_KERNEL();
-    error INVALID_LIQUIDITY_TRANCHE_ON_KERNEL();
-    error INVALID_ST_ASSET_ON_KERNEL();
-    error INVALID_JT_ASSET_ON_KERNEL();
-    error INVALID_LT_ASSET_ON_KERNEL();
-    error INVALID_ACCOUNTANT_ON_KERNEL();
-    error INVALID_KERNEL_ON_ACCOUNTANT();
-    error POOL_NOT_REGISTERED_WITH_VAULT();
-    error POOL_TOKEN_CONFIGURATION_MISMATCH();
-    error INVALID_KERNEL_ON_BALANCER_HOOK();
     error INVALID_ECLP_LP_ORACLE_FACTORY();
-    error INVALID_BPT_ORACLE_ON_KERNEL();
 
     // ═══════════════════════════════════════════════════════════════════════════
     // IMMUTABLES
@@ -211,9 +207,13 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
     constructor(
         IRoycoFactory _factory,
         GyroECLPPoolFactory _balancerV3PoolFactory,
-        ILPOracleFactoryBase _eclpLPOracleFactory
+        ILPOracleFactoryBase _eclpLPOracleFactory,
+        address _roycoDayEntryPoint,
+        address _roycoMarketSyncer
     )
         BaseDeploymentTemplate(_factory)
+        EntryPointConfigurer(_roycoDayEntryPoint, _factory)
+        MarketSyncerConfigurer(_roycoMarketSyncer)
     {
         BALANCER_V3_POOL_FACTORY = _balancerV3PoolFactory;
         BALANCER_V3_VAULT = IVault(address(_balancerV3PoolFactory.getVault()));
@@ -232,8 +232,8 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
 
     /**
      * @dev Returns the ABI-encoded kernel `initialize(...)` calldata for the concrete Day kernel
-     * @param _bptOracle The template-deployed E-CLP BPT oracle for this market's pool — the concrete template must
-     *        inject it into the kernel's LT-quoter init params (overwriting any caller-supplied value)
+     * @param _bptOracle The template-deployed E-CLP BPT oracle for this market's pool, which the concrete template must
+     *        inject into the kernel's LT-quoter init params (overwriting any caller-supplied value)
      */
     function _kernelInitData(
         IRoycoDayKernel.RoycoDayKernelInitParams memory _kip,
@@ -261,20 +261,20 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         result.accountant = ROYCO_FACTORY.predictDeterministicAddress(_marketComponentSalt(p.marketId, TAG_ACCOUNTANT_PROXY));
 
         // 2. Deploy the JT YDM (driven by coverage utilization) and the LT YDM / LDM (driven by liquidity utilization), each
-        //    pinning its own target-utilization curve kink
-        (result.ydm,) = _deployYDM(_marketComponentSalt(p.marketId, TAG_YDM), p.jtYDMTargetUtilizationWAD, p.ydmComponentId);
-        (result.ltYdm,) = _deployYDM(_marketComponentSalt(p.marketId, TAG_LDM), p.ltYDMTargetUtilizationWAD, p.ydmComponentId);
+        //    pinning its own model-specific constructor params
+        (result.ydm,) = _deployYDM(_marketComponentSalt(p.marketId, TAG_YDM), p.jtYdmConstructorArgs, p.ydmComponentId);
+        (result.ltYdm,) = _deployYDM(_marketComponentSalt(p.marketId, TAG_LDM), p.ltYdmConstructorArgs, p.ydmComponentId);
 
-        // 3. Deploy ST impl + proxy first — the pool needs ST_PROXY as one of its tokens
+        // 3. Deploy ST impl + proxy first, the pool needs ST_PROXY as one of its tokens
         address stImpl = _deploySeniorTrancheImpl(p.stAsset, result.kernel, _marketComponentSalt(p.marketId, TAG_ST_IMPL));
         _deployProxy(stImpl, _encodeTrancheInitData(p.stTranche), _marketComponentSalt(p.marketId, TAG_ST_PROXY));
 
         // 4. Deploy the pool hooks proxy against the shared stand-in implementation (returns true from onRegister and advertises
-        //    the real hook's flags) so the pool can register now; it is upgraded to the real kernel-bound hook after step 9
+        //    the real hook's flags) so the pool can register now, and it is upgraded to the real kernel-bound hook after step 9
         address balancerHook = _deployProxy(BALANCER_HOOK_STANDIN_IMPL, bytes("no-op"), _marketComponentSalt(p.marketId, TAG_BALANCER_HOOK));
 
         // 5. Create the Gyro E-CLP pool `{ST_share, quote}`: senior leg WITH_RATE (rate provider = the predicted kernel),
-        //    hooked to the stand-in proxy — LT asset = pool
+        //    hooked to the stand-in proxy, LT asset = pool
         address balancerPool = _createBalancerV3Pool(
             p.gyroECLPPoolParams, result.seniorTranche, result.kernel, balancerHook, _marketComponentSalt(p.marketId, TAG_BALANCER_V3_POOL)
         );
@@ -308,9 +308,23 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         result.extras = abi.encode(ExtraContractsDeployedResult({ balancerPool: balancerPool, balancerHook: balancerHook, bptOracle: bptOracle }));
     }
 
-    /**
-     * @notice Deploys the market's E-CLP BPT TVL oracle through Balancer's LP oracle factory
-     */
+    /// @inheritdoc BaseDeploymentTemplate
+    function _configureMarketPeriphery(DeploymentResult calldata _result, bytes calldata _params) internal override(BaseDeploymentTemplate) {
+        DayParams memory p = abi.decode(_params, (DayParams));
+
+        // Decode the market's tranches and entry point configs
+        address[] memory tranches = new address[](3);
+        IRoycoDayEntryPoint.TrancheConfig[] memory configs = new IRoycoDayEntryPoint.TrancheConfig[](3);
+        (tranches[0], configs[0]) = (_result.seniorTranche, p.entryPointTrancheConfigs.st);
+        (tranches[1], configs[1]) = (_result.juniorTranche, p.entryPointTrancheConfigs.jt);
+        (tranches[2], configs[2]) = (_result.liquidityTranche, p.entryPointTrancheConfigs.lt);
+
+        // Configure the market's tranches on the entry point and register its kernel on the market syncer
+        _configureEntryPointTrancheConfigs(ROYCO_FACTORY, tranches, configs);
+        _registerMarketKernelOnSyncer(ROYCO_FACTORY, _result.kernel);
+    }
+
+    /// @notice Deploys the market's E-CLP BPT TVL oracle through Balancer's LP oracle factory
     function _deployBPTOracle(address _balancerPool) internal returns (address) {
         IERC20[] memory poolTokens = BALANCER_V3_VAULT.getPoolTokens(_balancerPool);
         BalancerAggregatorV3Interface[] memory feeds = new BalancerAggregatorV3Interface[](poolTokens.length);
@@ -401,7 +415,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         );
     }
 
-    /// @dev Token config for a pool leg: the senior-tranche leg is `WITH_RATE` (priced by the kernel rate provider) — every other leg is `STANDARD`
+    /// @dev Token config for a pool leg: the senior-tranche leg is `WITH_RATE` (priced by the kernel rate provider), every other leg is `STANDARD`
     function _buildTokenConfig(
         address _token,
         address _seniorTranche,
@@ -445,7 +459,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         return RoleBindings({ targetBindings: targets, postInitGrants: grants });
     }
 
-    /// @dev The concrete Day kernel's quoter admin selectors (its ST/JT quoter family varies per kernel type) — the
+    /// @dev The concrete Day kernel's quoter admin selectors (its ST/JT quoter family varies per kernel type): the
     ///      base binds the universal Balancer LT-quoter setters, and subclasses extend with their ST/JT quoter setters
     function _kernelQuoterBinding(address _kernel) internal view virtual returns (TargetBinding memory) {
         bytes4[] memory s = new bytes4[](2);
@@ -471,7 +485,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
     }
 
     /// @dev `mint` carries no binding: it is gated by the tranche's own `onlyKernel` check (an immutable-address
-    ///      check), which scopes minting to THIS market's kernel — a shared AccessManager role could not
+    ///      check), which scopes minting to THIS market's kernel in a way a shared AccessManager role could not
     function _trancheBinding(address _tranche, uint64 _depositRole, uint64 _redeemRole, bool _isLiquidity) private pure returns (TargetBinding memory) {
         // Base tranche surface (7 selectors) + the two LT-only multi-asset selectors when binding the liquidity tranche
         uint256 n = _isLiquidity ? 9 : 7;

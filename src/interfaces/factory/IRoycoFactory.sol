@@ -16,7 +16,7 @@ interface IRoycoFactory {
      * @custom:field trancheToKernel - Maps each of a market's tranches (senior, junior, and liquidity) to the market's
      *                kernel
      *                The kernel's immutables carry the full tranche set, so any one tranche resolves the whole
-     *                market via `getMarket` without a three-way mapping — also serves as the "is this a factory-deployed
+     *                market via `getMarket` without a three-way mapping, also serves as the "is this a factory-deployed
      *                Royco tranche" registry check (zero for unknown addresses)
      */
     struct RoycoFactoryState {
@@ -81,10 +81,10 @@ interface IRoycoFactory {
      */
     function executeMarketDeployment(address _template, bytes calldata _params) external returns (IRoycoProtocolTemplate.DeploymentResult memory result);
 
-    /// @notice CREATE3-deploys a contract from creation code — callable only by the active template
+    /// @notice CREATE3-deploys a contract from creation code, callable only by the active template
     function deployDeterministicContract(bytes calldata _creationCode, bytes32 _salt) external returns (address deployed, bool alreadyDeployed);
 
-    /// @notice CREATE3-deploys an ERC1967 proxy — callable only by the active template
+    /// @notice CREATE3-deploys an ERC1967 proxy, callable only by the active template
     function deployDeterministicProxy(
         address _implementation,
         bytes calldata _initData,
@@ -96,13 +96,13 @@ interface IRoycoFactory {
     /// @notice Predicts the CREATE3 address for a salt
     function predictDeterministicAddress(bytes32 _salt) external view returns (address);
 
-    /// @notice Binds a target's selector to a role on the AccessManager — callable only by the active template
+    /// @notice Binds a target's selector to a role on the AccessManager, callable only by the active template
     function setMarketTargetFunctionRole(address _target, bytes4 _selector, uint64 _roleId) external;
 
-    /// @notice Grants a role on the AccessManager — callable only by the active template
+    /// @notice Grants a role on the AccessManager, callable only by the active template
     function grantMarketRole(uint64 _roleId, address _account, uint32 _executionDelay) external;
 
-    /// @notice Forwards an arbitrary call as the factory — callable only by the active template
+    /// @notice Forwards an arbitrary call as the factory, callable only by the active template
     function executeAsFactory(address _target, bytes calldata _data) external returns (bytes memory result);
 
     /// @notice Returns the kernel a factory-deployed tranche belongs to (zero for unknown addresses)

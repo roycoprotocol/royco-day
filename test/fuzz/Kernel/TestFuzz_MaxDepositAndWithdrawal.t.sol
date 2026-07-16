@@ -154,8 +154,9 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
      * Derivation (flat marks, NAV-per-BPT exactly 1.0 so shares == BPT == NAV):
      *   post-redemption liquidity gate for a total withdrawal w:
      *     ceil(st * 0.05e18 / (depth - w)) <= WAD  <=>  ceil(st/20) <= depth - w  <=>  w <= depth - ceil(st/20)
-     *   the view holds back one extra share, the market's 1-wei ST NAV dust tolerance:
-     *     reportedMax = depth - ceil(st/20) - 1, so the slack to the boundary is exactly 1 share
+     *   the view pads the senior NAV by the market's 1-wei ST NAV dust tolerance before scaling:
+     *     reportedMax = depth - ceil((st + 1)/20) = depth - floor(st/20) - 1, so the slack to the algebraic
+     *     floor is exactly 1 share when 20 divides st (the ceil absorbs the pad otherwise)
      */
     function testFuzz_MaxLiquidityRedemption_DrainsToLiquidityFloorAndOneMoreShareReverts(uint256 _stSeed, uint256 _jtSeed, uint256 _extraQuoteSeed) public {
         uint256 st = bound(_stSeed, 1e18, 1e27); // uniform over 9 orders of magnitude of senior seed size
@@ -165,9 +166,9 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         uint256 depth = _seedFlatMarket(st, jt, extraQuote);
 
         // The hand-derived closed form (derivation above) in plain checked integer arithmetic: the pool must
-        // keep at least 5% of the senior effective NAV, rounded up against the redeemer, plus 1 wei of ST dust
+        // keep at least 5% of the dust-padded senior effective NAV, rounded up against the redeemer
         uint256 requiredFloor = (st + 19) / 20;
-        uint256 expectedMax = depth - requiredFloor - 1;
+        uint256 expectedMax = depth - (st / 20) - 1;
         uint256 reportedMax = liquidityTranche.maxRedeem(LT_PROVIDER);
         assertEq(reportedMax, expectedMax, "reported max liquidity redemption must equal depth - ceil(st/20) - 1");
 
@@ -197,11 +198,17 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         assertEq(toUint256(accountant.getState().lastLTRawNAV), depth - reportedMax, "the max redemption must land wei-exactly on the LT raw mark");
         assertLe(RoycoTestMath.computeLiquidityUtilization(st, 0.05e18, depth - reportedMax), WAD, "liquidity utilization must hold at or below 100% after the max redemption");
 
-        // Consume the single wei of ST dust slack, landing exactly on the algebraic floor depth == ceil(st/20)
-        vm.prank(LT_PROVIDER);
-        liquidityTranche.redeem(1, LT_PROVIDER, LT_PROVIDER);
-        assertEq(toUint256(accountant.getState().lastLTRawNAV), requiredFloor, "the slack redemption must land exactly on the required liquidity floor");
-        assertLe(RoycoTestMath.computeLiquidityUtilization(st, 0.05e18, requiredFloor), WAD, "liquidity utilization must sit at or below 100% exactly at the floor");
+        // The dust pad leaves slack to the algebraic floor only when the ceil cannot absorb it: exactly 1 share
+        // when 20 divides st, zero otherwise
+        uint256 slack = (depth - reportedMax) - requiredFloor;
+        assertEq(slack, st % 20 == 0 ? 1 : 0, "the dust pad's slack to the algebraic floor must match the ceil absorption");
+        if (slack != 0) {
+            // Consume the slack, landing exactly on the algebraic floor depth == ceil(st/20)
+            vm.prank(LT_PROVIDER);
+            liquidityTranche.redeem(slack, LT_PROVIDER, LT_PROVIDER);
+            assertEq(toUint256(accountant.getState().lastLTRawNAV), requiredFloor, "the slack redemption must land exactly on the required liquidity floor");
+            assertLe(RoycoTestMath.computeLiquidityUtilization(st, 0.05e18, requiredFloor), WAD, "liquidity utilization must sit at or below 100% exactly at the floor");
+        }
 
         // One share below the floor makes the remaining depth insufficient and violates the liquidity requirement
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);

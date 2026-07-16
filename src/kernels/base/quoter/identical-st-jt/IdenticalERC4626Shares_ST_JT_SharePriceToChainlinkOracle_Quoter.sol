@@ -32,7 +32,7 @@ abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quote
         uint48 gracePeriodSeconds;
     }
 
-    /// @notice Initializes the identical ERC4626 shares chainlink oracle quoter and its inherited contracts
+    /// @notice Initializes the identical ERC4626 shares Chainlink (compatible) oracle quoter and its inherited contracts
     /// @param _params The quoter-specific initialization parameters
     function __IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter_init(ST_JT_QuoterSpecificParams calldata _params) internal onlyInitializing {
         __IdenticalAssets_ST_JT_Oracle_Quoter_init_unchained(_params.initialConversionRateWAD);

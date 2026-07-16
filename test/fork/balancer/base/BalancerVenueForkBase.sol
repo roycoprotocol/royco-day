@@ -14,7 +14,7 @@ import { Math } from "../../../../lib/openzeppelin-contracts/contracts/utils/mat
 
 import { BalancerV3_LT_BPTOracle_Quoter } from "../../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";
-import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../src/libraries/Units.sol";
+import { toUint256 } from "../../../../src/libraries/Units.sol";
 import {
     IPermit2Like,
     Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest

@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
-import { Vm } from "../../../lib/forge-std/src/Vm.sol";
 import { IYDM } from "../../../src/interfaces/IYDM.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { MarketState } from "../../../src/libraries/Types.sol";
@@ -179,7 +178,7 @@ contract Test_BaseAdaptiveCurveYDM is Test {
 
     /// V1 forwards its hardcoded (min, max, speed) triple to the base and the getters return it verbatim
     function test_ImmutableGetters_V1() public {
-        AdaptiveCurveYDM_V1 y = new AdaptiveCurveYDM_V1(7e17);
+        AdaptiveCurveYDM_V1 y = new AdaptiveCurveYDM_V1(7e17, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
         assertEq(y.TARGET_UTILIZATION_WAD(), 7e17, "V1 target");
         assertEq(y.MIN_YIELD_SHARE_AT_TARGET_WAD(), MIN_YT, "V1 min");
         assertEq(y.MAX_YIELD_SHARE_AT_TARGET_WAD(), MAX_YT, "V1 max");
@@ -189,7 +188,7 @@ contract Test_BaseAdaptiveCurveYDM is Test {
 
     /// V2 forwards its hardcoded (min, max, speed) triple to the base and the getters return it verbatim
     function test_ImmutableGetters_V2() public {
-        AdaptiveCurveYDM_V2 y = new AdaptiveCurveYDM_V2(2e17);
+        AdaptiveCurveYDM_V2 y = new AdaptiveCurveYDM_V2(2e17, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
         assertEq(y.TARGET_UTILIZATION_WAD(), 2e17, "V2 target");
         assertEq(y.MIN_YIELD_SHARE_AT_TARGET_WAD(), MIN_YT, "V2 min");
         assertEq(y.MAX_YIELD_SHARE_AT_TARGET_WAD(), MAX_YT, "V2 max");
@@ -199,13 +198,13 @@ contract Test_BaseAdaptiveCurveYDM is Test {
 
     /// V2 adapts at exactly the deploy-time speed limit
     function test_ImmutableGetters_V2SpeedSitsAtLimit() public {
-        AdaptiveCurveYDM_V2 y = new AdaptiveCurveYDM_V2(5e17);
+        AdaptiveCurveYDM_V2 y = new AdaptiveCurveYDM_V2(5e17, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
         assertEq(y.ADAPTATION_SPEED_AT_BOUNDARY_WAD(), y.MAX_ADAPTATION_SPEED_WAD(), "V2 sits exactly at the limit");
     }
 
     /// V1 adapts at exactly half the deploy-time speed limit
     function test_ImmutableGetters_V1SpeedIsHalfLimit() public {
-        AdaptiveCurveYDM_V1 y = new AdaptiveCurveYDM_V1(5e17);
+        AdaptiveCurveYDM_V1 y = new AdaptiveCurveYDM_V1(5e17, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
         assertEq(y.ADAPTATION_SPEED_AT_BOUNDARY_WAD() * 2, y.MAX_ADAPTATION_SPEED_WAD(), "V1 is half the limit");
     }
 
@@ -229,35 +228,35 @@ contract Test_BaseAdaptiveCurveYDM is Test {
 
     /// previewYieldShare for a never-initialized accountant reverts on V1
     function test_RevertIf_PreviewYieldShareUninitialized_V1() public {
-        AdaptiveCurveYDM_V1 y = new AdaptiveCurveYDM_V1(5e17);
+        AdaptiveCurveYDM_V1 y = new AdaptiveCurveYDM_V1(5e17, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
         vm.expectRevert(IYDM.UNINITIALIZED_YDM.selector);
         y.previewYieldShare(MarketState.FIXED_TERM, type(uint256).max);
     }
 
     /// yieldShare for a never-initialized accountant reverts on V1
     function test_RevertIf_YieldShareUninitialized_V1() public {
-        AdaptiveCurveYDM_V1 y = new AdaptiveCurveYDM_V1(5e17);
+        AdaptiveCurveYDM_V1 y = new AdaptiveCurveYDM_V1(5e17, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
         vm.expectRevert(IYDM.UNINITIALIZED_YDM.selector);
         y.yieldShare(MarketState.PERPETUAL, 0);
     }
 
     /// previewYieldShare for a never-initialized accountant reverts on V2
     function test_RevertIf_PreviewYieldShareUninitialized_V2() public {
-        AdaptiveCurveYDM_V2 y = new AdaptiveCurveYDM_V2(5e17);
+        AdaptiveCurveYDM_V2 y = new AdaptiveCurveYDM_V2(5e17, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
         vm.expectRevert(IYDM.UNINITIALIZED_YDM.selector);
         y.previewYieldShare(MarketState.PERPETUAL, WAD);
     }
 
     /// yieldShare for a never-initialized accountant reverts on V2
     function test_RevertIf_YieldShareUninitialized_V2() public {
-        AdaptiveCurveYDM_V2 y = new AdaptiveCurveYDM_V2(5e17);
+        AdaptiveCurveYDM_V2 y = new AdaptiveCurveYDM_V2(5e17, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
         vm.expectRevert(IYDM.UNINITIALIZED_YDM.selector);
         y.yieldShare(MarketState.FIXED_TERM, 3e17);
     }
 
     /// mapping is keyed by msg.sender: this-init'd, B still uninitialized => reverts.
     function test_RevertIf_YieldShareQueriedByUninitializedAccountant() public {
-        AdaptiveCurveYDM_V1 y = new AdaptiveCurveYDM_V1(5e17);
+        AdaptiveCurveYDM_V1 y = new AdaptiveCurveYDM_V1(5e17, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
         y.initializeYDMForMarket(uint64(1e17), uint64(5e17));
         vm.prank(ACCT_B);
         vm.expectRevert(IYDM.UNINITIALIZED_YDM.selector);
@@ -271,12 +270,12 @@ contract Test_BaseAdaptiveCurveYDM is Test {
     // =====================================================================
 
     function _v1(uint256 target, uint64 yT, uint64 yFull) internal returns (AdaptiveCurveYDM_V1 y) {
-        y = new AdaptiveCurveYDM_V1(target);
+        y = new AdaptiveCurveYDM_V1(target, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
         y.initializeYDMForMarket(yT, yFull);
     }
 
     function _v2(uint256 target, uint64 y0, uint64 yT, uint64 yFull) internal returns (AdaptiveCurveYDM_V2 y) {
-        y = new AdaptiveCurveYDM_V2(target);
+        y = new AdaptiveCurveYDM_V2(target, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
         y.initializeYDMForMarket(y0, yT, yFull);
     }
 

@@ -19,7 +19,7 @@ abstract contract BaseYDM is IYDM {
 
     /**
      * @notice Sets the per-instance target utilization (the kink) shared by every market this YDM serves
-     * @dev Must be greater than zero so the curve regions are well defined when utilization is zero — concrete models may further constrain it
+     * @dev Must be greater than zero so the curve regions are well defined when utilization is zero, concrete models may further constrain it
      * @param _targetUtilizationWAD The target utilization (the kink) for this model, in the range (0, 100%], scaled to WAD precision
      */
     constructor(uint256 _targetUtilizationWAD) {

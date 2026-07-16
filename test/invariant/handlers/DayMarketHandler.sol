@@ -228,7 +228,6 @@ contract DayMarketHandler is DayMarketTestBase {
     bytes4 internal constant SEL_INVALID_POST_OP = IRoycoDayAccountant.INVALID_POST_OP_STATE.selector;
     bytes4 internal constant SEL_ZERO_SHARES = IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES.selector;
     bytes4 internal constant SEL_ZERO_VALUE = IRoycoVaultTranche.INVALID_VALUE_ALLOCATED.selector;
-    bytes4 internal constant SEL_ZERO_REDEEM = IRoycoVaultTranche.MUST_REQUEST_NON_ZERO_SHARES.selector;
     bytes4 internal constant SEL_ERC20_BALANCE = IERC20Errors.ERC20InsufficientBalance.selector;
     bytes4 internal constant SEL_AMOUNT_OUT_BELOW_MIN = IVaultErrors.AmountOutBelowMin.selector;
     bytes4 internal constant SEL_PANIC = bytes4(0x4e487b71);
@@ -910,10 +909,12 @@ contract DayMarketHandler is DayMarketTestBase {
         if (s.fixedTerm) {
             _expect(p, SEL_DISABLED_FT);
         } else if (s.ltSupply == 0) {
-            // A no-LT-supply market: an in-kind redeem either panics on the zero-supply valuation or, when its
-            // slice floors to zero, trips the post-op no-op guard (INVALID_POST_OP_STATE) first.
+            // A no-LT-supply market, every LT balance is zero, so a redeem of any size either panics on the
+            // zero-supply valuation or computes an all-zero claim that clears the post-op no-op guard and
+            // reaches the share burn, which reverts on the redeemer's empty LT balance
             _expect(p, SEL_PANIC);
             _expect(p, SEL_INVALID_POST_OP);
+            _expect(p, SEL_ERC20_BALANCE);
         } else {
             uint256 ltClaimUnits = s.ltRawNAV == 0 ? 0 : _quoteNAVToLTUnits(s.ltRawNAV);
             uint256 userLt = ltClaimUnits.mulDiv(_shares, s.ltSupply);
@@ -1023,11 +1024,12 @@ contract DayMarketHandler is DayMarketTestBase {
         if (s.fixedTerm) {
             _expect(p, SEL_DISABLED_FT);
         } else if (s.ltSupply == 0 || s.stSupply == 0) {
-            // A degenerate market with no senior or LT supply: a multi-asset exit either divides by zero in the
-            // senior valuation (Panic) or, when its BPT/idle slices floor to zero first, trips the post-op no-op
-            // guard (INVALID_POST_OP_STATE) before any panic. Both mean the exit did not settle.
+            // A degenerate market with no senior or LT supply, a multi-asset exit either divides by zero in the
+            // senior valuation (Panic) or computes an all-zero claim that clears the post-op no-op guard and
+            // reaches the share burn, which reverts on the redeemer's empty LT balance. None of these settle the exit
             _expect(p, SEL_PANIC);
             _expect(p, SEL_INVALID_POST_OP);
+            _expect(p, SEL_ERC20_BALANCE);
         } else {
             RemovalMirror memory r = _mirrorVenueRemoval(s, _shares);
             if (r.bonusNAV > 0) ghost_jtLossSinceLastCheck = true;

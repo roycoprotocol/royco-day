@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 // =============================================================================
-// Components — canonical namespace of SSTORE2 component IDs used by Royco
+// Components, canonical namespace of SSTORE2 component IDs used by Royco
 // market deployment templates
 //
 // Component IDs are `bytes32` hashes derived via `keccak256(bytes("ROYCO_COMPONENT_*"))`

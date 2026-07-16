@@ -17,10 +17,13 @@ import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/ac
 import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { SafeCast } from "../../../lib/openzeppelin-contracts/contracts/utils/math/SafeCast.sol";
+import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
+import { MarketDeploymentConfig } from "../../../script/config/MarketDeploymentConfig.sol";
 import {
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
     ADMIN_ENTRY_POINT_ROLE,
+    ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE,
     ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
@@ -38,11 +41,12 @@ import {
 } from "../../../src/factory/RolesConfiguration.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { RoycoDayKernel } from "../../../src/kernels/base/RoycoDayKernel.sol";
 import { BalancerV3_LT_BPTOracle_Quoter } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
-import { RoycoDayBalancerV3Hooks } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/RoycoDayBalancerV3Hooks.sol";
+import { RoycoDayBalancerV3Hooks } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/hooks/RoycoDayBalancerV3Hooks.sol";
 import { TrancheType } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT } from "../../../src/libraries/Units.sol";
 import { RoycoLiquidityTranche } from "../../../src/tranches/RoycoLiquidityTranche.sol";
@@ -81,6 +85,8 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
     address internal BALANCER_HOOK; // the pool's hooks contract (the kernel-bound RoycoDayBalancerV3Hooks proxy)
     address internal LT_YDM; // the LDM
     IVault internal VAULT;
+    IRoycoDayEntryPoint internal ENTRY_POINT; // the pre-deployed entry point singleton the template configured
+    RoycoMarketSyncer internal MARKET_SYNCER; // the pre-deployed syncer singleton the template registered the kernel on
 
     function _forkConfiguration() internal view override returns (uint256 forkBlock, string memory forkRpcUrl) {
         // No skip: the suite FAILS (env not found) when MAINNET_RPC_URL is unset, instead of silently passing.
@@ -105,6 +111,10 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
             DEPLOYER.privateKey
         );
         _setDeployedMarket(result);
+
+        // The periphery singletons the script deploys before the market and the template configures for it.
+        ENTRY_POINT = IRoycoDayEntryPoint(result.entryPoint);
+        MARKET_SYNCER = RoycoMarketSyncer(result.marketSyncer);
 
         // Capture the Day-only addresses the script's DeploymentResult omits, by reading the deployed contracts.
         LT = IRoycoVaultTranche(KERNEL.LIQUIDITY_TRANCHE());
@@ -305,12 +315,83 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(AccessManagedUpgradeable(BALANCER_HOOK).authority(), am, "balancer hook authority");
     }
 
-    /// @notice The factory retains ADMIN_ROLE and ADMIN_ENTRY_POINT_ROLE on the AccessManager after deployment
+    /// @notice The factory retains ADMIN_ROLE, ADMIN_ENTRY_POINT_ROLE, and SYNC_ROLE on the AccessManager after
+    ///         deployment (the latter two drive per-market periphery configuration)
     function test_Auth_FactoryHoldsAdminAndEntryPointRoles() public view {
         (bool isAdmin,) = ACCESS_MANAGER.hasRole(0, address(FACTORY)); // ADMIN_ROLE == 0
         assertTrue(isAdmin, "factory not ADMIN_ROLE");
         (bool isEntry,) = ACCESS_MANAGER.hasRole(ADMIN_ENTRY_POINT_ROLE, address(FACTORY));
         assertTrue(isEntry, "factory not ADMIN_ENTRY_POINT_ROLE");
+        (bool isSync,) = ACCESS_MANAGER.hasRole(SYNC_ROLE, address(FACTORY));
+        assertTrue(isSync, "factory not SYNC_ROLE");
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // PERIPHERY SINGLETONS (entry point + market syncer)
+    // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// @notice The pre-deployed entry point was configured for all three tranches through the factory, with the
+    ///         config-file delays, and shares the market's authority + factory binding
+    function test_Periphery_EntryPointConfiguredForAllTranches() public view {
+        assertEq(ENTRY_POINT.ROYCO_FACTORY(), address(FACTORY), "entry point factory binding");
+        assertEq(AccessManagedUpgradeable(address(ENTRY_POINT)).authority(), address(ACCESS_MANAGER), "entry point authority");
+
+        MarketDeploymentConfig.MarketConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig("snUSD");
+        _assertEntryPointConfig(address(ST), cfg.stEntryPointConfig, "ST");
+        _assertEntryPointConfig(address(JT), cfg.jtEntryPointConfig, "JT");
+        _assertEntryPointConfig(address(LT), cfg.ltEntryPointConfig, "LT");
+    }
+
+    function _assertEntryPointConfig(address _tranche, IRoycoDayEntryPoint.TrancheConfig memory _expected, string memory _ctx) internal view {
+        IRoycoDayEntryPoint.EnrichedTrancheConfig memory stored = ENTRY_POINT.getTrancheConfig(_tranche);
+        assertEq(stored.kernel, address(KERNEL), string.concat(_ctx, ": entry point config kernel"));
+        assertEq(stored.baseConfig.enabled, _expected.enabled, string.concat(_ctx, ": entry point config enabled"));
+        assertEq(stored.baseConfig.depositDelaySeconds, _expected.depositDelaySeconds, string.concat(_ctx, ": deposit delay"));
+        assertEq(stored.baseConfig.redemptionDelaySeconds, _expected.redemptionDelaySeconds, string.concat(_ctx, ": redemption delay"));
+        assertEq(stored.baseConfig.oracleClock, _expected.oracleClock, string.concat(_ctx, ": oracle clock"));
+    }
+
+    /// @notice The pre-deployed syncer registered the market's kernel, answers to the market authority, and has
+    ///         its registration surface bound to SYNC_ROLE
+    function test_Periphery_SyncerRegisteredKernel() public view {
+        assertTrue(MARKET_SYNCER.isMarketKernelRegistered(address(KERNEL)), "kernel registered on the syncer");
+        assertEq(AccessManagedUpgradeable(address(MARKET_SYNCER)).authority(), address(ACCESS_MANAGER), "syncer authority");
+        assertEq(
+            ACCESS_MANAGER.getTargetFunctionRole(address(MARKET_SYNCER), RoycoMarketSyncer.addMarketKernels.selector),
+            SYNC_ROLE,
+            "addMarketKernels bound to SYNC_ROLE"
+        );
+    }
+
+    /// @notice The deploy script wires the entry point's full access model (previously the standalone entry point
+    ///         deployment's Safe batch): public LP surface, role-gated config/fee/pause/upgrade selectors, and the
+    ///         LP role grants the entry point needs to transact with the tranches
+    function test_Periphery_EntryPointAccessModelWired() public view {
+        address ep = address(ENTRY_POINT);
+        // The user-facing request/execute/cancel surface is public (compliance is enforced by the tranches).
+        assertEq(ACCESS_MANAGER.getTargetFunctionRole(ep, IRoycoDayEntryPoint.requestDeposit.selector), PUBLIC_ROLE, "requestDeposit public");
+        assertEq(ACCESS_MANAGER.getTargetFunctionRole(ep, IRoycoDayEntryPoint.requestRedemption.selector), PUBLIC_ROLE, "requestRedemption public");
+        assertEq(ACCESS_MANAGER.getTargetFunctionRole(ep, IRoycoDayEntryPoint.pokeOracleClock.selector), PUBLIC_ROLE, "pokeOracleClock public");
+        // The admin surface is bound to its dedicated roles.
+        assertEq(
+            ACCESS_MANAGER.getTargetFunctionRole(ep, IRoycoDayEntryPoint.modifyTrancheConfigs.selector),
+            ADMIN_ENTRY_POINT_ROLE,
+            "modifyTrancheConfigs role"
+        );
+        assertEq(
+            ACCESS_MANAGER.getTargetFunctionRole(ep, IRoycoDayEntryPoint.collectProtocolFees.selector),
+            ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE,
+            "collectProtocolFees role"
+        );
+        assertEq(ACCESS_MANAGER.getTargetFunctionRole(ep, UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE, "upgrade role");
+        // The entry point holds the three LP roles so it can deposit/redeem and receive escrowed shares.
+        (bool st,) = ACCESS_MANAGER.hasRole(ST_LP_ROLE, ep);
+        (bool jt,) = ACCESS_MANAGER.hasRole(JT_LP_ROLE, ep);
+        (bool lt,) = ACCESS_MANAGER.hasRole(LT_LP_ROLE, ep);
+        assertTrue(st && jt && lt, "entry point holds the tranche LP roles");
+        // The syncer holds SYNC_ROLE so its batch syncs can drive each kernel's SYNC_ROLE-gated accounting sync.
+        (bool sync,) = ACCESS_MANAGER.hasRole(SYNC_ROLE, address(MARKET_SYNCER));
+        assertTrue(sync, "syncer holds SYNC_ROLE");
     }
 
     /// @notice Each tranche entrypoint is bound to its intended role: LP-gated deposits/redeems, open LT deposits,

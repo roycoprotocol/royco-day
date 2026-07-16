@@ -6,7 +6,7 @@ import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoSeniorTranche } from "../../interfaces/IRoycoSeniorTranche.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { Cache, CacheKey } from "../Cache.sol";
-import { WAD, ZERO_NAV_UNITS } from "../Constants.sol";
+import { ZERO_NAV_UNITS } from "../Constants.sol";
 import { SyncedAccountingState } from "../Types.sol";
 import { Math, NAV_UNIT, toUint256 } from "../Units.sol";
 import { ValuationLogic } from "./ValuationLogic.sol";
@@ -52,7 +52,7 @@ library FeeAndLiquidityPremiumLogic {
             // Attempt to deploy the entire staged premium into the LT's market-making inventory, valuing the idle senior shares at the synced senior share rate (effective NAV over the post-mint supply)
             IRoycoDayKernel(address(this)).attemptLiquidityPremiumReinvestment(type(uint256).max, _state.stEffectiveNAV, stTotalSupplyAfterMints);
         }
-        // Mint the ST protocol fee shares to the protocol fee recipient and LT liquidity premium fee shares to the kernel at an identical price
+        // Mint the ST protocol fee shares to the protocol fee recipient, priced identically to the premium shares minted above
         if (stProtocolFeeShares != 0) {
             IRoycoVaultTranche(_immutables.seniorTranche).mintProtocolFeeShares(protocolFeeRecipient, stProtocolFeeShares);
         }

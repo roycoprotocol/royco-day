@@ -58,7 +58,7 @@ contract Test_AdaptiveCurveYDM_V2 is Test {
     // ---------------------------------------------------------------------
 
     function _deploy(uint256 target) internal returns (AdaptiveCurveYDM_V2) {
-        return new AdaptiveCurveYDM_V2(target);
+        return new AdaptiveCurveYDM_V2(target, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
     }
 
     /// Canonical curve: target=0.5, y0=0.1, yT=0.3, yFull=0.9 => FD=0.2, FP=0.6. Clean powers of ten.
@@ -128,7 +128,7 @@ contract Test_AdaptiveCurveYDM_V2 is Test {
     /// A zero target utilization is rejected: the curve needs a positive kink to interpolate around
     function test_RevertIf_ConstructorTargetZero() public {
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
-        new AdaptiveCurveYDM_V2(0);
+        new AdaptiveCurveYDM_V2(0, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
     }
 
     /// One wei is the smallest accepted target utilization
@@ -146,13 +146,13 @@ contract Test_AdaptiveCurveYDM_V2 is Test {
     /// A target above WAD is meaningless (utilization is capped at WAD) and rejected
     function test_RevertIf_ConstructorTargetAboveWad() public {
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
-        new AdaptiveCurveYDM_V2(WAD + 1);
+        new AdaptiveCurveYDM_V2(WAD + 1, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
     }
 
     /// The extreme uint256 max target is rejected by the same gate
     function test_RevertIf_ConstructorTargetUintMax() public {
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
-        new AdaptiveCurveYDM_V2(type(uint256).max);
+        new AdaptiveCurveYDM_V2(type(uint256).max, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
     }
 
     /// V2's fixed speed is exactly the deploy-time limit (100e18/365days). No per-market speed field.
@@ -191,6 +191,23 @@ contract Test_AdaptiveCurveYDM_V2 is Test {
         AdaptiveCurveYDM_V2 ydm = _deploy(5e17);
         vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
         ydm.initializeYDMForMarket(4e17, 3e17, 9e17); // y0 > yT
+    }
+
+    /// A yield-share-at-target above the governance cap is rejected at initialization, matching V1: the cap must
+    /// hold even in the fixed-term branch, where the stored yT is used unclamped
+    function test_RevertIf_InitializeYTargetAboveMax() public {
+        // Deploy with a sub-WAD cap so the ceiling is reachable below yFull
+        AdaptiveCurveYDM_V2 ydm = new AdaptiveCurveYDM_V2(5e17, 0.0001e18, 0.3e18, SPEED_V2);
+        vm.expectRevert(IYDM.INVALID_YDM_INITIALIZATION.selector);
+        ydm.initializeYDMForMarket(1e17, 4e17, 9e17); // yT (0.4) > MAX (0.3)
+    }
+
+    /// The cap itself is an accepted yield-share-at-target
+    function test_Initialize_YTargetAtMax() public {
+        AdaptiveCurveYDM_V2 ydm = new AdaptiveCurveYDM_V2(5e17, 0.0001e18, 0.3e18, SPEED_V2);
+        ydm.initializeYDMForMarket(1e17, 3e17, 9e17); // yT == MAX (0.3)
+        (uint64 yT,,,) = _readCurve(ydm, address(this));
+        assertEq(yT, 3e17, "yT stored at the cap");
     }
 
     /// yT above yFull would give a downward upper segment and is rejected

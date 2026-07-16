@@ -13,9 +13,10 @@ import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/acc
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import { CREATE3 } from "../../../lib/solady/src/utils/CREATE3.sol";
+import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
 import { MarketDeploymentConfig } from "../../../script/config/MarketDeploymentConfig.sol";
+import { RoycoDayEntryPoint } from "../../../src/entrypoint/RoycoDayEntryPoint.sol";
 import {
     ADMIN_ENTRY_POINT_ROLE,
     ADMIN_FACTORY_ROLE,
@@ -23,13 +24,17 @@ import {
     ADMIN_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
-    DEPLOYER_ROLE
+    DEPLOYER_ROLE,
+    SYNC_ROLE
 } from "../../../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate } from "../../../src/factory/templates/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
 import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
-import { COMPONENT_ID_SENIOR_TRANCHE_IMPL, TAG_ST_IMPL, TAG_ST_PROXY } from "../../../src/factory/templates/base/Components.sol";
+import { COMPONENT_ID_SENIOR_TRANCHE_IMPL, TAG_ST_PROXY } from "../../../src/factory/templates/base/Components.sol";
+import { EntryPointConfigurer } from "../../../src/factory/templates/periphery/EntryPointConfigurer.sol";
+import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
+import { IBaseTemplate } from "../../../src/interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import { AdaptiveCurveYDM_V1 } from "../../../src/ydm/AdaptiveCurveYDM_V1.sol";
@@ -53,6 +58,8 @@ contract Test_RoycoFactory is Test {
     RoycoFactory internal factory;
     DeployScript internal deployScript;
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate internal template;
+    IRoycoDayEntryPoint internal entryPoint;
+    RoycoMarketSyncer internal syncer;
 
     address internal FACTORY_ADMIN = makeAddr("FACTORY_ADMIN");
     address internal DEPLOYER = makeAddr("DEPLOYER");
@@ -90,11 +97,38 @@ contract Test_RoycoFactory is Test {
         am.grantRole(ADMIN_PAUSER_ROLE, address(this), 0);
         am.grantRole(ADMIN_UNPAUSER_ROLE, address(this), 0);
 
+        // The REAL periphery singletons the template configures per market: the entry point (initialized empty,
+        // configs flow through the factory) and the market syncer (initialized with no kernels).
+        RoycoDayEntryPoint entryPointImpl = new RoycoDayEntryPoint(address(factory));
+        entryPoint = IRoycoDayEntryPoint(
+            address(
+                new ERC1967Proxy(
+                    address(entryPointImpl),
+                    abi.encodeCall(RoycoDayEntryPoint.initialize, (new address[](0), new IRoycoDayEntryPoint.TrancheConfig[](0)))
+                )
+            )
+        );
+        RoycoMarketSyncer syncerImpl = new RoycoMarketSyncer();
+        syncer = RoycoMarketSyncer(address(new ERC1967Proxy(address(syncerImpl), abi.encodeCall(RoycoMarketSyncer.initialize, (address(am), new address[](0))))));
+
+        // Bind the config selectors the factory drives during deployments (the factory self-granted
+        // ADMIN_ENTRY_POINT_ROLE + SYNC_ROLE in its initialize).
+        bytes4[] memory entryPointSelectors = new bytes4[](1);
+        entryPointSelectors[0] = IRoycoDayEntryPoint.modifyTrancheConfigs.selector;
+        am.setTargetFunctionRole(address(entryPoint), entryPointSelectors, ADMIN_ENTRY_POINT_ROLE);
+        bytes4[] memory syncerSelectors = new bytes4[](1);
+        syncerSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
+        am.setTargetFunctionRole(address(syncer), syncerSelectors, SYNC_ROLE);
+
         // The real Day template, bound to this factory. `deployScript` is used only for its pure/view build helpers
         // (`dayTemplateComponents`, `buildDayParams`, `getMarketConfig`) — the factory + template above are the units under test.
         deployScript = new DeployScript();
         template = new Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
-            IRoycoFactory(address(factory)), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY), ILPOracleFactoryBase(ECLP_LP_ORACLE_FACTORY)
+            IRoycoFactory(address(factory)),
+            GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY),
+            ILPOracleFactoryBase(ECLP_LP_ORACLE_FACTORY),
+            address(entryPoint),
+            address(syncer)
         );
     }
 
@@ -233,13 +267,34 @@ contract Test_RoycoFactory is Test {
 
     /// A template constructed against a different factory address is rejected
     function test_RevertIf_TemplateBoundToDifferentFactoryRegistered() external {
-        // A real template bound to a different factory address must be rejected.
+        // A real template bound to a different factory address must be rejected. The template validates its entry
+        // point's factory binding at construction, so the foreign template needs an entry point bound to the foreign
+        // factory: a bare (uninitialized) implementation suffices since ROYCO_FACTORY is a constructor immutable.
+        address otherFactory = makeAddr("OTHER_FACTORY");
+        RoycoDayEntryPoint foreignEntryPoint = new RoycoDayEntryPoint(otherFactory);
         Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate foreign = new Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
-            IRoycoFactory(makeAddr("OTHER_FACTORY")), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY), ILPOracleFactoryBase(ECLP_LP_ORACLE_FACTORY)
+            IRoycoFactory(otherFactory),
+            GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY),
+            ILPOracleFactoryBase(ECLP_LP_ORACLE_FACTORY),
+            address(foreignEntryPoint),
+            address(syncer)
         );
         vm.prank(FACTORY_ADMIN);
         vm.expectRevert(IRoycoFactory.TEMPLATE_BOUND_TO_DIFFERENT_FACTORY.selector);
         factory.registerTemplate(address(foreign));
+    }
+
+    /// A template constructed with an entry point bound to a different factory is rejected at construction
+    function test_RevertIf_TemplateConstructedWithMisboundEntryPoint() external {
+        RoycoDayEntryPoint foreignEntryPoint = new RoycoDayEntryPoint(makeAddr("OTHER_FACTORY"));
+        vm.expectRevert(EntryPointConfigurer.ENTRY_POINT_BOUND_TO_DIFFERENT_FACTORY.selector);
+        new Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
+            IRoycoFactory(address(factory)),
+            GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY),
+            ILPOracleFactoryBase(ECLP_LP_ORACLE_FACTORY),
+            address(foreignEntryPoint),
+            address(syncer)
+        );
     }
 
     /// Registration is blocked while the factory is paused
@@ -319,6 +374,62 @@ contract Test_RoycoFactory is Test {
         assertEq(factory.trancheToKernel(r.seniorTranche), r.kernel, "st->kernel");
         assertEq(factory.trancheToKernel(r.juniorTranche), r.kernel, "jt->kernel");
         assertEq(factory.trancheToKernel(r.liquidityTranche), r.kernel, "lt->kernel");
+
+        // The template configured the entry point for all three tranches through the factory (post-registration hook).
+        MarketDeploymentConfig.MarketConfig memory cfg = deployScript.getMarketConfig("snUSD");
+        _assertEntryPointConfigured(r.seniorTranche, r.kernel, cfg.stEntryPointConfig, "st entry point config");
+        _assertEntryPointConfigured(r.juniorTranche, r.kernel, cfg.jtEntryPointConfig, "jt entry point config");
+        _assertEntryPointConfigured(r.liquidityTranche, r.kernel, cfg.ltEntryPointConfig, "lt entry point config");
+
+        // The template registered the market's kernel on the syncer through the factory.
+        assertTrue(syncer.isMarketKernelRegistered(r.kernel), "kernel registered on the syncer");
+    }
+
+    /// @dev Asserts the entry point stored the expected config for a tranche, enriched with the market's kernel.
+    function _assertEntryPointConfigured(
+        address _tranche,
+        address _kernel,
+        IRoycoDayEntryPoint.TrancheConfig memory _expected,
+        string memory _ctx
+    )
+        internal
+        view
+    {
+        IRoycoDayEntryPoint.EnrichedTrancheConfig memory stored = entryPoint.getTrancheConfig(_tranche);
+        assertEq(stored.kernel, _kernel, string.concat(_ctx, ": kernel"));
+        assertEq(stored.baseConfig.enabled, _expected.enabled, string.concat(_ctx, ": enabled"));
+        assertEq(stored.baseConfig.depositDelaySeconds, _expected.depositDelaySeconds, string.concat(_ctx, ": deposit delay"));
+        assertEq(stored.baseConfig.redemptionDelaySeconds, _expected.redemptionDelaySeconds, string.concat(_ctx, ": redemption delay"));
+        assertEq(stored.baseConfig.oracleClock, _expected.oracleClock, string.concat(_ctx, ": oracle clock"));
+    }
+
+    /// @notice A revoked SYNC_ROLE makes the syncer registration leg of the periphery hook fail, and the whole
+    ///         deployment unwinds atomically: no market contracts, no registry entries, no entry point configs
+    function test_RevertIf_FactoryLacksSyncRole_DeploymentUnwindsAtomically() external {
+        _register();
+        am.revokeRole(SYNC_ROLE, address(factory));
+
+        bytes memory p = _encodedParams(keccak256("no-sync-role"));
+        address predictedST = factory.predictDeterministicAddress(keccak256(abi.encodePacked("ROYCO_MARKET_", keccak256("no-sync-role"), TAG_ST_PROXY)));
+        vm.prank(DEPLOYER);
+        vm.expectPartialRevert(IRoycoFactory.FACTORY_CALL_FAILED.selector);
+        factory.executeMarketDeployment(address(template), p);
+
+        // Atomic unwind: nothing was deployed or registered.
+        assertEq(predictedST.code.length, 0, "no tranche deployed");
+        assertEq(factory.trancheToKernel(predictedST), address(0), "no registry entry");
+    }
+
+    /// @notice Only the factory may drive the periphery configuration hook
+    function test_RevertIf_StrangerCallsConfigureMarketPeriphery() external {
+        _register();
+        IRoycoProtocolTemplate.DeploymentResult memory r = _deploy(keccak256("hook-auth"));
+
+        // Precompute the params: `_encodedParams` makes external calls that would otherwise consume the prank/expectRevert.
+        bytes memory p = _encodedParams(keccak256("hook-auth"));
+        vm.prank(STRANGER);
+        vm.expectRevert(IBaseTemplate.ONLY_ROYCO_FACTORY.selector);
+        template.configureMarketPeriphery(r, p);
     }
 
     /// The transient active-template binding clears after a deployment, so sequential deploys work and registries stay per-market
@@ -580,7 +691,7 @@ contract Test_RoycoFactory is Test {
         // config carries, which isolates the model type as the only difference that matters.
         StaticCurveYDM refJtStatic = new StaticCurveYDM(cfg.jtYdmTargetUtilizationWAD);
         StaticCurveYDM refLtStatic = new StaticCurveYDM(cfg.ltYdmTargetUtilizationWAD);
-        AdaptiveCurveYDM_V2 refV2 = new AdaptiveCurveYDM_V2(cfg.jtYdmTargetUtilizationWAD);
+        AdaptiveCurveYDM_V2 refV2 = new AdaptiveCurveYDM_V2(cfg.jtYdmTargetUtilizationWAD, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
         assertEq(r.ydm.codehash, address(refJtStatic).codehash, "configured StaticCurve, ydm must be StaticCurveYDM");
         assertEq(r.ltYdm.codehash, address(refLtStatic).codehash, "configured StaticCurve, ltYdm must be StaticCurveYDM");
         // And it is NOT the adaptive model that used to stand in for it under a static config.
@@ -606,8 +717,8 @@ contract Test_RoycoFactory is Test {
         IRoycoProtocolTemplate.DeploymentResult memory r = factory.executeMarketDeployment(address(template), p);
 
         // The deployed model is the configured AdaptiveCurveYDM_V1, compared against references built with the same targets
-        AdaptiveCurveYDM_V1 refJtV1 = new AdaptiveCurveYDM_V1(cfg.jtYdmTargetUtilizationWAD);
-        AdaptiveCurveYDM_V1 refLtV1 = new AdaptiveCurveYDM_V1(cfg.ltYdmTargetUtilizationWAD);
+        AdaptiveCurveYDM_V1 refJtV1 = new AdaptiveCurveYDM_V1(cfg.jtYdmTargetUtilizationWAD, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
+        AdaptiveCurveYDM_V1 refLtV1 = new AdaptiveCurveYDM_V1(cfg.ltYdmTargetUtilizationWAD, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
         assertEq(r.ydm.codehash, address(refJtV1).codehash, "configured AdaptiveCurve_V1, ydm must be AdaptiveCurveYDM_V1");
         assertEq(r.ltYdm.codehash, address(refLtV1).codehash, "configured AdaptiveCurve_V1, ltYdm must be AdaptiveCurveYDM_V1");
     }

@@ -9,6 +9,11 @@ on:
 env:
   FOUNDRY_PROFILE: ci
 
+# Cancel superseded runs on the same ref so rapid pushes don't queue redundant builds
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     strategy:
@@ -17,58 +22,115 @@ jobs:
     name: Foundry project
     runs-on: ubuntu-latest
     steps:
+      # Submodules are NOT fetched here, they are restored from the cache below and only fetched on a miss
       - uses: actions/checkout@v4
+
+      - name: Add swap space
+        # A cold via_ir build OOM-kills the 7GB runner (exit 143), so swap keeps the cold path alive
+        # Warm (incremental) builds never touch it
+        run: |
+          sudo fallocate -l 8G /mnt/extra-swap
+          sudo chmod 600 /mnt/extra-swap
+          sudo mkswap /mnt/extra-swap
+          sudo swapon /mnt/extra-swap
+
+      - name: Compute submodule cache key
+        # The key digests the commit's gitlink SHAs, so any submodule bump produces a new key
+        # Exact-match only since forge compiles whatever sources are on disk
+        id: submodule-key
+        run: echo "hash=$(git ls-tree HEAD lib/ | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore submodule dependencies
+        id: deps-cache
+        uses: actions/cache/restore@v4
         with:
-          submodules: recursive
+          # lib/ and .git/modules must be cached together: each lib/*/.git is a pointer into .git/modules,
+          # and restoring the worktrees alone leaves the pointers dangling (forge git revision warnings)
+          path: |
+            lib
+            .git/modules
+          key: forge-deps-v2-${{ runner.os }}-${{ steps.submodule-key.outputs.hash }}
+
+      - name: Install submodule dependencies
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: git submodule update --init --recursive
+
+      - name: Save submodule dependencies
+        # Saved immediately after the fetch so a red run still banks it for the next one
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            lib
+            .git/modules
+          key: forge-deps-v2-${{ runner.os }}-${{ steps.submodule-key.outputs.hash }}
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
           # Pinned to stable 1.7.1.
           version: "1.7.1"
+          # The built-in cache only covers the RPC cache, we manage all caches explicitly in this file
+          cache: false
 
       - name: Show Forge version
         run: |
           forge --version
 
-      - name: Cache Forge build artifacts
-        # Incremental compiles: cold via_ir builds are slow. Exact key per commit; prefix restore
-        # reuses the newest prior build.
+      - name: Cache solc binaries
+        # solc binaries are immutable per version, so the prefix restore is always safe
+        # Forge downloads any missing version itself and extra cached versions are inert
         uses: actions/cache@v4
+        with:
+          path: ~/.svm
+          key: svm-${{ runner.os }}-${{ hashFiles('foundry.toml') }}
+          restore-keys: |
+            svm-${{ runner.os }}-
+
+      - name: Restore RPC fork state
+        # RPC responses for a pinned (chain, block) are immutable, so reuse only removes archive-node
+        # round trips. Each run restores the newest prior state and accumulates onto it
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.foundry/cache/rpc
+          key: forge-rpc-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            forge-rpc-${{ runner.os }}-
+
+      - name: Restore Forge build artifacts
+        # The newest prior build must ALWAYS restore so compiles stay incremental (cold via_ir builds OOM)
+        # The prefix carries no settings hash on purpose: forge revalidates every cached artifact against
+        # its source content, compiler version, and settings, so a stale cache can only save work, never
+        # compile the wrong code. Keying on foundry.toml would force a cold build on every config tweak
+        uses: actions/cache/restore@v4
         with:
           path: |
             cache
             out
-          key: forge-build-${{ runner.os }}-${{ hashFiles('foundry.toml', 'remappings.txt') }}-${{ github.sha }}
+          key: forge-build-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
-            forge-build-${{ runner.os }}-${{ hashFiles('foundry.toml', 'remappings.txt') }}-
+            forge-build-${{ runner.os }}-
 
       - name: Run Forge fmt
         run: |
           forge fmt --check
         id: fmt
-        # Blocking on PRs (enforce style on contributions); advisory on push to main and
-        # manual dispatch, so a formatting diff never hides build/test breakage on main.
+        # Blocking on PRs, advisory on main so a formatting diff never hides build/test breakage
         continue-on-error: ${{ github.event_name != 'pull_request' }}
 
       - name: Run Forge build
-        # Full build first (tests, scripts, mocks), then size-check only src/ —
-        # EIP-170 applies to deployed contracts; test-only mocks may exceed it.
-        # test/research/** is skipped by profile.ci (foundry.toml): those suites compile the
-        # vendored Balancer vault graph via_ir, which OOM-kills the 7GB hosted runner (exit 143).
-        # Research suites build and run locally only.
+        # Full build first, then size-check only src/ (EIP-170 applies to deployed contracts, not test mocks)
+        # test/research/** is excluded by foundry.toml, run it deliberately via FOUNDRY_PROFILE=research
+        # --threads 1 because two parallel via_ir solc processes OOM the runner on a cold build
         run: |
-          forge build
-          forge build src/ --sizes
+          forge build --threads 1
+          forge build src/ --sizes --threads 1
         id: build
 
       - name: Run Forge tests
-        # Fork suites (everything under test/fork/) run against live-chain forks and need
-        # archive-node RPC URLs. Which chains they need is derived from the fork tree itself
-        # (every *_RPC_URL env var the suites reference), so supporting a new chain never
-        # requires editing this step — just pass its secret in `env` below. If any required RPC
-        # secret is unset we skip test/fork/** so the rest of the tests still run; once the
-        # secrets are added the fork tests run automatically.
+        # Fork suites need archive-node RPC URLs. The required chains are derived from the fork tree
+        # itself, so supporting a new chain just means passing its secret in `env` below
+        # If any required secret is unset we skip test/fork/** so the rest of the tests still run
         run: |
           required=$(grep -rhoE '\b[A-Z][A-Z0-9_]*_RPC_URL\b' test/fork | sort -u)
           missing=""
@@ -76,7 +138,7 @@ jobs:
             if [ -z "$(printenv "$var")" ]; then missing="$missing $var"; fi
           done
           if [ -n "$missing" ]; then
-            echo "Missing fork RPC secrets:$missing — skipping fork suites (test/fork/**)"
+            echo "Missing fork RPC secrets:$missing, skipping fork suites (test/fork/**)"
             forge test -vvv --no-match-path 'test/fork/**'
           else
             forge test -vvv
@@ -87,4 +149,24 @@ jobs:
           AVALANCHE_RPC_URL: ${{ secrets.AVALANCHE_RPC_URL }}
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
           ARBITRUM_RPC_URL: ${{ secrets.ARBITRUM_RPC_URL }}
+          # CI pins 200 fuzz runs for runtime (env beats foundry.toml, local ci profile keeps 1,000)
+          # The secret can raise it without a workflow change
           FOUNDRY_FUZZ_RUNS: ${{ secrets.FOUNDRY_FUZZ_RUNS || 200 }}
+
+      - name: Save Forge build artifacts
+        # always() so a red run still banks whatever compiled and the next run resumes incrementally
+        # The combined actions/cache only saves on job success, which is the wrong semantics here
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            cache
+            out
+          key: forge-build-${{ runner.os }}-${{ github.sha }}
+
+      - name: Save RPC fork state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.foundry/cache/rpc
+          key: forge-rpc-${{ runner.os }}-${{ github.sha }}

@@ -32,7 +32,7 @@ uint256 constant MAX_PROTOCOL_FEE_WAD = 1e18;
 
 /**
  * @dev The max mint dilution, scaled to WAD precision: the largest fraction of the POST-mint share supply a
- *      single mint may own ((WAD - 1e6) / WAD = 1 - 1e-12) — flipped around: pre-existing holders always
+ *      single mint may own ((WAD - 1e6) / WAD = 1 - 1e-12), flipped around: pre-existing holders always
  *      collectively retain at least the 1e-12 complement, however large the deposit, so one mint can grow
  *      the supply by at most a factor of 1e12 - 1
  *
@@ -47,7 +47,7 @@ uint256 constant MAX_PROTOCOL_FEE_WAD = 1e18;
  *      fairly owns ~all of it - whatever incumbents keep is paid out of the depositor's pocket. 1e-12
  *      makes that transfer economically invisible while staying numerically load-bearing:
  *      - Invisible: wiped holders keep <= 1e-12 of any recovery (sub-dust at any realistic NAV), and the
- *        clamped depositor forgoes at most 1e-12 of its own deposit — no one loses measurable value, which is
+ *        clamped depositor forgoes at most 1e-12 of its own deposit, no one loses measurable value, which is
  *        why the mint clamps rather than reverts
  *      - Load-bearing: supply grows at most ~2^40 per wipe-and-redeposit cycle (unbounded, three cycles
  *        empirically pushed supply to ~1e77 and bricked every later mint), keeping the cap math's own

@@ -6,9 +6,9 @@ import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgrade
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IRoycoDayAccountant } from "../../interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
-import { ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../Constants.sol";
+import { WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../Constants.sol";
 import { AssetClaims, MarketState, Operation, SyncedAccountingState, TrancheType } from "../Types.sol";
-import { NAV_UNIT, TRANCHE_UNIT } from "../Units.sol";
+import { Math, NAV_UNIT, RoycoUnitsMath } from "../Units.sol";
 import { AccountingSyncLogic } from "./AccountingSyncLogic.sol";
 import { BlacklistLogic } from "./BlacklistLogic.sol";
 import { FeeAndLiquidityPremiumLogic } from "./FeeAndLiquidityPremiumLogic.sol";
@@ -23,6 +23,8 @@ import { ValuationLogic } from "./ValuationLogic.sol";
  * @dev Invoked by the kernel via delegatecall
  */
 library RedemptionLogic {
+    using RoycoUnitsMath for NAV_UNIT;
+
     // =============================
     // Tranche Redeem Functions
     // =============================
@@ -255,7 +257,7 @@ library RedemptionLogic {
 
     /**
      * @notice Previews a multi-asset LT redemption of _ltShares by simulating the proportional venue removal and the senior unwind
-     * @dev NON-VIEW: routes the venue removal through its simulation/query mode, so callers must staticcall it
+     * @dev NON-VIEW: routes the venue removal through its execute-and-unwind preview, which mutates no state net
      * @param _ltShares The number of LT shares to redeem
      * @return stClaims The ST redemption asset claims that would be transferred to the receiver, denominated in the respective tranches' tranche units
      * @return quoteAssets The quote assets the removal would withdraw to the receiver
@@ -335,7 +337,7 @@ library RedemptionLogic {
         claimOnSTNAV = IRoycoDayKernel(address(this)).stConvertTrancheUnitsToNAVUnits(stClaims.stAssets);
         claimOnJTNAV = IRoycoDayKernel(address(this)).jtConvertTrancheUnitsToNAVUnits(stClaims.jtAssets);
 
-        // Bound the claims by the max withdrawable assets globally for each tranche and compute the cumulative NAV
+        // The max withdrawable assets globally for each tranche is its entire raw NAV (ST redemptions are otherwise unrestricted in a PERPETUAL state)
         stMaxWithdrawableNAV = ValuationLogic._getSeniorTrancheRawNAV($);
         jtMaxWithdrawableNAV = ValuationLogic._getJuniorTrancheRawNAV($);
     }
@@ -348,7 +350,7 @@ library RedemptionLogic {
      * @return claimOnJTNAV The notional claims on JT assets that the junior tranche has denominated in kernel's NAV units
      * @return stMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the senior tranche, denominated in the kernel's NAV units
      * @return jtMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the junior tranche, denominated in the kernel's NAV units
-     * @return totalTrancheShares The total number of shares that exist in the junior tranche after minting any protocol fee shares post-sync, including virtual shares
+     * @return totalTrancheShares The total number of shares that exist in the junior tranche after minting any protocol fee shares post-sync
      */
     function jtMaxWithdrawable(
         IRoycoDayKernel.RoycoDayKernelState storage $,
@@ -408,5 +410,69 @@ library RedemptionLogic {
         claimOnLTNAV = state.ltRawNAV;
         // The withdrawal is bounded by the market's liquidity requirement
         ltMaxWithdrawableNAV = IRoycoDayAccountant(_immutables.accountant).maxLTWithdrawal(state);
+    }
+
+    /**
+     * @notice Returns the maximum amount of assets that can be withdrawn from the liquidity tranche via a multi-asset redemption
+     * @dev A multi-asset redemption redeems the withdrawn and idle premium senior shares in-flow, reducing the liquidity requirement alongside the withdrawal
+     *
+     * @dev Liquidity Requirement: LT_RAW_NAV >= (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)
+     * @dev Senior share redemption NAV per unit of LT raw NAV withdrawn, r: SENIOR_SHARE_REDEMPTION_NAV / LT_RAW_NAV
+     * @dev Max assets withdrawable from LT multi-asset, z: (LT_RAW_NAV - z) = ((ST_EFFECTIVE_NAV - (z * r)) * MIN_LIQUIDITY)
+     *      Isolate z: z = (LT_RAW_NAV - (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)) * LT_RAW_NAV / (LT_RAW_NAV - (SENIOR_SHARE_REDEMPTION_NAV * MIN_LIQUIDITY))
+     *
+     * @dev The idle liquidity premium senior shares are assumed unreinvested (the worst case): a reinvestment grows the LT raw NAV
+     *      and its withdrawable surplus by the same premium value, which can only raise the bound
+     * @param _owner The address that is withdrawing the assets
+     * @return claimOnLTNAV The notional claims on LT assets that the liquidity tranche has denominated in kernel's NAV units
+     * @return ltMaxWithdrawableNAV The maximum amount of assets that can be withdrawn multi-asset, denominated in the kernel's NAV units
+     * @return totalTrancheShares The total number of shares that exist in the liquidity tranche after minting any protocol fee shares post-sync
+     * @dev NON-VIEW: routes the venue removal through its execute-and-unwind preview, which mutates no state net
+     */
+    function ltMaxWithdrawableMultiAsset(
+        IRoycoDayKernel.RoycoDayKernelState storage $,
+        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
+        address _owner
+    )
+        external
+        returns (NAV_UNIT claimOnLTNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheShares)
+    {
+        // If the owner is blacklisted or the kernel is currently paused, return zero claims
+        if (BlacklistLogic._isBlacklisted($, _owner) || PausableUpgradeable(address(this)).paused()) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+
+        // Get the total claims the liquidity tranche has on its own assets
+        SyncedAccountingState memory state;
+        AssetClaims memory ltClaims;
+        (state, ltClaims, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
+
+        // LT redemptions are disabled during a fixed-term market state
+        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+
+        // A multi-asset redemption pulls a proportional slice of both LT legs
+        claimOnLTNAV = state.ltRawNAV;
+        // The withdrawal is bounded by the market's liquidity requirement
+        NAV_UNIT ltWithdrawableNAV = IRoycoDayAccountant(_immutables.accountant).maxLTWithdrawal(state);
+
+        // Compute the senior tranche shares a proportional removal of the entire LT asset holding would withdraw
+        uint256 stSharesWithdrawn;
+        if (ltClaims.ltAssets != ZERO_TRANCHE_UNITS) (stSharesWithdrawn,) = IRoycoDayKernel(address(this)).previewRemoveLiquidity(ltClaims.ltAssets);
+
+        // Value the withdrawn and idle premium senior shares at the post-sync senior share rate, rounding down so the requirement reduction is never overstated
+        (,, uint256 totalSTShares) =
+            FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(_immutables.seniorTranche).totalSupply());
+        NAV_UNIT stSharesRedeemedNAV =
+            ValuationLogic._convertToValue((stSharesWithdrawn + ltClaims.stShares), totalSTShares, state.stEffectiveNAV, Math.Rounding.Floor);
+        // Compute the reduction in the market's liquidity requirement from redeeming the senior shares in-flow
+        NAV_UNIT liquidityRequirementReductionNAV = stSharesRedeemedNAV.mulDiv(state.minLiquidityWAD, WAD, Math.Rounding.Floor);
+
+        // If the requirement reduction outpaces the withdrawal itself, the entire holding is withdrawable unless nothing is withdrawable in kind
+        if (liquidityRequirementReductionNAV >= state.ltRawNAV) {
+            ltMaxWithdrawableNAV = (ltWithdrawableNAV == ZERO_NAV_UNITS) ? ZERO_NAV_UNITS : state.ltRawNAV;
+        } else {
+            // Scale the in-kind withdrawable NAV by the requirement reduction, capped at the entire holding
+            ltMaxWithdrawableNAV = RoycoUnitsMath.min(
+                ltWithdrawableNAV.mulDiv(state.ltRawNAV, (state.ltRawNAV - liquidityRequirementReductionNAV), Math.Rounding.Floor), state.ltRawNAV
+            );
+        }
     }
 }

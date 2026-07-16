@@ -65,4 +65,9 @@ contract Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_K
     function _initializeQuoterCache() internal override(RoycoDayKernel, IdenticalAssets_ST_JT_Oracle_Quoter) {
         IdenticalAssets_ST_JT_Oracle_Quoter._initializeQuoterCache();
     }
+
+    /// @inheritdoc RoycoDayKernel
+    function _isTrancheShareCustodian(address _account) internal view override(RoycoDayKernel, BalancerV3_LT_BPTOracle_Quoter) returns (bool) {
+        return BalancerV3_LT_BPTOracle_Quoter._isTrancheShareCustodian(_account);
+    }
 }

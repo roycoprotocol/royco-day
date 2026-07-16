@@ -30,7 +30,7 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter is
         uint48 stalenessThresholdSeconds;
     }
 
-    /// @notice Initializes the identical assets chainlink oracle quoter and the base identical assets oracle quoter
+    /// @notice Initializes the identical assets Chainlink (compatible) oracle quoter and the base identical assets oracle quoter
     /// @param _params The quoter-specific initialization parameters
     function __IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter_init(ST_JT_QuoterSpecificParams calldata _params) internal onlyInitializing {
         __IdenticalAssets_ST_JT_AdminOracle_Quoter_init(_params.initialConversionRateWAD);

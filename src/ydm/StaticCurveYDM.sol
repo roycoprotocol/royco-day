@@ -15,7 +15,7 @@ import { BaseYDM } from "./base/BaseYDM.sol";
  * @dev It is parameterized purely by the utilization of that service, so the same contract prices any tranche-yield premium
  * @dev Utilization is the fraction of the capital pool's service capacity that is currently in use: the ratio of demand for the service the pool provides to the pool's capacity to supply it, scaled to WAD precision
  * @dev At zero utilization the service is unused and the capital is abundant, so it earns the least
- * @dev At WAD utilization demand equals the pool's full capacity — demand beyond capacity is reported above WAD and capped to WAD here
+ * @dev At WAD utilization demand equals the pool's full capacity, demand beyond capacity is reported above WAD and capped to WAD here
  * @dev The premium rises with utilization so scarcer service is paid more, pulling additional capital into the pool
  * @dev The curve is a piece-wise function parameterized by the utilization and a per-instance target utilization (the kink) supplied at construction
  */
@@ -58,7 +58,7 @@ contract StaticCurveYDM is BaseYDM {
 
     /**
      * @notice Sets the per-instance target utilization (the kink) shared by every market this YDM serves
-     * @dev Must be greater than zero so the curve regions are well defined when utilization is zero — concrete models may further constrain it
+     * @dev Must be greater than zero so the curve regions are well defined when utilization is zero
      * @param _targetUtilizationWAD The target utilization (the kink) for this model, in the range (0, 100%], scaled to WAD precision
      */
     constructor(uint256 _targetUtilizationWAD) BaseYDM(_targetUtilizationWAD) { }
@@ -79,7 +79,7 @@ contract StaticCurveYDM is BaseYDM {
             INVALID_YDM_INITIALIZATION()
         );
 
-        // Initialize the YDM curve for this market (2 SSTOREs: slot0 = y0 + slopeLt, slot1 = yT + slopeGte)
+        // Initialize the YDM curve for this market (all four fields pack into one storage slot)
         StaticYieldCurve storage curve = accountantToCurve[msg.sender];
         curve.yieldShareAtZeroUtilWAD = _yieldShareAtZeroUtilWAD;
         curve.slopeLtTargetUtilWAD = _computeSlope(_yieldShareAtZeroUtilWAD, _yieldShareAtTargetWAD, 0, TARGET_UTILIZATION_WAD);

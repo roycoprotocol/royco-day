@@ -19,7 +19,8 @@ import {
     ADMIN_ROLE,
     ADMIN_UNPAUSER_ROLE,
     ADMIN_UPGRADER_ROLE,
-    DEPLOYER_ROLE
+    DEPLOYER_ROLE,
+    SYNC_ROLE
 } from "./RolesConfiguration.sol";
 
 /**
@@ -68,7 +69,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         (bool factoryIsAdmin,) = am.hasRole(ADMIN_ROLE, address(this));
         require(factoryIsAdmin, FACTORY_NOT_ADMIN_ON_ACCESS_MANAGER());
 
-        // Wire the factory's authority the specified access manager
+        // Wire the factory's authority to the specified access manager
         __RoycoBase_init(_roycoAccessManager);
 
         // Bind factory-level gated selectors to their roles
@@ -96,6 +97,9 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
 
         // Grant the factory `ADMIN_ENTRY_POINT_ROLE` on the AM
         am.grantRole(ADMIN_ENTRY_POINT_ROLE, address(this), 0);
+
+        // Grant the factory `SYNC_ROLE` on the AM so market deployments can register kernels on the market syncer
+        am.grantRole(SYNC_ROLE, address(this), 0);
     }
 
     /// @inheritdoc IRoycoFactory
@@ -161,9 +165,6 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         // Deploy the market
         result = IBaseTemplate(_template).deployMarket(_params);
 
-        // Explicitly clear for clarity: transient storage auto-clears at the end of the transaction as a backstop
-        _activeTemplate = address(0);
-
         // A valid market must have a kernel, a senior tranche, and at least one complementary tranche (junior, liquidity, or both)
         require(
             result.kernel != address(0) && result.seniorTranche != address(0) && (result.juniorTranche != address(0) || result.liquidityTranche != address(0)),
@@ -174,6 +175,12 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         $.trancheToKernel[result.seniorTranche] = result.kernel;
         if (result.juniorTranche != address(0)) $.trancheToKernel[result.juniorTranche] = result.kernel;
         if (result.liquidityTranche != address(0)) $.trancheToKernel[result.liquidityTranche] = result.kernel;
+
+        // Configure the market's periphery, may read trancheToKernel mapping set above.
+        IBaseTemplate(_template).configureMarketPeriphery(result, _params);
+
+        // Explicitly clear for clarity: transient storage auto-clears at the end of the transaction as a backstop
+        _activeTemplate = address(0);
 
         emit MarketDeploymentCompleted(_template, msg.sender, result);
     }

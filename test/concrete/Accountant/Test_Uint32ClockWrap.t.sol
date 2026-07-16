@@ -41,7 +41,7 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
     function test_ydmAdaptationClock_wrapsAtUint32_slamsV2YieldShareToFloor() public {
         // Standalone V2 curve with this test as its market accountant: kink at 50% utilization,
         // yield shares 0.05e18 at zero utilization / 0.1e18 at target / 0.2e18 at full utilization
-        AdaptiveCurveYDM_V2 ydm = new AdaptiveCurveYDM_V2(0.5e18);
+        AdaptiveCurveYDM_V2 ydm = new AdaptiveCurveYDM_V2(0.5e18, 0.0001e18, 1e18, (100e18 / uint256(365 days)));
         ydm.initializeYDMForMarket(0.05e18, 0.1e18, 0.2e18);
         assertEq(ydm.MIN_YIELD_SHARE_AT_TARGET_WAD(), 0.0001e18, "the V2 floor on the yield share at target is 0.0001e18 by construction");
 
@@ -92,7 +92,7 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
     function test_ydmAdaptationClock_wrapsAtUint32_slamsV1YieldShareToCeiling() public {
         // Standalone V1 curve: kink at 50% utilization, yield shares 0.1e18 at target / 0.2e18 at full
         // utilization, giving a multiplicative steepness of 2e18
-        AdaptiveCurveYDM_V1 ydm = new AdaptiveCurveYDM_V1(0.5e18);
+        AdaptiveCurveYDM_V1 ydm = new AdaptiveCurveYDM_V1(0.5e18, 0.0001e18, 1e18, (50e18 / uint256(365 days)));
         ydm.initializeYDMForMarket(0.1e18, 0.2e18);
         assertEq(ydm.MAX_YIELD_SHARE_AT_TARGET_WAD(), 1e18, "the V1 ceiling on the yield share at target is 100% by construction");
 

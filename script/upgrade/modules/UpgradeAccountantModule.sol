@@ -53,7 +53,6 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
         // a `RoycoDayAccountant` (e.g. if an address was mis-entered in `UpgradeConfig`).
         NAV_UNIT stRawNAV = IRoycoVaultTranche(IRoycoDayKernel(kernel).SENIOR_TRANCHE()).getRawNAV();
         NAV_UNIT jtRawNAV = IRoycoVaultTranche(IRoycoDayKernel(kernel).JUNIOR_TRANCHE()).getRawNAV();
-        NAV_UNIT ltRawNAV = IRoycoVaultTranche(IRoycoDayKernel(kernel).LIQUIDITY_TRANCHE()).getRawNAV();
         a.previewSyncTrancheAccounting(stRawNAV, jtRawNAV);
 
         address oldImpl = _readImplementation(proxy);
@@ -89,7 +88,6 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
 
         NAV_UNIT stRawNAV = IRoycoVaultTranche(kernel.SENIOR_TRANCHE()).getRawNAV();
         NAV_UNIT jtRawNAV = IRoycoVaultTranche(kernel.JUNIOR_TRANCHE()).getRawNAV();
-        NAV_UNIT ltRawNAV = IRoycoVaultTranche(kernel.LIQUIDITY_TRANCHE()).getRawNAV();
 
         IRoycoDayAccountant.RoycoDayAccountantState memory state = a.getState();
         SyncedAccountingState memory sync = a.previewSyncTrancheAccounting(stRawNAV, jtRawNAV);
@@ -99,14 +97,14 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
 
     /// @inheritdoc UpgradeModuleBase
     function verify(address _proxy, bytes memory _preStateSnapshot) external view override {
+        // Decode the exact tuple `snapshotState` encodes: (kernel, state, sync, stRawNAV, jtRawNAV)
         (
             address preKernel,
             IRoycoDayAccountant.RoycoDayAccountantState memory preState,
             SyncedAccountingState memory preSync,
             NAV_UNIT preStRawNAV,
-            NAV_UNIT preJtRawNAV,
-            NAV_UNIT preLtRawNAV
-        ) = abi.decode(_preStateSnapshot, (address, IRoycoDayAccountant.RoycoDayAccountantState, SyncedAccountingState, NAV_UNIT, NAV_UNIT, NAV_UNIT));
+            NAV_UNIT preJtRawNAV
+        ) = abi.decode(_preStateSnapshot, (address, IRoycoDayAccountant.RoycoDayAccountantState, SyncedAccountingState, NAV_UNIT, NAV_UNIT));
 
         IRoycoDayAccountant a = IRoycoDayAccountant(_proxy);
         require(a.KERNEL() == preKernel, UpgradeAccountantModule__KernelImmutableChanged(preKernel, a.KERNEL()));

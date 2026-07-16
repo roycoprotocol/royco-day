@@ -5,10 +5,10 @@ import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_TrancheTransferWhitelist_Kernel
@@ -130,5 +130,37 @@ contract Test_TrancheTransferWhitelist_Kernel is DayMarketTestBase {
         assertEq(toUint256(claims.stAssets), 40e18, "the redemption must claim exactly the pro-rata 40e18 vault shares");
         assertEq(seniorTranche.balanceOf(ST_PROVIDER), 60e18, "the share balance must drop by exactly the redeemed shares (100e18 - 40e18)");
         assertEq(stJtVault.balanceOf(ST_PROVIDER) - vaultSharesBefore, 40e18, "the redeemer's asset balance must grow by exactly the returned vault shares");
+    }
+
+    /**
+     * @notice On a whitelist-enforcing market, a senior tranche share transfer to the market-making venue's vault
+     *         succeeds through the tranche-share custodian exemption, while the SAME transfer from the SAME sender
+     *         to an ordinary non-whitelisted address reverts ACCOUNT_NOT_WHITELISTED_TRANCHE_LP
+     * @dev Senior deposits are ST_LP_ROLE-gated (not public), so neither the venue vault nor a fresh address is a
+     *      whitelisted senior LP. The pair isolates the custodian exemption as the only discriminant: the Balancer
+     *      vault escrows every pool's tokens, so it holds the senior shares backing the BPT and can never be a
+     *      whitelisted LP. Without the exemption every venue add that routes senior shares into the pool would
+     *      revert on an enforcing market, which is exactly the transfer this test reproduces in isolation
+     */
+    function test_TransferSeniorShares_ToVenueVault_SucceedsViaCustodianExemption() public {
+        // Seed 100e18 ST / 30e18 JT at flat PnL so ST_PROVIDER holds exactly 100e18 senior shares and the transfer
+        // books no premium mint (no senior gain), leaving receiver identity as the sole variable under test
+        _seedMarket(100e18, 30e18);
+        assertEq(seniorTranche.balanceOf(ST_PROVIDER), 100e18, "the flat genesis seed must mint exactly 100e18 senior shares");
+
+        // Control: the identical transfer to a fresh, role-less address reverts. Senior deposits are ST_LP_ROLE-gated,
+        // so an ordinary address is not a whitelisted senior LP and the hook rejects it on its receiver check
+        address outsider = makeAddr("NON_WHITELISTED_ST_RECIPIENT");
+        vm.prank(ST_PROVIDER);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayKernel.ACCOUNT_NOT_WHITELISTED_TRANCHE_LP.selector, outsider));
+        seniorTranche.transfer(outsider, 10e18);
+        assertEq(seniorTranche.balanceOf(ST_PROVIDER), 100e18, "the rejected transfer must not move the sender's shares");
+
+        // The venue vault is just as un-whitelisted a senior LP as the outsider, but it is the tranche-share
+        // custodian, so the exemption lets the identical transfer through. This is the escrow a venue add performs
+        vm.prank(ST_PROVIDER);
+        seniorTranche.transfer(address(balancerVault), 10e18);
+        assertEq(seniorTranche.balanceOf(address(balancerVault)), 10e18, "the vault must receive the senior shares via the custodian exemption");
+        assertEq(seniorTranche.balanceOf(ST_PROVIDER), 90e18, "the sender must lose exactly the transferred shares (100e18 - 10e18)");
     }
 }

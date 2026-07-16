@@ -24,6 +24,10 @@ fs_permissions = [{ access = "read", path = "./out" }, { access = "read-write", 
 solc_version = "0.8.35"
 ignored_warnings_from = ["test/*", "lib/*"]
 show_progress = true
+# test/research/** is excluded from all builds and test runs: its suites compile the vendored Balancer
+# vault graph via_ir (slow, memory-heavy) and exist for offline analysis only. Run them deliberately with
+# `FOUNDRY_PROFILE=research forge test --match-path 'test/research/**'`.
+skip = ["test/research/**"]
 
 [profile.development]
 optimizer = true
@@ -57,14 +61,19 @@ exclude_lints = ["mixed-case-function", "mixed-case-variable", "unsafe-typecast"
 runs = 200
 show_logs = true
 
-# CI profile: the PR gate — 1,000 fuzz runs per test, 256x64 invariant runs.
-# test/research/** is local-only: its suites compile the vendored Balancer vault graph via_ir,
-# which needs more solc memory than the 7GB hosted runner has (exit 143).
+# CI profile: the PR gate — 1,000 fuzz runs per test (the workflow env pins 200 on hosted runners),
+# 256x64 invariant runs. Research suites are already excluded by the default profile's skip.
+# build_info embeds full compilation inputs (~2GB of out/) and nothing in CI consumes it — disabling it
+# keeps the CI build cache payload small.
 [profile.ci]
 fuzz = { runs = 1000, show_logs = false }
 invariant = { runs = 256, depth = 64, fail_on_revert = false }
 show_progress = false
-skip = ["test/research/**"]
+build_info = false
+
+# Research profile: the ONLY profile that compiles test/research/** — run its suites deliberately
+[profile.research]
+skip = []
 
 # Nightly profile: deep fuzz/invariant sweeps across token decimal configurations
 [profile.nightly]

@@ -191,11 +191,11 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     }
 
     /// @inheritdoc IRoycoDayAccountant
-    function commitLiquidityTrancheRawNAV(NAV_UNIT _freshLtRawNAV) external override(IRoycoDayAccountant) onlyRoycoKernel {
+    function commitLiquidityTrancheRawNAV(NAV_UNIT _freshLTRawNAV) external override(IRoycoDayAccountant) onlyRoycoKernel {
         // Commit the freshly marked liquidity tranche raw NAV: the kernel marks it after the sync commits the senior/junior NAVs and mints any fee shares
         // The LT raw NAV is dependent on the fresh ST share price which is resolved on the preceding pre-op synchronization
-        _getRoycoDayAccountantStorage().lastLTRawNAV = _freshLtRawNAV;
-        emit LiquidityTrancheRawNAVCommitted(_freshLtRawNAV);
+        _getRoycoDayAccountantStorage().lastLTRawNAV = _freshLTRawNAV;
+        emit LiquidityTrancheRawNAVCommitted(_freshLTRawNAV);
     }
 
     /// @inheritdoc IRoycoDayAccountant
@@ -257,11 +257,8 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             // Compute the total value redeemed from ST and JT
             NAV_UNIT totalSTAndJTRedemptionNAV = (toNAVUnits(-deltaSTRawNAV) + toNAVUnits(-deltaJTRawNAV));
             if (_op == Operation.ST_REDEEM || _op == Operation.LT_REDEEM) {
-                if (_op == Operation.LT_REDEEM) {
-                    require(deltaLTRawNAV < 0 || (deltaLTRawNAV <= 0 && totalSTAndJTRedemptionNAV > ZERO_NAV_UNITS), INVALID_POST_OP_STATE(_op));
-                } else {
-                    require(deltaLTRawNAV == 0 && totalSTAndJTRedemptionNAV > ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
-                }
+                if (_op == Operation.LT_REDEEM) require(deltaLTRawNAV <= 0, INVALID_POST_OP_STATE(_op));
+                else require(deltaLTRawNAV == 0 && totalSTAndJTRedemptionNAV > ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
                 // Reduce JT effective NAV by the the bonus provided from its assets
                 jtEffectiveNAV = jtEffectiveNAV - _stSelfLiquidationBonusNAV;
                 // Reduce ST effective NAV by the total redemptions without the bonus provided from JT effective NAV
@@ -373,7 +370,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // If there is no minimum liquidity requirement, there is no ST capacity restriction
         NAV_UNIT maxSTDepositGivenLiquidity = MAX_NAV_UNITS;
         if (state.minLiquidityWAD != 0) {
-            // Solve for y, rounding in favor of senior protection
+            // Solve for x', rounding in favor of senior protection
             // Compute the maximum value ownable by the senior tranche given the current value of the market making inventory
             NAV_UNIT maxSTEffectiveNAV = state.ltRawNAV.mulDiv(WAD, state.minLiquidityWAD, Math.Rounding.Floor);
             // Compute the value of assets that can be deposited into senior while retaining minimum liquidity
@@ -391,7 +388,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
      *
      * @dev Coverage Requirement: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_COINVESTED ? JT_RAW_NAV : 0)) * MIN_COVERAGE
      * @dev When assets are claimed from the JT, they are always liquidated in the same proportion as the tranche's total claims on the ST and JT assets
-     * @dev Let JT_CLAIM_ON_ST and JT_CLAIM_ON_JT be the JT's total claims on the ST and JT assets respectively, in NAV units — the JT's total claims are JT_CLAIM_ON_ST + JT_CLAIM_ON_JT
+     * @dev Let JT_CLAIM_ON_ST and JT_CLAIM_ON_JT be the JT's total claims on the ST and JT assets respectively, in NAV units, the JT's total claims are JT_CLAIM_ON_ST + JT_CLAIM_ON_JT
      * @dev Let ST_CLAIM_FRACTION be JT_CLAIM_ON_ST / (JT_CLAIM_ON_ST + JT_CLAIM_ON_JT) and JT_CLAIM_FRACTION be JT_CLAIM_ON_JT / (JT_CLAIM_ON_ST + JT_CLAIM_ON_JT)
      * @dev Therefore, if a total NAV of y is claimed from the JT, ST_CLAIM_FRACTION * y is claimed from the ST_RAW_NAV and JT_CLAIM_FRACTION * y is claimed from the JT_RAW_NAV
      * @dev Max assets withdrawable from JT, y: (JT_EFFECTIVE_NAV - y) = ((ST_RAW_NAV - ST_CLAIM_FRACTION * y) + (JT_COINVESTED ? (JT_RAW_NAV - JT_CLAIM_FRACTION * y) : 0)) * MIN_COVERAGE
@@ -412,7 +409,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Get the surplus JT assets in NAV units
         // The exposure and requirement intermediates live in a scoped block so their stack slots are released before the fraction math below
         NAV_UNIT surplusJTValue;
-        // Compute the total covered exposure of the underlying investment, rounding in favor of senior protection
+        // Compute the total covered exposure of the underlying investment
         NAV_UNIT totalCoveredExposure = state.stRawNAV + (state.jtCoinvested ? state.jtRawNAV : ZERO_NAV_UNITS);
         // Compute the minimum junior tranche assets required to cover the exposure as per the market's coverage requirement
         NAV_UNIT requiredJTValue = totalCoveredExposure.mulDiv(state.minCoverageWAD, WAD, Math.Rounding.Ceil);
@@ -420,7 +417,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Also account for the effective dust tolerance required to preclude reverts due to rounding after JT redemptions
         // Additionally absorb the worst case inner-ceil rounding in the coverageUtilization computation
         surplusJTValue = state.jtEffectiveNAV
-            .saturatingSub(requiredJTValue + $.stNAVDustTolerance + (state.jtCoinvested ? $.jtNAVDustTolerance : ZERO_NAV_UNITS) + toNAVUnits(uint256(2)));
+            .saturatingSub((requiredJTValue + $.stNAVDustTolerance + (state.jtCoinvested ? $.jtNAVDustTolerance : ZERO_NAV_UNITS) + toNAVUnits(uint256(2))));
         if (surplusJTValue == ZERO_NAV_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS);
 
         // Compute the total JT claim on NAV and preemptively return if zero
@@ -454,10 +451,11 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // If there is no minimum liquidity requirement or the coverage liquiditation threshold has been breached, there is no LT withdrawal restriction
         if (state.minLiquidityWAD == 0 || (state.coverageUtilizationWAD >= state.coverageLiquidationUtilizationWAD)) return state.ltRawNAV;
         // Compute the minimum market-making depth required to satisfy the market's liquidity requirement, rounding in favor of senior protection
-        NAV_UNIT requiredLTValue = state.stEffectiveNAV.mulDiv(state.minLiquidityWAD, WAD, Math.Rounding.Ceil);
-        // Compute the surplus depth that can be withdrawn while retaining minimum liquidity
         // Also account for ST's dust tolerance to preclude reverts due to rounding after LT redemptions
-        ltWithdrawableNAV = state.ltRawNAV.saturatingSub(requiredLTValue + _getRoycoDayAccountantStorage().stNAVDustTolerance);
+        NAV_UNIT requiredLTValue =
+            (state.stEffectiveNAV + _getRoycoDayAccountantStorage().stNAVDustTolerance).mulDiv(state.minLiquidityWAD, WAD, Math.Rounding.Ceil);
+        // Compute the surplus depth that can be withdrawn while retaining minimum liquidity
+        ltWithdrawableNAV = state.ltRawNAV.saturatingSub(requiredLTValue);
     }
 
     // =============================
@@ -514,7 +512,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
                 NAV_UNIT lastJTRawNAV = $.lastJTRawNAV;
 
                 // Decompose the last checkpointed senior claim into its self-backed portion (funded by ST's own raw NAV) and its cross-tranche portion (funded by JT's raw NAV)
-                // Only the two senior claims feed the PNL attribution below; the two junior claims the decomposition returns are discarded
+                // Only the two senior claims feed the PNL attribution below, the two junior claims the decomposition returns are discarded
                 (NAV_UNIT stClaimOnSTRawNAV, NAV_UNIT stClaimOnJTRawNAV,,) =
                     TrancheClaimsLogic._computeSTandJTClaimsOnRawNAVs(lastSTRawNAV, lastJTRawNAV, stEffectiveNAV, jtEffectiveNAV);
 
@@ -538,7 +536,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
 
             /// @dev STEP_APPLY_MARK_TO_MARKET: Mark the ST and JT NAVs to market via the PnL waterfall, based on their respective obligations to one another
             {
-                // The net JT gains — the JT protocol fee accrued is calculated using this NAV
+                // The net JT gains, the JT protocol fee accrued is calculated using this NAV
                 NAV_UNIT jtNetGain;
                 /// @dev STEP_APPLY_JT_LOSS: The JT assets depreciated in value
                 if (deltaJTEffectiveNAV < 0) {

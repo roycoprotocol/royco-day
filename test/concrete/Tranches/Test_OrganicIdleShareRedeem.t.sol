@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
-import { Operation } from "../../../src/libraries/Types.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
@@ -10,21 +9,24 @@ import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_OrganicIdleShareRedeem
- * @notice An in-kind LT redemption reverts INVALID_POST_OP_STATE when the BPT slice floors to zero while the idle
- *         premium ST-share slice is positive, reaching the triggering state entirely through public functions —
- *         no manual storage seeding or direct doPostOp calls (the companion coverage in Test_FeeAndLiquidityPremium
- *         builds the same state with the mock-kernel doPostOp).
+ * @notice An in-kind LT redemption whose BPT slice floors to zero while the idle premium ST-share slice is positive
+ *         reverts LIQUIDITY_REQUIREMENT_VIOLATED, not on the op-shape check. The same perpetual premium accrual that
+ *         stages the idle pile also drives the market liquidity-deficient, and a deficient market blocks every LT
+ *         redemption. The whole state is reached through public functions, no manual storage seeding or direct
+ *         doPostOp calls (the companion coverage in Test_FeeAndLiquidityPremium builds the same shape with the
+ *         mock-kernel doPostOp).
  * @dev How the organic state is reached:
  *      1. Venue slippage is armed (setVenueSlippageMode) so the reinvestment gate deterministically defers on
- *         every sync — the liquidity premium accrues as staged idle ST shares (kernel `ltOwnedSeniorTrancheShares`)
+ *         every sync, the liquidity premium accrues as staged idle ST shares (kernel `ltOwnedSeniorTrancheShares`)
  *         and NEVER deploys into BPT, so the pooled BPT count (`ltOwnedYieldBearingAssets`) is frozen at the seed.
  *      2. Senior yield is accrued and synced repeatedly. Each sync stages more idle premium AND mints a small LT
  *         protocol-fee share tranche against the (idle-inflated) LT effective NAV, so the LT share SUPPLY grows
  *         above the frozen BPT count while the idle ST-share pile grows even faster.
  *      3. Once `bptCount < ltSupply` (so a 1-share BPT slice floors to zero) and `idle >= ltSupply` (so a 1-share
- *         idle slice is >= 1 wei), redeeming a single LT share in-kind has deltaLTRawNAV == 0 and
- *         totalSTAndJTRedemptionNAV == 0 — the LT_REDEEM op-shape require (RoycoDayAccountant.sol:263) reverts,
- *         even though the redeemer was owed a positive slice of staged premium.
+ *         idle slice is >= 1 wei), redeeming a single LT share in-kind has deltaLTRawNAV == 0, a valid redemption
+ *         shape. The senior effective NAV grew while the pooled depth stayed frozen, so liquidity utilization has
+ *         drifted above its limit, and the post-op liquidity requirement rejects the redemption. The redeemer's
+ *         premium is not stranded, it waits until the market re-liquifies.
  */
 contract Test_OrganicIdleShareRedeem is DayMarketTestBase {
     uint256 internal stUnit;
@@ -51,7 +53,7 @@ contract Test_OrganicIdleShareRedeem is DayMarketTestBase {
         return kernel.getState().ltOwnedSeniorTrancheShares;
     }
 
-    function test_inKindLtRedeem_zeroBptSliceWithIdleShares_revertsInvalidPostOpState_organic() public {
+    function test_inKindLtRedeem_zeroBptSliceWithIdleShares_revertsLiquidityRequirement_organic() public {
         // Accrue senior yield and sync until the idle premium pile and the LT-fee-diluted supply overtake the
         // frozen BPT count. Big up-only yields keep the market PERPETUAL and make the LDM pay a large premium.
         uint256 supply;
@@ -87,11 +89,13 @@ contract Test_OrganicIdleShareRedeem is DayMarketTestBase {
         assertGe(idleSlice, 1, "the proportional idle ST-share slice must be positive");
         assertGe(liquidityTranche.balanceOf(LT_PROVIDER), 1, "the redeemer must hold the LT share it redeems");
 
-        // Redeeming that single LT share in-kind reverts: the op moves no marked NAV (zero BPT delta, zero
-        // ST/JT redemption), so the LT_REDEEM op-shape invariant rejects it — the staged premium is stranded on
-        // the in-kind path.
+        // Redeeming that single LT share in-kind reverts, but not on the op-shape invariant. The zero-delta
+        // senior-shares-only redemption is a valid shape (a redemption never grows the LT's deployed raw NAV), so it
+        // reaches the liquidity requirement, which the perpetual premium accrual has already driven past its limit:
+        // senior effective NAV climbed while the pooled depth stayed frozen. A liquidity-deficient market blocks every
+        // LT redemption, so the premium waits until the market re-liquifies rather than being stranded by the shape check
         vm.prank(LT_PROVIDER);
-        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_REDEEM));
+        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         liquidityTranche.redeem(1, LT_PROVIDER, LT_PROVIDER);
     }
 }

@@ -138,7 +138,7 @@ contract SetChainlinkOracle is ParameterUpdateBase {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @dev Decodes the calldata and asserts the kernel now returns the expected oracle + threshold.
-    function _verify(UpdateParams memory _params) internal pure override {
+    function _verify(UpdateParams memory _params) internal view override {
         (address expectedOracle, uint48 expectedStaleness,) = _decodeCallData(_params.callData);
 
         IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState memory state =

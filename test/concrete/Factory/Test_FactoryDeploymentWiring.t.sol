@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
-import { ADMIN_ROLE, ADMIN_FACTORY_ROLE, DEPLOYER_ROLE, SYNC_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { ADMIN_ENTRY_POINT_ROLE, ADMIN_ROLE, ADMIN_FACTORY_ROLE, DEPLOYER_ROLE, SYNC_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../../../src/interfaces/factory/IRoycoProtocolTemplate.sol";
@@ -60,6 +60,19 @@ contract Test_FactoryDeploymentWiring is Test {
     }
 
     // ---------------------------------------------------------------------
+    // initialize: the factory self-grants the roles its deployment path drives
+    // ---------------------------------------------------------------------
+
+    function test_Initialize_selfGrantsEntryPointAndSyncRoles() public view {
+        // The periphery configuration hook drives modifyTrancheConfigs (ADMIN_ENTRY_POINT_ROLE) and addMarketKernels
+        // (SYNC_ROLE) as the factory, so initialize must have granted the factory both roles on the AM
+        (bool holdsEntryPointRole,) = am.hasRole(ADMIN_ENTRY_POINT_ROLE, address(factory));
+        assertTrue(holdsEntryPointRole, "the factory must hold ADMIN_ENTRY_POINT_ROLE after initialize");
+        (bool holdsSyncRole,) = am.hasRole(SYNC_ROLE, address(factory));
+        assertTrue(holdsSyncRole, "the factory must hold SYNC_ROLE after initialize");
+    }
+
+    // ---------------------------------------------------------------------
     // ONLY_ACTIVE_TEMPLATE: the three primitives reject any caller outside an active-template window
     // ---------------------------------------------------------------------
 
@@ -95,6 +108,43 @@ contract Test_FactoryDeploymentWiring is Test {
         // The registry write landed for all three tranches.
         assertEq(factory.trancheToKernel(makeAddr("ST")), makeAddr("KERNEL"), "ST -> kernel registry write");
         assertEq(factory.trancheToKernel(makeAddr("LT")), makeAddr("KERNEL"), "LT -> kernel registry write");
+    }
+
+    // ---------------------------------------------------------------------
+    // configureMarketPeriphery: the active-template window spans the post-registration hook
+    // ---------------------------------------------------------------------
+
+    function test_Hook_wiringPrimitivesWorkInConfigureMarketPeriphery_afterRegistryWrite() public {
+        template.setMode(template.MODE_WIRE_IN_HOOK());
+        template.setWireConfig(WIRE_TARGET, WIRE_SELECTOR, SYNC_ROLE, WIRE_ACCOUNT);
+
+        factory.executeMarketDeployment(address(template), "");
+
+        // The hook ran with the window still open (the primitives succeeded) ...
+        assertEq(am.getTargetFunctionRole(WIRE_TARGET, WIRE_SELECTOR), SYNC_ROLE, "the hook must be able to bind selectors through the factory");
+        (bool member,) = am.hasRole(SYNC_ROLE, WIRE_ACCOUNT);
+        assertTrue(member, "the hook must be able to grant roles through the factory");
+        // ... and after the registry write, so hook-phase periphery config can validate tranche provenance.
+        assertEq(factory.trancheToKernel(makeAddr("ST")), makeAddr("KERNEL"), "the registry write must precede the hook");
+
+        // The window is closed once executeMarketDeployment returns.
+        vm.expectRevert(IRoycoFactory.ONLY_ACTIVE_TEMPLATE.selector);
+        factory.executeAsFactory(WIRE_TARGET, hex"deadbeef");
+    }
+
+    function test_Hook_directCallRejectedForNonFactoryCaller() public {
+        IRoycoProtocolTemplate.DeploymentResult memory result;
+        vm.expectRevert(abi.encodeWithSignature("ONLY_ROYCO_FACTORY()"));
+        template.configureMarketPeriphery(result, "");
+    }
+
+    function test_Hook_revertUnwindsRegistryWritesAtomically() public {
+        template.setMode(template.MODE_EXEC_FAIL_IN_HOOK());
+        vm.expectPartialRevert(IRoycoFactory.FACTORY_CALL_FAILED.selector);
+        factory.executeMarketDeployment(address(template), "");
+
+        // The registry writes that preceded the failing hook were unwound with the whole deployment.
+        assertEq(factory.trancheToKernel(makeAddr("ST")), address(0), "a hook revert must unwind the registry writes");
     }
 
     // ---------------------------------------------------------------------

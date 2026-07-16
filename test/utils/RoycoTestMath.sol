@@ -704,7 +704,8 @@ library RoycoTestMath {
      * @dev Mirrors src RoycoDayAccountant.maxLTWithdrawal.
      *      Bypasses (full ltRawNAV): minLiquidityWAD == 0, or coverageUtilizationWAD >= coverageLiquidationUtilizationWAD
      *      (liquidation breached, the comparison is >= so the exact threshold bypasses).
-     *      Rounding: Ceil on the required depth. Favors: senior (the max reads low).
+     *      Rounding: Ceil on the dust-padded required depth (the dust tolerance folds into the senior NAV before
+     *      scaling, mirroring the accountant). Favors: senior (the max reads low).
      * @param ltRawNAV The LT raw NAV at the synced marks
      * @param stEffectiveNAV The senior effective NAV at the synced marks
      * @param minLiquidityWAD The minimum liquidity fraction in WAD
@@ -726,8 +727,8 @@ library RoycoTestMath {
         returns (uint256 ltWithdrawable)
     {
         if (minLiquidityWAD == 0 || coverageUtilizationWAD >= coverageLiquidationUtilizationWAD) return ltRawNAV;
-        uint256 requiredLTValue = Math.mulDiv(stEffectiveNAV, minLiquidityWAD, WAD, Math.Rounding.Ceil);
-        ltWithdrawable = _sat(ltRawNAV, requiredLTValue + stDust);
+        uint256 requiredLTValue = Math.mulDiv(stEffectiveNAV + stDust, minLiquidityWAD, WAD, Math.Rounding.Ceil);
+        ltWithdrawable = _sat(ltRawNAV, requiredLTValue);
     }
 
     /**

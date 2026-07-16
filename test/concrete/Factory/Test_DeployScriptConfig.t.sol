@@ -9,6 +9,7 @@ import {
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
     ADMIN_BLACKLIST_ROLE,
     ADMIN_ENTRY_POINT_ROLE,
+    ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
     ADMIN_ORACLE_QUOTER_ROLE,
@@ -61,9 +62,9 @@ contract Test_DeployScriptConfig is Test {
      *         after grants have already landed. This test guarantees pass 2 can never hit that revert
      */
     function test_GetRoleConfig_ResolvesEveryGeneratedRoleAssignment() public view {
-        // 15 distinct dummy addresses, one per RoleAssignmentAddresses field (the struct's full address surface).
+        // 17 distinct dummy addresses, one per RoleAssignmentAddresses field (the struct's full address surface).
         // The fee recipient deliberately carries three LP roles (ST/JT/LT) and market ops carries the blacklist
-        // admin role alongside its own, which is how 15 addresses fan out to 18 assignments.
+        // admin role alongside its own, which is how 17 addresses fan out to 20 assignments.
         DeployScript.RoleAssignmentAddresses memory addresses = DeployScript.RoleAssignmentAddresses({
             pauserAddress: address(0x1001),
             unpauserAddress: address(0x1002),
@@ -79,15 +80,17 @@ contract Test_DeployScriptConfig is Test {
             deployerAdminAddress: address(0x100C),
             protocolFeeRecipientAddress: address(0x100D),
             balancerPoolManagerAddress: address(0x100E),
-            marketOpsAddress: address(0x100F)
+            marketOpsAddress: address(0x100F),
+            adminEntryPointAddress: address(0x1010),
+            entryPointFeeCollectorAddress: address(0x1011)
         });
 
         DeployScript.RoleAssignment[] memory assignments = deployScript.generateRolesAssignments(addresses);
 
-        // Independently derived count: the address surface is 15 fields, of which the fee recipient maps to the
-        // three LP roles, market ops maps to its own role plus the blacklist admin role, and the other 13 map
-        // one-to-one, so 13 + 3 + 2 = 18 assignments.
-        assertEq(assignments.length, 18, "one assignment per (role, assignee) pair: 13 one-to-one + 3 LP roles on the fee recipient + 2 on market ops");
+        // Independently derived count: the address surface is 17 fields, of which the fee recipient maps to the
+        // three LP roles, market ops maps to its own role plus the blacklist admin role, and the other 15 map
+        // one-to-one, so 15 + 3 + 2 = 20 assignments.
+        assertEq(assignments.length, 20, "one assignment per (role, assignee) pair: 15 one-to-one + 3 LP roles on the fee recipient + 2 on market ops");
 
         for (uint256 i; i < assignments.length; ++i) {
             uint64 role = assignments[i].role;
@@ -126,9 +129,9 @@ contract Test_DeployScriptConfig is Test {
 
         // The emitted role set itself, hand-listed from the deployment's operational surface (pause/unpause,
         // upgrade, sync, kernel/accountant/fee/quoter admin, LP admin + the three LP roles, guardian, deployer +
-        // its admin, Balancer pool manager, market ops + blacklist admin). Order-pinned so a silent drop or
-        // reorder is loud.
-        uint64[18] memory expectedRoles = [
+        // its admin, Balancer pool manager, market ops + blacklist admin, entry point config + fee collection).
+        // Order-pinned so a silent drop or reorder is loud.
+        uint64[20] memory expectedRoles = [
             ADMIN_PAUSER_ROLE,
             ADMIN_UPGRADER_ROLE,
             SYNC_ROLE,
@@ -146,7 +149,9 @@ contract Test_DeployScriptConfig is Test {
             LT_LP_ROLE,
             ADMIN_BALANCER_POOL_MANAGER_ROLE,
             ADMIN_MARKET_OPS_ROLE,
-            ADMIN_BLACKLIST_ROLE
+            ADMIN_BLACKLIST_ROLE,
+            ADMIN_ENTRY_POINT_ROLE,
+            ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE
         ];
         for (uint256 i; i < expectedRoles.length; ++i) {
             assertEq(assignments[i].role, expectedRoles[i], "generated role set diverged from the deployment role surface");
@@ -155,18 +160,15 @@ contract Test_DeployScriptConfig is Test {
 
     /**
      * @notice getRoleConfig must revert UNKNOWN_ROLE, carrying the queried id, for protocol roles that exist as
-     *         constants but have no admin/guardian mapping. BURNER_ROLE and ADMIN_ENTRY_POINT_ROLE are real role ids
-     *         (granted through other paths, never by this script), so a config that accidentally references one must
-     *         fail loudly at resolution time instead of silently defaulting to some admin, which would hand role
+     *         constants but have no admin/guardian mapping. BURNER_ROLE is a real role id (granted to each market's
+     *         kernel by the template, never by this script), so a config that accidentally references it must fail
+     *         loudly at resolution time instead of silently defaulting to some admin, which would hand role
      *         administration to an unintended party
      */
     function test_RevertIf_GetRoleConfigQueriedWithUnmappedRole() public {
         // The revert must carry the exact queried id so the operator can see WHICH role the config mis-references.
         vm.expectRevert(abi.encodeWithSelector(DeployScript.UNKNOWN_ROLE.selector, BURNER_ROLE));
         deployScript.getRoleConfig(BURNER_ROLE);
-
-        vm.expectRevert(abi.encodeWithSelector(DeployScript.UNKNOWN_ROLE.selector, ADMIN_ENTRY_POINT_ROLE));
-        deployScript.getRoleConfig(ADMIN_ENTRY_POINT_ROLE);
     }
 
     /**

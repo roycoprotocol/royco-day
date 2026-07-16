@@ -47,7 +47,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     /**
      * @notice The namespaced storage for the BalancerV3_LT_BPTOracle_Quoter
      * @custom:field bptOracle - The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity tranche assets
-     * @custom:field maxReinvestmentSlippageWAD - The maximum slippage tolerated when single-sided reinvesting the liquidity premium ST shares into the BPT, scaled to WAD precision — above this threshold the reinvestment defers to the auction fallback
+     * @custom:field maxReinvestmentSlippageWAD - The maximum slippage tolerated when single-sided reinvesting the liquidity premium ST shares into the BPT, scaled to WAD precision, above this threshold the reinvestment defers to the auction fallback
      */
     struct BalancerV3_LT_BPTOracle_QuoterState {
         address bptOracle;
@@ -89,6 +89,12 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     /// @notice Thrown when the BPT oracle prices a pool other than this market's registered liquidity tranche pool
     error BPT_ORACLE_POOL_MISMATCH();
 
+    /// @notice Thrown when the BPT oracle reverts while the vault is unlocked, which the venue reads it through (previews and hooks)
+    error BPT_ORACLE_CANNOT_REVERT_WHILE_VAULT_UNLOCKED();
+
+    /// @notice Thrown when a preview-mode venue callback returns instead of unwinding via its result-carrying revert
+    error PREVIEW_CANNOT_MUTATE_STATE();
+
     /// @notice Constructs the Balancer V3 liquidity tranche quoter
     /// @param _balancerV3Vault The instance of the singleton Balancer V3 Vault
     constructor(IVault _balancerV3Vault) VaultGuard(_balancerV3Vault) {
@@ -97,7 +103,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         // Ensure that the Balancer V3 Pool is registered with the vault
         require(_vault.isPoolRegistered(LT_ASSET), POOL_NOT_REGISTERED());
 
-        // Retrieve the constituent tokens of this kernel's Balancer V3 pool and ensure that their are exactly 2
+        // Retrieve the constituent tokens of this kernel's Balancer V3 pool and ensure that there are exactly 2
         IERC20[] memory tokens = _vault.getPoolTokens(LT_ASSET);
         require(tokens.length == 2, POOL_MUST_HAVE_TWO_TOKENS());
 
@@ -155,7 +161,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
      * @dev Within a synchronized operation the returned rate is the one the pre-op sync cached, so an inline senior share mint or burn (a multi-asset deposit or redemption) cannot transiently move the senior-leg mark before the matching effective NAV is committed
      * @dev Before the first sync of a transaction the cache is unset, so a standalone pool interaction or an off-chain read previews the fresh rate the next sync would resolve from committed state
      * @dev The rate is floored to a minimum of 1 wei so the pool never receives a zero rate, which it would reject
-     * @dev Before the senior tranche is seeded (zero ST supply) the rate resolves to that 1-wei floor rather than a neutral 1.0 — this is inert because with no ST shares in existence the pool's ST leg is empty, so the rate only ever scales a zero balance until the tranche is seeded
+     * @dev Before the senior tranche is seeded (zero ST supply) the rate resolves to that 1-wei floor rather than a neutral 1.0, this is inert because with no ST shares in existence the pool's ST leg is empty, so the rate only ever scales a zero balance until the tranche is seeded
      */
     function getRate() external view virtual override(IRateProvider) returns (uint256 rate) {
         // Query the cache for the ST share rate
@@ -184,26 +190,50 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
 
     /**
      * @inheritdoc IRoycoDayKernel
-     * @dev Routes the add through the Vault's query mode (`quote`) so it simulates the BPT minted without settling balances or moving tokens
+     * @dev Routes the add through the unlocked Vault so it simulates the BPT minted, and their valuation against the
+     *      post-add pool state, under the Vault's real semantics. The preview-mode callback unwinds every transient balance
+     *      change by reverting with the result decoded here, so the preview is callable inside a transaction (the Vault's
+     *      query mode is restricted to static calls)
      * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
      */
-    function previewAddLiquidity(uint256 _seniorShares, uint256 _quoteAssets) external override(IRoycoDayKernel) onlySelf returns (TRANCHE_UNIT ltAssets) {
-        bytes memory callbackReturnData = _vault.quote(abi.encodeCall(this.addBalancerV3Liquidity, (true, _seniorShares, _quoteAssets, ZERO_TRANCHE_UNITS)));
-        assembly ("memory-safe") {
-            ltAssets := mload(add(callbackReturnData, 0x20))
+    function previewAddLiquidity(
+        uint256 _seniorShares,
+        uint256 _quoteAssets
+    )
+        external
+        override(IRoycoDayKernel)
+        onlySelf
+        returns (TRANCHE_UNIT ltAssets, NAV_UNIT valueAllocated)
+    {
+        try _vault.unlock(abi.encodeCall(this.addBalancerV3Liquidity, (true, _seniorShares, _quoteAssets, ZERO_TRANCHE_UNITS))) {
+            // Unreachable: a preview-mode callback always unwinds via its result-carrying revert
+            revert PREVIEW_CANNOT_MUTATE_STATE();
+        } catch (bytes memory callbackRevertData) {
+            _validatePreviewResult(callbackRevertData, BalancerV3VenueLogic.PREVIEW_ADD_LIQUIDITY_RESULT.selector);
+            assembly ("memory-safe") {
+                ltAssets := mload(add(callbackRevertData, 0x24))
+                valueAllocated := mload(add(callbackRevertData, 0x44))
+            }
         }
     }
 
     /**
      * @inheritdoc IRoycoDayKernel
-     * @dev Routes the removal through the Vault's query mode (`quote`) so it simulates the constituents withdrawn without settling balances or moving tokens
+     * @dev Routes the removal through the unlocked Vault so it simulates the constituents withdrawn under the Vault's real
+     *      semantics. The preview-mode callback unwinds every transient balance change by reverting with the result decoded
+     *      here, so the preview is callable inside a transaction (the Vault's query mode is restricted to static calls)
      * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
      */
     function previewRemoveLiquidity(TRANCHE_UNIT _ltAssets) external override(IRoycoDayKernel) onlySelf returns (uint256 stShares, uint256 quoteAssets) {
-        bytes memory callbackReturnData = _vault.quote(abi.encodeCall(this.removeBalancerV3Liquidity, (true, _ltAssets, uint256(0), uint256(0), address(0))));
-        assembly ("memory-safe") {
-            stShares := mload(add(callbackReturnData, 0x20))
-            quoteAssets := mload(add(callbackReturnData, 0x40))
+        try _vault.unlock(abi.encodeCall(this.removeBalancerV3Liquidity, (true, _ltAssets, uint256(0), uint256(0), address(0)))) {
+            // Unreachable: a preview-mode callback always unwinds via its result-carrying revert
+            revert PREVIEW_CANNOT_MUTATE_STATE();
+        } catch (bytes memory callbackRevertData) {
+            _validatePreviewResult(callbackRevertData, BalancerV3VenueLogic.PREVIEW_REMOVE_LIQUIDITY_RESULT.selector);
+            assembly ("memory-safe") {
+                stShares := mload(add(callbackRevertData, 0x24))
+                quoteAssets := mload(add(callbackRevertData, 0x44))
+            }
         }
     }
 
@@ -343,10 +373,36 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         _setMaxReinvestmentSlippage(_maxReinvestmentSlippageWAD);
     }
 
+    // =============================
+    // Internal Utility Functions
+    // =============================
+
+    /// @inheritdoc RoycoDayKernel
+    /// @dev The Balancer V3 Vault escrows every pool's constituent assets, making the vault the custodian of the senior tranche shares backing the BPT
+    function _isTrancheShareCustodian(address _account) internal view virtual override(RoycoDayKernel) returns (bool) {
+        return (_account == address(_vault));
+    }
+
+    /**
+     * @dev Asserts that a caught preview revert carries the expected result, bubbling any genuine venue failure unchanged
+     * @param _callbackRevertData The revert data caught from the vault callback
+     * @param _expectedErrorSelector The expected preview result error selector
+     */
+    function _validatePreviewResult(bytes memory _callbackRevertData, bytes4 _expectedErrorSelector) internal pure {
+        assembly ("memory-safe") {
+            // Revert with any genuine, unexpected venue failure
+            if iszero(eq(shr(224, mload(add(_callbackRevertData, 0x20))), shr(224, _expectedErrorSelector))) {
+                revert(add(_callbackRevertData, 0x20), mload(_callbackRevertData))
+            }
+        }
+    }
+
     /// @notice Sets the new BPT oracle
     /// @param _bptOracle The new manipulation-resistant balancer pool token (BPT) oracle
     function _setBPTOracle(address _bptOracle) internal {
         require(address(LPOracleBase(_bptOracle).pool()) == LT_ASSET, BPT_ORACLE_POOL_MISMATCH());
+        // The venue reads the oracle while the vault is unlocked, so it must not revert on an unlocked vault
+        require(!LPOracleBase(_bptOracle).getShouldRevertIfVaultUnlocked(), BPT_ORACLE_CANNOT_REVERT_WHILE_VAULT_UNLOCKED());
         _getBalancerV3_LT_BPTOracle_QuoterStorage().bptOracle = _bptOracle;
         emit BPTOracleUpdated(_bptOracle);
     }
@@ -358,6 +414,10 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         _getBalancerV3_LT_BPTOracle_QuoterStorage().maxReinvestmentSlippageWAD = _maxReinvestmentSlippageWAD;
         emit MaxReinvestmentSlippageUpdated(_maxReinvestmentSlippageWAD);
     }
+
+    // =============================
+    // State Accessor Functions
+    // =============================
 
     /**
      * @notice Builds the immutables carrier threaded into the Balancer V3 venue's delegatecall logic library

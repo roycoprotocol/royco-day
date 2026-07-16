@@ -15,10 +15,10 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
 
     /// @dev Storage slot for IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState using ERC-7201 pattern
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant IDENTICAL_ASSETS_ST_JT_CHAINLINK_ORACLE_QUOTER_STORAGE_SLOT = 0x8e7ed06a76894329325a62f314422440f9b1abd4bff8ec1da566b06f1d6e5900;
+    bytes32 private constant IDENTICAL_ASSETS_ST_JT_CHAINLINK_ORACLE_QUOTER_STORAGE_SLOT = 0xb0795a7ad2e3ad817ec4fc7509f77aa60bf4acf71fcb8429fdf758cf457db600;
 
     /**
-     * @dev Storage state for the Royco identical assets chainlink oracle quoter
+     * @dev Storage state for the Royco identical assets Chainlink (compatible) oracle quoter
      * @custom:storage-location erc7201:Royco.storage.IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState
      * @custom:field oracle - The Chainlink (compatible) tranche asset to reference asset price oracle
      * @custom:field stalenessThresholdSeconds - The maximum age in seconds an oracle price may have before it is considered stale
@@ -32,7 +32,7 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
         uint48 gracePeriodSeconds;
     }
 
-    /// @notice Emitted when the identical assets chainlink oracle is updated
+    /// @notice Emitted when the identical assets Chainlink (compatible) oracle is updated
     event ChainlinkOracleUpdated(address indexed oracle, uint48 stalenessThresholdSeconds);
 
     /// @notice Emitted when the L2 sequencer uptime feed (and its grace period) used to gate price queries is updated
@@ -60,8 +60,8 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
     error INVALID_GRACE_PERIOD_SECONDS();
 
     /**
-     * @notice Initializes the identical assets chainlink oracle quoter
-     * @param _oracle The chainlink (compatible) oracle used to price an asset
+     * @notice Initializes the identical assets Chainlink (compatible) oracle quoter
+     * @param _oracle The Chainlink (compatible) oracle used to price an asset
      * @param _stalenessThresholdSeconds The staleness threshold in seconds
      * @param _sequencerUptimeFeed The L2 sequencer uptime feed to check before trusting the price (set to the null address to disable the check)
      * @param _gracePeriodSeconds The grace period in seconds that must elapse after the L2 sequencer is restored before trusting the price
@@ -105,17 +105,17 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
     }
 
     /**
-     * @notice Sets the chainlink oracle for pricing an asset
-     * @param _oracle The new chainlink (compatible) oracle for pricing an asset
+     * @notice Sets the Chainlink (compatible) oracle for pricing an asset
+     * @param _oracle The new Chainlink (compatible) oracle for pricing an asset
      * @param _stalenessThresholdSeconds The new staleness threshold seconds
-     * @param _syncBeforeUpdate Whether to sync the tranche accounting before updating the chainlink oracle
+     * @param _syncBeforeUpdate Whether to sync the tranche accounting before updating the Chainlink (compatible) oracle
      */
     function setChainlinkOracle(address _oracle, uint48 _stalenessThresholdSeconds, bool _syncBeforeUpdate) external restricted {
-        // If specified, sync the tranche accounting before updating the chainlink oracle
+        // If specified, sync the tranche accounting before updating the Chainlink (compatible) oracle
         if (_syncBeforeUpdate) _preOpSyncTrancheAccounting();
-        // Update the chainlink oracle
+        // Update the Chainlink (compatible) oracle
         _setChainlinkOracle(_oracle, _stalenessThresholdSeconds);
-        // Sync the tranche accounting after updating the chainlink oracle
+        // Sync the tranche accounting after updating the Chainlink (compatible) oracle
         _preOpSyncTrancheAccounting();
     }
 
@@ -129,13 +129,13 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
         _setSequencerUptimeFeed(_sequencerUptimeFeed, _gracePeriodSeconds);
     }
 
-    /// @dev Returns the chainlink oracle configuration for this quoter
-    function getChainlinkOracleConfiguration() external pure returns (IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState memory) {
+    /// @dev Returns the Chainlink (compatible) oracle configuration for this quoter
+    function getChainlinkOracleConfiguration() external view returns (IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState memory) {
         return _getIdenticalAssets_ST_JT_ChainlinkOracle_QuoterStorage();
     }
 
     /**
-     * @notice Queries the chainlink oracle for the price
+     * @notice Queries the Chainlink (compatible) oracle for the price
      * @dev The price is returned as the answer from the latest round
      * @return price The price from the latest round
      * @return precision The precision of the price
@@ -169,12 +169,12 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
     }
 
     /**
-     * @notice Sets the new chainlink oracle
+     * @notice Sets the new Chainlink (compatible) oracle
      * @param _oracle The new tranche asset to reference asset oracle
      * @param _stalenessThresholdSeconds The new staleness threshold seconds
      */
     function _setChainlinkOracle(address _oracle, uint48 _stalenessThresholdSeconds) internal {
-        // Oracle can be set to the null address since upstream contracts may use an admin set price with the chainlink oracle as a fallback
+        // Oracle can be set to the null address since upstream contracts may use an admin set price with the Chainlink (compatible) oracle as a fallback
         require(_oracle == address(0) || _stalenessThresholdSeconds > 0, INVALID_STALENESS_THRESHOLD_SECONDS());
 
         IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState storage $ = _getIdenticalAssets_ST_JT_ChainlinkOracle_QuoterStorage();

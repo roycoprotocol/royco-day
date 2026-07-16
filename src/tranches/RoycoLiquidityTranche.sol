@@ -3,13 +3,12 @@ pragma solidity ^0.8.28;
 
 import { IERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
-import { Math } from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
 import { IRoycoLiquidityTranche } from "../interfaces/IRoycoLiquidityTranche.sol";
 import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 import { ZERO_NAV_UNITS } from "../libraries/Constants.sol";
 import { AssetClaims, TrancheType } from "../libraries/Types.sol";
-import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../libraries/Units.sol";
+import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../libraries/Units.sol";
 import { ValuationLogic } from "../libraries/logic/ValuationLogic.sol";
 import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
 
@@ -21,6 +20,7 @@ import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
  */
 contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
     using SafeERC20 for IERC20;
+    using RoycoUnitsMath for uint256;
 
     /**
      * @notice Constructs the Royco liquidity tranche vault
@@ -103,7 +103,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
             _spendAllowance(_owner, msg.sender, _shares);
         }
 
-        // Orchestrate the multi-asset redemption in the kernel, bounding the removal's slippage by the caller's minimum senior shares and quote out — it transfers the assets directly to the receiver
+        // Orchestrate the multi-asset redemption in the kernel, bounding the removal's slippage by the caller's minimum senior shares and quote out, it transfers the assets directly to the receiver
         (stClaims, quoteAssets) = IRoycoDayKernel(KERNEL).ltRedeemMultiAsset(_shares, _minSTSharesOut, _minQuoteAssetsOut, _receiver);
 
         // Burn shares after the kernel processes the redemption (kernel depends on pre-burn total supply)
@@ -121,7 +121,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         // Simulate the kernel's multi-asset deposit for the value allocated, the pre-deposit LT effective NAV per share, and the LT supply the pre-op sync will have minted
         (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt,, uint256 ltTotalSupplyAfterMints) =
             IRoycoDayKernel(KERNEL).ltPreviewDepositMultiAsset(toTrancheUnits(_stAssets), _quoteAssets);
-        // Mint LT shares at the pre-deposit LT effective NAV per share against that post-sync supply — identical to depositMultiAsset's share math
+        // Mint LT shares at the pre-deposit LT effective NAV per share against that post-sync supply, identical to depositMultiAsset's share math
         shares = ValuationLogic._convertToShares(valueAllocated, navToMintSharesAt, ltTotalSupplyAfterMints, Math.Rounding.Floor);
     }
 
@@ -132,7 +132,25 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         override(IRoycoLiquidityTranche)
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
-        // Simulate the kernel's multi-asset redemption for the ST claims and quote assets the receiver would get — identical to redeemMultiAsset's outputs
+        // Simulate the kernel's multi-asset redemption for the ST claims and quote assets the receiver would get, identical to redeemMultiAsset's outputs
         (stClaims, quoteAssets) = IRoycoDayKernel(KERNEL).ltPreviewRedeemMultiAsset(_shares);
+    }
+
+    // =============================
+    // Multi-Asset Max Redeem Function
+    // =============================
+
+    /// @inheritdoc IRoycoLiquidityTranche
+    function maxRedeemMultiAsset(address _owner) external virtual override(IRoycoLiquidityTranche) returns (uint256 shares) {
+        uint256 sharesOwned = balanceOf(_owner);
+
+        // The liquidity tranche has claims only on its own RAW NAV
+        (NAV_UNIT claimOnLTNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees) =
+            IRoycoDayKernel(KERNEL).ltMaxWithdrawableMultiAsset(_owner);
+
+        // We do not allow redemptions if the tranche has no claims on the assets
+        if (claimOnLTNAV == ZERO_NAV_UNITS) return 0;
+
+        shares = Math.min(sharesOwned, totalTrancheSharesAfterMintingFees.mulDiv(ltMaxWithdrawableNAV, claimOnLTNAV, Math.Rounding.Floor));
     }
 }

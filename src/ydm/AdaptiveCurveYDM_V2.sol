@@ -12,10 +12,10 @@ import { BaseAdaptiveCurveYDM } from "./base/BaseAdaptiveCurveYDM.sol";
  * @dev It is parameterized purely by the utilization of that service, so the same contract prices any tranche-yield premium
  * @dev Utilization is the fraction of the capital pool's service capacity that is currently in use: the ratio of demand for the service the pool provides to the pool's capacity to supply it, scaled to WAD precision
  * @dev At zero utilization the service is unused and the capital is abundant, so it earns the least
- * @dev At WAD utilization demand equals the pool's full capacity — demand beyond capacity is reported above WAD and capped to WAD here
+ * @dev At WAD utilization demand equals the pool's full capacity, demand beyond capacity is reported above WAD and capped to WAD here
  * @dev The premium rises with utilization so scarcer service is paid more, pulling additional capital into the pool
  * @dev The curve is an adaptive piece-wise function parameterized by the utilization, static slopes, a per-instance target utilization (the kink) supplied at construction, and the yield share at the kink (Y_T)
- * @dev The curve adapts its yield share at the kink (Y_T) up or down based on the market's relative delta from the target utilization over time — the slopes above and below the target remain static, so only Y_T adapts, translating the curve vertically and providing fixed premiums/discounts to Y_T at each utilization level
+ * @dev The curve adapts its yield share at the kink (Y_T) up or down based on the market's relative delta from the target utilization over time, the slopes above and below the target remain static, so only Y_T adapts, translating the curve vertically and providing fixed premiums/discounts to Y_T at each utilization level
  */
 contract AdaptiveCurveYDM_V2 is BaseAdaptiveCurveYDM {
     /**
@@ -56,11 +56,21 @@ contract AdaptiveCurveYDM_V2 is BaseAdaptiveCurveYDM {
     event YdmAdaptedOutput(address indexed accountant, uint256 avgYieldShareWAD, uint256 newYieldShareAtTargetWAD);
 
     /**
-     * @notice Sets the per-instance target utilization (the kink) shared by every market this YDM serves
+     * @notice Sets the per-instance target utilization (the kink), the bounds on the adaptive yield share at target, and the boundary adaptation speed shared by every market this YDM serves
      * @dev Must be greater than zero so the curve regions are well defined when utilization is zero
      * @param _targetUtilizationWAD The target utilization (the kink) for this model, in the range (0, 100%], scaled to WAD precision
+     * @param _minYieldShareAtTargetWAD The minimum yield share at target utilization, in the range (0, _maxYieldShareAtTargetWAD], scaled to WAD precision
+     * @param _maxYieldShareAtTargetWAD The maximum yield share at target utilization, in the range [_minYieldShareAtTargetWAD, WAD], scaled to WAD precision
+     * @param _adaptationSpeedAtBoundaryWAD The speed at which the curve adapts per second at 0% and 100% utilization, in the range (0, MAX_ADAPTATION_SPEED_WAD], scaled to WAD precision
      */
-    constructor(uint256 _targetUtilizationWAD) BaseAdaptiveCurveYDM(_targetUtilizationWAD, 0.0001e18, WAD, 100e18 / uint256(365 days)) { }
+    constructor(
+        uint256 _targetUtilizationWAD,
+        uint256 _minYieldShareAtTargetWAD,
+        uint256 _maxYieldShareAtTargetWAD,
+        uint256 _adaptationSpeedAtBoundaryWAD
+    )
+        BaseAdaptiveCurveYDM(_targetUtilizationWAD, _minYieldShareAtTargetWAD, _maxYieldShareAtTargetWAD, _adaptationSpeedAtBoundaryWAD)
+    { }
 
     /**
      * @notice Initializes the YDM curve for a particular Royco market
@@ -71,11 +81,7 @@ contract AdaptiveCurveYDM_V2 is BaseAdaptiveCurveYDM {
      */
     function initializeYDMForMarket(uint64 _yieldShareAtZeroUtilWAD, uint64 _yieldShareAtTargetUtilWAD, uint64 _yieldShareAtFullUtilWAD) external {
         // Ensure that the YDM curve is valid
-        require(
-            _yieldShareAtTargetUtilWAD >= MIN_YIELD_SHARE_AT_TARGET_WAD && _yieldShareAtZeroUtilWAD <= _yieldShareAtTargetUtilWAD
-                && _yieldShareAtTargetUtilWAD <= _yieldShareAtFullUtilWAD && _yieldShareAtFullUtilWAD <= WAD,
-            INVALID_YDM_INITIALIZATION()
-        );
+        _validateYDMInitialization(_yieldShareAtZeroUtilWAD, _yieldShareAtTargetUtilWAD, _yieldShareAtFullUtilWAD);
 
         // Initialize the YDM curve for this market
         AdaptiveYieldCurve storage curve = accountantToCurve[msg.sender];
