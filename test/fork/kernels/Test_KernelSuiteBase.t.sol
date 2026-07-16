@@ -709,17 +709,6 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertSolvency();
     }
 
-    /// @notice Executes an in-kind LT deposit of `_bptAssets` for `_lp`, snapshotting around it.
-    function _doDepositLT(address _lp, uint256 _bptAssets) internal returns (OpReceipt memory r) {
-        r.pre = _snap(_actorArray(_lp));
-        vm.startPrank(_lp);
-        IERC20(POOL).approve(address(LT), _bptAssets);
-        r.shares = LT.deposit(toTrancheUnits(_bptAssets), _lp);
-        vm.stopPrank();
-        r.post = _snap(_actorArray(_lp));
-        _assertSolvency();
-    }
-
     /// @notice Executes a multi-asset LT deposit for `_lp` with exact approvals, snapshotting around it.
     function _doDepositLTMulti(address _lp, uint256 _stAssets, uint256 _quoteAssets, uint256 _minLTAssetsOut) internal returns (OpReceipt memory r) {
         r.pre = _snap(_actorArray(_lp));

@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
-import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { toUint256 } from "../../../src/libraries/Units.sol";
 import { MarketFuzzTestBase } from "../../utils/MarketFuzzTestBase.sol";
 
 /**

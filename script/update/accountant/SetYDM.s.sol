@@ -19,9 +19,6 @@ contract SetYDM is ParameterUpdateBase {
     // CONSTANTS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev AdaptiveCurveYDM_V2 singleton address (CREATE2, same on every chain we target)
-    address internal constant ADAPTIVE_CURVE_YDM_V2 = 0x00b01af1736C7d7646bd97fb6f0Dc96Bf57d0810;
-
     // ═══════════════════════════════════════════════════════════════════════════
     // TYPES
     // ═══════════════════════════════════════════════════════════════════════════

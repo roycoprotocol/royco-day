@@ -4,9 +4,7 @@ pragma solidity ^0.8.28;
 import { Test } from "../../lib/forge-std/src/Test.sol";
 import { Vm } from "../../lib/forge-std/src/Vm.sol";
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
-import { ERC1967Proxy } from "../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
-import { RoycoDayAccountant } from "../../src/accountant/RoycoDayAccountant.sol";
 import { ADMIN_UNPAUSER_ROLE, JT_LP_ROLE, ST_LP_ROLE } from "../../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoBlacklist } from "../../src/interfaces/IRoycoBlacklist.sol";
@@ -15,17 +13,9 @@ import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../../src/interfaces/IYDM.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
-import { RoycoJuniorTranche } from "../../src/tranches/RoycoJuniorTranche.sol";
-import { RoycoSeniorTranche } from "../../src/tranches/RoycoSeniorTranche.sol";
 import { Assertions } from "./Assertions.sol";
 
 abstract contract RoycoDayTestBase is Test, Assertions {
-    uint256 internal constant BPS = 0.0001e18;
-
-    /// @dev The target coverage utilization (the YDM curve kink) used by the JT risk-premium YDMs in tests (90%)
-    uint256 internal constant TARGET_COVERAGE_UTILIZATION_WAD = 0.9e18;
-    int256 internal constant TARGET_COVERAGE_UTILIZATION_WAD_INT = 0.9e18;
-
     struct TrancheState {
         NAV_UNIT rawNAV;
         NAV_UNIT effectiveNAV;
@@ -339,26 +329,11 @@ abstract contract RoycoDayTestBase is Test, Assertions {
         return provider;
     }
 
-    /// @notice Converts the specified assets denominated in JT's tranche units to the kernel's NAV units
-    /// @param _assets The assets denominated in JT's tranche units to convert to the kernel's NAV units
-    /// @return value The specified assets denominated in JT's tranche units converted to the kernel's NAV units
-    function _toJTValue(TRANCHE_UNIT _assets) internal view returns (NAV_UNIT) {
-        return KERNEL.jtConvertTrancheUnitsToNAVUnits(_assets);
-    }
-
     /// @notice Converts the specified assets denominated in ST's tranche units to the kernel's NAV units
     /// @param _assets The assets denominated in ST's tranche units to convert to the kernel's NAV units
     /// @return value The specified assets denominated in ST's tranche units converted to the kernel's NAV units
     function _toSTValue(TRANCHE_UNIT _assets) internal view returns (NAV_UNIT) {
         return KERNEL.stConvertTrancheUnitsToNAVUnits(_assets);
-    }
-
-    /// @notice Deploys a KERNEL using ERC1967 proxy
-    /// @param _kernelImplementation The implementation address
-    /// @param _kernelInitData The initialization data
-    /// @return KERNELProxy The deployed proxy address
-    function _deployKernel(address _kernelImplementation, bytes memory _kernelInitData) internal returns (address KERNELProxy) {
-        KERNELProxy = address(new ERC1967Proxy(_kernelImplementation, _kernelInitData));
     }
 
     /// @notice Returns the fork configuration
@@ -387,7 +362,9 @@ abstract contract RoycoDayTestBase is Test, Assertions {
                 deployerAdminAddress: DEPLOYER_ADMIN_ADDRESS,
                 protocolFeeRecipientAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS,
                 balancerPoolManagerAddress: KERNEL_ADMIN_ADDRESS,
-                marketOpsAddress: KERNEL_ADMIN_ADDRESS
+                marketOpsAddress: KERNEL_ADMIN_ADDRESS,
+                adminEntryPointAddress: KERNEL_ADMIN_ADDRESS,
+                entryPointFeeCollectorAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS
             })
         );
     }
@@ -401,59 +378,5 @@ abstract contract RoycoDayTestBase is Test, Assertions {
         KERNEL.syncTrancheAccounting();
     }
 
-    /// @notice Schedules and executes a kernel admin operation (handles delay)
-    /// @param _target The target contract address
-    /// @param _data The calldata for the operation
-    function _executeKernelAdminOperation(address _target, bytes memory _data) internal {
-        // Schedule the operation
-        vm.prank(KERNEL_ADMIN_ADDRESS);
-        ACCESS_MANAGER.schedule(_target, _data, 0);
-
-        // Warp past the delay (2 days for ADMIN_KERNEL_ROLE)
-        vm.warp(block.timestamp + 2 days + 1);
-
-        // Execute the operation
-        vm.prank(KERNEL_ADMIN_ADDRESS);
-        ACCESS_MANAGER.execute(_target, _data);
-    }
-
-    /// @notice Schedules and executes an accountant admin operation (handles delay)
-    /// @param _target The target contract address
-    /// @param _data The calldata for the operation
-    function _executeAccountantAdminOperation(address _target, bytes memory _data) internal {
-        // Schedule the operation
-        vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        ACCESS_MANAGER.schedule(_target, _data, 0);
-
-        // Warp past the delay (2 days for ADMIN_ACCOUNTANT_ROLE)
-        vm.warp(block.timestamp + 2 days + 1);
-
-        // Execute the operation
-        vm.prank(ACCOUNTANT_ADMIN_ADDRESS);
-        ACCESS_MANAGER.execute(_target, _data);
-    }
-
-    /// @notice Schedules and executes a protocol fee setter operation (handles delay)
-    /// @param _target The target contract address
-    /// @param _data The calldata for the operation
-    function _executeProtocolFeeSetterOperation(address _target, bytes memory _data) internal {
-        // Schedule the operation
-        vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
-        ACCESS_MANAGER.schedule(_target, _data, 0);
-
-        // Warp past the delay (2 days for ADMIN_PROTOCOL_FEE_SETTER_ROLE)
-        vm.warp(block.timestamp + 2 days + 1);
-
-        // Execute the operation
-        vm.prank(PROTOCOL_FEE_SETTER_ADDRESS);
-        ACCESS_MANAGER.execute(_target, _data);
-    }
-
-    /// @notice Sets the protocol fee recipient via kernel admin (with scheduling)
-    /// @param _newRecipient The new protocol fee recipient address
-    function _setProtocolFeeRecipient(address _newRecipient) internal {
-        bytes memory data = abi.encodeCall(KERNEL.setProtocolFeeRecipient, (_newRecipient));
-        _executeKernelAdminOperation(address(KERNEL), data);
-    }
 
 }

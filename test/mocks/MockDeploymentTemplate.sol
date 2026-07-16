@@ -49,4 +49,8 @@ contract MockDeploymentTemplate is BaseDeploymentTemplate {
         }
         result = _result;
     }
+
+    /// @inheritdoc BaseDeploymentTemplate
+    /// @dev No periphery to configure for the canned-result mock
+    function _configureMarketPeriphery(IRoycoProtocolTemplate.DeploymentResult calldata, bytes calldata) internal override(BaseDeploymentTemplate) { }
 }

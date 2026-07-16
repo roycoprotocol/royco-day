@@ -6,10 +6,12 @@ import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/ac
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { Initializable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import { RoycoDayEntryPoint } from "../../../src/entrypoint/RoycoDayEntryPoint.sol";
+import { ADMIN_ENTRY_POINT_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { TrancheType } from "../../../src/libraries/Types.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
+import { MockRoycoFactory } from "../../mocks/MockRoycoFactory.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
 import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
@@ -38,16 +40,18 @@ contract Test_EntryPointConstructionAndAdmin is EntryPointTestBase {
         new RoycoDayEntryPoint(address(0));
     }
 
-    function test_initialize_wiresAuthorityFactoryAndConfigs() public view {
+    function test_initialize_wiresAuthorityAndFactory_initialConfigsArriveThroughFactory() public view {
         assertEq(entryPoint.ROYCO_FACTORY(), address(entryPointFactory), "the factory must be the constructor-set immutable");
         assertEq(IAccessManaged(address(entryPoint)).authority(), address(accessManager), "the authority must be the factory's ROYCO_AUTHORITY");
 
-        // The initial tranche configs must be enriched with the tranche's asset, kernel, and type
+        // The fixture initializes the entry point empty and routes the initial configs through the factory
+        // (mirroring production market deployments); the stored configs must be enriched with the tranche's
+        // asset, kernel, and type
         IRoycoDayEntryPoint.EnrichedTrancheConfig memory config = entryPoint.getTrancheConfig(address(liquidityTranche));
         assertEq(config.asset, address(bpt), "the LT config must cache the tranche asset");
         assertEq(config.kernel, address(kernel), "the LT config must cache the market kernel");
         assertEq(uint8(config.trancheType), uint8(TrancheType.LIQUIDITY), "the LT config must cache the tranche type");
-        assertTrue(config.baseConfig.enabled, "the LT must be enabled at initialization");
+        assertTrue(config.baseConfig.enabled, "the LT must be enabled by the factory-routed initial configuration");
     }
 
     function test_initialize_cannotBeReinitialized() public {
@@ -98,6 +102,35 @@ contract Test_EntryPointConstructionAndAdmin is EntryPointTestBase {
         IRoycoDayEntryPoint.EnrichedTrancheConfig memory stored = entryPoint.getTrancheConfig(tranches[0]);
         assertEq(stored.baseConfig.depositDelaySeconds, 2 hours, "the delay update must be stored");
         assertFalse(stored.baseConfig.enabled, "the enable flag update must be stored");
+    }
+
+    // ---------------------------------------------------------------------
+    // Factory-routed configuration
+    // ---------------------------------------------------------------------
+
+    function test_factoryRoute_modifyTrancheConfigs_succeeds() public {
+        // The factory (holding ADMIN_ENTRY_POINT_ROLE) can apply config changes, as production deployments do
+        (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
+        configs[1].redemptionDelaySeconds = 3 hours;
+        entryPointFactory.executeAsFactory(address(entryPoint), abi.encodeCall(IRoycoDayEntryPoint.modifyTrancheConfigs, (tranches, configs)));
+
+        assertEq(
+            entryPoint.getTrancheConfig(tranches[1]).baseConfig.redemptionDelaySeconds, 3 hours, "the factory-routed config update must be stored"
+        );
+    }
+
+    function test_factoryRoute_revertsWhenFactoryLacksRole() public {
+        // Without ADMIN_ENTRY_POINT_ROLE the factory's forwarded call fails the entry point's access check
+        accessManager.revokeRole(ADMIN_ENTRY_POINT_ROLE, address(entryPointFactory));
+
+        (address[] memory tranches, IRoycoDayEntryPoint.TrancheConfig[] memory configs) = _defaultTrancheConfigs();
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                MockRoycoFactory.FACTORY_CALL_FAILED.selector,
+                abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(entryPointFactory))
+            )
+        );
+        entryPointFactory.executeAsFactory(address(entryPoint), abi.encodeCall(IRoycoDayEntryPoint.modifyTrancheConfigs, (tranches, configs)));
     }
 
     // ---------------------------------------------------------------------

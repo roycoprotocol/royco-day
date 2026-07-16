@@ -6,7 +6,7 @@ import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoSeniorTranche } from "../../interfaces/IRoycoSeniorTranche.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
 import { Cache, CacheKey } from "../Cache.sol";
-import { WAD, ZERO_NAV_UNITS } from "../Constants.sol";
+import { ZERO_NAV_UNITS } from "../Constants.sol";
 import { SyncedAccountingState } from "../Types.sol";
 import { Math, NAV_UNIT, toUint256 } from "../Units.sol";
 import { ValuationLogic } from "./ValuationLogic.sol";

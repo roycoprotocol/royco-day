@@ -136,6 +136,18 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
         return _getInitializedVersion() > 0;
     }
 
+    /// @inheritdoc IRoycoProtocolTemplate
+    function configureMarketPeriphery(DeploymentResult calldata _result, bytes calldata _params) external override(IRoycoProtocolTemplate) onlyRoycoFactory {
+        _configureMarketPeriphery(_result, _params);
+    }
+
+    /**
+     * @notice Configures pre-deployed periphery singletons for a just-deployed market.
+     * @param _result The market's deployment result, as returned by `deployMarket`
+     * @param _params The same ABI-encoded template-specific params passed to `deployMarket`
+     */
+    function _configureMarketPeriphery(DeploymentResult calldata _result, bytes calldata _params) internal virtual;
+
     // ═══════════════════════════════════════════════════════════════════════════
     // SALT DERIVATION
     // ═══════════════════════════════════════════════════════════════════════════

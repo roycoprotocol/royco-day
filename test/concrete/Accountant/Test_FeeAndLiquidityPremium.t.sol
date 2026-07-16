@@ -2,10 +2,9 @@
 pragma solidity ^0.8.28;
 
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
 import { Operation, SyncedAccountingState } from "../../../src/libraries/Types.sol";
-import { NAV_UNIT, toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { FeeAndLiquidityPremiumLogic } from "../../../src/libraries/logic/FeeAndLiquidityPremiumLogic.sol";
 import { ValuationLogic } from "../../../src/libraries/logic/ValuationLogic.sol";
 import { FeeAndLiquidityPremiumHarness } from "../../mocks/FeeAndLiquidityPremiumHarness.sol";

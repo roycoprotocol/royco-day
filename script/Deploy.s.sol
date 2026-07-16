@@ -3,13 +3,18 @@ pragma solidity ^0.8.28;
 
 import { ILPOracleFactoryBase } from "../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleFactoryBase.sol";
 import { GyroECLPPoolFactory } from "../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
+import { UUPSUpgradeable } from "../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { AccessManager } from "../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
+import { RoycoMarketSyncer } from "../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { RoycoDayAccountant } from "../src/accountant/RoycoDayAccountant.sol";
 import { RoycoBlacklist } from "../src/auth/RoycoBlacklist.sol";
+import { RoycoDayEntryPoint } from "../src/entrypoint/RoycoDayEntryPoint.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
     ADMIN_BLACKLIST_ROLE,
+    ADMIN_ENTRY_POINT_ROLE,
+    ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE,
     ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
@@ -25,6 +30,7 @@ import {
     JT_LP_ROLE,
     LP_ROLE_ADMIN_ROLE,
     LT_LP_ROLE,
+    PUBLIC_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
 } from "../src/factory/RolesConfiguration.sol";
@@ -32,7 +38,6 @@ import { RoycoFactory } from "../src/factory/RoycoFactory.sol";
 import {
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
 } from "../src/factory/templates/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
-import { BaseDeploymentTemplate } from "../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import {
     COMPONENT_ID_ACCOUNTANT_IMPL,
     COMPONENT_ID_DAY_BALANCER_HOOKS,
@@ -45,7 +50,9 @@ import {
     COMPONENT_ID_YDM_STATIC_CURVE
 } from "../src/factory/templates/base/Components.sol";
 import { BalancerV3_GyroECLP_LT_DeploymentTemplate } from "../src/factory/templates/liquidity-tranche/BalancerV3_GyroECLP_LT_DeploymentTemplate.sol";
+import { IRoycoAuth } from "../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../src/interfaces/IRoycoDayAccountant.sol";
+import { IRoycoDayEntryPoint } from "../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../src/interfaces/IRoycoVaultTranche.sol";
 import { IYDM } from "../src/interfaces/IYDM.sol";
@@ -90,6 +97,10 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     bytes32 constant FACTORY_PROXY_SALT = keccak256("ROYCO_FACTORY_PROXY_V2");
     bytes32 constant BLACKLIST_IMPL_SALT = keccak256("ROYCO_BLACKLIST_IMPLEMENTATION_V2");
     bytes32 constant BLACKLIST_PROXY_SALT = keccak256("ROYCO_BLACKLIST_PROXY_V2");
+    bytes32 constant ENTRY_POINT_IMPL_SALT = keccak256("ROYCO_DAY_ENTRY_POINT_IMPLEMENTATION_V2");
+    bytes32 constant ENTRY_POINT_PROXY_SALT = keccak256("ROYCO_DAY_ENTRY_POINT_PROXY_V2");
+    bytes32 constant SYNCER_IMPL_SALT = keccak256("ROYCO_MARKET_SYNCER_IMPLEMENTATION_V2");
+    bytes32 constant SYNCER_PROXY_SALT = keccak256("ROYCO_MARKET_SYNCER_PROXY_V2");
 
     bool ENABLE_LOGGING = false;
 
@@ -152,6 +163,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         IRoycoDayAccountant accountant;
         IRoycoDayKernel kernel;
         address roycoBlacklist;
+        address entryPoint;
+        address marketSyncer;
     }
 
     /// @notice Addresses for role assignments
@@ -171,6 +184,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         address protocolFeeRecipientAddress;
         address balancerPoolManagerAddress;
         address marketOpsAddress;
+        address adminEntryPointAddress;
+        address entryPointFeeCollectorAddress;
     }
 
     /// @notice A single role assignment applied to the AccessManager.
@@ -211,7 +226,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
                 deployerAdminAddress: chainConfig.deployerAdminAddress,
                 protocolFeeRecipientAddress: chainConfig.protocolFeeRecipient,
                 balancerPoolManagerAddress: chainConfig.balancerPoolManagerAddress,
-                marketOpsAddress: chainConfig.marketOpsAddress
+                marketOpsAddress: chainConfig.marketOpsAddress,
+                adminEntryPointAddress: chainConfig.adminEntryPointAddress,
+                entryPointFeeCollectorAddress: chainConfig.entryPointFeeCollectorAddress
             })
         );
 
@@ -242,7 +259,15 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         address deployer = vm.addr(_deployerPrivateKey);
 
         // 1. Stand up the AccessManager + factory (idempotent within a test via CREATE2).
-        (AccessManager accessManager, RoycoFactory factory) = _deployAccessManagerAndFactory(deployer, _factoryAdmin, _roleAssignments);
+        (AccessManager accessManager, RoycoFactory factory, bool amExisted) = _deployAccessManagerAndFactory(deployer);
+
+        // 1.5. Deploy (or reuse) the periphery singletons (entry point + market syncer) the template configures per
+        //      market. Runs BEFORE the role graph is applied: the entry point's LP role grants require the LP roles'
+        //      admin to still be ADMIN_ROLE (held by the deployer), and pass 2 of the role graph re-points it.
+        (address entryPoint, address marketSyncer) = _deployPeripherySingletons(accessManager, address(factory));
+
+        // 1.75. Apply the role graph (grants + admin/guardian re-pointing) on a freshly deployed AccessManager.
+        if (!amExisted) _applyRoleGraph(accessManager, _factoryAdmin, deployer, _roleAssignments);
 
         // 2. Deploy (or reuse) the chain's shared blacklist (governed by the AccessManager, not the factory).
         address roycoBlacklist = _deployBlacklist(address(accessManager));
@@ -256,7 +281,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         }
 
         // 3. Register (or reuse) the Day template for this kernel type.
-        address template = _getOrRegisterTemplate(factory, _config.kernelType);
+        address template = _getOrRegisterTemplate(factory, _config.kernelType, entryPoint, marketSyncer);
 
         // 4. Deploy the market via the template.
         bytes32 marketId = keccak256(abi.encode(_config.seniorTrancheName, _config.juniorTrancheName, block.timestamp, block.chainid));
@@ -277,13 +302,15 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             juniorTranche: IRoycoVaultTranche(r.juniorTranche),
             accountant: IRoycoDayAccountant(r.accountant),
             kernel: IRoycoDayKernel(r.kernel),
-            roycoBlacklist: roycoBlacklist
+            roycoBlacklist: roycoBlacklist,
+            entryPoint: entryPoint,
+            marketSyncer: marketSyncer
         });
     }
 
     /// @notice Builds the role assignments applied to the AccessManager (surface-compatible with the legacy helper).
     function generateRolesAssignments(RoleAssignmentAddresses memory _addresses) public pure returns (RoleAssignment[] memory roleAssignments) {
-        roleAssignments = new RoleAssignment[](18);
+        roleAssignments = new RoleAssignment[](20);
         roleAssignments[0] = _assignment(ADMIN_PAUSER_ROLE, _addresses.pauserAddress);
         roleAssignments[1] = _assignment(ADMIN_UPGRADER_ROLE, _addresses.upgraderAddress);
         roleAssignments[2] = _assignment(SYNC_ROLE, _addresses.syncRoleAddress);
@@ -304,6 +331,10 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         // The dedicated blacklist-management role (gates blacklistAccounts/unblacklistAccounts/setSanctionsList on
         // the shared RoycoBlacklist) is granted to the market-ops admin.
         roleAssignments[17] = _assignment(ADMIN_BLACKLIST_ROLE, _addresses.marketOpsAddress);
+        // The entry point's config and fee-collection admin roles (the factory also self-grants the config role in
+        // its initialize, the per-market template auto-configure path).
+        roleAssignments[18] = _assignment(ADMIN_ENTRY_POINT_ROLE, _addresses.adminEntryPointAddress);
+        roleAssignments[19] = _assignment(ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE, _addresses.entryPointFeeCollectorAddress);
     }
 
     function _assignment(uint64 _role, address _assignee) private pure returns (RoleAssignment memory) {
@@ -331,6 +362,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (role == ADMIN_BALANCER_POOL_MANAGER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_MARKET_OPS_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_BLACKLIST_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == ADMIN_ENTRY_POINT_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         revert UNKNOWN_ROLE(role);
     }
 
@@ -338,18 +371,13 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     // INTERNAL: ACCESS MANAGER + FACTORY
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Deploys (or reuses) the standalone AccessManager + the template-driven factory, and wires the role graph.
-    function _deployAccessManagerAndFactory(
-        address _deployer,
-        address _factoryAdmin,
-        RoleAssignment[] memory _roleAssignments
-    )
-        internal
-        returns (AccessManager accessManager, RoycoFactory factory)
-    {
+    /// @notice Deploys (or reuses) the standalone AccessManager + the template-driven factory.
+    /// @dev The role graph is applied by the caller (when `amExisted` is false) AFTER the periphery singletons are
+    ///      deployed, so grants that require default (ADMIN_ROLE) role admins can land before pass 2 re-points them.
+    function _deployAccessManagerAndFactory(address _deployer) internal returns (AccessManager accessManager, RoycoFactory factory, bool amExisted) {
         // Deploy the AccessManager with the deployer as the initial admin so it can wire roles during this broadcast.
-        (address amAddr, bool amExisted) =
-            deployWithSanityChecks(ACCESS_MANAGER_SALT, abi.encodePacked(type(AccessManager).creationCode, abi.encode(_deployer)), false);
+        address amAddr;
+        (amAddr, amExisted) = deployWithSanityChecks(ACCESS_MANAGER_SALT, abi.encodePacked(type(AccessManager).creationCode, abi.encode(_deployer)), false);
         accessManager = AccessManager(amAddr);
 
         // Predict the factory proxy address so we can grant it ADMIN_ROLE before its constructor runs `initialize`.
@@ -368,7 +396,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         (address factoryProxy,) = deployWithSanityChecks(FACTORY_PROXY_SALT, factoryProxyCreationCode, false);
         require(factoryProxy == predictedFactory, "factory address mismatch");
         factory = RoycoFactory(factoryProxy);
-        if (!amExisted) _applyRoleGraph(accessManager, _factoryAdmin, _deployer, _roleAssignments);
     }
 
     /// @notice Applies role admins/guardians/grants on the AccessManager (mirrors the legacy factory.initialize role setup).
@@ -402,14 +429,22 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Deploys + registers (or returns the cached) Day template for a kernel type.
-    function _getOrRegisterTemplate(RoycoFactory _factory, KernelType _kernelType) internal returns (address template) {
+    function _getOrRegisterTemplate(
+        RoycoFactory _factory,
+        KernelType _kernelType,
+        address _entryPoint,
+        address _marketSyncer
+    )
+        internal
+        returns (address template)
+    {
         template = kernelTypeToTemplate[uint256(_kernelType)];
         if (template != address(0)) return template;
 
         IRoycoFactory factoryIface = IRoycoFactory(address(_factory));
         bytes32 kernelComponentId;
         bytes memory kernelCreationCode;
-        (template, kernelComponentId, kernelCreationCode) = _deployTemplate(factoryIface, _kernelType);
+        (template, kernelComponentId, kernelCreationCode) = _deployTemplate(factoryIface, _kernelType, _entryPoint, _marketSyncer);
 
         (bytes32[] memory ids, bytes[] memory codes) = _dayTemplateComponents(kernelComponentId, kernelCreationCode);
         IBaseTemplate(template).initialize(ids, codes);
@@ -474,13 +509,16 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     /// @notice Deploys the concrete Day template for a kernel type and returns its kernel component id + creation code.
     function _deployTemplate(
         IRoycoFactory _factory,
-        KernelType _kernelType
+        KernelType _kernelType,
+        address _entryPoint,
+        address _marketSyncer
     )
         internal
         returns (address template, bytes32 kernelComponentId, bytes memory kernelCreationCode)
     {
-        // The concrete Balancer-V3 templates are constructed with the chain's Gyro E-CLP pool factory and Balancer's
-        // E-CLP LP oracle factory (through which the template deploys each market's BPT oracle).
+        // The concrete Balancer-V3 templates are constructed with the chain's Gyro E-CLP pool factory, Balancer's
+        // E-CLP LP oracle factory (through which the template deploys each market's BPT oracle), and the pre-deployed
+        // periphery singletons (entry point + market syncer) the template configures for each deployed market.
         ChainConfig memory chainConfig = getChainConfig(block.chainid);
         GyroECLPPoolFactory poolFactory = GyroECLPPoolFactory(chainConfig.gyroECLPPoolFactory);
         ILPOracleFactoryBase eclpLPOracleFactory = ILPOracleFactoryBase(chainConfig.eclpLPOracleFactory);
@@ -488,7 +526,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (_kernelType == KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel) {
             return (
                 address(
-                    new Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(_factory, poolFactory, eclpLPOracleFactory)
+                    new Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
+                        _factory, poolFactory, eclpLPOracleFactory, _entryPoint, _marketSyncer
+                    )
                 ),
                 COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK,
                 type(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode
@@ -558,6 +598,10 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         params.stSelfLiquidationBonusWAD = _config.stSelfLiquidationBonusWAD;
         params.roycoBlacklist = _roycoBlacklist;
         params.enforceVaultSharesTransferWhitelist = _config.enforceVaultSharesTransferWhitelist;
+        // Per-tranche entry point configs applied by the template (via the factory) after the market is deployed.
+        params.entryPointTrancheConfigs = BalancerV3_GyroECLP_LT_DeploymentTemplate.EntryPointTrancheConfigs({
+            st: _config.stEntryPointConfig, jt: _config.jtEntryPointConfig, lt: _config.ltEntryPointConfig
+        });
     }
 
     /// @notice Builds YDM initialization data based on YDM type.
@@ -626,6 +670,91 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     // ═══════════════════════════════════════════════════════════════════════════
     // INTERNAL: BLACKLIST + HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Deploys (or returns) the chain's periphery singletons via CREATE2: the Royco Day entry point and the
+    ///         Royco market syncer, both deployed before any market and configured for each market by the template.
+    /// @dev The entry point initializes with empty config arrays: every market's initial tranche configs flow through
+    ///      the factory (which holds ADMIN_ENTRY_POINT_ROLE) at market deployment. The syncer initializes with no
+    ///      kernels: the factory (which holds SYNC_ROLE) registers each market's kernel at deployment.
+    /// @param _accessManager The AccessManager governing both singletons' restricted functions.
+    /// @param _factory The Royco factory baked into the entry point's provenance validation.
+    function _deployPeripherySingletons(AccessManager _accessManager, address _factory) internal returns (address entryPoint, address marketSyncer) {
+        // Deploy the entry point implementation + proxy, initialized with no tranche configs.
+        (address entryPointImpl,) =
+            deployWithSanityChecks(ENTRY_POINT_IMPL_SALT, abi.encodePacked(type(RoycoDayEntryPoint).creationCode, abi.encode(_factory)), false);
+        bytes memory entryPointInitData = abi.encodeCall(RoycoDayEntryPoint.initialize, (new address[](0), new IRoycoDayEntryPoint.TrancheConfig[](0)));
+        bool entryPointExisted;
+        (entryPoint, entryPointExisted) = deployWithSanityChecks(ENTRY_POINT_PROXY_SALT, getERC1967ProxyCreationCode(entryPointImpl, entryPointInitData), false);
+
+        // Deploy the market syncer implementation + proxy, initialized with no registered kernels.
+        (address syncerImpl,) = deployWithSanityChecks(SYNCER_IMPL_SALT, type(RoycoMarketSyncer).creationCode, false);
+        bytes memory syncerInitData = abi.encodeCall(RoycoMarketSyncer.initialize, (address(_accessManager), new address[](0)));
+        bool syncerExisted;
+        (marketSyncer, syncerExisted) = deployWithSanityChecks(SYNCER_PROXY_SALT, getERC1967ProxyCreationCode(syncerImpl, syncerInitData), false);
+
+        // Wire each singleton's full role surface on first deployment. Runs before the role graph re-points any
+        // role admins, so the LP role grants below can be made by the deployer (ADMIN_ROLE).
+        if (!entryPointExisted) _wireEntryPointRoles(_accessManager, entryPoint);
+        if (!syncerExisted) _wireSyncerRoles(_accessManager, marketSyncer);
+    }
+
+    /// @notice Binds the entry point's selectors to their roles and grants it the tranche LP roles.
+    /// @dev Mirrors the production access model: LP request/execute/cancel selectors are public (user compliance is
+    ///      enforced by the tranches), config is ADMIN_ENTRY_POINT_ROLE-gated (held by the factory + admin multisig),
+    ///      fee collection has its own role, and pause/unpause/upgrade follow the protocol-wide roles.
+    function _wireEntryPointRoles(AccessManager _accessManager, address _entryPoint) internal {
+        bytes4[] memory lpSelectors = new bytes4[](11);
+        lpSelectors[0] = IRoycoDayEntryPoint.requestDeposit.selector;
+        lpSelectors[1] = IRoycoDayEntryPoint.executeDeposit.selector;
+        lpSelectors[2] = IRoycoDayEntryPoint.executeDeposits.selector;
+        lpSelectors[3] = IRoycoDayEntryPoint.cancelDepositRequest.selector;
+        lpSelectors[4] = IRoycoDayEntryPoint.cancelDepositRequests.selector;
+        lpSelectors[5] = IRoycoDayEntryPoint.requestRedemption.selector;
+        lpSelectors[6] = IRoycoDayEntryPoint.executeRedemption.selector;
+        lpSelectors[7] = IRoycoDayEntryPoint.executeRedemptions.selector;
+        lpSelectors[8] = IRoycoDayEntryPoint.cancelRedemptionRequest.selector;
+        lpSelectors[9] = IRoycoDayEntryPoint.cancelRedemptionRequests.selector;
+        lpSelectors[10] = IRoycoDayEntryPoint.pokeOracleClock.selector;
+        _accessManager.setTargetFunctionRole(_entryPoint, lpSelectors, PUBLIC_ROLE);
+
+        _accessManager.setTargetFunctionRole(_entryPoint, _sel(IRoycoDayEntryPoint.modifyTrancheConfigs.selector), ADMIN_ENTRY_POINT_ROLE);
+        _accessManager.setTargetFunctionRole(_entryPoint, _sel(IRoycoDayEntryPoint.collectProtocolFees.selector), ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE);
+        _accessManager.setTargetFunctionRole(_entryPoint, _sel(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
+        _accessManager.setTargetFunctionRole(_entryPoint, _sel(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
+        _accessManager.setTargetFunctionRole(_entryPoint, _sel(UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE);
+
+        // The entry point itself needs the LP roles to call tranche.deposit/redeem (and to receive escrowed shares
+        // on whitelist-enforcing markets). MUST run while the LP roles' admin is still ADMIN_ROLE (the deployer).
+        _accessManager.grantRole(ST_LP_ROLE, _entryPoint, 0);
+        _accessManager.grantRole(JT_LP_ROLE, _entryPoint, 0);
+        _accessManager.grantRole(LT_LP_ROLE, _entryPoint, 0);
+    }
+
+    /// @notice Binds the syncer's selectors to their roles and grants it SYNC_ROLE.
+    /// @dev The batch-sync surface and kernel registration are SYNC_ROLE-gated (held by the factory, the sync
+    ///      operators, and the syncer itself: each kernel's syncTrancheAccounting is also SYNC_ROLE-gated), and
+    ///      pause/unpause/upgrade follow the protocol-wide roles (mirroring royco-periphery's syncer deployment).
+    function _wireSyncerRoles(AccessManager _accessManager, address _marketSyncer) internal {
+        bytes4[] memory syncerSelectors = new bytes4[](4);
+        syncerSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
+        syncerSelectors[1] = RoycoMarketSyncer.removeMarketKernels.selector;
+        syncerSelectors[2] = RoycoMarketSyncer.executeBatchAccountingSync.selector;
+        syncerSelectors[3] = RoycoMarketSyncer.executeBatchAccountingSyncFor.selector;
+        _accessManager.setTargetFunctionRole(_marketSyncer, syncerSelectors, SYNC_ROLE);
+
+        _accessManager.setTargetFunctionRole(_marketSyncer, _sel(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
+        _accessManager.setTargetFunctionRole(_marketSyncer, _sel(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
+        _accessManager.setTargetFunctionRole(_marketSyncer, _sel(UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE);
+
+        // The syncer drives each registered kernel's SYNC_ROLE-gated syncTrancheAccounting
+        _accessManager.grantRole(SYNC_ROLE, _marketSyncer, 0);
+    }
+
+    /// @notice Wraps a single selector into the one-element array `setTargetFunctionRole` expects.
+    function _sel(bytes4 _selector) internal pure returns (bytes4[] memory selectors) {
+        selectors = new bytes4[](1);
+        selectors[0] = _selector;
+    }
 
     /// @notice Deploys (or returns) the chain's shared RoycoBlacklist via CREATE2.
     /// @param _authority The AccessManager that governs the blacklist's restricted functions.

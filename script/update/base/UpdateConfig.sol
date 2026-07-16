@@ -28,7 +28,7 @@ abstract contract UpdateConfig {
     address internal constant ROYCO_FACTORY = address(0);
 
     /// @dev The Day entry point proxy (CREATE3 — same address on every chain).
-    /// @dev TODO: set the deployed Day entry point address once DeployEntryPoint has run.
+    /// @dev TODO: set the deployed Day entry point address once the market deployment script (Deploy.s.sol) has run.
     address internal constant ROYCO_ENTRY_POINT = address(0);
 
     // ═══════════════════════════════════════════════════════════════════════════

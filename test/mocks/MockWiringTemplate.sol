@@ -17,6 +17,8 @@ contract MockWiringTemplate is BaseDeploymentTemplate {
     uint8 public constant MODE_WIRE = 0;
     uint8 public constant MODE_REENTER = 1;
     uint8 public constant MODE_EXEC_FAIL = 2;
+    uint8 public constant MODE_WIRE_IN_HOOK = 3;
+    uint8 public constant MODE_EXEC_FAIL_IN_HOOK = 4;
 
     uint8 public mode;
     address public wireTarget;
@@ -55,11 +57,23 @@ contract MockWiringTemplate is BaseDeploymentTemplate {
         } else if (mode == MODE_REENTER) {
             // Re-entering while this template is the active one trips the singleton guard.
             ROYCO_FACTORY.executeMarketDeployment(address(this), "");
-        } else {
+        } else if (mode == MODE_EXEC_FAIL) {
             // A call to a selector this contract does not implement (no fallback) reverts, so the factory's
             // executeAsFactory sees success == false and reverts FACTORY_CALL_FAILED.
             ROYCO_FACTORY.executeAsFactory(address(this), hex"deadbeef");
         }
         result = _result;
+    }
+
+    /// @inheritdoc BaseDeploymentTemplate
+    /// @dev In the hook modes, drives the factory's primitives from the post-registration hook phase — proving the
+    ///      active-template window spans `configureMarketPeriphery` and that hook reverts bubble out of the deployment
+    function _configureMarketPeriphery(IRoycoProtocolTemplate.DeploymentResult calldata, bytes calldata) internal override(BaseDeploymentTemplate) {
+        if (mode == MODE_WIRE_IN_HOOK) {
+            ROYCO_FACTORY.setMarketTargetFunctionRole(wireTarget, wireSelector, wireRole);
+            ROYCO_FACTORY.grantMarketRole(wireRole, wireAccount, 0);
+        } else if (mode == MODE_EXEC_FAIL_IN_HOOK) {
+            ROYCO_FACTORY.executeAsFactory(address(this), hex"deadbeef");
+        }
     }
 }

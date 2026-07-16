@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { IGyroECLPPool } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
 import { IERC20Metadata } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { BalancerV3_GyroECLP_LT_DeploymentTemplate } from "../../src/factory/templates/liquidity-tranche/BalancerV3_GyroECLP_LT_DeploymentTemplate.sol";
+import { IRoycoDayEntryPoint } from "../../src/interfaces/IRoycoDayEntryPoint.sol";
 import {
     IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
 } from "../../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
@@ -71,6 +72,9 @@ abstract contract MarketDeploymentConfig {
         // Foundation ("fndn") operational role holders.
         address balancerPoolManagerAddress;
         address marketOpsAddress;
+        // Entry point admins: config changes (delays, oracle clocks, enable flags) and protocol fee collection.
+        address adminEntryPointAddress;
+        address entryPointFeeCollectorAddress;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -114,6 +118,10 @@ abstract contract MarketDeploymentConfig {
         uint256 ltYdmTargetUtilizationWAD; // LDM target-utilization kink
         // Liquidity tranche: the Gyro E-CLP {ST_share, quote} pool the LT BPT is minted from.
         BalancerV3_GyroECLP_LT_DeploymentTemplate.GyroECLPPoolParams gyroECLPPoolParams;
+        // Entry point config per tranche
+        IRoycoDayEntryPoint.TrancheConfig stEntryPointConfig;
+        IRoycoDayEntryPoint.TrancheConfig jtEntryPointConfig;
+        IRoycoDayEntryPoint.TrancheConfig ltEntryPointConfig;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -170,7 +178,11 @@ abstract contract MarketDeploymentConfig {
             gyroECLPPoolFactory: GYRO_ECLP_POOL_FACTORY[_chainId],
             eclpLPOracleFactory: ECLP_LP_ORACLE_FACTORY[_chainId],
             balancerPoolManagerAddress: ROOT_MULTISIG,
-            marketOpsAddress: ROOT_MULTISIG
+            marketOpsAddress: ROOT_MULTISIG,
+            // The operational (executor) multisig manages entry point tranche configs, mirroring the WCE-immediate
+            // model of the retired standalone entry point deployment; the root multisig collects protocol fees.
+            adminEntryPointAddress: EXECUTOR_MULTISIG,
+            entryPointFeeCollectorAddress: ROOT_MULTISIG
         });
     }
 
@@ -298,8 +310,17 @@ abstract contract MarketDeploymentConfig {
                 disableUnbalancedLiquidity: false,
                 quoteAsset: USDC[block.chainid],
                 quoteAssetRateProvider: address(0) // USDC is a pegged quote: register STANDARD (rate = 1)
-            })
+            }),
+            stEntryPointConfig: _defaultEntryPointTrancheConfig(),
+            jtEntryPointConfig: _defaultEntryPointTrancheConfig(),
+            ltEntryPointConfig: _defaultEntryPointTrancheConfig()
         });
+    }
+
+    /// @notice The default entry point config a tranche is enabled with at market deployment
+    /// @dev The oracle clock is deployed externally per market and wired post-deployment (a null clock disables the gate)
+    function _defaultEntryPointTrancheConfig() internal pure returns (IRoycoDayEntryPoint.TrancheConfig memory) {
+        return IRoycoDayEntryPoint.TrancheConfig({ enabled: true, depositDelaySeconds: 5 minutes, redemptionDelaySeconds: 24 hours, oracleClock: address(0) });
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
