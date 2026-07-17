@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
+import { EntryPointTestBase, IERC20Like } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { EntryPointTestBase, IERC20Like } from "../../utils/EntryPointTestBase.sol";
 
 /**
  * @title Test_EntryPointRedemptionLifecycle
@@ -222,6 +223,53 @@ contract Test_EntryPointRedemptionLifecycle is EntryPointTestBase {
     // ---------------------------------------------------------------------
     // Batch semantics
     // ---------------------------------------------------------------------
+
+    function test_cancelRedemptionRequests_batchCancelsAll() public {
+        (uint256 sharesSt, uint256 nonceSt) = _acquireAndRequest(USER_A, address(seniorTranche), 10 * stUnit, USER_A, 0);
+        (uint256 sharesJt, uint256 nonceJt) = _acquireAndRequest(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
+
+        uint256[] memory nonces = new uint256[](2);
+        nonces[0] = nonceSt;
+        nonces[1] = nonceJt;
+        vm.prank(USER_A);
+        entryPoint.cancelRedemptionRequests(nonces, USER_A);
+        assertEq(seniorTranche.balanceOf(USER_A), sharesSt, "the senior escrow must be returned");
+        assertEq(juniorTranche.balanceOf(USER_A), sharesJt, "the junior escrow must be returned");
+        assertEq(entryPoint.getRedemptionRequest(USER_A, nonceSt).shares, 0, "the senior request must be deleted");
+        assertEq(entryPoint.getRedemptionRequest(USER_A, nonceJt).shares, 0, "the junior request must be deleted");
+    }
+
+    function test_cancelRedemptionRequests_delayedRoleBatchExecutesDirectlyThroughSingleRestrictedGate() public {
+        // Rebind the batch selector to a dedicated role and grant it to USER_A with an execution delay
+        uint64 delayedCancelRole = 424_242;
+        accessManager.setTargetFunctionRole(address(entryPoint), _sels(IRoycoDayEntryPoint.cancelRedemptionRequests.selector), delayedCancelRole);
+        accessManager.grantRole(delayedCancelRole, USER_A, 1 days);
+
+        // Two live requests so the batch loops the internal cancel more than once
+        (uint256 sharesSt, uint256 nonceSt) = _acquireAndRequest(USER_A, address(seniorTranche), 10 * stUnit, USER_A, 0);
+        (uint256 sharesJt, uint256 nonceJt) = _acquireAndRequest(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
+        uint256[] memory nonces = new uint256[](2);
+        nonces[0] = nonceSt;
+        nonces[1] = nonceJt;
+
+        bytes memory callData = abi.encodeCall(entryPoint.cancelRedemptionRequests, (nonces, USER_A));
+
+        // Unscheduled direct call: the single gate consumes a schedule that does not exist and reverts typed, so the delay genuinely bites
+        bytes32 operationId = accessManager.hashOperation(USER_A, address(entryPoint), callData);
+        vm.prank(USER_A);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManager.AccessManagerNotScheduled.selector, operationId));
+        entryPoint.cancelRedemptionRequests(nonces, USER_A);
+
+        // Schedule, wait out the delay, then the DIRECT batch call must land: restricted runs once for the whole
+        // frame, so the second cancellation in the loop cannot re-consume the schedule and revert mid-batch
+        vm.prank(USER_A);
+        accessManager.schedule(address(entryPoint), callData, uint48(block.timestamp + 1 days));
+        vm.warp(block.timestamp + 1 days);
+        vm.prank(USER_A);
+        entryPoint.cancelRedemptionRequests(nonces, USER_A);
+        assertEq(seniorTranche.balanceOf(USER_A), sharesSt, "the senior escrow must be returned by the delayed batch cancel");
+        assertEq(juniorTranche.balanceOf(USER_A), sharesJt, "the junior escrow must be returned by the delayed batch cancel");
+    }
 
     function test_executeRedemptions_acrossUsers() public {
         (, uint256 nonceA) = _acquireAndRequest(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);

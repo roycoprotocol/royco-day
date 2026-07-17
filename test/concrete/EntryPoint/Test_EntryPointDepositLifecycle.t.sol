@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { stdError } from "../../../lib/forge-std/src/StdError.sol";
+import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
+import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { EntryPointTestBase, IERC20Like } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { stdError } from "../../../lib/forge-std/src/StdError.sol";
-import { EntryPointTestBase, IERC20Like } from "../../utils/EntryPointTestBase.sol";
 
 /**
  * @title Test_EntryPointDepositLifecycle
@@ -388,6 +389,39 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
         vm.prank(USER_A);
         entryPoint.cancelDepositRequests(nonces, USER_A);
         assertEq(stJtVault.balanceOf(USER_A) - balanceBefore, 2 * amount, "both escrows must be returned");
+    }
+
+    function test_cancelDepositRequests_delayedRoleBatchExecutesDirectlyThroughSingleRestrictedGate() public {
+        // Rebind the batch selector to a dedicated role and grant it to USER_A with an execution delay
+        uint64 delayedCancelRole = 424_242;
+        accessManager.setTargetFunctionRole(address(entryPoint), _sels(IRoycoDayEntryPoint.cancelDepositRequests.selector), delayedCancelRole);
+        accessManager.grantRole(delayedCancelRole, USER_A, 1 days);
+
+        // Two live requests so the batch loops the internal cancel more than once
+        uint256 amount = _depositAmount(address(seniorTranche));
+        (uint256 nonce1,) = _requestDepositDefault(USER_A, address(seniorTranche), amount);
+        (uint256 nonce2,) = _requestDepositDefault(USER_A, address(juniorTranche), amount);
+        uint256[] memory nonces = new uint256[](2);
+        nonces[0] = nonce1;
+        nonces[1] = nonce2;
+
+        bytes memory callData = abi.encodeCall(entryPoint.cancelDepositRequests, (nonces, USER_A));
+
+        // Unscheduled direct call: the single gate consumes a schedule that does not exist and reverts typed, so the delay genuinely bites
+        bytes32 operationId = accessManager.hashOperation(USER_A, address(entryPoint), callData);
+        vm.prank(USER_A);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManager.AccessManagerNotScheduled.selector, operationId));
+        entryPoint.cancelDepositRequests(nonces, USER_A);
+
+        // Schedule, wait out the delay, then the DIRECT batch call must land: restricted runs once for the whole
+        // frame, so the second cancellation in the loop cannot re-consume the schedule and revert mid-batch
+        vm.prank(USER_A);
+        accessManager.schedule(address(entryPoint), callData, uint48(block.timestamp + 1 days));
+        vm.warp(block.timestamp + 1 days);
+        uint256 balanceBefore = stJtVault.balanceOf(USER_A);
+        vm.prank(USER_A);
+        entryPoint.cancelDepositRequests(nonces, USER_A);
+        assertEq(stJtVault.balanceOf(USER_A) - balanceBefore, 2 * amount, "both escrows must be returned by the delayed batch cancel");
     }
 
     // ---------------------------------------------------------------------
