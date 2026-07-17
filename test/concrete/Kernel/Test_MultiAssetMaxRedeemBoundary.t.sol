@@ -6,6 +6,7 @@ import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/M
 import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
+import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { AssetClaims, MarketState } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
@@ -516,6 +517,46 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         (AssetClaims memory dustClaims, uint256 dustQuote) = liquidityTranche.previewRedeemMultiAsset(1);
         assertEq(dustQuote, 0, "a dust preview must floor the quote leg to zero");
         assertEq(toUint256(dustClaims.nav), 0, "a dust preview must floor the claim value to zero");
+    }
+
+    /// @notice A dust ST leg that floors to zero senior shares makes the multi-asset preview return zero, matching
+    ///         the execution which reverts on the zero-share senior mint
+    /// @dev With senior shares appreciated past one NAV each, a one-wei ST leg values below a whole senior share and
+    ///      floors to zero. The execution path mints that zero senior share and reverts MUST_MINT_NON_ZERO_SHARES, so
+    ///      the preview must not quote a positive share amount for a deposit that deterministically reverts
+    function test_LTDepositMultiAsset_DustSTLegFloorsToZeroSeniorShares_PreviewZeroAndExecutionReverts() public {
+        // Appreciate the senior leg 20% so each senior share is worth more than one NAV: a one-wei ST leg now floors
+        // to zero senior shares in both the preview and the execution
+        applySTPnL(2000);
+        _sync();
+
+        uint256 dustSTLeg = 1;
+        uint256 quoteAssets = 100 * QUOTE_UNIT;
+
+        // The preview returns zero shares because the floored senior leg carries no LT assets out
+        uint256 previewShares = liquidityTranche.previewDepositMultiAsset(dustSTLeg, quoteAssets);
+        assertEq(previewShares, 0, "a dust ST leg flooring to zero senior shares must preview zero LT shares");
+
+        // The execution reverts on the zero-share senior mint the preview now mirrors
+        stJtVault.mintShares(LT_PROVIDER, dustSTLeg);
+        quoteToken.mint(LT_PROVIDER, quoteAssets);
+        vm.startPrank(LT_PROVIDER);
+        stJtVault.approve(address(liquidityTranche), dustSTLeg);
+        quoteToken.approve(address(liquidityTranche), quoteAssets);
+        vm.expectRevert(IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES.selector);
+        liquidityTranche.depositMultiAsset(dustSTLeg, quoteAssets, 0, LT_PROVIDER);
+        vm.stopPrank();
+
+        // A pure quote-only deposit in the same state is untouched by the dust guard: it previews a positive share
+        // amount and executes, because the guard only fires when a nonzero ST leg is supplied
+        uint256 quoteOnlyPreview = liquidityTranche.previewDepositMultiAsset(0, quoteAssets);
+        assertGt(quoteOnlyPreview, 0, "a quote-only deposit must still preview a positive share amount");
+        quoteToken.mint(LT_PROVIDER, quoteAssets);
+        vm.startPrank(LT_PROVIDER);
+        quoteToken.approve(address(liquidityTranche), quoteAssets);
+        uint256 quoteOnlyMinted = liquidityTranche.depositMultiAsset(0, quoteAssets, 0, LT_PROVIDER);
+        vm.stopPrank();
+        assertEq(quoteOnlyMinted, quoteOnlyPreview, "a quote-only deposit must execute and mint exactly the previewed shares");
     }
 
     /// @notice Preview equals execution for a senior-only deposit leg: the unbalanced add's fee-bearing side

@@ -10,7 +10,7 @@ import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/M
 import { RoycoBase } from "../../base/RoycoBase.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
-import { WAD_DECIMALS, ZERO_NAV_UNITS } from "../../libraries/Constants.sol";
+import { WAD_DECIMALS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../libraries/Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
 import { NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toUint256 } from "../../libraries/Units.sol";
 import { TrancheClaimsLogic } from "../../libraries/logic/TrancheClaimsLogic.sol";
@@ -244,6 +244,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @inheritdoc IRoycoVaultTranche
     function maxDeposit(address _receiver) external view virtual override(IRoycoVaultTranche) returns (TRANCHE_UNIT assets) {
+        // Deposits revert under the tranche's own pause, so advertise zero capacity
+        if (paused()) return ZERO_TRANCHE_UNITS;
         if (TRANCHE_TYPE() == TrancheType.SENIOR) assets = IRoycoDayKernel(KERNEL).stMaxDeposit(_receiver);
         else if (TRANCHE_TYPE() == TrancheType.JUNIOR) assets = IRoycoDayKernel(KERNEL).jtMaxDeposit(_receiver);
         else assets = IRoycoDayKernel(KERNEL).ltMaxDeposit(_receiver);
@@ -251,6 +253,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @inheritdoc IRoycoVaultTranche
     function maxRedeem(address _owner) public view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
+        // Redemptions revert under the tranche's own pause, so advertise zero capacity
+        if (paused()) return 0;
         uint256 sharesOwned = balanceOf(_owner);
 
         if (TRANCHE_TYPE() == TrancheType.SENIOR || TRANCHE_TYPE() == TrancheType.JUNIOR) {

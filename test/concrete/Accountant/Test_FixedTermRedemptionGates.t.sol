@@ -2,7 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
-import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
+import { AssetClaims, MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
+import { toUint256 } from "../../../src/libraries/Units.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
@@ -68,5 +69,26 @@ contract Test_FixedTermRedemptionGates_Kernel is DayMarketTestBase {
         vm.prank(LT_PROVIDER);
         vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
         liquidityTranche.redeemMultiAsset(shares, 0, 0, LT_PROVIDER, LT_PROVIDER);
+    }
+
+    /// @notice The senior preview returns an empty claim in FIXED_TERM, matching the reverting redeem and the zero maxRedeem
+    /// @dev previewRedeem must not quote a nonzero payout for a redemption guaranteed to revert, mirroring the LT preview gate
+    function test_STPreviewRedeem_ReturnsEmptyInFixedTerm() public view {
+        uint256 shares = seniorTranche.balanceOf(ST_PROVIDER) / 10;
+        AssetClaims memory claim = seniorTranche.previewRedeem(shares);
+        assertEq(toUint256(claim.nav), 0, "senior previewRedeem must return zero NAV in FIXED_TERM");
+        assertEq(toUint256(claim.stAssets), 0, "senior previewRedeem must return zero ST assets in FIXED_TERM");
+        assertEq(toUint256(claim.jtAssets), 0, "senior previewRedeem must return zero JT assets in FIXED_TERM");
+        assertEq(seniorTranche.maxRedeem(ST_PROVIDER), 0, "senior maxRedeem must already zero in FIXED_TERM, so the preview must agree");
+    }
+
+    /// @notice The junior preview returns an empty claim in FIXED_TERM, matching the reverting redeem and the zero maxRedeem
+    function test_JTPreviewRedeem_ReturnsEmptyInFixedTerm() public view {
+        uint256 shares = juniorTranche.balanceOf(JT_PROVIDER) / 10;
+        AssetClaims memory claim = juniorTranche.previewRedeem(shares);
+        assertEq(toUint256(claim.nav), 0, "junior previewRedeem must return zero NAV in FIXED_TERM");
+        assertEq(toUint256(claim.stAssets), 0, "junior previewRedeem must return zero ST assets in FIXED_TERM");
+        assertEq(toUint256(claim.jtAssets), 0, "junior previewRedeem must return zero JT assets in FIXED_TERM");
+        assertEq(juniorTranche.maxRedeem(JT_PROVIDER), 0, "junior maxRedeem must already zero in FIXED_TERM, so the preview must agree");
     }
 }

@@ -217,6 +217,55 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
         assertEq(seniorTranche.allowance(FLAGGED, ally), 10e18, "the failed transferFrom must not have consumed allowance");
     }
 
+    /**
+     * @notice A clean, whitelisted holder cannot route redemption proceeds to a blacklisted receiver on ANY redeem
+     *         path: senior, junior, in-kind liquidity, and multi-asset liquidity all screen the asset receiver and
+     *         revert, while the same redemption to a clean receiver still settles
+     * @dev The burn hook screens the caller and share owner, but the redemption assets are transferred to a
+     *      separate receiver before the burn, so the receiver is the one egress the hook never sees. Each redeem
+     *      entrypoint screens it directly. The owner and caller stay clean here, isolating the receiver screen from
+     *      the owner screen, and the multi-asset path is screened before any venue interaction
+     */
+    function test_RevertIf_RedemptionReceiverIsBlacklisted() public {
+        uint256 quoteUnit = 10 ** uint256(cell.quoteAsset.decimals);
+        // Coverage after seed: (100 + 30) x 0.2 / 30 = 0.8667 <= 1, then pool depth of 2e18 senior legs against 8 quote
+        _seedMarket(100e18, 30e18);
+        _seedLT(10e18, 2e18, 8 * quoteUnit);
+        _sync();
+
+        vm.prank(MARKET_OPS_ADMIN);
+        kernel.setRoycoBlacklist(address(roycoBlacklist));
+        roycoBlacklist.blacklistAccounts(_one(FLAGGED));
+
+        bytes memory receiverBlacklisted = abi.encodeWithSelector(IRoycoBlacklist.ACCOUNT_BLACKLISTED.selector, FLAGGED);
+
+        // Senior: the owner and caller (ST_PROVIDER) are clean, only the asset receiver is flagged
+        vm.prank(ST_PROVIDER);
+        vm.expectRevert(receiverBlacklisted);
+        seniorTranche.redeem(1e18, FLAGGED, ST_PROVIDER);
+
+        // Junior: same, the flagged account is only the asset receiver
+        vm.prank(JT_PROVIDER);
+        vm.expectRevert(receiverBlacklisted);
+        juniorTranche.redeem(1e18, FLAGGED, JT_PROVIDER);
+
+        // Liquidity in-kind: the BPT payout receiver is screened
+        vm.prank(LT_PROVIDER);
+        vm.expectRevert(receiverBlacklisted);
+        liquidityTranche.redeem(1e18, FLAGGED, LT_PROVIDER);
+
+        // Liquidity multi-asset: the quote and senior-unwind receiver is screened before the venue removal runs
+        vm.prank(LT_PROVIDER);
+        vm.expectRevert(receiverBlacklisted);
+        liquidityTranche.redeemMultiAsset(1e18, 0, 0, FLAGGED, LT_PROVIDER);
+
+        // The clean receiver still settles: a senior redemption to CLEAN pays out its vault shares
+        uint256 cleanBefore = stJtVault.balanceOf(CLEAN);
+        vm.prank(ST_PROVIDER);
+        seniorTranche.redeem(1e18, CLEAN, ST_PROVIDER);
+        assertGt(stJtVault.balanceOf(CLEAN) - cleanBefore, 0, "a clean receiver must still receive redemption proceeds");
+    }
+
     // =============================
     // Sanctions list failure modes and recovery
     // =============================

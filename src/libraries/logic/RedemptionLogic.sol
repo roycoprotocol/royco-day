@@ -46,6 +46,9 @@ library RedemptionLogic {
         external
         returns (AssetClaims memory userAssetClaims)
     {
+        // Screen the asset receiver so redemption proceeds cannot be routed to a blacklisted account
+        BlacklistLogic._enforceNotBlacklisted($, _receiver);
+
         SyncedAccountingState memory state;
         uint256 totalTrancheShares;
         // Execute an accounting sync to reconcile underlying PNL
@@ -85,6 +88,9 @@ library RedemptionLogic {
         external
         returns (AssetClaims memory userAssetClaims)
     {
+        // Screen the asset receiver so redemption proceeds cannot be routed to a blacklisted account
+        BlacklistLogic._enforceNotBlacklisted($, _receiver);
+
         // Execute a pre-op sync on accounting
         SyncedAccountingState memory state;
         uint256 totalTrancheShares;
@@ -119,6 +125,9 @@ library RedemptionLogic {
         external
         returns (AssetClaims memory userAssetClaims)
     {
+        // Screen the asset receiver so redemption proceeds cannot be routed to a blacklisted account
+        BlacklistLogic._enforceNotBlacklisted($, _receiver);
+
         // Execute a pre-op sync on accounting
         SyncedAccountingState memory state;
         uint256 totalTrancheShares;
@@ -162,6 +171,9 @@ library RedemptionLogic {
         external
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
+        // Screen the asset receiver so redemption proceeds cannot be routed to a blacklisted account, before any venue interaction
+        BlacklistLogic._enforceNotBlacklisted($, _receiver);
+
         // Execute a pre-op sync, minting this period's liquidity premium into the kernel's held senior shares so the held pile and the LT supply are consistent for sizing the redeemer's slice
         (SyncedAccountingState memory state, AssetClaims memory ltClaims, uint256 totalLTShares) =
             AccountingSyncLogic._preOpSyncTrancheAccounting($, _immutables, TrancheType.LIQUIDITY);
@@ -220,6 +232,8 @@ library RedemptionLogic {
         // Preview the total claims the senior tranche has on each tranche's assets and the total shares after minting any protocol fee and liquidity premium fee shares post-sync
         (SyncedAccountingState memory state, AssetClaims memory stClaims, uint256 totalShares) =
             IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.SENIOR);
+        // ST redemptions are disabled during a fixed-term market state: return an empty claim, matching the reverting redeem path
+        if (state.marketState == MarketState.FIXED_TERM) return userClaim;
 
         // Calculate the user's claims based on the shares redeemed
         userClaim = TrancheClaimsLogic._scaleAssetClaims(stClaims, _shares, totalShares);
@@ -235,7 +249,10 @@ library RedemptionLogic {
      */
     function jtPreviewRedeem(uint256 _shares) external view returns (AssetClaims memory userClaim) {
         // Preview the total claims the junior tranche has on each tranche's assets and the total shares after minting any protocol fee shares post-sync
-        (, AssetClaims memory jtClaims, uint256 totalShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.JUNIOR);
+        (SyncedAccountingState memory state, AssetClaims memory jtClaims, uint256 totalShares) =
+            IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.JUNIOR);
+        // JT redemptions are disabled during a fixed-term market state: return an empty claim, matching the reverting redeem path
+        if (state.marketState == MarketState.FIXED_TERM) return userClaim;
         // Calculate the user's claims based on the shares redeemed
         userClaim = TrancheClaimsLogic._scaleAssetClaims(jtClaims, _shares, totalShares);
     }

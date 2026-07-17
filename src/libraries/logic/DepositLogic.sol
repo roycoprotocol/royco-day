@@ -298,6 +298,10 @@ library DepositLogic {
             : ValuationLogic._convertToShares(
                 IRoycoDayKernel(address(this)).stConvertTrancheUnitsToNAVUnits(_stAssets), state.stEffectiveNAV, totalSTShares, Math.Rounding.Floor
             );
+        // A dust ST leg that floors to zero senior shares reverts on the zero-share senior mint in execution, so return zero to match it
+        if (_stAssets != ZERO_TRANCHE_UNITS && stSharesToAdd == 0) {
+            return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS, ltTotalSupplyAfterMints);
+        }
         // Quote the venue add for the senior shares and quote assets (simulation only: no slippage gate, no settlement)
         // The venue values the minted LT assets against the post-add state inside the preview, exactly as execution does
         (ltAssetsOut, valueAllocated) = IRoycoDayKernel(address(this)).previewAddLiquidity(stSharesToAdd, _quoteAssets);

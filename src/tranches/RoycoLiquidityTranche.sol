@@ -142,6 +142,8 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
 
     /// @inheritdoc IRoycoLiquidityTranche
     function maxRedeemMultiAsset(address _owner) external virtual override(IRoycoLiquidityTranche) returns (uint256 shares) {
+        // Redemptions revert under the tranche's own pause, so advertise zero capacity
+        if (paused()) return 0;
         uint256 sharesOwned = balanceOf(_owner);
 
         // The liquidity tranche has claims only on its own RAW NAV

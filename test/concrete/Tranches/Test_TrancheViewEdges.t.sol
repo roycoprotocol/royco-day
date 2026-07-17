@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
@@ -186,6 +188,88 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
         // The kernel's ledgers drop by exactly the paid slices, so the fee-share holders retain the remainders
         assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), ownedBpt - expectedBptSlice, "the pooled inventory must drop by exactly the BPT slice");
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares - expectedIdleSlice, "the idle pile must drop by exactly the senior share slice");
+    }
+
+    // =============================
+    // Max views against a tranche-only pause
+    // =============================
+
+    /**
+     * @notice When only the senior tranche token is paused (the kernel stays live), its max deposit and max redeem
+     *         views report zero, matching the tranche's own whenNotPaused guard that reverts every deposit and
+     *         redemption, and unpausing restores the advertised capacity
+     * @dev The kernel-side max helpers read only the kernel's pause flag, so a tranche-only pause would otherwise
+     *      leave the views advertising capacity for operations that deterministically revert. The tranche owns its
+     *      pause flag, so the zeroing lives in the tranche view. This test pins both the view zeroing and the
+     *      execution revert the view is meant to describe
+     */
+    function test_MaxDepositAndMaxRedeem_ZeroWhenSeniorTranchePausedWithKernelLive() public {
+        _deployMarket(cellA(), defaultParams());
+        _seedMarket(ST_SEED, JT_SEED);
+        _sync();
+
+        // Baseline: with nothing paused the senior tranche advertises capacity on both surfaces
+        assertGt(toUint256(seniorTranche.maxDeposit(ST_PROVIDER)), 0, "senior deposit capacity must be live before the pause");
+        assertGt(seniorTranche.maxRedeem(ST_PROVIDER), 0, "senior redemption capacity must be live before the pause");
+
+        // Pause only the senior tranche: the kernel stays live so the mismatch is tranche-only
+        vm.prank(PAUSER);
+        IRoycoAuth(address(seniorTranche)).pause();
+        assertFalse(PausableUpgradeable(address(kernel)).paused(), "the kernel must stay unpaused for the mismatch to be tranche-only");
+
+        // The views report zero, matching the tranche's own whenNotPaused guard
+        assertEq(toUint256(seniorTranche.maxDeposit(ST_PROVIDER)), 0, "a paused senior tranche must advertise zero deposit capacity");
+        assertEq(seniorTranche.maxRedeem(ST_PROVIDER), 0, "a paused senior tranche must advertise zero redemption capacity");
+
+        // The execution paths those views describe actually revert on the tranche pause
+        stJtVault.mintShares(ST_PROVIDER, ST_SEED);
+        vm.startPrank(ST_PROVIDER);
+        stJtVault.approve(address(seniorTranche), ST_SEED);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        seniorTranche.deposit(toTrancheUnits(ST_SEED), ST_PROVIDER);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        seniorTranche.redeem(1e18, ST_PROVIDER, ST_PROVIDER);
+        vm.stopPrank();
+
+        // Unpausing restores the advertised capacity
+        vm.prank(UNPAUSER);
+        IRoycoAuth(address(seniorTranche)).unpause();
+        assertGt(toUint256(seniorTranche.maxDeposit(ST_PROVIDER)), 0, "unpausing must restore senior deposit capacity");
+        assertGt(seniorTranche.maxRedeem(ST_PROVIDER), 0, "unpausing must restore senior redemption capacity");
+    }
+
+    /**
+     * @notice A tranche-only pause zeroes the junior and liquidity max views as well, including the multi-asset LT
+     *         maximum, each independently of the kernel's pause flag
+     * @dev maxRedeemMultiAsset is probed independently of maxRedeem by the entrypoint, so it needs the same
+     *      tranche-pause zeroing to stay coherent with the reverting multi-asset redemption path
+     */
+    function test_MaxViews_ZeroWhenJuniorOrLiquidityTranchePaused() public {
+        _deployMarket(cellA(), defaultParams());
+        _seedMarket(ST_SEED, JT_SEED);
+        // Give LT_PROVIDER a liquidity position: 5e18 BPT against 5 whole quote keeps NAV-per-BPT at exactly 1.0
+        _seedLT(LT_SEED_BPT, 0, 5 * 10 ** uint256(cell.quoteAsset.decimals));
+        _sync();
+
+        // Junior: a tranche-only pause zeroes both max surfaces, and unpausing restores them
+        vm.prank(PAUSER);
+        IRoycoAuth(address(juniorTranche)).pause();
+        assertEq(toUint256(juniorTranche.maxDeposit(JT_PROVIDER)), 0, "a paused junior tranche must advertise zero deposit capacity");
+        assertEq(juniorTranche.maxRedeem(JT_PROVIDER), 0, "a paused junior tranche must advertise zero redemption capacity");
+        vm.prank(UNPAUSER);
+        IRoycoAuth(address(juniorTranche)).unpause();
+        assertGt(juniorTranche.maxRedeem(JT_PROVIDER), 0, "unpausing must restore junior redemption capacity");
+
+        // Liquidity: the in-kind and the multi-asset maxima both zero on a tranche-only pause
+        assertGt(liquidityTranche.maxRedeemMultiAsset(LT_PROVIDER), 0, "the multi-asset maximum must be live before the pause");
+        vm.prank(PAUSER);
+        IRoycoAuth(address(liquidityTranche)).pause();
+        assertEq(toUint256(liquidityTranche.maxDeposit(LT_PROVIDER)), 0, "a paused liquidity tranche must advertise zero deposit capacity");
+        assertEq(liquidityTranche.maxRedeem(LT_PROVIDER), 0, "a paused liquidity tranche must advertise zero in-kind redemption capacity");
+        assertEq(liquidityTranche.maxRedeemMultiAsset(LT_PROVIDER), 0, "a paused liquidity tranche must advertise zero multi-asset redemption capacity");
+        vm.prank(UNPAUSER);
+        IRoycoAuth(address(liquidityTranche)).unpause();
+        assertGt(liquidityTranche.maxRedeemMultiAsset(LT_PROVIDER), 0, "unpausing must restore the multi-asset maximum");
     }
 
     // =============================
