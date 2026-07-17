@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { LT_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";
-import { toUint256, toTrancheUnits } from "../../../src/libraries/Units.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_EmptyLTPremiumBootstrap
@@ -78,6 +79,7 @@ contract Test_EmptyLTPremiumBootstrap is DayMarketTestBase {
 
         // Now a first LT depositor arrives with a TINY BPT position and captures the whole staged premium.
         address dave = makeAddr("DAVE_FIRST_LP");
+        accessManager.grantRole(LT_LP_ROLE, dave, 0);
         uint256 daveBpt = 1e18; // one BPT unit — tiny next to the accumulated premium
         _mintBptTo(dave, daveBpt, quoteUnit); // ~1 quote wei of backing; NAV ~ 1e18
         uint256 daveDepositNAV = toUint256(kernel.ltConvertTrancheUnitsToNAVUnits(toTrancheUnits(daveBpt)));

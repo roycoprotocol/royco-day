@@ -394,16 +394,15 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertTrue(sync, "syncer holds SYNC_ROLE");
     }
 
-    /// @notice Each tranche entrypoint is bound to its intended role: LP-gated deposits/redeems, open LT deposits,
-    ///         and the pause/unpause/upgrade/burn admin surface
+    /// @notice Each tranche entrypoint is bound to its intended role: LP-gated deposits and redeems on every
+    ///         tranche, and the pause/unpause/upgrade/burn admin surface
     function test_Auth_TrancheSelectorRoleBindings() public view {
         _assertRole(address(ST), IRoycoVaultTranche.deposit.selector, ST_LP_ROLE);
         _assertRole(address(ST), IRoycoVaultTranche.redeem.selector, ST_LP_ROLE);
         _assertRole(address(JT), IRoycoVaultTranche.deposit.selector, JT_LP_ROLE);
         _assertRole(address(JT), IRoycoVaultTranche.redeem.selector, JT_LP_ROLE);
-        // LT deposits are open (they only deepen senior liquidity); LT redemptions stay role-gated.
-        _assertRole(address(LT), IRoycoVaultTranche.deposit.selector, PUBLIC_ROLE);
-        _assertRole(address(LT), RoycoLiquidityTranche.depositMultiAsset.selector, PUBLIC_ROLE);
+        _assertRole(address(LT), IRoycoVaultTranche.deposit.selector, LT_LP_ROLE);
+        _assertRole(address(LT), RoycoLiquidityTranche.depositMultiAsset.selector, LT_LP_ROLE);
         _assertRole(address(LT), IRoycoVaultTranche.redeem.selector, LT_LP_ROLE);
         _assertRole(address(LT), RoycoLiquidityTranche.redeemMultiAsset.selector, LT_LP_ROLE);
 

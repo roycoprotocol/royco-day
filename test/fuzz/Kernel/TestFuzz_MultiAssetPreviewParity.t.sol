@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import { LT_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
 import { MarketFuzzTestBase } from "../../utils/MarketFuzzTestBase.sol";
@@ -30,6 +31,7 @@ contract TestFuzz_MultiAssetPreviewParity_Kernel is MarketFuzzTestBase {
         _setupEvolvedMarket(_stSeed, _jtSeed, _vaultBps, _elapsed);
         uint256 quoteLeg = bound(_quoteSeed, 1, 1e12); // 1 quote wei up to 1e12 quote wei
         address a = makeAddr("MA_QUOTE");
+        accessManager.grantRole(LT_LP_ROLE, a, 0);
         quoteToken.mint(a, quoteLeg);
         vm.startPrank(a);
         quoteToken.approve(address(liquidityTranche), quoteLeg);
@@ -69,6 +71,7 @@ contract TestFuzz_MultiAssetPreviewParity_Kernel is MarketFuzzTestBase {
         uint256 stLeg = bound(_stSeed2, maxStLeg / 2, maxStLeg);
         uint256 quoteLeg = bound(_quoteSeed, 1, Math.max(1, st / QUOTE_TO_NAV_SCALE / 10));
         address a = makeAddr("MA_BALANCED");
+        accessManager.grantRole(LT_LP_ROLE, a, 0);
         stJtVault.mintShares(a, stLeg);
         quoteToken.mint(a, quoteLeg);
         vm.startPrank(a);

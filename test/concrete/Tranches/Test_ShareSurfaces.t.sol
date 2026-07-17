@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IERC20Errors } from "../../../lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol";
-import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
+import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
+import { IERC20Errors } from "../../../lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol";
+import { LT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
-import { IRoycoSeniorTranche } from "../../../src/interfaces/IRoycoSeniorTranche.sol";
 import { IRoycoLiquidityTranche } from "../../../src/interfaces/IRoycoLiquidityTranche.sol";
+import { IRoycoSeniorTranche } from "../../../src/interfaces/IRoycoSeniorTranche.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { AssetClaims, Operation } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
-import { LT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
+import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_ShareSurfaces_Tranches
@@ -222,7 +222,9 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
         emit IRoycoVaultTranche.Redeem(
             ST_DELEGATE,
             ST_DELEGATE,
-            AssetClaims({ stAssets: toTrancheUnits(10e18), jtAssets: toTrancheUnits(0), ltAssets: toTrancheUnits(0), stShares: 0, nav: toNAVUnits(uint256(10e18)) }),
+            AssetClaims({
+                stAssets: toTrancheUnits(10e18), jtAssets: toTrancheUnits(0), ltAssets: toTrancheUnits(0), stShares: 0, nav: toNAVUnits(uint256(10e18))
+            }),
             10e18
         );
         vm.prank(ST_DELEGATE);
@@ -382,6 +384,7 @@ contract Test_IdleLiquidityPremiumRedemption_LiquidityTranche is DayMarketTestBa
 
         // Top up quote-only depth so the post-redemption liquidity requirement (9e18 against 180e18 senior) clears
         address depthProvider = makeAddr("DEPTH_PROVIDER");
+        accessManager.grantRole(LT_LP_ROLE, depthProvider, 0);
         quoteToken.mint(address(this), 12e6);
         quoteToken.approve(address(balancerVault), 12e6);
         uint256[2] memory quoteOnlyLegs;
@@ -402,7 +405,11 @@ contract Test_IdleLiquidityPremiumRedemption_LiquidityTranche is DayMarketTestBa
         assertEq(toUint256(claims.ltAssets), 5_142_857_142_857_142_857, "the BPT slice must be floor(18e18 x 3 / 10.5)");
         assertEq(claims.stShares, 1_680_672_268_907_563_025, "the staged-premium slice must be floor(staged x 3e18 / 10.5e18)");
         assertEq(bpt.balanceOf(LT_PROVIDER) - bptBefore, 5_142_857_142_857_142_857, "the redeemer must receive its BPT slice in kind");
-        assertEq(seniorTranche.balanceOf(LT_PROVIDER) - stSharesBefore, 1_680_672_268_907_563_025, "the redeemer must receive its staged premium slice as senior shares");
+        assertEq(
+            seniorTranche.balanceOf(LT_PROVIDER) - stSharesBefore,
+            1_680_672_268_907_563_025,
+            "the redeemer must receive its staged premium slice as senior shares"
+        );
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, 4_201_680_672_268_907_563, "the kernel's staged pile must drop by exactly the paid slice");
     }
 }

@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { LT_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits } from "../../../src/libraries/Units.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_FixedTermEntrypointMatrix
@@ -53,8 +54,8 @@ contract Test_FixedTermEntrypointMatrix is DayMarketTestBase {
     // Blocked in FIXED_TERM: anything that mints senior shares
     // ---------------------------------------------------------------------
 
-    // ST/JT deposit are role-gated (restricted); use the seeded role-holders so auth passes and the op reaches
-    // the FIXED_TERM gate. LT deposit is PUBLIC_ROLE, so its actors need no role.
+    // All tranche deposits are role-gated (restricted); use the seeded role-holders (or grant the LT role to
+    // fresh actors) so auth passes and the op reaches the FIXED_TERM gate.
     function test_RevertIf_STDepositInFixedTerm() public {
         stJtVault.mintShares(ST_PROVIDER, stUnit);
         vm.startPrank(ST_PROVIDER);
@@ -75,6 +76,7 @@ contract Test_FixedTermEntrypointMatrix is DayMarketTestBase {
 
     function test_RevertIf_MultiAssetLTDepositWithSTLegInFixedTerm() public {
         address a = makeAddr("FT_LT_STLEG");
+        accessManager.grantRole(LT_LP_ROLE, a, 0);
         stJtVault.mintShares(a, stUnit);
         quoteToken.mint(a, 10 * quoteUnit);
         vm.startPrank(a);
@@ -91,6 +93,7 @@ contract Test_FixedTermEntrypointMatrix is DayMarketTestBase {
 
     function test_QuoteOnlyMultiAssetLTDeposit_SucceedsInFixedTerm() public {
         address a = makeAddr("FT_LT_QUOTE");
+        accessManager.grantRole(LT_LP_ROLE, a, 0);
         quoteToken.mint(a, 10 * quoteUnit);
         vm.startPrank(a);
         quoteToken.approve(address(liquidityTranche), 10 * quoteUnit);
@@ -101,6 +104,7 @@ contract Test_FixedTermEntrypointMatrix is DayMarketTestBase {
 
     function test_InKindLTDeposit_SucceedsInFixedTerm() public {
         address a = makeAddr("FT_LT_INKIND");
+        accessManager.grantRole(LT_LP_ROLE, a, 0);
         uint256 bptAmount = 10e18;
         _mintBptTo(a, bptAmount, 10 * quoteUnit);
         vm.startPrank(a);

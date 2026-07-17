@@ -37,6 +37,9 @@ bytes32 constant COMPONENT_ID_DAY_KERNEL_IDENTICAL_MAKINA_CHAINLINK = keccak256(
 /// @dev Creation-code id for `Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel`
 bytes32 constant COMPONENT_ID_DAY_KERNEL_IDENTICAL_CHAINLINK_TO_ADMIN = keccak256("ROYCO_COMPONENT_DAY_KERNEL_IDENTICAL_CHAINLINK_TO_ADMIN");
 
+/// @dev Creation-code id for `Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel`
+bytes32 constant COMPONENT_ID_DAY_KERNEL_IDENTICAL_AA_IDLE_CDO_VIRTUAL_PRICE = keccak256("ROYCO_COMPONENT_DAY_KERNEL_IDENTICAL_AA_IDLE_CDO_VIRTUAL_PRICE");
+
 // ─── Market component salt tags ──────────────────────────────────────────────
 
 bytes32 constant TAG_ST_PROXY = "ST";

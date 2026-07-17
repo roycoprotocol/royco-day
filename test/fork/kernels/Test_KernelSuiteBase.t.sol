@@ -3819,8 +3819,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      */
     function _expectedMaxLTWithdrawalNAV() internal view returns (NAV_UNIT) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        uint256 requiredValue =
-            Math.mulDiv((toUint256(a.lastSTEffectiveNAV) + toUint256(a.stNAVDustTolerance)), a.minLiquidityWAD, WAD, Math.Rounding.Ceil);
+        uint256 requiredValue = Math.mulDiv((toUint256(a.lastSTEffectiveNAV) + toUint256(a.stNAVDustTolerance)), a.minLiquidityWAD, WAD, Math.Rounding.Ceil);
         uint256 ltRawValue = toUint256(a.lastLTRawNAV);
         return toNAVUnits(ltRawValue > requiredValue ? ltRawValue - requiredValue : 0);
     }
@@ -4487,7 +4486,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     // ── Access control and caller gates ──
 
     /// @notice A role-less outsider is rejected with the exact-arg `AccessManagedUnauthorized` on every restricted
-    ///         entrypoint, while the deliberately public LT deposit surface lands real deposits for the same caller.
+    ///         entrypoint, across the deposit and redeem surfaces of all three tranches.
     function test_AccessControl_restrictedSweep() public {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
         if (testConfig.hasLiquidityTranche) _seedDefaultLT();
@@ -4514,33 +4513,15 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         ACCOUNTANT.setMinCoverage(0.2e18);
         if (testConfig.hasLiquidityTranche) {
             vm.expectRevert(unauthorizedError);
+            LT.deposit(toTrancheUnits(assets), outsider);
+            vm.expectRevert(unauthorizedError);
+            IRoycoLiquidityTranche(address(LT)).depositMultiAsset(0, assets, 0, outsider);
+            vm.expectRevert(unauthorizedError);
             LT.redeem(1, outsider, outsider);
             vm.expectRevert(unauthorizedError);
             IRoycoLiquidityTranche(address(LT)).redeemMultiAsset(1, 0, 0, outsider, outsider);
         }
         vm.stopPrank();
-
-        // The LT deposit surface is deliberately public: the outsider proceeds past auth and lands real deposits
-        if (testConfig.hasLiquidityTranche) {
-            uint256 quoteAssets = _quoteAssetsForValue(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(testConfig.initialFunding / 1000)));
-            vm.startPrank(outsider);
-            IERC20(testConfig.quoteAsset).approve(address(LT), quoteAssets);
-            uint256 multiShares = IRoycoLiquidityTranche(address(LT)).depositMultiAsset(0, quoteAssets, 0, outsider);
-            vm.stopPrank();
-            assertGt(multiShares, 0, "the public multi-asset LT deposit must succeed for a role-less caller");
-
-            OpReceipt memory r = _doRedeemLT(LT_ALICE_ADDRESS, LT.balanceOf(LT_ALICE_ADDRESS) / 10);
-            uint256 bptAssets = toUint256(r.claims.ltAssets);
-            assertGt(bptAssets, 0, "arrange: the redemption must pay out BPT");
-            vm.prank(LT_ALICE_ADDRESS);
-            IERC20(POOL).transfer(outsider, bptAssets);
-            vm.startPrank(outsider);
-            IERC20(POOL).approve(address(LT), bptAssets);
-            uint256 inKindShares = LT.deposit(toTrancheUnits(bptAssets), outsider);
-            vm.stopPrank();
-            assertGt(inKindShares, 0, "the public in-kind LT deposit must succeed for a role-less caller");
-            _assertSolvency();
-        }
         _assertCommittedConservation();
     }
 

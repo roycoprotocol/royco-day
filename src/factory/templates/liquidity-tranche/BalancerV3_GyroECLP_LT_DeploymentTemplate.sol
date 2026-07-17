@@ -46,7 +46,6 @@ import {
     BURNER_ROLE,
     JT_LP_ROLE,
     LT_LP_ROLE,
-    PUBLIC_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
 } from "../../RolesConfiguration.sol";
@@ -454,7 +453,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         TargetBinding[] memory targets = new TargetBinding[](9);
         targets[0] = _trancheBinding(_r.seniorTranche, ST_LP_ROLE, ST_LP_ROLE, false);
         targets[1] = _trancheBinding(_r.juniorTranche, JT_LP_ROLE, JT_LP_ROLE, false);
-        targets[2] = _trancheBinding(_r.liquidityTranche, PUBLIC_ROLE, LT_LP_ROLE, true);
+        targets[2] = _trancheBinding(_r.liquidityTranche, LT_LP_ROLE, LT_LP_ROLE, true);
         targets[3] = _kernelBinding(_r.kernel);
         targets[4] = _accountantBinding(_r.accountant);
         targets[5] = _balancerVaultBinding(address(BALANCER_V3_VAULT));

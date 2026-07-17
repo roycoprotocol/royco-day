@@ -21,7 +21,6 @@ import {
     BURNER_ROLE,
     JT_LP_ROLE,
     LT_LP_ROLE,
-    PUBLIC_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
 } from "../../src/factory/RolesConfiguration.sol";
@@ -748,8 +747,8 @@ abstract contract DayMarketTestBase is Assertions {
         // ST/JT tranches: LP-gated deposit and redeem, admin surface, kernel-only burns via BURNER_ROLE
         _bindTranche(address(seniorTranche), ST_LP_ROLE, ST_LP_ROLE, false);
         _bindTranche(address(juniorTranche), JT_LP_ROLE, JT_LP_ROLE, false);
-        // LT: public deposits (deposits are never liquidity-gated), LP-gated redemptions
-        _bindTranche(address(liquidityTranche), PUBLIC_ROLE, LT_LP_ROLE, true);
+        // LT: LP-gated deposits and redemptions, mirroring the ST/JT surface
+        _bindTranche(address(liquidityTranche), LT_LP_ROLE, LT_LP_ROLE, true);
 
         // Kernel
         address k = address(kernel);

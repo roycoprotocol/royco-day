@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { ST_LP_ROLE } from "../../src/factory/RolesConfiguration.sol";
+import { LT_LP_ROLE, ST_LP_ROLE } from "../../src/factory/RolesConfiguration.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoSeniorTranche } from "../../src/interfaces/IRoycoSeniorTranche.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { AssetClaims, MarketState, SyncedAccountingState } from "../../src/libraries/Types.sol";
 import { Math, toNAVUnits, toTrancheUnits, toUint256 } from "../../src/libraries/Units.sol";
+import { DayMarketTestBase } from "../utils/DayMarketTestBase.sol";
 import { FixtureCell } from "../utils/FixtureTypes.sol";
 import { defaultParams } from "../utils/MarketParams.sol";
-import { DayMarketTestBase } from "../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_MarketLifecycleBase
@@ -586,7 +586,9 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         emit IRoycoVaultTranche.Redeem(
             LT_PROVIDER,
             LT_PROVIDER,
-            AssetClaims({ stAssets: toTrancheUnits(0), jtAssets: toTrancheUnits(0), ltAssets: toTrancheUnits(21e18), stShares: 0, nav: toNAVUnits(uint256(21e18)) }),
+            AssetClaims({
+                stAssets: toTrancheUnits(0), jtAssets: toTrancheUnits(0), ltAssets: toTrancheUnits(21e18), stShares: 0, nav: toNAVUnits(uint256(21e18))
+            }),
             parkShares
         );
         vm.prank(LT_PROVIDER);
@@ -646,6 +648,7 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         assertGe(pre.liquidityUtilizationWAD, 1.5e18, "liquidityUtilization must read breached (>= 180e18 x 0.05 / 6e18)");
 
         address depositor = makeAddr("UNDER_PROVISIONED_LT_DEPOSITOR");
+        accessManager.grantRole(LT_LP_ROLE, depositor, 0);
         quoteToken.mint(address(this), quoteUnit);
         quoteToken.approve(address(balancerVault), quoteUnit);
         // The pool's token amounts follow the sorted registration order, so map the quote leg through the index
@@ -688,6 +691,7 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         assertEq(uint8(pre.marketState), uint8(MarketState.FIXED_TERM), "covered drawdown must enter FIXED_TERM");
 
         address depositor = makeAddr("COVERAGE_BREACHED_LT_DEPOSITOR");
+        accessManager.grantRole(LT_LP_ROLE, depositor, 0);
         quoteToken.mint(address(this), quoteUnit);
         quoteToken.approve(address(balancerVault), quoteUnit);
         // The pool's token amounts follow the sorted registration order, so map the quote leg through the index

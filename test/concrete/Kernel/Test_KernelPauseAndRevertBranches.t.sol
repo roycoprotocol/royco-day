@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import { stdError } from "../../../lib/forge-std/src/Test.sol";
+import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
+import { LT_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { toTrancheUnits } from "../../../src/libraries/Units.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_KernelPauseAndRevertBranches
@@ -69,6 +70,7 @@ contract Test_KernelPauseAndRevertBranches is DayMarketTestBase {
 
     function test_PausedKernel_bricksInKindLTDeposit() public {
         address a = makeAddr("P_LT_INKIND");
+        accessManager.grantRole(LT_LP_ROLE, a, 0);
         uint256 bptAmount = 10e18;
         _mintBptTo(a, bptAmount, 10 * quoteUnit);
         vm.prank(a);
@@ -81,6 +83,7 @@ contract Test_KernelPauseAndRevertBranches is DayMarketTestBase {
 
     function test_PausedKernel_bricksMultiAssetLTDeposit() public {
         address a = makeAddr("P_LT_MULTI");
+        accessManager.grantRole(LT_LP_ROLE, a, 0);
         quoteToken.mint(a, 10 * quoteUnit);
         vm.prank(a);
         quoteToken.approve(address(liquidityTranche), 10 * quoteUnit);

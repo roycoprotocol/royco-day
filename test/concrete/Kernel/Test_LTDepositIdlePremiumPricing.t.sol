@@ -2,12 +2,13 @@
 pragma solidity ^0.8.28;
 
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import { LT_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_LTDepositIdlePremiumPricing_Kernel
@@ -99,6 +100,7 @@ contract Test_LTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
     function test_LTDeposit_WhileIdlePremiumOutstanding_CannotDiluteExistingHolders() public {
         uint256 idleShares = _accrueIdlePremiumSeniorShares();
         address entrant = makeAddr("DILUTION_ENTRANT");
+        accessManager.grantRole(LT_LP_ROLE, entrant, 0);
 
         // Fund the entrant with 1e18 fresh BPT against a matching quote leg, keeping NAV-per-BPT at exactly 1.0
         // (the mock vault pulls the quote leg from the caller, so it must be minted and approved first)

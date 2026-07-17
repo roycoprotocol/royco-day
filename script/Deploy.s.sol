@@ -36,6 +36,9 @@ import {
 } from "../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../src/factory/RoycoFactory.sol";
 import {
+    Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
+} from "../src/factory/templates/Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
+import {
     Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
 } from "../src/factory/templates/Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
 import {
@@ -47,6 +50,7 @@ import {
 import {
     COMPONENT_ID_ACCOUNTANT_IMPL,
     COMPONENT_ID_DAY_BALANCER_HOOKS,
+    COMPONENT_ID_DAY_KERNEL_IDENTICAL_AA_IDLE_CDO_VIRTUAL_PRICE,
     COMPONENT_ID_DAY_KERNEL_IDENTICAL_CHAINLINK_TO_ADMIN,
     COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK,
     COMPONENT_ID_DAY_KERNEL_IDENTICAL_MAKINA_CHAINLINK,
@@ -68,6 +72,9 @@ import { IBaseTemplate } from "../src/interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import {
+    Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel
+} from "../src/kernels/Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
+import {
     Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel
 } from "../src/kernels/Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
 import {
@@ -82,6 +89,9 @@ import {
 import {
     IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
 } from "../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
+import {
+    IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter
+} from "../src/kernels/base/quoter/identical-st-jt/IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter.sol";
 import {
     IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter
 } from "../src/kernels/base/quoter/identical-st-jt/IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
@@ -132,7 +142,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     enum KernelType {
         Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel,
         Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel,
-        Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel
+        Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel,
+        Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel
     }
 
     /// @notice Enum for YDM types
@@ -169,6 +180,15 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
     struct IdenticalAssets_ST_JT_ChainlinkToAdminOracle_QuoterKernelParams {
         IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter.ST_JT_QuoterSpecificParams stAndJTQuoterParams;
+        BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams ltQuoterParams;
+    }
+
+    // ─── Kernel-specific param struct for the Day IdleCDO-VirtualPrice-Balancer kernel (encoding-identical to the
+    //     template's KernelSpecificParams wrapper, all fields static so flat and nested encodings agree) ───
+
+    struct Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_QuoterKernelParams {
+        address idleCDO;
+        IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter.ST_JT_QuoterSpecificParams stAndJTQuoterParams;
         BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams ltQuoterParams;
     }
 
@@ -542,6 +562,12 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
                 type(Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode
             );
         }
+        if (_kernelType == KernelType.Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel) {
+            return _dayTemplateComponents(
+                COMPONENT_ID_DAY_KERNEL_IDENTICAL_AA_IDLE_CDO_VIRTUAL_PRICE,
+                type(Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode
+            );
+        }
         revert UnsupportedKernelType(_kernelType);
     }
 
@@ -607,6 +633,17 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
                 ),
                 COMPONENT_ID_DAY_KERNEL_IDENTICAL_CHAINLINK_TO_ADMIN,
                 type(Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode
+            );
+        }
+        if (_kernelType == KernelType.Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel) {
+            return (
+                address(
+                    new Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
+                        _factory, poolFactory, eclpLPOracleFactory, _entryPoint, _marketSyncer
+                    )
+                ),
+                COMPONENT_ID_DAY_KERNEL_IDENTICAL_AA_IDLE_CDO_VIRTUAL_PRICE,
+                type(Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode
             );
         }
         revert UnsupportedKernelType(_kernelType);
