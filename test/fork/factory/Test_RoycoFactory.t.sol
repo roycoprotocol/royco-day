@@ -28,7 +28,9 @@ import {
     SYNC_ROLE
 } from "../../../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
-import { Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate } from "../../../src/factory/templates/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
+import {
+    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
+} from "../../../src/factory/templates/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
 import { BaseDeploymentTemplate } from "../../../src/factory/templates/base/BaseDeploymentTemplate.sol";
 import { COMPONENT_ID_SENIOR_TRANCHE_IMPL, TAG_ST_PROXY } from "../../../src/factory/templates/base/Components.sol";
 import { EntryPointConfigurer } from "../../../src/factory/templates/periphery/EntryPointConfigurer.sol";
@@ -103,13 +105,13 @@ contract Test_RoycoFactory is Test {
         entryPoint = IRoycoDayEntryPoint(
             address(
                 new ERC1967Proxy(
-                    address(entryPointImpl),
-                    abi.encodeCall(RoycoDayEntryPoint.initialize, (new address[](0), new IRoycoDayEntryPoint.TrancheConfig[](0)))
+                    address(entryPointImpl), abi.encodeCall(RoycoDayEntryPoint.initialize, (new address[](0), new IRoycoDayEntryPoint.TrancheConfig[](0)))
                 )
             )
         );
         RoycoMarketSyncer syncerImpl = new RoycoMarketSyncer();
-        syncer = RoycoMarketSyncer(address(new ERC1967Proxy(address(syncerImpl), abi.encodeCall(RoycoMarketSyncer.initialize, (address(am), new address[](0))))));
+        syncer =
+            RoycoMarketSyncer(address(new ERC1967Proxy(address(syncerImpl), abi.encodeCall(RoycoMarketSyncer.initialize, (address(am), new address[](0))))));
 
         // Bind the config selectors the factory drives during deployments (the factory self-granted
         // ADMIN_ENTRY_POINT_ROLE + SYNC_ROLE in its initialize).
@@ -121,7 +123,7 @@ contract Test_RoycoFactory is Test {
         am.setTargetFunctionRole(address(syncer), syncerSelectors, SYNC_ROLE);
 
         // The real Day template, bound to this factory. `deployScript` is used only for its pure/view build helpers
-        // (`dayTemplateComponents`, `buildDayParams`, `getMarketConfig`) — the factory + template above are the units under test.
+        // (`dayTemplateComponentsForKernelType`, `buildDayParams`, `getMarketConfig`) — the factory + template above are the units under test.
         deployScript = new DeployScript();
         template = new Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
             IRoycoFactory(address(factory)),
@@ -135,7 +137,9 @@ contract Test_RoycoFactory is Test {
     // ─── helpers ───
 
     function _register() internal {
-        (bytes32[] memory ids, bytes[] memory codes) = deployScript.dayTemplateComponents();
+        (bytes32[] memory ids, bytes[] memory codes) = deployScript.dayTemplateComponentsForKernelType(
+            DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel
+        );
         template.initialize(ids, codes);
         vm.prank(FACTORY_ADMIN);
         factory.registerTemplate(address(template));
@@ -208,7 +212,9 @@ contract Test_RoycoFactory is Test {
         assertFalse(factory.isTemplateEnabled(address(template)), "not enabled pre");
 
         // The deployer initializes the template directly (SSTORE2-persisting each component's creation code) ...
-        (bytes32[] memory ids, bytes[] memory codes) = deployScript.dayTemplateComponents();
+        (bytes32[] memory ids, bytes[] memory codes) = deployScript.dayTemplateComponentsForKernelType(
+            DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel
+        );
         template.initialize(ids, codes);
         assertTrue(template.bytecodePointer(COMPONENT_ID_SENIOR_TRANCHE_IMPL) != address(0), "component bytecode persisted");
         assertTrue(template.isInitialized(), "template initialized");

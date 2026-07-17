@@ -1,21 +1,19 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.28;
 
 import { BalancerPoolToken } from "../../lib/balancer-v3-monorepo/pkg/vault/contracts/BalancerPoolToken.sol";
-import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
-import { RoycoDayKernel } from "../../src/kernels/base/RoycoDayKernel.sol";
-import {
-    IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter
-} from "../../src/kernels/base/quoter/identical-st-jt/IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter.sol";
-import { IdenticalAssets_ST_JT_Oracle_Quoter } from "../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_Oracle_Quoter.sol";
-import { BalancerV3_LT_BPTOracle_Quoter } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
+import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
+import { RoycoDayKernel } from "./base/RoycoDayKernel.sol";
+import { IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter } from "./base/quoter/identical-st-jt/IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter.sol";
+import { IdenticalAssets_ST_JT_Oracle_Quoter } from "./base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_Oracle_Quoter.sol";
+import { BalancerV3_LT_BPTOracle_Quoter } from "./base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 
 /**
  * @title Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel
- * @notice Test-only concrete kernel composing the Chainlink-to-admin-oracle ST/JT quoter with the Balancer V3
- *         BPT-oracle liquidity tranche quoter, mirroring the shipped ERC4626-to-Chainlink kernel's shape
- * @dev The Chainlink-to-admin quoter ships abstract with no concrete kernel wiring it, so tests exercise it through
- *      this composition. The exposed oracle-query shim lets tests pin the admin backstop's unreachable-revert design
+ * @author Waymont
+ * @notice The senior and junior tranches transfer in the same yield bearing asset such as a Pendle PT (PT-USDe, etc.), and the liquidity tranche provides secondary liquidity via a Balancer V3 pool pairing the senior tranche share against a quote asset (USDC, srRoyUSDC, etc.)
+ * @dev ST/JT NAV computations convert tranche units to reference assets (PT-USDe to USDe, etc.) using a Chainlink (compatible) oracle and then convert reference assets to NAV units using an admin set rate
+ * @dev LT NAV computations value the pool position (BPT) using a manipulation-resistant Balancer V3 oracle, and the pool prices the senior share leg via this kernel's senior share rate provider
  */
 contract Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel is
     IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter,
@@ -50,15 +48,12 @@ contract Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_K
         external
         initializer
     {
+        // Initialize the base kernel state
         __RoycoDayKernel_init(_standardParams);
+        // Initialize the identical assets Chainlink (compatible) oracle to admin set rate ST/JT quoter
         __IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter_init(_specificParams.stAndJTQuoterParams);
+        // Initialize the Balancer V3 liquidity tranche quoter
         __BalancerV3_LT_BPTOracle_Quoter_init_unchained(_specificParams.ltQuoterParams);
-    }
-
-    /// @notice Exposes the internal oracle-query helper so tests can pin its unreachable-backstop revert directly
-    /// @return conversionRateWAD Never returns, the admin-oracle composition's helper always reverts
-    function exposed_getConversionRateFromOracleWAD() external pure returns (uint256 conversionRateWAD) {
-        return _getConversionRateFromOracleWAD();
     }
 
     /// @inheritdoc RoycoDayKernel

@@ -18,7 +18,7 @@ import { RoycoLiquidityTranche } from "../../../src/tranches/RoycoLiquidityTranc
 import { RoycoSeniorTranche } from "../../../src/tranches/RoycoSeniorTranche.sol";
 import {
     Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel as MakinaChainlinkKernel
-} from "../../mocks/Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
+} from "../../../src/kernels/Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
 import { MockAggregatorV3 } from "../../mocks/MockAggregatorV3.sol";
 import { MockBPT } from "../../mocks/MockBPT.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";

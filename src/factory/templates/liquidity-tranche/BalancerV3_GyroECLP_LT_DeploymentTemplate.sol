@@ -231,6 +231,16 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
     function _kernelComponentId() internal pure virtual returns (bytes32);
 
     /**
+     * @dev Returns the ABI-encoded constructor args appended to the concrete Day kernel's creation code
+     *      The unnamed param is the market's opaque kernel-specific params blob, unused by the default encoding,
+     *      kernels with extra constructor args override to decode it and append them after the standard params
+     * @param _cp The standard kernel construction params the template assembled for this market
+     */
+    function _kernelConstructionArgs(IRoycoDayKernel.RoycoDayKernelConstructionParams memory _cp, bytes memory) internal pure virtual returns (bytes memory) {
+        return abi.encode(_cp);
+    }
+
+    /**
      * @dev Returns the ABI-encoded kernel `initialize(...)` calldata for the concrete Day kernel
      * @param _bptOracle The template-deployed E-CLP BPT oracle for this market's pool, which the concrete template must
      *        inject into the kernel's LT-quoter init params (overwriting any caller-supplied value)
@@ -359,7 +369,8 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
             ltAsset: _balancerPool,
             enforceVaultSharesTransferWhitelist: _p.enforceVaultSharesTransferWhitelist
         });
-        address kernelImpl = _deployImpl(_kernelComponentId(), abi.encode(cp), _marketComponentSalt(_p.marketId, TAG_KERNEL_IMPL));
+        address kernelImpl =
+            _deployImpl(_kernelComponentId(), _kernelConstructionArgs(cp, _p.kernelSpecificParams), _marketComponentSalt(_p.marketId, TAG_KERNEL_IMPL));
 
         IRoycoDayKernel.RoycoDayKernelInitParams memory kip = IRoycoDayKernel.RoycoDayKernelInitParams({
             initialAuthority: ROYCO_FACTORY.ROYCO_AUTHORITY(),

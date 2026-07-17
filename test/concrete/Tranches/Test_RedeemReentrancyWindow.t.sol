@@ -11,6 +11,9 @@ import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.s
 import { ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import {
+    Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel as PlainAssetKernel
+} from "../../../src/kernels/Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
+import {
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel as ShippedKernel
 } from "../../../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
 import {
@@ -22,9 +25,6 @@ import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../../../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoLiquidityTranche } from "../../../src/tranches/RoycoLiquidityTranche.sol";
 import { RoycoSeniorTranche } from "../../../src/tranches/RoycoSeniorTranche.sol";
-import {
-    Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel as PlainAssetKernel
-} from "../../mocks/Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
 import { MockAggregatorV3 } from "../../mocks/MockAggregatorV3.sol";
 import { MockBPT } from "../../mocks/MockBPT.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
