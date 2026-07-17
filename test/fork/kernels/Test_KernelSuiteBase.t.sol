@@ -4457,7 +4457,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(JT.maxRedeem(eve), 0, "jtMaxRedeem must report zero for a blacklisted owner");
 
         if (testConfig.hasLiquidityTranche) {
-            // The public multi-asset LT deposit surface is screened at the share mint
+            // A roled LT depositor is still screened at the share mint: it cannot mint to a blacklisted receiver
             uint256 quoteAssets = _quoteAssetsForValue(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(testConfig.initialFunding / 1000)));
             vm.startPrank(LT_BOB_ADDRESS);
             IERC20(testConfig.quoteAsset).approve(address(LT), quoteAssets);

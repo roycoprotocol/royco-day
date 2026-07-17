@@ -374,9 +374,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(ACCESS_MANAGER.getTargetFunctionRole(ep, IRoycoDayEntryPoint.pokeOracleClock.selector), PUBLIC_ROLE, "pokeOracleClock public");
         // The admin surface is bound to its dedicated roles.
         assertEq(
-            ACCESS_MANAGER.getTargetFunctionRole(ep, IRoycoDayEntryPoint.modifyTrancheConfigs.selector),
-            ADMIN_ENTRY_POINT_ROLE,
-            "modifyTrancheConfigs role"
+            ACCESS_MANAGER.getTargetFunctionRole(ep, IRoycoDayEntryPoint.modifyTrancheConfigs.selector), ADMIN_ENTRY_POINT_ROLE, "modifyTrancheConfigs role"
         );
         assertEq(
             ACCESS_MANAGER.getTargetFunctionRole(ep, IRoycoDayEntryPoint.collectProtocolFees.selector),
