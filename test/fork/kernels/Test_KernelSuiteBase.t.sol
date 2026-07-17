@@ -3819,8 +3819,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      */
     function _expectedMaxLTWithdrawalNAV() internal view returns (NAV_UNIT) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        uint256 requiredValue =
-            Math.mulDiv((toUint256(a.lastSTEffectiveNAV) + toUint256(a.stNAVDustTolerance)), a.minLiquidityWAD, WAD, Math.Rounding.Ceil);
+        uint256 requiredValue = Math.mulDiv((toUint256(a.lastSTEffectiveNAV) + toUint256(a.stNAVDustTolerance)), a.minLiquidityWAD, WAD, Math.Rounding.Ceil);
         uint256 ltRawValue = toUint256(a.lastLTRawNAV);
         return toNAVUnits(ltRawValue > requiredValue ? ltRawValue - requiredValue : 0);
     }
@@ -4497,11 +4496,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         vm.startPrank(outsider);
         vm.expectRevert(unauthorizedError);
-        ST.deposit(toTrancheUnits(assets), outsider);
-        vm.expectRevert(unauthorizedError);
         ST.redeem(1, outsider, outsider);
-        vm.expectRevert(unauthorizedError);
-        JT.deposit(toTrancheUnits(assets), outsider);
         vm.expectRevert(unauthorizedError);
         JT.redeem(1, outsider, outsider);
         vm.expectRevert(unauthorizedError);

@@ -452,8 +452,8 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
 
     function _buildRoleBindings(DeploymentResult memory _r, address _balancerHook) internal view virtual returns (RoleBindings memory) {
         TargetBinding[] memory targets = new TargetBinding[](9);
-        targets[0] = _trancheBinding(_r.seniorTranche, ST_LP_ROLE, ST_LP_ROLE, false);
-        targets[1] = _trancheBinding(_r.juniorTranche, JT_LP_ROLE, JT_LP_ROLE, false);
+        targets[0] = _trancheBinding(_r.seniorTranche, PUBLIC_ROLE, ST_LP_ROLE, false);
+        targets[1] = _trancheBinding(_r.juniorTranche, PUBLIC_ROLE, JT_LP_ROLE, false);
         targets[2] = _trancheBinding(_r.liquidityTranche, PUBLIC_ROLE, LT_LP_ROLE, true);
         targets[3] = _kernelBinding(_r.kernel);
         targets[4] = _accountantBinding(_r.accountant);

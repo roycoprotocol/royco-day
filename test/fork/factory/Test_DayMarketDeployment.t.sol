@@ -374,9 +374,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(ACCESS_MANAGER.getTargetFunctionRole(ep, IRoycoDayEntryPoint.pokeOracleClock.selector), PUBLIC_ROLE, "pokeOracleClock public");
         // The admin surface is bound to its dedicated roles.
         assertEq(
-            ACCESS_MANAGER.getTargetFunctionRole(ep, IRoycoDayEntryPoint.modifyTrancheConfigs.selector),
-            ADMIN_ENTRY_POINT_ROLE,
-            "modifyTrancheConfigs role"
+            ACCESS_MANAGER.getTargetFunctionRole(ep, IRoycoDayEntryPoint.modifyTrancheConfigs.selector), ADMIN_ENTRY_POINT_ROLE, "modifyTrancheConfigs role"
         );
         assertEq(
             ACCESS_MANAGER.getTargetFunctionRole(ep, IRoycoDayEntryPoint.collectProtocolFees.selector),
@@ -397,11 +395,10 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
     /// @notice Each tranche entrypoint is bound to its intended role: LP-gated deposits/redeems, open LT deposits,
     ///         and the pause/unpause/upgrade/burn admin surface
     function test_Auth_TrancheSelectorRoleBindings() public view {
-        _assertRole(address(ST), IRoycoVaultTranche.deposit.selector, ST_LP_ROLE);
+        _assertRole(address(ST), IRoycoVaultTranche.deposit.selector, PUBLIC_ROLE);
         _assertRole(address(ST), IRoycoVaultTranche.redeem.selector, ST_LP_ROLE);
-        _assertRole(address(JT), IRoycoVaultTranche.deposit.selector, JT_LP_ROLE);
+        _assertRole(address(JT), IRoycoVaultTranche.deposit.selector, PUBLIC_ROLE);
         _assertRole(address(JT), IRoycoVaultTranche.redeem.selector, JT_LP_ROLE);
-        // LT deposits are open (they only deepen senior liquidity); LT redemptions stay role-gated.
         _assertRole(address(LT), IRoycoVaultTranche.deposit.selector, PUBLIC_ROLE);
         _assertRole(address(LT), RoycoLiquidityTranche.depositMultiAsset.selector, PUBLIC_ROLE);
         _assertRole(address(LT), IRoycoVaultTranche.redeem.selector, LT_LP_ROLE);
@@ -547,13 +544,6 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         vm.prank(address(0xBAD));
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(0xBAD)));
         KERNEL.setProtocolFeeRecipient(address(0xBAD));
-    }
-
-    /// @notice snUSD tranche deposits are gated by ST_LP_ROLE: a random address reverts on auth before any value check
-    function test_RevertIf_NonLPDepositsIntoSeniorTranche() public {
-        vm.prank(address(0xBAD));
-        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(0xBAD)));
-        ST.deposit(TRANCHE_UNIT.wrap(0), address(0xBAD));
     }
 
     /**
