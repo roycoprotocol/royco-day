@@ -5,35 +5,40 @@ import { BalancerPoolToken } from "../../lib/balancer-v3-monorepo/pkg/vault/cont
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { RoycoDayKernel } from "../../src/kernels/base/RoycoDayKernel.sol";
 import {
-    IdenticalERC4626Shares_ST_JT_SharePriceToAdminOracle_Quoter
-} from "../../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToAdminOracle_Quoter.sol";
+    IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter
+} from "../../src/kernels/base/quoter/identical-st-jt/IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
 import { IdenticalAssets_ST_JT_Oracle_Quoter } from "../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_Oracle_Quoter.sol";
 import { BalancerV3_LT_BPTOracle_Quoter } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 
 /**
- * @title Identical_ERC4626_ST_JT_SharePriceToAdminOracle_BalancerV3_BPTOracle_LT_Kernel
- * @notice Test-only concrete kernel composing the ERC4626-share-price-to-admin-oracle ST/JT quoter with the
+ * @title Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel
+ * @notice Test-only concrete kernel composing the Makina machine-share-price-to-Chainlink-oracle ST/JT quoter with the
  *         Balancer V3 BPT-oracle liquidity tranche quoter, mirroring the shipped ERC4626-to-Chainlink kernel's shape
- * @dev The ERC4626-to-admin quoter ships abstract with no concrete kernel wiring it, so tests exercise it through this composition
+ * @dev The Makina quoter ships abstract with no concrete kernel wiring it, so tests exercise it through this composition
  */
-contract Identical_ERC4626_ST_JT_SharePriceToAdminOracle_BalancerV3_BPTOracle_LT_Kernel is
-    IdenticalERC4626Shares_ST_JT_SharePriceToAdminOracle_Quoter,
+contract Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel is
+    IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter,
     BalancerV3_LT_BPTOracle_Quoter
 {
     /**
      * @notice Kernel-specific initialization parameters
-     * @custom:field stAndJTQuoterParams - The senior/junior tranche ERC4626-shares-to-admin-oracle quoter's parameters
+     * @custom:field stAndJTQuoterParams - The senior/junior tranche Makina-shares-to-Chainlink-oracle quoter's parameters
      * @custom:field ltQuoterParams - The liquidity tranche Balancer V3 quoter's parameters
      */
     struct KernelSpecificInitParams {
-        IdenticalERC4626Shares_ST_JT_SharePriceToAdminOracle_Quoter.ST_JT_QuoterSpecificParams stAndJTQuoterParams;
+        IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams stAndJTQuoterParams;
         BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams ltQuoterParams;
     }
 
-    /// @notice Constructs the kernel state and resolves the quote asset from the liquidity tranche's Balancer V3 pool
+    /// @notice Constructs the kernel state, pins the Makina machine, and resolves the quote asset from the liquidity tranche's Balancer V3 pool
     /// @param _params The standard construction parameters for the Royco Day kernel
-    constructor(IRoycoDayKernel.RoycoDayKernelConstructionParams memory _params)
+    /// @param _makinaMachine The Makina machine whose share token is the ST/JT tranche asset
+    constructor(
+        IRoycoDayKernel.RoycoDayKernelConstructionParams memory _params,
+        address _makinaMachine
+    )
         RoycoDayKernel(_params)
+        IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter(_makinaMachine)
         BalancerV3_LT_BPTOracle_Quoter(BalancerPoolToken(_params.ltAsset).getVault())
     { }
 
@@ -50,7 +55,7 @@ contract Identical_ERC4626_ST_JT_SharePriceToAdminOracle_BalancerV3_BPTOracle_LT
         initializer
     {
         __RoycoDayKernel_init(_standardParams);
-        __IdenticalERC4626Shares_ST_JT_SharePriceToAdminOracle_Quoter_init(_specificParams.stAndJTQuoterParams);
+        __IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter_init(_specificParams.stAndJTQuoterParams);
         __BalancerV3_LT_BPTOracle_Quoter_init_unchained(_specificParams.ltQuoterParams);
     }
 

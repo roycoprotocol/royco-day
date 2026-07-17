@@ -148,32 +148,17 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
-    function cancelDepositRequests(uint256[] calldata _requestNonces, address _receiver) external override(IRoycoDayEntryPoint) {
+    function cancelDepositRequests(uint256[] calldata _requestNonces, address _receiver) external override(IRoycoDayEntryPoint) whenNotPaused restricted {
         // Execute the user specified deposit request cancellations
         uint256 numRequestsToCancel = _requestNonces.length;
         for (uint256 i = 0; i < numRequestsToCancel; ++i) {
-            cancelDepositRequest(_requestNonces[i], _receiver);
+            _cancelDepositRequest(_requestNonces[i], _receiver);
         }
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
-    function cancelDepositRequest(uint256 _requestNonce, address _receiver) public override(IRoycoDayEntryPoint) whenNotPaused restricted {
-        // Ensure the receiver isn't null
-        require(_receiver != address(0), NULL_ADDRESS());
-        // Retrieve the user's specified deposit request and assert that it exists
-        RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
-        DepositRequest memory request = $.userToNonceToDepositRequest[msg.sender][_requestNonce];
-        require(request.assets != ZERO_TRANCHE_UNITS, INVALID_REQUEST(_requestNonce));
-
-        // Mark the request as cancelled
-        delete $.userToNonceToDepositRequest[msg.sender][_requestNonce];
-
-        // Return the assets from the cancelled request to the specified receiver
-        address asset = $.trancheToConfig[request.baseRequest.tranche].asset;
-        IERC20(asset).safeTransfer(_receiver, toUint256(request.assets));
-
-        // Emit the deposit request cancellation event
-        emit DepositRequestCancelled(msg.sender, _requestNonce, _receiver, request.assets);
+    function cancelDepositRequest(uint256 _requestNonce, address _receiver) external override(IRoycoDayEntryPoint) whenNotPaused restricted {
+        _cancelDepositRequest(_requestNonce, _receiver);
     }
 
     /// =============================
@@ -264,31 +249,17 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
-    function cancelRedemptionRequests(uint256[] calldata _requestNonces, address _receiver) external override(IRoycoDayEntryPoint) {
+    function cancelRedemptionRequests(uint256[] calldata _requestNonces, address _receiver) external override(IRoycoDayEntryPoint) whenNotPaused restricted {
         // Execute the user specified redemption request cancellations
         uint256 numRequestsToCancel = _requestNonces.length;
         for (uint256 i = 0; i < numRequestsToCancel; ++i) {
-            cancelRedemptionRequest(_requestNonces[i], _receiver);
+            _cancelRedemptionRequest(_requestNonces[i], _receiver);
         }
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
-    function cancelRedemptionRequest(uint256 _requestNonce, address _receiver) public override(IRoycoDayEntryPoint) whenNotPaused restricted {
-        // Ensure the receiver isn't null
-        require(_receiver != address(0), NULL_ADDRESS());
-        // Retrieve the user's specified redemption request and assert that it exists
-        RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
-        RedemptionRequest memory request = $.userToNonceToRedemptionRequest[msg.sender][_requestNonce];
-        require(request.shares != 0, INVALID_REQUEST(_requestNonce));
-
-        // Mark the request as cancelled
-        delete $.userToNonceToRedemptionRequest[msg.sender][_requestNonce];
-
-        // Return the shares from the cancelled request to the specified receiver
-        IERC20(request.baseRequest.tranche).safeTransfer(_receiver, request.shares);
-
-        // Emit the redemption request cancellation event
-        emit RedemptionRequestCancelled(msg.sender, _requestNonce, _receiver, request.shares);
+    function cancelRedemptionRequest(uint256 _requestNonce, address _receiver) external override(IRoycoDayEntryPoint) whenNotPaused restricted {
+        _cancelRedemptionRequest(_requestNonce, _receiver);
     }
 
     /// =============================
@@ -435,6 +406,30 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     }
 
     /**
+     * @dev Cancels the caller's specified deposit request and returns its assets to the specified receiver
+     * @param _requestNonce The nonce of the deposit request to cancel
+     * @param _receiver The receiver of the cancelled request's assets
+     */
+    function _cancelDepositRequest(uint256 _requestNonce, address _receiver) internal {
+        // Ensure the receiver isn't null
+        require(_receiver != address(0), NULL_ADDRESS());
+        // Retrieve the user's specified deposit request and assert that it exists
+        RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
+        DepositRequest memory request = $.userToNonceToDepositRequest[msg.sender][_requestNonce];
+        require(request.assets != ZERO_TRANCHE_UNITS, INVALID_REQUEST(_requestNonce));
+
+        // Mark the request as cancelled
+        delete $.userToNonceToDepositRequest[msg.sender][_requestNonce];
+
+        // Return the assets from the cancelled request to the specified receiver
+        address asset = $.trancheToConfig[request.baseRequest.tranche].asset;
+        IERC20(asset).safeTransfer(_receiver, toUint256(request.assets));
+
+        // Emit the deposit request cancellation event
+        emit DepositRequestCancelled(msg.sender, _requestNonce, _receiver, request.assets);
+    }
+
+    /**
      * @notice Executes a pending redemption request for the specified user
      * @dev The request must exist and the configured delay period must have elapsed
      *      A maximal liquidity tranche redemption exits in-kind whenever the in-kind bound serves the entire
@@ -536,6 +531,29 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
 
         // Emit the redemption execution event
         emit RedemptionExecuted(_user, _requestNonce, msg.sender, userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets, bonusClaims, bonusQuoteAssets);
+    }
+
+    /**
+     * @dev Cancels the caller's specified redemption request and returns its shares to the specified receiver
+     * @param _requestNonce The nonce of the redemption request to cancel
+     * @param _receiver The receiver of the cancelled request's shares
+     */
+    function _cancelRedemptionRequest(uint256 _requestNonce, address _receiver) internal {
+        // Ensure the receiver isn't null
+        require(_receiver != address(0), NULL_ADDRESS());
+        // Retrieve the user's specified redemption request and assert that it exists
+        RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
+        RedemptionRequest memory request = $.userToNonceToRedemptionRequest[msg.sender][_requestNonce];
+        require(request.shares != 0, INVALID_REQUEST(_requestNonce));
+
+        // Mark the request as cancelled
+        delete $.userToNonceToRedemptionRequest[msg.sender][_requestNonce];
+
+        // Return the shares from the cancelled request to the specified receiver
+        IERC20(request.baseRequest.tranche).safeTransfer(_receiver, request.shares);
+
+        // Emit the redemption request cancellation event
+        emit RedemptionRequestCancelled(msg.sender, _requestNonce, _receiver, request.shares);
     }
 
     /**
