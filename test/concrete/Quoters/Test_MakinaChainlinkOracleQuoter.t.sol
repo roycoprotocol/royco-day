@@ -219,10 +219,18 @@ abstract contract MakinaChainlinkMarketTestBase is DayMarketTestBase {
         });
     }
 
-    /// @notice Builds the kernel proxy initialization calldata for the specified initial stored rate and sequencer feed
+    /// @notice Builds the kernel proxy initialization calldata for the specified initial stored rate and sequencer feed, wiring the fixture's accounting feed
     /// @param _initialConversionRateWAD The stored accounting-asset-to-NAV rate to initialize the ST/JT quoter with (0 runs Chainlink-primary)
     /// @param _sequencerUptimeFeed The L2 sequencer uptime feed (the null address disables the check)
     function _kernelInitData(uint256 _initialConversionRateWAD, address _sequencerUptimeFeed) internal view returns (bytes memory) {
+        return _kernelInitDataWithOracle(_initialConversionRateWAD, address(accountingFeed), _sequencerUptimeFeed);
+    }
+
+    /// @notice Builds the kernel proxy initialization calldata with an explicit accounting-asset-to-NAV oracle, so init-gate tests can pass the null address
+    /// @param _initialConversionRateWAD The stored accounting-asset-to-NAV rate to initialize the ST/JT quoter with (0 runs Chainlink-primary)
+    /// @param _oracle The accounting-asset-to-NAV oracle to wire (the null address runs admin-primary and requires a nonzero stored rate)
+    /// @param _sequencerUptimeFeed The L2 sequencer uptime feed (the null address disables the check)
+    function _kernelInitDataWithOracle(uint256 _initialConversionRateWAD, address _oracle, address _sequencerUptimeFeed) internal view returns (bytes memory) {
         return abi.encodeCall(
             makinaKernelImpl.initialize,
             (
@@ -235,7 +243,7 @@ abstract contract MakinaChainlinkMarketTestBase is DayMarketTestBase {
                 MakinaChainlinkKernel.KernelSpecificInitParams({
                     stAndJTQuoterParams: IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams({
                         initialConversionRateWAD: _initialConversionRateWAD,
-                        accountingAssetToNavAssetOracle: address(accountingFeed),
+                        accountingAssetToNavAssetOracle: _oracle,
                         stalenessThresholdSeconds: ORACLE_STALENESS_THRESHOLD_SECONDS,
                         sequencerUptimeFeed: _sequencerUptimeFeed,
                         gracePeriodSeconds: ORACLE_GRACE_PERIOD_SECONDS
@@ -398,6 +406,89 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
         assertEq(makinaKernel.getStoredConversionRateWAD(), 0, "clearing the genesis override must restore the sentinel");
         // The feed path resumes: machine 1.5 x feed 1.0 = floor(1.5e18 x 1e18 / 1e18) = 1.5e18
         assertEq(makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 1.5e18, "the cleared quoter must price through the feed at 1.5 x 1.0");
+    }
+
+    // =============================
+    // The oracle-presence invariant (no configuration may strand both price sources)
+    // =============================
+
+    /**
+     * @notice Initializing the kernel with a zero rate AND a null oracle is rejected outright
+     * @dev Zero is the query-the-feed sentinel and the null oracle means there is no feed to query, so this
+     *      configuration has no price source at all: before the invariant it deployed successfully and bricked on
+     *      the first quote with an untyped revert into empty code. The config gate must catch it at initialize with
+     *      a typed error instead of letting a priceless market ship
+     */
+    function test_RevertIf_InitializedWithNullOracleAndZeroRate() public {
+        // A fresh proxy over the live impl with BOTH second-hop price sources absent
+        bytes memory initData = _kernelInitDataWithOracle(0, address(0), address(0));
+        vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.NULL_ORACLE_WITHOUT_STORED_RATE.selector);
+        new ERC1967Proxy(address(makinaKernelImpl), initData);
+    }
+
+    /**
+     * @notice Initializing with a nonzero rate and a null oracle is a valid admin-primary configuration
+     * @dev This is the shape that emulates the admin sibling on the Chainlink composition: the stored rate is the
+     *      whole second hop and no feed exists to consult. The invariant must permit it (the stored rate prices the
+     *      market) while the paired init gate above rejects the priceless variant, so admin-primary deployments are
+     *      a first-class configuration rather than an accident of the null-oracle allowance
+     */
+    function test_NullOracleWithNonzeroInitialRate_RunsAdminPrimary() public {
+        // A fresh proxy over the live impl: stored rate 2.0 as the entire second hop, no oracle wired
+        MakinaChainlinkKernel fresh =
+            MakinaChainlinkKernel(address(new ERC1967Proxy(address(makinaKernelImpl), _kernelInitDataWithOracle(2e18, address(0), address(0)))));
+
+        // The rate landed and the oracle slot is genuinely null
+        assertEq(fresh.getStoredConversionRateWAD(), 2e18, "the admin-primary rate must land in quoter storage");
+        assertEq(fresh.getChainlinkOracleConfiguration().oracle, address(0), "the oracle slot must be null in the admin-primary configuration");
+
+        // Composed: machine 1.0 x stored 2.0 = 2e18, priced with no feed in existence, on both tranches and inverse
+        assertEq(fresh.getTrancheUnitToNAVUnitConversionRateWAD(), 2e18, "the composed rate must run off the stored rate with no oracle wired");
+        assertEq(toUint256(fresh.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2e18, "one whole share must quote through the admin-primary rate");
+        assertEq(toUint256(fresh.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2e18, "the junior side prices through the identical rate");
+        assertEq(toUint256(fresh.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(2e18)))), 1e18, "NAV -> share must invert the admin-primary rate");
+    }
+
+    /**
+     * @notice The two setters gate each other so no admin operation sequence can strand both price sources: the
+     *         oracle cannot be detached while the sentinel is stored, and the sentinel cannot be stored while the
+     *         oracle is null, while the full migration to admin-primary and back remains reachable in order
+     * @dev Each setter checks the OTHER price source before removing its own: setChainlinkOracle(0) requires a
+     *      stored rate and setConversionRate(0) requires a wired oracle. Before the invariant both landed (or died
+     *      in the post-set sync with an untyped revert into empty code), so a two-step admin mistake could strand a
+     *      live market with no price source. The lifecycle below walks the whole state machine through the public
+     *      surface: feed-primary -> override -> detached admin-primary -> blocked sentinel -> re-attached -> feed-primary
+     */
+    function test_OraclePresenceInvariant_DetachAndSentinelGateEachOther() public {
+        // Feed-primary (the setUp baseline): detaching the only price source is rejected with a typed error
+        vm.prank(ORACLE_QUOTER_ADMIN);
+        vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.NULL_ORACLE_WITHOUT_STORED_RATE.selector);
+        makinaKernel.setChainlinkOracle(address(0), 0, false);
+        assertEq(makinaKernel.getChainlinkOracleConfiguration().oracle, address(accountingFeed), "the rejected detach must leave the feed wired");
+
+        // Install an override, then the detach is legal: the stored rate carries the second hop alone
+        vm.prank(ORACLE_QUOTER_ADMIN);
+        makinaKernel.setConversionRate(2e18, false);
+        vm.prank(ORACLE_QUOTER_ADMIN);
+        makinaKernel.setChainlinkOracle(address(0), 0, false);
+        assertEq(makinaKernel.getChainlinkOracleConfiguration().oracle, address(0), "the overridden market must permit detaching the feed");
+        // Admin-primary pricing: machine 1.0 x stored 2.0 = 2e18
+        assertEq(makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 2e18, "the detached market must price through the stored rate");
+
+        // With no oracle wired, storing the sentinel is rejected with a typed error instead of the untyped
+        // empty-code revert this exact sequence produced before the invariant
+        vm.prank(ORACLE_QUOTER_ADMIN);
+        vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.SENTINEL_RATE_WITHOUT_ORACLE.selector);
+        makinaKernel.setConversionRate(0, false);
+        assertEq(makinaKernel.getStoredConversionRateWAD(), 2e18, "the rejected sentinel must leave the stored rate untouched");
+
+        // Re-attach the feed, then the sentinel is legal again and the feed path resumes: machine 1.0 x feed 1.0 = 1e18
+        vm.prank(ORACLE_QUOTER_ADMIN);
+        makinaKernel.setChainlinkOracle(address(accountingFeed), ORACLE_STALENESS_THRESHOLD_SECONDS, false);
+        vm.prank(ORACLE_QUOTER_ADMIN);
+        makinaKernel.setConversionRate(0, false);
+        assertEq(makinaKernel.getStoredConversionRateWAD(), 0, "clearing against a re-attached feed must restore the sentinel");
+        assertEq(makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 1e18, "the re-attached feed must price the second hop again");
     }
 
     // =============================

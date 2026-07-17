@@ -9,12 +9,18 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import {
+    Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel as ERC4626ToAdminKernel
+} from "../../../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
+import {
     IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter
 } from "../../../src/kernels/base/quoter/identical-st-jt/IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter.sol";
 import {
-    IdenticalERC4626Shares_ST_JT_SharePriceToAdminOracle_Quoter
-} from "../../../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToAdminOracle_Quoter.sol";
+    IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
+} from "../../../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
 import { IdenticalAssets_ST_JT_AdminOracle_Quoter } from "../../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_AdminOracle_Quoter.sol";
+import {
+    IdenticalAssets_ST_JT_ChainlinkOracle_Quoter
+} from "../../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol";
 import { BalancerV3_LT_BPTOracle_Quoter } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../../../src/tranches/RoycoJuniorTranche.sol";
@@ -23,9 +29,6 @@ import { RoycoSeniorTranche } from "../../../src/tranches/RoycoSeniorTranche.sol
 import {
     Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel as ChainlinkToAdminKernel
 } from "../../mocks/Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
-import {
-    Identical_ERC4626_ST_JT_SharePriceToAdminOracle_BalancerV3_BPTOracle_LT_Kernel as ERC4626ToAdminKernel
-} from "../../mocks/Identical_ERC4626_ST_JT_SharePriceToAdminOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
 import { MockAggregatorV3 } from "../../mocks/MockAggregatorV3.sol";
 import { MockBPT } from "../../mocks/MockBPT.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
@@ -37,7 +40,8 @@ import { MockERC4626C } from "../../mocks/MockERC4626C.sol";
  * @title TestFuzz_AdminOracleQuoterRateComposition_Kernel
  * @notice Fuzzes the two admin-second-hop ST/JT quoter compositions, the Chainlink-to-admin quoter (a Chainlink feed
  *         prices the tranche asset into a reference asset, an admin rate prices the reference asset into NAV units)
- *         and the ERC4626-share-price-to-admin quoter (the vault's live share price is the first hop instead)
+ *         and the ERC4626-share-price-to-Chainlink quoter deployed admin-primary (the vault's live share price is the
+ *         first hop, and the stored admin rate, standing in for a null Chainlink oracle, is the second)
  * @dev The composed rate is the market's sole pricing seam: every deposit, redemption, coverage check, and sync marks
  *      tranche value through it, so a one-wei composition error silently misprices every tranche. The forward
  *      conversion is pinned against a plain checked-integer composition derived by hand from the raw fuzz inputs,
@@ -93,9 +97,10 @@ contract TestFuzz_AdminOracleQuoterRateComposition_Kernel is Test {
      * means the production chain introduces no extra rounding or scaling step anywhere in either two-hop path.
      *
      * A zero admin-rate draw exercises the other half of the contract: zero is the resume-the-oracle sentinel in the
-     * stored-rate-overrides-oracle quoter family, but these compositions have no reference-to-NAV oracle to resume
-     * (the oracle-query helper is a hard revert), so a stored zero would brick every conversion and the setter must
-     * reject it loudly on both kernels.
+     * stored-rate-overrides-oracle quoter family, but neither deployment has a second-hop oracle to resume (the
+     * Chainlink-to-admin quoter's oracle-query helper is a hard revert, and the admin-primary kernel's second-hop
+     * oracle is the null address), so a stored zero would brick every conversion and the setter must reject it
+     * loudly on both kernels.
      */
     function testFuzz_TwoHopConversion_MatchesIndependentComposition(
         uint256 _feedDecimalsSeed,
@@ -121,16 +126,19 @@ contract TestFuzz_AdminOracleQuoterRateComposition_Kernel is Test {
         uint256 amount = bound(_amountSeed, 0, 1e30);
 
         if (adminRateWAD == 0) {
-            // A zero admin rate can never be stored: it is the query-the-oracle sentinel, and in these compositions
-            // the oracle-query helper is an unconditional revert, so a stored zero would turn every conversion (and
-            // with it every sync, deposit, and redemption) into a revert. Both kernels are deployed with a valid
-            // placeholder rate and the setter must refuse to overwrite it with the sentinel
+            // A zero admin rate can never be stored: it is the query-the-oracle sentinel, and neither deployment has
+            // a second-hop oracle to fall back on (the Chainlink-to-admin quoter's oracle-query helper is an
+            // unconditional revert, the admin-primary kernel's second-hop oracle is the null address), so a stored
+            // zero would turn every conversion (and with it every sync, deposit, and redemption) into a revert. Both
+            // kernels are deployed with a valid placeholder rate and the setter must refuse to overwrite it with the
+            // sentinel, the admin-only quoter through its unconditional zero gate and the admin-primary kernel
+            // through the Chainlink base's no-oracle-to-resume gate
             ChainlinkToAdminKernel chainlinkKernel = _deployChainlinkToAdminKernel(feedDecimals, feedPrice, 1e18);
             vm.expectRevert(IdenticalAssets_ST_JT_AdminOracle_Quoter.INVALID_CONVERSION_RATE.selector);
             chainlinkKernel.setConversionRate(0, false);
 
             ERC4626ToAdminKernel erc4626Kernel = _deployERC4626ToAdminKernel(vaultRateWAD, 1e18);
-            vm.expectRevert(IdenticalAssets_ST_JT_AdminOracle_Quoter.INVALID_CONVERSION_RATE.selector);
+            vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.SENTINEL_RATE_WITHOUT_ORACLE.selector);
             erc4626Kernel.setConversionRate(0, false);
             return;
         }
@@ -241,12 +249,15 @@ contract TestFuzz_AdminOracleQuoterRateComposition_Kernel is Test {
     }
 
     /**
-     * @notice Deploys a share-price-to-admin kernel over a fresh 18-decimal vault share (6-decimal underlying) whose
-     *         assets-per-share rate is pinned to the fuzzed value
+     * @notice Deploys the shipped share-price-to-Chainlink kernel in admin-primary mode (a null second-hop oracle
+     *         priced entirely through a nonzero stored rate) over a fresh 18-decimal vault share (6-decimal
+     *         underlying) whose assets-per-share rate is pinned to the fuzzed value
      * @dev The 18/6 decimal split makes the quoter's convertToAssets probe amount (1e30 shares) differ from WAD, so
-     *      the scale-factor cancellation on the first hop is genuinely exercised rather than trivially 1e18/1e18
+     *      the scale-factor cancellation on the first hop is genuinely exercised rather than trivially 1e18/1e18.
+     *      The initializer stores the rate before wiring the oracle, so the nonzero rate is exactly what lets the
+     *      null oracle through the Chainlink base's NULL_ORACLE_WITHOUT_STORED_RATE gate
      * @param _vaultRateWAD The vault's assets-per-share rate, WAD-normalized (the tranche-share-to-base-asset price)
-     * @param _adminRateWAD The admin oracle's base-asset-to-NAV rate, WAD-scaled
+     * @param _adminRateWAD The admin oracle's base-asset-to-NAV rate, WAD-scaled (nonzero, admin-primary mandates a stored rate)
      * @return kernel The initialized kernel proxy exposing the quoter's conversion surface
      */
     function _deployERC4626ToAdminKernel(uint256 _vaultRateWAD, uint256 _adminRateWAD) internal returns (ERC4626ToAdminKernel kernel) {
@@ -262,8 +273,12 @@ contract TestFuzz_AdminOracleQuoterRateComposition_Kernel is Test {
             (
                 _standardInitParams(),
                 ERC4626ToAdminKernel.KernelSpecificInitParams({
-                    stAndJTQuoterParams: IdenticalERC4626Shares_ST_JT_SharePriceToAdminOracle_Quoter.ST_JT_QuoterSpecificParams({
-                        initialConversionRateWAD: _adminRateWAD
+                    stAndJTQuoterParams: IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams({
+                        initialConversionRateWAD: _adminRateWAD,
+                        baseAssetToNavAssetOracle: address(0),
+                        stalenessThresholdSeconds: 0,
+                        sequencerUptimeFeed: address(0),
+                        gracePeriodSeconds: 0
                     }),
                     ltQuoterParams: BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams({
                         bptOracle: address(plumbing.bptOracle), maxReinvestmentSlippageWAD: 0

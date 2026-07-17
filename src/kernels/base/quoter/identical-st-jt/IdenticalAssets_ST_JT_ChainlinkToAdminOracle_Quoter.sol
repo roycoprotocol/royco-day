@@ -31,8 +31,11 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter is
     }
 
     /// @notice Initializes the identical assets Chainlink (compatible) oracle quoter and the base identical assets oracle quoter
+    /// @dev The oracle prices the mandatory tranche asset to reference asset hop with no stored rate fallback, so a null oracle can never price this composition and is rejected outright
     /// @param _params The quoter-specific initialization parameters
     function __IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter_init(ST_JT_QuoterSpecificParams calldata _params) internal onlyInitializing {
+        // The oracle is the only tranche asset to reference asset price source, so it must be set
+        require(_params.trancheAssetToReferenceAssetOracle != address(0), NULL_ADDRESS());
         __IdenticalAssets_ST_JT_AdminOracle_Quoter_init(_params.initialConversionRateWAD);
         __IdenticalAssets_ST_JT_ChainlinkOracle_Quoter_init_unchained(
             _params.trancheAssetToReferenceAssetOracle, _params.stalenessThresholdSeconds, _params.sequencerUptimeFeed, _params.gracePeriodSeconds
@@ -40,13 +43,13 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter is
     }
 
     /// @inheritdoc IdenticalAssets_ST_JT_AdminOracle_Quoter
+    /// @dev Access control is enforced by the root setter this dispatches to, a second restricted here would consume a delayed admin operation twice
     function setConversionRate(
         uint256 _conversionRateWAD,
         bool _syncBeforeUpdate
     )
         public
-        override(IdenticalAssets_ST_JT_Oracle_Quoter, IdenticalAssets_ST_JT_AdminOracle_Quoter)
-        restricted
+        override(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter, IdenticalAssets_ST_JT_AdminOracle_Quoter)
     {
         IdenticalAssets_ST_JT_AdminOracle_Quoter.setConversionRate(_conversionRateWAD, _syncBeforeUpdate);
     }

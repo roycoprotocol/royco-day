@@ -1,20 +1,23 @@
 // SPDX-License-Identifier: LicenseRef-PolyForm-Perimeter-1.0.1
 pragma solidity ^0.8.28;
 
-import { IdenticalAssets_ST_JT_ChainlinkOracle_Quoter } from "./base/IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol";
-import { IdenticalAssets_ST_JT_Oracle_Quoter } from "./base/IdenticalAssets_ST_JT_Oracle_Quoter.sol";
-import { IdenticalERC4626Shares_ST_JT_Oracle_Quoter, Math, WAD } from "./base/IdenticalERC4626Shares_ST_JT_Oracle_Quoter.sol";
+import { IERC20Metadata, IERC4626 } from "../../../../../lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol";
+import { Math } from "../../../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import { WAD, WAD_DECIMALS } from "../../../../libraries/Constants.sol";
+import { IdenticalAssets_ST_JT_ChainlinkOracle_Quoter, IdenticalAssets_ST_JT_Oracle_Quoter } from "./base/IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol";
 
 /**
  * @title IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
- * @dev The senior and junior tranches must have the same ERC4626 vault share as its tranche unit
+ * @notice Quoter to convert tranche units (ERC4626 vault shares) to/from NAV units by converting the shares to base assets and converting base assets to NAV units using a Chainlink (compatible) oracle or an admin set rate
+ * @dev Mandates that the base asset to NAV units uses a Chainlink (compatible) oracle with an admin set rate override
+ * @dev The senior and junior tranches must have the same ERC4626 vault share as their tranche unit
  * @dev Use case: Convert sNUSD (Tranche unit) to NUSD (base assets) using ERC4626's convertToAssets and convert NUSD to USD (NAV unit) using its Redstone fundamental price feed or an admin set rate
  */
-abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter is
-    IdenticalERC4626Shares_ST_JT_Oracle_Quoter,
-    IdenticalAssets_ST_JT_ChainlinkOracle_Quoter
-{
+abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter is IdenticalAssets_ST_JT_ChainlinkOracle_Quoter {
     using Math for uint256;
+
+    /// @dev The share amount to pass to convertToAssets() such that the result is scaled to WAD precision
+    uint256 internal immutable ERC4626_SHARES_TO_CONVERT_TO_ASSETS;
 
     /**
      * @notice The quoter-specific initialization parameters
@@ -32,7 +35,19 @@ abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quote
         uint48 gracePeriodSeconds;
     }
 
-    /// @notice Initializes the identical ERC4626 shares Chainlink (compatible) oracle quoter and its inherited contracts
+    /// @notice Constructs the ERC4626 vault shares oracle quoter
+    constructor() {
+        // NOTE: Both tranche assets are identical ERC4626 vault shares
+        // Compute the share amount to pass to convertToAssets() such that the result is scaled to WAD precision
+        // OUTPUT_DECIMALS = INPUT_DECIMALS + BASE_ASSET_DECIMALS - TRANCHE_DECIMALS
+        // For OUTPUT_DECIMALS to have WAD_DECIMALS of precision:
+        // INPUT_DECIMALS = WAD_DECIMALS + TRANCHE_DECIMALS - BASE_ASSET_DECIMALS
+        // OUTPUT_DECIMALS = (WAD_DECIMALS + TRANCHE_DECIMALS - BASE_ASSET_DECIMALS) + BASE_ASSET_DECIMALS - TRANCHE_DECIMALS
+        // OUTPUT_DECIMALS = WAD_DECIMALS
+        ERC4626_SHARES_TO_CONVERT_TO_ASSETS = 10 ** (WAD_DECIMALS + IERC4626(ST_ASSET).decimals() - IERC20Metadata(IERC4626(ST_ASSET).asset()).decimals());
+    }
+
+    /// @notice Initializes the identical ERC4626 vault shares Chainlink (compatible) oracle quoter and its inherited contracts
     /// @param _params The quoter-specific initialization parameters
     function __IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter_init(ST_JT_QuoterSpecificParams calldata _params) internal onlyInitializing {
         __IdenticalAssets_ST_JT_Oracle_Quoter_init_unchained(_params.initialConversionRateWAD);
@@ -51,10 +66,21 @@ abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quote
         public
         view
         virtual
-        override(IdenticalERC4626Shares_ST_JT_Oracle_Quoter, IdenticalAssets_ST_JT_ChainlinkOracle_Quoter)
+        override(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter)
         returns (uint256 trancheToNAVUnitConversionRateWAD)
     {
-        return IdenticalERC4626Shares_ST_JT_Oracle_Quoter.getTrancheUnitToNAVUnitConversionRateWAD();
+        // Fetch the conversion rate from the tranche asset (ERC4626 share) to its underlying asset, scaled to WAD precision
+        uint256 trancheUnitToBaseAssetsConversionRateWAD = IERC4626(ST_ASSET).convertToAssets(ERC4626_SHARES_TO_CONVERT_TO_ASSETS);
+
+        // Resolve the vault base asset to NAV unit conversion rate, scaled to WAD precision
+        uint256 baseAssetToNAVUnitConversionRateWAD = getStoredConversionRateWAD();
+        // If the stored conversion rate is the sentinel value, query the oracle for the rate
+        if (baseAssetToNAVUnitConversionRateWAD == SENTINEL_CONVERSION_RATE) {
+            baseAssetToNAVUnitConversionRateWAD = _getConversionRateFromOracleWAD();
+        }
+
+        // Calculate the conversion rate from tranche to NAV units, scaled to WAD precision
+        trancheToNAVUnitConversionRateWAD = trancheUnitToBaseAssetsConversionRateWAD.mulDiv(baseAssetToNAVUnitConversionRateWAD, WAD, Math.Rounding.Floor);
     }
 
     /// @notice Returns the conversion rate from the ERC4626 base asset to NAV units, scaled to WAD precision

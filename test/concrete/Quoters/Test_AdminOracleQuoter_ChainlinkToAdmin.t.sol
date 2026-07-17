@@ -4,9 +4,12 @@ pragma solidity ^0.8.28;
 import { IVault } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
 import { AccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
+import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManager.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
+import { ADMIN_ORACLE_QUOTER_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import {
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel as ShippedKernel
@@ -14,9 +17,7 @@ import {
 import {
     IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter
 } from "../../../src/kernels/base/quoter/identical-st-jt/IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter.sol";
-import {
-    IdenticalAssets_ST_JT_AdminOracle_Quoter
-} from "../../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_AdminOracle_Quoter.sol";
+import { IdenticalAssets_ST_JT_AdminOracle_Quoter } from "../../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_AdminOracle_Quoter.sol";
 import {
     IdenticalAssets_ST_JT_ChainlinkOracle_Quoter
 } from "../../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol";
@@ -84,6 +85,58 @@ contract Test_AdminOracleQuoter_ChainlinkToAdmin is DayMarketTestBase {
         new ERC1967Proxy(address(freshImpl), initData);
     }
 
+    /**
+     * @notice Initializing the quoter with a null tranche asset oracle is rejected outright
+     * @dev The Chainlink (compatible) oracle prices the mandatory tranche asset to reference asset hop and the stored
+     *      admin rate prices a DIFFERENT hop, so no stored rate can substitute for a missing oracle here: before this
+     *      gate the deploy landed and every subsequent quote reverted untyped into empty code at the null feed. The
+     *      config must fail loud at initialize instead of shipping a market that can never price
+     */
+    function test_RevertIf_InitializedWithNullTrancheAssetOracle() public {
+        // A fresh implementation against the already-deployed market plumbing, only the oracle argument is poisoned
+        ChainlinkToAdminKernel freshImpl = new ChainlinkToAdminKernel(kernelConstructionParams);
+        bytes memory initData =
+            abi.encodeCall(freshImpl.initialize, (_standardKernelInitParams(), _kernelSpecificInitParamsWithOracle(INITIAL_ADMIN_RATE_WAD, address(0))));
+        vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
+        new ERC1967Proxy(address(freshImpl), initData);
+    }
+
+    // =============================
+    // The single access gate on the setter dispatch chain (leaf to admin base to root)
+    // =============================
+
+    /**
+     * @notice A role with an AccessManager execution delay can schedule setConversionRate and then call it DIRECTLY,
+     *         and an unscheduled direct call reverts typed, so the dispatch chain carries exactly one restricted gate
+     * @dev This composition's setter dispatches leaf to admin base to root, and only the root setter is restricted:
+     *      a delayed caller's direct call consumes its scheduled operation exactly once. A second restricted anywhere
+     *      on the chain would consume the schedule on its first pass and revert AccessManagerNotScheduled on the
+     *      second, bricking the direct execution route for every delayed admin. This is the regression pin for the
+     *      single-gate dispatch, and the unscheduled revert proves the surviving gate still enforces the delay
+     */
+    function test_SetConversionRate_DelayedRoleExecutesDirectlyThroughSingleRestrictedGate() public {
+        // A fresh admin whose oracle quoter role carries a 1 day execution delay (the fixture admins the access manager)
+        address delayedAdmin = makeAddr("DELAYED_ORACLE_QUOTER_ADMIN");
+        accessManager.grantRole(ADMIN_ORACLE_QUOTER_ROLE, delayedAdmin, 1 days);
+
+        bytes memory callData = abi.encodeCall(adminKernel.setConversionRate, (3e18, false));
+
+        // Unscheduled direct call: the gate consumes a schedule that does not exist and reverts typed, so the delay genuinely bites
+        bytes32 operationId = accessManager.hashOperation(delayedAdmin, address(adminKernel), callData);
+        vm.prank(delayedAdmin);
+        vm.expectRevert(abi.encodeWithSelector(IAccessManager.AccessManagerNotScheduled.selector, operationId));
+        adminKernel.setConversionRate(3e18, false);
+        assertEq(adminKernel.getStoredConversionRateWAD(), INITIAL_ADMIN_RATE_WAD, "the unscheduled call must leave the stored rate unchanged");
+
+        // Schedule, wait out the delay, then the DIRECT call must land: one restricted, one schedule consumption
+        vm.prank(delayedAdmin);
+        accessManager.schedule(address(adminKernel), callData, uint48(block.timestamp + 1 days));
+        vm.warp(block.timestamp + 1 days);
+        vm.prank(delayedAdmin);
+        adminKernel.setConversionRate(3e18, false);
+        assertEq(adminKernel.getStoredConversionRateWAD(), 3e18, "the delayed admin's scheduled direct call must land the rate");
+    }
+
     // =============================
     // The zero-rate setter gate (the sentinel never resumes an oracle path here)
     // =============================
@@ -126,8 +179,12 @@ contract Test_AdminOracleQuoter_ChainlinkToAdmin is DayMarketTestBase {
         assertEq(toUint256(adminKernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 3e18, "the junior side shares the identical composed rate");
 
         // The inverse divides by the same composed rate: 3e18 NAV x 1e18 / 3e18 = 1e18 tranche units, an exact round-trip
-        assertEq(toUint256(adminKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(3e18)))), 1e18, "3.0 NAV must invert to exactly one whole senior unit");
-        assertEq(toUint256(adminKernel.jtConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(3e18)))), 1e18, "3.0 NAV must invert to exactly one whole junior unit");
+        assertEq(
+            toUint256(adminKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(3e18)))), 1e18, "3.0 NAV must invert to exactly one whole senior unit"
+        );
+        assertEq(
+            toUint256(adminKernel.jtConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(3e18)))), 1e18, "3.0 NAV must invert to exactly one whole junior unit"
+        );
     }
 
     // =============================
@@ -323,13 +380,27 @@ contract Test_AdminOracleQuoter_ChainlinkToAdmin is DayMarketTestBase {
         });
     }
 
-    /// @notice Builds the kernel-specific init params for a given initial admin conversion rate
+    /// @notice Builds the kernel-specific init params for a given initial admin conversion rate, wiring the fixture's price feed
     /// @param _initialConversionRateWAD The reference asset to NAV unit rate the ST/JT quoter is initialized with
     function _kernelSpecificInitParams(uint256 _initialConversionRateWAD) internal view returns (ChainlinkToAdminKernel.KernelSpecificInitParams memory) {
+        return _kernelSpecificInitParamsWithOracle(_initialConversionRateWAD, address(priceFeed));
+    }
+
+    /// @notice Builds the kernel-specific init params with an explicit tranche asset oracle, so init-gate tests can pass the null address
+    /// @param _initialConversionRateWAD The reference asset to NAV unit rate the ST/JT quoter is initialized with
+    /// @param _oracle The tranche asset to reference asset oracle to wire
+    function _kernelSpecificInitParamsWithOracle(
+        uint256 _initialConversionRateWAD,
+        address _oracle
+    )
+        internal
+        view
+        returns (ChainlinkToAdminKernel.KernelSpecificInitParams memory)
+    {
         return ChainlinkToAdminKernel.KernelSpecificInitParams({
             stAndJTQuoterParams: IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter.ST_JT_QuoterSpecificParams({
                 initialConversionRateWAD: _initialConversionRateWAD,
-                trancheAssetToReferenceAssetOracle: address(priceFeed),
+                trancheAssetToReferenceAssetOracle: _oracle,
                 gracePeriodSeconds: ORACLE_GRACE_PERIOD_SECONDS,
                 sequencerUptimeFeed: address(0),
                 stalenessThresholdSeconds: ORACLE_STALENESS_THRESHOLD_SECONDS

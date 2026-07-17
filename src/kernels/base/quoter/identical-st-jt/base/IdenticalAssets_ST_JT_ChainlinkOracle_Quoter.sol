@@ -59,8 +59,15 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
     /// @notice Thrown when a sequencer uptime feed is configured with a non-positive grace period
     error INVALID_GRACE_PERIOD_SECONDS();
 
+    /// @notice Thrown when the oracle is set to the null address without a stored conversion rate to price through
+    error NULL_ORACLE_WITHOUT_STORED_RATE();
+
+    /// @notice Thrown when the conversion rate is set to the sentinel value (0) without an oracle to resume
+    error SENTINEL_RATE_WITHOUT_ORACLE();
+
     /**
      * @notice Initializes the identical assets Chainlink (compatible) oracle quoter
+     * @dev Must run after the stored conversion rate is initialized so a null oracle can be validated against it
      * @param _oracle The Chainlink (compatible) oracle used to price an asset
      * @param _stalenessThresholdSeconds The staleness threshold in seconds
      * @param _sequencerUptimeFeed The L2 sequencer uptime feed to check before trusting the price (set to the null address to disable the check)
@@ -102,6 +109,18 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
         // Calculate the conversion rate from tranche to NAV units, scaled to WAD precision
         trancheToNAVUnitConversionRateWAD =
             trancheAssetPriceInReferenceAsset.mulDiv(referenceAssetToNAVUnitConversionRateWAD, pricePrecision, Math.Rounding.Floor);
+    }
+
+    /// @inheritdoc IdenticalAssets_ST_JT_Oracle_Quoter
+    /// @dev The sentinel value (0) routes pricing back to the Chainlink (compatible) oracle, so it is only accepted while an oracle is configured
+    /// @dev Access control is enforced by the root setter this dispatches to, a second restricted here would consume a delayed admin operation twice
+    function setConversionRate(uint256 _conversionRateWAD, bool _syncBeforeUpdate) public virtual override(IdenticalAssets_ST_JT_Oracle_Quoter) {
+        // Storing the sentinel without an oracle would leave the market with no price source
+        require(
+            _conversionRateWAD != SENTINEL_CONVERSION_RATE || _getIdenticalAssets_ST_JT_ChainlinkOracle_QuoterStorage().oracle != address(0),
+            SENTINEL_RATE_WITHOUT_ORACLE()
+        );
+        IdenticalAssets_ST_JT_Oracle_Quoter.setConversionRate(_conversionRateWAD, _syncBeforeUpdate);
     }
 
     /**
@@ -176,6 +195,9 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
     function _setChainlinkOracle(address _oracle, uint48 _stalenessThresholdSeconds) internal {
         // Oracle can be set to the null address since upstream contracts may use an admin set price with the Chainlink (compatible) oracle as a fallback
         require(_oracle == address(0) || _stalenessThresholdSeconds > 0, INVALID_STALENESS_THRESHOLD_SECONDS());
+        // A null oracle is only configurable while a stored rate is set, so a composition using the oracle as the stored rate's fallback can never lose both price sources
+        // A composition where the oracle prices a mandatory hop must additionally reject a null oracle at its own initializer
+        require(_oracle != address(0) || getStoredConversionRateWAD() != SENTINEL_CONVERSION_RATE, NULL_ORACLE_WITHOUT_STORED_RATE());
 
         IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState storage $ = _getIdenticalAssets_ST_JT_ChainlinkOracle_QuoterStorage();
         $.oracle = _oracle;
