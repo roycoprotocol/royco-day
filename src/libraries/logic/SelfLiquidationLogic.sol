@@ -76,6 +76,7 @@ library SelfLiquidationLogic {
      *      NOTE: INVARIANT: U' == U
      *      Result after simplification:
      *      BONUS_MAX = (ST_REDEMPTION_NAV * JT_EFFECTIVE_NAV) / (COVERED_EXPOSURE - JT_EFFECTIVE_NAV)
+     *                = (ST_REDEMPTION_NAV * JT_EFFECTIVE_NAV) / ST_EFFECTIVE_NAV
      *
      * @param _state The synced accounting state
      * @param _stUserClaims The ST user's base claims before bonus
@@ -92,7 +93,6 @@ library SelfLiquidationLogic {
         // If the ST claim on NAV is zero, there is no bonus to apply
         if (_stUserClaims.nav == ZERO_NAV_UNITS) return ZERO_NAV_UNITS;
         // Compute the coverage-utilization-neutral bonus, rounding down to be conservative
-        // NOTE: The denominator cannot be 0 or underflow since a liquidation can only occur if utilization > WAD, which requires that JT effective NAV < Covered Exposure
-        return _stUserClaims.nav.mulDiv(_state.jtEffectiveNAV, ((_state.stRawNAV + _state.jtRawNAV) - _state.jtEffectiveNAV), Math.Rounding.Floor);
+        return _stUserClaims.nav.mulDiv(_state.jtEffectiveNAV, _state.stEffectiveNAV, Math.Rounding.Floor);
     }
 }
