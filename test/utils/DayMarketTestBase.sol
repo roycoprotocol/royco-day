@@ -223,15 +223,13 @@ abstract contract DayMarketTestBase is Assertions {
      * @notice Deploys the full Day market for the specified token shape and parameterization
      * @dev Mirrors BalancerV3_GyroECLP_LT_DeploymentTemplate.deployMarket's order, adapted to mocks: tokens, oracles, venue, YDMs,
      *      predicted kernel address, impls, tranche and accountant proxies, pool registration, kernel impl (its
-     *      constructor reads accountant.JT_COINVESTED and validates the registered pool), kernel proxy at the
+     *      constructor validates the registered pool), kernel proxy at the
      *      predicted address, then role bindings and grants
      * @param _cell The token shape (FixtureCell) to deploy
      * @param _params The market parameterization to deploy
      */
     function _deployMarket(FixtureCell memory _cell, MarketParamsConfig memory _params) internal virtual {
-        // The kernel family requires identical ST/JT assets, and identical assets force JT_COINVESTED at kernel
-        // construction (RoycoDayKernel.sol:122). The jtCoinvested=false axis lives only at AccountantTestBase
-        require(_params.jtCoinvested, "DayMarketTestBase: kernel family forces jtCoinvested=true; drive the false axis at AccountantTestBase");
+        // The kernel family requires identical ST/JT assets, which the kernel constructor enforces
         _validateFixtureCell(_cell);
 
         cell = _cell;
@@ -273,14 +271,13 @@ abstract contract DayMarketTestBase is Assertions {
         kernelProxyDeployer = makeAddr("KERNEL_PROXY_DEPLOYER");
         address predictedKernel = vm.computeCreateAddress(kernelProxyDeployer, vm.getNonce(kernelProxyDeployer));
 
-        // 7. Impls with the predicted kernel address (jtCoinvested hard-true per the kernel-family constraint)
+        // 7. Impls with the predicted kernel address
         RoycoSeniorTranche stImpl = new RoycoSeniorTranche(address(stJtVault), predictedKernel);
         RoycoJuniorTranche jtImpl = new RoycoJuniorTranche(address(stJtVault), predictedKernel);
         RoycoLiquidityTranche ltImpl = new RoycoLiquidityTranche(address(bpt), predictedKernel);
-        RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel, true);
+        RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel);
 
-        // 8. Tranche and accountant proxies MUST exist before the kernel impl (its constructor calls
-        //    accountant.JT_COINVESTED() and its initialize calls tranche.asset())
+        // 8. Tranche and accountant proxies MUST exist before the kernel impl (its initialize calls tranche.asset())
         seniorTranche = RoycoSeniorTranche(_deployTrancheProxy(address(stImpl), "Royco Senior Tranche", "RST"));
         juniorTranche = RoycoJuniorTranche(_deployTrancheProxy(address(jtImpl), "Royco Junior Tranche", "RJT"));
         liquidityTranche = RoycoLiquidityTranche(_deployTrancheProxy(address(ltImpl), "Royco Liquidity Tranche", "RLT"));

@@ -21,28 +21,25 @@ import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
 contract Test_Initialization_Accountant is AccountantTestBase {
     function setUp() public {
         stranger = makeAddr("stranger");
-        _deploy(false, _defaultParams());
+        _deploy(_defaultParams());
     }
 
     /// a null kernel reverts in the constructor
     function test_RevertIf_ConstructorNullKernel() public {
         vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
-        new RoycoDayAccountant(address(0), false);
+        new RoycoDayAccountant(address(0));
     }
 
-    /// KERNEL and JT_COINVESTED are immutably set, both boolean values covered
-    function test_Constructor_setsKernelAndCoinvestedImmutables() public {
+    /// KERNEL is immutably set
+    function test_Constructor_setsKernelImmutable() public {
         MockAccountantKernel freshKernel = new MockAccountantKernel();
-        RoycoDayAccountant coinvested = new RoycoDayAccountant(address(freshKernel), true);
-        assertEq(coinvested.KERNEL(), address(freshKernel), "kernel immutable");
-        assertTrue(coinvested.JT_COINVESTED(), "coinvested true");
-        RoycoDayAccountant notCoinvested = new RoycoDayAccountant(address(freshKernel), false);
-        assertFalse(notCoinvested.JT_COINVESTED(), "coinvested false");
+        RoycoDayAccountant acct = new RoycoDayAccountant(address(freshKernel));
+        assertEq(acct.KERNEL(), address(freshKernel), "kernel immutable");
     }
 
     /// each of the four fee params above MAX_PROTOCOL_FEE_WAD reverts independently
     function test_RevertIf_InitializeSTProtocolFeeAboveMax() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         p.stProtocolFeeWAD = uint64(MAX_PROTOCOL_FEE_WAD + 1);
         vm.expectRevert(IRoycoDayAccountant.MAX_PROTOCOL_FEE_EXCEEDED.selector);
@@ -51,7 +48,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// The JT protocol fee above MAX_PROTOCOL_FEE_WAD reverts
     function test_RevertIf_InitializeJTProtocolFeeAboveMax() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         p.jtProtocolFeeWAD = uint64(MAX_PROTOCOL_FEE_WAD + 1);
         vm.expectRevert(IRoycoDayAccountant.MAX_PROTOCOL_FEE_EXCEEDED.selector);
@@ -60,7 +57,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// The JT yield-share protocol fee above MAX_PROTOCOL_FEE_WAD reverts
     function test_RevertIf_InitializeJTYieldShareProtocolFeeAboveMax() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         p.jtYieldShareProtocolFeeWAD = uint64(MAX_PROTOCOL_FEE_WAD + 1);
         vm.expectRevert(IRoycoDayAccountant.MAX_PROTOCOL_FEE_EXCEEDED.selector);
@@ -69,7 +66,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// The LT yield-share protocol fee above MAX_PROTOCOL_FEE_WAD reverts
     function test_RevertIf_InitializeLTYieldShareProtocolFeeAboveMax() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         p.ltYieldShareProtocolFeeWAD = uint64(MAX_PROTOCOL_FEE_WAD + 1);
         vm.expectRevert(IRoycoDayAccountant.MAX_PROTOCOL_FEE_EXCEEDED.selector);
@@ -78,7 +75,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// all four fees at exactly MAX_PROTOCOL_FEE_WAD (100%) pass
     function test_Initialize_allFeesAtExactlyMax() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         p.stProtocolFeeWAD = uint64(MAX_PROTOCOL_FEE_WAD);
         p.jtProtocolFeeWAD = uint64(MAX_PROTOCOL_FEE_WAD);
@@ -94,7 +91,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// identical JT and LT YDMs revert
     function test_RevertIf_InitializeIdenticalYDMs() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         p.ltYDM = p.jtYDM;
         vm.expectRevert(IRoycoDayAccountant.YDMS_CANNOT_BE_IDENTICAL.selector);
@@ -103,7 +100,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// minCoverage == WAD reverts
     function test_RevertIf_InitializeMinCoverageAtWAD() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         p.minCoverageWAD = uint64(WAD);
         vm.expectRevert(IRoycoDayAccountant.INVALID_COVERAGE_CONFIG.selector);
@@ -112,7 +109,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// minCoverage > WAD reverts
     function test_RevertIf_InitializeMinCoverageAboveWAD() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         p.minCoverageWAD = uint64(WAD + 1);
         vm.expectRevert(IRoycoDayAccountant.INVALID_COVERAGE_CONFIG.selector);
@@ -121,7 +118,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// liquidation utilization == WAD reverts
     function test_RevertIf_InitializeLiquidationUtilizationAtWAD() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         p.coverageLiquidationUtilizationWAD = WAD;
         vm.expectRevert(IRoycoDayAccountant.INVALID_COVERAGE_CONFIG.selector);
@@ -130,7 +127,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// liquidation utilization < WAD reverts
     function test_RevertIf_InitializeLiquidationUtilizationBelowWAD() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         p.coverageLiquidationUtilizationWAD = WAD - 1;
         vm.expectRevert(IRoycoDayAccountant.INVALID_COVERAGE_CONFIG.selector);
@@ -139,7 +136,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// minCoverage = WAD - 1 with liquidation utilization = WAD + 1 passes (both boundaries)
     function test_Initialize_coverageConfigBoundariesPass() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         p.minCoverageWAD = uint64(WAD - 1);
         p.coverageLiquidationUtilizationWAD = WAD + 1;
@@ -151,7 +148,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// minLiquidity == WAD reverts
     function test_RevertIf_InitializeMinLiquidityAtWAD() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         p.minLiquidityWAD = uint64(WAD);
         vm.expectRevert(IRoycoDayAccountant.INVALID_LIQUIDITY_CONFIG.selector);
@@ -160,7 +157,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// minLiquidity = WAD - 1 passes
     function test_Initialize_minLiquidityBoundaryPasses() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         p.minLiquidityWAD = uint64(WAD - 1);
         acct.initialize(p, address(authority));
@@ -169,7 +166,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// maxJT + maxLT > WAD reverts
     function test_RevertIf_InitializeMaxYieldSharesSumAboveWAD() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         p.maxJTYieldShareWAD = 0.6e18;
         p.maxLTYieldShareWAD = 0.4e18 + 1;
@@ -179,7 +176,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// maxJT + maxLT == WAD passes
     function test_Initialize_maxYieldSharesSumAtWADPasses() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         p.maxJTYieldShareWAD = 0.6e18;
         p.maxLTYieldShareWAD = 0.4e18;
@@ -191,7 +188,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// a null JT YDM reverts
     function test_RevertIf_InitializeNullJTYDM() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         p.jtYDM = address(0);
         vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
@@ -200,7 +197,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// a null LT YDM reverts
     function test_RevertIf_InitializeNullLTYDM() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         p.ltYDM = address(0);
         vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
@@ -209,7 +206,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// non-empty init data is forwarded to each YDM verbatim
     function test_Initialize_ydmInitCalledWithNonEmptyData() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         p.jtYDMInitializationData = abi.encodeCall(MockRecordingYDM.initializeModel, (hex"1234"));
         p.ltYDMInitializationData = abi.encodeCall(MockRecordingYDM.initializeModel, (hex"5678"));
@@ -222,7 +219,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// empty init data makes no call to either YDM
     function test_Initialize_ydmInitSkippedWithEmptyData() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         acct.initialize(p, address(authority));
         assertEq(MockRecordingYDM(p.jtYDM).initializeCallCount(), 0, "jt ydm never called");
@@ -231,7 +228,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// a reverting JT YDM initialization bubbles the exact revert payload inside FAILED_TO_INITIALIZE_YDM
     function test_RevertIf_InitializeJTYDMInitReverts() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         MockRecordingYDM(p.jtYDM).setRevertOnInitialize(true);
         p.jtYDMInitializationData = abi.encodeCall(MockRecordingYDM.initializeModel, (hex""));
@@ -243,7 +240,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// a reverting LT YDM initialization bubbles the exact revert payload inside FAILED_TO_INITIALIZE_YDM
     function test_RevertIf_InitializeLTYDMInitReverts() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         MockRecordingYDM(p.ltYDM).setRevertOnInitialize(true);
         p.ltYDMInitializationData = abi.encodeCall(MockRecordingYDM.initializeModel, (hex""));
@@ -259,7 +256,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
      * observable logs are OZ's AuthorityUpdated and Initialized, which are not accountant configuration events)
      */
     function test_Initialize_emitsAllInitEvents() public {
-        RoycoDayAccountant acct = _deployUninitialized(false);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         vm.expectEmit(true, true, true, true, address(acct));
         emit IRoycoDayAccountant.SeniorTrancheProtocolFeeUpdated(p.stProtocolFeeWAD);
@@ -292,7 +289,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
 
     /// getState after initialization returns every configured field exactly and zeroes all dynamic state
     function test_Initialize_stateMatchesParams() public {
-        RoycoDayAccountant acct = _deployUninitialized(true);
+        RoycoDayAccountant acct = _deployUninitialized();
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _paramsWithFreshYDMs();
         p.minCoverageWAD = 0.123e18;
         p.coverageLiquidationUtilizationWAD = 1.7e18;

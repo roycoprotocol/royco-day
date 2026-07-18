@@ -18,7 +18,7 @@ import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
 contract Test_PostOpSync_Accountant is AccountantTestBase {
     function setUp() public {
         stranger = makeAddr("stranger");
-        _deploy(false, _defaultParams());
+        _deploy(_defaultParams());
     }
 
     /// an ST deposit adds its senior raw NAV delta to the senior effective NAV and commits the checkpoint
@@ -500,7 +500,7 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
         assertEq(toUint256(state.ltProtocolFee), 0, "no lt fee on an operation");
         assertEq(
             state.coverageUtilizationWAD,
-            _specCoverageUtilization(900e18, 300e18, false, DEFAULT_MIN_COVERAGE_WAD, 200e18),
+            _specCoverageUtilization(900e18, 300e18, DEFAULT_MIN_COVERAGE_WAD, 200e18),
             "fresh coverage utilization, not a placeholder"
         );
         assertEq(
@@ -564,11 +564,13 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
      */
     function test_PostOp_coverageGate_stDepositExactBoundary() public {
         _seedFlatWithLT(200e18);
+        // Coinvested coverage folds JT_RAW into the covered exposure, so the WAD boundary is (stRaw + jtRaw) * 0.1 / jtEff == WAD,
+        // i.e. stRaw = 9 * jtRaw: at jtRaw = jtEff = 200e18 the senior mark lands on WAD at 1800e18
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(2000e18)), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(200e18)), ZERO_NAV_UNITS, true);
+            kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(1800e18)), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(200e18)), ZERO_NAV_UNITS, true);
         assertEq(state.coverageUtilizationWAD, WAD, "coverage utilization lands exactly on WAD and passes");
         vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(2000e18 + 1)), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(200e18)), ZERO_NAV_UNITS, true);
+        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(1800e18 + 1)), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(200e18)), ZERO_NAV_UNITS, true);
     }
 
     /**
@@ -578,11 +580,12 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
      */
     function test_PostOp_coverageGate_ltDepositExactBoundary() public {
         _seedFlatWithLT(SEED_LT_RAW);
+        // Coinvested coverage folds JT_RAW in, so the senior mark hits the WAD boundary at 9 * jtRaw = 1800e18 (jtEff 200e18)
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(uint256(2000e18)), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(150e18)), ZERO_NAV_UNITS, true);
+            kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(uint256(1800e18)), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(150e18)), ZERO_NAV_UNITS, true);
         assertEq(state.coverageUtilizationWAD, WAD, "coverage utilization lands exactly on WAD and passes");
         vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(uint256(2000e18 + 1)), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(150e18 + 1)), ZERO_NAV_UNITS, true);
+        kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(uint256(1800e18 + 1)), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(150e18 + 1)), ZERO_NAV_UNITS, true);
     }
 
     /**
@@ -591,12 +594,14 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
      * wei gives ceil(1e38 / (1e20 - 1)) = 1e18 + 1 since 1e38 = (1e20 - 1) * 1e18 + 1e18
      */
     function test_PostOp_coverageGate_jtRedeemExactBoundary() public {
-        _seedFlatWithLT(SEED_LT_RAW);
+        // Coinvested coverage needs stRaw = 9 * jtRaw at the WAD boundary, so seed a 900e18 senior against the
+        // 200e18 junior and redeem the junior down to 100e18: (900e18 + 100e18) * 0.1 / 100e18 == WAD exactly
+        _seedState(900e18, SEED_JT_RAW, 900e18, SEED_JT_RAW, 0, SEED_LT_RAW, MarketState.PERPETUAL);
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(uint256(100e18)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true);
+            kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(uint256(900e18)), toNAVUnits(uint256(100e18)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true);
         assertEq(state.coverageUtilizationWAD, WAD, "coverage utilization lands exactly on WAD and passes");
         vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(uint256(100e18 - 1)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true);
+        kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(uint256(900e18)), toNAVUnits(uint256(100e18 - 1)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true);
     }
 
     /**

@@ -38,7 +38,7 @@ contract Test_PremiumDustAndFixedTermEdges is AccountantTestBase {
         // Deploy with a 1e12-wei effective dust tolerance so a sub-dust gain is easy to construct
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.stNAVDustTolerance = toNAVUnits(uint256(1e12));
-        _deploy(true, p);
+        _deploy(p);
 
         // Pin the instantaneous yield shares both YDMs report so the premium is a fixed constant
         jtYDM.setPreviewYieldShareReturn(0.1e18);
@@ -74,7 +74,7 @@ contract Test_PremiumDustAndFixedTermEdges is AccountantTestBase {
      *      overflows uint32 (max 4294967295) and wraps to 4295571995 - 4294967296 = 604699, far below bigT
      */
     function test_fixedTermEndTimestamp_truncatesToUint32NearCeiling() public {
-        _deploy(true, _defaultParams());
+        _deploy(_defaultParams());
 
         // Seed a healthy PERPETUAL checkpoint
         _seedSymmetric(100e18, 30e18, 10e18);

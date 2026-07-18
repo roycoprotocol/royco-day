@@ -7,7 +7,7 @@ import { Test_MarketLifecycleBase } from "./Test_MarketLifecycleBase.t.sol";
 
 /// @title Test_MarketLifecycle_8DecVault_6DecQuote
 /// @notice Market lifecycle on the 8-decimal shape: 4626(8,8) ST/JT shares against a 6-decimal quote stable
-/// @dev This shape contributes the 8-decimal-shares axis only, jtCoinvested stays true at the kernel layer (identical ST/JT assets force co-investment)
+/// @dev This shape contributes the 8-decimal-shares axis only, ST/JT share one asset as the kernel requires
 contract Test_MarketLifecycle_8DecVault_6DecQuote is Test_MarketLifecycleBase {
     function _tokenShape() internal pure override returns (FixtureCell memory) {
         return cellD();

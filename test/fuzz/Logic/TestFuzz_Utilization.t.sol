@@ -23,40 +23,31 @@ contract TestFuzz_Utilization_Logic is Test {
     /**
      * Coverage utilization is the metric that blocks senior deposits when junior first-loss capital is
      * too thin, so it must round UP: an under-read would admit senior exposure the junior tranche cannot
-     * cover. Property (UtilizationLogic.sol:27-48):
-     *   coverageUtilizationWAD == RoycoTestMath.computeCoverageUtilization(stRawNAV, jtRawNAV, coinvested, minCov, jtEffectiveNAV)   [exact, full input space]
+     * cover. Property (UtilizationLogic.sol:26-46):
+     *   coverageUtilizationWAD == RoycoTestMath.computeCoverageUtilization(stRawNAV, jtRawNAV, minCov, jtEffectiveNAV)   [exact, full input space]
      * Zero edges pinned exactly, and the zero edges take precedence over the infinite edge:
      *   minCov == 0 or exposure == 0 => 0, then jtEffectiveNAV == 0 => type(uint256).max
      * Ceil direction on the finite branch: utilization * jtEffectiveNAV >= exposure * minCov (the metric reads high,
      * favoring senior). Overflow guard: utilization * jtEffectiveNAV <= exposure * minCov + jtEffectiveNAV - 1 <= 2e48 + 1e30 < 2^256
      * because utilization = ceil(exposure * minCov / jtEffectiveNAV) with exposure <= 2e30 and minCov < 1e18
      */
-    function testFuzz_CoverageUtilization_MatchesMirrorAndCeilBias(
-        uint256 _stRaw,
-        uint256 _jtRaw,
-        bool _jtCoinvested,
-        uint256 _minCov,
-        uint256 _jtEff
-    )
-        public
-        pure
-    {
+    function testFuzz_CoverageUtilization_MatchesMirrorAndCeilBias(uint256 _stRaw, uint256 _jtRaw, uint256 _minCov, uint256 _jtEff) public pure {
         _stRaw = bound(_stRaw, 0, MAX_NAV); // uniform over the full NAV range incl. the 0 edge
         _jtRaw = bound(_jtRaw, 0, MAX_NAV); // uniform over the full NAV range incl. the 0 edge
         _minCov = bound(_minCov, 0, WAD - 1); // config invariant: setMinCoverage enforces minCoverageWAD < WAD, incl. the 0 edge
         _jtEff = bound(_jtEff, 0, MAX_NAV); // includes 0 => the infinite-utilization branch
 
         uint256 coverageUtilizationWAD =
-            UtilizationLogic._computeCoverageUtilization(toNAVUnits(_stRaw), toNAVUnits(_jtRaw), _jtCoinvested, _minCov, toNAVUnits(_jtEff));
+            UtilizationLogic._computeCoverageUtilization(toNAVUnits(_stRaw), toNAVUnits(_jtRaw), _minCov, toNAVUnits(_jtEff));
 
         // Exact equality with the independent mirror over the entire input space
         assertEq(
             coverageUtilizationWAD,
-            RoycoTestMath.computeCoverageUtilization(_stRaw, _jtRaw, _jtCoinvested, _minCov, _jtEff),
+            RoycoTestMath.computeCoverageUtilization(_stRaw, _jtRaw, _minCov, _jtEff),
             "coverage utilization == RoycoTestMath.computeCoverageUtilization"
         );
 
-        uint256 exposure = _stRaw + (_jtCoinvested ? _jtRaw : 0);
+        uint256 exposure = _stRaw + _jtRaw;
         if (_minCov == 0 || exposure == 0) {
             assertEq(coverageUtilizationWAD, 0, "no requirement or no exposure reads zero");
         } else if (_jtEff == 0) {
@@ -72,7 +63,7 @@ contract TestFuzz_Utilization_Logic is Test {
     /**
      * Liquidity utilization is the metric that blocks LT redemptions from pulling pool depth below the
      * senior tranche's required exit liquidity, so it must round UP: an under-read would let a redemption
-     * drain depth senior exits depend on. Property (UtilizationLogic.sol:60-75):
+     * drain depth senior exits depend on. Property (UtilizationLogic.sol:58-73):
      *   liquidityUtilizationWAD == RoycoTestMath.computeLiquidityUtilization(stEffectiveNAV, minLiq, ltRawNAV)   [exact, full input space]
      * Zero edges pinned exactly, and the zero edges take precedence over the infinite edge:
      *   stEffectiveNAV == 0 or minLiq == 0 => 0, then ltRawNAV == 0 => type(uint256).max
@@ -119,10 +110,10 @@ contract TestFuzz_Utilization_Logic is Test {
         uint256 jtEff = _j * _minCov; // the exact junior buffer that backs the exposure at precisely 100%
         uint256 exposure = _j * WAD;
 
-        uint256 atBoundary = UtilizationLogic._computeCoverageUtilization(toNAVUnits(exposure), ZERO_NAV_UNITS, false, _minCov, toNAVUnits(jtEff));
+        uint256 atBoundary = UtilizationLogic._computeCoverageUtilization(toNAVUnits(exposure), ZERO_NAV_UNITS, _minCov, toNAVUnits(jtEff));
         assertEq(atBoundary, WAD, "the exactly-backed state must read exactly 100%, keeping the <= gate open");
 
-        uint256 pastBoundary = UtilizationLogic._computeCoverageUtilization(toNAVUnits(exposure + 1), ZERO_NAV_UNITS, false, _minCov, toNAVUnits(jtEff));
+        uint256 pastBoundary = UtilizationLogic._computeCoverageUtilization(toNAVUnits(exposure + 1), ZERO_NAV_UNITS, _minCov, toNAVUnits(jtEff));
         assertEq(pastBoundary, WAD + 1, "one exposure wei past the boundary must read 100% + 1 wei, tripping the <= gate");
     }
 

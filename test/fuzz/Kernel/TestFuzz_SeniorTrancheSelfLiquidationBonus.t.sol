@@ -95,14 +95,10 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
                 stRawNAV: toUint256(state.stRawNAV),
                 jtRawNAV: toUint256(state.jtRawNAV),
                 jtEffectiveNAV: toUint256(state.jtEffectiveNAV),
-                jtCoinvested: true,
                 coverageUtilizationWAD: covPre,
                 coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_THRESHOLD_WAD,
                 bonusWAD: CONFIGURED_BONUS_WAD,
-                userClaimNAV: baseNav,
-                // The redeemer's claim on real exposure: each floored asset leg priced back at the drawn-down
-                // vault rate, i.e. the raw NAV this redemption actually pulls out of the covered exposure
-                stUserWeightedClaimNAV: baseSTAssets.mulDiv(rate, 1e18) + baseJTAssets.mulDiv(rate, 1e18)
+                userClaimNAV: baseNav
             })
         );
 
@@ -144,7 +140,7 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         // never worsen the remaining LPs' coverage
         uint256 jtEffPost = toUint256(accountant.getState().lastJTEffectiveNAV);
         uint256 covPost = RoycoTestMath.computeCoverageUtilization(
-            toUint256(accountant.getState().lastSTRawNAV), toUint256(accountant.getState().lastJTRawNAV), true, 0.2e18, jtEffPost
+            toUint256(accountant.getState().lastSTRawNAV), toUint256(accountant.getState().lastJTRawNAV), 0.2e18, jtEffPost
         );
         _assertCoverageUtilizationNeutralWithinCeilRounding(covPre, covPost, jtEffPost);
     }
@@ -213,14 +209,10 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
                 stRawNAV: toUint256(state.stRawNAV),
                 jtRawNAV: toUint256(state.jtRawNAV),
                 jtEffectiveNAV: jtEffHand,
-                jtCoinvested: true,
                 coverageUtilizationWAD: covPre,
                 coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_THRESHOLD_WAD,
                 bonusWAD: bonusWAD,
-                userClaimNAV: baseNav,
-                // The redeemer's claim on real exposure: each floored asset leg priced back at the drawn-down
-                // vault rate, i.e. the raw NAV this redemption actually pulls out of the covered exposure
-                stUserWeightedClaimNAV: baseSTAssets.mulDiv(rate, 1e18) + baseJTAssets.mulDiv(rate, 1e18)
+                userClaimNAV: baseNav
             })
         );
 
@@ -257,7 +249,7 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         // absurd - can worsen the remaining LPs' coverage
         uint256 jtEffPost = toUint256(accountant.getState().lastJTEffectiveNAV);
         uint256 covPost = RoycoTestMath.computeCoverageUtilization(
-            toUint256(accountant.getState().lastSTRawNAV), toUint256(accountant.getState().lastJTRawNAV), true, 0.2e18, jtEffPost
+            toUint256(accountant.getState().lastSTRawNAV), toUint256(accountant.getState().lastJTRawNAV), 0.2e18, jtEffPost
         );
         _assertCoverageUtilizationNeutralWithinCeilRounding(covPre, covPost, jtEffPost);
     }
@@ -282,6 +274,10 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
      * @param _jtEffPost The committed post-redemption junior effective NAV, the ceil-division denominator
      */
     function _assertCoverageUtilizationNeutralWithinCeilRounding(uint256 _covPre, uint256 _covPost, uint256 _jtEffPost) private pure {
+        // A zero post-redemption junior buffer only arises at a full senior exit (userClaimNAV == stEffectiveNAV), which
+        // leaves zero senior effective NAV behind: coverage utilization is then a vacuous type(uint256).max sentinel over
+        // no surviving senior claim, so the anti-bank-run property does not govern this state and there is nothing to bound
+        if (_jtEffPost == 0) return;
         uint256 roundingSlackWei = 2;
         uint256 toleranceWAD = _jtEffPost == 0 ? 0 : Math.mulDiv(roundingSlackWei, 0.2e18, _jtEffPost, Math.Rounding.Ceil);
         assertLe(

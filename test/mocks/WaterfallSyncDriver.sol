@@ -12,7 +12,7 @@ import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
  *         config validation from an external call frame
  * @dev The kernel address is constructor-supplied so a test can act as the kernel for the pre-op and post-op
  *      sync entrypoints (call them directly with the kernel set to the test contract, or prank as the configured
- *      kernel address), and the junior co-investment flag is forwarded so both exposure modes are drivable
+ *      kernel address)
  * @dev seedCheckpoint bypasses initialize entirely: it writes the full accountant state field set (checkpointed
  *      raw and effective NAVs, the JT coverage impermanent loss ledger, the time-weighted yield share
  *      accumulators, the max yield shares, all four protocol fee percentages, the market state and fixed-term
@@ -22,7 +22,7 @@ import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
  *      read the seeded dust tolerances from storage, so they are driven directly with a marshaled state struct
  */
 contract WaterfallSyncDriver is RoycoDayAccountant {
-    constructor(address _kernel, bool _jtCoinvested) RoycoDayAccountant(_kernel, _jtCoinvested) { }
+    constructor(address _kernel) RoycoDayAccountant(_kernel) { }
 
     /// @notice Writes the full accountant state field set into ERC-7201 storage as the last committed checkpoint
     function seedCheckpoint(RoycoDayAccountantState calldata _seed) external {

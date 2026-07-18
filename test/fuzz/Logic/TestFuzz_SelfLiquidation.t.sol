@@ -52,7 +52,6 @@ contract TestFuzz_SelfLiquidation_Logic is Test {
         uint256 _jtEff,
         uint256 _minCov,
         uint256 _threshold,
-        bool _jtCoinvested,
         uint256 _bonusWAD,
         uint256 _userStAssets,
         uint256 _userJtAssets,
@@ -72,9 +71,9 @@ contract TestFuzz_SelfLiquidation_Logic is Test {
 
         // The utilization the accountant would checkpoint for exactly this state, from the production math
         uint256 coverageUtilizationWAD =
-            UtilizationLogic._computeCoverageUtilization(toNAVUnits(_stRaw), toNAVUnits(_jtRaw), _jtCoinvested, _minCov, toNAVUnits(_jtEff));
+            UtilizationLogic._computeCoverageUtilization(toNAVUnits(_stRaw), toNAVUnits(_jtRaw), _minCov, toNAVUnits(_jtEff));
 
-        uint256 exposure = _stRaw + (_jtCoinvested ? _jtRaw : 0);
+        uint256 exposure = _stRaw + _jtRaw;
         if (coverageUtilizationWAD >= _threshold && _jtEff > 0) {
             // The lemma, step 1: a finite ceil'd utilization at or above a threshold of at least WAD + 1 forces
             // exposure * minCov > WAD * jtEff, because exposure * minCov <= WAD * jtEff would ceil to at most WAD.
@@ -94,7 +93,6 @@ contract TestFuzz_SelfLiquidation_Logic is Test {
         state.jtRawNAV = toNAVUnits(_jtRaw);
         state.stEffectiveNAV = toNAVUnits(_stRaw + _jtRaw > _jtEff ? _stRaw + _jtRaw - _jtEff : 0);
         state.jtEffectiveNAV = toNAVUnits(_jtEff);
-        state.jtCoinvested = _jtCoinvested;
         state.minCoverageWAD = _minCov;
         state.coverageUtilizationWAD = coverageUtilizationWAD;
         state.coverageLiquidationUtilizationWAD = _threshold;

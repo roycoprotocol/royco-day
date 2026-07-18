@@ -15,8 +15,8 @@ import { MarketFuzzTestBase } from "../../utils/MarketFuzzTestBase.sol";
  *         100%, and one wei (or share) beyond the max plus its derived dust slack reverts on the derived gate
  * @dev Every market is seeded flat at a 1.0 vault rate and 1.0 prices, so one vault-share wei == one BPT wei ==
  *      one NAV wei and every boundary is exact integer algebra. Default parameters throughout: 20% minimum
- *      coverage, 5% minimum liquidity, 1 wei ST and JT NAV dust tolerances, JT co-invested (forced by the kernel
- *      family). The dust slacks between the reported max and the algebraic gate boundary are therefore:
+ *      coverage, 5% minimum liquidity, 1 wei ST and JT NAV dust tolerances. The dust slacks between the
+ *      reported max and the algebraic gate boundary are therefore:
  *      - senior deposit, coverage leg: stDust + jtDust = 2 wei of slack
  *      - senior deposit, liquidity leg: stDust = 1 wei of slack
  *      - junior redemption: the two dust tolerances plus a 2 wei guard for the gate's internal ceil, all
@@ -53,14 +53,14 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         uint256 reportedMax = toUint256(seniorTranche.maxDeposit(ST_PROVIDER));
         assertEq(reportedMax, expectedMax, "reported max senior deposit must equal min(4jt - st - 2, 20depth - st - 1)");
         assertEq(
-            RoycoTestMath.maxSTDeposit(st, jt, st, jt, depth, true, 0.2e18, 0.05e18, 1, 1), expectedMax, "independent mirror must agree with the reported max"
+            RoycoTestMath.maxSTDeposit(st, jt, st, jt, depth, 0.2e18, 0.05e18, 1, 1), expectedMax, "independent mirror must agree with the reported max"
         );
 
         // Filling exactly the reported max must succeed and leave both gates at or below 100%
         _depositSenior(reportedMax);
         IRoycoDayAccountant.RoycoDayAccountantState memory acct = accountant.getState();
         assertEq(toUint256(acct.lastSTRawNAV), st + reportedMax, "the max deposit must land wei-exactly on the senior raw mark");
-        assertLe(RoycoTestMath.computeCoverageUtilization(st + reportedMax, jt, true, 0.2e18, jt), WAD, "coverage utilization must hold at or below 100% after filling the max");
+        assertLe(RoycoTestMath.computeCoverageUtilization(st + reportedMax, jt, 0.2e18, jt), WAD, "coverage utilization must hold at or below 100% after filling the max");
         assertLe(RoycoTestMath.computeLiquidityUtilization(st + reportedMax, 0.05e18, depth), WAD, "liquidity utilization must hold at or below 100% after filling the max");
 
         // Consuming the dust slack lands exactly on the algebraic boundary and still passes
@@ -68,7 +68,7 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         uint256 slack = boundary - reportedMax;
         _depositSenior(slack);
         assertEq(toUint256(accountant.getState().lastSTRawNAV), st + boundary, "the slack deposit must land exactly on the algebraic gate boundary");
-        assertLe(RoycoTestMath.computeCoverageUtilization(st + boundary, jt, true, 0.2e18, jt), WAD, "coverage utilization must sit at or below 100% exactly at the boundary");
+        assertLe(RoycoTestMath.computeCoverageUtilization(st + boundary, jt, 0.2e18, jt), WAD, "coverage utilization must sit at or below 100% exactly at the boundary");
         assertLe(RoycoTestMath.computeLiquidityUtilization(st + boundary, 0.05e18, depth), WAD, "liquidity utilization must sit at or below 100% exactly at the boundary");
 
         // One wei past the boundary trips whichever gate binds: coverage is checked before liquidity, so the
@@ -110,7 +110,7 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         uint256 expectedMax = (4 * jt - st - k - 20) / 4;
         uint256 reportedMax = juniorTranche.maxRedeem(JT_PROVIDER);
         assertEq(reportedMax, expectedMax, "reported max junior redemption must equal floor((4jt - st - k - 20) / 4)");
-        (uint256 rtmST, uint256 rtmJT) = RoycoTestMath.maxJTWithdrawal(st, jt, st, jt, true, 0.2e18, 1, 1);
+        (uint256 rtmST, uint256 rtmJT) = RoycoTestMath.maxJTWithdrawal(st, jt, st, jt, 0.2e18, 1, 1);
         assertEq(rtmST, 0, "a flat market withdraws nothing from the senior raw NAV");
         assertEq(rtmJT, expectedMax, "independent mirror must agree with the reported max");
 
@@ -126,7 +126,7 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         juniorTranche.redeem(reportedMax, JT_PROVIDER, JT_PROVIDER);
         assertEq(toUint256(accountant.getState().lastJTRawNAV), jt - reportedMax, "the max redemption must land wei-exactly on the junior raw mark");
         assertLe(
-            RoycoTestMath.computeCoverageUtilization(st, jt - reportedMax, true, 0.2e18, jt - reportedMax),
+            RoycoTestMath.computeCoverageUtilization(st, jt - reportedMax, 0.2e18, jt - reportedMax),
             WAD,
             "coverage utilization must hold at or below 100% after the max redemption"
         );
@@ -137,7 +137,7 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         juniorTranche.redeem(slack, JT_PROVIDER, JT_PROVIDER);
         assertEq(toUint256(accountant.getState().lastJTRawNAV), jt - boundary, "the slack redemption must land exactly on the algebraic boundary");
         assertLe(
-            RoycoTestMath.computeCoverageUtilization(st, jt - boundary, true, 0.2e18, jt - boundary), WAD, "coverage utilization must sit at or below 100% exactly at the boundary"
+            RoycoTestMath.computeCoverageUtilization(st, jt - boundary, 0.2e18, jt - boundary), WAD, "coverage utilization must sit at or below 100% exactly at the boundary"
         );
 
         // One share past the boundary makes 4w > 4jt - st and violates the coverage requirement
@@ -182,7 +182,7 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         // 0.6e18 + 1 wei (since (st + jt) / jt <= 3 up to the flooring in jt's lower bound), while the
         // deployed liquidation threshold must exceed WAD -- a market cannot be declared in liquidation
         // before its coverage is even fully utilized
-        uint256 flatCoverageUtilizationWAD = RoycoTestMath.computeCoverageUtilization(st, jt, true, 0.2e18, jt);
+        uint256 flatCoverageUtilizationWAD = RoycoTestMath.computeCoverageUtilization(st, jt, 0.2e18, jt);
         uint256 liquidationThresholdWAD = accountant.getState().coverageLiquidationUtilizationWAD;
         assertLe(flatCoverageUtilizationWAD, 0.6e18 + 1, "flat 2:1-to-1:2 seeds mark at most 60% coverage utilization");
         assertGt(liquidationThresholdWAD, WAD, "the deployed liquidation threshold must sit above full coverage utilization");

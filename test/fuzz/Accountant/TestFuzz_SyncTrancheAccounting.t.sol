@@ -31,7 +31,6 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
      * that broke both production and the mirror identically in those steps would still be caught.
      */
     function testFuzz_Sync_MatchesIndependentMirrorFieldForField(
-        bool _jtCoinvested,
         uint256 _stRaw0,
         uint256 _jtRaw0,
         uint256 _ltRaw0,
@@ -60,7 +59,7 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
         _jtRate = bound(_jtRate, 0, WAD); // full YDM output range, the accountant caps it at the configured max
         _ltRate = bound(_ltRate, 0, WAD); // full YDM output range, the accountant caps it at the configured max
 
-        _deploy(_jtCoinvested, _defaultParams());
+        _deploy(_defaultParams());
         jtYDM.setRates(_jtRate);
         ltYDM.setRates(_ltRate);
         _seedSymmetric(_stRaw0, _jtRaw0, _ltRaw0);
@@ -209,7 +208,6 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
      * could move senior or junior accounting, a swap against the pool could re-price the tranches.
      */
     function testFuzz_Sync_LiquidityMarkNeverMovesSeniorOrJuniorAccounting(
-        bool _jtCoinvested,
         uint256 _stRaw0,
         uint256 _jtRaw0,
         uint256 _ltRawA,
@@ -232,7 +230,7 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
         _jtRate = bound(_jtRate, 0, WAD); // full YDM output range
         _ltRate = bound(_ltRate, 0, WAD); // full YDM output range
 
-        _deploy(_jtCoinvested, _defaultParams());
+        _deploy(_defaultParams());
         jtYDM.setRates(_jtRate);
         ltYDM.setRates(_ltRate);
         _seedSymmetric(_stRaw0, _jtRaw0, _ltRawA);

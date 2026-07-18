@@ -58,7 +58,6 @@ abstract contract AdminPrimaryRateMarketTestBase is DayMarketTestBase {
      * @param _initialConversionRateWAD The base-asset-to-NAV-unit rate the kernel is initialized with, must be nonzero
      */
     function _deployAdminPrimaryMarket(FixtureCell memory _shape, MarketParamsConfig memory _params, uint256 _initialConversionRateWAD) internal {
-        require(_params.jtCoinvested, "AdminPrimaryRateMarketTestBase: kernel family forces jtCoinvested=true");
         require(_initialConversionRateWAD != 0, "AdminPrimaryRateMarketTestBase: admin-primary wiring requires a nonzero stored rate");
         _validateFixtureCell(_shape);
         cell = _shape;
@@ -93,7 +92,7 @@ abstract contract AdminPrimaryRateMarketTestBase is DayMarketTestBase {
         RoycoSeniorTranche stImpl = new RoycoSeniorTranche(address(stJtVault), predictedKernel);
         RoycoJuniorTranche jtImpl = new RoycoJuniorTranche(address(stJtVault), predictedKernel);
         RoycoLiquidityTranche ltImpl = new RoycoLiquidityTranche(address(bpt), predictedKernel);
-        RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel, true);
+        RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel);
 
         // Tranche and accountant proxies MUST exist before the kernel impl (its constructor reads the accountant)
         seniorTranche = RoycoSeniorTranche(_deployTrancheProxy(address(stImpl), "Royco Senior Tranche", "RST"));

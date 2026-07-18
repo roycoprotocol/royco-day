@@ -676,7 +676,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         });
         params.stAsset = _config.seniorAsset;
         params.jtAsset = _config.juniorAsset;
-        params.jtCoinvested = _config.jtCoinvested;
 
         // Accountant init params. `jtYDM`/`ltYDM` are overwritten by the template with the deployed instances. BOTH YDMs get
         // initialization data so the accountant initializes each of them. The LT premium/liquidity overlay is at its zero

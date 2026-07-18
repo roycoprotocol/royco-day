@@ -56,7 +56,7 @@ contract TestFuzz_MakinaChainlinkQuoterConversionRate_Kernel is Test {
      * @notice Deploys a Makina-Chainlink-quoter kernel over freshly parameterized tokens and feed, the smallest
      *         wiring the quoter's constructors and initializer accept
      * @dev The tranche and accountant implementations are consumed uninitialized: the kernel's constructor and
-     *      initializer read only their immutables (asset addresses and the co-investment flag), the conversion
+     *      initializer read only their immutables (asset addresses), the conversion
      *      surface under test is pure-view, and the override setter's internal accounting syncs pass trivially at
      *      zero NAVs, so no market state is ever needed
      * @param _trancheDecimals The machine share token's decimals (the ST and JT tranche unit)
@@ -101,8 +101,8 @@ contract TestFuzz_MakinaChainlinkQuoterConversionRate_Kernel is Test {
         RoycoSeniorTranche seniorTranche = new RoycoSeniorTranche(address(shareToken), predictedKernel);
         RoycoJuniorTranche juniorTranche = new RoycoJuniorTranche(address(shareToken), predictedKernel);
         RoycoLiquidityTranche liquidityTranche = new RoycoLiquidityTranche(address(bpt), predictedKernel);
-        // Identical ST/JT assets force the co-invested junior configuration at kernel construction
-        RoycoDayAccountant accountant = new RoycoDayAccountant(predictedKernel, true);
+        // The kernel constructor requires identical ST/JT assets
+        RoycoDayAccountant accountant = new RoycoDayAccountant(predictedKernel);
 
         balancerVault.registerPool(address(bpt), [IERC20(address(seniorTranche)), IERC20(address(quoteToken))]);
 

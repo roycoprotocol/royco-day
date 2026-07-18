@@ -118,8 +118,8 @@ interface IRoycoDayKernel {
     /// @notice Thrown when the tranche and the kernel's corresponding tranche assets don't match
     error TRANCHE_AND_KERNEL_ASSETS_MISMATCH();
 
-    /// @notice Thrown when the senior and junior tranches share the same asset (so are structurally correlated) but the accountant is not configured with the junior tranche co-invested
-    error JT_MUST_BE_COINVESTED();
+    /// @notice Thrown when the senior and junior tranches are not the same yield-bearing asset, since the junior tranche's capital must share the senior tranche's exposure
+    error TRANCHE_ASSETS_MUST_BE_IDENTICAL();
 
     /// @notice Thrown when the caller of a permissioned function isn't the market's senior tranche
     error ONLY_SENIOR_TRANCHE();

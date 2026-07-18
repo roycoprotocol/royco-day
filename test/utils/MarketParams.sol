@@ -15,8 +15,6 @@ import { MarketParamsConfig } from "./FixtureTypes.sol";
  *      minCoverageWAD                     | {0, 0.1e18, WAD-1}
  *      coverageLiquidationUtilizationWAD  | {WAD+1, 1.0009e18, 5e18}
  *      minLiquidityWAD                    | {0, 0.05e18, WAD-1}          (0 = the zero minimum-liquidity market)
- *      jtCoinvested                       | {true, false}                (kernel layer pinned true per RoycoDayKernel.sol:122,
- *                                                                        false driven at AccountantTestBase)
  *      maxJTYieldShareWAD                 | {0, sum == WAD exactly}
  *      maxLTYieldShareWAD                 | {0, sum == WAD exactly}
  *      stProtocolFeeWAD                   | {0, 0.1e18, MAX_PROTOCOL_FEE_WAD}
@@ -35,7 +33,6 @@ import { MarketParamsConfig } from "./FixtureTypes.sol";
 
 /**
  * @notice The default market parameterization used by the market lifecycle suites and any test that does not sweep a field
- * @dev jtCoinvested is true, the kernel family requires it for identical ST/JT assets (RoycoDayKernel.sol:122)
  * @dev YDM kinds default to MockYDM (0) so premiums are pinned constants, the curve target value curve[1] is the
  *      pinned share the fixture programs into each MockYDM, keeping kinds 0/1/2 interchangeable at target utilization
  */
@@ -45,7 +42,6 @@ function defaultParams() pure returns (MarketParamsConfig memory) {
         minCoverageWAD: 0.2e18,
         coverageLiquidationUtilizationWAD: 6.4667e18,
         minLiquidityWAD: 0.05e18,
-        jtCoinvested: true,
         // premiums
         maxJTYieldShareWAD: 0.5e18,
         maxLTYieldShareWAD: 0.3e18,

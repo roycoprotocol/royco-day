@@ -17,7 +17,7 @@ import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
 contract Test_StateMachine_Accountant is AccountantTestBase {
     function setUp() public {
         stranger = makeAddr("stranger");
-        _deploy(false, _defaultParams());
+        _deploy(_defaultParams());
     }
 
     /**
@@ -27,7 +27,7 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
     function test_StateMachine_zeroDurationConfigNeverEntersFixedTerm() public {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.fixedTermDurationSeconds = 0;
-        _deploy(false, p);
+        _deploy(p);
         _seedState(SEED_ST_RAW, SEED_JT_RAW, SEED_ST_RAW, SEED_JT_RAW, 0, SEED_LT_RAW, MarketState.PERPETUAL);
         vm.recordLogs();
         vm.expectEmit(true, true, true, true, address(accountant));
@@ -92,13 +92,15 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
         _seedLargeIL();
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayAccountant.FixedTermEnded();
+        // Coinvested coverage folds JT_RAW in: at stRaw 800e18 / jtRaw 300e18 with jtEff 100e18 the utilization is
+        // (800e18 + 300e18) * 0.1 / 100e18 = 1.1e18, landing exactly on the liquidation threshold and forcing perpetual
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.JuniorTrancheCoverageImpermanentLossReset(toNAVUnits(uint256(230e18)));
-        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(770e18)), toNAVUnits(uint256(300e18)));
+        emit IRoycoDayAccountant.JuniorTrancheCoverageImpermanentLossReset(toNAVUnits(uint256(200e18)));
+        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(800e18)), toNAVUnits(uint256(300e18)));
         assertEq(state.coverageUtilizationWAD, DEFAULT_LIQUIDATION_UTILIZATION_WAD, "coverage utilization lands exactly on the threshold");
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "liquidation breach forces perpetual");
         assertEq(toUint256(state.jtCoverageImpermanentLoss), 0, "il erased even mid fixed term");
-        assertEq(toUint256(state.jtEffectiveNAV), 70e18, "coverage applied before the transition");
+        assertEq(toUint256(state.jtEffectiveNAV), 100e18, "coverage applied before the transition");
         assertEq(toUint256(state.stEffectiveNAV), 1000e18, "st fully covered");
         assertEq(state.fixedTermEndTimestamp, 0, "end timestamp deleted");
     }
@@ -110,10 +112,12 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
     function test_StateMachine_belowLiquidationThresholdStaysFixedTerm() public {
         _seedLargeIL();
         uint32 end = uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS);
-        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(780e18)), toNAVUnits(uint256(300e18)));
-        assertEq(state.coverageUtilizationWAD, 0.975e18, "coverage utilization below the threshold");
+        // Coinvested coverage folds JT_RAW in: at stRaw 825e18 / jtRaw 300e18 with jtEff 125e18 the utilization is
+        // (825e18 + 300e18) * 0.1 / 125e18 = 0.9e18, comfortably below the 1.1 liquidation threshold, so the term persists
+        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(825e18)), toNAVUnits(uint256(300e18)));
+        assertEq(state.coverageUtilizationWAD, 0.9e18, "coverage utilization below the threshold");
         assertEq(uint8(state.marketState), uint8(MarketState.FIXED_TERM), "term persists below the liquidation threshold");
-        assertEq(toUint256(state.jtCoverageImpermanentLoss), 220e18, "il accumulates instead of erasing");
+        assertEq(toUint256(state.jtCoverageImpermanentLoss), 175e18, "il accumulates instead of erasing");
         assertEq(state.fixedTermEndTimestamp, end, "end timestamp kept");
     }
 
@@ -125,7 +129,10 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
      *   attrST = -floor(299999999999999999999 / 3) = -99999999999999999999, jt residual loss = 200e18 exactly
      *   so jtEffectiveNAV = 0, the 99999999999999999999 st loss is uncovered leaving stEffectiveNAV = 1 wei
      */
-    function test_StateMachine_wipeoutDisjunctInIsolation() public {
+    /// A full junior wipeout (jtEffectiveNAV to 0 with a surviving senior claim) forces PERPETUAL. Under coinvestment the
+    /// surviving senior raw NAV is itself covered exposure, so a zero junior buffer drives coverage utilization to the
+    /// type(uint256).max sentinel: the wipeout and liquidation disjuncts fire together rather than the wipeout in isolation
+    function test_StateMachine_juniorWipeoutForcesPerpetual() public {
         _seedState(0, 300e18, 100e18, 200e18, 100e18, SEED_LT_RAW, MarketState.FIXED_TERM);
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayAccountant.FixedTermEnded();
@@ -134,8 +141,8 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
         SyncedAccountingState memory state = kernel.doPreOp(ZERO_NAV_UNITS, toNAVUnits(uint256(1)));
         assertEq(toUint256(state.stEffectiveNAV), 1, "st retains a single wei of live claim");
         assertEq(toUint256(state.jtEffectiveNAV), 0, "jt wiped out");
-        assertEq(state.coverageUtilizationWAD, 0, "no exposure so the liquidation disjunct cannot be the trigger");
-        assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "wipeout alone forces perpetual");
+        assertEq(state.coverageUtilizationWAD, type(uint256).max, "a zero junior buffer over a live senior claim maxes coverage utilization");
+        assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "the junior wipeout forces perpetual");
         assertEq(toUint256(state.jtCoverageImpermanentLoss), 0, "il erased");
     }
 
@@ -162,7 +169,7 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.stNAVDustTolerance = toNAVUnits(uint256(30));
         p.jtNAVDustTolerance = toNAVUnits(uint256(40));
-        _deploy(false, p);
+        _deploy(p);
         _seedState(SEED_ST_RAW, SEED_JT_RAW, SEED_ST_RAW, SEED_JT_RAW, 0, SEED_LT_RAW, MarketState.PERPETUAL);
         // Covered loss of 50 wei: il = 50 <= dust 70 stays PERPETUAL with the il persisted for later recovery
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(SEED_ST_RAW - 50), toNAVUnits(SEED_JT_RAW));
@@ -193,7 +200,10 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.stNAVDustTolerance = toNAVUnits(uint256(30));
         p.jtNAVDustTolerance = toNAVUnits(uint256(40));
-        _deploy(false, p);
+        // Coinvested coverage folds JT_RAW in, so the 100e18 covered loss below marks (900e18 + 200e18) * 0.1 / 100e18 = 1.1
+        // utilization: lift the liquidation threshold clear of it so this test exercises the IL / dust-tolerance path rather than a liquidation breach
+        p.coverageLiquidationUtilizationWAD = 1.5e18;
+        _deploy(p);
         _seedState(SEED_ST_RAW, SEED_JT_RAW, SEED_ST_RAW, SEED_JT_RAW, 0, SEED_LT_RAW, MarketState.PERPETUAL);
         // Enter the fixed term on a covered 100e18 loss
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(900e18)), toNAVUnits(SEED_JT_RAW));

@@ -253,9 +253,8 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         applySTPnL(-6000);
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a = accountant.getState();
-        uint256 coverageUtilizationWAD = RoycoTestMath.computeCoverageUtilization(
-            toUint256(a.lastSTRawNAV), toUint256(a.lastJTRawNAV), accountant.JT_COINVESTED(), a.minCoverageWAD, toUint256(a.lastJTEffectiveNAV)
-        );
+        uint256 coverageUtilizationWAD =
+            RoycoTestMath.computeCoverageUtilization(toUint256(a.lastSTRawNAV), toUint256(a.lastJTRawNAV), a.minCoverageWAD, toUint256(a.lastJTEffectiveNAV));
         assertGe(coverageUtilizationWAD, a.coverageLiquidationUtilizationWAD, "setup: expected liquidation coverage to read breached");
 
         uint256 balance = liquidityTranche.balanceOf(LT_PROVIDER);

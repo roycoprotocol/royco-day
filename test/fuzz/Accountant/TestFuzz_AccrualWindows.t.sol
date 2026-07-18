@@ -47,7 +47,6 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
      * [last premium payment, last accrual] — the closed form only a contiguous window satisfies.
      */
     function testFuzz_AccrualWindows_ContiguousAndResetOnlyWhenPremiumsPay(
-        bool _jtCoinvested,
         uint256 _stRaw0,
         uint256 _jtRaw0,
         uint256 _ltRaw0,
@@ -59,7 +58,7 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
     )
         public
     {
-        _prepareMarket(_jtCoinvested, _stRaw0, _jtRaw0, _ltRaw0, _jtRate, _ltRate);
+        _prepareMarket(_stRaw0, _jtRaw0, _ltRaw0, _jtRate, _ltRate);
         for (uint256 i = 0; i < 8; ++i) {
             _step(_warps[i], _actions[i], _moves[i]);
         }
@@ -73,7 +72,6 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
      * window — never from re-reading the accrual the first sync already consumed.
      */
     function testFuzz_AccrualWindows_SameBlockRepeatGainSyncCannotReuseTheSpentWindow(
-        bool _jtCoinvested,
         uint256 _stRaw0,
         uint256 _jtRaw0,
         uint256 _ltRaw0,
@@ -85,7 +83,7 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
     )
         public
     {
-        _prepareMarket(_jtCoinvested, _stRaw0, _jtRaw0, _ltRaw0, _jtRate, _ltRate);
+        _prepareMarket(_stRaw0, _jtRaw0, _ltRaw0, _jtRate, _ltRate);
 
         // A real accrual window from one second to the ten-year suite ceiling, then the first gain sync
         vm.warp(block.timestamp + bound(_window, 1, MAX_ELAPSED));
@@ -124,7 +122,6 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
      * (an overflow or double-count) — and the sync must settle its payout from exactly that window.
      */
     function testFuzz_AccrualWindows_MaxElapsedWindowAccruesExactlyThenSettles(
-        bool _jtCoinvested,
         uint256 _stRaw0,
         uint256 _jtRaw0,
         uint256 _ltRaw0,
@@ -134,7 +131,7 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
     )
         public
     {
-        _prepareMarket(_jtCoinvested, _stRaw0, _jtRaw0, _ltRaw0, _jtRate, _ltRate);
+        _prepareMarket(_stRaw0, _jtRaw0, _ltRaw0, _jtRate, _ltRate);
 
         // The first-ever sync only initializes the accrual clock (it accrues nothing by construction)
         _stepSync(0);
@@ -155,14 +152,14 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
     }
 
     /// @dev Bounds the seed inputs, deploys the market with the pinned YDM rates, seeds it, and starts the model
-    function _prepareMarket(bool _jtCoinvested, uint256 _stRaw0, uint256 _jtRaw0, uint256 _ltRaw0, uint256 _jtRate, uint256 _ltRate) internal {
+    function _prepareMarket(uint256 _stRaw0, uint256 _jtRaw0, uint256 _ltRaw0, uint256 _jtRate, uint256 _ltRate) internal {
         stRawNAV = bound(_stRaw0, 0, MAX_NAV); // full NAV range incl. the empty-tranche edge
         jtRawNAV = bound(_jtRaw0, 0, MAX_NAV); // full NAV range incl. the uncovered-market edge
         ltRawNAV = bound(_ltRaw0, 0, MAX_NAV); // full NAV range incl. the no-depth edge
         pinnedJTRate = bound(_jtRate, 0, WAD); // full YDM output range, the accountant caps it at the configured max
         pinnedLTRate = bound(_ltRate, 0, WAD); // full YDM output range, the accountant caps it at the configured max
 
-        _deploy(_jtCoinvested, _defaultParams());
+        _deploy(_defaultParams());
         jtYDM.setRates(pinnedJTRate);
         ltYDM.setRates(pinnedLTRate);
         _seedSymmetric(stRawNAV, jtRawNAV, ltRawNAV);

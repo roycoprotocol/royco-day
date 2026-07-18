@@ -120,8 +120,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         LT_ASSET = _params.ltAsset;
         ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER = _params.enforceVaultSharesTransferWhitelist;
 
-        // If the senior and junior tranches share the same yield-bearing asset they are structurally correlated, so the junior tranche must be configured as co-invested in the accountant
-        require((_params.stAsset != _params.jtAsset) || IRoycoDayAccountant(_params.accountant).JT_COINVESTED(), JT_MUST_BE_COINVESTED());
+        // The senior and junior tranches must hold the same yield-bearing asset (coinvestment) so the junior tranche's capital always shares the senior tranche's exposure
+        require(_params.stAsset == _params.jtAsset, TRANCHE_ASSETS_MUST_BE_IDENTICAL());
     }
 
     /**

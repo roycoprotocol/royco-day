@@ -5,7 +5,6 @@ import { IVault } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contrac
 import { Initializable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import {
@@ -30,8 +29,8 @@ import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 /**
  * @title Test_Construction_Kernel
  * @notice Exercises the kernel family's construction- and initialization-time validation: null wiring, the
- *         forced junior co-investment for identical ST/JT assets, tranche-vs-kernel asset agreement, the
- *         liquidity pool's registration and token-pairing checks, and the optional initial conversion-rate seed
+ *         required ST/JT asset identity, tranche-vs-kernel asset agreement, the liquidity pool's registration
+ *         and token-pairing checks, and the optional initial conversion-rate seed
  * @dev These checks only ever run at market genesis, but each one guards a wiring mistake that would be
  *      unrecoverable behind the proxy once real deposits land, so every rejection path is pinned here
  * @dev NOTE on INVALID_BALANCER_V3_VAULT: unreachable through this kernel family by construction, the concrete
@@ -97,16 +96,15 @@ contract Test_Construction_Kernel is DayMarketTestBase {
     }
 
     /**
-     * @notice Identical ST/JT assets force the junior tranche to be co-invested, a non-co-invested accountant is rejected
-     * @dev With one shared yield-bearing asset the two tranches are structurally correlated, so an accountant claiming
-     *      the junior side sits in a risk-free opportunity would misprice coverage from the first sync onward
+     * @notice Distinct ST and JT assets are rejected at construction, both tranches must hold one shared
+     *         yield-bearing asset so the junior tranche's capital carries the senior tranche's exposure
+     * @dev The identity check is a pure address comparison in the base constructor, so it fires before any
+     *      quoter wiring can touch the foreign asset
      */
-    function test_RevertIf_IdenticalAssetsPairedWithNonCoinvestedAccountant() public {
-        // A fresh accountant implementation constructed with jtCoinvested = false (the immutable is readable on the implementation itself)
-        RoycoDayAccountant nonCoinvestedAccountant = new RoycoDayAccountant(makeAddr("SOME_KERNEL"), false);
+    function test_RevertIf_KernelConstructedWithDistinctTrancheAssets() public {
         IRoycoDayKernel.RoycoDayKernelConstructionParams memory params = _goodConstructionParams();
-        params.accountant = address(nonCoinvestedAccountant);
-        vm.expectRevert(IRoycoDayKernel.JT_MUST_BE_COINVESTED.selector);
+        params.jtAsset = makeAddr("FOREIGN_JT_ASSET");
+        vm.expectRevert(IRoycoDayKernel.TRANCHE_ASSETS_MUST_BE_IDENTICAL.selector);
         new DayKernel(params);
     }
 

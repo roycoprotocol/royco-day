@@ -358,7 +358,7 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a = accountant.getState();
         uint256 coverageUtilizationWAD = RoycoTestMath.computeCoverageUtilization(
-            toUint256(a.lastSTRawNAV), toUint256(a.lastJTRawNAV), accountant.JT_COINVESTED(), a.minCoverageWAD, toUint256(a.lastJTEffectiveNAV)
+            toUint256(a.lastSTRawNAV), toUint256(a.lastJTRawNAV), a.minCoverageWAD, toUint256(a.lastJTEffectiveNAV)
         );
         uint256 liquidityUtilizationWAD =
             RoycoTestMath.computeLiquidityUtilization(toUint256(a.lastSTEffectiveNAV), a.minLiquidityWAD, toUint256(a.lastLTRawNAV));
@@ -408,7 +408,7 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a = accountant.getState();
         uint256 coverageUtilizationWAD = RoycoTestMath.computeCoverageUtilization(
-            toUint256(a.lastSTRawNAV), toUint256(a.lastJTRawNAV), accountant.JT_COINVESTED(), a.minCoverageWAD, toUint256(a.lastJTEffectiveNAV)
+            toUint256(a.lastSTRawNAV), toUint256(a.lastJTRawNAV), a.minCoverageWAD, toUint256(a.lastJTEffectiveNAV)
         );
         assertGe(coverageUtilizationWAD, a.coverageLiquidationUtilizationWAD, "setup: expected liquidation coverage to read breached");
 

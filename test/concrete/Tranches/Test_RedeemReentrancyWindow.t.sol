@@ -248,7 +248,7 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
         RoycoSeniorTranche stImpl = new RoycoSeniorTranche(address(stJtUnderlying), predictedKernel);
         RoycoJuniorTranche jtImpl = new RoycoJuniorTranche(address(stJtUnderlying), predictedKernel);
         RoycoLiquidityTranche ltImpl = new RoycoLiquidityTranche(address(bpt), predictedKernel);
-        RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel, true);
+        RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel);
 
         // Tranche and accountant proxies must exist before the kernel impl (its constructor reads the accountant)
         seniorTranche = RoycoSeniorTranche(_deployTrancheProxy(address(stImpl), "Royco Senior Tranche", "RST"));

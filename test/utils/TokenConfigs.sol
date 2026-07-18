@@ -10,14 +10,9 @@ import { FixtureCell, TokenConfig } from "./FixtureTypes.sol";
  * @notice Canonical token shapes for the parameterized market fixture, keyed by the internal identifiers A..I
  *         (the "cell" letters survive only in this file, as internal identifiers)
  * @dev Hard rule, no test instantiates token mocks directly, tokens come exclusively from these builders
- * @dev Every shipped ST/JT quoter is in the IdenticalAssets family (the quoter base constructor requires ST_ASSET == JT_ASSET,
- *      IdenticalAssets_ST_JT_Oracle_Quoter.sol:52), so every shape uses ONE MockERC4626C instance for both ST and JT and the
- *      stAsset/jtAsset configs are always identical
- * @dev Cell D correction (second pass): the original redefinition paired 4626(8,8) with jtCoinvested=false, but the kernel
- *      constructor forces JT_COINVESTED=true whenever ST_ASSET == JT_ASSET (RoycoDayKernel.sol:122), which the identical-assets
- *      quoter family makes unconditional. Cell D therefore keeps jtCoinvested=true at the kernel layer and contributes only the
- *      8-decimal-shares axis, the jtCoinvested=false axis is exercisable exclusively at the mock-kernel accountant layer
- *      (AccountantTestBase)
+ * @dev Every shipped ST/JT quoter is in the IdenticalAssets family and the kernel constructor requires ST_ASSET == JT_ASSET,
+ *      so every shape uses ONE MockERC4626C instance for both ST and JT and the stAsset/jtAsset configs are always identical
+ * @dev Cell D contributes the 8-decimal-shares axis
  */
 
 /// @dev Builds a plain (non-4626) token config with no behaviors
@@ -52,9 +47,7 @@ function cellC() pure returns (FixtureCell memory) {
 
 /**
  * @notice Cell D, 8-decimal shares, 4626(8,8) ST/JT shares against a 6-decimal quote
- * @dev jtCoinvested stays TRUE, the kernel constructor forces JT_COINVESTED for identical ST/JT assets (RoycoDayKernel.sol:122)
- *      and the shipped quoter family only supports identical assets, so the jtCoinvested=false axis this cell originally carried
- *      is driven at the mock-kernel accountant layer (AccountantTestBase) instead
+ * @dev The kernel constructor requires identical ST/JT assets and the shipped quoter family only supports identical assets
  */
 function cellD() pure returns (FixtureCell memory) {
     TokenConfig memory vault = _vaultToken(8, 8);

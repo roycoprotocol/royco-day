@@ -48,9 +48,6 @@ contract DayMarketHandler is DayMarketTestBase {
     /// @dev One whole quote token in its native decimals
     uint256 internal QUOTE_UNIT;
 
-    /// @dev Whether the junior tranche is co-invested (always true for this kernel family)
-    bool internal JT_CO;
-
     /// @dev The pinned instantaneous junior yield share the mock model returns on every query
     uint256 internal JT_PINNED_SHARE_WAD;
 
@@ -283,7 +280,6 @@ contract DayMarketHandler is DayMarketTestBase {
         _deployMarket(cellA(), p);
 
         QUOTE_UNIT = 10 ** uint256(cell.quoteAsset.decimals);
-        JT_CO = accountant.JT_COINVESTED();
         JT_PINNED_SHARE_WAD = uint256(params.jtCurve[1]);
         LT_PINNED_SHARE_WAD = uint256(params.ltCurve[1]);
         ghost_windowMaxJTShareWAD = params.maxJTYieldShareWAD;
@@ -808,7 +804,7 @@ contract DayMarketHandler is DayMarketTestBase {
                 _expect(p, SEL_ZERO_VALUE);
             }
             uint256 stEffAfter = s.stEffectiveNAV + (stRawAfter - s.stRawNAV);
-            if (RoycoTestMath.computeCoverageUtilization(stRawAfter, s.jtRawNAV, JT_CO, s.minCoverageWAD, s.jtEffectiveNAV) > WAD) _expect(p, SEL_COVERAGE);
+            if (RoycoTestMath.computeCoverageUtilization(stRawAfter, s.jtRawNAV, s.minCoverageWAD, s.jtEffectiveNAV) > WAD) _expect(p, SEL_COVERAGE);
             if (RoycoTestMath.computeLiquidityUtilization(stEffAfter, s.minLiquidityWAD, s.ltRawNAV) > WAD) _expect(p, SEL_LIQUIDITY);
             bool mintPanics;
             (predShares, mintPanics) = _mirrorMintShares(value, s.stEffectiveNAV, s.stSupply);
@@ -874,7 +870,7 @@ contract DayMarketHandler is DayMarketTestBase {
             uint256 totalRedeemed = (s.stRawNAV - rawAfterST) + (s.jtRawNAV - rawAfterJT);
             if (totalRedeemed == 0) _expect(p, SEL_INVALID_POST_OP);
             uint256 jtEffAfter = s.jtEffectiveNAV - totalRedeemed;
-            if (RoycoTestMath.computeCoverageUtilization(rawAfterST, rawAfterJT, JT_CO, s.minCoverageWAD, jtEffAfter) > WAD) _expect(p, SEL_COVERAGE);
+            if (RoycoTestMath.computeCoverageUtilization(rawAfterST, rawAfterJT, s.minCoverageWAD, jtEffAfter) > WAD) _expect(p, SEL_COVERAGE);
             if (totalRedeemed != 0 && s.jtCoverageImpermanentLoss != 0) {
                 jtCoverageImpermanentLossExpected = s.jtCoverageImpermanentLoss.mulDiv(jtEffAfter, s.jtEffectiveNAV);
             }
@@ -961,7 +957,7 @@ contract DayMarketHandler is DayMarketTestBase {
             if (_stAssets > 0) {
                 uint256 stRawAfter = _quoteSTUnits(s.stOwned + _stAssets);
                 uint256 stEffAfter = s.stEffectiveNAV + (stRawAfter - s.stRawNAV);
-                if (RoycoTestMath.computeCoverageUtilization(stRawAfter, s.jtRawNAV, JT_CO, s.minCoverageWAD, s.jtEffectiveNAV) > WAD) {
+                if (RoycoTestMath.computeCoverageUtilization(stRawAfter, s.jtRawNAV, s.minCoverageWAD, s.jtEffectiveNAV) > WAD) {
                     _expect(p, SEL_COVERAGE);
                 }
                 if (RoycoTestMath.computeLiquidityUtilization(stEffAfter, s.minLiquidityWAD, v.ltRawAfter) > WAD) _expect(p, SEL_LIQUIDITY);
@@ -1217,12 +1213,10 @@ contract DayMarketHandler is DayMarketTestBase {
                     stRawNAV: s.stRawNAV,
                     jtRawNAV: s.jtRawNAV,
                     jtEffectiveNAV: s.jtEffectiveNAV,
-                    jtCoinvested: JT_CO,
                     coverageUtilizationWAD: s.coverageUtilizationWAD,
                     coverageLiquidationUtilizationWAD: s.coverageLiquidationUtilizationWAD,
                     bonusWAD: s.bonusWAD,
-                    userClaimNAV: navSlice,
-                    stUserWeightedClaimNAV: _quoteSTUnits(stA) + (JT_CO ? _quoteJTUnits(jtA) : 0)
+                    userClaimNAV: navSlice
                 })
             );
             uint256 bonusFromST = Math.min(bonusNAV, jtClaimOnST);
@@ -1273,7 +1267,7 @@ contract DayMarketHandler is DayMarketTestBase {
         c.poolSenior0 = seniorTranche.balanceOf(address(balancerVault));
         c.state0 = a0.lastMarketState;
         c.wasBreached = RoycoTestMath.computeCoverageUtilization(
-            toUint256(a0.lastSTRawNAV), toUint256(a0.lastJTRawNAV), JT_CO, a0.minCoverageWAD, toUint256(a0.lastJTEffectiveNAV)
+            toUint256(a0.lastSTRawNAV), toUint256(a0.lastJTRawNAV), a0.minCoverageWAD, toUint256(a0.lastJTEffectiveNAV)
         ) >= a0.coverageLiquidationUtilizationWAD;
 
         // Recompute the premium accrual window exactly as the accountant will, off the pinned model
@@ -1327,7 +1321,6 @@ contract DayMarketHandler is DayMarketTestBase {
             nowTimestamp: block.timestamp,
             fixedTermDuration: a0.fixedTermDurationSeconds,
             minCoverageWAD: a0.minCoverageWAD,
-            jtCoinvested: JT_CO,
             coverageLiquidationUtilizationWAD: a0.coverageLiquidationUtilizationWAD,
             effectiveDust: toUint256(a0.effectiveNAVDustTolerance),
             minLiquidityWAD: a0.minLiquidityWAD
@@ -1567,7 +1560,7 @@ contract DayMarketHandler is DayMarketTestBase {
         if (c.state0 == MarketState.PERPETUAL && a1.lastMarketState == MarketState.FIXED_TERM) ghost_enteredFixedTerm++;
         if (c.state0 == MarketState.FIXED_TERM && a1.lastMarketState == MarketState.PERPETUAL) ghost_exitedFixedTerm++;
         bool breachedNow = RoycoTestMath.computeCoverageUtilization(
-            toUint256(a1.lastSTRawNAV), toUint256(a1.lastJTRawNAV), JT_CO, a1.minCoverageWAD, toUint256(a1.lastJTEffectiveNAV)
+            toUint256(a1.lastSTRawNAV), toUint256(a1.lastJTRawNAV), a1.minCoverageWAD, toUint256(a1.lastJTEffectiveNAV)
         ) >= a1.coverageLiquidationUtilizationWAD;
         if (!c.wasBreached && breachedNow) ghost_crossedLiquidationThreshold++;
     }
@@ -1590,7 +1583,7 @@ contract DayMarketHandler is DayMarketTestBase {
         s.stEffectiveNAV = toUint256(a1.lastSTEffectiveNAV);
         s.jtEffectiveNAV = toUint256(a1.lastJTEffectiveNAV);
         s.jtCoverageImpermanentLoss = toUint256(a1.lastJTCoverageImpermanentLoss);
-        s.coverageUtilizationWAD = RoycoTestMath.computeCoverageUtilization(s.stRawNAV, s.jtRawNAV, JT_CO, a1.minCoverageWAD, s.jtEffectiveNAV);
+        s.coverageUtilizationWAD = RoycoTestMath.computeCoverageUtilization(s.stRawNAV, s.jtRawNAV, a1.minCoverageWAD, s.jtEffectiveNAV);
         s.minCoverageWAD = a1.minCoverageWAD;
         s.minLiquidityWAD = a1.minLiquidityWAD;
         s.coverageLiquidationUtilizationWAD = a1.coverageLiquidationUtilizationWAD;

@@ -20,7 +20,7 @@ import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
 contract Test_Setters_Accountant is AccountantTestBase {
     function setUp() public {
         stranger = makeAddr("stranger");
-        _deploy(false, _defaultParams());
+        _deploy(_defaultParams());
     }
 
     /// ST protocol fee setter boundary, event, and write
@@ -239,6 +239,11 @@ contract Test_Setters_Accountant is AccountantTestBase {
         // An absurd but non-overflowing JT dust tolerance: 1e45 dwarfs every NAV this market will ever hold
         accountant.setJuniorTrancheDustTolerance(toNAVUnits(uint256(1e45)));
         assertEq(toUint256(accountant.getState().effectiveNAVDustTolerance), 1e45, "effective dust is 0 + 1e45");
+
+        // Coinvested coverage folds JT_RAW in, so the 990e18 loss below marks (990e18 + 200e18) * 0.1 / 100e18 = 1.19
+        // utilization: lift the liquidation threshold clear of it so the loss stays a sub-threshold covered loss whose IL
+        // the huge dust tolerance is meant to suppress, rather than a liquidation breach that would erase the IL outright
+        accountant.setLiquidationCoverageUtilization(1.5e18);
 
         // Accrue a 1000s premium window at yield shares jt 0.1e18 / lt 0.05e18 (both below their caps 0.2e18 / 0.1e18)
         jtYDM.setRates(0.1e18);

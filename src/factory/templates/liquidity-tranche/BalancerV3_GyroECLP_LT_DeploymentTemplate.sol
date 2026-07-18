@@ -124,8 +124,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
      * @custom:field jtTranche - The junior tranche initialization params
      * @custom:field ltTranche - The liquidity tranche initialization params
      * @custom:field stAsset - The senior tranche's underlying yield-bearing asset
-     * @custom:field jtAsset - The junior tranche's underlying asset (the same yield-bearing asset as ST or the RFR)
-     * @custom:field jtCoinvested - Whether the junior tranche is co-invested in the same yield-bearing asset as the senior tranche
+     * @custom:field jtAsset - The junior tranche's underlying yield-bearing asset (must be the same asset as the senior tranche)
      * @custom:field accountant - The accountant initialization params (coverage, premiums, and state machine config)
      * @custom:field gyroECLPPoolParams - The Gyro E-CLP pool params for the liquidity tranche's `{ST_share, quote}` pool
      * @custom:field jtYdmConstructorArgs - The ABI-encoded constructor args for the junior tranche's YDM, per the selected model's constructor
@@ -145,7 +144,6 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         IRoycoVaultTranche.RoycoTrancheInitParams ltTranche;
         address stAsset;
         address jtAsset;
-        bool jtCoinvested;
         IRoycoDayAccountant.RoycoDayAccountantInitParams accountant;
         GyroECLPPoolParams gyroECLPPoolParams;
         bytes jtYdmConstructorArgs;
@@ -300,7 +298,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         _deployProxy(ltImpl, _encodeTrancheInitData(p.ltTranche), _marketComponentSalt(p.marketId, TAG_LT_PROXY));
 
         // 9. Deploy accountant impl + proxy (Day accountant bytecode registered under the accountant component ID)
-        address accountantImpl = _deployAccountantImpl(result.kernel, p.jtCoinvested, _marketComponentSalt(p.marketId, TAG_ACCOUNTANT_IMPL));
+        address accountantImpl = _deployAccountantImpl(result.kernel, _marketComponentSalt(p.marketId, TAG_ACCOUNTANT_IMPL));
         _deployProxy(accountantImpl, _encodeAccountantInitData(p.accountant, result.ydm, result.ltYdm), _marketComponentSalt(p.marketId, TAG_ACCOUNTANT_PROXY));
 
         // 10. Deploy kernel impl + proxy, injecting the template-deployed BPT oracle into the kernel's LT quoter init

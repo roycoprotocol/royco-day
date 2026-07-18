@@ -24,9 +24,9 @@ import {
  *        `coverageUtilizationWAD` reaches the liquidation threshold.
  *      A senior deposit needs a junior coverage buffer to exist first, so tests seed JT before depositing ST.
  *
- *      Coinvested-market caveat: for the snUSD market ST and JT share one asset + one base->NAV feed, so the `simulate*`
- *      hooks move both legs together. FIXED_TERM / self-liquidation-bonus tests are therefore best-effort: they attempt
- *      to reach the target state and `vm.skip` (with a reason) if a symmetric-PnL market cannot get there.
+ *      Shared-asset caveat: ST and JT share one asset and the snUSD market prices both with one base->NAV feed, so the
+ *      `simulate*` hooks move both legs together. FIXED_TERM / self-liquidation-bonus tests are therefore best-effort:
+ *      they attempt to reach the target state and `vm.skip` (with a reason) if a symmetric-PnL market cannot get there.
  */
 abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest {
     uint256 internal constant WAD = 1e18;
@@ -439,8 +439,8 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         uint256 coverageUtilizationWAD = _stSynced().coverageUtilizationWAD;
         if (coverageUtilizationWAD <= WAD) {
             // The deposit gate caps coverageUtilizationWAD at WAD, and the liquidation threshold must be > WAD, so the self-liquidation
-            // regime only engages after an asymmetric JT loss — which a coinvested shared-oracle market cannot produce.
-            // Covered by a self-liquidation unit suite (or a non-coinvested market). Best-effort here.
+            // regime only engages after an asymmetric JT loss, which a shared-oracle market cannot produce.
+            // Covered by a self-liquidation unit suite. Best-effort here.
             vm.skip(true);
             return;
         }

@@ -284,7 +284,6 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(s.maxLTYieldShareWAD, 0, "maxLTYieldShare == 0 (LT off)");
         assertEq(s.minLiquidityWAD, 0, "minLiquidity == 0");
         assertEq(s.fixedTermDurationSeconds, 0, "fixedTerm");
-        assertTrue(ACCOUNTANT.JT_COINVESTED(), "jtCoinvested");
     }
 
     /// @notice The kernel fee recipient, senior tranche self-liquidation bonus, tranche names/symbols, and whitelist flag match the config

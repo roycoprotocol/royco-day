@@ -245,10 +245,6 @@ interface IRoycoDayAccountant {
     /// @return kernel The kernel that this accountant maintains mark-to-market NAV, JT coverage impermanent loss, and fee accounting for
     function KERNEL() external view returns (address kernel);
 
-    /// @notice Whether the junior tranche is co-invested in the same yield-bearing opportunity as senior (shares senior's downside stress) or in a risk-free opportunity (cash, TBILLs, Aave Core, etc.) with respect to NAV units
-    /// @return jtCoinvested True if the junior tranche is co-invested with the senior tranche, false if it is in a risk-free opportunity
-    function JT_COINVESTED() external view returns (bool jtCoinvested);
-
     /**
      * @notice Synchronizes the effective NAVs and impermanent losses of both tranches by marking them to market
      * @dev Must be called before any NAV mutating operation

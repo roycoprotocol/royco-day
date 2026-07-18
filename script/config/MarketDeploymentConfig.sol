@@ -108,7 +108,6 @@ abstract contract MarketDeploymentConfig {
         uint64 jtProtocolFeeWAD;
         uint64 jtYieldShareProtocolFeeWAD;
         uint64 minCoverageWAD;
-        bool jtCoinvested;
         uint256 coverageLiquidationUtilizationWAD;
         uint24 fixedTermDurationSeconds;
         DeployScript.YDMType ydmType;
@@ -266,7 +265,6 @@ abstract contract MarketDeploymentConfig {
             jtProtocolFeeWAD: 0,
             jtYieldShareProtocolFeeWAD: 0.45e18,
             minCoverageWAD: 0.1e18,
-            jtCoinvested: true,
             coverageLiquidationUtilizationWAD: 1.0009009e18,
             fixedTermDurationSeconds: 0, // stable market, no fixed term
             ydmType: DeployScript.YDMType.AdaptiveCurve_V2,

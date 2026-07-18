@@ -80,7 +80,6 @@ abstract contract IdleCDOVirtualPriceMarketTestBase is DayMarketTestBase {
     )
         internal
     {
-        require(_params.jtCoinvested, "IdleCDOVirtualPriceMarketTestBase: kernel family forces jtCoinvested=true");
         // The base fixture's ERC4626 shape validation does not apply here: the tranche asset is a PLAIN ERC20
         // AA tranche token, only the quote-asset decimals are consumed by the base's pool-genesis helper
         cell = FixtureCell({
@@ -119,7 +118,7 @@ abstract contract IdleCDOVirtualPriceMarketTestBase is DayMarketTestBase {
         RoycoSeniorTranche stImpl = new RoycoSeniorTranche(address(aaTranche), predictedKernel);
         RoycoJuniorTranche jtImpl = new RoycoJuniorTranche(address(aaTranche), predictedKernel);
         RoycoLiquidityTranche ltImpl = new RoycoLiquidityTranche(address(bpt), predictedKernel);
-        RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel, true);
+        RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel);
 
         // Tranche and accountant proxies MUST exist before the kernel impl (its constructor reads the accountant)
         seniorTranche = RoycoSeniorTranche(_deployTrancheProxy(address(stImpl), "Royco Senior Tranche", "RST"));

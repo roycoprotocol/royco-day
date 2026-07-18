@@ -17,16 +17,12 @@ Each market tracks and reconciles two types of NAVs (Net Asset Value) per tranch
 Each market enforces a minimum coverage requirement, ensuring that senior capital always retains guaranteed downside protection. Coverage utilization measures how much of the junior buffer is currently "used" by senior exposure:
 
 ```
-                         (ST_RAW_NAV + (JT_RAW_NAV × β)) × MIN_COVERAGE
+                         (ST_RAW_NAV + JT_RAW_NAV) × MIN_COVERAGE
 Coverage Utilization =   ─────────────────────────────────────────────
                                        JT_EFFECTIVE_NAV
 ```
 
-**Parameters:**
-- MIN_COVERAGE: The minimum required coverage percentage, validated at initialization to be strictly less than 100% (eg. 20% means JT must be able to cover 20% of ST losses at all times)
-- β: A boolean co-investment flag capturing JT's sensitivity to the same downside stress that affects ST (0 if JT is in a risk-free investment, 1 if JT and ST are in the same underlying investment)
-
-Intuitively, when coverage utilization is less than or equal to 100%, the senior tranche is fully collateralized from a coverage lens. Consequently, when coverage utilization breaches 100%, the market has suffered sufficient losses such that the minimum coverage requirement is violated.
+Intuitively, when coverage utilization is less than or equal to 100%, the senior tranche is fully collateralized from a coverage lens. Consequently, when coverage utilization breaches 100%, the market has suffered losses such that the minimum coverage requirement is violated.
 
 Markets target a slight excess of junior capital above the minimum coverage requirement to keep the junior tranche perpetually liquid. To maintain this target, the risk premium paid by seniors to juniors adapts to supply and demand signals. As coverage utilization approaches 100%, the risk premium increases to attract more junior capital.
 

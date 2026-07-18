@@ -66,7 +66,6 @@ struct AssetClaims {
  * @custom:field liquidityUtilizationWAD - The current liquidityUtilization of the market, scaled to WAD precision
  * @custom:field fixedTermEndTimestamp - The timestamp at which the fixed term ends, set to 0 if the market is not in a fixed term state
  * @custom:field minCoverageWAD - The coverage percentage that the senior tranche is expected to be protected by, scaled to WAD precision
- * @custom:field jtCoinvested - Whether the junior tranche is co-invested in the same yield-bearing opportunity as senior (true means it shares senior's downside stress) or in the RFR (false)
  * @custom:field coverageLiquidationUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
  * @custom:field minLiquidityWAD - The percentage of the senior tranche NAV that must be in the liquidity tranche's market making inventory, scaled to WAD precision
  */
@@ -90,7 +89,6 @@ struct SyncedAccountingState {
     uint32 fixedTermEndTimestamp;
     // The market's coverage configuration
     uint256 minCoverageWAD;
-    bool jtCoinvested;
     uint256 coverageLiquidationUtilizationWAD;
     // The market's liquidity configuration
     uint256 minLiquidityWAD;

@@ -230,9 +230,9 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
         return _deployImpl(COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL, abi.encode(_asset, _kernel), _salt);
     }
 
-    /// @notice Deploys the accountant impl for a given kernel and the junior tranche's fixed co-investment configuration
-    function _deployAccountantImpl(address _kernel, bool _jtCoinvested, bytes32 _salt) internal returns (address impl) {
-        return _deployImpl(COMPONENT_ID_ACCOUNTANT_IMPL, abi.encode(_kernel, _jtCoinvested), _salt);
+    /// @notice Deploys the accountant impl for a given kernel
+    function _deployAccountantImpl(address _kernel, bytes32 _salt) internal returns (address impl) {
+        return _deployImpl(COMPONENT_ID_ACCOUNTANT_IMPL, abi.encode(_kernel), _salt);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

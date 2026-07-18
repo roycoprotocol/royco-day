@@ -8,11 +8,11 @@ import { toNAVUnits } from "../../src/libraries/Units.sol";
  * @title AttributionExposer
  * @notice Thin exposer over the accountant's internal pure delta-attribution helper so the fuzz layer can
  *         drive the exact production code path directly with arbitrary (delta, claim, lastRaw) tuples
- * @dev No state is touched and the constructor arguments are dummies: the attribution helper reads neither
- *      the kernel address nor the co-investment flag
+ * @dev No state is touched and the constructor argument is a dummy: the attribution helper reads neither
+ *      the kernel address nor any accountant configuration
  */
 contract AttributionExposer is RoycoDayAccountant {
-    constructor() RoycoDayAccountant(address(1), true) { }
+    constructor() RoycoDayAccountant(address(1)) { }
 
     /// @notice Calls the production attribution helper on plain uint256 operands
     function attribute(int256 _delta, uint256 _claim, uint256 _lastRaw) external pure returns (int256) {

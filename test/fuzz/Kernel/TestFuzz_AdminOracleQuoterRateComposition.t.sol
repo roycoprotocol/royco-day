@@ -315,8 +315,8 @@ contract TestFuzz_AdminOracleQuoterRateComposition_Kernel is Test {
         plumbing.seniorTranche = address(new RoycoSeniorTranche(_stJtAsset, plumbing.predictedKernel));
         plumbing.juniorTranche = address(new RoycoJuniorTranche(_stJtAsset, plumbing.predictedKernel));
         plumbing.liquidityTranche = address(new RoycoLiquidityTranche(address(plumbing.bpt), plumbing.predictedKernel));
-        // Identical ST/JT assets force the co-invested junior configuration at kernel construction
-        plumbing.accountant = address(new RoycoDayAccountant(plumbing.predictedKernel, true));
+        // The kernel constructor requires identical ST/JT assets
+        plumbing.accountant = address(new RoycoDayAccountant(plumbing.predictedKernel));
 
         plumbing.balancerVault.registerPool(address(plumbing.bpt), [IERC20(plumbing.seniorTranche), IERC20(address(quoteToken))]);
     }

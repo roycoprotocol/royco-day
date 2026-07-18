@@ -258,8 +258,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         s.twLT = a.twLTYieldShareAccruedWAD;
 
         // Utilizations recomputed independently from the committed checkpoint
-        s.coverageUtilizationWAD =
-            _expectedCoverageUtilization(a.lastSTRawNAV, a.lastJTRawNAV, ACCOUNTANT.JT_COINVESTED(), a.minCoverageWAD, a.lastJTEffectiveNAV);
+        s.coverageUtilizationWAD = _expectedCoverageUtilization(a.lastSTRawNAV, a.lastJTRawNAV, a.minCoverageWAD, a.lastJTEffectiveNAV);
         s.liquidityUtilizationWAD = _expectedLiquidityUtilization(a.lastSTEffectiveNAV, a.minLiquidityWAD, a.lastLTRawNAV);
 
         // Supplies
@@ -410,7 +409,6 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function _expectedCoverageUtilization(
         NAV_UNIT _stRawNAV,
         NAV_UNIT _jtRawNAV,
-        bool _coinvested,
         uint64 _minCoverageWAD,
         NAV_UNIT _jtEffectiveNAV
     )
@@ -419,7 +417,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         returns (uint256)
     {
         if (_minCoverageWAD == 0) return 0;
-        uint256 totalCoveredExposure = toUint256(_stRawNAV) + (_coinvested ? toUint256(_jtRawNAV) : 0);
+        uint256 totalCoveredExposure = toUint256(_stRawNAV) + toUint256(_jtRawNAV);
         if (totalCoveredExposure == 0) return 0;
         if (toUint256(_jtEffectiveNAV) == 0) return type(uint256).max;
         return Math.mulDiv(totalCoveredExposure, _minCoverageWAD, toUint256(_jtEffectiveNAV), Math.Rounding.Ceil);
@@ -900,12 +898,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /// @notice Drives `coverageUtilizationWAD >= coverageLiquidationUtilizationWAD` via measured-loss iteration, syncing each step.
     /// @dev Fails the test (never silently gives up) if the threshold is not reached within the iteration bound.
     function _breachLiquidation() internal {
-        bool coinvested = ACCOUNTANT.JT_COINVESTED();
         for (uint256 i = 0; i < 60; ++i) {
             _applySTLoss(0.05e18);
             _sync();
             IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-            uint256 coverageUtilizationWAD = _expectedCoverageUtilization(a.lastSTRawNAV, a.lastJTRawNAV, coinvested, a.minCoverageWAD, a.lastJTEffectiveNAV);
+            uint256 coverageUtilizationWAD = _expectedCoverageUtilization(a.lastSTRawNAV, a.lastJTRawNAV, a.minCoverageWAD, a.lastJTEffectiveNAV);
             if (coverageUtilizationWAD >= a.coverageLiquidationUtilizationWAD) return;
         }
         fail("_breachLiquidation: liquidation coverage utilization threshold not reached");
@@ -1190,9 +1187,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(post.lastJTEffectiveNAV, post.lastJTRawNAV, "committed JT effective NAV must equal its raw NAV");
         assertEq(post.lastSTRawNAV, ZERO_NAV_UNITS, "committed ST raw NAV must stay zero");
         assertEq(post.lastSTEffectiveNAV, ZERO_NAV_UNITS, "committed ST effective NAV must stay zero");
-        // With jtRawNAV == jtEffectiveNAV the coinvested coverage utilization is exactly minCoverage, and zero without coinvestment
+        // With jtRawNAV == jtEffectiveNAV the coverage utilization is exactly minCoverage
         // The production value is read via a same-block flat sync (a no-op on the committed state), never recomputed by the suite
-        uint256 expectedCovUtilWAD = ACCOUNTANT.JT_COINVESTED() ? uint256(ACCOUNTANT.getState().minCoverageWAD) : 0;
+        uint256 expectedCovUtilWAD = uint256(ACCOUNTANT.getState().minCoverageWAD);
         assertEq(_syncWithState().coverageUtilizationWAD, expectedCovUtilWAD, "production coverage utilization of a JT-only market");
         _assertCommittedConservation();
     }
@@ -1205,9 +1202,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 assets = Math.min((testConfig.initialFunding / 10) * 4, toUint256(ST.maxDeposit(ST_ALICE_ADDRESS)) / 2);
         NAV_UNIT value = KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets));
         MarketSnapshot memory pre = _snap();
-        uint256 expectedCovUtilWAD = _expectedCoverageUtilization(
-            pre.lastSTRawNAV + value, pre.lastJTRawNAV, ACCOUNTANT.JT_COINVESTED(), ACCOUNTANT.getState().minCoverageWAD, pre.lastJTEffectiveNAV
-        );
+        uint256 expectedCovUtilWAD =
+            _expectedCoverageUtilization(pre.lastSTRawNAV + value, pre.lastJTRawNAV, ACCOUNTANT.getState().minCoverageWAD, pre.lastJTEffectiveNAV);
         assertLe(expectedCovUtilWAD, WAD, "arrange: the deposit must satisfy coverage");
 
         vm.startPrank(ST_ALICE_ADDRESS);
@@ -1384,9 +1380,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
             "arrange: the deposit must breach the liquidity requirement"
         );
         assertLe(
-            _expectedCoverageUtilization(
-                pre.lastSTRawNAV + value, pre.lastJTRawNAV, ACCOUNTANT.JT_COINVESTED(), ACCOUNTANT.getState().minCoverageWAD, pre.lastJTEffectiveNAV
-            ),
+            _expectedCoverageUtilization(pre.lastSTRawNAV + value, pre.lastJTRawNAV, ACCOUNTANT.getState().minCoverageWAD, pre.lastJTEffectiveNAV),
             WAD,
             "arrange: coverage must not be the binding gate"
         );
@@ -1442,8 +1436,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 liquidityHeadroomValue =
             Math.mulDiv(toUint256(a.lastLTRawNAV), WAD, a.minLiquidityWAD) - toUint256(a.lastSTEffectiveNAV) - toUint256(a.stNAVDustTolerance);
         uint256 coverageHeadroomValue = Math.mulDiv(toUint256(a.lastJTEffectiveNAV), WAD, a.minCoverageWAD)
-            - ((ACCOUNTANT.JT_COINVESTED() ? toUint256(a.lastJTRawNAV) : 0) + toUint256(a.jtNAVDustTolerance))
-            - (toUint256(a.lastSTRawNAV) + toUint256(a.stNAVDustTolerance));
+            - (toUint256(a.lastJTRawNAV) + toUint256(a.jtNAVDustTolerance)) - (toUint256(a.lastSTRawNAV) + toUint256(a.stNAVDustTolerance));
         assertLt(liquidityHeadroomValue, coverageHeadroomValue, "arrange: liquidity must be the binding leg");
         TRANCHE_UNIT maxAssets = ST.maxDeposit(ST_BOB_ADDRESS);
         assertEq(
@@ -1562,11 +1555,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(post.jtSupply, pre.jtSupply + shares, "no fee mint may accompany a same-block deposit");
         assertEq(post.jtOwned, pre.jtOwned + toTrancheUnits(assets), "jtOwned must grow by the deposited assets");
         uint256 expectedCovUtilWAD = _expectedCoverageUtilization(
-            pre.lastSTRawNAV,
-            pre.lastJTRawNAV + measuredRawDelta,
-            ACCOUNTANT.JT_COINVESTED(),
-            ACCOUNTANT.getState().minCoverageWAD,
-            pre.lastJTEffectiveNAV + measuredRawDelta
+            pre.lastSTRawNAV, pre.lastJTRawNAV + measuredRawDelta, ACCOUNTANT.getState().minCoverageWAD, pre.lastJTEffectiveNAV + measuredRawDelta
         );
         // The production value is read via a same-block flat sync (a no-op on the committed state), never recomputed by the suite
         uint256 productionCovUtilWAD = _syncWithState().coverageUtilizationWAD;
@@ -1919,9 +1908,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         NAV_UNIT stValue = KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(stAssets));
         uint256 quoteAssets = _quoteAssetsForValue(stValue);
         assertLe(
-            _expectedCoverageUtilization(
-                pre.lastSTRawNAV + stValue, pre.lastJTRawNAV, ACCOUNTANT.JT_COINVESTED(), ACCOUNTANT.getState().minCoverageWAD, pre.lastJTEffectiveNAV
-            ),
+            _expectedCoverageUtilization(pre.lastSTRawNAV + stValue, pre.lastJTRawNAV, ACCOUNTANT.getState().minCoverageWAD, pre.lastJTEffectiveNAV),
             WAD,
             "arrange: coverage must not be the binding gate"
         );
@@ -1993,8 +1980,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /**
      * @notice Applies the expected ST self-liquidation bonus to a redeemer's base claims, mirroring
      *         `SelfLiquidationLogic.applySeniorTrancheSelfLiquidationBonus` on the committed checkpoint.
-     * @dev The bonus is `min(floor(nav * bonusWAD / WAD), jtEffectiveNAV, maxUtilizationNeutralBonus)` with the neutral cap's
-     *      two sourcing cases from the library's documented derivation, sourced ST-assets-first. Quoter conversions
+     * @dev The bonus is `min(floor(nav * bonusWAD / WAD), jtEffectiveNAV, maxUtilizationNeutralBonus)` with the neutral cap
+     *      from the library's documented derivation, sourced ST-assets-first. Quoter conversions
      *      of the claim legs are inputs. Callers must have synced in the same block.
      */
     function _expectedClaimsWithSelfLiquidationBonus(AssetClaims memory _userClaims)
@@ -2003,8 +1990,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         returns (AssetClaims memory claimsWithBonus, NAV_UNIT bonusNAV)
     {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        bool coinvested = ACCOUNTANT.JT_COINVESTED();
-        uint256 coverageUtilizationWAD = _expectedCoverageUtilization(a.lastSTRawNAV, a.lastJTRawNAV, coinvested, a.minCoverageWAD, a.lastJTEffectiveNAV);
+        uint256 coverageUtilizationWAD = _expectedCoverageUtilization(a.lastSTRawNAV, a.lastJTRawNAV, a.minCoverageWAD, a.lastJTEffectiveNAV);
         if (coverageUtilizationWAD < a.coverageLiquidationUtilizationWAD) return (_userClaims, ZERO_NAV_UNITS);
 
         uint256 jtEffectiveNAV = toUint256(a.lastJTEffectiveNAV);
@@ -2015,17 +2001,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         // The maximum bonus that does not raise coverage utilization (the bank-run-neutral cap)
         uint256 maxNeutralBonus;
         if (jtEffectiveNAV != 0) {
-            uint256 exposure = toUint256(a.lastSTRawNAV) + (coinvested ? jtRawNAV : 0);
+            uint256 exposure = toUint256(a.lastSTRawNAV) + jtRawNAV;
             uint256 weightedClaimNAV = toUint256(KERNEL.stConvertTrancheUnitsToNAVUnits(_userClaims.stAssets))
-                + (coinvested ? toUint256(KERNEL.jtConvertTrancheUnitsToNAVUnits(_userClaims.jtAssets)) : 0);
+                + toUint256(KERNEL.jtConvertTrancheUnitsToNAVUnits(_userClaims.jtAssets));
             if (weightedClaimNAV != 0) {
-                uint256 stSourcedMaxBonus = Math.mulDiv(weightedClaimNAV, jtEffectiveNAV, exposure - jtEffectiveNAV);
-                if (stSourcedMaxBonus <= jtClaimOnSTRawNAV) {
-                    maxNeutralBonus = stSourcedMaxBonus;
-                } else {
-                    maxNeutralBonus =
-                        Math.mulDiv(weightedClaimNAV + (coinvested ? 0 : jtClaimOnSTRawNAV), jtEffectiveNAV, exposure - (coinvested ? jtEffectiveNAV : 0));
-                }
+                maxNeutralBonus = Math.mulDiv(weightedClaimNAV, jtEffectiveNAV, exposure - jtEffectiveNAV);
             }
         }
 
@@ -2042,29 +2022,17 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      * @notice The smallest junior redemption NAV guaranteed to leave coverage utilization above WAD, from the
      *         committed checkpoint plus a documented drift margin.
      * @dev Derivation (post coverageUtilizationWAD > WAD, the gate rounds up in favor of breach): redeeming `x` NAV removes
-     *      `x * exposureFrac` from the covered exposure (the full `x` when coinvested, the ST-leg claim fraction
-     *      otherwise), so the exact boundary solves `(E - x*f)*minCov > (J - x)*WAD`, giving
-     *      `x > (J*WAD - E*minCov) / (WAD - minCov*f)`. The margin adds the two raw-NAV dust tolerances plus four
+     *      the full `x` from the covered exposure, so the exact boundary solves `(E - x)*minCov > (J - x)*WAD`, giving
+     *      `x > (J*WAD - E*minCov) / (WAD - minCov)`. The margin adds the two raw-NAV dust tolerances plus four
      *      `maxNAVDelta()` quoter round-trips (claim NAV -> tranche units -> measured raw delta on each leg) plus two
      *      wei, so the realized removal strictly dominates the boundary. Requires pre coverageUtilizationWAD <= WAD.
      */
     function _jtCoverageBreachRedemptionNAV() internal view returns (uint256 breachNAV) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        bool coinvested = ACCOUNTANT.JT_COINVESTED();
-        uint256 stRawNAV = toUint256(a.lastSTRawNAV);
-        uint256 jtRawNAV = toUint256(a.lastJTRawNAV);
-        uint256 stEffectiveNAV = toUint256(a.lastSTEffectiveNAV);
         uint256 jtEffectiveNAV = toUint256(a.lastJTEffectiveNAV);
-        uint256 exposure = stRawNAV + (coinvested ? jtRawNAV : 0);
+        uint256 exposure = toUint256(a.lastSTRawNAV) + toUint256(a.lastJTRawNAV);
 
-        uint256 exposureFracWAD = WAD;
-        if (!coinvested) {
-            uint256 jtClaimOnSTRawNAV = jtEffectiveNAV > jtRawNAV ? jtEffectiveNAV - jtRawNAV : 0;
-            uint256 jtClaimOnJTRawNAV = jtRawNAV - (stEffectiveNAV > stRawNAV ? stEffectiveNAV - stRawNAV : 0);
-            exposureFracWAD = Math.mulDiv(jtClaimOnSTRawNAV, WAD, jtClaimOnSTRawNAV + jtClaimOnJTRawNAV);
-        }
-
-        uint256 boundary = Math.ceilDiv(jtEffectiveNAV * WAD - exposure * a.minCoverageWAD, WAD - Math.mulDiv(a.minCoverageWAD, exposureFracWAD, WAD));
+        uint256 boundary = Math.ceilDiv(jtEffectiveNAV * WAD - exposure * a.minCoverageWAD, WAD - a.minCoverageWAD);
         breachNAV = boundary + toUint256(a.stNAVDustTolerance + a.jtNAVDustTolerance) + 4 * toUint256(maxNAVDelta()) + 2;
     }
 
@@ -2821,7 +2789,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         e.jtYieldShareWAD = _previewYieldShareAsAccountant(
             a.jtYDM,
             a.lastMarketState,
-            _expectedCoverageUtilization(a.lastSTRawNAV, a.lastJTRawNAV, ACCOUNTANT.JT_COINVESTED(), a.minCoverageWAD, a.lastJTEffectiveNAV),
+            _expectedCoverageUtilization(a.lastSTRawNAV, a.lastJTRawNAV, a.minCoverageWAD, a.lastJTEffectiveNAV),
             a.maxJTYieldShareWAD
         );
         e.ltYieldShareWAD = a.maxLTYieldShareWAD == 0
@@ -3040,7 +3008,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /**
      * @notice A senior-gain sync settles the full tranche accounting sync exactly: attribution, JT risk premium, both
      *         protocol fees, exact-args accrual and fee-mint events, and the post-payment accumulator reset.
-     * @dev On coinvested markets the hook moves both raw NAVs, so the expectation runs on the measured
+     * @dev On coupled-PnL kernels the hook moves both raw NAVs, so the expectation runs on the measured
      *      deltas. The name describes the hook intent, not a guaranteed delta shape.
      */
     function test_Sync_stGain_exactTrancheAccounting() public {
@@ -3238,7 +3206,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
     /**
      * @notice A junior-gain sync settles the full tranche accounting sync exactly against the measured deltas.
-     * @dev On coinvested markets the hook moves both raw NAVs together, so this completes the reachable
+     * @dev On coupled-PnL kernels the hook moves both raw NAVs together, so this completes the reachable
      *      set of reachable delta scenarios alongside the flat, senior-gain, and loss syncs.
      */
     function test_Sync_jtGain_exactTrancheAccounting() public {
@@ -3274,7 +3242,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      * @notice A junior-loss sync settles the coverage path of the sync exactly against the measured deltas, with
      *         the forced-perpetual erase on the zero-duration baseline.
      * @dev The coverage expectation branches on the MEASURED senior delta: on a coupled-PnL kernel (shared
-     *      feed, like the coinvested family) the junior loss drags the senior raw NAV down too, so coverage
+     *      feed) the junior loss drags the senior raw NAV down too, so coverage
      *      applies and the erase event fires, while on a decoupled kernel the junior tranche simply absorbs
      *      its own loss with no coverage touched. Both settle to the same independent recomputation.
      */
@@ -3487,7 +3455,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(post.lastSTEffectiveNAV, e.stEffectiveNAV, "the senior effective NAV must include the minted premium");
         assertEq(
             state.coverageUtilizationWAD,
-            _expectedCoverageUtilization(e.stRawNAVNew, e.jtRawNAVNew, ACCOUNTANT.JT_COINVESTED(), ACCOUNTANT.getState().minCoverageWAD, e.jtEffectiveNAV),
+            _expectedCoverageUtilization(e.stRawNAVNew, e.jtRawNAVNew, ACCOUNTANT.getState().minCoverageWAD, e.jtEffectiveNAV),
             "the production coverage utilization must match the independent recompute"
         );
         // Counterweight independent of the share-pricing mirror: the coverage-neutral mint reassigns senior
@@ -3749,8 +3717,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         // Arrange guard: both raw curve outputs must exceed the configured caps at the committed utilizations
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        uint256 coverageUtilizationWAD =
-            _expectedCoverageUtilization(a.lastSTRawNAV, a.lastJTRawNAV, ACCOUNTANT.JT_COINVESTED(), a.minCoverageWAD, a.lastJTEffectiveNAV);
+        uint256 coverageUtilizationWAD = _expectedCoverageUtilization(a.lastSTRawNAV, a.lastJTRawNAV, a.minCoverageWAD, a.lastJTEffectiveNAV);
         uint256 liquidityUtilizationWAD = _expectedLiquidityUtilization(a.lastSTEffectiveNAV, a.minLiquidityWAD, a.lastLTRawNAV);
         vm.prank(address(ACCOUNTANT));
         uint256 rawJTYieldShareWAD = IYDM(a.jtYDM).previewYieldShare(a.lastMarketState, coverageUtilizationWAD);
@@ -3807,8 +3774,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function _expectedMaxSTDepositAssets() internal view returns (TRANCHE_UNIT assets) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
         uint256 totalCoveredValue = Math.mulDiv(toUint256(a.lastJTEffectiveNAV), WAD, a.minCoverageWAD);
-        uint256 requiredValue = (ACCOUNTANT.JT_COINVESTED() ? toUint256(a.lastJTRawNAV) : 0) + toUint256(a.jtNAVDustTolerance) + toUint256(a.lastSTRawNAV)
-            + toUint256(a.stNAVDustTolerance);
+        uint256 requiredValue = toUint256(a.lastJTRawNAV) + toUint256(a.jtNAVDustTolerance) + toUint256(a.lastSTRawNAV) + toUint256(a.stNAVDustTolerance);
         return KERNEL.stConvertNAVUnitsToTrancheUnits(toNAVUnits(totalCoveredValue > requiredValue ? totalCoveredValue - requiredValue : 0));
     }
 
@@ -4721,9 +4687,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         // must itself fit under the coverage gate's defining inequality — depositing it leaves the covered
         // exposure times the minimum coverage within the junior effective NAV (plain cross-multiplied integers).
         assertLe(
-            (toUint256(a0.lastSTRawNAV)
-                    + toUint256(KERNEL.stConvertTrancheUnitsToNAVUnits(maxDepositBefore))
-                    + (ACCOUNTANT.JT_COINVESTED() ? toUint256(a0.lastJTRawNAV) : 0)) * uint256(a0.minCoverageWAD),
+            (toUint256(a0.lastSTRawNAV) + toUint256(KERNEL.stConvertTrancheUnitsToNAVUnits(maxDepositBefore)) + toUint256(a0.lastJTRawNAV))
+                * uint256(a0.minCoverageWAD),
             toUint256(a0.lastJTEffectiveNAV) * WAD,
             "the reported max deposit must satisfy the coverage gate's defining inequality"
         );

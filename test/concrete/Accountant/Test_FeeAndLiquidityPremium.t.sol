@@ -25,7 +25,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     FeeAndLiquidityPremiumHarness internal flp;
 
     function setUp() public {
-        _deploy(false, _defaultParams());
+        _deploy(_defaultParams());
         flp = new FeeAndLiquidityPremiumHarness();
     }
 
