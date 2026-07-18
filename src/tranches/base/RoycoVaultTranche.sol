@@ -3,14 +3,13 @@ pragma solidity ^0.8.28;
 
 import { ERC20Upgradeable, IERC20, IERC20Metadata } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/ERC20Upgradeable.sol";
 import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
-import { ERC20PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20PausableUpgradeable.sol";
 import { ERC20PermitUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { RoycoBase } from "../../base/RoycoBase.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
-import { WAD_DECIMALS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../libraries/Constants.sol";
+import { WAD_DECIMALS, ZERO_NAV_UNITS } from "../../libraries/Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../../libraries/Types.sol";
 import { NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toUint256 } from "../../libraries/Units.sol";
 import { TrancheClaimsLogic } from "../../libraries/logic/TrancheClaimsLogic.sol";
@@ -22,7 +21,7 @@ import { ValuationLogic } from "../../libraries/logic/ValuationLogic.sol";
  * @notice Abstract base contract implementing core vault functionality for Royco tranches (ST, JT, and LT)
  * @dev Tranches interact with the kernel to execute all operations based on the current holistic state of the Royco market
  */
-abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20PausableUpgradeable, ERC20BurnableUpgradeable, ERC20PermitUpgradeable {
+abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20BurnableUpgradeable, ERC20PermitUpgradeable {
     using Math for uint256;
     using RoycoUnitsMath for uint256;
     using SafeERC20 for IERC20;
@@ -62,7 +61,6 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         // Initialize all the parent contracts
         __RoycoBase_init(_params.initialAuthority);
         __ERC20_init_unchained(_params.name, _params.symbol);
-        __ERC20Pausable_init();
         __ERC20Burnable_init();
         __ERC20Permit_init(_params.name);
     }
@@ -74,7 +72,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
      */
 
     /// @inheritdoc IRoycoVaultTranche
-    function deposit(TRANCHE_UNIT _assets, address _receiver) public virtual override(IRoycoVaultTranche) whenNotPaused restricted returns (uint256 shares) {
+    function deposit(TRANCHE_UNIT _assets, address _receiver) public virtual override(IRoycoVaultTranche) restricted returns (uint256 shares) {
         require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
 
         // Transfer the assets to the kernel
@@ -111,7 +109,6 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
         public
         virtual
         override(IRoycoVaultTranche)
-        whenNotPaused
         restricted
         returns (AssetClaims memory claims)
     {
@@ -152,19 +149,19 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     }
 
     /// @inheritdoc IRoycoVaultTranche
-    function mint(address _to, uint256 _shares) external virtual override(IRoycoVaultTranche) whenNotPaused onlyKernel {
+    function mint(address _to, uint256 _shares) external virtual override(IRoycoVaultTranche) onlyKernel {
         require(_to != address(0), ERC20InvalidReceiver(address(0)));
         require(_shares != 0, MUST_MINT_NON_ZERO_SHARES());
         _mint(_to, _shares);
     }
 
     /// @inheritdoc ERC20BurnableUpgradeable
-    function burn(uint256 _shares) public virtual override(ERC20BurnableUpgradeable) whenNotPaused restricted {
+    function burn(uint256 _shares) public virtual override(ERC20BurnableUpgradeable) restricted {
         super.burn(_shares);
     }
 
     /// @inheritdoc ERC20BurnableUpgradeable
-    function burnFrom(address _account, uint256 _shares) public virtual override(ERC20BurnableUpgradeable) whenNotPaused restricted {
+    function burnFrom(address _account, uint256 _shares) public virtual override(ERC20BurnableUpgradeable) restricted {
         super.burnFrom(_account, _shares);
     }
 
@@ -244,8 +241,6 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @inheritdoc IRoycoVaultTranche
     function maxDeposit(address _receiver) external view virtual override(IRoycoVaultTranche) returns (TRANCHE_UNIT assets) {
-        // Deposits revert under the tranche's own pause, so advertise zero capacity
-        if (paused()) return ZERO_TRANCHE_UNITS;
         if (TRANCHE_TYPE() == TrancheType.SENIOR) assets = IRoycoDayKernel(KERNEL).stMaxDeposit(_receiver);
         else if (TRANCHE_TYPE() == TrancheType.JUNIOR) assets = IRoycoDayKernel(KERNEL).jtMaxDeposit(_receiver);
         else assets = IRoycoDayKernel(KERNEL).ltMaxDeposit(_receiver);
@@ -253,8 +248,6 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
 
     /// @inheritdoc IRoycoVaultTranche
     function maxRedeem(address _owner) public view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
-        // Redemptions revert under the tranche's own pause, so advertise zero capacity
-        if (paused()) return 0;
         uint256 sharesOwned = balanceOf(_owner);
 
         if (TRANCHE_TYPE() == TrancheType.SENIOR || TRANCHE_TYPE() == TrancheType.JUNIOR) {
@@ -329,8 +322,12 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Pausa
     /// @dev Returns the type of the tranche (Senior, Junior, or Liquidity)
     function TRANCHE_TYPE() public pure virtual returns (TrancheType);
 
-    /// @inheritdoc ERC20PausableUpgradeable
-    function _update(address _from, address _to, uint256 _value) internal override(ERC20PausableUpgradeable, ERC20Upgradeable) whenNotPaused {
+    /**
+     * @inheritdoc ERC20Upgradeable
+     * @dev Routes every balance update through the kernel's screening hook, which enforces the market's blacklist and
+     *      whitelist policy and reverts when the kernel is paused: transfers, mints, and burns are all gated by the kernel
+     */
+    function _update(address _from, address _to, uint256 _value) internal override(ERC20Upgradeable) {
         // Call the kernel's pre-balance update hook to assert that the balance update is valid
         IRoycoDayKernel(KERNEL).preTrancheBalanceUpdateHook(msg.sender, _from, _to, _value);
 

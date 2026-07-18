@@ -824,6 +824,8 @@ abstract contract DayMarketTestBase is Assertions {
             accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoVaultTranche.deposit.selector), _depositRole);
             accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoVaultTranche.redeem.selector), _redeemRole);
         }
+        // Pause/unpause are bound for parity with the other components, but the tranche enforces no pause of its own:
+        // the kernel is the market's single pause authority, so a tranche-level pause is inert
         accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
         accessManager.setTargetFunctionRole(_tranche, _sels(UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE);

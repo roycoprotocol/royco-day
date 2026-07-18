@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import { ERC20PermitUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
-import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { JT_LP_ROLE, LT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
@@ -176,31 +175,32 @@ contract Test_TranchePermit_Tranches is DayMarketTestBase {
     }
 
     /**
-     * @notice While the tranche is paused a permit still sets the allowance, but the delegate's redemption is
+     * @notice While the kernel is paused a permit still sets the allowance, but the delegate's redemption is
      *         blocked until unpause
      * @dev A pause is an emergency stop on asset movement, not on bookkeeping: permit only writes an allowance
      *      (no balance moves, no kernel call), so freezing it would serve no protective purpose and would break
-     *      gasless flows queued during an incident. The redeem, which actually moves assets, must stay gated
+     *      gasless flows queued during an incident. The redeem, which routes into the kernel's whenNotPaused
+     *      entrypoint, must stay gated
      */
-    function test_Permit_SetsAllowanceWhilePaused() public {
+    function test_Permit_SetsAllowanceWhileKernelPaused() public {
         vm.prank(ST_PROVIDER);
         seniorTranche.transfer(PERMIT_OWNER, 2e18);
 
         vm.prank(PAUSER);
-        IRoycoAuth(address(seniorTranche)).pause();
+        kernel.pause();
 
         // The signature-based approval lands even under pause
         uint256 deadline = block.timestamp + 1 hours;
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(PERMIT_OWNER_KEY, _permitDigest(address(seniorTranche), "Royco Senior Tranche", ST_DELEGATE, 2e18, 0, deadline));
         seniorTranche.permit(PERMIT_OWNER, ST_DELEGATE, 2e18, deadline, v, r, s);
-        assertEq(seniorTranche.allowance(PERMIT_OWNER, ST_DELEGATE), 2e18, "a paused tranche must still accept the pure-approval permit");
+        assertEq(seniorTranche.allowance(PERMIT_OWNER, ST_DELEGATE), 2e18, "a paused market must still accept the pure-approval permit");
         assertEq(seniorTranche.nonces(PERMIT_OWNER), 1, "the permit must consume the nonce even while paused");
 
         // The asset-moving half stays frozen: the delegate cannot redeem through the fresh allowance
         vm.prank(ST_DELEGATE);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         seniorTranche.redeem(2e18, ST_DELEGATE, PERMIT_OWNER);
-        assertEq(seniorTranche.balanceOf(PERMIT_OWNER), 2e18, "no share may move while the tranche is paused");
+        assertEq(seniorTranche.balanceOf(PERMIT_OWNER), 2e18, "no share may move while the market is paused");
         assertEq(seniorTranche.allowance(PERMIT_OWNER, ST_DELEGATE), 2e18, "the failed redemption must not consume the permit allowance");
     }
 }

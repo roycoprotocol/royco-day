@@ -54,7 +54,6 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         external
         virtual
         override(IRoycoLiquidityTranche)
-        whenNotPaused
         restricted
         returns (uint256 shares)
     {
@@ -91,7 +90,6 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         external
         virtual
         override(IRoycoLiquidityTranche)
-        whenNotPaused
         restricted
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
@@ -142,8 +140,6 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
 
     /// @inheritdoc IRoycoLiquidityTranche
     function maxRedeemMultiAsset(address _owner) external virtual override(IRoycoLiquidityTranche) returns (uint256 shares) {
-        // Redemptions revert under the tranche's own pause, so advertise zero capacity
-        if (paused()) return 0;
         uint256 sharesOwned = balanceOf(_owner);
 
         // The liquidity tranche has claims only on its own RAW NAV

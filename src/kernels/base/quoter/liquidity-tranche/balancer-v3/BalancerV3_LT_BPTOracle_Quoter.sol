@@ -158,13 +158,14 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
 
     /**
      * @inheritdoc IRateProvider
+     * @dev Reverts when the kernel is paused to ensure that the pool never executes operations on a faulty kernel state
      * @dev Values one senior tranche share in NAV units, the rate at which the pool prices its senior share leg
      * @dev Within a synchronized operation the returned rate is the one the pre-op sync cached, so an inline senior share mint or burn (a multi-asset deposit or redemption) cannot transiently move the senior-leg mark before the matching effective NAV is committed
      * @dev Before the first sync of a transaction the cache is unset, so a standalone pool interaction or an off-chain read previews the fresh rate the next sync would resolve from committed state
      * @dev The rate is floored to a minimum of 1 wei so the pool never receives a zero rate, which it would reject
      * @dev Before the senior tranche is seeded (zero ST supply) the rate resolves to that 1-wei floor rather than a neutral 1.0, this is inert because with no ST shares in existence the pool's ST leg is empty, so the rate only ever scales a zero balance until the tranche is seeded
      */
-    function getRate() external view virtual override(IRateProvider) returns (uint256 rate) {
+    function getRate() external view override(IRateProvider) whenNotPaused returns (uint256 rate) {
         // Query the cache for the ST share rate
         bool cacheHit;
         (cacheHit, rate) = Cache._read(CacheKey.ST_SHARE_RATE);
