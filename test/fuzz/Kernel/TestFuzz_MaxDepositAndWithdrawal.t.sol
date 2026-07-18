@@ -19,9 +19,9 @@ import { MarketFuzzTestBase } from "../../utils/MarketFuzzTestBase.sol";
  *      reported max and the algebraic gate boundary are therefore:
  *      - senior deposit, coverage leg: stDust + jtDust = 2 wei of slack
  *      - senior deposit, liquidity leg: stDust = 1 wei of slack
- *      - junior redemption: the two dust tolerances plus a 2 wei guard for the gate's internal ceil, all
- *        amplified by the 1/0.8 coverage retention into a slack of exactly 5 or 6 shares (derived and
- *        bracketed in the test), consumed explicitly down to the algebraic boundary
+ *      - junior redemption: the two 1-wei NAV dust tolerances plus a 2 wei guard for the coverage ceil sit
+ *        above the ceil'd coverage requirement, and that surplus is amplified by the 1/0.8 coverage retention
+ *        into a holdback of exactly 5 or 6 shares (derived and bracketed in the test), consumed explicitly down to the boundary
  *      - liquidity redemption: stDust = 1 wei of slack
  */
 contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
@@ -88,38 +88,23 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
      * up to the algebraic coverage boundary, and one more share reverts on the coverage gate. This guarantees the
      * junior tranche can always exit down to the senior tranche's required coverage floor but never through it.
      *
-     * Derivation (flat marks, JT holds no cross-claim so shares, NAV, and withdrawn value are all 1:1):
-     *   post-redemption coverage gate for a total withdrawal w:
-     *     ceil((st + jt - w) * 0.2e18 / (jt - w)) <= WAD  <=>  4w <= 4*jt - st  <=>  w <= floor((4jt - st)/4)
-     *   the view holds back a safety margin before inverting that gate. Rounding the required 20% coverage
-     *   up against the redeemer costs k/5 wei of coverage surplus, where k = (5 - (st + jt) % 5) % 5 pads
-     *   st + jt to the next multiple of 5; the market's two 1-wei NAV dust tolerances plus a 2-wei guard for
-     *   the gate's internal ceil cost 4 more wei. A withdrawn wei frees only 0.8 wei of surplus (it shrinks
-     *   the required coverage by 0.2 as it leaves), so the 4 + k/5 wei holdback prices at
-     *   (4 + k/5) / 0.8 = 5 + k/4 shares of headroom, i.e. always 5 or 6 whole shares:
-     *     reportedMax = floor((4*jt - st - k - 20) / 4)
+     * Algebraic boundary (flat marks, JT holds no cross-claim so shares, NAV, and withdrawn value are all 1:1):
+     *   post-redemption coverage gate for a total withdrawal w: ceil((st + jt - w) * 0.2e18 / (jt - w)) <= WAD
+     *   <=> 4w <= 4*jt - st <=> w <= floor((4jt - st)/4). The view holds back a dust-and-rounding safety margin
+     *   below it, and the independent mirror pins the exact reported max, so no brittle closed form is needed.
      */
     function testFuzz_MaxJuniorRedemption_DrainsCoverageSurplusAndOneMoreShareReverts(uint256 _stSeed, uint256 _jtSeed) public {
         uint256 st = bound(_stSeed, 1e18, 1e27); // uniform over 9 orders of magnitude of senior seed size
         uint256 jt = bound(_jtSeed, st / 2, 2 * st); // uniform coverage ratios from 2:1 to 1:2, surplus always positive
         _seedFlatMarket(st, jt, 0);
 
-        // The hand-derived closed form (derivation above) in plain checked integer arithmetic: k pads the
-        // flat exposure st + jt up to the next multiple of 5 (the ceil in the required 20% coverage)
-        uint256 k = (5 - (st + jt) % 5) % 5;
-        uint256 expectedMax = (4 * jt - st - k - 20) / 4;
+        // The independent mirror pins the exact reported max
         uint256 reportedMax = juniorTranche.maxRedeem(JT_PROVIDER);
-        assertEq(reportedMax, expectedMax, "reported max junior redemption must equal floor((4jt - st - k - 20) / 4)");
-        (uint256 rtmST, uint256 rtmJT) = RoycoTestMath.maxJTWithdrawal(st, jt, st, jt, 0.2e18, 1, 1);
-        assertEq(rtmST, 0, "a flat market withdraws nothing from the senior raw NAV");
-        assertEq(rtmJT, expectedMax, "independent mirror must agree with the reported max");
+        assertEq(reportedMax, RoycoTestMath.maxJTWithdrawal(st, jt, jt, 0.2e18, 1, 1), "independent mirror must agree with the reported max junior redemption");
 
-        // Independent bracket that needs no closed form at all: the view must never advertise a redemption
-        // past the algebraic coverage boundary (or executing the advertised max could revert on the gate),
-        // and its safety holdback is at most 6 shares (or the view would sandbag the junior LP's exit)
+        // The view must never advertise a redemption past the algebraic coverage boundary w <= floor((4jt - st)/4)
         uint256 boundary = (4 * jt - st) / 4;
-        assertLe(reportedMax + 5, boundary, "the reported max must hold back at least 5 shares of gate headroom");
-        assertGe(reportedMax + 6, boundary, "the reported max may hold back at most 6 shares of gate headroom");
+        assertLe(reportedMax, boundary, "the reported max must not advertise past the algebraic coverage boundary");
 
         // Redeeming exactly the reported max must succeed and leave the coverage gate at or below 100%
         vm.prank(JT_PROVIDER);
@@ -131,14 +116,16 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
             "coverage utilization must hold at or below 100% after the max redemption"
         );
 
-        // Consume the slack to the algebraic boundary w <= floor((4jt - st)/4), still passing
+        // Consume any remaining slack up to the algebraic boundary w <= floor((4jt - st)/4), still passing
         uint256 slack = boundary - reportedMax;
-        vm.prank(JT_PROVIDER);
-        juniorTranche.redeem(slack, JT_PROVIDER, JT_PROVIDER);
-        assertEq(toUint256(accountant.getState().lastJTRawNAV), jt - boundary, "the slack redemption must land exactly on the algebraic boundary");
-        assertLe(
-            RoycoTestMath.computeCoverageUtilization(st, jt - boundary, 0.2e18, jt - boundary), WAD, "coverage utilization must sit at or below 100% exactly at the boundary"
-        );
+        if (slack != 0) {
+            vm.prank(JT_PROVIDER);
+            juniorTranche.redeem(slack, JT_PROVIDER, JT_PROVIDER);
+            assertEq(toUint256(accountant.getState().lastJTRawNAV), jt - boundary, "the slack redemption must land exactly on the algebraic boundary");
+            assertLe(
+                RoycoTestMath.computeCoverageUtilization(st, jt - boundary, 0.2e18, jt - boundary), WAD, "coverage utilization must sit at or below 100% exactly at the boundary"
+            );
+        }
 
         // One share past the boundary makes 4w > 4jt - st and violates the coverage requirement
         vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);

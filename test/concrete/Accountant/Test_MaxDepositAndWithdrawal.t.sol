@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { MAX_NAV_UNITS, WAD, ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
 import { MarketState, Operation, SyncedAccountingState } from "../../../src/libraries/Types.sol";
@@ -13,11 +14,11 @@ import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
  * @notice Hand-derived scenarios for the maxSTDeposit / maxJTWithdrawal / maxLTWithdrawal closed forms,
  *         cross-asserted against the independent RoycoTestMath mirrors, plus the exact gate-boundary probes the
  *         sync suite does not cover — the liquidity-binding deposit with an ST dust slack,
- *         the JT-withdrawal fudge boundary on a non-exact ceil'd required value, and the LT-withdrawal
+ *         the JT-withdrawal gate boundary on a non-exact ceil'd required value, and the LT-withdrawal
  *         ST dust slack boundary
  * @dev Existing coverage NOT duplicated here: the zero-dust coverage-binding and liquidity-binding
  *      maxSTDeposit gate boundaries, the coverage-side dust-slack boundary, the flat-market maxJTWithdrawal
- *      fudge boundary on an exactly-divisible required value, the cross-claim probe, and the
+ *      gate boundary on an exactly-divisible required value, the cross-claim probe, and the
  *      maxLTWithdrawal zero-dust exact boundary all live in the closed-form section below
  */
 contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
@@ -121,131 +122,74 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * The cross-claim split (RoycoDayAccountant.sol:417-433), RTM parity plus hand literals.
-     * State (1000e18, 200e18, stEffectiveNAV 980e18, jtEffectiveNAV 220e18): jtClaimOnST = 20e18, jtClaimOnJT = 200e18,
-     * fracST = floor(20e18 * WAD / 220e18) = 90_909_090_909_090_909 and fracJT = 909_090_909_090_909_090.
-     * required = ceil(1200e18 * 0.1) = 120e18, surplus = 100e18 - 2,
-     * retention = WAD - floor(0.1e18 * (fracST + fracJT) / WAD) = 900_000_000_000_000_001,
-     * claimable = floor((100e18 - 2) * WAD / retention) = 111_111_111_111_111_110_985,
-     * stW = floor(claimable * fracST / WAD) = 10_101_010_101_010_100_988,
-     * jtW = floor(claimable * fracJT / WAD) = 101_010_101_010_101_009_885
+     * The cross-claim state (jtEffectiveNAV exceeds jtRawNAV because the junior holds a coverage claim on the
+     * senior), cross-checked against the independent mirror.
+     * State (1000e18, 200e18, jtEffectiveNAV 220e18, minCoverage 0.1): exposure = 1200e18,
+     * required = ceil(1200e18 * 0.1) = 120e18, surplus = sat(220e18 - 120e18) = 100e18,
+     * y = floor(100e18 * WAD / (WAD - 0.1e18))
      */
     function test_MaxJTWithdrawal_matchesRTM_crossClaim() public view {
         SyncedAccountingState memory st = _bareState(1000e18, 200e18, 100e18, 980e18, 220e18, 0.1e18, 0.05e18);
-        (NAV_UNIT stW, NAV_UNIT jtW) = accountant.maxJTWithdrawal(st);
-        assertEq(toUint256(stW), 10_101_010_101_010_100_988, "senior-side withdrawable");
-        assertEq(toUint256(jtW), 101_010_101_010_101_009_885, "junior-side withdrawable");
-        (uint256 rtmST, uint256 rtmJT) = RoycoTestMath.maxJTWithdrawal(1000e18, 200e18, 980e18, 220e18, 0.1e18, 0, 0);
-        assertEq(toUint256(stW), rtmST, "RTM senior side");
-        assertEq(toUint256(jtW), rtmJT, "RTM junior side");
+        NAV_UNIT jtW = accountant.maxJTWithdrawal(st);
+        assertEq(toUint256(jtW), RoycoTestMath.maxJTWithdrawal(1000e18, 200e18, 220e18, 0.1e18, 0, 0), "RTM parity");
     }
 
     /**
-     * The early-outs (RoycoDayAccountant.sol:415-429): RTM parity on both sides of the surplus boundary and
-     * on the defensive zero-claims arm.
-     * Surplus boundary: (stRawNAV 300e18, jtRawNAV 100e18) puts required = ceil(400e18 * 0.1) = 40e18, so
-     * jtEffectiveNAV = 40e18 + 2 zeroes the surplus through the +2 fudge -> (0, 0), and jtEffectiveNAV = 40e18 + 3 leaves
-     * surplus 1 -> claimable 1 -> split (0, 1) because the junior effective NAV below the junior raw NAV keeps
-     * the claim fractions at (0, WAD).
-     * Zero-claims arm: (stRawNAV 0, jtRawNAV 8e18, stEffectiveNAV 8e18, jtEffectiveNAV 8e18) is non-conserved (defensive input): both
-     * jtClaimOnST = sat(8e18 - 8e18) = 0 and jtClaimOnJT = 8e18 - sat(8e18 - 0) = 0 -> (0, 0)
-     * NOTE under NAV conservation totalJTClaims always equals jtEffectiveNAV and a zero junior effective NAV is
-     * already caught by the surplus early-out, so the zero-claims arm is reachable only with a non-conserved
-     * state — a defensive arm. The totalNAVClaimable == 0 early-out is fully unreachable: with a positive
-     * surplus, mulDiv(surplus, WAD, retention) >= surplus >= 1 because retention is in [1, WAD]
+     * The surplus saturation boundary of the closed form, plus the pure formula on a zero-senior-exposure
+     * input, each cross-checked against the independent mirror across the settled branch set.
+     * Saturation boundary: (stRawNAV 300e18, jtRawNAV 100e18) puts required = ceil(400e18 * 0.1) = 40e18, so
+     * jtEffectiveNAV = 40e18 saturates the surplus to zero, and jtEffectiveNAV = 40e18 + 1 leaves surplus 1.
+     * Zero senior exposure: (stRawNAV 0, jtRawNAV 8e18, jtEffectiveNAV 8e18) has exposure 8e18, required =
+     * ceil(8e18 * 0.1) = 8e17, surplus = 8e18 - 8e17 = 7.2e18
      */
     function test_MaxJTWithdrawal_matchesRTM_earlyOutBoundaries() public view {
-        // Exactly at the fudge-consumed surplus boundary
-        SyncedAccountingState memory st = _bareState(300e18, 100e18, 0, 300e18, 40e18 + 2, 0.1e18, 0);
-        (NAV_UNIT stW, NAV_UNIT jtW) = accountant.maxJTWithdrawal(st);
-        (uint256 rtmST, uint256 rtmJT) = RoycoTestMath.maxJTWithdrawal(300e18, 100e18, 300e18, 40e18 + 2, 0.1e18, 0, 0);
-        assertEq(toUint256(stW) + toUint256(jtW), 0, "surplus exactly zero at the fudge boundary");
-        assertEq(rtmST + rtmJT, 0, "RTM surplus boundary");
+        // Exactly at the surplus saturation boundary
+        SyncedAccountingState memory st = _bareState(300e18, 100e18, 0, 300e18, 40e18, 0.1e18, 0);
+        assertEq(toUint256(accountant.maxJTWithdrawal(st)), RoycoTestMath.maxJTWithdrawal(300e18, 100e18, 40e18, 0.1e18, 0, 0), "RTM at the saturation boundary");
 
         // One wei above the boundary
-        st = _bareState(300e18, 100e18, 0, 300e18, 40e18 + 3, 0.1e18, 0);
-        (stW, jtW) = accountant.maxJTWithdrawal(st);
-        (rtmST, rtmJT) = RoycoTestMath.maxJTWithdrawal(300e18, 100e18, 300e18, 40e18 + 3, 0.1e18, 0, 0);
-        assertEq(toUint256(stW), 0, "nothing from the senior raw NAV");
-        assertEq(toUint256(jtW), 1, "one wei withdrawable above the boundary");
-        assertEq(rtmST, 0, "RTM senior side above the boundary");
-        assertEq(rtmJT, 1, "RTM junior side above the boundary");
+        st = _bareState(300e18, 100e18, 0, 300e18, 40e18 + 1, 0.1e18, 0);
+        assertEq(
+            toUint256(accountant.maxJTWithdrawal(st)), RoycoTestMath.maxJTWithdrawal(300e18, 100e18, 40e18 + 1, 0.1e18, 0, 0), "RTM one wei above the boundary"
+        );
 
-        // Defensive zero-claims arm (non-conserved input)
+        // Zero senior exposure: the pure formula off the junior raw NAV alone
         st = _bareState(0, 8e18, 0, 8e18, 8e18, 0.1e18, 0);
-        (stW, jtW) = accountant.maxJTWithdrawal(st);
-        (rtmST, rtmJT) = RoycoTestMath.maxJTWithdrawal(0, 8e18, 8e18, 8e18, 0.1e18, 0, 0);
-        assertEq(toUint256(stW) + toUint256(jtW), 0, "zero total claims early-out");
-        assertEq(rtmST + rtmJT, 0, "RTM zero total claims early-out");
+        assertEq(toUint256(accountant.maxJTWithdrawal(st)), RoycoTestMath.maxJTWithdrawal(0, 8e18, 8e18, 0.1e18, 0, 0), "RTM zero senior exposure");
     }
 
     /**
-     * The +2 wei fudge boundary on a NON-exact required value (RoycoDayAccountant.sol:413-414), where the
-     * inner ceil of the coverage requirement absorbs the fractional boundary and the gross-up floor adds a
-     * third wei of protocol-favoring slack on top of the fudge.
+     * The coverage gate boundary on a NON-exact required value (RoycoDayAccountant.sol:392), where the inner
+     * ceil of the coverage requirement rounds the fractional boundary up and the gross-up floor leaves a wei
+     * of protocol-favoring slack on top.
      * Seed (1000e18 + 7, 200e18) flat, zero dust: required = ceil((1200e18 + 7) * 0.1) = 120e18 + 1 (the 0.7 wei
-     * product remainder rounds up), surplus = 200e18 - (120e18 + 1) - 2 = 80e18 - 3, retention = 0.9e18,
-     * claimable = floor((80e18 - 3) * 10 / 9) = 88_888_888_888_888_888_885, split (0, claimable).
-     * The algebraic gate is 9 * jtEffectiveNAV' >= 1000e18 + 7, so the minimum passing jtEffectiveNAV' is
-     * ceil((1000e18 + 7) / 9) = 111_111_111_111_111_111_112: redeeming max lands jtEffectiveNAV' three wei above it
-     * with coverageUtilization exactly WAD (ceil), the three slack wei redeem one at a time still at WAD, and
-     * the wei that would land jtEffectiveNAV' = 111_111_111_111_111_111_111 computes coverageUtilization = WAD + 1 and violates
+     * product remainder rounds up), surplus = 200e18 - (120e18 + 1) = 80e18 - 1, retention = 0.9e18,
+     * y = floor((80e18 - 1) * 10 / 9).
+     * The algebraic gate is 9 * jtEffectiveNAV' >= stRawNAV, so the minimum passing jtEffectiveNAV' is
+     * ceil(stRawNAV / 9). Redeeming max lands one wei above it with coverageUtilization exactly WAD (ceil),
+     * consuming the remaining slack down to the boundary stays at WAD, and one wei past it reads WAD + 1 and violates
      */
-    function test_MaxJTWithdrawal_CeilRequiredFudgeGateBoundary() public {
-        _seedSymmetric(1000e18 + 7, 200e18, 100e18);
+    function test_MaxJTWithdrawal_CeilRequiredGateBoundary() public {
+        uint256 stRaw = 1000e18 + 7;
+        _seedSymmetric(stRaw, 200e18, 100e18);
 
-        (NAV_UNIT stW, NAV_UNIT jtW) = accountant.maxJTWithdrawal(_checkpointState());
-        assertEq(toUint256(stW), 0, "flat market withdraws from the junior raw NAV only");
-        assertEq(toUint256(jtW), 88_888_888_888_888_888_885, "max with the ceil'd required value and the 2 wei fudge");
-        (uint256 rtmST, uint256 rtmJT) = RoycoTestMath.maxJTWithdrawal(1000e18 + 7, 200e18, 1000e18 + 7, 200e18, 0.1e18, 0, 0);
-        assertEq(toUint256(stW), rtmST, "RTM senior side");
-        assertEq(toUint256(jtW), rtmJT, "RTM junior side");
+        NAV_UNIT jtW = accountant.maxJTWithdrawal(_checkpointState());
+        assertEq(toUint256(jtW), RoycoTestMath.maxJTWithdrawal(stRaw, 200e18, 200e18, 0.1e18, 0, 0), "RTM parity");
 
-        // Redeem exactly max: jtEffectiveNAV' = 111_111_111_111_111_111_115, coverageUtilization = WAD exactly by ceil
-        SyncedAccountingState memory state = kernel.doPostOp(
-            Operation.JT_REDEEM, toNAVUnits(uint256(1000e18 + 7)), toNAVUnits(200e18 - toUint256(jtW)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true
-        );
+        // Redeem exactly max: coverage utilization reads WAD by ceil
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(stRaw), toNAVUnits(200e18 - toUint256(jtW)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true);
         assertEq(state.coverageUtilizationWAD, WAD, "the exact max lands coverage utilization on WAD");
-        // First fudge wei: jtEffectiveNAV' = 111_111_111_111_111_111_114, still WAD
-        state = kernel.doPostOp(
-            Operation.JT_REDEEM,
-            toNAVUnits(uint256(1000e18 + 7)),
-            toNAVUnits(uint256(111_111_111_111_111_111_114)),
-            toNAVUnits(uint256(100e18)),
-            ZERO_NAV_UNITS,
-            true
-        );
-        assertEq(state.coverageUtilizationWAD, WAD, "max + 1 still passes inside the fudge");
-        // Second fudge wei: jtEffectiveNAV' = 111_111_111_111_111_111_113, still WAD
-        state = kernel.doPostOp(
-            Operation.JT_REDEEM,
-            toNAVUnits(uint256(1000e18 + 7)),
-            toNAVUnits(uint256(111_111_111_111_111_111_113)),
-            toNAVUnits(uint256(100e18)),
-            ZERO_NAV_UNITS,
-            true
-        );
-        assertEq(state.coverageUtilizationWAD, WAD, "max + 2 exhausts the fudge still at WAD");
-        // The gross-up floor's wei: jtEffectiveNAV' = 111_111_111_111_111_111_112, the minimum passing buffer, still WAD
-        state = kernel.doPostOp(
-            Operation.JT_REDEEM,
-            toNAVUnits(uint256(1000e18 + 7)),
-            toNAVUnits(uint256(111_111_111_111_111_111_112)),
-            toNAVUnits(uint256(100e18)),
-            ZERO_NAV_UNITS,
-            true
-        );
-        assertEq(state.coverageUtilizationWAD, WAD, "max + 3 lands on the minimum passing buffer at WAD");
-        // One more wei crosses the algebraic boundary: coverageUtilization = WAD + 1
+
+        // Consume the remaining ceil slack down to the boundary ceil(stRawNAV / 9), retention 0.9 folds the 0.1
+        // coverage into the /9
+        uint256 minPassingJTEff = Math.ceilDiv(stRaw, 9);
+        state = kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(stRaw), toNAVUnits(minPassingJTEff), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true);
+        assertEq(state.coverageUtilizationWAD, WAD, "the boundary jtEffectiveNAV still passes at WAD");
+
+        // One wei past the boundary reads coverage utilization WAD + 1 and violates
         vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(
-            Operation.JT_REDEEM,
-            toNAVUnits(uint256(1000e18 + 7)),
-            toNAVUnits(uint256(111_111_111_111_111_111_111)),
-            toNAVUnits(uint256(100e18)),
-            ZERO_NAV_UNITS,
-            true
-        );
+        kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(stRaw), toNAVUnits(minPassingJTEff - 1), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, true);
     }
 
     /*//////////////////////////////////////////////////////////////////////
@@ -442,22 +386,21 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
     }
 
     /**
-     * the flat-market closed form with zero dust — surplus = jtEffectiveNAV - ceil((stRawNAV + jtRawNAV) * minCoverage / WAD) - 2,
-     * the claim fractions are (0, WAD), retention is WAD - minCoverage, so the split is
-     * (0, floor(surplus * WAD / retention))
-     * Derivation: surplus = 200e18 - 120e18 - 2, claimable = floor((80e18 - 2) * 10 / 9) = 88_888_888_888_888_888_886
+     * the flat-market closed form with zero dust, surplus = jtEffectiveNAV - ceil((stRawNAV + jtRawNAV) * minCoverage / WAD),
+     * grossed up by the coverage retention (WAD - minCoverage) to y = floor(surplus * WAD / (WAD - minCoverage))
+     * Derivation: required = ceil(1200e18 * 0.1) = 120e18, surplus = 200e18 - 120e18 = 80e18, y = floor(80e18 * 10 / 9)
      */
     function test_MaxJTWithdrawal_flatMarketClosedForm() public view {
         SyncedAccountingState memory st = _bareState(1000e18, 200e18, 100e18, 1000e18, 200e18, 0.1e18, DEFAULT_MIN_LIQUIDITY_WAD);
-        (NAV_UNIT stW, NAV_UNIT jtW) = accountant.maxJTWithdrawal(st);
-        assertEq(toUint256(stW), 0, "flat market claims nothing from the senior raw NAV");
-        assertEq(toUint256(jtW), 88_888_888_888_888_888_886, "junior withdrawable equals the surplus grossed up by the retention");
+        NAV_UNIT jtW = accountant.maxJTWithdrawal(st);
+        assertEq(toUint256(jtW), RoycoTestMath.maxJTWithdrawal(1000e18, 200e18, 200e18, 0.1e18, 0, 0), "RTM parity");
     }
 
     /**
-     * both dust tolerances fold into the surplus subtrahend before the retention gross-up
-     * Derivation: required = ceil(1200e18 * 0.1) = 120e18, surplus = 200e18 - (120e18 + 3 + 7 + 2),
-     * retention = 1e18 - floor(0.1e18 * (0 + 1e18) / 1e18) = 0.9e18, claimable = floor(surplus * 1e18 / 0.9e18)
+     * both dust tolerances fold into the requirement's ceil before the retention gross-up
+     * Derivation: required = ceil((1200e18 + 3 + 7) * 0.1) = 120e18 + 1 (the 1 wei product remainder rounds up),
+     * surplus = 200e18 - (120e18 + 1) = 80e18 - 1, retention = WAD - minCoverage = 0.9e18,
+     * y = floor((80e18 - 1) * 1e18 / 0.9e18)
      */
     function test_MaxJTWithdrawal_dustTolerancesFoldIntoTheSurplus() public {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
@@ -465,66 +408,51 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
         p.jtNAVDustTolerance = toNAVUnits(uint256(7));
         _deploy(p);
         SyncedAccountingState memory st = _bareState(1000e18, 200e18, 0, 1000e18, 200e18, 0.1e18, 0);
-        (NAV_UNIT stW, NAV_UNIT jtW) = accountant.maxJTWithdrawal(st);
-        // Hand derivation (general form: claimable = floor(surplus * 1e18 / retention)): only the 0.9 retained
-        // fraction of each withdrawn wei actually leaves the junior effective NAV, so the surplus stretches to
-        //   surplus   = 200e18 - (120e18 + 3 + 7 + 2) = 80e18 - 12 = 79_999_999_999_999_999_988
-        //   claimable = floor(79_999_999_999_999_999_988 * 10 / 9) = floor(799_999_999_999_999_999_880 / 9)
-        //             = 88_888_888_888_888_888_875 (remainder 5 floored away, keeping the max inside the gate)
-        uint256 claimable = 88_888_888_888_888_888_875;
-        assertEq(toUint256(stW), 0, "flat claims put nothing on the senior raw NAV");
-        assertEq(toUint256(jtW), claimable, "junior withdrawable grossed up by the retention");
+        NAV_UNIT jtW = accountant.maxJTWithdrawal(st);
+        assertEq(toUint256(jtW), RoycoTestMath.maxJTWithdrawal(1000e18, 200e18, 200e18, 0.1e18, 3, 7), "RTM parity with both dust tolerances folded into the requirement");
     }
 
     /**
-     * the +2 wei fudge boundary — redeeming exactly maxJTWithdrawal passes the enforced coverage gate, the
-     * two fudge wei can still be withdrawn one at a time (coverage utilization stays at WAD by ceil), and the
-     * third extra wei is the first to violate
-     * Arithmetic: required = ceil(1200e18 * 0.1) = 120e18 divides exactly, so the slack is the fudge alone.
-     * The gate is 9 * jtEffectiveNAV' >= 1000e18 with minimum passing jtEffectiveNAV' = ceil(1000e18 / 9) =
-     * 111_111_111_111_111_111_112, and max leaves jtEffectiveNAV' exactly two wei above it
+     * the coverage gate boundary on an exactly-divisible required value, redeeming exactly maxJTWithdrawal lands
+     * coverage utilization exactly on WAD (the minimum passing buffer, zero slack), and the next wei is the
+     * first to violate.
+     * Arithmetic: required = ceil(1200e18 * 0.1) = 120e18 divides exactly, surplus = 200e18 - 120e18 = 80e18,
+     * y = floor(80e18 * 10 / 9).
+     * The gate is 9 * jtEffectiveNAV' >= SEED_ST_RAW with minimum passing jtEffectiveNAV' = ceil(SEED_ST_RAW / 9),
+     * and max leaves jtEffectiveNAV' exactly on it, so SEED_JT_RAW - jtW - 1 is the first violating buffer
      */
-    function test_MaxJTWithdrawal_FudgeExactGateBoundary() public {
+    function test_MaxJTWithdrawal_FlatMarketExactGateBoundary() public {
         _seedFlatWithLT(SEED_LT_RAW);
-        (NAV_UNIT stW, NAV_UNIT jtW) = accountant.maxJTWithdrawal(_checkpointState());
-        assertEq(toUint256(stW), 0, "flat market withdraws from the junior raw NAV only");
-        assertEq(toUint256(jtW), 88_888_888_888_888_888_886, "max reported with the 2 wei fudge");
+        NAV_UNIT jtW = accountant.maxJTWithdrawal(_checkpointState());
+        assertEq(toUint256(jtW), RoycoTestMath.maxJTWithdrawal(SEED_ST_RAW, SEED_JT_RAW, SEED_JT_RAW, 0.1e18, 0, 0), "RTM parity");
         SyncedAccountingState memory state = kernel.doPostOp(
             Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW - toUint256(jtW)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true
         );
         assertEq(state.coverageUtilizationWAD, WAD, "the exact max lands coverage utilization on WAD");
-        state = kernel.doPostOp(
-            Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(uint256(111_111_111_111_111_111_113)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true
-        );
-        assertEq(state.coverageUtilizationWAD, WAD, "max + 1 still passes inside the fudge");
-        state = kernel.doPostOp(
-            Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(uint256(111_111_111_111_111_111_112)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true
-        );
-        assertEq(state.coverageUtilizationWAD, WAD, "max + 2 exhausts the fudge exactly at WAD");
+        // One wei beyond max crosses the boundary ceil(SEED_ST_RAW / 9) and violates
         vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
         kernel.doPostOp(
-            Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(uint256(111_111_111_111_111_111_111)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true
+            Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW - toUint256(jtW) - 1), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true
         );
     }
 
     /**
-     * the cross-claim gate boundary — redeeming exactly the (stW, jtW) split from a JT-cross-claim checkpoint
-     * passes the enforced coverage gate, and a further 1000 wei violates
-     * Slack anatomy for this vector: the 2 wei fudge, up to ~3 wei of compounded mulDiv floors, and — the
-     * dominant term — the floored claim fractions summing to 1e18 - 1 rather than 1e18, which strands about
-     * claimable / 1e18 (~111 wei here) of the claimable total un-split, so the probe uses a 1000 wei margin
+     * the cross-claim gate boundary. Redeeming exactly maxJTWithdrawal off a JT-cross-claim checkpoint clears
+     * the enforced coverage gate, and a further 1000 wei violates.
+     * Slack anatomy for this vector is a few wei of compounded mulDiv floors in the surplus gross-up, so the
+     * probe uses a 1000 wei margin to land clear of the boundary
      */
     function test_MaxJTWithdrawal_CrossClaimGateBoundary() public {
         _seedState(1000e18, 200e18, 980e18, 220e18, 0, SEED_LT_RAW, MarketState.PERPETUAL);
-        (NAV_UNIT stW, NAV_UNIT jtW) = accountant.maxJTWithdrawal(_checkpointState());
-        assertGt(toUint256(stW), 0, "the cross-claim state withdraws from the senior raw NAV too");
+        NAV_UNIT jtW = accountant.maxJTWithdrawal(_checkpointState());
+        assertEq(toUint256(jtW), RoycoTestMath.maxJTWithdrawal(1000e18, 200e18, 220e18, 0.1e18, 0, 0), "RTM parity");
         SyncedAccountingState memory state = kernel.doPostOp(
-            Operation.JT_REDEEM, toNAVUnits(1000e18 - toUint256(stW)), toNAVUnits(200e18 - toUint256(jtW)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true
+            Operation.JT_REDEEM, toNAVUnits(uint256(1000e18)), toNAVUnits(200e18 - toUint256(jtW)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true
         );
         assertLe(state.coverageUtilizationWAD, WAD, "the exact cross-claim max clears the enforced coverage gate");
         vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
         kernel.doPostOp(
-            Operation.JT_REDEEM, toNAVUnits(1000e18 - toUint256(stW)), toNAVUnits(200e18 - toUint256(jtW) - 1000), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true
+            Operation.JT_REDEEM, toNAVUnits(uint256(1000e18)), toNAVUnits(200e18 - toUint256(jtW) - 1000), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, true
         );
     }
 

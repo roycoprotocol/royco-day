@@ -1187,63 +1187,55 @@ contract Test_RoycoTestMath is Test {
     //////////////////////////////////////////////////////////////////////////*/
 
     /**
-     * Self-backed nominal with the retention denominator: exposure = 1200e18 ⇒ required 120e18,
-     * surplus = 200e18 − (120e18 + 0 + 0 + 2) = 80e18 − 2.
-     * Claims: jtClaimOnST = 0, jtClaimOnJT = 200e18 ⇒ stFrac 0, jtFrac 1e18.
-     * retention = 1e18 − ⌊1e17·1e18/1e18⌋ = 9e17.
-     * totalClaimable = ⌊(80e18 − 2)·1e18/9e17⌋ = ⌊799999999999999999980/9⌋ = 88888888888888888886 = jtW.
+     * Self-backed nominal with the retention denominator: exposure = 1200e18 ⇒ required = ⌈(1200e18 + 0 + 0)·1e17/1e18⌉ = 120e18,
+     * surplus = sat(200e18 − 120e18) = 80e18 (the dust folds into the requirement before the ceil, no fudge).
+     * JT is coinvested, so each withdrawn NAV unit relaxes the requirement by minCoverageWAD and the surplus grosses
+     * up by the retention denominator WAD − minCoverageWAD = 9e17:
+     * y = ⌊80e18·1e18/9e17⌋ = ⌊800000000000000000000/9⌋ = 88888888888888888888.
      */
     function test_MaxJTWithdrawal_SelfBacked_RetentionDenominator() public pure {
-        (uint256 stW, uint256 jtW) = RoycoTestMath.maxJTWithdrawal(1000e18, 200e18, 1000e18, 200e18, 1e17, 0, 0);
-        assertEq(stW, 0, "no cross claim");
-        assertEq(jtW, 88_888_888_888_888_888_886, "surplus grossed up by 10/9 retention");
+        uint256 jtW = RoycoTestMath.maxJTWithdrawal(1000e18, 200e18, 200e18, 1e17, 0, 0);
+        assertEq(jtW, 88_888_888_888_888_888_888, "surplus grossed up by 10/9 retention");
     }
 
     /**
-     * Fudge boundary: with jtEffectiveNAV exactly required + 2 the surplus saturates to 0 and the closed
-     * form returns (0, 0), while one more wei of buffer yields exactly 1 wei withdrawable.
-     *   required = ⌈1200e18·1e17/1e18⌉ = 120e18, jtEffectiveNAV = 120e18 + 2 ⇒ surplus 0, jtEffectiveNAV = 120e18 + 3 ⇒ surplus 1,
-     *   retention 9e17 ⇒ totalClaimable = ⌊1·1e18/9e17⌋ = 1 ⇒ jtW = ⌊1·1e18/1e18⌋ = 1.
+     * Surplus boundary: with jtEffectiveNAV exactly at the requirement the surplus saturates to 0 and the closed
+     * form returns 0, while one more wei of buffer yields exactly 1 wei withdrawable.
+     *   required = ⌈1200e18·1e17/1e18⌉ = 120e18, jtEffectiveNAV = 120e18 ⇒ surplus 0, jtEffectiveNAV = 120e18 + 1 ⇒ surplus 1,
+     *   retention 9e17 ⇒ y = ⌊1·1e18/9e17⌋ = 1.
      */
-    function test_MaxJTWithdrawal_FudgeBoundary() public pure {
-        (uint256 stW0, uint256 jtW0) = RoycoTestMath.maxJTWithdrawal(1000e18, 200e18, 1080e18 - 2, 120e18 + 2, 1e17, 0, 0);
-        assertEq(stW0, 0, "fudge consumes the surplus, stW");
-        assertEq(jtW0, 0, "fudge consumes the surplus, jtW");
-        (uint256 stW1, uint256 jtW1) = RoycoTestMath.maxJTWithdrawal(1000e18, 200e18, 1080e18 - 3, 120e18 + 3, 1e17, 0, 0);
-        assertEq(stW1, 0, "still no cross claim");
-        assertEq(jtW1, 1, "one wei past the fudge is withdrawable");
+    function test_MaxJTWithdrawal_SurplusBoundary() public pure {
+        uint256 jtW0 = RoycoTestMath.maxJTWithdrawal(1000e18, 200e18, 120e18, 1e17, 0, 0);
+        assertEq(jtW0, 0, "the requirement consumes the whole buffer");
+        uint256 jtW1 = RoycoTestMath.maxJTWithdrawal(1000e18, 200e18, 120e18 + 1, 1e17, 0, 0);
+        assertEq(jtW1, 1, "one wei past the requirement is withdrawable");
     }
 
     /**
-     * Cross-claim split: state 1000e18/200e18/950e18/250e18 (JT holds a 50e18 premium claim on ST).
-     *   jtClaimOnST = 50e18, jtClaimOnJT = 200e18, total 250e18 ⇒ stFrac 2e17, jtFrac 8e17 (both exact).
-     *   required = ⌈1200e18·1e17/1e18⌉ = 120e18, surplus = 250e18 − 120e18 − 2 = 130e18 − 2.
-     *   retention = 1e18 − ⌊1e17·1e18/1e18⌋ = 9e17.
-     *   totalClaimable = ⌊(130e18 − 2)·1e18/9e17⌋ = ⌊1299999999999999999980/9⌋ = 144444444444444444442.
-     *   stW = ⌊·2e17/1e18⌋ = 28888888888888888888, jtW = ⌊·8e17/1e18⌋ = 115555555555555555553.
+     * Cross-claim state: jtEffectiveNAV 250e18 exceeds jtRawNAV 200e18 (JT holds a 50e18 premium claim on ST), so the
+     * coverage buffer is the full 250e18 effective and the whole surplus grosses up through the single retention factor.
+     *   exposure = 1200e18 ⇒ required = ⌈1200e18·1e17/1e18⌉ = 120e18, surplus = sat(250e18 − 120e18) = 130e18.
+     *   retention 9e17 ⇒ y = ⌊130e18·1e18/9e17⌋ = ⌊1300000000000000000000/9⌋ = 144444444444444444444.
      */
-    function test_MaxJTWithdrawal_CrossClaimSplit() public pure {
-        (uint256 stW, uint256 jtW) = RoycoTestMath.maxJTWithdrawal(1000e18, 200e18, 950e18, 250e18, 1e17, 0, 0);
-        assertEq(stW, 28_888_888_888_888_888_888, "ST-sourced slice, floored");
-        assertEq(jtW, 115_555_555_555_555_555_553, "JT-sourced slice, floored");
+    function test_MaxJTWithdrawal_CrossClaimState() public pure {
+        uint256 jtW = RoycoTestMath.maxJTWithdrawal(1000e18, 200e18, 250e18, 1e17, 0, 0);
+        assertEq(jtW, 144_444_444_444_444_444_444, "coverage surplus grossed up by 10/9 retention");
     }
 
     /**
-     * Zero-total-claims early-out: jtEffectiveNAV 5 fully inside jtRawNAV 10 while ST claims the whole jtRawNAV
-     * (stClaimOnJT = sat(stEffectiveNAV − stRawNAV) = 10 = jtRawNAV) leaves both JT claims at 0, so even a positive surplus
-     * (minCov 0 ⇒ required 0, surplus = sat(5 − 2) = 3) returns (0, 0). Non-conserving guard probe by design.
+     * Zero minCoverage: no coverage requirement makes required 0 and the retention denominator the full WAD, so the
+     * withdrawable equals the whole buffer with no gross-up.
+     *   required = ⌈(100e18 + 10)·0/1e18⌉ = 0, surplus = sat(5 − 0) = 5, y = ⌊5·1e18/1e18⌋ = 5.
      */
-    function test_MaxJTWithdrawal_ZeroTotalClaims_ReturnsZero() public pure {
-        (uint256 stW, uint256 jtW) = RoycoTestMath.maxJTWithdrawal(100e18, 10, 100e18 + 10, 5, 0, 0, 0);
-        assertEq(stW, 0, "guard stW");
-        assertEq(jtW, 0, "guard jtW");
+    function test_MaxJTWithdrawal_ZeroMinCoverage_FullRetentionDenominator() public pure {
+        uint256 jtW = RoycoTestMath.maxJTWithdrawal(100e18, 10, 5, 0, 0, 0);
+        assertEq(jtW, 5, "zero coverage requirement, withdrawable equals the whole buffer");
     }
 
-    /// Zero-surplus early-out: required = ⌈1200e18·3e17/1e18⌉ = 360e18 exceeds jtEffectiveNAV 200e18 entirely.
+    /// Zero-surplus early-out: required = ⌈1200e18·3e17/1e18⌉ = 360e18 exceeds jtEffectiveNAV 200e18 entirely, surplus saturates to 0.
     function test_MaxJTWithdrawal_RequiredExceedsBuffer_ReturnsZero() public pure {
-        (uint256 stW, uint256 jtW) = RoycoTestMath.maxJTWithdrawal(1000e18, 200e18, 1000e18, 200e18, 3e17, 0, 0);
-        assertEq(stW, 0, "no surplus stW");
-        assertEq(jtW, 0, "no surplus jtW");
+        uint256 jtW = RoycoTestMath.maxJTWithdrawal(1000e18, 200e18, 200e18, 3e17, 0, 0);
+        assertEq(jtW, 0, "no surplus");
     }
 
     /*//////////////////////////////////////////////////////////////////////////

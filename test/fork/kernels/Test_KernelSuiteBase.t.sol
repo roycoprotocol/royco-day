@@ -2363,9 +2363,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _enterFixedTerm();
 
         assertEq(JT.maxRedeem(JT_ALICE_ADDRESS), 0, "jtMaxRedeem must report zero in a fixed term");
-        (,, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV,) = KERNEL.jtMaxWithdrawable(JT_ALICE_ADDRESS);
-        assertEq(stMaxWithdrawableNAV, ZERO_NAV_UNITS, "the junior ST-leg withdrawable must zero in a fixed term");
-        assertEq(jtMaxWithdrawableNAV, ZERO_NAV_UNITS, "the junior JT-leg withdrawable must zero in a fixed term");
+        (, NAV_UNIT jtMaxWithdrawableNAV,) = KERNEL.jtMaxWithdrawable(JT_ALICE_ADDRESS);
+        assertEq(jtMaxWithdrawableNAV, ZERO_NAV_UNITS, "the junior max-withdrawable NAV must zero in a fixed term");
 
         vm.prank(JT_ALICE_ADDRESS);
         vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);

@@ -325,10 +325,9 @@ interface IRoycoDayAccountant {
      * @notice Returns the maximum assets withdrawable from the junior tranche without violating the market's coverage requirement
      * @dev Always rounds in favor of senior tranche protection
      * @param state The synced accounting state that the maximum junior withdrawal is computed against
-     * @return stWithdrawableNAV The maximum claims on ST assets that the junior tranche can withdraw, denominated in NAV units
-     * @return jtWithdrawableNAV The maximum claims on JT assets that the junior tranche can withdraw, denominated in NAV units
+     * @return jtWithdrawableNAV The maximum assets that the junior tranche can withdraw, denominated in NAV units
      */
-    function maxJTWithdrawal(SyncedAccountingState memory state) external view returns (NAV_UNIT stWithdrawableNAV, NAV_UNIT jtWithdrawableNAV);
+    function maxJTWithdrawal(SyncedAccountingState memory state) external view returns (NAV_UNIT jtWithdrawableNAV);
 
     /**
      * @notice Returns the maximum assets withdrawable from the liquidity tranche without violating the market's liquidity requirement

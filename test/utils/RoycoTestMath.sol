@@ -634,29 +634,23 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice Max JT withdrawal: the coverage-surplus inversion with claim-fraction floors, the coverage
-     *         retention denominator, and the +2 wei fudge, split into per-tranche withdrawable NAVs.
+     * @notice Max JT withdrawal: the coverage-surplus inversion, stretched by the coverage retention factor (1 − minCoverageWAD).
      * @dev Mirrors src RoycoDayAccountant.maxJTWithdrawal.
-     *      surplus = sat(jtEffectiveNAV − (⌈exposure · minCoverageWAD / WAD⌉ + stDust + jtDust + 2)),
-     *      where the +2 wei absorbs the worst-case inner-ceil rounding of the coverage utilization check.
-     *      Fractions floor over totalJTClaims, retention = WAD − ⌊minCoverageWAD · (stFrac + jtFrac) / WAD⌋,
-     *      totalClaimable = ⌊surplus · WAD / retention⌋, and each split floors again.
-     *      Early-outs return (0, 0) on zero surplus, zero total claims, or zero claimable.
-     *      Rounding: mixed as stated. Favors: protocol. Precondition: retention > 0.
+     *      requiredJT = ⌈(exposure + stDust + jtDust) · minCoverageWAD / WAD⌉ folds the dust tolerances into the coverage requirement,
+     *      surplus = sat(jtEffectiveNAV − requiredJT). Since JT is coinvested, each withdrawn NAV unit relaxes the requirement by
+     *      minCoverageWAD, so the withdrawable NAV is ⌊surplus · WAD / (WAD − minCoverageWAD)⌋.
+     *      Rounding: Ceil on the requirement, Floor on the inversion. Favors: protocol. Precondition: minCoverageWAD < WAD.
      * @param stRawNAV The senior raw NAV at the synced marks
      * @param jtRawNAV The junior raw NAV at the synced marks
-     * @param stEffectiveNAV The senior effective NAV at the synced marks
      * @param jtEffectiveNAV The junior effective NAV at the synced marks
      * @param minCoverageWAD The minimum coverage fraction in WAD
      * @param stDust The ST NAV dust tolerance
      * @param jtDust The JT NAV dust tolerance
-     * @return stWithdrawable The JT-withdrawable NAV sourced from the ST raw NAV
-     * @return jtWithdrawable The JT-withdrawable NAV sourced from the JT raw NAV
+     * @return jtWithdrawable The JT-withdrawable NAV
      */
     function maxJTWithdrawal(
         uint256 stRawNAV,
         uint256 jtRawNAV,
-        uint256 stEffectiveNAV,
         uint256 jtEffectiveNAV,
         uint256 minCoverageWAD,
         uint256 stDust,
@@ -664,26 +658,11 @@ library RoycoTestMath {
     )
         internal
         pure
-        returns (uint256 stWithdrawable, uint256 jtWithdrawable)
+        returns (uint256 jtWithdrawable)
     {
-        uint256 jtClaimOnSTRaw = _sat(jtEffectiveNAV, jtRawNAV);
-        uint256 jtClaimOnJTRaw = jtRawNAV - _sat(stEffectiveNAV, stRawNAV);
-
-        uint256 exposure = stRawNAV + jtRawNAV;
-        uint256 requiredJTValue = Math.mulDiv(exposure, minCoverageWAD, WAD, Math.Rounding.Ceil);
-        uint256 surplus = _sat(jtEffectiveNAV, requiredJTValue + stDust + jtDust + 2);
-        if (surplus == 0) return (0, 0);
-
-        uint256 totalJTClaims = jtClaimOnSTRaw + jtClaimOnJTRaw;
-        if (totalJTClaims == 0) return (0, 0);
-        uint256 stFracWAD = Math.mulDiv(jtClaimOnSTRaw, WAD, totalJTClaims);
-        uint256 jtFracWAD = Math.mulDiv(jtClaimOnJTRaw, WAD, totalJTClaims);
-        uint256 retentionWAD = WAD - Math.mulDiv(minCoverageWAD, stFracWAD + jtFracWAD, WAD);
-        uint256 totalNAVClaimable = Math.mulDiv(surplus, WAD, retentionWAD);
-        if (totalNAVClaimable == 0) return (0, 0);
-
-        stWithdrawable = Math.mulDiv(totalNAVClaimable, stFracWAD, WAD);
-        jtWithdrawable = Math.mulDiv(totalNAVClaimable, jtFracWAD, WAD);
+        uint256 requiredJTValue = Math.mulDiv(stRawNAV + jtRawNAV + stDust + jtDust, minCoverageWAD, WAD, Math.Rounding.Ceil);
+        uint256 surplus = _sat(jtEffectiveNAV, requiredJTValue);
+        jtWithdrawable = Math.mulDiv(surplus, WAD, WAD - minCoverageWAD, Math.Rounding.Floor);
     }
 
     /**

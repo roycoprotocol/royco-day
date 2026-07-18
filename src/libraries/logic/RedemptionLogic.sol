@@ -324,10 +324,8 @@ library RedemptionLogic {
      * @notice Returns the maximum amount of assets that can be withdrawn from the senior tranche
      * @dev ST redemptions are allowed in PERPETUAL market states
      * @param _owner The address that is withdrawing the assets
-     * @return claimOnSTNAV The notional claims on ST assets that the senior tranche has denominated in kernel's NAV units
-     * @return claimOnJTNAV The notional claims on JT assets that the senior tranche has denominated in kernel's NAV units
+     * @return stClaimNAV The senior tranche's total notional claim on the market's raw NAVs, denominated in kernel's NAV units
      * @return stMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the senior tranche, denominated in the kernel's NAV units
-     * @return jtMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the junior tranche, denominated in the kernel's NAV units
      * @return totalTrancheShares The total number of shares that exist in the senior tranche after the post-sync mint of its protocol fee shares and liquidity premium shares
      */
     function stMaxWithdrawable(
@@ -336,36 +334,30 @@ library RedemptionLogic {
     )
         external
         view
-        returns (NAV_UNIT claimOnSTNAV, NAV_UNIT claimOnJTNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalTrancheShares)
+        returns (NAV_UNIT stClaimNAV, NAV_UNIT stMaxWithdrawableNAV, uint256 totalTrancheShares)
     {
         // If the owner is blacklisted or the kernel is currently paused, return zero claims
         if (BlacklistLogic._isBlacklisted($, _owner) || PausableUpgradeable(address(this)).paused()) {
-            return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+            return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
         }
 
+        // Get the senior tranche's total claim on the market's assets
         SyncedAccountingState memory state;
-        AssetClaims memory stClaims;
-        (state, stClaims, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.SENIOR);
+        (state,, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.SENIOR);
 
         // ST redemptions are disabled during a fixed-term market state
-        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
-        // Get the total claims the senior tranche has on each tranche's assets
-        claimOnSTNAV = IRoycoDayKernel(address(this)).stConvertTrancheUnitsToNAVUnits(stClaims.stAssets);
-        claimOnJTNAV = IRoycoDayKernel(address(this)).jtConvertTrancheUnitsToNAVUnits(stClaims.jtAssets);
-
-        // The max withdrawable assets globally for each tranche is its entire raw NAV (ST redemptions are otherwise unrestricted in a PERPETUAL state)
-        stMaxWithdrawableNAV = ValuationLogic._getSeniorTrancheRawNAV($);
-        jtMaxWithdrawableNAV = ValuationLogic._getJuniorTrancheRawNAV($);
+        // ST redemptions are otherwise unrestricted in a PERPETUAL state: the senior claim on each raw NAV pool never exceeds that pool, so its entire effective NAV is withdrawable
+        stClaimNAV = state.stEffectiveNAV;
+        stMaxWithdrawableNAV = state.stEffectiveNAV;
     }
 
     /**
      * @notice Returns the maximum amount of assets that can be withdrawn from the junior tranche
      * @dev JT redemptions are allowed only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-redemption
      * @param _owner The address that is withdrawing the assets
-     * @return claimOnSTNAV The notional claims on ST assets that the junior tranche has denominated in kernel's NAV units
-     * @return claimOnJTNAV The notional claims on JT assets that the junior tranche has denominated in kernel's NAV units
-     * @return stMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the senior tranche, denominated in the kernel's NAV units
+     * @return jtClaimNAV The junior tranche's total notional claim on the market's raw NAVs, denominated in kernel's NAV units
      * @return jtMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the junior tranche, denominated in the kernel's NAV units
      * @return totalTrancheShares The total number of shares that exist in the junior tranche after minting any protocol fee shares post-sync
      */
@@ -376,25 +368,25 @@ library RedemptionLogic {
     )
         external
         view
-        returns (NAV_UNIT claimOnSTNAV, NAV_UNIT claimOnJTNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalTrancheShares)
+        returns (NAV_UNIT jtClaimNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalTrancheShares)
     {
         // If the owner is blacklisted or the kernel is currently paused, return zero claims
         if (BlacklistLogic._isBlacklisted($, _owner) || PausableUpgradeable(address(this)).paused()) {
-            return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+            return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
         }
 
-        // Get the total claims the junior tranche has on each tranche's assets
+        // Get the junior tranche's total claim on the market's assets
         SyncedAccountingState memory state;
         (state,, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.JUNIOR);
 
         // JT redemptions are disabled during a fixed-term market state
-        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
-        // Use the precise NAV claims directly from the decomposition instead of round-tripping them through tranche units (NAV -> tranche -> NAV)
-        (,, claimOnSTNAV, claimOnJTNAV) = TrancheClaimsLogic._computeSTandJTClaimsOnRawNAVs(state);
+        // The junior tranche's total claim on the market's raw NAVs is exactly its effective NAV, since its claims on the ST and JT raw NAVs sum to it under NAV conservation
+        jtClaimNAV = state.jtEffectiveNAV;
 
-        // Get the max withdrawable ST and JT assets in NAV units from the accountant considering the coverage requirement
-        (stMaxWithdrawableNAV, jtMaxWithdrawableNAV) = IRoycoDayAccountant(_immutables.accountant).maxJTWithdrawal(state);
+        // Get the max withdrawable JT assets in NAV units from the accountant considering the coverage requirement
+        jtMaxWithdrawableNAV = IRoycoDayAccountant(_immutables.accountant).maxJTWithdrawal(state);
     }
 
     /**
