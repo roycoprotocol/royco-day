@@ -2549,11 +2549,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /**
-     * @notice Once the liquidation coverage utilization threshold is breached an LT redemption bypasses the
-     *         liquidity gate entirely: a redemption that leaves utilization above WAD succeeds and `maxRedeem`
-     *         reports the holder's full balance.
+     * @notice A breached liquidation coverage utilization does NOT waive the in-kind liquidity gate: `maxRedeem`
+     *         stays bounded below the holder's full balance and an in-kind redemption that would strand the pool
+     *         below the senior floor reverts LIQUIDITY_REQUIREMENT_VIOLATED.
      */
-    function test_LTRedeem_liquidationBreach_bypassesLiquidityGate() public whenLT {
+    function test_LTRedeem_liquidationBreach_enforcesLiquidityGate() public whenLT {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
         _seedDefaultLT();
         _sync();
@@ -2565,13 +2565,13 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertGe(pre.coverageUtilizationWAD, ACCOUNTANT.getState().coverageLiquidationUtilizationWAD, "arrange: the liquidation threshold must be breached");
         uint256 shares = (LT.balanceOf(LT_ALICE_ADDRESS) * 3) / 4;
         _assertSliceWouldBreachLiquidity(shares, minLiquidityWAD, pre);
-        assertEq(LT.maxRedeem(LT_ALICE_ADDRESS), LT.balanceOf(LT_ALICE_ADDRESS), "the full pooled depth must be withdrawable once liquidation is breached");
+        assertLt(LT.maxRedeem(LT_ALICE_ADDRESS), LT.balanceOf(LT_ALICE_ADDRESS), "the liquidation breach must not waive the in-kind liquidity gate");
 
-        OpReceipt memory r = _doRedeemLT(LT_ALICE_ADDRESS, shares);
-        assertGt(toUint256(r.claims.ltAssets), 0, "the bypassed redemption must pay the BPT slice");
-        assertGt(r.post.liquidityUtilizationWAD, WAD, "the gate must have been truly bypassed");
-        assertEq(r.post.ltSupply, r.pre.ltSupply - shares, "LT supply must fall by exactly the redeemed shares");
-        _assertCommittedConservation();
+        // The in-kind redemption only shrinks the pool depth, so it cannot relax its own floor and reverts
+        vm.prank(LT_ALICE_ADDRESS);
+        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        LT.redeem(shares, LT_ALICE_ADDRESS, LT_ALICE_ADDRESS);
+        _assertMarketUnchanged(pre);
     }
 
     /**
@@ -4188,8 +4188,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
     /**
      * @notice PINS the post-liquidation-breach per-tranche withdrawal rules: senior redemptions pay the bonus, LT
-     *         redemptions bypass the liquidity gate with the full pooled depth reported withdrawable, and junior
-     *         redemptions stay coverage-gated with zero reported capacity.
+     *         redemptions stay liquidity-gated with only a bounded surplus reported withdrawable and an
+     *         over-floor in-kind redemption reverting, and junior redemptions stay coverage-gated with zero
+     *         reported capacity.
      */
     function test_LiquidationBreach_perTrancheWithdrawalRules() public whenLT {
         _ensureSelfLiquidationBonusConfigured();
@@ -4211,17 +4212,17 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
         JT.redeem(jtShares, JT_ALICE_ADDRESS, JT_ALICE_ADDRESS);
 
-        // (d) The full pooled depth is reported withdrawable
+        // (d) The liquidity gate is enforced under liquidation: only a bounded surplus below the full pooled depth is reported
         (, NAV_UNIT ltMaxWithdrawableNAV,) = KERNEL.ltMaxWithdrawable(LT_ALICE_ADDRESS);
-        assertEq(ltMaxWithdrawableNAV, pre.lastLTRawNAV, "the full pooled depth must be withdrawable once liquidation is breached");
-        assertEq(LT.maxRedeem(LT_ALICE_ADDRESS), LT.balanceOf(LT_ALICE_ADDRESS), "ltMaxRedeem must report the holder's full balance");
+        assertLt(ltMaxWithdrawableNAV, pre.lastLTRawNAV, "the liquidation breach must not waive the pooled-depth liquidity floor");
+        assertLt(LT.maxRedeem(LT_ALICE_ADDRESS), LT.balanceOf(LT_ALICE_ADDRESS), "ltMaxRedeem must stay bounded below the full balance");
 
-        // (b) An LT redemption that overruns the liquidity floor succeeds (the gate is bypassed)
+        // (b) An in-kind LT redemption that overruns the liquidity floor reverts even during the breach
         uint256 ltShares = (LT.balanceOf(LT_ALICE_ADDRESS) * 3) / 4;
         _assertSliceWouldBreachLiquidity(ltShares, minLiquidityWAD, pre);
-        OpReceipt memory rLT = _doRedeemLT(LT_ALICE_ADDRESS, ltShares);
-        assertGt(toUint256(rLT.claims.ltAssets), 0, "the bypassed LT redemption must pay the BPT slice");
-        assertGt(rLT.post.liquidityUtilizationWAD, WAD, "the liquidity gate must have been truly bypassed");
+        vm.prank(LT_ALICE_ADDRESS);
+        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        LT.redeem(ltShares, LT_ALICE_ADDRESS, LT_ALICE_ADDRESS);
 
         // (a) A senior redemption succeeds and pays the exact bonus out of the junior effective NAV
         _sync();
