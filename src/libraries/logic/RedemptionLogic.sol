@@ -189,11 +189,9 @@ library RedemptionLogic {
         // Remove the liquidity equivalent to the LT assets the user has a claim on
         uint256 stSharesWithdrawn;
         if (userAssetClaims.stShares != 0) $.ltOwnedSeniorTrancheShares -= userAssetClaims.stShares;
-        if (userAssetClaims.ltAssets != ZERO_TRANCHE_UNITS) {
-            $.ltOwnedYieldBearingAssets = $.ltOwnedYieldBearingAssets - userAssetClaims.ltAssets;
-            (stSharesWithdrawn, quoteAssets) =
-                IRoycoDayKernel(address(this)).removeLiquidity(userAssetClaims.ltAssets, _minSTSharesOut, _minQuoteAssetsOut, _receiver);
-        }
+        $.ltOwnedYieldBearingAssets = $.ltOwnedYieldBearingAssets - userAssetClaims.ltAssets;
+        (stSharesWithdrawn, quoteAssets) =
+            IRoycoDayKernel(address(this)).removeLiquidity(userAssetClaims.ltAssets, _minSTSharesOut, _minQuoteAssetsOut, _receiver);
 
         // Redeem all of the redeemer's senior shares from the venue and from the premium
         uint256 stSharesToRedeem = stSharesWithdrawn + userAssetClaims.stShares;

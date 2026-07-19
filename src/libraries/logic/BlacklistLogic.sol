@@ -36,6 +36,19 @@ library BlacklistLogic {
     }
 
     /**
+     * @notice Batch-screens the specified accounts against the market's configured blacklist
+     * @dev No-op when no blacklist is configured (the null address disables screening)
+     * @dev Reverts if any specified account is blacklisted
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _accounts The addresses of the accounts to screen
+     */
+    function _enforceNotBlacklisted(IRoycoDayKernel.RoycoDayKernelState storage $, address[] memory _accounts) internal view {
+        // Batch screen the specified accounts against the market's blacklist if one is configured (the null address disables screening)
+        address roycoBlacklist = $.roycoBlacklist;
+        if (roycoBlacklist != address(0)) IRoycoBlacklist(roycoBlacklist).enforceNotBlacklisted(_accounts);
+    }
+
+    /**
      * @notice Batch-screens the accounts involved in a tranche share balance update against the market's configured blacklist
      * @dev No-op when no blacklist is configured (the null address disables screening)
      * @dev Reverts if any specified account is blacklisted

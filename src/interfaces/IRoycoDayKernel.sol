@@ -589,6 +589,14 @@ interface IRoycoDayKernel {
     function attemptLiquidityPremiumReinvestment(uint256 _stSharesToReinvest, NAV_UNIT _stEffectiveNAV, uint256 _totalSTShares) external;
 
     /**
+     * @notice Reverts if any of the specified accounts is blacklisted by the market's configured blacklist
+     * @dev No-op when no blacklist is configured (the null address disables screening)
+     * @dev Exposes the market's blacklist screening to periphery contracts whose value flows settle outside the tranche balance update hooks
+     * @param _accounts The addresses of the accounts to screen
+     */
+    function enforceNotBlacklisted(address[] memory _accounts) external view;
+
+    /**
      * @notice Pre-balance update hook for the tranche
      * @dev This function should revert if the balance update is invalid
      * @dev Should be called before every tranche share balance update

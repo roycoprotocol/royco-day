@@ -576,6 +576,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         _preTrancheBalanceUpdate(_caller, _from, _to, _value);
     }
 
+    /// @inheritdoc IRoycoDayKernel
+    function enforceNotBlacklisted(address[] memory _accounts) external view override(IRoycoDayKernel) {
+        BlacklistLogic._enforceNotBlacklisted(_getRoycoDayKernelStorage(), _accounts);
+    }
+
     /**
      * @notice Pre-balance update hook for the kernel
      * @dev Intentionally implemented with an empty body since inheriting contracts are not required to override this function
