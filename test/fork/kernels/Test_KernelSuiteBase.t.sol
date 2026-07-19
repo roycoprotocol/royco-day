@@ -632,11 +632,15 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /**
      * @notice Expected LT premium and ST fee share mints, both floor-priced against the retained senior NAV
      *         `(stEffectiveNAVPost - prem - fee)` at the pre-sync supply.
-     * @dev Mirrors `FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint`.
+     * @dev Mirrors `FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint`. The LT protocol fee
+     *      is carved out of the premium: the premium leg mints `(prem - ltFee)` and the fee leg mints `(fee + ltFee)`,
+     *      so the LT holds the premium net of the fee and the protocol receives the fee as senior shares. The retained
+     *      denominator subtracts the gross premium and the ST fee, so the carve-out leaves it unchanged.
      */
     function _expectedPremiumShares(
         NAV_UNIT _prem,
         NAV_UNIT _fee,
+        NAV_UNIT _ltFee,
         NAV_UNIT _stEffectiveNAVPost,
         uint256 _preSupply
     )
@@ -645,8 +649,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         returns (uint256 premShares, uint256 feeShares)
     {
         NAV_UNIT retainedSeniorNAV = toNAVUnits(toUint256(_stEffectiveNAVPost) - toUint256(_prem) - toUint256(_fee));
-        premShares = _expectedShares(_prem, _preSupply, retainedSeniorNAV);
-        feeShares = _expectedShares(_fee, _preSupply, retainedSeniorNAV);
+        premShares = _expectedShares(toNAVUnits(toUint256(_prem) - toUint256(_ltFee)), _preSupply, retainedSeniorNAV);
+        feeShares = _expectedShares(toNAVUnits(toUint256(_fee) + toUint256(_ltFee)), _preSupply, retainedSeniorNAV);
     }
 
     /**
@@ -1485,7 +1489,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertGt(toUint256(e.stProtocolFee), 0, "arrange: an ST protocol fee must accrue");
         assertGt(toUint256(e.jtProtocolFee), 0, "arrange: a JT yield-share protocol fee must accrue");
 
-        (uint256 premShares, uint256 stFeeShares) = _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.stEffectiveNAV, stSupplyPre);
+        (uint256 premShares, uint256 stFeeShares) = _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.ltProtocolFee, e.stEffectiveNAV, stSupplyPre);
         uint256 jtFeeShares = _expectedShares(e.jtProtocolFee, jtSupplyPre, e.jtEffectiveNAV - e.jtProtocolFee);
         uint256 expectedDepositShares = _expectedShares(value, stSupplyPre + premShares + stFeeShares, e.stEffectiveNAV);
         uint256 feeRecipientSTPre = ST.balanceOf(PROTOCOL_FEE_RECIPIENT_ADDRESS);
@@ -3024,7 +3028,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         uint256 stSupplyPre = ST.totalSupply();
         uint256 jtSupplyPre = JT.totalSupply();
-        (uint256 premShares, uint256 stFeeShares) = _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.stEffectiveNAV, stSupplyPre);
+        (uint256 premShares, uint256 stFeeShares) = _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.ltProtocolFee, e.stEffectiveNAV, stSupplyPre);
         uint256 jtFeeShares = _expectedShares(e.jtProtocolFee, jtSupplyPre, e.jtEffectiveNAV - e.jtProtocolFee);
         MarketSnapshot memory pre = _snap();
 
@@ -3220,7 +3224,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         uint256 stSupplyPre = ST.totalSupply();
         uint256 jtSupplyPre = JT.totalSupply();
-        (uint256 premShares, uint256 stFeeShares) = _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.stEffectiveNAV, stSupplyPre);
+        (uint256 premShares, uint256 stFeeShares) = _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.ltProtocolFee, e.stEffectiveNAV, stSupplyPre);
         uint256 jtFeeShares = _expectedShares(e.jtProtocolFee, jtSupplyPre, e.jtEffectiveNAV - e.jtProtocolFee);
         SyncedAccountingState memory state = _syncWithState();
 
@@ -3411,7 +3415,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         SyncExpectation memory e = _arrangeStagedPremiumSyncExpectation();
         assertLe(e.jtYieldShareWAD + e.ltYieldShareWAD, WAD, "the yield share caps must preclude PREMIUMS_EXCEED_SENIOR_YIELD");
         uint256 stSupplyPre = ST.totalSupply();
-        (uint256 premShares, uint256 stFeeShares) = _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.stEffectiveNAV, stSupplyPre);
+        (uint256 premShares, uint256 stFeeShares) = _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.ltProtocolFee, e.stEffectiveNAV, stSupplyPre);
         assertGt(premShares, 0, "arrange: the premium must mint shares");
         MarketSnapshot memory pre = _snap();
 
@@ -3442,7 +3446,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function test_Sync_premiumMint_coverageNeutral() public whenLT {
         SyncExpectation memory e = _arrangeStagedPremiumSyncExpectation();
         uint256 stSupplyPre = ST.totalSupply();
-        (uint256 premShares, uint256 stFeeShares) = _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.stEffectiveNAV, stSupplyPre);
+        (uint256 premShares, uint256 stFeeShares) = _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.ltProtocolFee, e.stEffectiveNAV, stSupplyPre);
         assertGt(premShares, 0, "arrange: the premium must mint shares");
 
         SyncedAccountingState memory state = _syncWithState();
@@ -3528,7 +3532,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         SyncExpectation memory e = _buildSyncExpectation(false);
         assertGt(toUint256(e.ltLiquidityPremium), 0, "arrange: the LDM must price a nonzero liquidity premium");
         uint256 stSupplyPre = ST.totalSupply();
-        (uint256 premShares, uint256 stFeeShares) = _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.stEffectiveNAV, stSupplyPre);
+        (uint256 premShares, uint256 stFeeShares) = _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.ltProtocolFee, e.stEffectiveNAV, stSupplyPre);
         assertGt(premShares, 0, "arrange: the premium must mint shares");
         NAV_UNIT premiumValue = _expectedValue(premShares, stSupplyPre + premShares + stFeeShares, e.stEffectiveNAV);
         uint256 minLtAssetsOut = Math.mulDiv(toUint256(KERNEL.ltConvertNAVUnitsToTrancheUnits(premiumValue)), WAD - slippageWAD, WAD, Math.Rounding.Ceil);
