@@ -9,8 +9,7 @@ import { NAV_UNIT, TRANCHE_UNIT } from "./Units.sol";
  * @custom:state PERPETUAL
  *      Normal operating state where market forces govern behavior, and the permanent state of a market configured with no fixed-term duration
  *      - The market is healthy (no losses over dust tolerance), severely undercollateralized (liquidation coverage utilization breached), or uncollateralized (no JT NAV remaining against a non-zero ST NAV)
- *      - All three tranches are liquid, subject to the coverage and liquidity requirements
- *      - While under/uncollateralized the LT shares ST's liquidity profile: the liquidity requirement is exempt
+ *      - All three tranches are liquid, subject to the coverage and liquidity requirements at all times, including while under or uncollateralized
  *      - Premiums and protocol fees accrue on ST yield, and adaptive curve YDMs adapt to this market's coverage and liquidity utilization
  * @custom:state FIXED_TERM
  *      Temporary recovery state entered when JT covers an ST drawdown while coverage stays within the liquidation threshold

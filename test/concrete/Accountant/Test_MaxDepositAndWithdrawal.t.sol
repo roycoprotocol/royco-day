@@ -197,40 +197,40 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * Mirror parity across the closed form's branch set: the ceil'd required depth, both bypasses (zero
-     * requirement, liquidation breach at the EXACT threshold per the >= comparison), and saturation.
+     * Mirror parity across the closed form's branch set: the ceil'd required depth, the zero-requirement bypass,
+     * coverage independence (the requirement holds even at and above the liquidation threshold), and saturation.
      * Required depth = ceil((600e18 + 11) * 0.03) = 18e18 + 1 (the 0.33 wei remainder rounds up):
      *   max = 40e18 - (18e18 + 1) = 22e18 - 1
-     * minLiquidity 0 -> full 40e18. coverageUtilization == liqThreshold (1.1e18) exactly -> full 40e18, one below -> restricted.
+     * minLiquidity 0 -> full 40e18. coverageUtilization at, above, and below the liquidation threshold all read 22e18 - 1.
      * ltRawNAV 10e18 < required -> saturates to 0
      */
-    function test_MaxLTWithdrawal_matchesRTM_ceilBypassesAndSaturation() public view {
+    function test_MaxLTWithdrawal_matchesRTM_ceilCoverageIndependenceAndSaturation() public view {
         // Ceil'd required depth
         SyncedAccountingState memory st = _bareState(700e18, 100e18, 40e18, 600e18 + 11, 100e18, 0.1e18, 0.03e18);
         assertEq(toUint256(accountant.maxLTWithdrawal(st)), 22e18 - 1, "ceil'd required depth at the hand literal");
-        assertEq(RoycoTestMath.maxLTWithdrawal(40e18, 600e18 + 11, 0.03e18, 0, 0, type(uint256).max), 22e18 - 1, "RTM ceil case");
+        assertEq(RoycoTestMath.maxLTWithdrawal(40e18, 600e18 + 11, 0.03e18, 0), 22e18 - 1, "RTM ceil case");
 
         // Zero-requirement bypass
         st.minLiquidityWAD = 0;
         assertEq(toUint256(accountant.maxLTWithdrawal(st)), 40e18, "no requirement leaves the full inventory withdrawable");
-        assertEq(RoycoTestMath.maxLTWithdrawal(40e18, 600e18 + 11, 0, 0, 0, type(uint256).max), 40e18, "RTM zero-requirement bypass");
+        assertEq(RoycoTestMath.maxLTWithdrawal(40e18, 600e18 + 11, 0, 0), 40e18, "RTM zero-requirement bypass");
 
-        // Liquidation-breach bypass at the exact threshold (>= comparison)
+        // Coverage independence: a breached liquidation threshold no longer unlocks the inventory, the requirement holds at all coverage levels
         st.minLiquidityWAD = 0.03e18;
         st.coverageLiquidationUtilizationWAD = 1.1e18;
         st.coverageUtilizationWAD = 1.1e18;
-        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 40e18, "the exact liquidation boundary unlocks the full inventory");
-        assertEq(RoycoTestMath.maxLTWithdrawal(40e18, 600e18 + 11, 0.03e18, 0, 1.1e18, 1.1e18), 40e18, "RTM exact-threshold bypass");
+        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 22e18 - 1, "the exact liquidation boundary stays requirement-restricted");
+        st.coverageUtilizationWAD = type(uint256).max;
+        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 22e18 - 1, "a wipeout-grade utilization stays requirement-restricted");
         st.coverageUtilizationWAD = 1.1e18 - 1;
-        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 22e18 - 1, "one below the boundary stays restricted");
-        assertEq(RoycoTestMath.maxLTWithdrawal(40e18, 600e18 + 11, 0.03e18, 0, 1.1e18 - 1, 1.1e18), 22e18 - 1, "RTM below-threshold restriction");
+        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 22e18 - 1, "one below the boundary reads identically");
 
         // Saturation
         st.coverageUtilizationWAD = 0;
         st.coverageLiquidationUtilizationWAD = type(uint256).max;
         st.ltRawNAV = toNAVUnits(uint256(10e18));
         assertEq(toUint256(accountant.maxLTWithdrawal(st)), 0, "under-provisioned inventory saturates to zero");
-        assertEq(RoycoTestMath.maxLTWithdrawal(10e18, 600e18 + 11, 0.03e18, 0, 0, type(uint256).max), 0, "RTM saturation");
+        assertEq(RoycoTestMath.maxLTWithdrawal(10e18, 600e18 + 11, 0.03e18, 0), 0, "RTM saturation");
     }
 
     /**
@@ -252,7 +252,7 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
         NAV_UNIT max = accountant.maxLTWithdrawal(_checkpointState());
         assertEq(toUint256(max), 50e18 - 1, "closed form off the dust-padded required depth");
         // coverageUtilization at the flat seed = ceil((1000e18 + 200e18) * 0.1 / 200e18) = 0.6e18, below the 1.1e18 threshold: no bypass
-        assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18, 0.05e18, 3, 0.6e18, 1.1e18), toUint256(max), "RTM parity");
+        assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18, 0.05e18, 3), toUint256(max), "RTM parity");
 
         // Redeem exactly the reported max
         SyncedAccountingState memory state = kernel.doPostOp(
@@ -457,18 +457,20 @@ contract Test_MaxDepositAndWithdrawal_Accountant is AccountantTestBase {
     }
 
     /**
-     * a coverage utilization at or above the liquidation threshold unlocks the entire liquidity raw NAV,
-     * inclusive at the exact boundary and at the uint256 max wipeout reading, while one below stays restricted
+     * the liquidity requirement holds at every coverage level: a coverage utilization at the liquidation
+     * threshold, past it at the uint256 max wipeout reading, and just below it all report the same restricted
+     * surplus, since the withdrawal bound no longer reads coverage
+     * required = ceil(1000e18 * 0.05) = 50e18, so max = 100e18 - 50e18 = 50e18 regardless of coverage
      */
-    function test_MaxLTWithdrawal_fullLTRawAtLiquidationBoundary() public view {
+    function test_MaxLTWithdrawal_enforcedRegardlessOfLiquidationBoundary() public view {
         SyncedAccountingState memory st = _bareState(1000e18, 200e18, 100e18, 1000e18, 200e18, 0.1e18, 0.05e18);
         st.coverageLiquidationUtilizationWAD = DEFAULT_LIQUIDATION_UTILIZATION_WAD;
         st.coverageUtilizationWAD = DEFAULT_LIQUIDATION_UTILIZATION_WAD;
-        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 100e18, "the exact liquidation boundary unlocks the full inventory");
+        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 50e18, "the exact liquidation boundary stays requirement-restricted");
         st.coverageUtilizationWAD = type(uint256).max;
-        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 100e18, "a wipeout-grade utilization unlocks the full inventory");
+        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 50e18, "a wipeout-grade utilization stays requirement-restricted");
         st.coverageUtilizationWAD = DEFAULT_LIQUIDATION_UTILIZATION_WAD - 1;
-        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 50e18, "one below the boundary stays requirement-restricted");
+        assertEq(toUint256(accountant.maxLTWithdrawal(st)), 50e18, "one below the boundary reads identically");
     }
 
     /**

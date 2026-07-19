@@ -1244,33 +1244,27 @@ contract Test_RoycoTestMath is Test {
 
     /// Nominal: required = ⌈1000e18·5e16/1e18⌉ = 50e18 exact, withdrawable = 100e18 − 50e18 = 50e18.
     function test_MaxLTWithdrawal_Nominal() public pure {
-        assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18, 5e16, 0, 5e17, 1.1e18), 50e18, "half the pool is surplus");
+        assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18, 5e16, 0), 50e18, "half the pool is surplus");
     }
 
     /// Ceil on the required depth: stEffectiveNAV 1000e18+1 ⇒ required = ⌈50e18 + 0.05⌉ = 50e18 + 1 ⇒ 50e18 − 1.
     function test_MaxLTWithdrawal_CeilInnerRounding() public pure {
-        assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18 + 1, 5e16, 0, 5e17, 1.1e18), 50e18 - 1, "ceil bites one wei");
+        assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18 + 1, 5e16, 0), 50e18 - 1, "ceil bites one wei");
     }
 
     /// The stDust folds into the senior NAV before μ-scaling: required = ⌈(1000e18 + 3)·0.05⌉ = 50e18 + 1 ⇒ 50e18 − 1.
     function test_MaxLTWithdrawal_StDustSlack() public pure {
-        assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18, 5e16, 3, 5e17, 1.1e18), 50e18 - 1, "dust slack");
+        assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18, 5e16, 3), 50e18 - 1, "dust slack");
     }
 
     /// minLiq == 0 bypasses the gate entirely: the whole ltRawNAV is withdrawable.
     function test_MaxLTWithdrawal_ZeroMinLiquidity_FullLtRaw() public pure {
-        assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18, 0, 0, 5e17, 1.1e18), 100e18, "no liquidity requirement");
-    }
-
-    /// Liquidation breach at the EXACT threshold bypasses (the comparison is >=): full ltRawNAV.
-    function test_MaxLTWithdrawal_LiquidationBreachExactThreshold_FullLtRaw() public pure {
-        assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18, 5e16, 0, 1.1e18, 1.1e18), 100e18, "exact threshold bypasses");
-        assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18, 5e16, 0, 1.1e18 - 1, 1.1e18), 50e18, "one wei below gates");
+        assertEq(RoycoTestMath.maxLTWithdrawal(100e18, 1000e18, 0, 0), 100e18, "no liquidity requirement");
     }
 
     /// Saturation: required 50e18 above the pool depth 40e18 saturates to 0.
     function test_MaxLTWithdrawal_SaturatesToZero() public pure {
-        assertEq(RoycoTestMath.maxLTWithdrawal(40e18, 1000e18, 5e16, 0, 5e17, 1.1e18), 0, "under-provisioned pool");
+        assertEq(RoycoTestMath.maxLTWithdrawal(40e18, 1000e18, 5e16, 0), 0, "under-provisioned pool");
     }
 
     /*//////////////////////////////////////////////////////////////////////////

@@ -346,6 +346,8 @@ library RoycoTestMath {
      *      of the post-mint supply (the residual guarantee is per mint, not per sync).
      *      Rounding: Floor on both mints. Favors: pre-existing ST shares.
      *      Precondition: premium + fee <= stEffectiveNAV (guaranteed upstream by the tranche accounting sync).
+     * @dev This zero-ltFee overload forwards to the five-argument form: with no LT protocol fee the premium leg
+     *      mints the full premium and the fee leg mints only the ST protocol fee.
      * @param stEffectiveNAV The post-sync senior effective NAV
      * @param premium The LT liquidity premium to mint as ST shares
      * @param fee The ST protocol fee to mint as ST shares
@@ -364,9 +366,40 @@ library RoycoTestMath {
         pure
         returns (uint256 premiumShares, uint256 feeShares, uint256 supplyAfter)
     {
+        return computeSTFeeAndLiquidityPremiumSharesToMint(stEffectiveNAV, premium, fee, 0, preSupply);
+    }
+
+    /**
+     * @notice The senior share mint split with an LT protocol fee carved out of the liquidity premium.
+     * @dev Mirrors src FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint. The LT protocol
+     *      fee moves from the premium carve-out into the fee carve-out: the premium leg mints (premium − ltFee) so
+     *      the LT holds the premium net of the fee, and the fee leg mints (fee + ltFee) so the protocol receives the
+     *      ST protocol fee plus the carved LT fee as senior shares. The retained denominator subtracts the gross
+     *      premium and the ST fee (the LT fee is already inside the premium), so it is unchanged by the carve-out.
+     *      Precondition: ltFee <= premium and premium + fee <= stEffectiveNAV (both guaranteed upstream).
+     * @param stEffectiveNAV The post-sync senior effective NAV
+     * @param premium The gross LT liquidity premium
+     * @param fee The ST protocol fee to mint as ST shares
+     * @param ltFee The LT protocol fee carved out of the premium and remitted as ST shares to the protocol
+     * @param preSupply The pre-sync ST share supply
+     * @return premiumShares The ST shares minted for the premium net of the LT fee
+     * @return feeShares The ST shares minted for the ST fee plus the carved LT fee
+     * @return supplyAfter The ST share supply after both mints
+     */
+    function computeSTFeeAndLiquidityPremiumSharesToMint(
+        uint256 stEffectiveNAV,
+        uint256 premium,
+        uint256 fee,
+        uint256 ltFee,
+        uint256 preSupply
+    )
+        internal
+        pure
+        returns (uint256 premiumShares, uint256 feeShares, uint256 supplyAfter)
+    {
         uint256 retained = stEffectiveNAV - premium - fee;
-        premiumShares = convertToShares(premium, retained, preSupply);
-        feeShares = convertToShares(fee, retained, preSupply);
+        premiumShares = convertToShares(premium - ltFee, retained, preSupply);
+        feeShares = convertToShares(fee + ltFee, retained, preSupply);
         supplyAfter = preSupply + premiumShares + feeShares;
     }
 
@@ -668,31 +701,27 @@ library RoycoTestMath {
     /**
      * @notice Max LT withdrawal: ltRawNAV − (⌈stEffectiveNAV · minLiquidityWAD / WAD⌉ + stDust), saturating.
      * @dev Mirrors src RoycoDayAccountant.maxLTWithdrawal.
-     *      Bypasses (full ltRawNAV): minLiquidityWAD == 0, or coverageUtilizationWAD >= coverageLiquidationUtilizationWAD
-     *      (liquidation breached, the comparison is >= so the exact threshold bypasses).
+     *      Bypass (full ltRawNAV): minLiquidityWAD == 0. The liquidity requirement is enforced at all coverage levels,
+     *      including once the liquidation coverage threshold is breached, so no coverage input feeds the bound.
      *      Rounding: Ceil on the dust-padded required depth (the dust tolerance folds into the senior NAV before
      *      scaling, mirroring the accountant). Favors: senior (the max reads low).
      * @param ltRawNAV The LT raw NAV at the synced marks
      * @param stEffectiveNAV The senior effective NAV at the synced marks
      * @param minLiquidityWAD The minimum liquidity fraction in WAD
      * @param stDust The ST NAV dust tolerance
-     * @param coverageUtilizationWAD The coverage utilization at the synced marks
-     * @param coverageLiquidationUtilizationWAD The coverage liquidation utilization threshold in WAD
      * @return ltWithdrawable The maximum LT withdrawal NAV
      */
     function maxLTWithdrawal(
         uint256 ltRawNAV,
         uint256 stEffectiveNAV,
         uint256 minLiquidityWAD,
-        uint256 stDust,
-        uint256 coverageUtilizationWAD,
-        uint256 coverageLiquidationUtilizationWAD
+        uint256 stDust
     )
         internal
         pure
         returns (uint256 ltWithdrawable)
     {
-        if (minLiquidityWAD == 0 || coverageUtilizationWAD >= coverageLiquidationUtilizationWAD) return ltRawNAV;
+        if (minLiquidityWAD == 0) return ltRawNAV;
         uint256 requiredLTValue = Math.mulDiv(stEffectiveNAV + stDust, minLiquidityWAD, WAD, Math.Rounding.Ceil);
         ltWithdrawable = _sat(ltRawNAV, requiredLTValue);
     }

@@ -70,7 +70,7 @@ library AccountingSyncLogic {
      * @param _trancheType An enumerator indicating which tranche to execute this preview for
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      * @return claims The claims on ST and JT assets that the specified tranche has denominated in tranche-native units
-     * @return totalTrancheShares The total number of shares that exist in the specified tranche after the post-sync mint of its accrued shares: the protocol fee shares for every tranche, plus the liquidity premium shares for the senior tranche
+     * @return totalTrancheShares The total number of shares that exist in the specified tranche after the post-sync mint of its accrued shares: the protocol fee shares for the senior and junior tranches, plus the liquidity premium shares for the senior tranche (the liquidity tranche mints none)
      */
     function previewSyncTrancheAccounting(
         IRoycoDayKernel.RoycoDayKernelState storage $,
@@ -99,17 +99,15 @@ library AccountingSyncLogic {
                 state.jtProtocolFee, (state.jtEffectiveNAV - state.jtProtocolFee), totalTrancheShares, Math.Rounding.Floor
             );
         } else {
-            // Compute LT share supply after the LT protocol fee shares are minted
+            // Simulate the liquidity premium senior-share mint (net of the LT protocol fee, which is carved out as senior shares to the protocol) to value the LT effective NAV
             (uint256 liquidityPremiumShares,, uint256 stTotalSupplyAfterMints) =
                 FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(_immutables.seniorTranche).totalSupply());
             // Update the simulated post-mint ST shares owned by LT
             uint256 ltOwnedSeniorTrancheShares = $.ltOwnedSeniorTrancheShares + liquidityPremiumShares;
             claims.stShares = ltOwnedSeniorTrancheShares;
             claims.nav = ValuationLogic._getLiquidityTrancheEffectiveNAV($, state.stEffectiveNAV, stTotalSupplyAfterMints, ltOwnedSeniorTrancheShares);
+            // The LT protocol fee no longer mints liquidity tranche shares, so this sync leaves the LT share supply unchanged
             totalTrancheShares = IERC20(_immutables.liquidityTranche).totalSupply();
-            totalTrancheShares += ValuationLogic._convertToShares(
-                state.ltProtocolFee, (claims.nav - state.ltProtocolFee), totalTrancheShares, Math.Rounding.Floor
-            );
         }
     }
 

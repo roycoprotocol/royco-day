@@ -163,18 +163,10 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         // required liquidity floor, or executing the advertised max would breach the no-run guarantee
         assertLe(reportedMax + requiredFloor, depth, "the reported max must leave the required liquidity floor in the pool");
 
-        // A breached liquidation threshold would bypass the liquidity gate and unlock the full depth, so
-        // prove the bypass is inactive rather than assume it: with the market's 20% minimum coverage and
-        // jt >= floor(st/2), the flat coverage utilization ceil((st + jt) * 0.2e18 / jt) is at most
-        // 0.6e18 + 1 wei (since (st + jt) / jt <= 3 up to the flooring in jt's lower bound), while the
-        // deployed liquidation threshold must exceed WAD -- a market cannot be declared in liquidation
-        // before its coverage is even fully utilized
-        uint256 flatCoverageUtilizationWAD = RoycoTestMath.computeCoverageUtilization(st, jt, 0.2e18, jt);
-        uint256 liquidationThresholdWAD = accountant.getState().coverageLiquidationUtilizationWAD;
-        assertLe(flatCoverageUtilizationWAD, 0.6e18 + 1, "flat 2:1-to-1:2 seeds mark at most 60% coverage utilization");
-        assertGt(liquidationThresholdWAD, WAD, "the deployed liquidation threshold must sit above full coverage utilization");
+        // The independent mirror agrees with the reported max: the liquidity requirement is coverage-blind, so
+        // the surplus depends only on the depth, the senior effective NAV, and the dust-padded floor
         assertEq(
-            RoycoTestMath.maxLTWithdrawal(depth, st, 0.05e18, 1, flatCoverageUtilizationWAD, liquidationThresholdWAD),
+            RoycoTestMath.maxLTWithdrawal(depth, st, 0.05e18, 1),
             expectedMax,
             "independent mirror must agree with the reported max"
         );

@@ -245,9 +245,11 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 0, "the full exit must execute under the waiver");
     }
 
-    /// @notice Past the coverage liquidation threshold LT redemptions are exempt from the liquidity requirement:
-    ///         the maximum reports the full balance and the full exit executes even though it strands the market below the floor
-    function test_MaxRedeemMultiAsset_CoverageLiquidationBreach_WaivesLiquidityGate() public {
+    /// @notice Past the coverage liquidation threshold the liquidity requirement still holds: the multi-asset
+    ///         maximum reports a bounded surplus below the full balance (a multi-asset exit relaxes the floor by
+    ///         unwinding senior depth, so it dominates the in-kind maximum but never waives the gate), a full
+    ///         exit reverts, and redeeming exactly the maximum leaves the liquidity floor satisfied
+    function test_MaxRedeemMultiAsset_CoverageLiquidationBreach_EnforcesLiquidityGate() public {
         // Crash the shared senior/junior rate 60%: junior absorbs losses until exhausted, so coverage
         // utilization reads past the liquidation threshold and the market forces perpetual
         applySTPnL(-6000);
@@ -257,14 +259,24 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
             RoycoTestMath.computeCoverageUtilization(toUint256(a.lastSTRawNAV), toUint256(a.lastJTRawNAV), a.minCoverageWAD, toUint256(a.lastJTEffectiveNAV));
         assertGe(coverageUtilizationWAD, a.coverageLiquidationUtilizationWAD, "setup: expected liquidation coverage to read breached");
 
+        // The breach no longer waives the liquidity gate: the multi-asset maximum is a bounded surplus below the
+        // full balance, and it still dominates the in-kind maximum because a multi-asset exit relaxes the floor
         uint256 balance = liquidityTranche.balanceOf(LT_PROVIDER);
-        assertEq(liquidityTranche.maxRedeemMultiAsset(LT_PROVIDER), balance, "the liquidation exemption must report the full balance");
-        assertEq(liquidityTranche.maxRedeemMultiAsset(LT_PROVIDER), liquidityTranche.maxRedeem(LT_PROVIDER), "both maxima must agree under the exemption");
+        uint256 maxMulti = liquidityTranche.maxRedeemMultiAsset(LT_PROVIDER);
+        assertGt(maxMulti, 0, "a multi-asset exit that relaxes the floor must still be possible");
+        assertLt(maxMulti, balance, "the breach must not waive the requirement: the maximum stays below the full balance");
+        assertGe(maxMulti, liquidityTranche.maxRedeem(LT_PROVIDER), "the multi-asset maximum must dominate the in-kind maximum");
 
+        // A full exit past the bounded maximum reverts on the enforced liquidity gate
         vm.prank(LT_PROVIDER);
+        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         liquidityTranche.redeemMultiAsset(balance, 0, 0, LT_PROVIDER, LT_PROVIDER);
+
+        // Redeeming exactly the advertised maximum succeeds and leaves the liquidity floor at or below 100%
+        vm.prank(LT_PROVIDER);
+        liquidityTranche.redeemMultiAsset(maxMulti, 0, 0, LT_PROVIDER, LT_PROVIDER);
         _sync();
-        assertGt(_liquidityUtilization(), WAD, "the exemption must have been load-bearing for the full exit");
+        assertLe(_liquidityUtilization(), WAD, "redeeming exactly the maximum must leave the liquidity floor satisfied");
     }
 
     /// @notice A fixed-term market disables LT redemptions: the maximum reports zero and the flow reverts

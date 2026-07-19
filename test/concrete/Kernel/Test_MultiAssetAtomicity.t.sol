@@ -396,10 +396,11 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
         assertLt(liquidityUtilizationAfter, liquidityUtilizationBefore, "a liquidity deposit in a breach state must reduce liquidity utilization");
     }
 
-    /// @notice Once liquidation coverage is breached the liquidity gate stands down and a full exit succeeds,
-    ///         unwinding the redeemer's slice of the idle liquidity premium senior shares
-    function test_LTRedeemMultiAsset_LiquidationCoverageBreached_LiquidityGateStandsDown() public {
-        // Idle liquidity premium senior shares ride along so the exempt redemption also proves their unwind
+    /// @notice Once liquidation coverage is breached the liquidity gate still stands: a full exit that would
+    ///         strand the pool below the senior floor reverts, while redeeming the bounded maximum succeeds and
+    ///         unwinds the redeemer's pro-rata slice of the idle liquidity premium senior shares
+    function test_LTRedeemMultiAsset_LiquidationCoverageBreached_LiquidityGateStands() public {
+        // Idle liquidity premium senior shares ride along so the bounded redemption also proves their unwind
         uint256 idleBefore = _accumulateIdleLiquidityPremiumSeniorShares();
 
         // Crash the shared senior/junior rate 60%: junior absorbs losses until exhausted, so coverage
@@ -412,25 +413,32 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
         );
         assertGe(coverageUtilizationWAD, a.coverageLiquidationUtilizationWAD, "setup: expected liquidation coverage to read breached");
 
-        // The provider's near-total exit would leave the pool below the senior liquidity floor, yet it must
-        // succeed because the wind-down exemption bypasses the liquidity gate. The provider no longer owns
-        // the WHOLE supply: paying the premium also minted a protocol-fee slice of liquidity shares to the
-        // fee recipient, so the exit unwinds the provider's pro-rata slice of the idle senior shares, not all of them
+        // The provider's full exit would strand the pool below the senior liquidity floor, and the breach no
+        // longer exempts it: the enforced liquidity gate reverts
         address actor = LT_PROVIDER;
-        uint256 supply = liquidityTranche.totalSupply();
         uint256 shares = liquidityTranche.balanceOf(actor);
-        uint256 expectedIdleAfter = idleBefore - Math.mulDiv(idleBefore, shares, supply);
         vm.prank(actor);
+        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         liquidityTranche.redeemMultiAsset(shares, 0, 0, actor, actor);
 
-        // The exit must debit exactly its pro-rata idle slice: idleBefore - floor(idleBefore * shares / supply)
+        // The bounded maximum still executes: a multi-asset exit relaxes the floor by unwinding senior depth in
+        // flow, so it stays below the full balance but remains positive
+        uint256 maxMulti = liquidityTranche.maxRedeemMultiAsset(actor);
+        assertGt(maxMulti, 0, "a bounded multi-asset exit that relaxes the floor must remain possible");
+        assertLt(maxMulti, shares, "the breach must not waive the requirement: the maximum stays below the full balance");
+        uint256 supply = liquidityTranche.totalSupply();
+        uint256 expectedIdleAfter = idleBefore - Math.mulDiv(idleBefore, maxMulti, supply);
+        vm.prank(actor);
+        liquidityTranche.redeemMultiAsset(maxMulti, 0, 0, actor, actor);
+
+        // The exit must debit exactly its pro-rata idle slice: idleBefore - floor(idleBefore * maxMulti / supply)
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, expectedIdleAfter, "the exit's idle senior share debit diverges from its pro-rata slice");
 
-        // Prove the exemption was load-bearing: the post-exit market is genuinely short of its liquidity floor
+        // The enforced gate leaves the pool at or above its senior liquidity floor after the bounded exit
         _sync();
         a = accountant.getState();
         uint256 liquidityUtilizationWAD =
             RoycoTestMath.computeLiquidityUtilization(toUint256(a.lastSTEffectiveNAV), a.minLiquidityWAD, toUint256(a.lastLTRawNAV));
-        assertGt(liquidityUtilizationWAD, WAD, "the bypassed gate should read breached after the full exit, proving the exemption mattered");
+        assertLe(liquidityUtilizationWAD, WAD, "the enforced gate must leave the pool at or above its liquidity floor after the bounded exit");
     }
 }

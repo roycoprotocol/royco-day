@@ -406,8 +406,8 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
      *      Isolate z: z = LT_RAW_NAV - (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)
      */
     function maxLTWithdrawal(SyncedAccountingState memory state) external view override(IRoycoDayAccountant) returns (NAV_UNIT) {
-        // If there is no minimum liquidity requirement or the coverage liquiditation threshold has been breached, there is no LT withdrawal restriction
-        if (state.minLiquidityWAD == 0 || (state.coverageUtilizationWAD >= state.coverageLiquidationUtilizationWAD)) return state.ltRawNAV;
+        // If there is no minimum liquidity requirement, there is no LT withdrawal restriction
+        if (state.minLiquidityWAD == 0) return state.ltRawNAV;
         // Compute the minimum market-making depth required to satisfy the market's liquidity requirement, rounding in favor of senior protection
         // Also account for ST's dust tolerance to preclude reverts due to rounding after LT redemptions
         NAV_UNIT requiredLTValue =

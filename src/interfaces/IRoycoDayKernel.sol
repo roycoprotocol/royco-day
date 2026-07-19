@@ -268,7 +268,7 @@ interface IRoycoDayKernel {
      * @param _trancheType An enumerator indicating which tranche to execute this preview for
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      * @return claims The claims on ST and JT assets that the specified tranche has denominated in tranche-native units
-     * @return totalTrancheShares The total number of shares that exist in the specified tranche after the post-sync mint of its accrued shares: the protocol fee shares for every tranche, plus the liquidity premium shares for the senior tranche
+     * @return totalTrancheShares The total number of shares that exist in the specified tranche after the post-sync mint of its accrued shares: the protocol fee shares for the senior and junior tranches, plus the liquidity premium shares for the senior tranche (the liquidity tranche mints none)
      */
     function previewSyncTrancheAccounting(TrancheType _trancheType)
         external
@@ -327,7 +327,7 @@ interface IRoycoDayKernel {
      * @return valueAllocated The NAV value of the LT assets the add would mint
      * @return navToMintSharesAt The pre-deposit LT effective NAV that LT shares would be minted against
      * @return ltAssetsOut The LT tranche assets the add would mint
-     * @return ltTotalSupplyAfterMints The LT tranche supply after this sync mints its protocol fee shares, which LT shares must be priced against
+     * @return ltTotalSupplyAfterMints The LT tranche supply post-sync (unchanged by the sync, since the liquidity tranche accrues no protocol fee shares), which LT shares must be priced against
      */
     function ltPreviewDepositMultiAsset(
         TRANCHE_UNIT _stAssets,
@@ -408,7 +408,7 @@ interface IRoycoDayKernel {
      * @param _owner The address that is withdrawing the assets
      * @return claimOnLTNAV The notional claims on LT assets that the liquidity tranche has denominated in kernel's NAV units
      * @return ltMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the liquidity tranche, denominated in the kernel's NAV units
-     * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the liquidity tranche after minting any protocol fee shares post-sync
+     * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the liquidity tranche post-sync (the liquidity tranche mints no protocol fee shares on a sync)
      */
     function ltMaxWithdrawable(address _owner)
         external
@@ -425,7 +425,7 @@ interface IRoycoDayKernel {
      * @param _owner The address that is withdrawing the assets
      * @return claimOnLTNAV The notional claims on LT assets that the liquidity tranche has denominated in kernel's NAV units
      * @return ltMaxWithdrawableNAV The maximum amount of assets that can be withdrawn multi-asset, denominated in the kernel's NAV units
-     * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the liquidity tranche after minting any protocol fee shares post-sync
+     * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the liquidity tranche post-sync (the liquidity tranche mints no protocol fee shares on a sync)
      */
     function ltMaxWithdrawableMultiAsset(address _owner)
         external

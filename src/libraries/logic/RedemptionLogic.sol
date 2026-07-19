@@ -143,16 +143,13 @@ library RedemptionLogic {
         TrancheClaimsLogic._withdrawAssets($, _immutables, userAssetClaims, _receiver);
 
         // Execute a post-redeem sync on accounting, enforcing the market's liquidity requirement post-redemption
-        // LT redemption is exempt from satisfying the liquidity requirement once coverage utilization reaches its liquidation threshold
-        AccountingSyncLogic._postOpSyncTrancheAccounting(
-            $, _immutables, Operation.LT_REDEEM, ZERO_NAV_UNITS, (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD)
-        );
+        AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.LT_REDEEM, ZERO_NAV_UNITS, true);
     }
 
     /**
      * @notice Atomically exits the liquidity tranche to the LT assets' constituent assets: proportionally removes the LT-asset slice,
      *         redeems the venue-held senior shares to ST underlying, and returns (ST underlying + quote) to the receiver
-     * @dev LT multi-asset redemptions are enabled only in a PERPETUAL market state, granted the market's liquidity requirement is satisfied post-redemption unless the liquidation coverage utilization threshold is breached
+     * @dev LT multi-asset redemptions are enabled only in a PERPETUAL market state, granted the market's liquidity requirement is satisfied post-redemption
      * @param _ltShares The number of LT shares being redeemed (used to size the proportional LT-asset slice)
      * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must return (slippage bound)
      * @param _minQuoteAssetsOut The minimum quote to return (slippage bound)
@@ -213,10 +210,7 @@ library RedemptionLogic {
         TrancheClaimsLogic._withdrawAssets($, _immutables, stClaims, _receiver);
 
         // Execute a post-redeem sync on accounting with the applied ST liquidation bonus
-        // LT redemption is exempt from satisfying the liquidity requirement once coverage utilization reaches its liquidation threshold
-        AccountingSyncLogic._postOpSyncTrancheAccounting(
-            $, _immutables, Operation.LT_REDEEM, stSelfLiquidationBonusNAV, (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD)
-        );
+        AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.LT_REDEEM, stSelfLiquidationBonusNAV, true);
     }
 
     // =============================
@@ -394,7 +388,7 @@ library RedemptionLogic {
      * @param _owner The address that is withdrawing the assets
      * @return claimOnLTNAV The notional claims on LT assets that the liquidity tranche has denominated in kernel's NAV units
      * @return ltMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the liquidity tranche, denominated in the kernel's NAV units
-     * @return totalTrancheShares The total number of shares that exist in the liquidity tranche after minting any protocol fee shares post-sync
+     * @return totalTrancheShares The total number of shares that exist in the liquidity tranche
      */
     function ltMaxWithdrawable(
         IRoycoDayKernel.RoycoDayKernelState storage $,
@@ -435,7 +429,7 @@ library RedemptionLogic {
      * @param _owner The address that is withdrawing the assets
      * @return claimOnLTNAV The notional claims on LT assets that the liquidity tranche has denominated in kernel's NAV units
      * @return ltMaxWithdrawableNAV The maximum amount of assets that can be withdrawn multi-asset, denominated in the kernel's NAV units
-     * @return totalTrancheShares The total number of shares that exist in the liquidity tranche after minting any protocol fee shares post-sync
+     * @return totalTrancheShares The total number of shares that exist in the liquidity tranche
      * @dev NON-VIEW: routes the venue removal through its execute-and-unwind preview, which mutates no state net
      */
     function ltMaxWithdrawableMultiAsset(

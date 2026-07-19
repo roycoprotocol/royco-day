@@ -481,7 +481,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     /// @inheritdoc IRoycoDayKernel
-    /// @dev LT multi-asset redemptions are enabled only in a PERPETUAL market state, granted the market's liquidity requirement is satisfied post-redemption unless the liquidation coverage utilization threshold is breached
+    /// @dev LT multi-asset redemptions are enabled only in a PERPETUAL market state, granted the market's liquidity requirement is satisfied post-redemption
     function ltRedeemMultiAsset(
         uint256 _ltShares,
         uint256 _minSTSharesOut,

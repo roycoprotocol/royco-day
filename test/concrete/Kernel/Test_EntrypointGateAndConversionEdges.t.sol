@@ -88,28 +88,27 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
     }
 
     // =============================
-    // JT redemption stays coverage-gated after the liquidation threshold is breached, while LT redemption bypasses it
+    // JT stays coverage-gated and in-kind LT stays liquidity-gated after the liquidation threshold is breached
     // =============================
 
     /**
      * @notice Once the liquidation coverage utilization is breached (forced PERPETUAL), a JT redemption reverts
-     *         COVERAGE_REQUIREMENT_VIOLATED while an LT redemption in the same state succeeds through the
-     *         liquidation bypass
-     * @dev The liquidation bypass is given only to LT redemptions (RedemptionLogic.sol:145,216 pass
-     *      enforce = coverage utilization < liquidation threshold) while jtRedeem passes enforce = true
-     *      unconditionally (RedemptionLogic.sol:105), so the accountant's JT_REDEEM coverage gate
-     *      (RoycoDayAccountant.sol:327-329) fires in the wind-down state while the LT gate is released
+     *         COVERAGE_REQUIREMENT_VIOLATED and an in-kind LT redemption that strands the pool below the senior
+     *         liquidity floor reverts LIQUIDITY_REQUIREMENT_VIOLATED: the breach exempts neither
+     * @dev jtRedeem and ltRedeem both pass enforce = true unconditionally (RedemptionLogic.sol:109,146), so the
+     *      accountant's JT_REDEEM coverage gate and LT_REDEEM liquidity gate (RoycoDayAccountant.sol:316-323) both
+     *      fire in the wind-down state. An in-kind LT redeem only shrinks the pool depth, so unlike a multi-asset
+     *      redeem it cannot relax its own liquidity floor and is gated whenever it would breach it
      * @dev Breach derivation (shared -21% rate on the seeded 100/30 market): stRawNAV = 79e18, jtRawNAV = 23.7e18,
      *      the 21e18 ST loss is fully covered so stEffectiveNAV = 100e18 and jtEffectiveNAV = 30e18 - 6.3e18 -
      *      21e18 = 2.7e18, coverageUtilizationWAD = ceil((79e18 + 23.7e18) x 0.2e18 / 2.7e18) =
      *      7607407407407407408 >= 6.4667e18, which takes the forced-PERPETUAL liquidation branch
      *      (RoycoDayAccountant.sol:666-678) and erases the coverage IL
-     * @dev LT contrast derivation: redeeming 3e18 of the 6e18 LT shares pays exactly the 3e18 BPT slice and
-     *      leaves ltRawNAV = 3e18, and the post-op liquidityUtilizationWAD would be ceil(100e18 x 0.05e18 / 3e18)
-     *      = 1666666666666666667 > WAD — the liquidity gate WOULD have fired, so its success proves the
-     *      liquidation bypass exists for LT and is withheld from JT
+     * @dev LT gate derivation: redeeming 3e18 of the 6e18 LT shares would leave ltRawNAV = 3e18, and the post-op
+     *      liquidityUtilizationWAD = ceil(100e18 x 0.05e18 / 3e18) = 1666666666666666667 > WAD, so the liquidity
+     *      gate fires even though coverage is in liquidation
      */
-    function test_jtRedeem_coverageGated_whileLtRedeem_bypasses_duringLiquidation() public {
+    function test_jtRedeem_coverageGated_and_ltRedeem_liquidityGated_duringLiquidation() public {
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
         applySTPnL(-2100);
 
@@ -129,14 +128,12 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
         vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
         juniorTranche.redeem(jtShares, JT_PROVIDER, JT_PROVIDER);
 
-        // The LT redemption in the identical state succeeds through its liquidation bypass (the asymmetry pin):
-        // 3e18 of 6e18 LT shares pays 3e18 BPT even though the post-op liquidity gate would read breached
+        // The in-kind LT redemption in the identical state is liquidity-gated: draining 3e18 of the 6e18 depth
+        // would strand the pool below the senior floor, and the breach no longer exempts it
         uint256 ltShares = 3e18;
         vm.prank(LT_PROVIDER);
-        AssetClaims memory ltClaims = liquidityTranche.redeem(ltShares, LT_PROVIDER, LT_PROVIDER);
-        assertEq(toUint256(ltClaims.ltAssets), 3e18, "LT redeem must pay the proportional 3e18 BPT slice");
-        assertEq(bpt.balanceOf(LT_PROVIDER), 3e18, "the BPT payout must land on the LT redeemer");
-        assertEq(toUint256(accountant.getState().lastLTRawNAV), 3e18, "ltRawNAV must drop below the 5e18 liquidity floor");
+        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        liquidityTranche.redeem(ltShares, LT_PROVIDER, LT_PROVIDER);
     }
 
     // =============================
@@ -236,19 +233,18 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
      * @dev Idle pile derivation (+10% on the seeded 100/30 market, same block so the instantaneous yield shares
      *      apply): stRaw 100e18 -> 110e18 gives stGain = 10e18; JT risk premium = 10e18 x 0.2 = 2e18 and LT
      *      liquidity premium = 10e18 x 0.1 = 1e18 (the fixture's pinned yield shares); ST protocol fee =
-     *      (10 - 2 - 1)e18 x 0.1 = 0.7e18; stEffectiveNAV = 100e18 + 7e18 + 1e18 = 108e18. The premium mints
-     *      against the retained senior NAV 108e18 - 1e18 - 0.7e18 = 106.3e18 over the 100e18 pre-sync supply:
-     *      idleShares = floor(100e18 x 1e18 / 106.3e18) = 940733772342427093. The ST fee mint is
-     *      floor(100e18 x 0.7e18 / 106.3e18) = 658513640639698965, so the senior supply lands at
-     *      101599247412982126058
-     * @dev Redemption slice derivation: the gain sync also mints LT protocol fee shares — the 0.1e18 LT fee is
-     *      priced on the LT effective NAV 6e18 + floor(940733772342427093 x 108e18 / 101599247412982126058) =
-     *      6e18 + 999999999999999999, so ltFeeShares = floor(6e18 x 0.1e18 / 6899999999999999999) =
-     *      86956521739130434 and the LT supply is 6086956521739130434. Redeeming the provider's full 6e18 shares
-     *      takes the pro-rata idle slice floor(940733772342427093 x 6e18 / 6086956521739130434) =
-     *      927294718451820991 senior shares, unwound to the yield-bearing asset: the total senior claim is
+     *      (10 - 2 - 1)e18 x 0.1 = 0.7e18; stEffectiveNAV = 100e18 + 7e18 + 1e18 = 108e18. The 10% LT protocol
+     *      fee carves 0.1e18 out of the premium and is remitted as senior shares to the protocol, so the LT's idle
+     *      leg is the net 0.9e18 and no LT shares mint for it. The net premium mints against the retained senior
+     *      NAV 108e18 - 1e18 - 0.7e18 = 106.3e18 over the 100e18 pre-sync supply: idleShares =
+     *      floor(0.9e18 x 100e18 / 106.3e18) = 846660395108184383. The pooled senior fee mint (0.7e18 ST + 0.1e18
+     *      LT) is floor(0.8e18 x 100e18 / 106.3e18) = 752587017873941674, so the senior supply lands at
+     *      101599247412982126057
+     * @dev Redemption slice derivation: the LT protocol fee mints no LT shares, so the LT supply stays the 6e18
+     *      seed and the provider still owns the whole tranche. Redeeming the full 6e18 takes the entire idle slice
+     *      of 846660395108184383 senior shares, unwound to the yield-bearing asset: the total senior claim is
      *      floor(108e18 / 1.1) = 98181818181818181818 vault shares, so the redeemer receives
-     *      floor(98181818181818181818 x 927294718451820991 / 101599247412982126058) = 896103896103896103
+     *      floor(98181818181818181818 x 846660395108184383 / 101599247412982126057) = 818181818181818181
      */
     function test_ltRedeemMultiAsset_zeroVenueSlice_skipsSlippageFloorsAndPaysIdlePremium() public {
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
@@ -259,7 +255,7 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
         applySTPnL(1000);
         _sync();
         uint256 idleShares = kernel.getState().ltOwnedSeniorTrancheShares;
-        assertEq(idleShares, 940_733_772_342_427_093, "the staged premium must be floor(100e18 x 1e18 / 106.3e18) senior shares");
+        assertEq(idleShares, 846_660_395_108_184_383, "the staged premium must be floor(0.9e18 x 100e18 / 106.3e18) senior shares net of the LT fee");
 
         // Retire the liquidity requirement so the redemption reaches the missing slippage check instead of the
         // post-op liquidity gate (with zero pool depth and a positive minimum, every LT redemption would revert
@@ -275,10 +271,10 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
         assertEq(toUint256(pre.ltRawNAV), 0, "the committed LT mark must read the pinned zero pool value");
         assertEq(uint8(pre.marketState), uint8(MarketState.PERPETUAL), "a collapsed pool mark must not move the state machine");
 
-        // The provider still holds its full 6e18 seed shares; the gain sync's LT protocol fee shares went to the
-        // fee recipient, growing the supply to 6e18 + 86956521739130434
+        // The provider still holds its full 6e18 seed shares, and the LT supply stays the 6e18 seed: the gain
+        // sync's LT protocol fee mints senior shares to the fee recipient, not liquidity shares
         assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 6e18, "the provider must still hold its full LT seed shares");
-        assertEq(liquidityTranche.totalSupply(), 6_086_956_521_739_130_434, "the LT supply must be the 6e18 seed plus the gain sync's fee shares");
+        assertEq(liquidityTranche.totalSupply(), 6e18, "the LT supply must stay the 6e18 seed: the LT protocol fee mints no liquidity shares");
 
         // The redemption succeeds with quoteAssets = 0 against _minQuoteAssetsOut = 1 (and zero venue senior
         // shares against _minSTSharesOut = 1). Both floors sit inside the proportional venue removal, and a zero
@@ -293,18 +289,18 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
 
         // The fair idle premium slice is still paid (no funds are lost, only the slippage floor is skipped):
         // the idle senior shares are unwound to the yield-bearing asset at the 1.1 rate
-        assertEq(toUint256(stClaims.stAssets), 896_103_896_103_896_103, "the idle slice must unwind to its pro-rata vault shares");
+        assertEq(toUint256(stClaims.stAssets), 818_181_818_181_818_181, "the idle slice must unwind to its full vault shares");
         assertEq(toUint256(stClaims.jtAssets), 0, "a healthy market's senior claim has no junior-asset leg");
-        assertEq(stJtVault.balanceOf(LT_PROVIDER), 896_103_896_103_896_103, "the unwound vault shares must land on the redeemer");
+        assertEq(stJtVault.balanceOf(LT_PROVIDER), 818_181_818_181_818_181, "the unwound vault shares must land on the redeemer");
 
-        // The shares are burned and the kernel state reflects a completed redemption: the idle pile drops by the
-        // redeemed slice while the (worthless) pooled BPT never left kernel custody
+        // The shares are burned and the kernel state reflects a completed redemption: the idle pile fully drains
+        // while the (worthless) pooled BPT never left kernel custody
         assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 0, "the redeemed LT shares must be burned");
-        assertEq(liquidityTranche.totalSupply(), 86_956_521_739_130_434, "only the fee recipient's LT shares may remain outstanding");
+        assertEq(liquidityTranche.totalSupply(), 0, "no LT shares remain: the provider held the whole supply and the LT fee mints none");
         assertEq(
             kernel.getState().ltOwnedSeniorTrancheShares,
-            940_733_772_342_427_093 - 927_294_718_451_820_991,
-            "the idle pile must drop by exactly the redeemed pro-rata slice"
+            0,
+            "the idle pile must drain to zero: the sole holder redeemed the entire idle slice"
         );
         assertEq(
             toUint256(kernel.getState().ltOwnedYieldBearingAssets),

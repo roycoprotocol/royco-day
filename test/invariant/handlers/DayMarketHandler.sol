@@ -1380,10 +1380,14 @@ contract DayMarketHandler is DayMarketTestBase {
                 string.concat(_label, ": coverage-loss ledger replay diverges from the committed value")
             );
 
-            // The senior supply may grow only by the fee and liquidity premium share mint, both legs floor-priced (and mint-dilution clamped)
-            uint256 feeShares;
-            (premiumShares, feeShares,) =
-                RoycoTestMath.computeSTFeeAndLiquidityPremiumSharesToMint(c.w.stEffectiveNAV, c.w.ltLiquidityPremium, c.w.stProtocolFee, c.stSupply0);
+            // The senior supply may grow only by the fee and liquidity premium share mint, both legs floor-priced
+            // (and mint-dilution clamped) over the same retained NAV stEffectiveNAV - premium - stFee. The LT
+            // protocol fee is carved out of the premium: the LT receives the NET premium (premium - ltFee) as
+            // idle senior shares and the fee recipient receives (stFee + ltFee) as senior shares, so no
+            // liquidity-tranche shares mint on a sync. ltFee <= premium always, so the net never underflows
+            uint256 retainedSeniorNAV = c.w.stEffectiveNAV - c.w.ltLiquidityPremium - c.w.stProtocolFee;
+            premiumShares = RoycoTestMath.convertToShares(c.w.ltLiquidityPremium - c.w.ltProtocolFee, retainedSeniorNAV, c.stSupply0);
+            uint256 feeShares = RoycoTestMath.convertToShares(c.w.stProtocolFee + c.w.ltProtocolFee, retainedSeniorNAV, c.stSupply0);
             _flag(
                 seniorTranche.totalSupply() == c.stSupply0 + premiumShares + feeShares,
                 string.concat(_label, ": senior supply moved by something other than the fee and liquidity premium share mint")

@@ -269,7 +269,7 @@ library DepositLogic {
      * @return valueAllocated The NAV value of the LT assets the add would mint
      * @return navToMintSharesAt The pre-deposit LT effective NAV that LT shares would be minted against
      * @return ltAssetsOut The LT tranche assets the add would mint
-     * @return ltTotalSupplyAfterMints The LT tranche supply after this sync mints its protocol fee shares, which LT shares must be priced against
+     * @return ltTotalSupplyAfterMints The LT tranche supply post-sync (unchanged by the sync, since the liquidity tranche accrues no protocol fee shares), which LT shares must be priced against
      */
     function ltPreviewDepositMultiAsset(
         IRoycoDayKernel.RoycoDayKernelState storage $,
@@ -280,7 +280,7 @@ library DepositLogic {
         external
         returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut, uint256 ltTotalSupplyAfterMints)
     {
-        // Preview the sync and the LT supply after this sync mints the LT protocol fee shares, exactly as depositMultiAsset reads totalSupply() post-sync
+        // Preview the sync and the post-sync LT supply (the sync mints no LT shares), exactly as depositMultiAsset reads totalSupply() post-sync
         SyncedAccountingState memory state;
         (state,, ltTotalSupplyAfterMints) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
         // During a fixed-term market state only a quote-only deposit is permitted and an ST-leg deposit reverts, so return zero before quoting the venue add to match it
