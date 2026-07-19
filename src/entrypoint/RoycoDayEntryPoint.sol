@@ -26,8 +26,8 @@ import { TrancheClaimsLogic } from "../libraries/logic/TrancheClaimsLogic.sol";
  *      forfeited to the protocol as fee shares, so a queued request can never gain value over its request-time NAV
  *      Supports third-party executors (keepers) with configurable bonus incentives
  *      Partial execution is supported, allowing requests to be fulfilled incrementally as tranche capacity is freed up
- *      Screens interacting addresses against the market's blacklist through the tranche's kernel, covering exactly the
- *      value flows that settle outside the kernel's own screened paths so no address is screened twice
+ *      Screens interacting addresses against the market's blacklist through the tranche's kernel, covering the request
+ *      operators and every value flow that settles outside the kernel's own screened paths
  */
 contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     using SafeERC20 for IERC20;
@@ -85,7 +85,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         require(_tranche != address(0) && _receiver != address(0), NULL_ADDRESS());
         require(_executorBonusWAD < WAD || _executorBonusWAD == type(uint64).max, INVALID_EXECUTOR_BONUS());
 
-        // Ensure that the tranche is enabled on this entry point and the sender and reciever are not blacklisted
+        // Ensure that the tranche is enabled on this entry point and the caller and receiver are not blacklisted
         RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
         EnrichedTrancheConfig memory config = $.trancheToConfig[_tranche];
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
@@ -186,7 +186,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         require(_tranche != address(0) && _receiver != address(0), NULL_ADDRESS());
         require(_executorBonusWAD < WAD || _executorBonusWAD == type(uint64).max, INVALID_EXECUTOR_BONUS());
 
-        // Ensure that the tranche is enabled on this entry point and the reciever is not blacklisted
+        // Ensure that the tranche is enabled on this entry point and the receiver is not blacklisted (the share escrow transfer below screens the caller)
         RoycoDayEntryPointState storage $ = _getRoycoDayEntryPointStorage();
         EnrichedTrancheConfig memory config = $.trancheToConfig[_tranche];
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
@@ -362,6 +362,9 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         _validateRequestExecution(_requestNonce, request.baseRequest, config.baseConfig.oracleClock);
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
 
+        // Screen the executor and request owner against the market's blacklist so a flagged party can never operate the request (the tranche deposit below screens the receiver)
+        _enforceNotBlacklisted(config.kernel, msg.sender, _user);
+
         // Resolve the actual amount of assets to deposit
         _assetsToDeposit = (_assetsToDeposit == MAX_TRANCHE_UNITS)
             ? toTrancheUnits(Math.min(toUint256(IRoycoVaultTranche(tranche).maxDeposit(request.baseRequest.receiver)), toUint256(request.assets)))
@@ -393,9 +396,6 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         else {
             // Ensure that the user has opted into third party execution
             require(request.baseRequest.executorBonusWAD != type(uint64).max, THIRD_PARTY_EXECUTION_DISABLED());
-            // Screen the executor against the market's blacklist, the bonus assets settle outside the kernel's screened flows (the tranche deposit below screens the receiver)
-            _enforceNotBlacklisted(config.kernel, msg.sender);
-
             // Compute and transfer bonus assets to the executor
             bonusAssets = _assetsToDeposit.mulDiv(request.baseRequest.executorBonusWAD, WAD, Math.Rounding.Floor);
             if (bonusAssets != ZERO_TRANCHE_UNITS) IERC20(config.asset).safeTransfer(msg.sender, toUint256(bonusAssets));
@@ -472,6 +472,9 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         _validateRequestExecution(_requestNonce, request.baseRequest, config.baseConfig.oracleClock);
         require(config.baseConfig.enabled, TRANCHE_NOT_ENABLED());
 
+        // Screen the executor and request owner against the market's blacklist so a flagged party can never operate the request
+        _enforceNotBlacklisted(config.kernel, msg.sender, _user);
+
         // Resolve the actual amount of shares to redeem and the exit route for liquidity tranche redemptions specifically
         bool isMultiAssetRedemption;
         if (_sharesToRedeem == type(uint256).max) {
@@ -527,8 +530,8 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         else {
             // Ensure that the user has opted into third party execution
             require(request.baseRequest.executorBonusWAD != type(uint64).max, THIRD_PARTY_EXECUTION_DISABLED());
-            // Screen the executor and receiver against the market's blacklist, the asset and quote remittances below settle outside the kernel's screened flows (the self path's redemption screens the receiver)
-            _enforceNotBlacklisted(config.kernel, msg.sender, request.baseRequest.receiver);
+            // Screen the receiver against the market's blacklist, the asset and quote remittance legs below settle outside the kernel's screened flows (the self path's redemption screens the receiver)
+            _enforceNotBlacklisted(config.kernel, request.baseRequest.receiver);
 
             // Redeem shares to this contract for bonus calculation, forfeiting accrued yield as protocol fees
             (userSharesRedeemed, protocolFeeShares, userClaims, quoteAssets) =
@@ -698,8 +701,8 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
 
     /**
      * @dev Screens an account against the market's blacklist through the tranche's kernel
-     *      Only accounts the kernel's own screened flows never reach are screened here (asset escrow movements, executor
-     *      bonuses, and third party remittances settle outside the tranche balance update hooks), so no account is screened twice
+     *      Covers the addresses the kernel's own screened flows never reach: request operators, asset escrow movements,
+     *      executor bonuses, and third party remittances all settle outside the tranche balance update hooks
      * @param _kernel The kernel of the market that the tranche belongs to, consulted for the market's configured blacklist
      * @param _account The address of the account to screen
      */
