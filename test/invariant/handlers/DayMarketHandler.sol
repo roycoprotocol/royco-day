@@ -755,7 +755,7 @@ contract DayMarketHandler is DayMarketTestBase {
         // Park at the boundary: the advertised maximum is exactly the largest exit the gate may pass
         uint256 maxShares = liquidityTranche.maxRedeem(actor);
         if (maxShares != 0) {
-            bool enforced = !s.fixedTerm && s.coverageUtilizationWAD < s.coverageLiquidationUtilizationWAD;
+            bool enforced = !s.fixedTerm;
             uint256 balBefore = liquidityTranche.balanceOf(actor);
             _execLtRedeem(actor, maxShares, s);
             bool redeemed = liquidityTranche.balanceOf(actor) < balBefore;
@@ -771,7 +771,7 @@ contract DayMarketHandler is DayMarketTestBase {
 
         // The one-share probe past the boundary: the gate must reject it or the floor must still hold
         if (liquidityTranche.balanceOf(actor) != 0) {
-            bool enforced = !s.fixedTerm && s.coverageUtilizationWAD < s.coverageLiquidationUtilizationWAD;
+            bool enforced = !s.fixedTerm;
             uint256 balBefore = liquidityTranche.balanceOf(actor);
             _execLtRedeem(actor, 1, s);
             bool redeemed = liquidityTranche.balanceOf(actor) < balBefore;
@@ -919,8 +919,8 @@ contract DayMarketHandler is DayMarketTestBase {
             // granularity trips the no-op guard. This NAV-granular mirror's ltRawAfter cannot resolve that
             // boundary reliably, so accept the revert as a valid outcome; a value-moving redeem simply succeeds.
             _expect(p, SEL_INVALID_POST_OP);
-            bool enforced = s.coverageUtilizationWAD < s.coverageLiquidationUtilizationWAD;
-            if (enforced && RoycoTestMath.computeLiquidityUtilization(s.stEffectiveNAV, s.minLiquidityWAD, ltRawAfter) > WAD) _expect(p, SEL_LIQUIDITY);
+            // The liquidity gate is enforced on every LT redemption, including once the liquidation coverage threshold is breached
+            if (RoycoTestMath.computeLiquidityUtilization(s.stEffectiveNAV, s.minLiquidityWAD, ltRawAfter) > WAD) _expect(p, SEL_LIQUIDITY);
             if (_shares > liquidityTranche.balanceOf(_actor)) _expect(p, SEL_ERC20_BALANCE);
         }
         uint256 bptBefore = bpt.balanceOf(_actor);
@@ -1035,9 +1035,10 @@ contract DayMarketHandler is DayMarketTestBase {
             // ltRawAfter rounds differently than the committed mark), so accept the revert as a valid outcome for
             // every multi-asset redeem — a redemption that moves real value simply succeeds instead.
             _expect(p, SEL_INVALID_POST_OP);
-            bool enforced = s.coverageUtilizationWAD < s.coverageLiquidationUtilizationWAD;
+            // The liquidity gate is enforced on every LT redemption, including during a liquidation breach: the multi-asset
+            // exit relaxes the floor by unwinding senior depth (reflected in stEffAfter) but never waives it
             uint256 stEffAfter = s.stEffectiveNAV - (r.totalRedeemed - r.bonusNAV);
-            if (enforced && RoycoTestMath.computeLiquidityUtilization(stEffAfter, s.minLiquidityWAD, r.ltRawAfter) > WAD) _expect(p, SEL_LIQUIDITY);
+            if (RoycoTestMath.computeLiquidityUtilization(stEffAfter, s.minLiquidityWAD, r.ltRawAfter) > WAD) _expect(p, SEL_LIQUIDITY);
             if (_shares > liquidityTranche.balanceOf(_actor)) _expect(p, SEL_ERC20_BALANCE);
             if (_probeQuoteMin) {
                 // The unmeetable floor: one wei above the proportional removal's guaranteed quote output
