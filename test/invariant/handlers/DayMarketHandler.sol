@@ -987,10 +987,7 @@ contract DayMarketHandler is DayMarketTestBase {
                 seniorTranche.totalSupply() + f.venueSenior0 == f.stSupply0 + seniorTranche.balanceOf(address(balancerVault)),
                 "ltDepositMultiAsset: minted senior shares do not reconcile with the pool's senior inflow"
             );
-            _flag(
-                kernel.getState().ltOwnedSeniorTrancheShares == idleLedgerBefore,
-                "ltDepositMultiAsset: a deposit moved the idle liquidity premium ledger"
-            );
+            _flag(kernel.getState().ltOwnedSeniorTrancheShares == idleLedgerBefore, "ltDepositMultiAsset: a deposit moved the idle liquidity premium ledger");
             _flag(
                 bpt.balanceOf(address(kernel)) + f.bptSupply0 == f.kernelBpt0 + bpt.totalSupply(),
                 "ltDepositMultiAsset: pool tokens minted by the add do not reconcile with the kernel's custody"
