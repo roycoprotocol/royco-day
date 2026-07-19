@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { IVaultErrors } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultErrors.sol";
 import { stdError } from "../../../lib/forge-std/src/StdError.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
@@ -213,22 +214,21 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
     }
 
     // =============================
-    // The multi-asset LT redemption skips the caller's slippage floors when the venue slice is zero
+    // The multi-asset LT redemption enforces the caller's slippage floors even when the venue slice is zero
     // =============================
 
     /**
-     * @notice `redeemMultiAsset(shares, _minSTSharesOut, _minQuoteAssetsOut, ...)` enforces the caller's minimums
-     *         only through the proportional venue removal, which is skipped whenever the redeemer's venue-asset
-     *         slice is zero (RedemptionLogic.sol:181-185 guards removeLiquidity behind
-     *         `userAssetClaims.ltAssets != 0`). In the idle-only LT state the call therefore succeeds while
-     *         returning 0 quote assets against a positive `_minQuoteAssetsOut`, and no funds are lost because the
-     *         fair idle premium slice is still paid
+     * @notice `redeemMultiAsset(shares, _minSTSharesOut, _minQuoteAssetsOut, ...)` always routes through the
+     *         proportional venue removal (RedemptionLogic.sol runs removeLiquidity unconditionally), so the
+     *         caller's minimums bind even when the redeemer's venue-asset slice is zero: an idle-only exit with a
+     *         positive floor reverts inside the removal instead of settling below it, and the same exit with zero
+     *         floors settles paying the fair idle premium slice
      * @dev Idle-only construction: venue slippage is armed so a +10% senior gain's liquidity premium mints as
      *      senior shares to the LT but the gated reinvestment defers, staging the premium idle in the kernel.
      *      Then the BPT oracle is pinned to a zero mark (a worthless pool), so ltRawNAV = 0 and every redeemer's
      *      venue-asset slice is exactly zero: the LT share's only remaining value is the idle premium leg.
      *      Governance retires the liquidity requirement first (setMinLiquidity(0)) so the post-redemption
-     *      liquidity gate cannot mask the missing slippage check — with a positive minimum and zero pool depth
+     *      liquidity gate cannot mask the floor check being exercised, with a positive minimum and zero pool depth
      *      every LT redemption would revert LIQUIDITY_REQUIREMENT_VIOLATED instead
      * @dev Idle pile derivation (+10% on the seeded 100/30 market, same block so the instantaneous yield shares
      *      apply): stRaw 100e18 -> 110e18 gives stGain = 10e18; JT risk premium = 10e18 x 0.2 = 2e18 and LT
@@ -246,7 +246,7 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
      *      floor(108e18 / 1.1) = 98181818181818181818 vault shares, so the redeemer receives
      *      floor(98181818181818181818 x 846660395108184383 / 101599247412982126057) = 818181818181818181
      */
-    function test_ltRedeemMultiAsset_zeroVenueSlice_skipsSlippageFloorsAndPaysIdlePremium() public {
+    function test_ltRedeemMultiAsset_zeroVenueSlice_enforcesSlippageFloorsAndPaysIdlePremium() public {
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
 
         // Stage the idle premium: armed venue slippage defers the gated reinvestment, so the +10% gain's premium
@@ -276,19 +276,20 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
         assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 6e18, "the provider must still hold its full LT seed shares");
         assertEq(liquidityTranche.totalSupply(), 6e18, "the LT supply must stay the 6e18 seed: the LT protocol fee mints no liquidity shares");
 
-        // The redemption succeeds with quoteAssets = 0 against _minQuoteAssetsOut = 1 (and zero venue senior
-        // shares against _minSTSharesOut = 1). Both floors sit inside the proportional venue removal, and a zero
-        // venue-asset slice skips that removal entirely.
+        // A positive floor reverts: the removal always runs, so the zero-output venue slice fails the caller's
+        // 1-wei minimums inside the vault instead of settling below them
         vm.prank(LT_PROVIDER);
-        (AssetClaims memory stClaims, uint256 quoteAssets) = liquidityTranche.redeemMultiAsset(6e18, 1, 1, LT_PROVIDER, LT_PROVIDER);
+        vm.expectPartialRevert(IVaultErrors.AmountOutBelowMin.selector);
+        liquidityTranche.redeemMultiAsset(6e18, 1, 1, LT_PROVIDER, LT_PROVIDER);
 
-        // The caller's quote floor was violated by a successful call: 0 returned against a minimum of 1
-        assertEq(quoteAssets, 0, "the redemption must return zero quote assets below the caller's 1-wei minimum");
-        assertEq(quoteToken.balanceOf(LT_PROVIDER), 0, "no quote assets may reach the redeemer, its floor notwithstanding");
+        // With zero floors the idle-only exit settles: no quote or BPT flows from the worthless pool position
+        vm.prank(LT_PROVIDER);
+        (AssetClaims memory stClaims, uint256 quoteAssets) = liquidityTranche.redeemMultiAsset(6e18, 0, 0, LT_PROVIDER, LT_PROVIDER);
+        assertEq(quoteAssets, 0, "the zero-value venue slice must return zero quote assets");
+        assertEq(quoteToken.balanceOf(LT_PROVIDER), 0, "no quote assets may reach the redeemer from a worthless pool");
         assertEq(bpt.balanceOf(LT_PROVIDER), 0, "the worthless pool position pays out no BPT either");
 
-        // The fair idle premium slice is still paid (no funds are lost, only the slippage floor is skipped):
-        // the idle senior shares are unwound to the yield-bearing asset at the 1.1 rate
+        // The fair idle premium slice is paid: the idle senior shares are unwound to the yield-bearing asset at the 1.1 rate
         assertEq(toUint256(stClaims.stAssets), 818_181_818_181_818_181, "the idle slice must unwind to its full vault shares");
         assertEq(toUint256(stClaims.jtAssets), 0, "a healthy market's senior claim has no junior-asset leg");
         assertEq(stJtVault.balanceOf(LT_PROVIDER), 818_181_818_181_818_181, "the unwound vault shares must land on the redeemer");
@@ -297,15 +298,11 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
         // while the (worthless) pooled BPT never left kernel custody
         assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 0, "the redeemed LT shares must be burned");
         assertEq(liquidityTranche.totalSupply(), 0, "no LT shares remain: the provider held the whole supply and the LT fee mints none");
-        assertEq(
-            kernel.getState().ltOwnedSeniorTrancheShares,
-            0,
-            "the idle pile must drain to zero: the sole holder redeemed the entire idle slice"
-        );
+        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, 0, "the idle pile must drain to zero: the sole holder redeemed the entire idle slice");
         assertEq(
             toUint256(kernel.getState().ltOwnedYieldBearingAssets),
             SEEDED_LT_RAW_NAV,
-            "the pooled BPT must remain in kernel custody, untouched by the skipped removal"
+            "the pooled BPT must remain in kernel custody, the zero-unit removal moves nothing"
         );
     }
 }

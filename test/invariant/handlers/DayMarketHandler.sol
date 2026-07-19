@@ -193,10 +193,6 @@ contract DayMarketHandler is DayMarketTestBase {
     uint256 public ghost_syncCount;
     uint256 public ghost_uncoveredLossRealized;
 
-    /// @notice Times a multi-asset redemption succeeded under a positive quote floor because its zero venue
-    ///         slice skipped the proportional removal, the only place the caller's quote floor is checked
-    uint256 public ghost_quoteFloorBypassObserved;
-
     /// @notice Invocations per op label, the anti-vacuity ledger: a run that never scheduled an op is visible here
     mapping(bytes32 op => uint256) public ghost_opCalls;
 
@@ -1002,13 +998,10 @@ contract DayMarketHandler is DayMarketTestBase {
      * @dev Runs one multi-asset liquidity redemption under a full mirror of the proportional removal.
      *      With _probeQuoteMin set, the call carries a quote floor one wei above the venue's guaranteed
      *      proportional output, an amount the redeemer can never receive, so an honestly enforced
-     *      slippage bound must reject the call. When the mirrored venue slice is nonzero the removal
-     *      actually runs and its per-token floor check fires before the share burn, the senior unwind,
-     *      and every post-op gate, so the venue's floor rejection is the only admissible outcome. When
-     *      the mirrored venue slice is zero the kernel skips the removal entirely, and with it the only
-     *      place the caller's quote floor is checked: the call succeeds paying zero quote below the
-     *      stated minimum. That bypass is pinned here (success, zero quote out, counted in
-     *      ghost_quoteFloorBypassObserved) so it stays visible to campaigns instead of being skipped
+     *      slippage bound must reject the call. The removal runs unconditionally (a zero venue slice
+     *      removes zero units and outputs zeros), so its per-token floor check fires before the share
+     *      burn, the senior unwind, and every post-op gate on every exit: the venue's floor rejection
+     *      is the only admissible outcome for an armed probe regardless of the venue slice
      */
     function _execLtRedeemMultiAsset(address _actor, uint256 _shares, bool _probeQuoteMin, Snap memory s) internal {
         Pred memory p;
@@ -1039,19 +1032,17 @@ contract DayMarketHandler is DayMarketTestBase {
             if (_shares > liquidityTranche.balanceOf(_actor)) _expect(p, SEL_ERC20_BALANCE);
             if (_probeQuoteMin) {
                 // The unmeetable floor: one wei above the proportional removal's guaranteed quote output
+                // The probe must revert and the exit must not settle: the removal always runs, so either its
+                // quote-floor check rejects the unmeetable minimum (AMOUNT_OUT_BELOW_MIN), or a dust slice
+                // whose NAV move floors to zero trips the post-op no-op guard (INVALID_POST_OP_STATE) before
+                // the floor check runs. Narrow to exactly those two rejections, a success or any other
+                // revert is a recorded violation
                 minQuoteOut = r.quoteOut + 1;
-                if (r.venueLtUnits != 0) {
-                    // A nonzero venue slice must revert, and the exit must not settle: either the removal's
-                    // quote-floor check rejects a value-moving slice (AMOUNT_OUT_BELOW_MIN), or a dust slice
-                    // whose NAV move floors to zero trips the post-op no-op guard (INVALID_POST_OP_STATE) before
-                    // the floor check runs. Narrow to exactly those two rejections; a success or any other
-                    // revert is a recorded violation.
-                    Pred memory onlyRevert;
-                    p = onlyRevert;
-                    _expect(p, SEL_AMOUNT_OUT_BELOW_MIN);
-                    _expect(p, SEL_INVALID_POST_OP);
-                    probeMustRevert = true;
-                }
+                Pred memory onlyRevert;
+                p = onlyRevert;
+                _expect(p, SEL_AMOUNT_OUT_BELOW_MIN);
+                _expect(p, SEL_INVALID_POST_OP);
+                probeMustRevert = true;
             }
         }
         TokenFlows memory f = _snapTokenFlows();
@@ -1062,13 +1053,6 @@ contract DayMarketHandler is DayMarketTestBase {
         try liquidityTranche.redeemMultiAsset(_shares, 0, minQuoteOut, _actor, _actor) {
             // A caller's slippage floor is a postcondition: an exit that cannot pay it must not settle
             _flag(!probeMustRevert, "ltRedeemMultiAsset: the venue removal accepted a quote floor above its guaranteed output");
-            if (_probeQuoteMin && !probeMustRevert) {
-                // The zero-venue-slice bypass, pinned as current behavior: no removal ran, so the caller's
-                // positive quote floor was never checked and the exit settled with zero quote below it,
-                // handing over only the idle premium slice claims. The counter keeps the bypass visible
-                ghost_quoteFloorBypassObserved++;
-                _flag(quoteToken.balanceOf(_actor) == quoteBefore, "ltRedeemMultiAsset: a zero venue slice paid quote despite skipping the removal");
-            }
             _recordSuccess("ltRedeemMultiAsset");
             ghost_transferredOut[address(stJtVault)] += stJtVault.balanceOf(_actor) - vaultSharesBefore;
             ghost_transferredOut[address(quoteToken)] += quoteToken.balanceOf(_actor) - quoteBefore;
