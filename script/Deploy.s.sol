@@ -18,6 +18,7 @@ import {
     ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
+    ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
     ADMIN_ORACLE_QUOTER_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
@@ -36,12 +37,24 @@ import {
 } from "../src/factory/RolesConfiguration.sol";
 import { RoycoFactory } from "../src/factory/RoycoFactory.sol";
 import {
+    Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
+} from "../src/factory/templates/Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
+import {
+    Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
+} from "../src/factory/templates/Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
+import {
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
 } from "../src/factory/templates/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
 import {
+    Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
+} from "../src/factory/templates/Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
+import {
     COMPONENT_ID_ACCOUNTANT_IMPL,
     COMPONENT_ID_DAY_BALANCER_HOOKS,
+    COMPONENT_ID_DAY_KERNEL_IDENTICAL_AA_IDLE_CDO_VIRTUAL_PRICE,
+    COMPONENT_ID_DAY_KERNEL_IDENTICAL_CHAINLINK_TO_ADMIN,
     COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK,
+    COMPONENT_ID_DAY_KERNEL_IDENTICAL_MAKINA_CHAINLINK,
     COMPONENT_ID_JUNIOR_TRANCHE_IMPL,
     COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL,
     COMPONENT_ID_SENIOR_TRANCHE_IMPL,
@@ -60,11 +73,29 @@ import { IBaseTemplate } from "../src/interfaces/factory/IBaseTemplate.sol";
 import { IRoycoFactory } from "../src/interfaces/factory/IRoycoFactory.sol";
 import { IRoycoProtocolTemplate } from "../src/interfaces/factory/IRoycoProtocolTemplate.sol";
 import {
+    Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel
+} from "../src/kernels/Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
+import {
+    Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel
+} from "../src/kernels/Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
+import {
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel
 } from "../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
 import {
+    Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel
+} from "../src/kernels/Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
+import {
+    IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter
+} from "../src/kernels/base/quoter/identical-st-jt/IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter.sol";
+import {
     IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
 } from "../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
+import {
+    IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter
+} from "../src/kernels/base/quoter/identical-st-jt/IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter.sol";
+import {
+    IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter
+} from "../src/kernels/base/quoter/identical-st-jt/IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
 import { BalancerV3_LT_BPTOracle_Quoter } from "../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 import { RoycoDayBalancerV3Hooks } from "../src/kernels/base/quoter/liquidity-tranche/balancer-v3/hooks/RoycoDayBalancerV3Hooks.sol";
 import { toNAVUnits } from "../src/libraries/Units.sol";
@@ -110,7 +141,10 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     /// @notice Enum for the Day kernel types this script can deploy.
     /// @dev New Day kernel types are added here as they ship.
     enum KernelType {
-        Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel
+        Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel,
+        Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel,
+        Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel,
+        Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel
     }
 
     /// @notice Enum for YDM types
@@ -131,6 +165,31 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
     struct IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams {
         IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams stAndJTQuoterParams;
+        BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams ltQuoterParams;
+    }
+
+    // ─── Kernel-specific param struct for the Day Makina-Chainlink-Balancer kernel (encoding-identical to the
+    //     template's KernelSpecificParams wrapper, all fields static so flat and nested encodings agree) ───
+
+    struct IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams {
+        address makinaMachine;
+        IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams stAndJTQuoterParams;
+        BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams ltQuoterParams;
+    }
+
+    // ─── Kernel-specific param struct for the Day Chainlink-to-admin-Balancer kernel (field-identical to the template's) ───
+
+    struct IdenticalAssets_ST_JT_ChainlinkToAdminOracle_QuoterKernelParams {
+        IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter.ST_JT_QuoterSpecificParams stAndJTQuoterParams;
+        BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams ltQuoterParams;
+    }
+
+    // ─── Kernel-specific param struct for the Day IdleCDO-VirtualPrice-Balancer kernel (encoding-identical to the
+    //     template's KernelSpecificParams wrapper, all fields static so flat and nested encodings agree) ───
+
+    struct Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_QuoterKernelParams {
+        address idleCDO;
+        IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter.ST_JT_QuoterSpecificParams stAndJTQuoterParams;
         BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams ltQuoterParams;
     }
 
@@ -184,6 +243,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         address protocolFeeRecipientAddress;
         address balancerPoolManagerAddress;
         address marketOpsAddress;
+        address marketReinvestLiquidityPremiumAddress;
         address adminEntryPointAddress;
         address entryPointFeeCollectorAddress;
     }
@@ -227,6 +287,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
                 protocolFeeRecipientAddress: chainConfig.protocolFeeRecipient,
                 balancerPoolManagerAddress: chainConfig.balancerPoolManagerAddress,
                 marketOpsAddress: chainConfig.marketOpsAddress,
+                marketReinvestLiquidityPremiumAddress: chainConfig.marketReinvestLiquidityPremiumAddress,
                 adminEntryPointAddress: chainConfig.adminEntryPointAddress,
                 entryPointFeeCollectorAddress: chainConfig.entryPointFeeCollectorAddress
             })
@@ -310,7 +371,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
     /// @notice Builds the role assignments applied to the AccessManager (surface-compatible with the legacy helper).
     function generateRolesAssignments(RoleAssignmentAddresses memory _addresses) public pure returns (RoleAssignment[] memory roleAssignments) {
-        roleAssignments = new RoleAssignment[](20);
+        roleAssignments = new RoleAssignment[](21);
         roleAssignments[0] = _assignment(ADMIN_PAUSER_ROLE, _addresses.pauserAddress);
         roleAssignments[1] = _assignment(ADMIN_UPGRADER_ROLE, _addresses.upgraderAddress);
         roleAssignments[2] = _assignment(SYNC_ROLE, _addresses.syncRoleAddress);
@@ -335,6 +396,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         // its initialize, the per-market template auto-configure path).
         roleAssignments[18] = _assignment(ADMIN_ENTRY_POINT_ROLE, _addresses.adminEntryPointAddress);
         roleAssignments[19] = _assignment(ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE, _addresses.entryPointFeeCollectorAddress);
+        // The dedicated liquidity-premium reinvestment role, split from market ops so the retry knob can be held
+        // by an operational keeper without the broader maintenance surface.
+        roleAssignments[20] = _assignment(ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE, _addresses.marketReinvestLiquidityPremiumAddress);
     }
 
     function _assignment(uint64 _role, address _assignee) private pure returns (RoleAssignment memory) {
@@ -361,6 +425,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (role == LT_LP_ROLE) return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_BALANCER_POOL_MANAGER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_MARKET_OPS_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_BLACKLIST_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_ENTRY_POINT_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
@@ -484,12 +549,33 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         codes[8] = type(RoycoDayBalancerV3Hooks).creationCode;
     }
 
-    /// @notice Public helper: the component set for the Day ERC4626-Chainlink-Balancer kernel template (test/tooling use).
-    function dayTemplateComponents() public pure returns (bytes32[] memory ids, bytes[] memory codes) {
-        return _dayTemplateComponents(
-            COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK,
-            type(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode
-        );
+    /// @notice Public helper: the component set for the Day template of a given kernel type (test/tooling use).
+    function dayTemplateComponentsForKernelType(KernelType _kernelType) public pure returns (bytes32[] memory ids, bytes[] memory codes) {
+        if (_kernelType == KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel) {
+            return _dayTemplateComponents(
+                COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK,
+                type(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode
+            );
+        }
+        if (_kernelType == KernelType.Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel) {
+            return _dayTemplateComponents(
+                COMPONENT_ID_DAY_KERNEL_IDENTICAL_MAKINA_CHAINLINK,
+                type(Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode
+            );
+        }
+        if (_kernelType == KernelType.Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel) {
+            return _dayTemplateComponents(
+                COMPONENT_ID_DAY_KERNEL_IDENTICAL_CHAINLINK_TO_ADMIN,
+                type(Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode
+            );
+        }
+        if (_kernelType == KernelType.Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel) {
+            return _dayTemplateComponents(
+                COMPONENT_ID_DAY_KERNEL_IDENTICAL_AA_IDLE_CDO_VIRTUAL_PRICE,
+                type(Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode
+            );
+        }
+        revert UnsupportedKernelType(_kernelType);
     }
 
     /// @notice Public wrapper over `_buildDayParams` so tests can construct real template deploy params from a market config.
@@ -534,6 +620,39 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
                 type(Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode
             );
         }
+        if (_kernelType == KernelType.Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel) {
+            return (
+                address(
+                    new Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
+                        _factory, poolFactory, eclpLPOracleFactory, _entryPoint, _marketSyncer
+                    )
+                ),
+                COMPONENT_ID_DAY_KERNEL_IDENTICAL_MAKINA_CHAINLINK,
+                type(Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode
+            );
+        }
+        if (_kernelType == KernelType.Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel) {
+            return (
+                address(
+                    new Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
+                        _factory, poolFactory, eclpLPOracleFactory, _entryPoint, _marketSyncer
+                    )
+                ),
+                COMPONENT_ID_DAY_KERNEL_IDENTICAL_CHAINLINK_TO_ADMIN,
+                type(Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode
+            );
+        }
+        if (_kernelType == KernelType.Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel) {
+            return (
+                address(
+                    new Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
+                        _factory, poolFactory, eclpLPOracleFactory, _entryPoint, _marketSyncer
+                    )
+                ),
+                COMPONENT_ID_DAY_KERNEL_IDENTICAL_AA_IDLE_CDO_VIRTUAL_PRICE,
+                type(Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel).creationCode
+            );
+        }
         revert UnsupportedKernelType(_kernelType);
     }
 
@@ -564,7 +683,6 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         });
         params.stAsset = _config.seniorAsset;
         params.jtAsset = _config.juniorAsset;
-        params.jtCoinvested = _config.jtCoinvested;
 
         // Accountant init params. `jtYDM`/`ltYDM` are overwritten by the template with the deployed instances. BOTH YDMs get
         // initialization data so the accountant initializes each of them. The LT premium/liquidity overlay is at its zero

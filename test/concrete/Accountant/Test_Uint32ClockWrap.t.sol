@@ -141,7 +141,7 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
      *      out of a zero-second window
      */
     function test_accrualClock_wrapsAtUint32_accruesFullPeriodSameBlock() public {
-        _deploy(false, _defaultParams());
+        _deploy(_defaultParams());
 
         // Land the first accrual past the uint32 horizon: it only initializes the clocks (no accrual, no YDM
         // consult) and stamps lastYieldShareAccrualTimestamp = uint32(2^32 + 5000) = 5000
@@ -187,7 +187,7 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.maxJTYieldShareWAD = 0.1e18;
         p.maxLTYieldShareWAD = 0.1e18;
-        _deploy(false, p);
+        _deploy(p);
 
         // Initialize both clocks past the uint32 horizon: each stamps as uint32(2^32 + 5000) = 5000
         uint256 t0 = TWO_POW_32 + 5000;

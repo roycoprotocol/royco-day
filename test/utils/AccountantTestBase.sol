@@ -36,9 +36,9 @@ abstract contract AccountantTestBase is Test {
     uint256 internal constant SEED_JT_RAW = 200e18;
     uint256 internal constant SEED_LT_RAW = 100e18;
     // Expected utilizations at the default flat seed, computed independently:
-    //   coverageUtilization = ceil((1000e18 + 0) * 0.1e18 / 200e18) = 0.5e18 (exact division so ceil == floor)
+    //   coverageUtilization = ceil((1000e18 + 200e18) * 0.1e18 / 200e18) = 0.6e18 (exact division so ceil == floor)
     //   liquidityUtilization = ceil(1000e18 * 0.05e18 / 100e18) = 0.5e18 (exact division)
-    uint256 internal constant SEED_COVERAGE_UTILIZATION_WAD = 0.5e18;
+    uint256 internal constant SEED_COVERAGE_UTILIZATION_WAD = 0.6e18;
     uint256 internal constant SEED_LIQUIDITY_UTILIZATION_WAD = 0.5e18;
 
     RoycoDayAccountant internal accountant;
@@ -81,10 +81,10 @@ abstract contract AccountantTestBase is Test {
     }
 
     /// @dev Deploys a fresh kernel, authority, implementation, and un-initialized ERC1967 proxy (RoycoBase disables initializers on the implementation)
-    function _deployUninitialized(bool _jtCoinvested) internal returns (RoycoDayAccountant acct) {
+    function _deployUninitialized() internal returns (RoycoDayAccountant acct) {
         kernel = new MockAccountantKernel();
         authority = new AccessManager(address(this));
-        implementation = new RoycoDayAccountant(address(kernel), _jtCoinvested);
+        implementation = new RoycoDayAccountant(address(kernel));
         acct = RoycoDayAccountant(address(new UninitializedERC1967Proxy(address(implementation))));
         kernel.setAccountant(address(acct));
     }
@@ -93,8 +93,8 @@ abstract contract AccountantTestBase is Test {
      * @dev Full deployment helper used by every test: proxy, initialize, and mock wiring
      * @dev Null YDM slots in the params are filled with fresh MockRecordingYDM instances, otherwise the passed addresses are adopted as the suite's mocks
      */
-    function _deploy(bool _jtCoinvested, IRoycoDayAccountant.RoycoDayAccountantInitParams memory _params) internal returns (RoycoDayAccountant acct) {
-        acct = _deployUninitialized(_jtCoinvested);
+    function _deploy(IRoycoDayAccountant.RoycoDayAccountantInitParams memory _params) internal returns (RoycoDayAccountant acct) {
+        acct = _deployUninitialized();
         if (_params.jtYDM == address(0)) _params.jtYDM = address(new MockRecordingYDM());
         if (_params.ltYDM == address(0)) _params.ltYDM = address(new MockRecordingYDM());
         jtYDM = MockRecordingYDM(_params.jtYDM);
@@ -240,7 +240,7 @@ abstract contract AccountantTestBase is Test {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.stNAVDustTolerance = toNAVUnits(uint256(3));
         p.jtNAVDustTolerance = toNAVUnits(uint256(4));
-        _deploy(false, p);
+        _deploy(p);
         _seedState(SEED_ST_RAW, SEED_JT_RAW, SEED_ST_RAW + 5, SEED_JT_RAW - 5, 5, SEED_LT_RAW, MarketState.PERPETUAL);
         jtYDM.setPreviewYieldShareReturn(0.1e18);
         ltYDM.setPreviewYieldShareReturn(0.05e18);
@@ -303,7 +303,7 @@ abstract contract AccountantTestBase is Test {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.stNAVDustTolerance = toNAVUnits(uint256(3));
         p.jtNAVDustTolerance = toNAVUnits(uint256(4));
-        _deploy(false, p);
+        _deploy(p);
         _seedState(SEED_ST_RAW, SEED_JT_RAW, SEED_ST_RAW, SEED_JT_RAW, 0, SEED_LT_RAW, MarketState.PERPETUAL);
         kernel.doPreOp(toNAVUnits(SEED_ST_RAW - 12), toNAVUnits(SEED_JT_RAW));
         kernel.doPreOp(toNAVUnits(SEED_ST_RAW - 5), toNAVUnits(SEED_JT_RAW));
@@ -367,7 +367,7 @@ abstract contract AccountantTestBase is Test {
 
     /**
      * @dev Independent coverage utilization expectation:
-     * ceil((stRawNAV + (coinvested ? jtRawNAV : 0)) * minCoverage / jtEffectiveNAV), 0 when the minimum coverage or the
+     * ceil((stRawNAV + jtRawNAV) * minCoverage / jtEffectiveNAV), 0 when the minimum coverage or the
      * exposure is zero, uint256 max when the junior buffer is zero against live exposure
      * @dev Forwards to the suite's single utilization mirror (RoycoTestMath, 512-bit mulDiv) so every caller
      * shares one overflow surface, a raw-multiply duplicate that overflowed at exposure x minCoverage >= 2^256
@@ -376,7 +376,6 @@ abstract contract AccountantTestBase is Test {
     function _specCoverageUtilization(
         uint256 _stRaw,
         uint256 _jtRaw,
-        bool _coinvested,
         uint256 _minCoverageWAD,
         uint256 _jtEff
     )
@@ -384,7 +383,7 @@ abstract contract AccountantTestBase is Test {
         pure
         returns (uint256)
     {
-        return RoycoTestMath.computeCoverageUtilization(_stRaw, _jtRaw, _coinvested, _minCoverageWAD, _jtEff);
+        return RoycoTestMath.computeCoverageUtilization(_stRaw, _jtRaw, _minCoverageWAD, _jtEff);
     }
 
     /**
@@ -412,12 +411,11 @@ abstract contract AccountantTestBase is Test {
         st.jtEffectiveNAV = s.lastJTEffectiveNAV;
         st.jtCoverageImpermanentLoss = s.lastJTCoverageImpermanentLoss;
         st.coverageUtilizationWAD = _specCoverageUtilization(
-            toUint256(s.lastSTRawNAV), toUint256(s.lastJTRawNAV), accountant.JT_COINVESTED(), s.minCoverageWAD, toUint256(s.lastJTEffectiveNAV)
+            toUint256(s.lastSTRawNAV), toUint256(s.lastJTRawNAV), s.minCoverageWAD, toUint256(s.lastJTEffectiveNAV)
         );
         st.liquidityUtilizationWAD = _specLiquidityUtilization(toUint256(s.lastSTEffectiveNAV), s.minLiquidityWAD, toUint256(s.lastLTRawNAV));
         st.fixedTermEndTimestamp = s.fixedTermEndTimestamp;
         st.minCoverageWAD = s.minCoverageWAD;
-        st.jtCoinvested = accountant.JT_COINVESTED();
         st.coverageLiquidationUtilizationWAD = s.coverageLiquidationUtilizationWAD;
         st.minLiquidityWAD = s.minLiquidityWAD;
     }
@@ -433,7 +431,6 @@ abstract contract AccountantTestBase is Test {
         uint256 _ltRaw,
         uint256 _stEff,
         uint256 _jtEff,
-        bool _coinvested,
         uint256 _minCoverageWAD,
         uint256 _minLiquidityWAD
     )
@@ -446,7 +443,6 @@ abstract contract AccountantTestBase is Test {
         st.ltRawNAV = toNAVUnits(_ltRaw);
         st.stEffectiveNAV = toNAVUnits(_stEff);
         st.jtEffectiveNAV = toNAVUnits(_jtEff);
-        st.jtCoinvested = _coinvested;
         st.minCoverageWAD = _minCoverageWAD;
         st.minLiquidityWAD = _minLiquidityWAD;
         st.coverageLiquidationUtilizationWAD = type(uint256).max;

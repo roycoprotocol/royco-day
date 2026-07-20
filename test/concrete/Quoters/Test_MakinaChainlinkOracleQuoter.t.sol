@@ -27,7 +27,7 @@ import { RoycoLiquidityTranche } from "../../../src/tranches/RoycoLiquidityTranc
 import { RoycoSeniorTranche } from "../../../src/tranches/RoycoSeniorTranche.sol";
 import {
     Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel as MakinaChainlinkKernel
-} from "../../mocks/Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
+} from "../../../src/kernels/Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
 import { MockAggregatorV3 } from "../../mocks/MockAggregatorV3.sol";
 import { MockBPT } from "../../mocks/MockBPT.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
@@ -47,9 +47,9 @@ import { _plainToken } from "../../utils/TokenConfigs.sol";
  *         a stored admin rate as an OVERRIDE (a nonzero stored rate wins, zero restores the feed path)
  * @dev Mirrors MakinaMarketTestBase step for step and swaps only the second hop: a MockAggregatorV3
  *      accounting-asset-to-NAV price feed is wired into the kernel init through the 5-field Chainlink quoter params.
- *      The Makina Chainlink quoter ships abstract in src with no concrete kernel wiring it, so the test-only
- *      concrete kernel in test/mocks exercises it end to end. The market stays unseeded in every test, conversion
- *      rates are independent of tranche NAVs and the setters' internal accounting syncs pass trivially at zero NAVs
+ *      The tests drive the shipped concrete Makina Chainlink kernel from src/kernels end to end. The market stays
+ *      unseeded in every test, conversion rates are independent of tranche NAVs and the setters' internal accounting
+ *      syncs pass trivially at zero NAVs
  */
 abstract contract MakinaChainlinkMarketTestBase is DayMarketTestBase {
     /// @notice The deployed market's kernel proxy, typed to the Makina Chainlink composition under test
@@ -113,7 +113,6 @@ abstract contract MakinaChainlinkMarketTestBase is DayMarketTestBase {
     )
         internal
     {
-        require(_params.jtCoinvested, "MakinaChainlinkMarketTestBase: kernel family forces jtCoinvested=true");
         // The base fixture's ERC4626 shape validation does not apply here: the tranche asset is a PLAIN ERC20
         // machine share, only the quote-asset decimals are consumed by the base's pool-genesis helper
         cell = FixtureCell({
@@ -155,7 +154,7 @@ abstract contract MakinaChainlinkMarketTestBase is DayMarketTestBase {
         RoycoSeniorTranche stImpl = new RoycoSeniorTranche(address(machineShare), predictedKernel);
         RoycoJuniorTranche jtImpl = new RoycoJuniorTranche(address(machineShare), predictedKernel);
         RoycoLiquidityTranche ltImpl = new RoycoLiquidityTranche(address(bpt), predictedKernel);
-        RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel, true);
+        RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel);
 
         // Tranche and accountant proxies MUST exist before the kernel impl (its constructor reads the accountant)
         seniorTranche = RoycoSeniorTranche(_deployTrancheProxy(address(stImpl), "Royco Senior Tranche", "RST"));

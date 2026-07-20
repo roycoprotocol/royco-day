@@ -56,6 +56,9 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     Vm.Wallet internal ORACLE_QUOTER_ADMIN;
     address internal ORACLE_QUOTER_ADMIN_ADDRESS;
 
+    Vm.Wallet internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN;
+    address internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS;
+
     Vm.Wallet internal LP_ROLE_ADMIN;
     address internal LP_ROLE_ADMIN_ADDRESS;
 
@@ -119,17 +122,14 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     string internal JUNIOR_TRANCHE_NAME = "Royco Junior Tranche";
     string internal JUNIOR_TRANCHE_SYMBOL = "RJT";
     uint64 internal COVERAGE_WAD = 0.2e18; // 20% coverage
-    bool internal JT_COINVESTED = false; // JT in a different opportunity (RFR), uncorrelated downside
     uint64 internal ST_PROTOCOL_FEE_WAD = 0.1e18; // 10% protocol fee
     uint64 internal JT_PROTOCOL_FEE_WAD = 0.1e18; // 10% protocol fee
     /**
      * @dev Liquidation coverage utilization threshold. Derivation at this fixture's 20% minimum coverage:
-     *      coverage utilization is exposure x minCoverage / jtEffectiveNAV (JT not co-invested here, so exposure is
-     *      stRawNAV alone), and 97 x 0.2e18 / 3 = 6.4666...e18 is the utilization of a market whose junior buffer
-     *      has eroded to 3 NAV units against 97 units of senior exposure. Rounding that up at the fourth decimal
-     *      to 6.4667e18 keeps the exact 97-to-3 market just below the threshold, so liquidation arms only once the
-     *      junior buffer covers less than ~3.09% (0.2e18 / 6.4667e18) of senior exposure — a near-total JT wipeout,
-     *      far above any utilization a healthy seeded state in this suite reads
+     *      coverage utilization is exposure x minCoverage / jtEffectiveNAV, where exposure is the combined
+     *      stRawNAV + jtRawNAV. At 6.4667e18 liquidation arms only once the junior buffer covers less than
+     *      ~3.09% (0.2e18 / 6.4667e18) of total exposure, a near-total JT wipeout, far above any utilization
+     *      a healthy seeded state in this suite reads
      */
     uint256 internal LIQUIDATION_COVERAGE_UTILIZATION_WAD = 6.4667e18;
     uint24 internal FIXED_TERM_DURATION_SECONDS = 2 weeks; // 2 weeks in seconds
@@ -186,6 +186,9 @@ abstract contract RoycoDayTestBase is Test, Assertions {
 
         ORACLE_QUOTER_ADMIN = _initWallet("ORACLE_QUOTER_ADMIN", 1000 ether);
         ORACLE_QUOTER_ADMIN_ADDRESS = ORACLE_QUOTER_ADMIN.addr;
+
+        MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN = _initWallet("MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN", 1000 ether);
+        MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS = MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN.addr;
 
         LP_ROLE_ADMIN = _initWallet("LP_ROLE_ADMIN", 1000 ether);
         LP_ROLE_ADMIN_ADDRESS = LP_ROLE_ADMIN.addr;
@@ -363,6 +366,7 @@ abstract contract RoycoDayTestBase is Test, Assertions {
                 protocolFeeRecipientAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS,
                 balancerPoolManagerAddress: KERNEL_ADMIN_ADDRESS,
                 marketOpsAddress: KERNEL_ADMIN_ADDRESS,
+                marketReinvestLiquidityPremiumAddress: MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS,
                 adminEntryPointAddress: KERNEL_ADMIN_ADDRESS,
                 entryPointFeeCollectorAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS
             })
@@ -377,6 +381,4 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     function _sync() internal prankModifier(SYNC_ROLE_ADDRESS) {
         KERNEL.syncTrancheAccounting();
     }
-
-
 }

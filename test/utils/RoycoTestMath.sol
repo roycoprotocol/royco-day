@@ -71,7 +71,6 @@ library RoycoTestMath {
      * @custom:field nowTimestamp - Block timestamp of the sync (state-machine predicate input)
      * @custom:field fixedTermDuration - Configured fixed-term duration (0 forces PERPETUAL)
      * @custom:field minCoverageWAD - Minimum coverage fraction (input for the post-sync coverage utilization)
-     * @custom:field jtCoinvested - Whether JT raw NAV counts toward coverage exposure (the exposure beta)
      * @custom:field coverageLiquidationUtilizationWAD - Liquidation threshold on coverage utilization
      * @custom:field effectiveDust - Dust tolerance used by the fee gates and the state machine
      * @custom:field minLiquidityWAD - Minimum liquidity fraction (input for the mirror-side liquidity utilization)
@@ -101,7 +100,6 @@ library RoycoTestMath {
         uint256 nowTimestamp;
         uint256 fixedTermDuration;
         uint256 minCoverageWAD;
-        bool jtCoinvested;
         uint256 coverageLiquidationUtilizationWAD;
         uint256 effectiveDust;
         uint256 minLiquidityWAD;
@@ -171,23 +169,19 @@ library RoycoTestMath {
      * @custom:field stRawNAV - Senior raw NAV at the synced marks
      * @custom:field jtRawNAV - Junior raw NAV at the synced marks
      * @custom:field jtEffectiveNAV - Junior effective NAV at the synced marks (the bonus source cap)
-     * @custom:field jtCoinvested - Whether JT raw NAV counts toward covered exposure
      * @custom:field coverageUtilizationWAD - Coverage utilization at the synced marks
      * @custom:field coverageLiquidationUtilizationWAD - Liquidation threshold gating the bonus (strict-less means inactive)
      * @custom:field bonusWAD - Configured self-liquidation bonus fraction of the redeemed NAV
-     * @custom:field userClaimNAV - The redeeming ST user's total claim NAV (the desired-bonus base)
-     * @custom:field stUserWeightedClaimNAV - The user's claim on real exposure, ST leg plus JT leg only when co-invested
+     * @custom:field userClaimNAV - The redeeming ST user's total claim NAV (the desired-bonus base and the U-neutral scaling weight)
      */
     struct SeniorTrancheSelfLiquidationBonusInputs {
         uint256 stRawNAV;
         uint256 jtRawNAV;
         uint256 jtEffectiveNAV;
-        bool jtCoinvested;
         uint256 coverageUtilizationWAD;
         uint256 coverageLiquidationUtilizationWAD;
         uint256 bonusWAD;
         uint256 userClaimNAV;
-        uint256 stUserWeightedClaimNAV;
     }
 
     /**
@@ -254,15 +248,13 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice Coverage utilization: ⌈(stRawNAV + beta·jtRawNAV) · minCoverageWAD / jtEffectiveNAV⌉ where beta is 1 if JT is
-     *         co-invested and 0 otherwise.
+     * @notice Coverage utilization: ⌈(stRawNAV + jtRawNAV) · minCoverageWAD / jtEffectiveNAV⌉.
      * @dev Mirrors src UtilizationLogic._computeCoverageUtilization.
      *      Edges (zero edges take precedence): 0 if minCoverageWAD == 0 or the exposure is 0, then uint256 max if
      *      jtEffectiveNAV == 0 against a positive requirement.
      *      Rounding: Ceil. Favors: senior (utilization reads high, gating deposits earlier).
      * @param stRawNAV The senior raw NAV (total, no exclusion)
      * @param jtRawNAV The junior raw NAV
-     * @param jtCoinvested Whether JT raw NAV counts toward covered exposure
      * @param minCoverageWAD The minimum coverage fraction in WAD
      * @param jtEffectiveNAV The junior effective NAV
      * @return utilizationWAD The coverage utilization in WAD
@@ -270,7 +262,6 @@ library RoycoTestMath {
     function computeCoverageUtilization(
         uint256 stRawNAV,
         uint256 jtRawNAV,
-        bool jtCoinvested,
         uint256 minCoverageWAD,
         uint256 jtEffectiveNAV
     )
@@ -278,7 +269,7 @@ library RoycoTestMath {
         pure
         returns (uint256 utilizationWAD)
     {
-        uint256 exposure = jtCoinvested ? stRawNAV + jtRawNAV : stRawNAV;
+        uint256 exposure = stRawNAV + jtRawNAV;
         if (minCoverageWAD == 0 || exposure == 0) return 0;
         if (jtEffectiveNAV == 0) return type(uint256).max;
         utilizationWAD = Math.mulDiv(exposure, minCoverageWAD, jtEffectiveNAV, Math.Rounding.Ceil);
@@ -355,6 +346,8 @@ library RoycoTestMath {
      *      of the post-mint supply (the residual guarantee is per mint, not per sync).
      *      Rounding: Floor on both mints. Favors: pre-existing ST shares.
      *      Precondition: premium + fee <= stEffectiveNAV (guaranteed upstream by the tranche accounting sync).
+     * @dev This zero-ltFee overload forwards to the five-argument form: with no LT protocol fee the premium leg
+     *      mints the full premium and the fee leg mints only the ST protocol fee.
      * @param stEffectiveNAV The post-sync senior effective NAV
      * @param premium The LT liquidity premium to mint as ST shares
      * @param fee The ST protocol fee to mint as ST shares
@@ -373,9 +366,40 @@ library RoycoTestMath {
         pure
         returns (uint256 premiumShares, uint256 feeShares, uint256 supplyAfter)
     {
+        return computeSTFeeAndLiquidityPremiumSharesToMint(stEffectiveNAV, premium, fee, 0, preSupply);
+    }
+
+    /**
+     * @notice The senior share mint split with an LT protocol fee carved out of the liquidity premium.
+     * @dev Mirrors src FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint. The LT protocol
+     *      fee moves from the premium carve-out into the fee carve-out: the premium leg mints (premium − ltFee) so
+     *      the LT holds the premium net of the fee, and the fee leg mints (fee + ltFee) so the protocol receives the
+     *      ST protocol fee plus the carved LT fee as senior shares. The retained denominator subtracts the gross
+     *      premium and the ST fee (the LT fee is already inside the premium), so it is unchanged by the carve-out.
+     *      Precondition: ltFee <= premium and premium + fee <= stEffectiveNAV (both guaranteed upstream).
+     * @param stEffectiveNAV The post-sync senior effective NAV
+     * @param premium The gross LT liquidity premium
+     * @param fee The ST protocol fee to mint as ST shares
+     * @param ltFee The LT protocol fee carved out of the premium and remitted as ST shares to the protocol
+     * @param preSupply The pre-sync ST share supply
+     * @return premiumShares The ST shares minted for the premium net of the LT fee
+     * @return feeShares The ST shares minted for the ST fee plus the carved LT fee
+     * @return supplyAfter The ST share supply after both mints
+     */
+    function computeSTFeeAndLiquidityPremiumSharesToMint(
+        uint256 stEffectiveNAV,
+        uint256 premium,
+        uint256 fee,
+        uint256 ltFee,
+        uint256 preSupply
+    )
+        internal
+        pure
+        returns (uint256 premiumShares, uint256 feeShares, uint256 supplyAfter)
+    {
         uint256 retained = stEffectiveNAV - premium - fee;
-        premiumShares = convertToShares(premium, retained, preSupply);
-        feeShares = convertToShares(fee, retained, preSupply);
+        premiumShares = convertToShares(premium - ltFee, retained, preSupply);
+        feeShares = convertToShares(fee + ltFee, retained, preSupply);
         supplyAfter = preSupply + premiumShares + feeShares;
     }
 
@@ -563,7 +587,7 @@ library RoycoTestMath {
         require(out.stRawNAV + out.jtRawNAV == stEffectiveNAV + jtEffectiveNAV, CONSERVATION_VIOLATED());
 
         // State machine on the fresh raws and the settled post-sync jtEffectiveNAV
-        out.coverageUtilizationWAD = computeCoverageUtilization(out.stRawNAV, out.jtRawNAV, in_.jtCoinvested, in_.minCoverageWAD, jtEffectiveNAV);
+        out.coverageUtilizationWAD = computeCoverageUtilization(out.stRawNAV, out.jtRawNAV, in_.minCoverageWAD, jtEffectiveNAV);
         bool forcedPerpetual = in_.fixedTermDuration == 0
             || (in_.marketStateLast == MarketState.FIXED_TERM && in_.fixedTermEndTimestampLast <= in_.nowTimestamp)
             || out.coverageUtilizationWAD >= in_.coverageLiquidationUtilizationWAD || (jtEffectiveNAV == 0 && stEffectiveNAV > 0);
@@ -599,8 +623,8 @@ library RoycoTestMath {
     /**
      * @notice Max ST deposit: min of the coverage-leg and liquidity-leg inversions, each minus dust slack.
      * @dev Mirrors src RoycoDayAccountant.maxSTDeposit.
-     *      Coverage leg: ⌊jtEffectiveNAV · WAD / minCoverageWAD⌋ − ((jtCoinvested ? jtRawNAV : 0) + jtDust + stRawNAV + stDust),
-     *      saturating. The jtDust term applies regardless of co-investment. Liquidity leg:
+     *      Coverage leg: ⌊jtEffectiveNAV · WAD / minCoverageWAD⌋ − (jtRawNAV + jtDust + stRawNAV + stDust),
+     *      saturating. Liquidity leg:
      *      ⌊ltRawNAV · WAD / minLiquidityWAD⌋ − (stEffectiveNAV + stDust), saturating. A zero requirement disables its leg
      *      (uint256 max). Rounding: Floor on both inversions. Favors: protocol (the max reads low).
      * @param stRawNAV The senior raw NAV at the synced marks
@@ -608,7 +632,6 @@ library RoycoTestMath {
      * @param stEffectiveNAV The senior effective NAV at the synced marks
      * @param jtEffectiveNAV The junior effective NAV at the synced marks
      * @param ltRawNAV The LT raw NAV at the synced marks
-     * @param jtCoinvested Whether JT raw NAV counts toward covered exposure
      * @param minCoverageWAD The minimum coverage fraction in WAD
      * @param minLiquidityWAD The minimum liquidity fraction in WAD
      * @param stDust The ST NAV dust tolerance
@@ -621,7 +644,6 @@ library RoycoTestMath {
         uint256 stEffectiveNAV,
         uint256 jtEffectiveNAV,
         uint256 ltRawNAV,
-        bool jtCoinvested,
         uint256 minCoverageWAD,
         uint256 minLiquidityWAD,
         uint256 stDust,
@@ -634,7 +656,7 @@ library RoycoTestMath {
         uint256 maxGivenCoverage = type(uint256).max;
         if (minCoverageWAD != 0) {
             uint256 totalCoveredValue = Math.mulDiv(jtEffectiveNAV, WAD, minCoverageWAD);
-            maxGivenCoverage = _sat(totalCoveredValue, (jtCoinvested ? jtRawNAV : 0) + jtDust + stRawNAV + stDust);
+            maxGivenCoverage = _sat(totalCoveredValue, jtRawNAV + jtDust + stRawNAV + stDust);
         }
         uint256 maxGivenLiquidity = type(uint256).max;
         if (minLiquidityWAD != 0) {
@@ -645,88 +667,61 @@ library RoycoTestMath {
     }
 
     /**
-     * @notice Max JT withdrawal: the coverage-surplus inversion with claim-fraction floors, the coverage
-     *         retention denominator, and the +2 wei fudge, split into per-tranche withdrawable NAVs.
+     * @notice Max JT withdrawal: the coverage-surplus inversion, stretched by the coverage retention factor (1 − minCoverageWAD).
      * @dev Mirrors src RoycoDayAccountant.maxJTWithdrawal.
-     *      surplus = sat(jtEffectiveNAV − (⌈exposure · minCoverageWAD / WAD⌉ + stDust + (jtCoinvested ? jtDust : 0) + 2)),
-     *      where the +2 wei absorbs the worst-case inner-ceil rounding of the coverage utilization check.
-     *      Fractions floor over totalJTClaims, retention = WAD − ⌊minCoverageWAD · (stFrac + beta·jtFrac) / WAD⌋,
-     *      totalClaimable = ⌊surplus · WAD / retention⌋, and each split floors again.
-     *      Early-outs return (0, 0) on zero surplus, zero total claims, or zero claimable.
-     *      Rounding: mixed as stated. Favors: protocol. Precondition: retention > 0.
+     *      requiredJT = ⌈(exposure + stDust + jtDust) · minCoverageWAD / WAD⌉ folds the dust tolerances into the coverage requirement,
+     *      surplus = sat(jtEffectiveNAV − requiredJT). Since JT is coinvested, each withdrawn NAV unit relaxes the requirement by
+     *      minCoverageWAD, so the withdrawable NAV is ⌊surplus · WAD / (WAD − minCoverageWAD)⌋.
+     *      Rounding: Ceil on the requirement, Floor on the inversion. Favors: protocol. Precondition: minCoverageWAD < WAD.
      * @param stRawNAV The senior raw NAV at the synced marks
      * @param jtRawNAV The junior raw NAV at the synced marks
-     * @param stEffectiveNAV The senior effective NAV at the synced marks
      * @param jtEffectiveNAV The junior effective NAV at the synced marks
-     * @param jtCoinvested Whether JT raw NAV counts toward covered exposure
      * @param minCoverageWAD The minimum coverage fraction in WAD
      * @param stDust The ST NAV dust tolerance
      * @param jtDust The JT NAV dust tolerance
-     * @return stWithdrawable The JT-withdrawable NAV sourced from the ST raw NAV
-     * @return jtWithdrawable The JT-withdrawable NAV sourced from the JT raw NAV
+     * @return jtWithdrawable The JT-withdrawable NAV
      */
     function maxJTWithdrawal(
         uint256 stRawNAV,
         uint256 jtRawNAV,
-        uint256 stEffectiveNAV,
         uint256 jtEffectiveNAV,
-        bool jtCoinvested,
         uint256 minCoverageWAD,
         uint256 stDust,
         uint256 jtDust
     )
         internal
         pure
-        returns (uint256 stWithdrawable, uint256 jtWithdrawable)
+        returns (uint256 jtWithdrawable)
     {
-        uint256 jtClaimOnSTRaw = _sat(jtEffectiveNAV, jtRawNAV);
-        uint256 jtClaimOnJTRaw = jtRawNAV - _sat(stEffectiveNAV, stRawNAV);
-
-        uint256 exposure = stRawNAV + (jtCoinvested ? jtRawNAV : 0);
-        uint256 requiredJTValue = Math.mulDiv(exposure, minCoverageWAD, WAD, Math.Rounding.Ceil);
-        uint256 surplus = _sat(jtEffectiveNAV, requiredJTValue + stDust + (jtCoinvested ? jtDust : 0) + 2);
-        if (surplus == 0) return (0, 0);
-
-        uint256 totalJTClaims = jtClaimOnSTRaw + jtClaimOnJTRaw;
-        if (totalJTClaims == 0) return (0, 0);
-        uint256 stFracWAD = Math.mulDiv(jtClaimOnSTRaw, WAD, totalJTClaims);
-        uint256 jtFracWAD = Math.mulDiv(jtClaimOnJTRaw, WAD, totalJTClaims);
-        uint256 retentionWAD = WAD - Math.mulDiv(minCoverageWAD, stFracWAD + (jtCoinvested ? jtFracWAD : 0), WAD);
-        uint256 totalNAVClaimable = Math.mulDiv(surplus, WAD, retentionWAD);
-        if (totalNAVClaimable == 0) return (0, 0);
-
-        stWithdrawable = Math.mulDiv(totalNAVClaimable, stFracWAD, WAD);
-        jtWithdrawable = Math.mulDiv(totalNAVClaimable, jtFracWAD, WAD);
+        uint256 requiredJTValue = Math.mulDiv(stRawNAV + jtRawNAV + stDust + jtDust, minCoverageWAD, WAD, Math.Rounding.Ceil);
+        uint256 surplus = _sat(jtEffectiveNAV, requiredJTValue);
+        jtWithdrawable = Math.mulDiv(surplus, WAD, WAD - minCoverageWAD, Math.Rounding.Floor);
     }
 
     /**
      * @notice Max LT withdrawal: ltRawNAV − (⌈stEffectiveNAV · minLiquidityWAD / WAD⌉ + stDust), saturating.
      * @dev Mirrors src RoycoDayAccountant.maxLTWithdrawal.
-     *      Bypasses (full ltRawNAV): minLiquidityWAD == 0, or coverageUtilizationWAD >= coverageLiquidationUtilizationWAD
-     *      (liquidation breached, the comparison is >= so the exact threshold bypasses).
+     *      Bypass (full ltRawNAV): minLiquidityWAD == 0. The liquidity requirement is enforced at all coverage levels,
+     *      including once the liquidation coverage threshold is breached, so no coverage input feeds the bound.
      *      Rounding: Ceil on the dust-padded required depth (the dust tolerance folds into the senior NAV before
      *      scaling, mirroring the accountant). Favors: senior (the max reads low).
      * @param ltRawNAV The LT raw NAV at the synced marks
      * @param stEffectiveNAV The senior effective NAV at the synced marks
      * @param minLiquidityWAD The minimum liquidity fraction in WAD
      * @param stDust The ST NAV dust tolerance
-     * @param coverageUtilizationWAD The coverage utilization at the synced marks
-     * @param coverageLiquidationUtilizationWAD The coverage liquidation utilization threshold in WAD
      * @return ltWithdrawable The maximum LT withdrawal NAV
      */
     function maxLTWithdrawal(
         uint256 ltRawNAV,
         uint256 stEffectiveNAV,
         uint256 minLiquidityWAD,
-        uint256 stDust,
-        uint256 coverageUtilizationWAD,
-        uint256 coverageLiquidationUtilizationWAD
+        uint256 stDust
     )
         internal
         pure
         returns (uint256 ltWithdrawable)
     {
-        if (minLiquidityWAD == 0 || coverageUtilizationWAD >= coverageLiquidationUtilizationWAD) return ltRawNAV;
+        if (minLiquidityWAD == 0) return ltRawNAV;
         uint256 requiredLTValue = Math.mulDiv(stEffectiveNAV + stDust, minLiquidityWAD, WAD, Math.Rounding.Ceil);
         ltWithdrawable = _sat(ltRawNAV, requiredLTValue);
     }
@@ -735,10 +730,7 @@ library RoycoTestMath {
      * @notice Self-liquidation bonus: min(⌊userClaimNAV · bonusWAD / WAD⌋, jtEffectiveNAV, U-neutral max), active
      *         only once coverage utilization is at or above the liquidation threshold.
      * @dev Mirrors src SelfLiquidationLogic.applySeniorTrancheSelfLiquidationBonus (the bonus NAV computation).
-     *      The U-neutral max sources ST-claim capital first. Case 1 (entirely from JT's claim on ST):
-     *      ⌊weighted · jtEffectiveNAV / (exposure − jtEffectiveNAV)⌋, taken iff it fits within jtClaimOnSTRaw = sat(jtEffectiveNAV − jtRawNAV).
-     *      Case 2 (crossing into JT's self-claim):
-     *      ⌊(weighted + (jtCoinvested ? 0 : jtClaimOnSTRaw)) · jtEffectiveNAV / (exposure − (jtCoinvested ? jtEffectiveNAV : 0))⌋.
+     *      The bonus source does not change the U-neutral bound, so the max is ⌊weighted · jtEffectiveNAV / (exposure − jtEffectiveNAV)⌋.
      *      Early-outs: below the threshold, jtEffectiveNAV == 0, or weighted == 0 return 0.
      *      Rounding: Floor throughout. Favors: JT.
      *      Precondition: exposure > jtEffectiveNAV whenever the bonus is active (the documented positivity lemma).
@@ -748,8 +740,7 @@ library RoycoTestMath {
     function seniorTrancheSelfLiquidationBonus(SeniorTrancheSelfLiquidationBonusInputs memory in_) internal pure returns (uint256 bonusNAV) {
         if (in_.coverageUtilizationWAD < in_.coverageLiquidationUtilizationWAD) return 0;
         uint256 desiredBonusNAV = Math.mulDiv(in_.userClaimNAV, in_.bonusWAD, WAD);
-        uint256 jtClaimOnSTRaw = _sat(in_.jtEffectiveNAV, in_.jtRawNAV);
-        uint256 maxNeutralBonusNAV = _maxCoverageUtilizationNeutralBonus(in_, jtClaimOnSTRaw);
+        uint256 maxNeutralBonusNAV = _maxCoverageUtilizationNeutralBonus(in_);
         bonusNAV = Math.min(Math.min(desiredBonusNAV, in_.jtEffectiveNAV), maxNeutralBonusNAV);
     }
 
@@ -808,17 +799,13 @@ library RoycoTestMath {
 
     /**
      * @dev The U-neutral max bonus, mirroring src SelfLiquidationLogic._computeMaxCoverageUtilizationNeutralBonus:
-     *      ST-claim sourced first (case 1) then crossing into the JT self-claim (case 2), with the
-     *      jtEffectiveNAV == 0 and weighted == 0 early-outs. Floor on both divisions.
+     *      the bonus source does not change the bound, so it is ⌊userClaimNAV · jtEffectiveNAV / (exposure − jtEffectiveNAV)⌋,
+     *      with the userClaimNAV == 0 early-out. Floor on the division. The liquidation-branch caller guarantees exposure > jtEffectiveNAV.
      */
-    function _maxCoverageUtilizationNeutralBonus(SeniorTrancheSelfLiquidationBonusInputs memory in_, uint256 jtClaimOnSTRaw) private pure returns (uint256) {
-        if (in_.jtEffectiveNAV == 0) return 0;
-        if (in_.stUserWeightedClaimNAV == 0) return 0;
-        uint256 exposure = in_.stRawNAV + (in_.jtCoinvested ? in_.jtRawNAV : 0);
-        uint256 stSourcedMax = Math.mulDiv(in_.stUserWeightedClaimNAV, in_.jtEffectiveNAV, exposure - in_.jtEffectiveNAV);
-        if (stSourcedMax <= jtClaimOnSTRaw) return stSourcedMax;
-        uint256 adjustedWeightedClaim = in_.stUserWeightedClaimNAV + (in_.jtCoinvested ? 0 : jtClaimOnSTRaw);
-        return Math.mulDiv(adjustedWeightedClaim, in_.jtEffectiveNAV, exposure - (in_.jtCoinvested ? in_.jtEffectiveNAV : 0));
+    function _maxCoverageUtilizationNeutralBonus(SeniorTrancheSelfLiquidationBonusInputs memory in_) private pure returns (uint256) {
+        if (in_.userClaimNAV == 0) return 0;
+        uint256 exposure = in_.stRawNAV + in_.jtRawNAV;
+        return Math.mulDiv(in_.userClaimNAV, in_.jtEffectiveNAV, exposure - in_.jtEffectiveNAV);
     }
 
     /**

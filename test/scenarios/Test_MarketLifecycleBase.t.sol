@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { ST_LP_ROLE } from "../../src/factory/RolesConfiguration.sol";
+import { LT_LP_ROLE, ST_LP_ROLE } from "../../src/factory/RolesConfiguration.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoSeniorTranche } from "../../src/interfaces/IRoycoSeniorTranche.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
 import { AssetClaims, MarketState, SyncedAccountingState } from "../../src/libraries/Types.sol";
 import { Math, toNAVUnits, toTrancheUnits, toUint256 } from "../../src/libraries/Units.sol";
+import { DayMarketTestBase } from "../utils/DayMarketTestBase.sol";
 import { FixtureCell } from "../utils/FixtureTypes.sol";
 import { defaultParams } from "../utils/MarketParams.sol";
-import { DayMarketTestBase } from "../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_MarketLifecycleBase
@@ -84,13 +84,17 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
 
     /**
      * @dev The fee and liquidity premium share mint (_computeSTFeeAndLiquidityPremiumSharesToMint, jointly
-     *      priced): the premium and the ST fee both price against the pre-sync 100e18 supply over the retained
-     *      NAV 100.8e18 - 0.1e18 - 0.07e18 = 100.63e18, each floored:
-     *      LT_PREMIUM_SHARES = floor(100e18 x 0.1e18 / 100.63e18) = 99373944151843386
-     *      ST_FEE_SHARES = floor(100e18 x 0.07e18 / 100.63e18) = 69561760906290370
+     *      priced): both price against the pre-sync 100e18 supply over the retained NAV
+     *      100.8e18 - 0.1e18 - 0.07e18 = 100.63e18, each floored. The LT protocol fee is carved out of the
+     *      liquidity premium and remitted as SENIOR shares, so the LT receives the premium NET of its own fee
+     *      and the fee recipient receives senior shares worth the ST fee PLUS the LT fee:
+     *      LT_PREMIUM_SHARES = floor(100e18 x (0.1e18 - 0.01e18) / 100.63e18) = 89436549736659047
+     *      ST_FEE_SHARES = floor(100e18 x (0.07e18 + 0.01e18) / 100.63e18) = 79499155321474709
+     *      Total senior shares minted this sync is unchanged: (premium - ltFee) + (stFee + ltFee) == premium + stFee,
+     *      so POST_SYNC_ST_SUPPLY is byte-identical to the old split
      */
-    uint256 internal constant LT_PREMIUM_SHARES = 99_373_944_151_843_386;
-    uint256 internal constant ST_FEE_SHARES = 69_561_760_906_290_370;
+    uint256 internal constant LT_PREMIUM_SHARES = 89_436_549_736_659_047;
+    uint256 internal constant ST_FEE_SHARES = 79_499_155_321_474_709;
     uint256 internal constant POST_SYNC_ST_SUPPLY = 100e18 + LT_PREMIUM_SHARES + ST_FEE_SHARES;
 
     /**
@@ -99,28 +103,27 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
      *      the just-cached effective share rate floor(1e18 x 100.8e18 / POST_SYNC_ST_SUPPLY) = 1.0063e18, and the
      *      seeded pool's NAV-per-BPT is exactly 1.0 (the genesis seed backs the dead minimum supply at 1.0), so
      *      the add mints fair value:
-     *      REINVESTED_BPT = floor(LT_PREMIUM_SHARES x 1.0063e18 / 1e18) = 99999999999999999
+     *      REINVESTED_BPT = floor(LT_PREMIUM_SHARES x 1.0063e18 / 1e18) = 89999999999999998
      *      against the gate's minimum of
-     *      ceil(floor(LT_PREMIUM_SHARES x 100.8e18 / POST_SYNC_ST_SUPPLY) x 0.999) = 99900000000000000,
+     *      ceil(floor(LT_PREMIUM_SHARES x 100.8e18 / POST_SYNC_ST_SUPPLY) x 0.999) = 89910000000000000,
      *      leaving only wei-level flooring as slippage, far inside the 10bps defaultParams gate. The deployed
      *      senior leg marks the oracle TVL up by the identical amount (same price, same floor), so the committed
      *      post-sync ltRawNAV is exactly SEEDED_LT_RAW_NAV + REINVESTED_BPT and no idle liquidity premium senior
-     *      shares remain with the kernel
+     *      shares remain with the kernel. Only the NET premium (premium - ltFee) deploys, so the depth grows by
+     *      less than the old full-premium split
      */
-    uint256 internal constant REINVESTED_BPT = 99_999_999_999_999_999;
+    uint256 internal constant REINVESTED_BPT = 89_999_999_999_999_998;
     uint256 internal constant POST_DEPLOY_LT_RAW_NAV = SEEDED_LT_RAW_NAV + REINVESTED_BPT;
 
     /**
-     * @dev JT and LT protocol fee share mints, each priced against the post-fee NAV over the pre-mint supply:
+     * @dev JT protocol fee share mint, priced against the post-fee NAV over the pre-mint supply:
      *      JT_FEE_SHARES = floor(30e18 x 0.05e18 / (30.5e18 - 0.05e18)) = 49261083743842364
-     *      LT_FEE_SHARES = floor(26e18 x 0.01e18 / (POST_DEPLOY_LT_RAW_NAV - 0.01e18)) = 9965504024530471
-     *      (the LT fee prices against the post-sync LT effective NAV, which is the post-deploy ltRawNAV because
-     *      the premium deployed inline and left no idle senior shares)
+     *      The LT protocol fee no longer mints liquidity-tranche shares: it is remitted as senior shares folded
+     *      into ST_FEE_SHARES, so a sync leaves the LT total supply unchanged at the seeded 26e18
      */
     uint256 internal constant JT_FEE_SHARES = 49_261_083_743_842_364;
     uint256 internal constant POST_SYNC_JT_SUPPLY = 30e18 + JT_FEE_SHARES;
-    uint256 internal constant LT_FEE_SHARES = 9_965_504_024_530_471;
-    uint256 internal constant POST_SYNC_LT_SUPPLY = 26e18 + LT_FEE_SHARES;
+    uint256 internal constant POST_SYNC_LT_SUPPLY = 26e18;
 
     /**
      * @dev Exact redemption NAV expectations (shape-independent, all inputs above):
@@ -232,9 +235,10 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         _warpAndRefreshFeed(1 days);
         syncVenuePrices();
 
-        // Every value-moving mint in the sync is pinned with exact args, in emission order: the premium share
-        // mint (supply is 100e18 + premium at that instant), the inline reinvestment, the three protocol fee
-        // share mints, and the final committed LT raw NAV
+        // Every value-moving mint in the sync is pinned with exact args, in emission order: the NET premium share
+        // mint to the LT (supply is 100e18 + net premium at that instant), the inline reinvestment, the ST and JT
+        // protocol fee share mints (the LT fee is folded into the senior fee mint as senior shares, and no
+        // liquidity-tranche shares are minted on a sync), and the final committed LT raw NAV
         vm.expectEmit(address(seniorTranche));
         emit IRoycoSeniorTranche.LiquidityPremiumSharesMinted(address(kernel), LT_PREMIUM_SHARES, 100e18 + LT_PREMIUM_SHARES);
         vm.expectEmit(address(kernel));
@@ -243,8 +247,6 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         emit IRoycoVaultTranche.ProtocolFeeSharesMinted(PROTOCOL_FEE_RECIPIENT, ST_FEE_SHARES, POST_SYNC_ST_SUPPLY);
         vm.expectEmit(address(juniorTranche));
         emit IRoycoVaultTranche.ProtocolFeeSharesMinted(PROTOCOL_FEE_RECIPIENT, JT_FEE_SHARES, POST_SYNC_JT_SUPPLY);
-        vm.expectEmit(address(liquidityTranche));
-        emit IRoycoVaultTranche.ProtocolFeeSharesMinted(PROTOCOL_FEE_RECIPIENT, LT_FEE_SHARES, POST_SYNC_LT_SUPPLY);
         vm.expectEmit(address(accountant));
         emit IRoycoDayAccountant.LiquidityTrancheRawNAVCommitted(toNAVUnits(POST_DEPLOY_LT_RAW_NAV));
         SyncedAccountingState memory state = _sync();
@@ -484,7 +486,7 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
      *      the pre-existing holders first — the premium shares mint against the pre-deposit supply, so the
      *      attacker's shares price at the fresh rate: minted = floor(5.05e18 x POST_SYNC_ST_SUPPLY / 100.8e18).
      *      The immediate same-block round-trip redemption then returns at most the deposited value (two floors),
-     *      proving the sandwich nets zero and the premium still lands with the LT in full
+     *      proving the sandwich nets zero and the NET premium (premium - ltFee) still lands with the LT
      */
     function test_STDeposit_frontRunningGainSync_capturesNoYieldOrPremium() public {
         _seedDefault();
@@ -515,12 +517,12 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         assertLt(mintedShares, depositNAV, "sandwich deposit: the attacker must mint strictly fewer shares than deposited NAV wei");
         assertEq(seniorTranche.totalSupply(), POST_SYNC_ST_SUPPLY + expectedMintedShares, "sandwich deposit: supply must be post-sync supply + attacker mint");
 
-        // The premium and fee flows are untouched by the sandwich: the premium deployed to the pool in full and
-        // the fee recipient holds exactly the derived fee shares
+        // The premium and fee flows are untouched by the sandwich: the net premium deployed to the pool in full
+        // and the fee recipient holds exactly the derived senior fee shares (ST fee plus the LT fee)
         IRoycoDayKernel.RoycoDayKernelState memory ks = kernel.getState();
         assertEq(ks.ltOwnedSeniorTrancheShares, 0, "sandwich deposit: the premium must still deploy, leaving no idle senior shares");
-        assertEq(balancerVault.getPoolBalances(address(bpt))[stPoolTokenIndex], LT_PREMIUM_SHARES, "sandwich deposit: the pool must hold the full premium");
-        assertEq(seniorTranche.balanceOf(PROTOCOL_FEE_RECIPIENT), ST_FEE_SHARES, "sandwich deposit: the ST fee mint must be undiluted by the attacker");
+        assertEq(balancerVault.getPoolBalances(address(bpt))[stPoolTokenIndex], LT_PREMIUM_SHARES, "sandwich deposit: the pool must hold the net premium");
+        assertEq(seniorTranche.balanceOf(PROTOCOL_FEE_RECIPIENT), ST_FEE_SHARES, "sandwich deposit: the senior fee mint must be undiluted by the attacker");
 
         // Round-trip: redeem every minted share in the same block. Post-deposit state is exact: stEff rose by
         // the 5.05e18 deposit to 105.85e18 and the supply by the attacker's mint, so the exit pays
@@ -586,7 +588,9 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         emit IRoycoVaultTranche.Redeem(
             LT_PROVIDER,
             LT_PROVIDER,
-            AssetClaims({ stAssets: toTrancheUnits(0), jtAssets: toTrancheUnits(0), ltAssets: toTrancheUnits(21e18), stShares: 0, nav: toNAVUnits(uint256(21e18)) }),
+            AssetClaims({
+                stAssets: toTrancheUnits(0), jtAssets: toTrancheUnits(0), ltAssets: toTrancheUnits(21e18), stShares: 0, nav: toNAVUnits(uint256(21e18))
+            }),
             parkShares
         );
         vm.prank(LT_PROVIDER);
@@ -646,6 +650,7 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         assertGe(pre.liquidityUtilizationWAD, 1.5e18, "liquidityUtilization must read breached (>= 180e18 x 0.05 / 6e18)");
 
         address depositor = makeAddr("UNDER_PROVISIONED_LT_DEPOSITOR");
+        accessManager.grantRole(LT_LP_ROLE, depositor, 0);
         quoteToken.mint(address(this), quoteUnit);
         quoteToken.approve(address(balancerVault), quoteUnit);
         // The pool's token amounts follow the sorted registration order, so map the quote leg through the index
@@ -688,6 +693,7 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         assertEq(uint8(pre.marketState), uint8(MarketState.FIXED_TERM), "covered drawdown must enter FIXED_TERM");
 
         address depositor = makeAddr("COVERAGE_BREACHED_LT_DEPOSITOR");
+        accessManager.grantRole(LT_LP_ROLE, depositor, 0);
         quoteToken.mint(address(this), quoteUnit);
         quoteToken.approve(address(balancerVault), quoteUnit);
         // The pool's token amounts follow the sorted registration order, so map the quote leg through the index

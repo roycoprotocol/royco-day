@@ -20,7 +20,7 @@ import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
 contract Test_AccessControl_Accountant is AccountantTestBase {
     function setUp() public {
         stranger = makeAddr("stranger");
-        _deploy(false, _defaultParams());
+        _deploy(_defaultParams());
     }
 
     /// preOpSyncTrancheAccounting reverts for any non-kernel caller, including the admin

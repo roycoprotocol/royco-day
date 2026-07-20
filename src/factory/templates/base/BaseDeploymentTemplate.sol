@@ -163,6 +163,16 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
         return keccak256(abi.encodePacked("ROYCO_MARKET_", _marketId, _componentTag));
     }
 
+    /**
+     * @notice Market-agnostic YDM salt: one shared instance per `(roleTag, model)` pair
+     * @param _componentTag The YDM role tag, `bytes32("YDM")` for the JT YDM or `bytes32("LDM")` for the LT LDM
+     * @param _ydmComponentId The component id of the YDM creation code, selecting the YDM model
+     * @return salt The market-agnostic CREATE3 salt for the `(roleTag, model)` pair's shared YDM instance
+     */
+    function _ydmSalt(bytes32 _componentTag, bytes32 _ydmComponentId) internal pure returns (bytes32 salt) {
+        return keccak256(abi.encodePacked("ROYCO_YDM_", _componentTag, _ydmComponentId));
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // DEPLOYMENT HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
@@ -201,12 +211,15 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
     }
 
     /**
-     * @notice Deploys a YDM instance of the selected component type at the caller-supplied salt, pinning its model-specific constructor params
+     * @notice Deploys (or reuses) a YDM instance of the selected component type at the caller-supplied salt, pinning its model-specific constructor params
      * @dev The registered creation code is the bare YDM bytecode for `_ydmComponentId`, the constructor args are appended here
-     *      (per market) rather than baked into the registered creation code, ABI-encoded per the selected model's constructor
+     *      rather than baked into the registered creation code, ABI-encoded per the selected model's constructor
      *      (the static curve takes its target utilization, and the adaptive curves additionally take their adaptation bounds and speed)
+     * @dev Unlike every other market component, an already-deployed YDM is reused rather than rejected: YDMs are
+     *      market-agnostic singletons (curve state keyed per accountant), so any market whose `_ydmSalt` matches a
+     *      previously deployed instance shares it
      * @dev An unregistered YDM component id reverts loud in `_readCreationCode` (CREATION_CODE_NOT_SET), so an unsupported type can never silently deploy the wrong model
-     * @param _salt The CREATE3 salt for this YDM instance
+     * @param _salt The CREATE3 salt for this YDM instance, derived market-agnostically via `_ydmSalt`
      * @param _ydmConstructorArgs The ABI-encoded constructor args for the selected YDM model
      * @param _ydmComponentId The component id of the YDM creation code to deploy, selecting the market's YDM model
      */
@@ -230,9 +243,9 @@ abstract contract BaseDeploymentTemplate is Initializable, IBaseTemplate {
         return _deployImpl(COMPONENT_ID_LIQUIDITY_TRANCHE_IMPL, abi.encode(_asset, _kernel), _salt);
     }
 
-    /// @notice Deploys the accountant impl for a given kernel and the junior tranche's fixed co-investment configuration
-    function _deployAccountantImpl(address _kernel, bool _jtCoinvested, bytes32 _salt) internal returns (address impl) {
-        return _deployImpl(COMPONENT_ID_ACCOUNTANT_IMPL, abi.encode(_kernel, _jtCoinvested), _salt);
+    /// @notice Deploys the accountant impl for a given kernel
+    function _deployAccountantImpl(address _kernel, bytes32 _salt) internal returns (address impl) {
+        return _deployImpl(COMPONENT_ID_ACCOUNTANT_IMPL, abi.encode(_kernel), _salt);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -22,6 +22,10 @@ via_ir = true
 deny = "never"
 fs_permissions = [{ access = "read", path = "./out" }, { access = "read-write", path = "./output" }]
 solc_version = "0.8.35"
+# Fork suites adopt the forked block's ~60M gas limit, which caps a CREATE's code deposit at 300KB. The
+# test-only DeployScript embeds every kernel and template creation code (~310KB runtime) so its in-test
+# construction needs the block gas limit lifted. Test-env only, deployments are unaffected.
+disable_block_gas_limit = true
 ignored_warnings_from = ["test/*", "lib/*"]
 show_progress = true
 # test/research/** is excluded from all builds and test runs: its suites compile the vendored Balancer

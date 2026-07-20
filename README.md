@@ -17,16 +17,12 @@ Each market tracks and reconciles two types of NAVs (Net Asset Value) per tranch
 Each market enforces a minimum coverage requirement, ensuring that senior capital always retains guaranteed downside protection. Coverage utilization measures how much of the junior buffer is currently "used" by senior exposure:
 
 ```
-                         (ST_RAW_NAV + (JT_RAW_NAV × β)) × MIN_COVERAGE
+                         (ST_RAW_NAV + JT_RAW_NAV) × MIN_COVERAGE
 Coverage Utilization =   ─────────────────────────────────────────────
                                        JT_EFFECTIVE_NAV
 ```
 
-**Parameters:**
-- MIN_COVERAGE: The minimum required coverage percentage, validated at initialization to be strictly less than 100% (eg. 20% means JT must be able to cover 20% of ST losses at all times)
-- β: A boolean co-investment flag capturing JT's sensitivity to the same downside stress that affects ST (0 if JT is in a risk-free investment, 1 if JT and ST are in the same underlying investment)
-
-Intuitively, when coverage utilization is less than or equal to 100%, the senior tranche is fully collateralized from a coverage lens. Consequently, when coverage utilization breaches 100%, the market has suffered sufficient losses such that the minimum coverage requirement is violated.
+Intuitively, when coverage utilization is less than or equal to 100%, the senior tranche is fully collateralized from a coverage lens. Consequently, when coverage utilization breaches 100%, the market has suffered losses such that the minimum coverage requirement is violated.
 
 Markets target a slight excess of junior capital above the minimum coverage requirement to keep the junior tranche perpetually liquid. To maintain this target, the risk premium paid by seniors to juniors adapts to supply and demand signals. As coverage utilization approaches 100%, the risk premium increases to attract more junior capital.
 
@@ -44,7 +40,7 @@ Liquidity Utilization = ──────────────────�
 
 When liquidity utilization is less than or equal to 100%, the senior tranche is considered sufficiently liquid. Markets target a slight excess of market-making capital above the minimum liquidity requirement to keep the senior tranche perpetually liquid. To maintain this target, the liquidity premium paid by seniors to the market makers adapts to supply and demand signals. As liquidity utilization approaches 100%, the liquidity premium increases to attract more market-making capital.
 
-The LT's raw NAV is read from the venue's manipulation-resistant oracle to ensure that trades and exogenous venue operations do not impact the instantaneous valuation of the market-making depth. Redemptions that reduce depth are gated so the venue can't be drained below the senior tranche's required liquidity floor (bypassed once liquidation coverage utilization is breached). A market with zero minimum liquidity behaves exactly like a plain senior/junior market.
+The LT's raw NAV is read from the venue's manipulation-resistant oracle to ensure that trades and exogenous venue operations do not impact the instantaneous valuation of the market-making depth. Redemptions that reduce depth are gated so the venue can't be drained below the senior tranche's required liquidity floor. A multi-asset redemption relaxes that floor in-flow by redeeming the senior shares the depth is paired against, shrinking the requirement alongside the withdrawal. A market with zero minimum liquidity behaves exactly like a plain senior/junior market.
 
 ## Architecture
 
@@ -119,7 +115,7 @@ Markets operate as perpetual instruments with full liquidity for all tranches un
 
 The two states are:
 
-**PERPETUAL**: The normal operating state governed by market forces, and the permanent state of a market configured with no fixed-term duration. The market is either healthy (no losses beyond the dust tolerance), severely undercollateralized (its liquidation coverage utilization breached), or uncollateralized (no junior NAV remaining against a non-zero senior NAV). All three tranches are liquid, subject to the coverage and liquidity requirements. While under or uncollateralized, the liquidity tranche shares the senior's liquidity profile and the liquidity requirement is exempt. Premiums and protocol fees accrue on senior yield, and adaptive-curve models adapt to the market's coverage and liquidity utilization.
+**PERPETUAL**: The normal operating state governed by market forces, and the permanent state of a market configured with no fixed-term duration. The market is either healthy (no losses beyond the dust tolerance), severely undercollateralized (its liquidation coverage utilization breached), or uncollateralized (no junior NAV remaining against a non-zero senior NAV). All three tranches are liquid, subject to the coverage and liquidity requirements. Premiums and protocol fees accrue on senior yield, and adaptive-curve models adapt to the market's coverage and liquidity utilization.
 
 **FIXED_TERM**: A temporary recovery state entered when junior coverage first absorbs a senior drawdown while coverage stays within the liquidation threshold, giving the underlying position time to recover before junior LPs realize any losses. Senior and junior deposits and redemptions are all blocked. This stops seniors from withdrawing coverage from existing juniors, and new juniors from diluting existing juniors, on arbitrary volatility. Liquidity tranche redemptions are also blocked so the LT keeps market-making the senior when secondary liquidity is most valuable, while liquidity tranche deposits stay open (multi-asset deposits accept only the quote leg during a fixed term, since minting the senior leg is a senior deposit). No liquidity premium is paid and no protocol fees are taken, and the adaptive-curve models do not adapt, since utilization moves on underlying PnL rather than market forces during recovery.
 

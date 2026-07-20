@@ -245,10 +245,6 @@ interface IRoycoDayAccountant {
     /// @return kernel The kernel that this accountant maintains mark-to-market NAV, JT coverage impermanent loss, and fee accounting for
     function KERNEL() external view returns (address kernel);
 
-    /// @notice Whether the junior tranche is co-invested in the same yield-bearing opportunity as senior (shares senior's downside stress) or in a risk-free opportunity (cash, TBILLs, Aave Core, etc.) with respect to NAV units
-    /// @return jtCoinvested True if the junior tranche is co-invested with the senior tranche, false if it is in a risk-free opportunity
-    function JT_COINVESTED() external view returns (bool jtCoinvested);
-
     /**
      * @notice Synchronizes the effective NAVs and impermanent losses of both tranches by marking them to market
      * @dev Must be called before any NAV mutating operation
@@ -281,7 +277,7 @@ interface IRoycoDayAccountant {
      * @dev When enforcement is requested, fails fast on the coverage requirement for operations that can worsen coverage (add senior exposure or
      *      remove the junior loss-absorption buffer: ST_DEPOSIT, LT_DEPOSIT, JT_REDEEM) and on the liquidity requirement for operations that can
      *      worsen liquidity (raise the senior effective NAV or reduce the depth of the AMM or another market-making venue: ST_DEPOSIT, the multi-asset
-     *      LT_DEPOSIT, and an LT_REDEEM that pays no self-liquidation bonus), a bonus-paying LT_REDEEM is a liquidation-breach exit and is exempt
+     *      LT_DEPOSIT, and any LT_REDEEM), enforced even while the liquidation coverage threshold is breached so a multi-asset exit cannot unwind senior depth from the venue to relax its own liquidity floor and drain the market below the senior requirement
      *      Intermediate multi-asset sub-syncs pass false, deferring enforcement to the final post-op sync that books the combined exposure
      * @param _op The operation being executed in between the pre and post operation synchronizations
      * @param _stRawNAV The post-op senior tranche's raw NAV
@@ -329,10 +325,9 @@ interface IRoycoDayAccountant {
      * @notice Returns the maximum assets withdrawable from the junior tranche without violating the market's coverage requirement
      * @dev Always rounds in favor of senior tranche protection
      * @param state The synced accounting state that the maximum junior withdrawal is computed against
-     * @return stWithdrawableNAV The maximum claims on ST assets that the junior tranche can withdraw, denominated in NAV units
-     * @return jtWithdrawableNAV The maximum claims on JT assets that the junior tranche can withdraw, denominated in NAV units
+     * @return jtWithdrawableNAV The maximum assets that the junior tranche can withdraw, denominated in NAV units
      */
-    function maxJTWithdrawal(SyncedAccountingState memory state) external view returns (NAV_UNIT stWithdrawableNAV, NAV_UNIT jtWithdrawableNAV);
+    function maxJTWithdrawal(SyncedAccountingState memory state) external view returns (NAV_UNIT jtWithdrawableNAV);
 
     /**
      * @notice Returns the maximum assets withdrawable from the liquidity tranche without violating the market's liquidity requirement

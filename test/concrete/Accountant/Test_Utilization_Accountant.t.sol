@@ -11,13 +11,13 @@ import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
 /**
  * @title Test_Utilization_Accountant
  * @notice The coverage and liquidity utilization computations on the post-op surface: the zero
- *         short-circuits and their precedence over the max edges, ceil bias exactness, the coinvested
- *         numerator toggle, and the pre-op placeholder versus post-op fresh-value contract
+ *         short-circuits and their precedence over the max edges, ceil bias exactness, the junior raw
+ *         NAV in the coverage numerator, and the pre-op placeholder versus post-op fresh-value contract
  */
 contract Test_Utilization_Accountant is AccountantTestBase {
     function setUp() public {
         stranger = makeAddr("stranger");
-        _deploy(false, _defaultParams());
+        _deploy(_defaultParams());
     }
 
     /**
@@ -29,7 +29,7 @@ contract Test_Utilization_Accountant is AccountantTestBase {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.minCoverageWAD = 0;
         p.minLiquidityWAD = 0;
-        _deploy(false, p);
+        _deploy(p);
         SyncedAccountingState memory state =
             kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, true);
         assertEq(state.coverageUtilizationWAD, 0, "zero minimum coverage short-circuits before the empty-buffer max edge");
@@ -38,12 +38,13 @@ contract Test_Utilization_Accountant is AccountantTestBase {
 
     /**
      * a zero covered exposure reads a zero coverage utilization and a zero senior effective NAV reads
-     * a zero liquidity utilization, each taking precedence over its own zero-denominator max edge
+     * a zero liquidity utilization, each taking precedence over its own zero-denominator max edge, so a
+     * market drained by a full senior redemption reads (0, 0) instead of (max, max)
      */
     function test_Utilization_zeroExposureAndZeroSTEffectivePrecedeMaxEdges() public {
-        SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.JT_DEPOSIT, ZERO_NAV_UNITS, toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS, true);
-        assertEq(state.coverageUtilizationWAD, 0, "no covered exposure so coverage utilization is zero despite the live buffer");
+        kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
+        SyncedAccountingState memory state = kernel.doPostOp(Operation.ST_REDEEM, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, true);
+        assertEq(state.coverageUtilizationWAD, 0, "no covered exposure so coverage utilization is zero, preceding the empty-buffer max edge");
         assertEq(state.liquidityUtilizationWAD, 0, "zero senior effective NAV precedes the zero-inventory max edge");
     }
 
@@ -70,8 +71,8 @@ contract Test_Utilization_Accountant is AccountantTestBase {
         SyncedAccountingState memory state =
             kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + 7), toNAVUnits(uint256(300e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, false);
         uint256 coverageUtilization = state.coverageUtilizationWAD;
-        uint256 covProduct = (SEED_ST_RAW + 7) * uint256(DEFAULT_MIN_COVERAGE_WAD);
-        assertEq(coverageUtilization, _specCoverageUtilization(SEED_ST_RAW + 7, 300e18, false, DEFAULT_MIN_COVERAGE_WAD, 300e18), "coverage matches the independent ceil");
+        uint256 covProduct = (SEED_ST_RAW + 7 + 300e18) * uint256(DEFAULT_MIN_COVERAGE_WAD);
+        assertEq(coverageUtilization, _specCoverageUtilization(SEED_ST_RAW + 7, 300e18, DEFAULT_MIN_COVERAGE_WAD, 300e18), "coverage matches the independent ceil");
         assertGe(coverageUtilization * 300e18, covProduct, "coverage ceil bias covers the exact product");
         assertLt((coverageUtilization - 1) * 300e18, covProduct, "coverage ceil tightness, one less would under-cover");
         uint256 liquidityUtilization = state.liquidityUtilizationWAD;
@@ -82,22 +83,15 @@ contract Test_Utilization_Accountant is AccountantTestBase {
     }
 
     /**
-     * the JT_COINVESTED immutable toggles the junior raw NAV in the coverage numerator
-     * Derivation: after a 50e18 junior deposit, coinvested reads ceil((1000e18 + 250e18) * 0.1e18 / 250e18)
-     * = 0.5e18 while the risk-free-junior twin reads ceil(1000e18 * 0.1e18 / 250e18) = 0.4e18
+     * the coverage numerator includes the junior raw NAV alongside the senior raw NAV
+     * Derivation: after a 50e18 junior deposit, ceil((1000e18 + 250e18) * 0.1e18 / 250e18) = 0.5e18,
+     * while a numerator excluding the junior raw NAV would read ceil(1000e18 * 0.1e18 / 250e18) = 0.4e18
      */
-    function test_Utilization_coverageCoinvestedIncludesJTRaw() public {
-        _deploy(true, _defaultParams());
+    function test_Utilization_coverageNumeratorIncludesJTRaw() public {
         _seedFlatWithLT(SEED_LT_RAW);
-        SyncedAccountingState memory coinvested =
+        SyncedAccountingState memory state =
             kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(uint256(250e18)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
-        assertEq(coinvested.coverageUtilizationWAD, 0.5e18, "coinvested numerator includes the junior raw NAV");
-
-        _deploy(false, _defaultParams());
-        _seedFlatWithLT(SEED_LT_RAW);
-        SyncedAccountingState memory riskFree =
-            kernel.doPostOp(Operation.JT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(uint256(250e18)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
-        assertEq(riskFree.coverageUtilizationWAD, 0.4e18, "risk-free-junior numerator excludes the junior raw NAV");
+        assertEq(state.coverageUtilizationWAD, 0.5e18, "coverage numerator includes the junior raw NAV");
     }
 
     /**
@@ -107,7 +101,7 @@ contract Test_Utilization_Accountant is AccountantTestBase {
     function test_Utilization_liquidityZeroWhenMinLiquidityZero() public {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.minLiquidityWAD = 0;
-        _deploy(false, p);
+        _deploy(p);
         _seedFlatWithLT(0);
         SyncedAccountingState memory state =
             kernel.doPostOp(Operation.ST_DEPOSIT, toNAVUnits(SEED_ST_RAW + 100e18), toNAVUnits(SEED_JT_RAW), ZERO_NAV_UNITS, ZERO_NAV_UNITS, true);

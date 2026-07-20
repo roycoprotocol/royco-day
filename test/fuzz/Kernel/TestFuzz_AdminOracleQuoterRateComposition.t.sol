@@ -28,7 +28,7 @@ import { RoycoLiquidityTranche } from "../../../src/tranches/RoycoLiquidityTranc
 import { RoycoSeniorTranche } from "../../../src/tranches/RoycoSeniorTranche.sol";
 import {
     Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel as ChainlinkToAdminKernel
-} from "../../mocks/Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
+} from "../../../src/kernels/Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
 import { MockAggregatorV3 } from "../../mocks/MockAggregatorV3.sol";
 import { MockBPT } from "../../mocks/MockBPT.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
@@ -315,8 +315,8 @@ contract TestFuzz_AdminOracleQuoterRateComposition_Kernel is Test {
         plumbing.seniorTranche = address(new RoycoSeniorTranche(_stJtAsset, plumbing.predictedKernel));
         plumbing.juniorTranche = address(new RoycoJuniorTranche(_stJtAsset, plumbing.predictedKernel));
         plumbing.liquidityTranche = address(new RoycoLiquidityTranche(address(plumbing.bpt), plumbing.predictedKernel));
-        // Identical ST/JT assets force the co-invested junior configuration at kernel construction
-        plumbing.accountant = address(new RoycoDayAccountant(plumbing.predictedKernel, true));
+        // The kernel constructor requires identical ST/JT assets
+        plumbing.accountant = address(new RoycoDayAccountant(plumbing.predictedKernel));
 
         plumbing.balancerVault.registerPool(address(plumbing.bpt), [IERC20(plumbing.seniorTranche), IERC20(address(quoteToken))]);
     }

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { ERC20BurnableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20BurnableUpgradeable.sol";
-import { ADMIN_ROLE, BURNER_ROLE, JT_LP_ROLE, LT_LP_ROLE, PUBLIC_ROLE, ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { ADMIN_ROLE, BURNER_ROLE, JT_LP_ROLE, LT_LP_ROLE, ST_LP_ROLE, SYNC_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoLiquidityTranche } from "../../../src/interfaces/IRoycoLiquidityTranche.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
@@ -46,9 +46,9 @@ contract Test_MockMarketRoleMatrix is DayMarketTestBase {
         assertEq(_role(address(juniorTranche), IRoycoVaultTranche.redeem.selector), JT_LP_ROLE, "JT redeem -> JT_LP_ROLE");
     }
 
-    function test_LTDeposit_isPublic_LTRedeem_isLPGated() public view {
-        assertEq(_role(address(liquidityTranche), IRoycoVaultTranche.deposit.selector), PUBLIC_ROLE, "LT deposit -> PUBLIC_ROLE");
-        assertEq(_role(address(liquidityTranche), IRoycoLiquidityTranche.depositMultiAsset.selector), PUBLIC_ROLE, "LT depositMultiAsset -> PUBLIC_ROLE");
+    function test_LTDepositAndRedeem_areLPGated() public view {
+        assertEq(_role(address(liquidityTranche), IRoycoVaultTranche.deposit.selector), LT_LP_ROLE, "LT deposit -> LT_LP_ROLE");
+        assertEq(_role(address(liquidityTranche), IRoycoLiquidityTranche.depositMultiAsset.selector), LT_LP_ROLE, "LT depositMultiAsset -> LT_LP_ROLE");
         assertEq(_role(address(liquidityTranche), IRoycoVaultTranche.redeem.selector), LT_LP_ROLE, "LT redeem -> LT_LP_ROLE");
         assertEq(_role(address(liquidityTranche), IRoycoLiquidityTranche.redeemMultiAsset.selector), LT_LP_ROLE, "LT redeemMultiAsset -> LT_LP_ROLE");
     }

@@ -20,9 +20,6 @@ struct TokenConfig {
 
 /**
  * @notice Full market parameterization, mirroring the accountant and kernel init params 1:1
- * @dev jtCoinvested must be true for any kernel-layer deployment: the shipped kernel family requires identical
- *      ST/JT assets and its constructor enforces JT_COINVESTED for identical assets (RoycoDayKernel.sol:121).
- *      The jtCoinvested=false axis is exercisable only at the mock-kernel accountant layer (AccountantTestBase)
  * @dev ydmKind values: 0 = MockYDM (pinned share), 1 = StaticCurveYDM, 2 = AdaptiveCurveYDM_V2
  */
 struct MarketParamsConfig {
@@ -30,7 +27,6 @@ struct MarketParamsConfig {
     uint64 minCoverageWAD;
     uint256 coverageLiquidationUtilizationWAD;
     uint64 minLiquidityWAD;
-    bool jtCoinvested;
     // premiums
     uint64 maxJTYieldShareWAD;
     uint64 maxLTYieldShareWAD;

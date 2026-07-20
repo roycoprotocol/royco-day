@@ -2,12 +2,13 @@
 pragma solidity ^0.8.28;
 
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import { LT_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_LTDepositIdlePremiumPricing_Kernel
@@ -71,21 +72,23 @@ contract Test_LTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
         //   shares at 20% (JT) and 10% (LT), so the risk premium is 2e18 and the liquidity premium is 1e18,
         //   leaving a residual senior gain of 10e18 - 2e18 - 1e18 = 7e18, on which the 10% senior protocol fee
         //   takes 0.7e18. The premium stays a senior claim, so stEffectiveNAV = 100e18 + 7e18 + 1e18 = 108e18.
-        //   The premium and fee share mints are both priced on the NAV the pre-existing shares retain,
-        //   108e18 - 1e18 - 0.7e18 = 106.3e18, over the pre-sync 100e18 supply:
-        //     premium shares = floor(1e18 x 100e18 / 106.3e18) = floor(10^21 / 1063)     = 940733772342427093
-        //     fee shares     = floor(0.7e18 x 100e18 / 106.3e18) = floor(7x10^20 / 1063) = 658513640639698965
-        //   post-mint senior supply = 100e18 + 940733772342427093 + 658513640639698965 = 101599247412982126058
-        assertEq(idleShares, 940_733_772_342_427_093, "the staged premium must be exactly the hand-derived senior share count");
-        assertEq(seniorTranche.totalSupply(), 101_599_247_412_982_126_058, "the senior supply must carry exactly the premium and fee mints");
+        //   The 10% LT protocol fee carves 0.1e18 out of the 1e18 premium and is remitted as senior shares to the
+        //   protocol, so the LT's idle premium leg is the net 0.9e18 and no LT shares are minted for the fee. The
+        //   net premium and the pooled senior fee (0.7e18 ST + 0.1e18 LT) share mints are both priced on the NAV
+        //   the pre-existing shares retain, 108e18 - 1e18 - 0.7e18 = 106.3e18, over the pre-sync 100e18 supply:
+        //     premium shares = floor(0.9e18 x 100e18 / 106.3e18) = floor(9x10^20 / 1063) = 846660395108184383
+        //     fee shares     = floor(0.8e18 x 100e18 / 106.3e18) = floor(8x10^20 / 1063) = 752587017873941674
+        //   post-mint senior supply = 100e18 + 846660395108184383 + 752587017873941674 = 101599247412982126057
+        assertEq(idleShares, 846_660_395_108_184_383, "the staged premium must be the hand-derived senior share count net of the LT protocol fee");
+        assertEq(seniorTranche.totalSupply(), 101_599_247_412_982_126_057, "the senior supply must carry exactly the net premium and pooled fee mints");
 
         (SyncedAccountingState memory st,,, NAV_UNIT navToMintSharesAt) = kernel.ltPreviewDeposit(toTrancheUnits(1e18));
         assertEq(toUint256(st.stEffectiveNAV), 108e18, "the senior effective NAV must be exactly seed plus residual gain plus premium");
         assertEq(toUint256(st.ltRawNAV), 6e18, "the pool depth must be exactly the untouched auto-seed");
-        // Idle leg value = floor(940733772342427093 x 108e18 / 101599247412982126058) = 999999999999999999:
-        // the 1e18 premium minus one wei lost across the two floor roundings (share mint, then valuation), so
-        // the deposit price is 6e18 + (1e18 - 1) and the rounding wei stays with the pool, never the entrant
-        assertEq(toUint256(navToMintSharesAt), 6_999_999_999_999_999_999, "the deposit price must be pool depth plus the idle leg, one wei under 7e18");
+        // Idle leg value = floor(846660395108184383 x 108e18 / 101599247412982126057) = 899999999999999999:
+        // the net 0.9e18 premium minus one wei lost across the two floor roundings (share mint, then valuation), so
+        // the deposit price is 6e18 + (0.9e18 - 1) and the rounding wei stays with the pool, never the entrant
+        assertEq(toUint256(navToMintSharesAt), 6_899_999_999_999_999_999, "the deposit price must be pool depth plus the net idle leg, one wei under 6.9e18");
     }
 
     /**
@@ -99,6 +102,7 @@ contract Test_LTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
     function test_LTDeposit_WhileIdlePremiumOutstanding_CannotDiluteExistingHolders() public {
         uint256 idleShares = _accrueIdlePremiumSeniorShares();
         address entrant = makeAddr("DILUTION_ENTRANT");
+        accessManager.grantRole(LT_LP_ROLE, entrant, 0);
 
         // Fund the entrant with 1e18 fresh BPT against a matching quote leg, keeping NAV-per-BPT at exactly 1.0
         // (the mock vault pulls the quote leg from the caller, so it must be minted and approved first)

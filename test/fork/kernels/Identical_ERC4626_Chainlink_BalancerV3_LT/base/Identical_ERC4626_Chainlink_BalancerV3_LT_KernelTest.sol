@@ -51,9 +51,9 @@ abstract contract Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest is Test_K
     // ═══════════════════════════════════════════════════════════════════════════
     // SIMULATE HOOKS — move the base->NAV leg by mocking the Chainlink-compatible feed
     // ═══════════════════════════════════════════════════════════════════════════
-    // NOTE (coinvested caveat): ST and JT share the same asset + the same base->NAV feed, so a feed move affects BOTH legs
-    //      by the same fraction. Isolating a single tranche's NAV is not possible for a coinvested market via this axis;
-    //      a share-price axis (`vm.mockCall` on the vault's `convertToAssets`) can be layered in when yield tests need it.
+    // NOTE: ST and JT share the same asset + the same base->NAV feed, so a feed move affects BOTH legs by the same
+    //      fraction. Isolating a single tranche's NAV is not possible via this axis. A share-price axis (`vm.mockCall`
+    //      on the vault's `convertToAssets`) can be layered in when yield tests need it.
 
     function simulateSTYield(uint256 _percentageWAD) public virtual override {
         _moveOracle(int256(1), _percentageWAD);

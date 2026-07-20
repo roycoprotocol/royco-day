@@ -1,20 +1,21 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.28;
 
 import { BalancerPoolToken } from "../../lib/balancer-v3-monorepo/pkg/vault/contracts/BalancerPoolToken.sol";
-import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
-import { RoycoDayKernel } from "../../src/kernels/base/RoycoDayKernel.sol";
+import { IRoycoDayKernel } from "../interfaces/IRoycoDayKernel.sol";
+import { RoycoDayKernel } from "./base/RoycoDayKernel.sol";
 import {
     IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter
-} from "../../src/kernels/base/quoter/identical-st-jt/IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
-import { IdenticalAssets_ST_JT_Oracle_Quoter } from "../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_Oracle_Quoter.sol";
-import { BalancerV3_LT_BPTOracle_Quoter } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
+} from "./base/quoter/identical-st-jt/IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
+import { IdenticalAssets_ST_JT_Oracle_Quoter } from "./base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_Oracle_Quoter.sol";
+import { BalancerV3_LT_BPTOracle_Quoter } from "./base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
 
 /**
  * @title Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel
- * @notice Test-only concrete kernel composing the Makina machine-share-price-to-Chainlink-oracle ST/JT quoter with the
- *         Balancer V3 BPT-oracle liquidity tranche quoter, mirroring the shipped ERC4626-to-Chainlink kernel's shape
- * @dev The Makina quoter ships abstract with no concrete kernel wiring it, so tests exercise it through this composition
+ * @author Waymont
+ * @notice The senior and junior tranches transfer in the same Makina machine shares (DUSD, etc.), and the liquidity tranche provides secondary liquidity via a Balancer V3 pool pairing the senior tranche share against a quote asset (USDC, srRoyUSDC, etc.)
+ * @dev ST/JT NAV computations convert tranche units (Makina machine shares) to accounting assets using the machine's convertToAssets and then convert accounting assets to NAV units using a Chainlink (compatible) oracle or an admin set exchange rate
+ * @dev LT NAV computations value the pool position (BPT) using a manipulation-resistant Balancer V3 oracle, and the pool prices the senior share leg via this kernel's senior share rate provider
  */
 contract Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel is
     IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter,
@@ -22,7 +23,7 @@ contract Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle
 {
     /**
      * @notice Kernel-specific initialization parameters
-     * @custom:field stAndJTQuoterParams - The senior/junior tranche Makina-shares-to-Chainlink-oracle quoter's parameters
+     * @custom:field stAndJTQuoterParams - The senior/junior tranche Makina-machine-shares-to-Chainlink quoter's parameters
      * @custom:field ltQuoterParams - The liquidity tranche Balancer V3 quoter's parameters
      */
     struct KernelSpecificInitParams {
@@ -54,8 +55,11 @@ contract Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle
         external
         initializer
     {
+        // Initialize the base kernel state
         __RoycoDayKernel_init(_standardParams);
+        // Initialize the identical Makina machine shares to Chainlink (compatible) oracle ST/JT quoter
         __IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter_init(_specificParams.stAndJTQuoterParams);
+        // Initialize the Balancer V3 liquidity tranche quoter
         __BalancerV3_LT_BPTOracle_Quoter_init_unchained(_specificParams.ltQuoterParams);
     }
 

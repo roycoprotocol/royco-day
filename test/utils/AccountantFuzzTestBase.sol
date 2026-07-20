@@ -92,7 +92,6 @@ abstract contract AccountantFuzzTestBase is AccountantTestBase {
         in_.nowTimestamp = block.timestamp;
         in_.fixedTermDuration = DEFAULT_FIXED_TERM_DURATION_SECONDS;
         in_.minCoverageWAD = DEFAULT_MIN_COVERAGE_WAD;
-        in_.jtCoinvested = accountant.JT_COINVESTED();
         in_.coverageLiquidationUtilizationWAD = DEFAULT_LIQUIDATION_UTILIZATION_WAD;
         // Read the effective dust the deployed accountant actually enforces (it maintains the field as the sum
         // of the two configured raw-NAV dust tolerances) instead of hard-coding 0, so a suite that deploys with

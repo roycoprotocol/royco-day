@@ -233,6 +233,7 @@ interface IRoycoDayEntryPoint {
 
     /**
      * @notice Requests a deposit into the tranche, escrowing assets until the delay period elapses and the request is executed
+     * @dev The caller and receiver are screened against the market's blacklist through the tranche's kernel
      * @param _tranche The tranche to deposit into
      * @param _assets The amount of underlying assets to deposit, denominated in tranche asset units
      * @param _receiver The address that will receive the minted tranche shares
@@ -268,6 +269,7 @@ interface IRoycoDayEntryPoint {
      * @notice Executes a pending deposit request for the specified user
      * @dev The request must exist and the configured delay period must have elapsed
      *      If executed by a third party, the executor bonus is paid in assets before depositing the remainder
+     *      The executor and request owner are screened against the market's blacklist through the tranche's kernel (the tranche deposit screens the receiver)
      * @param _user The user whose deposit request should be executed
      * @param _requestNonce The nonce of the deposit request to execute
      * @param _assetsToDeposit The amount of assets to deposit (use MAX_TRANCHE_UNITS to deposit the maximum possible)
@@ -284,6 +286,7 @@ interface IRoycoDayEntryPoint {
 
     /**
      * @notice Cancels a pending deposit request for the caller, returning escrowed assets
+     * @dev The caller and receiver are screened against the market's blacklist through the tranche's kernel
      * @param _requestNonce The nonce of the deposit request to cancel
      * @param _receiver The address to receive the returned escrowed assets
      */
@@ -291,6 +294,7 @@ interface IRoycoDayEntryPoint {
 
     /**
      * @notice Requests a redemption from the tranche, escrowing tranche shares until the delay period elapses and the request is executed
+     * @dev The caller and receiver are screened against the market's blacklist through the tranche's kernel
      * @param _tranche The tranche to redeem shares from
      * @param _shares The amount of tranche shares to redeem
      * @param _receiver The address that will receive the assets withdrawn upon redemption
@@ -333,6 +337,7 @@ interface IRoycoDayEntryPoint {
      *      exiting to the LP token's constituents only when the multi-asset bound is strictly wider (equal bounds
      *      stay in-kind), so a redemption the market can serve is never left behind by the in-kind gate. Explicit
      *      amounts always exit in-kind
+     *      The executor and request owner are screened against the market's blacklist through the tranche's kernel, and a bonus-remitting third party execution screens the receiver as well (a self execution's redemption screens the receiver)
      * @param _user The user whose redemption request should be executed
      * @param _requestNonce The nonce of the redemption request to execute
      * @param _sharesToRedeem The amount of shares to redeem (use type(uint256).max to redeem the maximum possible)
@@ -356,6 +361,7 @@ interface IRoycoDayEntryPoint {
 
     /**
      * @notice Cancels a pending redemption request for the caller, returning escrowed shares
+     * @dev The caller and receiver are screened against the market's blacklist through the tranche's kernel
      * @param _requestNonce The nonce of the redemption request to cancel
      * @param _receiver The address to receive the returned escrowed shares
      */

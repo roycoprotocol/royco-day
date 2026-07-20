@@ -31,6 +31,15 @@ bytes32 constant COMPONENT_ID_DAY_BALANCER_HOOKS = keccak256("ROYCO_COMPONENT_DA
 /// @dev Creation-code id for `Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel`
 bytes32 constant COMPONENT_ID_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK = keccak256("ROYCO_COMPONENT_DAY_KERNEL_IDENTICAL_ERC4626_CHAINLINK");
 
+/// @dev Creation-code id for `Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel`
+bytes32 constant COMPONENT_ID_DAY_KERNEL_IDENTICAL_MAKINA_CHAINLINK = keccak256("ROYCO_COMPONENT_DAY_KERNEL_IDENTICAL_MAKINA_CHAINLINK");
+
+/// @dev Creation-code id for `Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel`
+bytes32 constant COMPONENT_ID_DAY_KERNEL_IDENTICAL_CHAINLINK_TO_ADMIN = keccak256("ROYCO_COMPONENT_DAY_KERNEL_IDENTICAL_CHAINLINK_TO_ADMIN");
+
+/// @dev Creation-code id for `Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel`
+bytes32 constant COMPONENT_ID_DAY_KERNEL_IDENTICAL_AA_IDLE_CDO_VIRTUAL_PRICE = keccak256("ROYCO_COMPONENT_DAY_KERNEL_IDENTICAL_AA_IDLE_CDO_VIRTUAL_PRICE");
+
 // ─── Market component salt tags ──────────────────────────────────────────────
 
 bytes32 constant TAG_ST_PROXY = "ST";
@@ -45,6 +54,6 @@ bytes32 constant TAG_KERNEL_IMPL = "KERNEL_IMPL";
 bytes32 constant TAG_ACCOUNTANT_IMPL = "ACCOUNTANT_IMPL";
 bytes32 constant TAG_YDM = "YDM";
 bytes32 constant TAG_LDM = "LDM";
-bytes32 constant TAG_BALANCER_HOOK = "BALANCER_HOOK";
+bytes32 constant TAG_BALANCER_HOOK_PROXY = "BALANCER_HOOK";
 bytes32 constant TAG_BALANCER_HOOK_IMPL = "BALANCER_HOOK_IMPL";
 bytes32 constant TAG_BALANCER_V3_POOL = "BALANCER_V3_POOL";

@@ -1,21 +1,20 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { IERC20Errors } from "../../../lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol";
-import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
-import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
+import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
+import { IERC20Errors } from "../../../lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol";
+import { LT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
-import { IRoycoSeniorTranche } from "../../../src/interfaces/IRoycoSeniorTranche.sol";
 import { IRoycoLiquidityTranche } from "../../../src/interfaces/IRoycoLiquidityTranche.sol";
+import { IRoycoSeniorTranche } from "../../../src/interfaces/IRoycoSeniorTranche.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { AssetClaims, Operation } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
-import { LT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
+import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_ShareSurfaces_Tranches
@@ -116,19 +115,19 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
     }
 
     // =============================
-    // Paused-tranche mint surface
+    // Paused-kernel mint surface
     // =============================
 
     /**
-     * @notice A paused senior tranche admits no supply change: every kernel mint path with non-zero shares reverts
-     * @dev Pausing the tranche token itself (not the kernel) is the emergency stop on share movement, and a mint
-     *      is a share movement like any other — if any kernel mint slipped through, a paused market's share count
-     *      could still drift and dilute holders mid-incident. The fee and premium mints hit the pause inside the
-     *      balance update, the plain mint at its own entry gate, all three must land on the same EnforcedPause
+     * @notice A paused kernel admits no supply change: every kernel mint path with non-zero shares reverts
+     * @dev The kernel is the market's single pause authority, and a mint is a share movement like any other — if any
+     *      mint slipped through, a paused market's share count could still drift and dilute holders mid-incident. The
+     *      fee, premium, and plain mints all route their balance update through the kernel's whenNotPaused hook, so a
+     *      paused kernel lands all three on the same EnforcedPause
      */
-    function test_RevertIf_TranchePausedAndKernelMintsNonZeroShares() public {
+    function test_RevertIf_KernelPausedAndMintsNonZeroShares() public {
         vm.prank(PAUSER);
-        IRoycoAuth(address(seniorTranche)).pause();
+        kernel.pause();
 
         vm.startPrank(address(kernel));
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
@@ -141,16 +140,15 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
     }
 
     /**
-     * @notice While the senior tranche is paused, the ZERO-share fee and premium mints still succeed (returning
-     *         the unchanged supply and emitting their mint events), while the plain mint reverts even for zero
-     *         shares
-     * @dev The fee and premium mints only check the pause inside the balance update, which a zero-share call
-     *      never reaches, whereas the plain mint checks the pause at its entry, before even its own zero-shares
-     *      guard. Nothing of value escapes: no balance or supply moves, only the event fires.
+     * @notice While the kernel is paused, the ZERO-share fee and premium mints still succeed (returning the
+     *         unchanged supply and emitting their mint events), while the plain mint reverts on its zero-shares guard
+     * @dev The fee and premium mints only reach the kernel's whenNotPaused hook when they actually move shares, which
+     *      a zero-share call never does, so they sail through a paused market. The plain mint reverts before any
+     *      balance update, on its own MUST_MINT_NON_ZERO_SHARES guard. Nothing of value escapes: no balance or supply moves
      */
-    function test_ZeroShareFeeAndPremiumMintsSucceedWhilePaused_PlainMintReverts() public {
+    function test_ZeroShareFeeAndPremiumMintsSucceedWhileKernelPaused_PlainMintReverts() public {
         vm.prank(PAUSER);
-        IRoycoAuth(address(seniorTranche)).pause();
+        kernel.pause();
 
         uint256 supplyBefore = seniorTranche.totalSupply();
         uint256 kernelBalanceBefore = seniorTranche.balanceOf(address(kernel));
@@ -164,8 +162,8 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
         vm.expectEmit(address(seniorTranche));
         emit IRoycoSeniorTranche.LiquidityPremiumSharesMinted(address(kernel), 0, supplyBefore);
         uint256 premiumReportedSupply = seniorTranche.mintLiquidityPremiumShares(address(kernel), 0);
-        // The plain mint refuses the same zero-share call at its pause gate, before its zero-shares guard can fire
-        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        // The plain mint refuses the same zero-share call on its own zero-shares guard, before any balance update
+        vm.expectRevert(IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES.selector);
         seniorTranche.mint(address(this), 0);
         vm.stopPrank();
 
@@ -175,6 +173,36 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
         assertEq(seniorTranche.totalSupply(), supplyBefore, "no supply change may escape the pause");
         assertEq(seniorTranche.balanceOf(PROTOCOL_FEE_RECIPIENT), 0, "the fee recipient must be credited nothing while paused");
         assertEq(seniorTranche.balanceOf(address(kernel)), kernelBalanceBefore, "the kernel must be credited nothing while paused");
+    }
+
+    /**
+     * @notice A paused kernel bricks the kernel-only burn and burnFrom, so a paused market can never destroy shares
+     * @dev burn and burnFrom carry no pause modifier of their own, only the BURNER_ROLE gate, so their freeze under a
+     *      pause rides entirely on the _update -> preTrancheBalanceUpdateHook path, which reverts EnforcedPause. The
+     *      hook fires before the balance is touched, so no share moves and the reverted burnFrom consumes no allowance
+     */
+    function test_RevertIf_KernelPausedAndBurns() public {
+        uint256 ownerBalanceBefore = seniorTranche.balanceOf(ST_PROVIDER);
+
+        // burnFrom needs a standing allowance so it reaches the balance update rather than the allowance guard
+        vm.prank(ST_PROVIDER);
+        seniorTranche.approve(address(kernel), 1e18);
+
+        vm.prank(PAUSER);
+        kernel.pause();
+
+        vm.startPrank(address(kernel));
+        // A burn of the caller's own shares reverts on the hook before any balance decrement
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        seniorTranche.burn(1e18);
+        // burnFrom clears the allowance guard, then reverts on the same hook
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        seniorTranche.burnFrom(ST_PROVIDER, 1e18);
+        vm.stopPrank();
+
+        // No share burned and the reverted burnFrom left the allowance intact
+        assertEq(seniorTranche.balanceOf(ST_PROVIDER), ownerBalanceBefore, "no share may burn while the kernel is paused");
+        assertEq(seniorTranche.allowance(ST_PROVIDER, address(kernel)), 1e18, "the reverted burnFrom must not consume the allowance");
     }
 
     // =============================
@@ -222,7 +250,9 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
         emit IRoycoVaultTranche.Redeem(
             ST_DELEGATE,
             ST_DELEGATE,
-            AssetClaims({ stAssets: toTrancheUnits(10e18), jtAssets: toTrancheUnits(0), ltAssets: toTrancheUnits(0), stShares: 0, nav: toNAVUnits(uint256(10e18)) }),
+            AssetClaims({
+                stAssets: toTrancheUnits(10e18), jtAssets: toTrancheUnits(0), ltAssets: toTrancheUnits(0), stShares: 0, nav: toNAVUnits(uint256(10e18))
+            }),
             10e18
         );
         vm.prank(ST_DELEGATE);
@@ -382,6 +412,7 @@ contract Test_IdleLiquidityPremiumRedemption_LiquidityTranche is DayMarketTestBa
 
         // Top up quote-only depth so the post-redemption liquidity requirement (9e18 against 180e18 senior) clears
         address depthProvider = makeAddr("DEPTH_PROVIDER");
+        accessManager.grantRole(LT_LP_ROLE, depthProvider, 0);
         quoteToken.mint(address(this), 12e6);
         quoteToken.approve(address(balancerVault), 12e6);
         uint256[2] memory quoteOnlyLegs;
@@ -402,7 +433,11 @@ contract Test_IdleLiquidityPremiumRedemption_LiquidityTranche is DayMarketTestBa
         assertEq(toUint256(claims.ltAssets), 5_142_857_142_857_142_857, "the BPT slice must be floor(18e18 x 3 / 10.5)");
         assertEq(claims.stShares, 1_680_672_268_907_563_025, "the staged-premium slice must be floor(staged x 3e18 / 10.5e18)");
         assertEq(bpt.balanceOf(LT_PROVIDER) - bptBefore, 5_142_857_142_857_142_857, "the redeemer must receive its BPT slice in kind");
-        assertEq(seniorTranche.balanceOf(LT_PROVIDER) - stSharesBefore, 1_680_672_268_907_563_025, "the redeemer must receive its staged premium slice as senior shares");
+        assertEq(
+            seniorTranche.balanceOf(LT_PROVIDER) - stSharesBefore,
+            1_680_672_268_907_563_025,
+            "the redeemer must receive its staged premium slice as senior shares"
+        );
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, 4_201_680_672_268_907_563, "the kernel's staged pile must drop by exactly the paid slice");
     }
 }

@@ -28,9 +28,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     /// @inheritdoc IRoycoDayAccountant
     address public immutable override(IRoycoDayAccountant) KERNEL;
 
-    /// @inheritdoc IRoycoDayAccountant
-    bool public immutable override(IRoycoDayAccountant) JT_COINVESTED;
-
     /// @dev Permissions the function to only be callable by the market's kernel
     /// @dev Should be placed on all state mutating NAV synchronization functions
     modifier onlyRoycoKernel() {
@@ -49,15 +46,13 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     // =============================
 
     /**
-     * @dev Constructs the accountant with the specified kernel and the junior tranche's fixed co-investment configuration
+     * @dev Constructs the accountant with the specified kernel
      * @param _kernel The kernel that this accountant maintains mark-to-market NAV, JT coverage impermanent loss, and fee accounting for
-     * @param _jtCoinvested Whether the junior tranche is co-invested in the same yield-bearing opportunity as senior (shares senior's downside stress) or is in a risk-free opportunity (cash, TBILLs, Aave Core, etc.) with respect to NAV units
      */
-    constructor(address _kernel, bool _jtCoinvested) {
+    constructor(address _kernel) {
         // Ensure the specified kernel is not null and immutably set it
         require(_kernel != address(0), NULL_ADDRESS());
         KERNEL = _kernel;
-        JT_COINVESTED = _jtCoinvested;
     }
 
     /**
@@ -306,11 +301,10 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             stProtocolFee: ZERO_NAV_UNITS,
             jtProtocolFee: ZERO_NAV_UNITS,
             ltProtocolFee: ZERO_NAV_UNITS,
-            coverageUtilizationWAD: UtilizationLogic._computeCoverageUtilization(_stRawNAV, _jtRawNAV, JT_COINVESTED, minCoverageWAD, jtEffectiveNAV),
+            coverageUtilizationWAD: UtilizationLogic._computeCoverageUtilization(_stRawNAV, _jtRawNAV, minCoverageWAD, jtEffectiveNAV),
             liquidityUtilizationWAD: UtilizationLogic._computeLiquidityUtilization(stEffectiveNAV, minLiquidityWAD, _ltRawNAV),
             fixedTermEndTimestamp: $.fixedTermEndTimestamp,
             minCoverageWAD: minCoverageWAD,
-            jtCoinvested: JT_COINVESTED,
             coverageLiquidationUtilizationWAD: $.coverageLiquidationUtilizationWAD,
             minLiquidityWAD: minLiquidityWAD
         });
@@ -337,9 +331,9 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
      * @inheritdoc IRoycoDayAccountant
      * @dev ST deposits are bounded by the coverage and liquidity requirements of the market
      *
-     * @dev Coverage Requirement: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_COINVESTED ? JT_RAW_NAV : 0)) * MIN_COVERAGE
-     * @dev Max assets depositable into ST, x: JT_EFFECTIVE_NAV = ((ST_RAW_NAV + x) + (JT_COINVESTED ? JT_RAW_NAV : 0)) * MIN_COVERAGE
-     *      Isolate x: x = (JT_EFFECTIVE_NAV / MIN_COVERAGE) - (JT_COINVESTED ? JT_RAW_NAV : 0) - ST_RAW_NAV
+     * @dev Coverage Requirement: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + JT_RAW_NAV) * MIN_COVERAGE
+     * @dev Max assets depositable into ST, x: JT_EFFECTIVE_NAV = ((ST_RAW_NAV + x) + JT_RAW_NAV) * MIN_COVERAGE
+     *      Isolate x: x = (JT_EFFECTIVE_NAV / MIN_COVERAGE) - JT_RAW_NAV - ST_RAW_NAV
      *
      * @dev Liquidity Requirement: LT_RAW_NAV >= (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)
      * @dev Max assets depositable into ST, x': LT_RAW_NAV = ((ST_EFFECTIVE_NAV + x') * MIN_LIQUIDITY)
@@ -358,12 +352,9 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             // Solve for x, rounding in favor of senior protection
             // Compute the total covered assets by the junior tranche loss absorption buffer
             NAV_UNIT totalCoveredValue = state.jtEffectiveNAV.mulDiv(WAD, state.minCoverageWAD, Math.Rounding.Floor);
-            // Compute the assets required to cover current junior tranche exposure
-            // Also account for JT's dust tolerance to preclude reverts due to rounding after ST deposit (if both are exposed to the same underlying rounding)
-            NAV_UNIT jtCoverageRequired = (state.jtCoinvested ? state.jtRawNAV : ZERO_NAV_UNITS) + $.jtNAVDustTolerance;
             // Compute the value of assets that can be deposited into senior while retaining minimum coverage
-            // Also account for ST's dust tolerance to preclude reverts due to rounding after ST deposit
-            maxSTDepositGivenCoverage = totalCoveredValue.saturatingSub((jtCoverageRequired + state.stRawNAV + $.stNAVDustTolerance));
+            // Also account for dust tolerances to preclude reverts due to rounding after ST deposit
+            maxSTDepositGivenCoverage = totalCoveredValue.saturatingSub((state.stRawNAV + state.jtRawNAV + $.stNAVDustTolerance + $.jtNAVDustTolerance));
         }
 
         //  Compute the max ST deposit given the liquidity requirement
@@ -386,57 +377,24 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
      * @inheritdoc IRoycoDayAccountant
      * @dev JT withdrawals are bounded by the coverage requirement of the market
      *
-     * @dev Coverage Requirement: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + (JT_COINVESTED ? JT_RAW_NAV : 0)) * MIN_COVERAGE
-     * @dev When assets are claimed from the JT, they are always liquidated in the same proportion as the tranche's total claims on the ST and JT assets
-     * @dev Let JT_CLAIM_ON_ST and JT_CLAIM_ON_JT be the JT's total claims on the ST and JT assets respectively, in NAV units, the JT's total claims are JT_CLAIM_ON_ST + JT_CLAIM_ON_JT
-     * @dev Let ST_CLAIM_FRACTION be JT_CLAIM_ON_ST / (JT_CLAIM_ON_ST + JT_CLAIM_ON_JT) and JT_CLAIM_FRACTION be JT_CLAIM_ON_JT / (JT_CLAIM_ON_ST + JT_CLAIM_ON_JT)
-     * @dev Therefore, if a total NAV of y is claimed from the JT, ST_CLAIM_FRACTION * y is claimed from the ST_RAW_NAV and JT_CLAIM_FRACTION * y is claimed from the JT_RAW_NAV
-     * @dev Max assets withdrawable from JT, y: (JT_EFFECTIVE_NAV - y) = ((ST_RAW_NAV - ST_CLAIM_FRACTION * y) + (JT_COINVESTED ? (JT_RAW_NAV - JT_CLAIM_FRACTION * y) : 0)) * MIN_COVERAGE
-     *      Isolate y: y = (JT_EFFECTIVE_NAV - (MIN_COVERAGE * (ST_RAW_NAV + (JT_COINVESTED ? JT_RAW_NAV : 0)))) / (1 - (MIN_COVERAGE * (ST_CLAIM_FRACTION + (JT_COINVESTED ? JT_CLAIM_FRACTION : 0))))
+     * @dev Coverage Requirement: JT_EFFECTIVE_NAV >= (ST_RAW_NAV + JT_RAW_NAV) * MIN_COVERAGE
+     * @dev Max assets withdrawable from JT, y: JT_EFFECTIVE_NAV - y = ((ST_RAW_NAV + JT_RAW_NAV) - y) * MIN_COVERAGE
+     * @dev Isolate y: y = (JT_EFFECTIVE_NAV - ((ST_RAW_NAV + JT_RAW_NAV) * MIN_COVERAGE)) / (1 - MIN_COVERAGE)
      */
-    function maxJTWithdrawal(SyncedAccountingState memory state)
-        external
-        view
-        override(IRoycoDayAccountant)
-        returns (NAV_UNIT stWithdrawableNAV, NAV_UNIT jtWithdrawableNAV)
-    {
+    function maxJTWithdrawal(SyncedAccountingState memory state) external view override(IRoycoDayAccountant) returns (NAV_UNIT) {
         // Get the storage pointer to the accountant state
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
 
-        // Decompose the junior tranche's claims on the ST and JT raw NAVs from the synced accounting state
-        (,, NAV_UNIT jtClaimOnSTRawNAV, NAV_UNIT jtClaimOnJTRawNAV) = TrancheClaimsLogic._computeSTandJTClaimsOnRawNAVs(state);
-
-        // Get the surplus JT assets in NAV units
-        // The exposure and requirement intermediates live in a scoped block so their stack slots are released before the fraction math below
-        NAV_UNIT surplusJTValue;
         // Compute the total covered exposure of the underlying investment
-        NAV_UNIT totalCoveredExposure = state.stRawNAV + (state.jtCoinvested ? state.jtRawNAV : ZERO_NAV_UNITS);
-        // Compute the minimum junior tranche assets required to cover the exposure as per the market's coverage requirement
-        NAV_UNIT requiredJTValue = totalCoveredExposure.mulDiv(state.minCoverageWAD, WAD, Math.Rounding.Ceil);
-        // Compute the surplus coverage currently provided by the junior tranche based on its currently remaining loss-absorption buffer
+        NAV_UNIT totalCoveredExposure = state.stRawNAV + state.jtRawNAV;
+        // Compute the minimum junior tranche assets required to cover the exposure as per the market's coverage requirement, rounding in favor of senior protection
         // Also account for the effective dust tolerance required to preclude reverts due to rounding after JT redemptions
-        // Additionally absorb the worst case inner-ceil rounding in the coverageUtilization computation
-        surplusJTValue = state.jtEffectiveNAV
-            .saturatingSub((requiredJTValue + $.stNAVDustTolerance + (state.jtCoinvested ? $.jtNAVDustTolerance : ZERO_NAV_UNITS) + toNAVUnits(uint256(2))));
-        if (surplusJTValue == ZERO_NAV_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        NAV_UNIT requiredJTValue = (totalCoveredExposure + $.stNAVDustTolerance + $.jtNAVDustTolerance).mulDiv(state.minCoverageWAD, WAD, Math.Rounding.Ceil);
+        // Compute the surplus coverage currently provided by the junior tranche based on its currently remaining loss-absorption buffer
+        NAV_UNIT surplusJTValue = state.jtEffectiveNAV.saturatingSub(requiredJTValue);
 
-        // Compute the total JT claim on NAV and preemptively return if zero
-        NAV_UNIT totalJTClaims = jtClaimOnSTRawNAV + jtClaimOnJTRawNAV;
-        if (totalJTClaims == ZERO_NAV_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS);
-        // The fraction of the JT's total NAV claims resting on the ST raw NAV
-        uint256 jtClaimOnSTFractionWAD = jtClaimOnSTRawNAV.mulDiv(WAD, totalJTClaims, Math.Rounding.Floor);
-        // The fraction of the JT's total NAV claims resting on the JT raw NAV
-        uint256 jtClaimOnJTFractionWAD = jtClaimOnJTRawNAV.mulDiv(WAD, totalJTClaims, Math.Rounding.Floor);
-        // Compute how much coverage the system retains per 1 nav unit of JT assets withdrawn scaled to WAD precision
-        uint256 coverageRetentionWAD =
-            (WAD - state.minCoverageWAD.mulDiv((jtClaimOnSTFractionWAD + (state.jtCoinvested ? jtClaimOnJTFractionWAD : uint256(0))), WAD, Math.Rounding.Floor));
-        // Calculate how much of the surplus can be withdrawn while satisfying the coverage requirement
-        NAV_UNIT totalNAVClaimable = surplusJTValue.mulDiv(WAD, coverageRetentionWAD, Math.Rounding.Floor);
-        if (totalNAVClaimable == ZERO_NAV_UNITS) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS);
-
-        // Split it into individual tranche's claims
-        stWithdrawableNAV = totalNAVClaimable.mulDiv(jtClaimOnSTFractionWAD, WAD, Math.Rounding.Floor);
-        jtWithdrawableNAV = totalNAVClaimable.mulDiv(jtClaimOnJTFractionWAD, WAD, Math.Rounding.Floor);
+        // Solve for y, rounding in favor of senior protection
+        return surplusJTValue.mulDiv(WAD, (WAD - state.minCoverageWAD), Math.Rounding.Floor);
     }
 
     /**
@@ -447,15 +405,15 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
      * @dev Max assets withdrawable from LT, z: (LT_RAW_NAV - z) = (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)
      *      Isolate z: z = LT_RAW_NAV - (ST_EFFECTIVE_NAV * MIN_LIQUIDITY)
      */
-    function maxLTWithdrawal(SyncedAccountingState memory state) external view override(IRoycoDayAccountant) returns (NAV_UNIT ltWithdrawableNAV) {
-        // If there is no minimum liquidity requirement or the coverage liquiditation threshold has been breached, there is no LT withdrawal restriction
-        if (state.minLiquidityWAD == 0 || (state.coverageUtilizationWAD >= state.coverageLiquidationUtilizationWAD)) return state.ltRawNAV;
+    function maxLTWithdrawal(SyncedAccountingState memory state) external view override(IRoycoDayAccountant) returns (NAV_UNIT) {
+        // If there is no minimum liquidity requirement, there is no LT withdrawal restriction
+        if (state.minLiquidityWAD == 0) return state.ltRawNAV;
         // Compute the minimum market-making depth required to satisfy the market's liquidity requirement, rounding in favor of senior protection
         // Also account for ST's dust tolerance to preclude reverts due to rounding after LT redemptions
         NAV_UNIT requiredLTValue =
             (state.stEffectiveNAV + _getRoycoDayAccountantStorage().stNAVDustTolerance).mulDiv(state.minLiquidityWAD, WAD, Math.Rounding.Ceil);
         // Compute the surplus depth that can be withdrawn while retaining minimum liquidity
-        ltWithdrawableNAV = state.ltRawNAV.saturatingSub(requiredLTValue);
+        return state.ltRawNAV.saturatingSub(requiredLTValue);
     }
 
     // =============================
@@ -602,9 +560,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
                                 IYDM($.jtYDM)
                                     .previewYieldShare(
                                         initialMarketState,
-                                        UtilizationLogic._computeCoverageUtilization(
-                                            $.lastSTRawNAV, $.lastJTRawNAV, JT_COINVESTED, $.minCoverageWAD, $.lastJTEffectiveNAV
-                                        )
+                                        UtilizationLogic._computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, $.minCoverageWAD, $.lastJTEffectiveNAV)
                                     ),
                                 $.maxJTYieldShareWAD
                             );
@@ -657,7 +613,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         uint256 minCoverageWAD = $.minCoverageWAD;
         uint256 minLiquidityWAD = $.minLiquidityWAD;
         uint256 coverageLiquidationUtilizationWAD = $.coverageLiquidationUtilizationWAD;
-        uint256 coverageUtilizationWAD = UtilizationLogic._computeCoverageUtilization(_stRawNAV, _jtRawNAV, JT_COINVESTED, minCoverageWAD, jtEffectiveNAV);
+        uint256 coverageUtilizationWAD = UtilizationLogic._computeCoverageUtilization(_stRawNAV, _jtRawNAV, minCoverageWAD, jtEffectiveNAV);
         MarketState resultingMarketState;
         uint32 fixedTermEndTimestamp = $.fixedTermEndTimestamp;
         {
@@ -724,7 +680,6 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             liquidityUtilizationWAD: 0,
             fixedTermEndTimestamp: fixedTermEndTimestamp,
             minCoverageWAD: minCoverageWAD,
-            jtCoinvested: JT_COINVESTED,
             coverageLiquidationUtilizationWAD: coverageLiquidationUtilizationWAD,
             minLiquidityWAD: minLiquidityWAD
         });
@@ -805,8 +760,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         // Get the storage pointer to the accountant state
         RoycoDayAccountantState storage $ = _getRoycoDayAccountantStorage();
         // Compute both utilizations
-        coverageUtilizationWAD =
-            UtilizationLogic._computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, JT_COINVESTED, $.minCoverageWAD, $.lastJTEffectiveNAV);
+        coverageUtilizationWAD = UtilizationLogic._computeCoverageUtilization($.lastSTRawNAV, $.lastJTRawNAV, $.minCoverageWAD, $.lastJTEffectiveNAV);
         liquidityUtilizationWAD = UtilizationLogic._computeLiquidityUtilization($.lastSTEffectiveNAV, $.minLiquidityWAD, $.lastLTRawNAV);
     }
 

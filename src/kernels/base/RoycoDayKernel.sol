@@ -120,8 +120,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         LT_ASSET = _params.ltAsset;
         ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER = _params.enforceVaultSharesTransferWhitelist;
 
-        // If the senior and junior tranches share the same yield-bearing asset they are structurally correlated, so the junior tranche must be configured as co-invested in the accountant
-        require((_params.stAsset != _params.jtAsset) || IRoycoDayAccountant(_params.accountant).JT_COINVESTED(), JT_MUST_BE_COINVESTED());
+        // The senior and junior tranches must hold the same yield-bearing asset (coinvestment) so the junior tranche's capital always shares the senior tranche's exposure
+        require(_params.stAsset == _params.jtAsset, TRANCHE_ASSETS_MUST_BE_IDENTICAL());
     }
 
     /**
@@ -265,7 +265,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         view
         virtual
         override(IRoycoDayKernel)
-        returns (NAV_UNIT claimOnSTNAV, NAV_UNIT claimOnJTNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalTrancheShares)
+        returns (NAV_UNIT stClaimNAV, NAV_UNIT stMaxWithdrawableNAV, uint256 totalTrancheShares)
     {
         return RedemptionLogic.stMaxWithdrawable(_getRoycoDayKernelStorage(), _owner);
     }
@@ -283,7 +283,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         view
         virtual
         override(IRoycoDayKernel)
-        returns (NAV_UNIT claimOnSTNAV, NAV_UNIT claimOnJTNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalTrancheShares)
+        returns (NAV_UNIT jtClaimNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalTrancheShares)
     {
         return RedemptionLogic.jtMaxWithdrawable(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _owner);
     }
@@ -481,7 +481,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     }
 
     /// @inheritdoc IRoycoDayKernel
-    /// @dev LT multi-asset redemptions are enabled only in a PERPETUAL market state, granted the market's liquidity requirement is satisfied post-redemption unless the liquidation coverage utilization threshold is breached
+    /// @dev LT multi-asset redemptions are enabled only in a PERPETUAL market state, granted the market's liquidity requirement is satisfied post-redemption
     function ltRedeemMultiAsset(
         uint256 _ltShares,
         uint256 _minSTSharesOut,
@@ -574,6 +574,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
         // Call the market specific pre-balance update hook
         _preTrancheBalanceUpdate(_caller, _from, _to, _value);
+    }
+
+    /// @inheritdoc IRoycoDayKernel
+    function enforceNotBlacklisted(address[] memory _accounts) external view override(IRoycoDayKernel) {
+        BlacklistLogic._enforceNotBlacklisted(_getRoycoDayKernelStorage(), _accounts);
     }
 
     /**

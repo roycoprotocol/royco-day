@@ -46,6 +46,9 @@ library RedemptionLogic {
         external
         returns (AssetClaims memory userAssetClaims)
     {
+        // Screen the asset receiver so redemption proceeds cannot be routed to a blacklisted account
+        BlacklistLogic._enforceNotBlacklisted($, _receiver);
+
         SyncedAccountingState memory state;
         uint256 totalTrancheShares;
         // Execute an accounting sync to reconcile underlying PNL
@@ -85,6 +88,9 @@ library RedemptionLogic {
         external
         returns (AssetClaims memory userAssetClaims)
     {
+        // Screen the asset receiver so redemption proceeds cannot be routed to a blacklisted account
+        BlacklistLogic._enforceNotBlacklisted($, _receiver);
+
         // Execute a pre-op sync on accounting
         SyncedAccountingState memory state;
         uint256 totalTrancheShares;
@@ -119,6 +125,9 @@ library RedemptionLogic {
         external
         returns (AssetClaims memory userAssetClaims)
     {
+        // Screen the asset receiver so redemption proceeds cannot be routed to a blacklisted account
+        BlacklistLogic._enforceNotBlacklisted($, _receiver);
+
         // Execute a pre-op sync on accounting
         SyncedAccountingState memory state;
         uint256 totalTrancheShares;
@@ -134,16 +143,13 @@ library RedemptionLogic {
         TrancheClaimsLogic._withdrawAssets($, _immutables, userAssetClaims, _receiver);
 
         // Execute a post-redeem sync on accounting, enforcing the market's liquidity requirement post-redemption
-        // LT redemption is exempt from satisfying the liquidity requirement once coverage utilization reaches its liquidation threshold
-        AccountingSyncLogic._postOpSyncTrancheAccounting(
-            $, _immutables, Operation.LT_REDEEM, ZERO_NAV_UNITS, (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD)
-        );
+        AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.LT_REDEEM, ZERO_NAV_UNITS, true);
     }
 
     /**
      * @notice Atomically exits the liquidity tranche to the LT assets' constituent assets: proportionally removes the LT-asset slice,
      *         redeems the venue-held senior shares to ST underlying, and returns (ST underlying + quote) to the receiver
-     * @dev LT multi-asset redemptions are enabled only in a PERPETUAL market state, granted the market's liquidity requirement is satisfied post-redemption unless the liquidation coverage utilization threshold is breached
+     * @dev LT multi-asset redemptions are enabled only in a PERPETUAL market state, granted the market's liquidity requirement is satisfied post-redemption
      * @param _ltShares The number of LT shares being redeemed (used to size the proportional LT-asset slice)
      * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must return (slippage bound)
      * @param _minQuoteAssetsOut The minimum quote to return (slippage bound)
@@ -162,6 +168,9 @@ library RedemptionLogic {
         external
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
+        // Screen the asset receiver so redemption proceeds cannot be routed to a blacklisted account, before any venue interaction
+        BlacklistLogic._enforceNotBlacklisted($, _receiver);
+
         // Execute a pre-op sync, minting this period's liquidity premium into the kernel's held senior shares so the held pile and the LT supply are consistent for sizing the redeemer's slice
         (SyncedAccountingState memory state, AssetClaims memory ltClaims, uint256 totalLTShares) =
             AccountingSyncLogic._preOpSyncTrancheAccounting($, _immutables, TrancheType.LIQUIDITY);
@@ -180,11 +189,9 @@ library RedemptionLogic {
         // Remove the liquidity equivalent to the LT assets the user has a claim on
         uint256 stSharesWithdrawn;
         if (userAssetClaims.stShares != 0) $.ltOwnedSeniorTrancheShares -= userAssetClaims.stShares;
-        if (userAssetClaims.ltAssets != ZERO_TRANCHE_UNITS) {
-            $.ltOwnedYieldBearingAssets = $.ltOwnedYieldBearingAssets - userAssetClaims.ltAssets;
-            (stSharesWithdrawn, quoteAssets) =
-                IRoycoDayKernel(address(this)).removeLiquidity(userAssetClaims.ltAssets, _minSTSharesOut, _minQuoteAssetsOut, _receiver);
-        }
+        $.ltOwnedYieldBearingAssets = $.ltOwnedYieldBearingAssets - userAssetClaims.ltAssets;
+        (stSharesWithdrawn, quoteAssets) =
+            IRoycoDayKernel(address(this)).removeLiquidity(userAssetClaims.ltAssets, _minSTSharesOut, _minQuoteAssetsOut, _receiver);
 
         // Redeem all of the redeemer's senior shares from the venue and from the premium
         uint256 stSharesToRedeem = stSharesWithdrawn + userAssetClaims.stShares;
@@ -201,10 +208,7 @@ library RedemptionLogic {
         TrancheClaimsLogic._withdrawAssets($, _immutables, stClaims, _receiver);
 
         // Execute a post-redeem sync on accounting with the applied ST liquidation bonus
-        // LT redemption is exempt from satisfying the liquidity requirement once coverage utilization reaches its liquidation threshold
-        AccountingSyncLogic._postOpSyncTrancheAccounting(
-            $, _immutables, Operation.LT_REDEEM, stSelfLiquidationBonusNAV, (state.coverageUtilizationWAD < state.coverageLiquidationUtilizationWAD)
-        );
+        AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.LT_REDEEM, stSelfLiquidationBonusNAV, true);
     }
 
     // =============================
@@ -220,6 +224,8 @@ library RedemptionLogic {
         // Preview the total claims the senior tranche has on each tranche's assets and the total shares after minting any protocol fee and liquidity premium fee shares post-sync
         (SyncedAccountingState memory state, AssetClaims memory stClaims, uint256 totalShares) =
             IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.SENIOR);
+        // ST redemptions are disabled during a fixed-term market state: return an empty claim, matching the reverting redeem path
+        if (state.marketState == MarketState.FIXED_TERM) return userClaim;
 
         // Calculate the user's claims based on the shares redeemed
         userClaim = TrancheClaimsLogic._scaleAssetClaims(stClaims, _shares, totalShares);
@@ -235,7 +241,10 @@ library RedemptionLogic {
      */
     function jtPreviewRedeem(uint256 _shares) external view returns (AssetClaims memory userClaim) {
         // Preview the total claims the junior tranche has on each tranche's assets and the total shares after minting any protocol fee shares post-sync
-        (, AssetClaims memory jtClaims, uint256 totalShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.JUNIOR);
+        (SyncedAccountingState memory state, AssetClaims memory jtClaims, uint256 totalShares) =
+            IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.JUNIOR);
+        // JT redemptions are disabled during a fixed-term market state: return an empty claim, matching the reverting redeem path
+        if (state.marketState == MarketState.FIXED_TERM) return userClaim;
         // Calculate the user's claims based on the shares redeemed
         userClaim = TrancheClaimsLogic._scaleAssetClaims(jtClaims, _shares, totalShares);
     }
@@ -307,10 +316,8 @@ library RedemptionLogic {
      * @notice Returns the maximum amount of assets that can be withdrawn from the senior tranche
      * @dev ST redemptions are allowed in PERPETUAL market states
      * @param _owner The address that is withdrawing the assets
-     * @return claimOnSTNAV The notional claims on ST assets that the senior tranche has denominated in kernel's NAV units
-     * @return claimOnJTNAV The notional claims on JT assets that the senior tranche has denominated in kernel's NAV units
+     * @return stClaimNAV The senior tranche's total notional claim on the market's raw NAVs, denominated in kernel's NAV units
      * @return stMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the senior tranche, denominated in the kernel's NAV units
-     * @return jtMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the junior tranche, denominated in the kernel's NAV units
      * @return totalTrancheShares The total number of shares that exist in the senior tranche after the post-sync mint of its protocol fee shares and liquidity premium shares
      */
     function stMaxWithdrawable(
@@ -319,36 +326,30 @@ library RedemptionLogic {
     )
         external
         view
-        returns (NAV_UNIT claimOnSTNAV, NAV_UNIT claimOnJTNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalTrancheShares)
+        returns (NAV_UNIT stClaimNAV, NAV_UNIT stMaxWithdrawableNAV, uint256 totalTrancheShares)
     {
         // If the owner is blacklisted or the kernel is currently paused, return zero claims
         if (BlacklistLogic._isBlacklisted($, _owner) || PausableUpgradeable(address(this)).paused()) {
-            return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+            return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
         }
 
+        // Get the senior tranche's total claim on the market's assets
         SyncedAccountingState memory state;
-        AssetClaims memory stClaims;
-        (state, stClaims, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.SENIOR);
+        (state,, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.SENIOR);
 
         // ST redemptions are disabled during a fixed-term market state
-        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
-        // Get the total claims the senior tranche has on each tranche's assets
-        claimOnSTNAV = IRoycoDayKernel(address(this)).stConvertTrancheUnitsToNAVUnits(stClaims.stAssets);
-        claimOnJTNAV = IRoycoDayKernel(address(this)).jtConvertTrancheUnitsToNAVUnits(stClaims.jtAssets);
-
-        // The max withdrawable assets globally for each tranche is its entire raw NAV (ST redemptions are otherwise unrestricted in a PERPETUAL state)
-        stMaxWithdrawableNAV = ValuationLogic._getSeniorTrancheRawNAV($);
-        jtMaxWithdrawableNAV = ValuationLogic._getJuniorTrancheRawNAV($);
+        // ST redemptions are otherwise unrestricted in a PERPETUAL state: the senior claim on each raw NAV pool never exceeds that pool, so its entire effective NAV is withdrawable
+        stClaimNAV = state.stEffectiveNAV;
+        stMaxWithdrawableNAV = state.stEffectiveNAV;
     }
 
     /**
      * @notice Returns the maximum amount of assets that can be withdrawn from the junior tranche
      * @dev JT redemptions are allowed only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-redemption
      * @param _owner The address that is withdrawing the assets
-     * @return claimOnSTNAV The notional claims on ST assets that the junior tranche has denominated in kernel's NAV units
-     * @return claimOnJTNAV The notional claims on JT assets that the junior tranche has denominated in kernel's NAV units
-     * @return stMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the senior tranche, denominated in the kernel's NAV units
+     * @return jtClaimNAV The junior tranche's total notional claim on the market's raw NAVs, denominated in kernel's NAV units
      * @return jtMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the junior tranche, denominated in the kernel's NAV units
      * @return totalTrancheShares The total number of shares that exist in the junior tranche after minting any protocol fee shares post-sync
      */
@@ -359,25 +360,25 @@ library RedemptionLogic {
     )
         external
         view
-        returns (NAV_UNIT claimOnSTNAV, NAV_UNIT claimOnJTNAV, NAV_UNIT stMaxWithdrawableNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalTrancheShares)
+        returns (NAV_UNIT jtClaimNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalTrancheShares)
     {
         // If the owner is blacklisted or the kernel is currently paused, return zero claims
         if (BlacklistLogic._isBlacklisted($, _owner) || PausableUpgradeable(address(this)).paused()) {
-            return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+            return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
         }
 
-        // Get the total claims the junior tranche has on each tranche's assets
+        // Get the junior tranche's total claim on the market's assets
         SyncedAccountingState memory state;
         (state,, totalTrancheShares) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.JUNIOR);
 
         // JT redemptions are disabled during a fixed-term market state
-        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
+        if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
-        // Use the precise NAV claims directly from the decomposition instead of round-tripping them through tranche units (NAV -> tranche -> NAV)
-        (,, claimOnSTNAV, claimOnJTNAV) = TrancheClaimsLogic._computeSTandJTClaimsOnRawNAVs(state);
+        // The junior tranche's total claim on the market's raw NAVs is exactly its effective NAV, since its claims on the ST and JT raw NAVs sum to it under NAV conservation
+        jtClaimNAV = state.jtEffectiveNAV;
 
-        // Get the max withdrawable ST and JT assets in NAV units from the accountant considering the coverage requirement
-        (stMaxWithdrawableNAV, jtMaxWithdrawableNAV) = IRoycoDayAccountant(_immutables.accountant).maxJTWithdrawal(state);
+        // Get the max withdrawable JT assets in NAV units from the accountant considering the coverage requirement
+        jtMaxWithdrawableNAV = IRoycoDayAccountant(_immutables.accountant).maxJTWithdrawal(state);
     }
 
     /**
@@ -385,7 +386,7 @@ library RedemptionLogic {
      * @param _owner The address that is withdrawing the assets
      * @return claimOnLTNAV The notional claims on LT assets that the liquidity tranche has denominated in kernel's NAV units
      * @return ltMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the liquidity tranche, denominated in the kernel's NAV units
-     * @return totalTrancheShares The total number of shares that exist in the liquidity tranche after minting any protocol fee shares post-sync
+     * @return totalTrancheShares The total number of shares that exist in the liquidity tranche
      */
     function ltMaxWithdrawable(
         IRoycoDayKernel.RoycoDayKernelState storage $,
@@ -426,7 +427,7 @@ library RedemptionLogic {
      * @param _owner The address that is withdrawing the assets
      * @return claimOnLTNAV The notional claims on LT assets that the liquidity tranche has denominated in kernel's NAV units
      * @return ltMaxWithdrawableNAV The maximum amount of assets that can be withdrawn multi-asset, denominated in the kernel's NAV units
-     * @return totalTrancheShares The total number of shares that exist in the liquidity tranche after minting any protocol fee shares post-sync
+     * @return totalTrancheShares The total number of shares that exist in the liquidity tranche
      * @dev NON-VIEW: routes the venue removal through its execute-and-unwind preview, which mutates no state net
      */
     function ltMaxWithdrawableMultiAsset(

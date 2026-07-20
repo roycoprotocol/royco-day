@@ -13,6 +13,7 @@ import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
+    ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
     ADMIN_ORACLE_QUOTER_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
@@ -21,7 +22,6 @@ import {
     BURNER_ROLE,
     JT_LP_ROLE,
     LT_LP_ROLE,
-    PUBLIC_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
 } from "../../src/factory/RolesConfiguration.sol";
@@ -202,6 +202,7 @@ abstract contract DayMarketTestBase is Assertions {
     address internal ACCOUNTANT_ADMIN;
     address internal PROTOCOL_FEE_SETTER;
     address internal ORACLE_QUOTER_ADMIN;
+    address internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN;
     address internal PROTOCOL_FEE_RECIPIENT;
 
     /// @notice Default LP actors, one per tranche
@@ -224,15 +225,13 @@ abstract contract DayMarketTestBase is Assertions {
      * @notice Deploys the full Day market for the specified token shape and parameterization
      * @dev Mirrors BalancerV3_GyroECLP_LT_DeploymentTemplate.deployMarket's order, adapted to mocks: tokens, oracles, venue, YDMs,
      *      predicted kernel address, impls, tranche and accountant proxies, pool registration, kernel impl (its
-     *      constructor reads accountant.JT_COINVESTED and validates the registered pool), kernel proxy at the
+     *      constructor validates the registered pool), kernel proxy at the
      *      predicted address, then role bindings and grants
      * @param _cell The token shape (FixtureCell) to deploy
      * @param _params The market parameterization to deploy
      */
     function _deployMarket(FixtureCell memory _cell, MarketParamsConfig memory _params) internal virtual {
-        // The kernel family requires identical ST/JT assets, and identical assets force JT_COINVESTED at kernel
-        // construction (RoycoDayKernel.sol:122). The jtCoinvested=false axis lives only at AccountantTestBase
-        require(_params.jtCoinvested, "DayMarketTestBase: kernel family forces jtCoinvested=true; drive the false axis at AccountantTestBase");
+        // The kernel family requires identical ST/JT assets, which the kernel constructor enforces
         _validateFixtureCell(_cell);
 
         cell = _cell;
@@ -274,14 +273,13 @@ abstract contract DayMarketTestBase is Assertions {
         kernelProxyDeployer = makeAddr("KERNEL_PROXY_DEPLOYER");
         address predictedKernel = vm.computeCreateAddress(kernelProxyDeployer, vm.getNonce(kernelProxyDeployer));
 
-        // 7. Impls with the predicted kernel address (jtCoinvested hard-true per the kernel-family constraint)
+        // 7. Impls with the predicted kernel address
         RoycoSeniorTranche stImpl = new RoycoSeniorTranche(address(stJtVault), predictedKernel);
         RoycoJuniorTranche jtImpl = new RoycoJuniorTranche(address(stJtVault), predictedKernel);
         RoycoLiquidityTranche ltImpl = new RoycoLiquidityTranche(address(bpt), predictedKernel);
-        RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel, true);
+        RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel);
 
-        // 8. Tranche and accountant proxies MUST exist before the kernel impl (its constructor calls
-        //    accountant.JT_COINVESTED() and its initialize calls tranche.asset())
+        // 8. Tranche and accountant proxies MUST exist before the kernel impl (its initialize calls tranche.asset())
         seniorTranche = RoycoSeniorTranche(_deployTrancheProxy(address(stImpl), "Royco Senior Tranche", "RST"));
         juniorTranche = RoycoJuniorTranche(_deployTrancheProxy(address(jtImpl), "Royco Junior Tranche", "RJT"));
         liquidityTranche = RoycoLiquidityTranche(_deployTrancheProxy(address(ltImpl), "Royco Liquidity Tranche", "RLT"));
@@ -748,8 +746,8 @@ abstract contract DayMarketTestBase is Assertions {
         // ST/JT tranches: LP-gated deposit and redeem, admin surface, kernel-only burns via BURNER_ROLE
         _bindTranche(address(seniorTranche), ST_LP_ROLE, ST_LP_ROLE, false);
         _bindTranche(address(juniorTranche), JT_LP_ROLE, JT_LP_ROLE, false);
-        // LT: public deposits (deposits are never liquidity-gated), LP-gated redemptions
-        _bindTranche(address(liquidityTranche), PUBLIC_ROLE, LT_LP_ROLE, true);
+        // LT: LP-gated deposits and redemptions, mirroring the ST/JT surface
+        _bindTranche(address(liquidityTranche), LT_LP_ROLE, LT_LP_ROLE, true);
 
         // Kernel
         address k = address(kernel);
@@ -757,9 +755,8 @@ abstract contract DayMarketTestBase is Assertions {
             k, _sels(IRoycoDayKernel.setProtocolFeeRecipient.selector, IRoycoDayKernel.setSeniorTrancheSelfLiquidationBonus.selector), ADMIN_KERNEL_ROLE
         );
         accessManager.setTargetFunctionRole(k, _sels(IRoycoDayKernel.syncTrancheAccounting.selector), SYNC_ROLE);
-        accessManager.setTargetFunctionRole(
-            k, _sels(IRoycoDayKernel.reinvestLiquidityPremium.selector, IRoycoDayKernel.setRoycoBlacklist.selector), ADMIN_MARKET_OPS_ROLE
-        );
+        accessManager.setTargetFunctionRole(k, _sels(IRoycoDayKernel.reinvestLiquidityPremium.selector), ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE);
+        accessManager.setTargetFunctionRole(k, _sels(IRoycoDayKernel.setRoycoBlacklist.selector), ADMIN_MARKET_OPS_ROLE);
         accessManager.setTargetFunctionRole(k, _sels(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         accessManager.setTargetFunctionRole(k, _sels(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
         accessManager.setTargetFunctionRole(k, _sels(UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE);
@@ -825,6 +822,8 @@ abstract contract DayMarketTestBase is Assertions {
             accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoVaultTranche.deposit.selector), _depositRole);
             accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoVaultTranche.redeem.selector), _redeemRole);
         }
+        // Pause/unpause are bound for parity with the other components, but the tranche enforces no pause of its own:
+        // the kernel is the market's single pause authority, so a tranche-level pause is inert
         accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
         accessManager.setTargetFunctionRole(_tranche, _sels(UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE);
@@ -857,6 +856,7 @@ abstract contract DayMarketTestBase is Assertions {
         ACCOUNTANT_ADMIN = _generateActor("ACCOUNTANT_ADMIN", ADMIN_ACCOUNTANT_ROLE);
         PROTOCOL_FEE_SETTER = _generateActor("PROTOCOL_FEE_SETTER", ADMIN_PROTOCOL_FEE_SETTER_ROLE);
         ORACLE_QUOTER_ADMIN = _generateActor("ORACLE_QUOTER_ADMIN", ADMIN_ORACLE_QUOTER_ROLE);
+        MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN = _generateActor("MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN", ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE);
 
         // LP actors
         ST_PROVIDER = _generateActor("ST_PROVIDER", ST_LP_ROLE);

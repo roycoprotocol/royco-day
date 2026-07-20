@@ -25,7 +25,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     FeeAndLiquidityPremiumHarness internal flp;
 
     function setUp() public {
-        _deploy(false, _defaultParams());
+        _deploy(_defaultParams());
         flp = new FeeAndLiquidityPremiumHarness();
     }
 
@@ -315,28 +315,46 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     }
 
     /**
-     * An LT protocol fee equal to the entire LT effective NAV (the 100% fee ceiling,
-     * FeeAndLiquidityPremiumLogic.sol:66-72) drives the fee-share denominator ltEff - fee to zero, which
-     * routes through the share-mint math's 1-wei branch (ValuationLogic.sol) instead of reverting, and at the
-     * default residual eps = 1e6 the mint BINDS the dilution clamp.
-     * ltEff = ltRawNAV 10e18 + idle 0 = 10e18, fee = 10e18 -> denominator 0 -> 1 wei
-     * bind: ceil(10e18 * 1e6 / (1e18 - 1e6)) > 1 -> feeShares = cap = floor(50e18 * (1e18 - 1e6) / 1e6)
-     *     = 50e18 * 999_999_999_999 = 49_999_999_999_950e18, minted to the protocol fee recipient
+     * The LT protocol fee is carved out of the liquidity premium and remitted as senior shares to the protocol
+     * (FeeAndLiquidityPremiumLogic.sol:92-97): it mints NO liquidity tranche shares. The premium leg mints the
+     * premium net of the LT fee to the kernel's idle pile, and the senior fee leg mints the ST fee PLUS the carved
+     * LT fee to the protocol fee recipient, both priced over the same retained senior NAV.
+     * stEff 1045e18, gross premium 2.5e18, ST fee 4.25e18, LT fee 0.5e18, pre-sync supply 1000e18:
+     *   retained = 1045e18 - 2.5e18 - 4.25e18 = 1038.25e18 (the LT fee is inside the premium, so retained is unchanged)
+     *   premShares = floor((2.5e18 - 0.5e18) * 1000e18 / 1038.25e18) = 1_926_318_324_103_058_030
+     *   feeShares  = floor((4.25e18 + 0.5e18) * 1000e18 / 1038.25e18) = 4_575_006_019_744_762_822
+     *   supplyAfter = 1000e18 + premShares + feeShares = 1_006_501_324_343_847_820_852
      */
-    function test_LTProtocolFeeMint_FullFeeClampsThroughOneWeiDenominator() public {
+    function test_LTProtocolFeeMint_CarvedFromPremiumAsSeniorSharesNoLTShares() public {
         flp.ST_LEDGER().setTotalSupply(1000e18);
-        flp.LT_LEDGER().setTotalSupply(50e18);
-        flp.setLTOwnedYieldBearingAssets(10e18);
-        SyncedAccountingState memory s = _mintState(1045e18, 0, 0);
-        s.ltProtocolFee = toNAVUnits(uint256(10e18));
+        flp.setSTOwnedYieldBearingAssets(1000e18);
+        flp.setLTOwnedSeniorTrancheShares(5e18);
+        flp.setReinvestSharesToDrain(0);
+        SyncedAccountingState memory s = _mintState(1045e18, 2.5e18, 4.25e18);
+        s.ltProtocolFee = toNAVUnits(uint256(0.5e18));
 
         flp.processFeesAndLiquidityPremium(s);
 
-        assertEq(flp.LT_LEDGER().feeMintCallCount(), 1, "one liquidity fee mint");
-        assertEq(flp.LT_LEDGER().lastFeeSharesMinted(), 49_999_999_999_950e18, "fee shares clamp to the dilution cap");
-        assertEq(flp.LT_LEDGER().lastFeeMintTo(), flp.PROTOCOL_FEE_RECIPIENT(), "fee shares mint to the recipient");
-        // The clamped 1-wei branch matches the RTM mirror at the same residual
-        assertEq(flp.LT_LEDGER().lastFeeSharesMinted(), RoycoTestMath.convertToShares(10e18, 0, 50e18), "RTM sharesFor cross-assert");
+        // The premium leg mints the premium NET of the LT fee, to the kernel's idle pile
+        assertEq(flp.ST_LEDGER().premiumMintCallCount(), 1, "one premium mint");
+        assertEq(flp.ST_LEDGER().lastPremiumSharesMinted(), 1_926_318_324_103_058_030, "premium shares are net of the LT fee");
+        assertEq(flp.ST_LEDGER().lastPremiumMintTo(), address(flp), "premium shares mint to the kernel");
+        assertEq(flp.ltOwnedSeniorTrancheShares(), 5e18 + 1_926_318_324_103_058_030, "idle pile grows by exactly the net premium shares");
+
+        // The senior fee leg mints the ST fee PLUS the carved LT fee, to the protocol fee recipient
+        assertEq(flp.ST_LEDGER().feeMintCallCount(), 1, "one senior fee mint");
+        assertEq(flp.ST_LEDGER().lastFeeSharesMinted(), 4_575_006_019_744_762_822, "fee shares pool the ST fee and the carved LT fee");
+        assertEq(flp.ST_LEDGER().lastFeeMintTo(), flp.PROTOCOL_FEE_RECIPIENT(), "fee shares mint to the recipient");
+
+        // The liquidity tranche mints no shares for the LT protocol fee
+        assertEq(flp.LT_LEDGER().feeMintCallCount(), 0, "the LT protocol fee mints no liquidity shares");
+
+        // RTM cross-assert of the carve-out split (the five-argument mirror models the LT fee)
+        (uint256 rtmPrem, uint256 rtmFee, uint256 rtmSupply) =
+            RoycoTestMath.computeSTFeeAndLiquidityPremiumSharesToMint(1045e18, 2.5e18, 4.25e18, 0.5e18, 1000e18);
+        assertEq(flp.ST_LEDGER().lastPremiumSharesMinted(), rtmPrem, "RTM premium shares net of the LT fee");
+        assertEq(flp.ST_LEDGER().lastFeeSharesMinted(), rtmFee, "RTM pooled fee shares");
+        assertEq(flp.ST_LEDGER().totalSupply(), rtmSupply, "RTM supply after both mints");
     }
 
     /*//////////////////////////////////////////////////////////////////////

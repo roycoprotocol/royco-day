@@ -29,7 +29,7 @@ import { RoycoLiquidityTranche } from "../../../src/tranches/RoycoLiquidityTranc
 import { RoycoSeniorTranche } from "../../../src/tranches/RoycoSeniorTranche.sol";
 import {
     Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel as ChainlinkToAdminKernel
-} from "../../mocks/Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
+} from "../../../src/kernels/Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
 import { MockAggregatorV3 } from "../../mocks/MockAggregatorV3.sol";
 import { MockBPT } from "../../mocks/MockBPT.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
@@ -46,9 +46,9 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  * @dev This composition inverts the shipped stored-rate-overrides-oracle family: the stored rate here is a mandatory
  *      second pricing hop rather than an oracle bypass, so zero (the resume-the-oracle sentinel elsewhere) must be
  *      rejected at initialize and by the setter, and every Chainlink sanity gate must keep biting with a rate stored
- * @dev The quoter ships abstract with no concrete kernel wiring it, so the tests drive it through a test-only kernel
- *      that composes it with the Balancer V3 LT quoter, deployed with the same order and role wiring as the shipped
- *      market fixture with only the kernel implementation swapped
+ * @dev The tests drive the shipped concrete Chainlink-to-admin kernel from src/kernels, which composes the quoter
+ *      with the Balancer V3 LT quoter, deployed with the same order and role wiring as the shipped market fixture
+ *      with only the kernel implementation swapped
  * @dev The market stays unseeded: conversion rates are independent of tranche NAVs, and the setter's internal
  *      accounting syncs pass trivially at zero NAVs, isolating the two-hop pricing math under test
  */
@@ -260,11 +260,14 @@ contract Test_AdminOracleQuoter_ChainlinkToAdmin is DayMarketTestBase {
      * @dev The composed rate resolution falls back to this helper only when the stored rate reads the zero sentinel,
      *      and the init and setter gates above reject zero, so through the guarded lifecycle the fallback branch is
      *      unreachable. Pinning the helper's revert documents WHY that is safe: if the zero gates ever regressed,
-     *      the failure mode is this loud revert on every conversion rather than a silent price of zero
+     *      the failure mode is this loud revert on every conversion rather than a silent price of zero. The shipped
+     *      kernel keeps the helper internal, so a thin harness over it surfaces the call for this pin
      */
     function test_OracleQueryHelperRevertsAsUnreachableBackstop() public {
+        // A fresh harness over the shipped kernel against the already-deployed market plumbing (the helper is pure, no proxy needed)
+        ChainlinkToAdminKernelHarness harness = new ChainlinkToAdminKernelHarness(kernelConstructionParams);
         vm.expectRevert(IdenticalAssets_ST_JT_AdminOracle_Quoter.MUST_USE_ADMIN_ORACLE_INPUT.selector);
-        adminKernel.exposed_getConversionRateFromOracleWAD();
+        harness.exposed_getConversionRateFromOracleWAD();
     }
 
     // =============================
@@ -312,7 +315,7 @@ contract Test_AdminOracleQuoter_ChainlinkToAdmin is DayMarketTestBase {
         RoycoSeniorTranche stImpl = new RoycoSeniorTranche(address(stJtVault), predictedKernel);
         RoycoJuniorTranche jtImpl = new RoycoJuniorTranche(address(stJtVault), predictedKernel);
         RoycoLiquidityTranche ltImpl = new RoycoLiquidityTranche(address(bpt), predictedKernel);
-        RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel, true);
+        RoycoDayAccountant accImpl = new RoycoDayAccountant(predictedKernel);
 
         // Tranche and accountant proxies must exist before the kernel impl (its constructor reads the accountant)
         seniorTranche = RoycoSeniorTranche(_deployTrancheProxy(address(stImpl), "Royco Senior Tranche", "RST"));
@@ -409,5 +412,20 @@ contract Test_AdminOracleQuoter_ChainlinkToAdmin is DayMarketTestBase {
                 bptOracle: address(bptOracle), maxReinvestmentSlippageWAD: params.maxReinvestmentSlippageWAD
             })
         });
+    }
+}
+
+/**
+ * @title ChainlinkToAdminKernelHarness
+ * @notice Thin harness over the shipped Chainlink-to-admin kernel exposing its internal oracle-query helper
+ * @dev Exists only so the unreachable-backstop test can call the helper directly, no behavior is changed
+ */
+contract ChainlinkToAdminKernelHarness is ChainlinkToAdminKernel {
+    constructor(IRoycoDayKernel.RoycoDayKernelConstructionParams memory _params) ChainlinkToAdminKernel(_params) { }
+
+    /// @notice Exposes the internal oracle-query helper so the test can pin its unreachable-backstop revert directly
+    /// @return conversionRateWAD Never returns, the admin-oracle composition's helper always reverts
+    function exposed_getConversionRateFromOracleWAD() external pure returns (uint256 conversionRateWAD) {
+        return _getConversionRateFromOracleWAD();
     }
 }

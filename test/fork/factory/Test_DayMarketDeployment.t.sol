@@ -27,6 +27,7 @@ import {
     ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
+    ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
     ADMIN_ORACLE_QUOTER_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_UNPAUSER_ROLE,
@@ -218,9 +219,11 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
             if (address(tokens[i]) == address(ST)) {
                 assertTrue(info[i].tokenType == TokenType.WITH_RATE, "senior leg not WITH_RATE");
                 assertEq(address(info[i].rateProvider), address(KERNEL), "rate provider != kernel");
+                assertFalse(info[i].paysYieldFees, "senior leg must not pay Balancer yield fees per the config");
             } else {
                 assertTrue(info[i].tokenType == TokenType.STANDARD, "quote leg not STANDARD");
                 assertEq(address(info[i].rateProvider), address(0), "quote leg has rate provider");
+                assertFalse(info[i].paysYieldFees, "quote leg must not pay Balancer yield fees per the config");
             }
         }
         assertEq(VAULT.getStaticSwapFeePercentage(POOL), SWAP_FEE, "swap fee");
@@ -284,7 +287,6 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(s.maxLTYieldShareWAD, 0, "maxLTYieldShare == 0 (LT off)");
         assertEq(s.minLiquidityWAD, 0, "minLiquidity == 0");
         assertEq(s.fixedTermDurationSeconds, 0, "fixedTerm");
-        assertTrue(ACCOUNTANT.JT_COINVESTED(), "jtCoinvested");
     }
 
     /// @notice The kernel fee recipient, senior tranche self-liquidation bonus, tranche names/symbols, and whitelist flag match the config
@@ -374,9 +376,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(ACCESS_MANAGER.getTargetFunctionRole(ep, IRoycoDayEntryPoint.pokeOracleClock.selector), PUBLIC_ROLE, "pokeOracleClock public");
         // The admin surface is bound to its dedicated roles.
         assertEq(
-            ACCESS_MANAGER.getTargetFunctionRole(ep, IRoycoDayEntryPoint.modifyTrancheConfigs.selector),
-            ADMIN_ENTRY_POINT_ROLE,
-            "modifyTrancheConfigs role"
+            ACCESS_MANAGER.getTargetFunctionRole(ep, IRoycoDayEntryPoint.modifyTrancheConfigs.selector), ADMIN_ENTRY_POINT_ROLE, "modifyTrancheConfigs role"
         );
         assertEq(
             ACCESS_MANAGER.getTargetFunctionRole(ep, IRoycoDayEntryPoint.collectProtocolFees.selector),
@@ -394,16 +394,15 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertTrue(sync, "syncer holds SYNC_ROLE");
     }
 
-    /// @notice Each tranche entrypoint is bound to its intended role: LP-gated deposits/redeems, open LT deposits,
-    ///         and the pause/unpause/upgrade/burn admin surface
+    /// @notice Each tranche entrypoint is bound to its intended role: LP-gated deposits and redeems on every
+    ///         tranche, and the pause/unpause/upgrade/burn admin surface
     function test_Auth_TrancheSelectorRoleBindings() public view {
         _assertRole(address(ST), IRoycoVaultTranche.deposit.selector, ST_LP_ROLE);
         _assertRole(address(ST), IRoycoVaultTranche.redeem.selector, ST_LP_ROLE);
         _assertRole(address(JT), IRoycoVaultTranche.deposit.selector, JT_LP_ROLE);
         _assertRole(address(JT), IRoycoVaultTranche.redeem.selector, JT_LP_ROLE);
-        // LT deposits are open (they only deepen senior liquidity); LT redemptions stay role-gated.
-        _assertRole(address(LT), IRoycoVaultTranche.deposit.selector, PUBLIC_ROLE);
-        _assertRole(address(LT), RoycoLiquidityTranche.depositMultiAsset.selector, PUBLIC_ROLE);
+        _assertRole(address(LT), IRoycoVaultTranche.deposit.selector, LT_LP_ROLE);
+        _assertRole(address(LT), RoycoLiquidityTranche.depositMultiAsset.selector, LT_LP_ROLE);
         _assertRole(address(LT), IRoycoVaultTranche.redeem.selector, LT_LP_ROLE);
         _assertRole(address(LT), RoycoLiquidityTranche.redeemMultiAsset.selector, LT_LP_ROLE);
 
@@ -427,7 +426,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         _assertRole(address(KERNEL), IRoycoAuth.pause.selector, ADMIN_PAUSER_ROLE);
 
         // Operational maintenance surface -> ADMIN_MARKET_OPS_ROLE.
-        _assertRole(address(KERNEL), IRoycoDayKernel.reinvestLiquidityPremium.selector, ADMIN_MARKET_OPS_ROLE);
+        _assertRole(address(KERNEL), IRoycoDayKernel.reinvestLiquidityPremium.selector, ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE);
         _assertRole(address(KERNEL), IRoycoDayKernel.setRoycoBlacklist.selector, ADMIN_MARKET_OPS_ROLE);
         _assertRole(address(ACCOUNTANT), IRoycoDayAccountant.setSeniorTrancheDustTolerance.selector, ADMIN_MARKET_OPS_ROLE);
         _assertRole(address(ACCOUNTANT), IRoycoDayAccountant.setJuniorTrancheDustTolerance.selector, ADMIN_MARKET_OPS_ROLE);

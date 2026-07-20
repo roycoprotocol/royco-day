@@ -269,7 +269,7 @@ library DepositLogic {
      * @return valueAllocated The NAV value of the LT assets the add would mint
      * @return navToMintSharesAt The pre-deposit LT effective NAV that LT shares would be minted against
      * @return ltAssetsOut The LT tranche assets the add would mint
-     * @return ltTotalSupplyAfterMints The LT tranche supply after this sync mints its protocol fee shares, which LT shares must be priced against
+     * @return ltTotalSupplyAfterMints The LT tranche supply post-sync (unchanged by the sync, since the liquidity tranche accrues no protocol fee shares), which LT shares must be priced against
      */
     function ltPreviewDepositMultiAsset(
         IRoycoDayKernel.RoycoDayKernelState storage $,
@@ -280,7 +280,7 @@ library DepositLogic {
         external
         returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut, uint256 ltTotalSupplyAfterMints)
     {
-        // Preview the sync and the LT supply after this sync mints the LT protocol fee shares, exactly as depositMultiAsset reads totalSupply() post-sync
+        // Preview the sync and the post-sync LT supply (the sync mints no LT shares), exactly as depositMultiAsset reads totalSupply() post-sync
         SyncedAccountingState memory state;
         (state,, ltTotalSupplyAfterMints) = IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
         // During a fixed-term market state only a quote-only deposit is permitted and an ST-leg deposit reverts, so return zero before quoting the venue add to match it
@@ -298,6 +298,10 @@ library DepositLogic {
             : ValuationLogic._convertToShares(
                 IRoycoDayKernel(address(this)).stConvertTrancheUnitsToNAVUnits(_stAssets), state.stEffectiveNAV, totalSTShares, Math.Rounding.Floor
             );
+        // A dust ST leg that floors to zero senior shares reverts on the zero-share senior mint in execution, so return zero to match it
+        if (_stAssets != ZERO_TRANCHE_UNITS && stSharesToAdd == 0) {
+            return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS, ltTotalSupplyAfterMints);
+        }
         // Quote the venue add for the senior shares and quote assets (simulation only: no slippage gate, no settlement)
         // The venue values the minted LT assets against the post-add state inside the preview, exactly as execution does
         (ltAssetsOut, valueAllocated) = IRoycoDayKernel(address(this)).previewAddLiquidity(stSharesToAdd, _quoteAssets);

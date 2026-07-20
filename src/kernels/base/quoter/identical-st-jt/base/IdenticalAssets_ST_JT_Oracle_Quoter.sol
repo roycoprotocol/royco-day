@@ -42,15 +42,10 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
     /// @param conversionRateWAD The updated conversion rate as defined by the oracle, scaled to WAD precision
     event ConversionRateUpdated(uint256 conversionRateWAD);
 
-    /// @notice Thrown when the senior and junior tranche assets are not identical
-    error TRANCHE_ASSETS_MUST_BE_IDENTICAL();
-
     /// @dev Constructs the identical assets oracle quoter
     constructor() {
-        // The tranche assets must be non-null (guaranteed by order of construction: kernel is constructed first)
-        // The tranche assets must be identical since there is a single conversion rate used for both tranches
-        require(ST_ASSET == JT_ASSET, TRANCHE_ASSETS_MUST_BE_IDENTICAL());
-        // Compute and set the tranche unit scale factor
+        // The tranche assets are guaranteed identical by the kernel constructor
+        // A single conversion rate prices both tranches, so compute the shared tranche unit scale factor
         TRANCHE_UNIT_SCALE_FACTOR = 10 ** IERC20Metadata(ST_ASSET).decimals();
     }
 

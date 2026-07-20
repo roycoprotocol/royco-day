@@ -18,7 +18,7 @@ import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
 contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
     function setUp() public {
         stranger = makeAddr("stranger");
-        _deploy(false, _defaultParams());
+        _deploy(_defaultParams());
     }
 
     /// the first-ever accrual initializes both timestamps, leaves the accumulators at zero, and never calls the YDMs
@@ -131,7 +131,7 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         vm.warp(block.timestamp + 3600);
         kernel.doPreOp(toNAVUnits(uint256(900e18)), toNAVUnits(uint256(300e18)));
         assertEq(uint8(jtYDM.lastYieldShareMarketState()), uint8(MarketState.FIXED_TERM), "jt ydm sees FIXED_TERM");
-        assertEq(jtYDM.lastYieldShareUtilizationWAD(), 0.45e18, "coverage utilization from cross-claim checkpoints");
+        assertEq(jtYDM.lastYieldShareUtilizationWAD(), 0.6e18, "coverage utilization from cross-claim checkpoints");
         assertEq(ltYDM.lastYieldShareUtilizationWAD(), 0.5e18, "liquidity utilization from checkpoints");
     }
 
@@ -246,7 +246,7 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.maxJTYieldShareWAD = uint64(WAD);
         p.maxLTYieldShareWAD = 0;
-        _deploy(false, p);
+        _deploy(p);
         _seedAndInitAccrual();
         jtYDM.setYieldShareReturn(WAD);
         vm.warp(block.timestamp + 100 * 365 days);
@@ -271,7 +271,7 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.maxJTYieldShareWAD = uint64(WAD);
         p.maxLTYieldShareWAD = 0;
-        _deploy(false, p);
+        _deploy(p);
         _seedAndInitAccrual();
         jtYDM.setYieldShareReturn(WAD);
 
@@ -313,7 +313,7 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.maxJTYieldShareWAD = uint64(WAD);
         p.maxLTYieldShareWAD = 0;
-        _deploy(false, p);
+        _deploy(p);
         _seedAndInitAccrual();
         jtYDM.setYieldShareReturn(WAD);
 

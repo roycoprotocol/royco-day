@@ -54,7 +54,6 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         external
         virtual
         override(IRoycoLiquidityTranche)
-        whenNotPaused
         restricted
         returns (uint256 shares)
     {
@@ -91,7 +90,6 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         external
         virtual
         override(IRoycoLiquidityTranche)
-        whenNotPaused
         restricted
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
@@ -142,15 +140,13 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
 
     /// @inheritdoc IRoycoLiquidityTranche
     function maxRedeemMultiAsset(address _owner) external virtual override(IRoycoLiquidityTranche) returns (uint256 shares) {
-        uint256 sharesOwned = balanceOf(_owner);
-
-        // The liquidity tranche has claims only on its own RAW NAV
+        // The liquidity tranche has claims only on its own RAW NAV, bounded here by the multi-asset liquidity requirement
         (NAV_UNIT claimOnLTNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees) =
             IRoycoDayKernel(KERNEL).ltMaxWithdrawableMultiAsset(_owner);
 
-        // We do not allow redemptions if the tranche has no claims on the assets
+        // We do not allow redemptions if the tranche has no claim on the assets
         if (claimOnLTNAV == ZERO_NAV_UNITS) return 0;
 
-        shares = Math.min(sharesOwned, totalTrancheSharesAfterMintingFees.mulDiv(ltMaxWithdrawableNAV, claimOnLTNAV, Math.Rounding.Floor));
+        shares = Math.min(balanceOf(_owner), totalTrancheSharesAfterMintingFees.mulDiv(ltMaxWithdrawableNAV, claimOnLTNAV, Math.Rounding.Floor));
     }
 }

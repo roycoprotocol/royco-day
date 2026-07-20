@@ -6,6 +6,7 @@ import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/M
 import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
+import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { AssetClaims, MarketState } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
@@ -244,27 +245,38 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 0, "the full exit must execute under the waiver");
     }
 
-    /// @notice Past the coverage liquidation threshold LT redemptions are exempt from the liquidity requirement:
-    ///         the maximum reports the full balance and the full exit executes even though it strands the market below the floor
-    function test_MaxRedeemMultiAsset_CoverageLiquidationBreach_WaivesLiquidityGate() public {
+    /// @notice Past the coverage liquidation threshold the liquidity requirement still holds: the multi-asset
+    ///         maximum reports a bounded surplus below the full balance (a multi-asset exit relaxes the floor by
+    ///         unwinding senior depth, so it dominates the in-kind maximum but never waives the gate), a full
+    ///         exit reverts, and redeeming exactly the maximum leaves the liquidity floor satisfied
+    function test_MaxRedeemMultiAsset_CoverageLiquidationBreach_EnforcesLiquidityGate() public {
         // Crash the shared senior/junior rate 60%: junior absorbs losses until exhausted, so coverage
         // utilization reads past the liquidation threshold and the market forces perpetual
         applySTPnL(-6000);
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a = accountant.getState();
-        uint256 coverageUtilizationWAD = RoycoTestMath.computeCoverageUtilization(
-            toUint256(a.lastSTRawNAV), toUint256(a.lastJTRawNAV), accountant.JT_COINVESTED(), a.minCoverageWAD, toUint256(a.lastJTEffectiveNAV)
-        );
+        uint256 coverageUtilizationWAD =
+            RoycoTestMath.computeCoverageUtilization(toUint256(a.lastSTRawNAV), toUint256(a.lastJTRawNAV), a.minCoverageWAD, toUint256(a.lastJTEffectiveNAV));
         assertGe(coverageUtilizationWAD, a.coverageLiquidationUtilizationWAD, "setup: expected liquidation coverage to read breached");
 
+        // The breach no longer waives the liquidity gate: the multi-asset maximum is a bounded surplus below the
+        // full balance, and it still dominates the in-kind maximum because a multi-asset exit relaxes the floor
         uint256 balance = liquidityTranche.balanceOf(LT_PROVIDER);
-        assertEq(liquidityTranche.maxRedeemMultiAsset(LT_PROVIDER), balance, "the liquidation exemption must report the full balance");
-        assertEq(liquidityTranche.maxRedeemMultiAsset(LT_PROVIDER), liquidityTranche.maxRedeem(LT_PROVIDER), "both maxima must agree under the exemption");
+        uint256 maxMulti = liquidityTranche.maxRedeemMultiAsset(LT_PROVIDER);
+        assertGt(maxMulti, 0, "a multi-asset exit that relaxes the floor must still be possible");
+        assertLt(maxMulti, balance, "the breach must not waive the requirement: the maximum stays below the full balance");
+        assertGe(maxMulti, liquidityTranche.maxRedeem(LT_PROVIDER), "the multi-asset maximum must dominate the in-kind maximum");
 
+        // A full exit past the bounded maximum reverts on the enforced liquidity gate
         vm.prank(LT_PROVIDER);
+        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         liquidityTranche.redeemMultiAsset(balance, 0, 0, LT_PROVIDER, LT_PROVIDER);
+
+        // Redeeming exactly the advertised maximum succeeds and leaves the liquidity floor at or below 100%
+        vm.prank(LT_PROVIDER);
+        liquidityTranche.redeemMultiAsset(maxMulti, 0, 0, LT_PROVIDER, LT_PROVIDER);
         _sync();
-        assertGt(_liquidityUtilization(), WAD, "the exemption must have been load-bearing for the full exit");
+        assertLe(_liquidityUtilization(), WAD, "redeeming exactly the maximum must leave the liquidity floor satisfied");
     }
 
     /// @notice A fixed-term market disables LT redemptions: the maximum reports zero and the flow reverts
@@ -516,6 +528,46 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         (AssetClaims memory dustClaims, uint256 dustQuote) = liquidityTranche.previewRedeemMultiAsset(1);
         assertEq(dustQuote, 0, "a dust preview must floor the quote leg to zero");
         assertEq(toUint256(dustClaims.nav), 0, "a dust preview must floor the claim value to zero");
+    }
+
+    /// @notice A dust ST leg that floors to zero senior shares makes the multi-asset preview return zero, matching
+    ///         the execution which reverts on the zero-share senior mint
+    /// @dev With senior shares appreciated past one NAV each, a one-wei ST leg values below a whole senior share and
+    ///      floors to zero. The execution path mints that zero senior share and reverts MUST_MINT_NON_ZERO_SHARES, so
+    ///      the preview must not quote a positive share amount for a deposit that deterministically reverts
+    function test_LTDepositMultiAsset_DustSTLegFloorsToZeroSeniorShares_PreviewZeroAndExecutionReverts() public {
+        // Appreciate the senior leg 20% so each senior share is worth more than one NAV: a one-wei ST leg now floors
+        // to zero senior shares in both the preview and the execution
+        applySTPnL(2000);
+        _sync();
+
+        uint256 dustSTLeg = 1;
+        uint256 quoteAssets = 100 * QUOTE_UNIT;
+
+        // The preview returns zero shares because the floored senior leg carries no LT assets out
+        uint256 previewShares = liquidityTranche.previewDepositMultiAsset(dustSTLeg, quoteAssets);
+        assertEq(previewShares, 0, "a dust ST leg flooring to zero senior shares must preview zero LT shares");
+
+        // The execution reverts on the zero-share senior mint the preview now mirrors
+        stJtVault.mintShares(LT_PROVIDER, dustSTLeg);
+        quoteToken.mint(LT_PROVIDER, quoteAssets);
+        vm.startPrank(LT_PROVIDER);
+        stJtVault.approve(address(liquidityTranche), dustSTLeg);
+        quoteToken.approve(address(liquidityTranche), quoteAssets);
+        vm.expectRevert(IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES.selector);
+        liquidityTranche.depositMultiAsset(dustSTLeg, quoteAssets, 0, LT_PROVIDER);
+        vm.stopPrank();
+
+        // A pure quote-only deposit in the same state is untouched by the dust guard: it previews a positive share
+        // amount and executes, because the guard only fires when a nonzero ST leg is supplied
+        uint256 quoteOnlyPreview = liquidityTranche.previewDepositMultiAsset(0, quoteAssets);
+        assertGt(quoteOnlyPreview, 0, "a quote-only deposit must still preview a positive share amount");
+        quoteToken.mint(LT_PROVIDER, quoteAssets);
+        vm.startPrank(LT_PROVIDER);
+        quoteToken.approve(address(liquidityTranche), quoteAssets);
+        uint256 quoteOnlyMinted = liquidityTranche.depositMultiAsset(0, quoteAssets, 0, LT_PROVIDER);
+        vm.stopPrank();
+        assertEq(quoteOnlyMinted, quoteOnlyPreview, "a quote-only deposit must execute and mint exactly the previewed shares");
     }
 
     /// @notice Preview equals execution for a senior-only deposit leg: the unbalanced add's fee-bearing side

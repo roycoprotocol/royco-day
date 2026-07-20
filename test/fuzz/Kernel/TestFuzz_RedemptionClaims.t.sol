@@ -151,9 +151,10 @@ contract TestFuzz_RedemptionClaims_Kernel is MarketFuzzTestBase {
      * fuzzed slice and must receive BOTH legs of the LT's effective NAV: the floor-scaled BPT slice and the
      * floor-scaled slice of the idle liquidity premium senior shares, sent directly.
      *
-     * Idle-share derivation: the premium and senior-fee share mints price against the retained senior NAV
-     * (stEffectiveNAV - premium - fee) at the pre-sync supply, so
-     *   idleShares = floor(st x premium / (stEffectiveNAV - premium - fee))
+     * Idle-share derivation: the premium mint to the LT is net of the LT protocol fee and the senior-fee mint to
+     * the recipient is the ST fee plus the LT fee carved out of the premium, both priced against the retained
+     * senior NAV (stEffectiveNAV - premium - fee) at the pre-sync supply, so
+     *   idleShares = floor(st x (premium - ltFee) / (stEffectiveNAV - premium - fee))
      * and the LT effective NAV adds the idle shares valued at the post-mint senior share price:
      *   ltEff = depth + floor(idleShares x stEffectiveNAV / stSupplyAfterMints)
      */
@@ -180,12 +181,19 @@ contract TestFuzz_RedemptionClaims_Kernel is MarketFuzzTestBase {
         syncVenuePrices();
         SyncedAccountingState memory state = _sync();
 
-        // The kernel must hold exactly the derived idle liquidity premium senior shares, outside the raw LT mark
-        (uint256 idleShares,, uint256 stSupplyAfterMints) =
-            RoycoTestMath.computeSTFeeAndLiquidityPremiumSharesToMint(toUint256(state.stEffectiveNAV), toUint256(state.ltLiquidityPremium), toUint256(state.stProtocolFee), st);
+        // The kernel must hold exactly the derived idle liquidity premium senior shares, outside the raw LT mark.
+        // The premium mint to the LT is net of the LT protocol fee, the fee mint to the recipient is the ST fee
+        // plus the LT fee, both priced against the retained senior NAV (stEffectiveNAV - premium - fee) at the
+        // pre-sync supply. No liquidity-tranche shares are minted on a sync.
+        uint256 retainedSeniorNAV = toUint256(state.stEffectiveNAV) - toUint256(state.ltLiquidityPremium) - toUint256(state.stProtocolFee);
+        uint256 idleShares =
+            RoycoTestMath.convertToShares(toUint256(state.ltLiquidityPremium) - toUint256(state.ltProtocolFee), retainedSeniorNAV, st);
+        uint256 stProtocolFeeShares =
+            RoycoTestMath.convertToShares(toUint256(state.stProtocolFee) + toUint256(state.ltProtocolFee), retainedSeniorNAV, st);
+        uint256 stSupplyAfterMints = st + idleShares + stProtocolFeeShares;
         IRoycoDayKernel.RoycoDayKernelState memory ks = kernel.getState();
-        assertEq(ks.ltOwnedSeniorTrancheShares, idleShares, "ltOwnedSeniorTrancheShares must hold exactly the derived premium mint");
-        assertEq(seniorTranche.totalSupply(), stSupplyAfterMints, "the senior supply must include the premium and fee mints exactly");
+        assertEq(ks.ltOwnedSeniorTrancheShares, idleShares, "ltOwnedSeniorTrancheShares must hold exactly the net premium mint");
+        assertEq(seniorTranche.totalSupply(), stSupplyAfterMints, "the senior supply must include the net premium and fee-plus-ltfee mints exactly");
         assertEq(toUint256(state.ltRawNAV), depth, "the committed LT raw mark must exclude the idle liquidity premium senior shares");
 
         // The LT's two-leg effective NAV: pool depth plus the idle shares at the post-mint senior share price

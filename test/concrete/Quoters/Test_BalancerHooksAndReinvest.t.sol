@@ -38,19 +38,20 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         _assertSeededGateFixture(idleShares);
 
         // The gate's floor, hand-derived from the pinned fixture state rather than by re-running the production
-        // conversion chain: the whole idle pile values to floor(108e18 x 940733772342427093 / 101599247412982126058)
-        // = 999999999999999999 at the committed senior rate — the 1e18 premium it was minted for, less a single
-        // floor-rounding wei. The pool's NAV per BPT is exactly 1.0 (6.000001e18 BPT backing 6.000001e18 of value),
-        // so the fair BPT is that same figure, and the 0.1% max reinvestment slippage discount floors the add at
-        // ceil(999999999999999999 x 999 / 1000) = ceil(999e15 - 0.999) = 999000000000000000
-        uint256 minOut = 0.999e18;
+        // conversion chain: the whole idle pile values to floor(108e18 x 846660395108184383 / 101599247412982126057)
+        // = 899999999999999999 at the committed senior rate, the 0.9e18 NET premium it was minted for (the 1e18
+        // gross premium less the 0.1e18 LT protocol fee), less a single floor-rounding wei. The pool's NAV per BPT
+        // is exactly 1.0 (6.000001e18 BPT backing 6.000001e18 of value), so the fair BPT is that same figure, and
+        // the 0.1% max reinvestment slippage discount floors the add at
+        // ceil(899999999999999999 x 999 / 1000) = 899100000000000000
+        uint256 minOut = 0.8991e18;
 
         uint256 ltOwnedBefore = toUint256(kernel.getState().ltOwnedYieldBearingAssets);
         uint256 committedLtRawNAVBefore = toUint256(accountant.getState().lastLTRawNAV);
 
         // Side 1: one wei under the gate, the inner add reverts, the failure is tolerated, and NOTHING moves
         balancerVault.setNextBptOutOverride(minOut - 1);
-        vm.prank(MARKET_OPS_ADMIN);
+        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
         kernel.reinvestLiquidityPremium(type(uint256).max);
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares, "under the gate: the idle pile must be untouched");
         assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), ltOwnedBefore, "under the gate: no BPT may be credited");
@@ -60,7 +61,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         balancerVault.setNextBptOutOverride(minOut);
         vm.expectEmit(address(kernel));
         emit IRoycoDayKernel.LiquidityPremiumReinvested(idleShares, toTrancheUnits(minOut));
-        vm.prank(MARKET_OPS_ADMIN);
+        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
         kernel.reinvestLiquidityPremium(type(uint256).max);
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, 0, "at the gate: the entire idle pile must deploy");
         assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), ltOwnedBefore + minOut, "at the gate: exactly minOut BPT must be credited");
@@ -76,22 +77,22 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         uint256 idleShares = _accrueIdlePremiumSeniorShares();
         _assertSeededGateFixture(idleShares);
 
-        // Deploy the floor-rounded half of the pinned pile: 940733772342427093 / 2 = 470366886171213546
-        uint256 half = 470366886171213546;
+        // Deploy the floor-rounded half of the pinned pile: 846660395108184383 / 2 = 423330197554092191
+        uint256 half = 423330197554092191;
 
         // The gate's floor for the half, hand-derived from the pinned fixture state: the half values to
-        // floor(108e18 x 470366886171213546 / 101599247412982126058) = 499999999999999999 at the committed senior
-        // rate (half the premium less a floor-rounding wei), the pool's NAV per BPT is exactly 1.0 so the fair BPT
-        // is the same figure, and the 0.1% discount floors the add at ceil(499999999999999999 x 999 / 1000)
-        // = ceil(4995e14 - 0.999) = 499500000000000000
-        uint256 minOut = 0.4995e18;
+        // floor(108e18 x 423330197554092191 / 101599247412982126057) = 449999999999999999 at the committed senior
+        // rate (half the NET premium less a floor-rounding wei), the pool's NAV per BPT is exactly 1.0 so the fair
+        // BPT is the same figure, and the 0.1% discount floors the add at ceil(449999999999999999 x 999 / 1000)
+        // = 449550000000000000
+        uint256 minOut = 0.44955e18;
 
         uint256 ltOwnedBefore = toUint256(kernel.getState().ltOwnedYieldBearingAssets);
 
         balancerVault.setNextBptOutOverride(minOut);
         vm.expectEmit(address(kernel));
         emit IRoycoDayKernel.LiquidityPremiumReinvested(half, toTrancheUnits(minOut));
-        vm.prank(MARKET_OPS_ADMIN);
+        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
         kernel.reinvestLiquidityPremium(half);
 
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares - half, "the undeployed remainder must stay idle and claimable");
@@ -119,9 +120,9 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares, "arrange: the no-gain sync must not touch the idle pile");
 
         // Pin the oracle to a TVL that rounds the fair-value floor to zero. The pile values to under 1e18 NAV
-        // (999999999999999999, pinned above) and the BPT supply is 6.000001e18, so the fair-BPT numerator
-        // bptSupply x premiumValue is under 6.1e36 — any TVL above that rounds floor(numerator / TVL) to 0, and
-        // 1e40 clears the boundary by more than a thousandfold
+        // (899999999999999999, the net premium pinned above) and the BPT supply is 6.000001e18, so the fair-BPT
+        // numerator bptSupply x premiumValue is under 5.5e36, any TVL above that rounds floor(numerator / TVL) to 0,
+        // and 1e40 clears the boundary by more than a thousandfold
         bptOracle.setMode(MockBPTOracle.Mode.MANUAL);
         bptOracle.setTVL(1e40);
 
@@ -129,7 +130,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
 
         // With a zero fair-value floor the reinvestment returns early before any venue add: it never reaches the
         // Vault, so no fill can occur and the idle pile is left untouched
-        vm.prank(MARKET_OPS_ADMIN);
+        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
         kernel.reinvestLiquidityPremium(idleShares);
 
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares, "the idle pile stays idle and claimable when the fair-value floor rounds to zero");
@@ -227,17 +228,23 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
      *        premium routes 2e18 of it to the junior side, so the committed senior effective NAV is 108e18
      *      - the liquidity tranche's pinned 10% premium carves 1e18 out of the gain, and the 10% senior protocol
      *        fee takes 0.7e18 (10% of the 7e18 senior residual after the 2e18 and 1e18 carve-outs), so the
-     *        pre-existing 100e18 senior shares retain 108e18 - 1e18 - 0.7e18 = 106.3e18
-     *      - premium shares minted: floor(1e18 x 100e18 / 106.3e18) = 940733772342427093 idle senior shares
-     *      - fee shares minted: floor(0.7e18 x 100e18 / 106.3e18) = 658513640639698965, so the senior supply lands
-     *        at 100e18 + 940733772342427093 + 658513640639698965 = 101599247412982126058
+     *        retained senior NAV is 108e18 - 1e18 - 0.7e18 = 106.3e18
+     *      - the 10% LT protocol fee carves ltFee = floor(1e18 x 0.1e18 / WAD) = 0.1e18 out of the LT premium, so
+     *        the LT is minted the NET premium and the protocol recipient is minted the ST fee PLUS that LT fee, both
+     *        as senior shares against the retained NAV and the pre-mint 100e18 supply
+     *      - premium shares minted to the LT (net of the LT fee): floor((1e18 - 0.1e18) x 100e18 / 106.3e18)
+     *        = 846660395108184383 idle senior shares
+     *      - fee shares minted to the protocol recipient (ST fee plus LT fee): floor((0.7e18 + 0.1e18) x 100e18 /
+     *        106.3e18) = 752587017873941674, so the senior supply lands at
+     *        100e18 + 846660395108184383 + 752587017873941674 = 101599247412982126057 (the two independent floors
+     *        drop one wei off the pre-split total, no LT tranche shares mint on a sync)
      *      - the pool holds 6.000001e18 BPT backing 6.000001e18 of quote-leg value (the 6e6-quote-wei auto-seed
      *        plus the genesis backing of the dead minimum supply), so its NAV per BPT is exactly 1.0
      */
     function _assertSeededGateFixture(uint256 _idleShares) internal view {
-        assertEq(_idleShares, 940733772342427093, "fixture pin: the idle premium pile");
+        assertEq(_idleShares, 846660395108184383, "fixture pin: the idle premium pile");
         assertEq(toUint256(accountant.getState().lastSTEffectiveNAV), 108e18, "fixture pin: the committed senior effective NAV");
-        assertEq(seniorTranche.totalSupply(), 101599247412982126058, "fixture pin: the post-mint senior supply");
+        assertEq(seniorTranche.totalSupply(), 101599247412982126057, "fixture pin: the post-mint senior supply");
         assertEq(balancerVault.totalSupply(address(bpt)), 6000001000000000000, "fixture pin: the pool's BPT supply");
         assertEq(bptOracle.computeTVL(), 6000001000000000000, "fixture pin: the pool's oracle TVL (NAV per BPT exactly 1.0)");
     }

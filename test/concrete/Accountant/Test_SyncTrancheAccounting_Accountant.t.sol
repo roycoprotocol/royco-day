@@ -19,7 +19,7 @@ import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     function setUp() public {
         stranger = makeAddr("stranger");
-        _deploy(false, _defaultParams());
+        _deploy(_defaultParams());
     }
 
     /// @dev Fully hand-derived expectation for one sync vector, asserted field-by-field by _runSyncVector
@@ -41,8 +41,8 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
      * hand-derived expectation, then re-reads the committed checkpoint and asserts exact NAV conservation plus
      * returned-vs-persisted equality
      *
-     * The coverage utilization is asserted against the documented formula ceil(stRawNAV * minCoverage / jtEffectiveNAV)
-     * evaluated with test-local math on the hand-derived jt effective NAV (JT_COINVESTED is false in every scenario deployment)
+     * The coverage utilization is asserted against the documented formula ceil((stRawNAV + jtRawNAV) * minCoverage / jtEffectiveNAV)
+     * evaluated with test-local math on the hand-derived jt effective NAV
      */
     function _runSyncVector(uint256 _stRawNew, uint256 _jtRawNew, ExpectedSync memory _e) internal {
         IRoycoDayAccountant.RoycoDayAccountantState memory pre = accountant.getState();
@@ -64,7 +64,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         assertEq(toUint256(executed.stProtocolFee), _e.stFee, "vector: st protocol fee");
         assertEq(toUint256(executed.jtProtocolFee), _e.jtFee, "vector: jt protocol fee");
         assertEq(toUint256(executed.ltProtocolFee), _e.ltFee, "vector: lt protocol fee");
-        assertEq(executed.coverageUtilizationWAD, _expectedCoverageUtilization(_stRawNew, _e.jtEffectiveNAV), "vector: coverage utilization");
+        assertEq(executed.coverageUtilizationWAD, _expectedCoverageUtilization(_stRawNew, _jtRawNew, _e.jtEffectiveNAV), "vector: coverage utilization");
         assertEq(executed.liquidityUtilizationWAD, 0, "vector: liquidity utilization placeholder");
         assertEq(executed.fixedTermEndTimestamp, _e.fixedTermEndTimestamp, "vector: fixed term end timestamp");
 
@@ -109,11 +109,10 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         st.stProtocolFee = toNAVUnits(_e.stFee);
         st.jtProtocolFee = toNAVUnits(_e.jtFee);
         st.ltProtocolFee = toNAVUnits(_e.ltFee);
-        st.coverageUtilizationWAD = _expectedCoverageUtilization(_stRawNew, _e.jtEffectiveNAV);
+        st.coverageUtilizationWAD = _expectedCoverageUtilization(_stRawNew, _jtRawNew, _e.jtEffectiveNAV);
         st.liquidityUtilizationWAD = 0;
         st.fixedTermEndTimestamp = _e.fixedTermEndTimestamp;
         st.minCoverageWAD = _pre.minCoverageWAD;
-        st.jtCoinvested = accountant.JT_COINVESTED();
         st.coverageLiquidationUtilizationWAD = _pre.coverageLiquidationUtilizationWAD;
         st.minLiquidityWAD = _pre.minLiquidityWAD;
     }
@@ -168,7 +167,6 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         in_.nowTimestamp = block.timestamp;
         in_.fixedTermDuration = _pre.fixedTermDurationSeconds;
         in_.minCoverageWAD = _pre.minCoverageWAD;
-        in_.jtCoinvested = accountant.JT_COINVESTED();
         in_.coverageLiquidationUtilizationWAD = _pre.coverageLiquidationUtilizationWAD;
         in_.effectiveDust = toUint256(_pre.effectiveNAVDustTolerance);
         in_.minLiquidityWAD = _pre.minLiquidityWAD;
@@ -230,9 +228,9 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         );
     }
 
-    /// @dev Independent coverage utilization math: ceil(stRawNAV * 0.1e18 / jtEffectiveNAV) with the default minimum coverage and no co-investment
-    function _expectedCoverageUtilization(uint256 _stRaw, uint256 _jtEff) internal pure returns (uint256) {
-        uint256 requiredCoverageNAV = _stRaw * uint256(DEFAULT_MIN_COVERAGE_WAD);
+    /// @dev Independent coverage utilization math: ceil((stRawNAV + jtRawNAV) * 0.1e18 / jtEffectiveNAV) with the default minimum coverage
+    function _expectedCoverageUtilization(uint256 _stRaw, uint256 _jtRaw, uint256 _jtEff) internal pure returns (uint256) {
+        uint256 requiredCoverageNAV = (_stRaw + _jtRaw) * uint256(DEFAULT_MIN_COVERAGE_WAD);
         if (requiredCoverageNAV == 0) return 0;
         if (_jtEff == 0) return type(uint256).max;
         return (requiredCoverageNAV + _jtEff - 1) / _jtEff;
@@ -338,7 +336,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         );
     }
 
-    /// Sync scenario (ST flat, JT flat, IL 0): the no-op sync leaves every field at the checkpoint (coverageUtilization exactly 0.5e18)
+    /// Sync scenario (ST flat, JT flat, IL 0): the no-op sync leaves every field at the checkpoint (coverageUtilization exactly 0.6e18)
     function test_Sync_NoIL_STFlatJTFlat() public {
         _seedNoIL();
         _runSyncVector(
@@ -356,8 +354,8 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
                 fixedTermEndTimestamp: 0
             })
         );
-        // Literal anchor for the independent ceil helper: 1000e18 * 0.1e18 / 200e18 divides exactly to 0.5e18
-        assertEq(_expectedCoverageUtilization(1000e18, 200e18), 0.5e18, "anchor: exact-division coverage utilization");
+        // Literal anchor for the independent ceil helper: 1200e18 * 0.1e18 / 200e18 divides exactly to 0.6e18
+        assertEq(_expectedCoverageUtilization(1000e18, 200e18, 200e18), 0.6e18, "anchor: exact-division coverage utilization");
     }
 
     /**
@@ -912,7 +910,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
      * liquidation threshold, forcing PERPETUAL with full il erasure
      * Derivation: dST = -(50e18-1), dJT = -20e18. jtEffectiveNAV = 100e18-1 - 20e18 = 80e18-1. coverage
      * = min(50e18-1, 80e18-1) = 50e18-1 so jtEffectiveNAV = 30e18, would-be il = 50e18-1, stEffectiveNAV unchanged 1000e18.
-     * then coverageUtilization = ceil(950e18 * 0.1e18 / 30e18) = 3166666666666666667 >= liqThreshold 1.1e18 so the FORCED
+     * then coverageUtilization = ceil((950e18 + 80e18) * 0.1e18 / 30e18) = 3433333333333333334 >= liqThreshold 1.1e18 so the FORCED
      * PERPETUAL disjunct fires (the liquidation disjunct): il ERASED (reset event 50e18-1), end deleted.
      * NOTE: the liquidation disjunct governs here — production and the RoycoTestMath mirror both
      * force PERPETUAL instead of keeping the term
@@ -943,7 +941,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     /**
      * Sync scenario (ST loss, JT flat, IL 0, FIXED_TERM): liquidation-forced PERPETUAL, as in the ST-loss/JT-loss scenario
      * Derivation: coverage = min(50e18-1, 100e18-1) = 50e18-1 so jtEffectiveNAV = 50e18, would-be il = 50e18-1, stEffectiveNAV
-     * unchanged. then coverageUtilization = ceil(950e18 * 0.1e18 / 50e18) = 1.9e18 >= 1.1e18 forces PERPETUAL, il erased
+     * unchanged. then coverageUtilization = ceil((950e18 + 100e18) * 0.1e18 / 50e18) = 2.1e18 >= 1.1e18 forces PERPETUAL, il erased
      */
     function test_Sync_FixedTermNoIL_STLossJTFlat() public {
         _seedNoILFixedTerm();
@@ -969,7 +967,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
      * (the liquidation disjunct governs, as in the ST-loss/JT-loss scenario)
      * Derivation: the jt gain 20e18 books provisional jtFee 2e18, jtEffectiveNAV = 120e18-1. coverage = 50e18-1 recomputes
      * jtNetGain = satSub(20e18 - (50e18-1)) = 0 <= dust so jtFee = 0, jtEffectiveNAV = 70e18, would-be il = 50e18-1.
-     * then coverageUtilization = ceil(950e18 * 0.1e18 / 70e18) = 1357142857142857143 >= 1.1e18 forces PERPETUAL, il erased
+     * then coverageUtilization = ceil((950e18 + 120e18) * 0.1e18 / 70e18) = 1528571428571428572 >= 1.1e18 forces PERPETUAL, il erased
      */
     function test_Sync_FixedTermNoIL_STLossJTGain() public {
         _seedNoILFixedTerm();
@@ -994,7 +992,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
      * Sync scenario (ST flat, JT loss, IL 0, FIXED_TERM): liquidation-forced PERPETUAL, not the il == 0
      * branch — the forced disjunct is evaluated first and lands an identical outcome
      * Derivation: dJT = -20e18 attributes 0 to the 1-wei cross-claim so jtEffectiveNAV = 80e18-1, il stays 0. The state resolution evaluates
-     * the forced disjuncts first (RoycoDayAccountant): coverageUtilization = ceil((1000e18-1) * 0.1e18 / (80e18-1)) = 1.25e18 + 1 wei
+     * the forced disjuncts first (RoycoDayAccountant): coverageUtilization = ceil(((1000e18-1) + 80e18) * 0.1e18 / (80e18-1)) = 1.35e18 + 1 wei
      * >= 1.1e18, so PERPETUAL is FORCED with IL erasure before the il == 0 branch is ever reached, the
      * erased il is already 0 (so no reset event), end deleted
      */
@@ -1018,9 +1016,10 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * Sync scenario (ST flat, JT flat, IL 0, FIXED_TERM): the pure state-machine scenario — a flat sync exits the term
-     * Derivation: zero deltas so no sync legs run, initial FIXED_TERM with il == 0 lands PERPETUAL
-     * (RoycoDayAccountant), end deleted, FixedTermEnded emitted, and NO il-reset event (nothing was erased)
+     * Sync scenario (ST flat, JT flat, IL 0, FIXED_TERM): a flat sync exits the term via the liquidation disjunct
+     * Derivation: zero deltas so no sync legs run. coverageUtilization = ceil(((1000e18-1) + 100e18) * 0.1e18 / (100e18-1))
+     * = 1.1e18 + 1 wei >= liqThreshold 1.1e18 so the FORCED PERPETUAL disjunct fires ahead of the il == 0 branch:
+     * end deleted, FixedTermEnded emitted, and NO il-reset event (the erased il is already 0)
      */
     function test_Sync_FixedTermNoIL_STFlatJTFlat() public {
         _seedNoILFixedTerm();
@@ -1963,7 +1962,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.stNAVDustTolerance = toNAVUnits(uint256(30));
         p.jtNAVDustTolerance = toNAVUnits(uint256(40));
-        _deploy(false, p);
+        _deploy(p);
         _seedState(SEED_ST_RAW, SEED_JT_RAW, SEED_ST_RAW, SEED_JT_RAW, 0, SEED_LT_RAW, MarketState.PERPETUAL);
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW + 70));
         assertEq(toUint256(state.jtProtocolFee), 0, "gain equal to the dust tolerance takes no fee");
@@ -1993,7 +1992,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         p.fixedTermDurationSeconds = 0;
         p.stNAVDustTolerance = toNAVUnits(_stDust);
         p.jtNAVDustTolerance = toNAVUnits(_jtDust);
-        _deploy(false, p);
+        _deploy(p);
     }
 
     /**
@@ -2104,13 +2103,13 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     /**
      * a gain above the il pays premiums only on the residual, via the instantaneous branch with the
      * FIXED_TERM initial state and last-committed checkpoint utilizations as the exact YDM preview arguments
-     * Derivation: gain 150e18, recovery 100e18 leaves stGain 50e18; checkpoint utils coverageUtilization = ceil(900e18 * 0.1e18
-     * / 200e18) = 0.45e18 and liquidityUtilization = ceil(1000e18 * 0.05e18 / 100e18) = 0.5e18; premiums 5e18 / 2.5e18, fees kept
+     * Derivation: gain 150e18, recovery 100e18 leaves stGain 50e18; checkpoint utils coverageUtilization = ceil((900e18 + 300e18)
+     * * 0.1e18 / 200e18) = 0.6e18 and liquidityUtilization = ceil(1000e18 * 0.05e18 / 100e18) = 0.5e18; premiums 5e18 / 2.5e18, fees kept
      * because the recovered market lands PERPETUAL: jtFee 0.5e18, ltFee 0.25e18, stFee = floor(42.5e18 * 0.1) = 4.25e18
      */
     function test_Sync_ilRecoveryThenPremiumOnResidualWithExactYDMArgs() public {
         _seedLargeIL();
-        vm.expectCall(address(jtYDM), abi.encodeCall(IYDM.previewYieldShare, (MarketState.FIXED_TERM, 0.45e18)));
+        vm.expectCall(address(jtYDM), abi.encodeCall(IYDM.previewYieldShare, (MarketState.FIXED_TERM, 0.6e18)));
         vm.expectCall(address(ltYDM), abi.encodeCall(IYDM.previewYieldShare, (MarketState.FIXED_TERM, 0.5e18)));
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1050e18)), toNAVUnits(uint256(300e18)));
         assertEq(toUint256(state.jtCoverageImpermanentLoss), 0, "il fully recovered first");
@@ -2126,14 +2125,15 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     /**
      * the same-block instantaneous branch queries previewYieldShare with the initial market state and
      * last-committed checkpoint utilizations, and prices the premium at the preview rate over a forced 1s window
-     * Derivation: gain 100e18 at preview rates 0.07e18 / 0.03e18 -> premiums 7e18 / 3e18
+     * Derivation: checkpoint utils coverageUtilization = ceil((1000e18 + 200e18) * 0.1e18 / 200e18) = 0.6e18 and
+     * liquidityUtilization = ceil(1000e18 * 0.05e18 / 100e18) = 0.5e18; gain 100e18 at preview rates 0.07e18 / 0.03e18 -> premiums 7e18 / 3e18
      */
     function test_Sync_instantaneousPremiumUsesPreviewRatesWithCheckpointArgs() public {
         _seedAndInitAccrual();
         jtYDM.setPreviewYieldShareReturn(0.07e18);
         ltYDM.setPreviewYieldShareReturn(0.03e18);
-        vm.expectCall(address(jtYDM), abi.encodeCall(IYDM.previewYieldShare, (MarketState.PERPETUAL, SEED_COVERAGE_UTILIZATION_WAD)));
-        vm.expectCall(address(ltYDM), abi.encodeCall(IYDM.previewYieldShare, (MarketState.PERPETUAL, SEED_LIQUIDITY_UTILIZATION_WAD)));
+        vm.expectCall(address(jtYDM), abi.encodeCall(IYDM.previewYieldShare, (MarketState.PERPETUAL, 0.6e18)));
+        vm.expectCall(address(ltYDM), abi.encodeCall(IYDM.previewYieldShare, (MarketState.PERPETUAL, 0.5e18)));
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(SEED_ST_RAW + 100e18), toNAVUnits(SEED_JT_RAW));
         assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW + 7e18, "instantaneous jt risk premium");
         assertEq(toUint256(state.ltLiquidityPremium), 3e18, "instantaneous lt liquidity premium");
@@ -2184,7 +2184,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.stNAVDustTolerance = toNAVUnits(uint256(30));
         p.jtNAVDustTolerance = toNAVUnits(uint256(40));
-        _deploy(false, p);
+        _deploy(p);
         _seedState(SEED_ST_RAW, SEED_JT_RAW, SEED_ST_RAW, SEED_JT_RAW, 0, SEED_LT_RAW, MarketState.PERPETUAL);
         kernel.doPreOp(toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW));
         uint32 windowStart = uint32(block.timestamp);
@@ -2279,7 +2279,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         SyncedAccountingState memory withLT = kernel.doPreOp(toNAVUnits(uint256(1050e18)), toNAVUnits(SEED_JT_RAW));
 
         // Counterfactual: fresh identical deployment and seed with the lt share zeroed
-        _deploy(false, _defaultParams());
+        _deploy(_defaultParams());
         _seedAndInitAccrual();
         jtYDM.setPreviewYieldShareReturn(0.1e18);
         ltYDM.setPreviewYieldShareReturn(0);
@@ -2312,7 +2312,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.maxJTYieldShareWAD = 0.6e18;
         p.maxLTYieldShareWAD = 0.4e18;
-        _deploy(false, p);
+        _deploy(p);
         // Rates stratified across three decades (sub-WAD, WAD..1e24, uint256 max) to include absurd outputs;
         // elapsed uniform up to a decade, gains uniform within the 1e30 strategy magnitude bound
         _rateJT = _strataRate(_rateJT);
@@ -2394,7 +2394,7 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         assertEq(toUint256(s.lastJTEffectiveNAV), SEED_JT_RAW, "jt untouched by the zero-premium splits");
 
         // Counterfactual: the identical 90 wei gain in one sync books the floored 9 wei fee
-        _deploy(false, _defaultParams());
+        _deploy(_defaultParams());
         _seedAndInitAccrual();
         jtYDM.setPreviewYieldShareReturn(0);
         ltYDM.setPreviewYieldShareReturn(0);

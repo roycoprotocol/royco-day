@@ -163,7 +163,7 @@ contract Test_LTConvertRawPricing_Tranches is DayMarketTestBase {
         uint256 minOut = Math.mulDiv(fairBPT, WAD - defaultParams().maxReinvestmentSlippageWAD, WAD, Math.Rounding.Ceil);
         setVenueSlippageMode(false);
         balancerVault.setNextBptOutOverride(minOut);
-        vm.prank(MARKET_OPS_ADMIN);
+        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
         kernel.reinvestLiquidityPremium(type(uint256).max);
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, 0, "arrange: the entire idle pile must have deployed");
 

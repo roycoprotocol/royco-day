@@ -118,8 +118,8 @@ interface IRoycoDayKernel {
     /// @notice Thrown when the tranche and the kernel's corresponding tranche assets don't match
     error TRANCHE_AND_KERNEL_ASSETS_MISMATCH();
 
-    /// @notice Thrown when the senior and junior tranches share the same asset (so are structurally correlated) but the accountant is not configured with the junior tranche co-invested
-    error JT_MUST_BE_COINVESTED();
+    /// @notice Thrown when the senior and junior tranches are not the same yield-bearing asset, since the junior tranche's capital must share the senior tranche's exposure
+    error TRANCHE_ASSETS_MUST_BE_IDENTICAL();
 
     /// @notice Thrown when the caller of a permissioned function isn't the market's senior tranche
     error ONLY_SENIOR_TRANCHE();
@@ -268,7 +268,7 @@ interface IRoycoDayKernel {
      * @param _trancheType An enumerator indicating which tranche to execute this preview for
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      * @return claims The claims on ST and JT assets that the specified tranche has denominated in tranche-native units
-     * @return totalTrancheShares The total number of shares that exist in the specified tranche after the post-sync mint of its accrued shares: the protocol fee shares for every tranche, plus the liquidity premium shares for the senior tranche
+     * @return totalTrancheShares The total number of shares that exist in the specified tranche after the post-sync mint of its accrued shares: the protocol fee shares for the senior and junior tranches, plus the liquidity premium shares for the senior tranche (the liquidity tranche mints none)
      */
     function previewSyncTrancheAccounting(TrancheType _trancheType)
         external
@@ -285,22 +285,14 @@ interface IRoycoDayKernel {
     /**
      * @notice Returns the maximum amount of assets that can be withdrawn from the senior tranche
      * @param _owner The address that is withdrawing the assets
-     * @return claimOnSTNAV The notional claims on ST assets that the senior tranche has denominated in kernel's NAV units
-     * @return claimOnJTNAV The notional claims on JT assets that the senior tranche has denominated in kernel's NAV units
+     * @return stClaimNAV The senior tranche's total notional claim on the market's raw NAVs, denominated in kernel's NAV units
      * @return stMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the senior tranche, denominated in the kernel's NAV units
-     * @return jtMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the junior tranche, denominated in the kernel's NAV units
      * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the senior tranche after the post-sync mint of its protocol fee shares and liquidity premium shares
      */
     function stMaxWithdrawable(address _owner)
         external
         view
-        returns (
-            NAV_UNIT claimOnSTNAV,
-            NAV_UNIT claimOnJTNAV,
-            NAV_UNIT stMaxWithdrawableNAV,
-            NAV_UNIT jtMaxWithdrawableNAV,
-            uint256 totalTrancheSharesAfterMintingFees
-        );
+        returns (NAV_UNIT stClaimNAV, NAV_UNIT stMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees);
 
     /**
      * @notice Previews the deposit of a specified amount of assets into the senior tranche
@@ -335,7 +327,7 @@ interface IRoycoDayKernel {
      * @return valueAllocated The NAV value of the LT assets the add would mint
      * @return navToMintSharesAt The pre-deposit LT effective NAV that LT shares would be minted against
      * @return ltAssetsOut The LT tranche assets the add would mint
-     * @return ltTotalSupplyAfterMints The LT tranche supply after this sync mints its protocol fee shares, which LT shares must be priced against
+     * @return ltTotalSupplyAfterMints The LT tranche supply post-sync (unchanged by the sync, since the liquidity tranche accrues no protocol fee shares), which LT shares must be priced against
      */
     function ltPreviewDepositMultiAsset(
         TRANCHE_UNIT _stAssets,
@@ -395,22 +387,14 @@ interface IRoycoDayKernel {
     /**
      * @notice Returns the maximum amount of assets that can be withdrawn from the junior tranche
      * @param _owner The address that is withdrawing the assets
-     * @return claimOnSTNAV The notional claims on ST assets that the junior tranche has denominated in kernel's NAV units
-     * @return claimOnJTNAV The notional claims on JT assets that the junior tranche has denominated in kernel's NAV units
-     * @return stMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the senior tranche, denominated in the kernel's NAV units
+     * @return jtClaimNAV The junior tranche's total notional claim on the market's raw NAVs, denominated in kernel's NAV units
      * @return jtMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the junior tranche, denominated in the kernel's NAV units
-     * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the junior tranche after minting any protocol fee shares post-sync, including virtual shares
+     * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the junior tranche after minting any protocol fee shares post-sync
      */
     function jtMaxWithdrawable(address _owner)
         external
         view
-        returns (
-            NAV_UNIT claimOnSTNAV,
-            NAV_UNIT claimOnJTNAV,
-            NAV_UNIT stMaxWithdrawableNAV,
-            NAV_UNIT jtMaxWithdrawableNAV,
-            uint256 totalTrancheSharesAfterMintingFees
-        );
+        returns (NAV_UNIT jtClaimNAV, NAV_UNIT jtMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees);
 
     /**
      * @notice Returns the maximum amount of assets that can be deposited into the liquidity tranche
@@ -424,7 +408,7 @@ interface IRoycoDayKernel {
      * @param _owner The address that is withdrawing the assets
      * @return claimOnLTNAV The notional claims on LT assets that the liquidity tranche has denominated in kernel's NAV units
      * @return ltMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the liquidity tranche, denominated in the kernel's NAV units
-     * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the liquidity tranche after minting any protocol fee shares post-sync
+     * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the liquidity tranche post-sync (the liquidity tranche mints no protocol fee shares on a sync)
      */
     function ltMaxWithdrawable(address _owner)
         external
@@ -441,7 +425,7 @@ interface IRoycoDayKernel {
      * @param _owner The address that is withdrawing the assets
      * @return claimOnLTNAV The notional claims on LT assets that the liquidity tranche has denominated in kernel's NAV units
      * @return ltMaxWithdrawableNAV The maximum amount of assets that can be withdrawn multi-asset, denominated in the kernel's NAV units
-     * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the liquidity tranche after minting any protocol fee shares post-sync
+     * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the liquidity tranche post-sync (the liquidity tranche mints no protocol fee shares on a sync)
      */
     function ltMaxWithdrawableMultiAsset(address _owner)
         external
@@ -603,6 +587,14 @@ interface IRoycoDayKernel {
      * @param _totalSTShares The senior tranche share supply after the liquidity premium and senior tranche protocol fee shares are minted, the denominator of the senior share rate
      */
     function attemptLiquidityPremiumReinvestment(uint256 _stSharesToReinvest, NAV_UNIT _stEffectiveNAV, uint256 _totalSTShares) external;
+
+    /**
+     * @notice Reverts if any of the specified accounts is blacklisted by the market's configured blacklist
+     * @dev No-op when no blacklist is configured (the null address disables screening)
+     * @dev Exposes the market's blacklist screening to periphery contracts whose value flows settle outside the tranche balance update hooks
+     * @param _accounts The addresses of the accounts to screen
+     */
+    function enforceNotBlacklisted(address[] memory _accounts) external view;
 
     /**
      * @notice Pre-balance update hook for the tranche
