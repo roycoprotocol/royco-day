@@ -18,6 +18,7 @@ import {
     ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
+    ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
     ADMIN_ORACLE_QUOTER_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
@@ -242,6 +243,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         address protocolFeeRecipientAddress;
         address balancerPoolManagerAddress;
         address marketOpsAddress;
+        address marketReinvestLiquidityPremiumAddress;
         address adminEntryPointAddress;
         address entryPointFeeCollectorAddress;
     }
@@ -285,6 +287,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
                 protocolFeeRecipientAddress: chainConfig.protocolFeeRecipient,
                 balancerPoolManagerAddress: chainConfig.balancerPoolManagerAddress,
                 marketOpsAddress: chainConfig.marketOpsAddress,
+                marketReinvestLiquidityPremiumAddress: chainConfig.marketReinvestLiquidityPremiumAddress,
                 adminEntryPointAddress: chainConfig.adminEntryPointAddress,
                 entryPointFeeCollectorAddress: chainConfig.entryPointFeeCollectorAddress
             })
@@ -368,7 +371,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
     /// @notice Builds the role assignments applied to the AccessManager (surface-compatible with the legacy helper).
     function generateRolesAssignments(RoleAssignmentAddresses memory _addresses) public pure returns (RoleAssignment[] memory roleAssignments) {
-        roleAssignments = new RoleAssignment[](20);
+        roleAssignments = new RoleAssignment[](21);
         roleAssignments[0] = _assignment(ADMIN_PAUSER_ROLE, _addresses.pauserAddress);
         roleAssignments[1] = _assignment(ADMIN_UPGRADER_ROLE, _addresses.upgraderAddress);
         roleAssignments[2] = _assignment(SYNC_ROLE, _addresses.syncRoleAddress);
@@ -393,6 +396,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         // its initialize, the per-market template auto-configure path).
         roleAssignments[18] = _assignment(ADMIN_ENTRY_POINT_ROLE, _addresses.adminEntryPointAddress);
         roleAssignments[19] = _assignment(ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE, _addresses.entryPointFeeCollectorAddress);
+        // The dedicated liquidity-premium reinvestment role, split from market ops so the retry knob can be held
+        // by an operational keeper without the broader maintenance surface.
+        roleAssignments[20] = _assignment(ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE, _addresses.marketReinvestLiquidityPremiumAddress);
     }
 
     function _assignment(uint64 _role, address _assignee) private pure returns (RoleAssignment memory) {
@@ -419,6 +425,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         if (role == LT_LP_ROLE) return RoleConfig({ adminRole: LP_ROLE_ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_BALANCER_POOL_MANAGER_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_MARKET_OPS_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
+        if (role == ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_BLACKLIST_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_ENTRY_POINT_ROLE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });
         if (role == ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE) return RoleConfig({ adminRole: ADMIN_ROLE, guardianRole: GUARDIAN_ROLE, executionDelay: 0 });

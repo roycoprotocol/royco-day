@@ -56,6 +56,9 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     Vm.Wallet internal ORACLE_QUOTER_ADMIN;
     address internal ORACLE_QUOTER_ADMIN_ADDRESS;
 
+    Vm.Wallet internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN;
+    address internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS;
+
     Vm.Wallet internal LP_ROLE_ADMIN;
     address internal LP_ROLE_ADMIN_ADDRESS;
 
@@ -183,6 +186,9 @@ abstract contract RoycoDayTestBase is Test, Assertions {
 
         ORACLE_QUOTER_ADMIN = _initWallet("ORACLE_QUOTER_ADMIN", 1000 ether);
         ORACLE_QUOTER_ADMIN_ADDRESS = ORACLE_QUOTER_ADMIN.addr;
+
+        MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN = _initWallet("MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN", 1000 ether);
+        MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS = MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN.addr;
 
         LP_ROLE_ADMIN = _initWallet("LP_ROLE_ADMIN", 1000 ether);
         LP_ROLE_ADMIN_ADDRESS = LP_ROLE_ADMIN.addr;
@@ -360,6 +366,7 @@ abstract contract RoycoDayTestBase is Test, Assertions {
                 protocolFeeRecipientAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS,
                 balancerPoolManagerAddress: KERNEL_ADMIN_ADDRESS,
                 marketOpsAddress: KERNEL_ADMIN_ADDRESS,
+                marketReinvestLiquidityPremiumAddress: MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS,
                 adminEntryPointAddress: KERNEL_ADMIN_ADDRESS,
                 entryPointFeeCollectorAddress: PROTOCOL_FEE_RECIPIENT_ADDRESS
             })
@@ -374,6 +381,4 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     function _sync() internal prankModifier(SYNC_ROLE_ADDRESS) {
         KERNEL.syncTrancheAccounting();
     }
-
-
 }

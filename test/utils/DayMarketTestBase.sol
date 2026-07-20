@@ -13,6 +13,7 @@ import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
+    ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
     ADMIN_ORACLE_QUOTER_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_PROTOCOL_FEE_SETTER_ROLE,
@@ -201,6 +202,7 @@ abstract contract DayMarketTestBase is Assertions {
     address internal ACCOUNTANT_ADMIN;
     address internal PROTOCOL_FEE_SETTER;
     address internal ORACLE_QUOTER_ADMIN;
+    address internal MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN;
     address internal PROTOCOL_FEE_RECIPIENT;
 
     /// @notice Default LP actors, one per tranche
@@ -753,9 +755,8 @@ abstract contract DayMarketTestBase is Assertions {
             k, _sels(IRoycoDayKernel.setProtocolFeeRecipient.selector, IRoycoDayKernel.setSeniorTrancheSelfLiquidationBonus.selector), ADMIN_KERNEL_ROLE
         );
         accessManager.setTargetFunctionRole(k, _sels(IRoycoDayKernel.syncTrancheAccounting.selector), SYNC_ROLE);
-        accessManager.setTargetFunctionRole(
-            k, _sels(IRoycoDayKernel.reinvestLiquidityPremium.selector, IRoycoDayKernel.setRoycoBlacklist.selector), ADMIN_MARKET_OPS_ROLE
-        );
+        accessManager.setTargetFunctionRole(k, _sels(IRoycoDayKernel.reinvestLiquidityPremium.selector), ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE);
+        accessManager.setTargetFunctionRole(k, _sels(IRoycoDayKernel.setRoycoBlacklist.selector), ADMIN_MARKET_OPS_ROLE);
         accessManager.setTargetFunctionRole(k, _sels(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         accessManager.setTargetFunctionRole(k, _sels(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
         accessManager.setTargetFunctionRole(k, _sels(UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE);
@@ -855,6 +856,7 @@ abstract contract DayMarketTestBase is Assertions {
         ACCOUNTANT_ADMIN = _generateActor("ACCOUNTANT_ADMIN", ADMIN_ACCOUNTANT_ROLE);
         PROTOCOL_FEE_SETTER = _generateActor("PROTOCOL_FEE_SETTER", ADMIN_PROTOCOL_FEE_SETTER_ROLE);
         ORACLE_QUOTER_ADMIN = _generateActor("ORACLE_QUOTER_ADMIN", ADMIN_ORACLE_QUOTER_ROLE);
+        MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN = _generateActor("MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN", ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE);
 
         // LP actors
         ST_PROVIDER = _generateActor("ST_PROVIDER", ST_LP_ROLE);

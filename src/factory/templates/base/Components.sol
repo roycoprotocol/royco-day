@@ -54,6 +54,6 @@ bytes32 constant TAG_KERNEL_IMPL = "KERNEL_IMPL";
 bytes32 constant TAG_ACCOUNTANT_IMPL = "ACCOUNTANT_IMPL";
 bytes32 constant TAG_YDM = "YDM";
 bytes32 constant TAG_LDM = "LDM";
-bytes32 constant TAG_BALANCER_HOOK = "BALANCER_HOOK";
+bytes32 constant TAG_BALANCER_HOOK_PROXY = "BALANCER_HOOK";
 bytes32 constant TAG_BALANCER_HOOK_IMPL = "BALANCER_HOOK_IMPL";
 bytes32 constant TAG_BALANCER_V3_POOL = "BALANCER_V3_POOL";

@@ -72,6 +72,8 @@ abstract contract MarketDeploymentConfig {
         // Foundation ("fndn") operational role holders.
         address balancerPoolManagerAddress;
         address marketOpsAddress;
+        // Holder of the dedicated liquidity-premium reinvestment retry knob (split from market ops).
+        address marketReinvestLiquidityPremiumAddress;
         // Entry point admins: config changes (delays, oracle clocks, enable flags) and protocol fee collection.
         address adminEntryPointAddress;
         address entryPointFeeCollectorAddress;
@@ -178,6 +180,7 @@ abstract contract MarketDeploymentConfig {
             eclpLPOracleFactory: ECLP_LP_ORACLE_FACTORY[_chainId],
             balancerPoolManagerAddress: ROOT_MULTISIG,
             marketOpsAddress: ROOT_MULTISIG,
+            marketReinvestLiquidityPremiumAddress: ROOT_MULTISIG,
             // The operational (executor) multisig manages entry point tranche configs, mirroring the WCE-immediate
             // model of the retired standalone entry point deployment; the root multisig collects protocol fees.
             adminEntryPointAddress: EXECUTOR_MULTISIG,
@@ -304,10 +307,10 @@ abstract contract MarketDeploymentConfig {
                     dSq: 99_999_999_999_999_999_886_624_093_342_106_115_200
                 }),
                 swapFeePercentage: 1e14, // 1 bp
-                enableDonation: false,
-                disableUnbalancedLiquidity: false,
                 quoteAsset: USDC[block.chainid],
-                quoteAssetRateProvider: address(0) // USDC is a pegged quote: register STANDARD (rate = 1)
+                quoteAssetRateProvider: address(0), // USDC is a pegged quote: register STANDARD (rate = 1)
+                chargeYieldFeeOnSeniorTrancheShares: false,
+                chargeYieldFeeOnQuoteAsset: false
             }),
             stEntryPointConfig: _defaultEntryPointTrancheConfig(),
             jtEntryPointConfig: _defaultEntryPointTrancheConfig(),

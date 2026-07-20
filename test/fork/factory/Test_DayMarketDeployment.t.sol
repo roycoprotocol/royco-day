@@ -27,6 +27,7 @@ import {
     ADMIN_FACTORY_ROLE,
     ADMIN_KERNEL_ROLE,
     ADMIN_MARKET_OPS_ROLE,
+    ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE,
     ADMIN_ORACLE_QUOTER_ROLE,
     ADMIN_PAUSER_ROLE,
     ADMIN_UNPAUSER_ROLE,
@@ -218,9 +219,11 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
             if (address(tokens[i]) == address(ST)) {
                 assertTrue(info[i].tokenType == TokenType.WITH_RATE, "senior leg not WITH_RATE");
                 assertEq(address(info[i].rateProvider), address(KERNEL), "rate provider != kernel");
+                assertFalse(info[i].paysYieldFees, "senior leg must not pay Balancer yield fees per the config");
             } else {
                 assertTrue(info[i].tokenType == TokenType.STANDARD, "quote leg not STANDARD");
                 assertEq(address(info[i].rateProvider), address(0), "quote leg has rate provider");
+                assertFalse(info[i].paysYieldFees, "quote leg must not pay Balancer yield fees per the config");
             }
         }
         assertEq(VAULT.getStaticSwapFeePercentage(POOL), SWAP_FEE, "swap fee");
@@ -423,7 +426,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         _assertRole(address(KERNEL), IRoycoAuth.pause.selector, ADMIN_PAUSER_ROLE);
 
         // Operational maintenance surface -> ADMIN_MARKET_OPS_ROLE.
-        _assertRole(address(KERNEL), IRoycoDayKernel.reinvestLiquidityPremium.selector, ADMIN_MARKET_OPS_ROLE);
+        _assertRole(address(KERNEL), IRoycoDayKernel.reinvestLiquidityPremium.selector, ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE);
         _assertRole(address(KERNEL), IRoycoDayKernel.setRoycoBlacklist.selector, ADMIN_MARKET_OPS_ROLE);
         _assertRole(address(ACCOUNTANT), IRoycoDayAccountant.setSeniorTrancheDustTolerance.selector, ADMIN_MARKET_OPS_ROLE);
         _assertRole(address(ACCOUNTANT), IRoycoDayAccountant.setJuniorTrancheDustTolerance.selector, ADMIN_MARKET_OPS_ROLE);

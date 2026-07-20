@@ -552,6 +552,8 @@ contract Test_RoycoFactory is Test {
         assertEq(address(info[_expectedSeniorIndex].rateProvider), _r.kernel, string.concat(_ctx, ": senior rate provider != kernel"));
         assertTrue(info[1 - _expectedSeniorIndex].tokenType == TokenType.STANDARD, string.concat(_ctx, ": quote leg not STANDARD"));
         assertEq(address(info[1 - _expectedSeniorIndex].rateProvider), address(0), string.concat(_ctx, ": quote leg has a rate provider"));
+        assertFalse(info[_expectedSeniorIndex].paysYieldFees, string.concat(_ctx, ": senior leg must not pay Balancer yield fees per the config"));
+        assertFalse(info[1 - _expectedSeniorIndex].paysYieldFees, string.concat(_ctx, ": quote leg must not pay Balancer yield fees per the config"));
     }
 
     /// @dev Asserts `getMarket(key)` returns exactly the deployed market's full component set.

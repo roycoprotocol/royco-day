@@ -51,7 +51,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
 
         // Side 1: one wei under the gate, the inner add reverts, the failure is tolerated, and NOTHING moves
         balancerVault.setNextBptOutOverride(minOut - 1);
-        vm.prank(MARKET_OPS_ADMIN);
+        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
         kernel.reinvestLiquidityPremium(type(uint256).max);
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares, "under the gate: the idle pile must be untouched");
         assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), ltOwnedBefore, "under the gate: no BPT may be credited");
@@ -61,7 +61,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         balancerVault.setNextBptOutOverride(minOut);
         vm.expectEmit(address(kernel));
         emit IRoycoDayKernel.LiquidityPremiumReinvested(idleShares, toTrancheUnits(minOut));
-        vm.prank(MARKET_OPS_ADMIN);
+        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
         kernel.reinvestLiquidityPremium(type(uint256).max);
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, 0, "at the gate: the entire idle pile must deploy");
         assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), ltOwnedBefore + minOut, "at the gate: exactly minOut BPT must be credited");
@@ -92,7 +92,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         balancerVault.setNextBptOutOverride(minOut);
         vm.expectEmit(address(kernel));
         emit IRoycoDayKernel.LiquidityPremiumReinvested(half, toTrancheUnits(minOut));
-        vm.prank(MARKET_OPS_ADMIN);
+        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
         kernel.reinvestLiquidityPremium(half);
 
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares - half, "the undeployed remainder must stay idle and claimable");
@@ -130,7 +130,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
 
         // With a zero fair-value floor the reinvestment returns early before any venue add: it never reaches the
         // Vault, so no fill can occur and the idle pile is left untouched
-        vm.prank(MARKET_OPS_ADMIN);
+        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
         kernel.reinvestLiquidityPremium(idleShares);
 
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares, "the idle pile stays idle and claimable when the fair-value floor rounds to zero");

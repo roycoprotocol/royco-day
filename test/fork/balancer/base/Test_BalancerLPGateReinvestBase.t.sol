@@ -392,7 +392,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
     /// @dev Executes the permissioned manual reinvest of the full idle balance and returns the decoded event args.
     function _manualReinvestAll() internal returns (uint256 stSharesReinvested, uint256 ltAssetsMinted, uint256 eventCount) {
         vm.recordLogs();
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS);
         KERNEL.reinvestLiquidityPremium(type(uint256).max);
         bytes memory data;
         (eventCount, data) = _lastLogData(vm.getRecordedLogs(), address(KERNEL), IRoycoDayKernel.LiquidityPremiumReinvested.selector);

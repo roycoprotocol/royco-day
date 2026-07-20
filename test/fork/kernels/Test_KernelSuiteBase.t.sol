@@ -1489,7 +1489,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertGt(toUint256(e.stProtocolFee), 0, "arrange: an ST protocol fee must accrue");
         assertGt(toUint256(e.jtProtocolFee), 0, "arrange: a JT yield-share protocol fee must accrue");
 
-        (uint256 premShares, uint256 stFeeShares) = _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.ltProtocolFee, e.stEffectiveNAV, stSupplyPre);
+        (uint256 premShares, uint256 stFeeShares) =
+            _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.ltProtocolFee, e.stEffectiveNAV, stSupplyPre);
         uint256 jtFeeShares = _expectedShares(e.jtProtocolFee, jtSupplyPre, e.jtEffectiveNAV - e.jtProtocolFee);
         uint256 expectedDepositShares = _expectedShares(value, stSupplyPre + premShares + stFeeShares, e.stEffectiveNAV);
         uint256 feeRecipientSTPre = ST.balanceOf(PROTOCOL_FEE_RECIPIENT_ADDRESS);
@@ -3028,7 +3029,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         uint256 stSupplyPre = ST.totalSupply();
         uint256 jtSupplyPre = JT.totalSupply();
-        (uint256 premShares, uint256 stFeeShares) = _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.ltProtocolFee, e.stEffectiveNAV, stSupplyPre);
+        (uint256 premShares, uint256 stFeeShares) =
+            _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.ltProtocolFee, e.stEffectiveNAV, stSupplyPre);
         uint256 jtFeeShares = _expectedShares(e.jtProtocolFee, jtSupplyPre, e.jtEffectiveNAV - e.jtProtocolFee);
         MarketSnapshot memory pre = _snap();
 
@@ -3224,7 +3226,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         uint256 stSupplyPre = ST.totalSupply();
         uint256 jtSupplyPre = JT.totalSupply();
-        (uint256 premShares, uint256 stFeeShares) = _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.ltProtocolFee, e.stEffectiveNAV, stSupplyPre);
+        (uint256 premShares, uint256 stFeeShares) =
+            _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.ltProtocolFee, e.stEffectiveNAV, stSupplyPre);
         uint256 jtFeeShares = _expectedShares(e.jtProtocolFee, jtSupplyPre, e.jtEffectiveNAV - e.jtProtocolFee);
         SyncedAccountingState memory state = _syncWithState();
 
@@ -3415,7 +3418,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         SyncExpectation memory e = _arrangeStagedPremiumSyncExpectation();
         assertLe(e.jtYieldShareWAD + e.ltYieldShareWAD, WAD, "the yield share caps must preclude PREMIUMS_EXCEED_SENIOR_YIELD");
         uint256 stSupplyPre = ST.totalSupply();
-        (uint256 premShares, uint256 stFeeShares) = _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.ltProtocolFee, e.stEffectiveNAV, stSupplyPre);
+        (uint256 premShares, uint256 stFeeShares) =
+            _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.ltProtocolFee, e.stEffectiveNAV, stSupplyPre);
         assertGt(premShares, 0, "arrange: the premium must mint shares");
         MarketSnapshot memory pre = _snap();
 
@@ -3446,7 +3450,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function test_Sync_premiumMint_coverageNeutral() public whenLT {
         SyncExpectation memory e = _arrangeStagedPremiumSyncExpectation();
         uint256 stSupplyPre = ST.totalSupply();
-        (uint256 premShares, uint256 stFeeShares) = _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.ltProtocolFee, e.stEffectiveNAV, stSupplyPre);
+        (uint256 premShares, uint256 stFeeShares) =
+            _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.ltProtocolFee, e.stEffectiveNAV, stSupplyPre);
         assertGt(premShares, 0, "arrange: the premium must mint shares");
 
         SyncedAccountingState memory state = _syncWithState();
@@ -3532,7 +3537,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         SyncExpectation memory e = _buildSyncExpectation(false);
         assertGt(toUint256(e.ltLiquidityPremium), 0, "arrange: the LDM must price a nonzero liquidity premium");
         uint256 stSupplyPre = ST.totalSupply();
-        (uint256 premShares, uint256 stFeeShares) = _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.ltProtocolFee, e.stEffectiveNAV, stSupplyPre);
+        (uint256 premShares, uint256 stFeeShares) =
+            _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.ltProtocolFee, e.stEffectiveNAV, stSupplyPre);
         assertGt(premShares, 0, "arrange: the premium must mint shares");
         NAV_UNIT premiumValue = _expectedValue(premShares, stSupplyPre + premShares + stFeeShares, e.stEffectiveNAV);
         uint256 minLtAssetsOut = Math.mulDiv(toUint256(KERNEL.ltConvertNAVUnitsToTrancheUnits(premiumValue)), WAD - slippageWAD, WAD, Math.Rounding.Ceil);
@@ -3583,7 +3589,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         MarketSnapshot memory pre = _snap();
 
         vm.recordLogs();
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS);
         KERNEL.reinvestLiquidityPremium(type(uint256).max);
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
@@ -3627,7 +3633,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertGt(minLtAssetsOut, 0, "arrange: the gate minimum must be nonzero");
         MarketSnapshot memory pre = _snap();
 
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS);
         KERNEL.reinvestLiquidityPremium(partialShares);
 
         MarketSnapshot memory post = _snap();
@@ -3650,7 +3656,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         MarketSnapshot memory pre = _snap();
 
         vm.recordLogs();
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS);
         KERNEL.reinvestLiquidityPremium(type(uint256).max);
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
@@ -3686,7 +3692,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertTrue(_trySetReinvestmentSlippage(0.5e18), "arrange: the slippage gate must open");
         MarketSnapshot memory preReinvest = _snap();
         uint256 reinvestedShares = preReinvest.ltOwnedSeniorTrancheShares;
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS);
         KERNEL.reinvestLiquidityPremium(type(uint256).max);
         MarketSnapshot memory post = _snap();
         assertEq(post.ltOwnedSeniorTrancheShares, 0, "the remaining staged premium must deploy");
@@ -4322,7 +4328,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         vm.prank(SYNC_ROLE_ADDRESS);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         KERNEL.syncTrancheAccounting();
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         KERNEL.reinvestLiquidityPremium(type(uint256).max);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
@@ -4609,7 +4615,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(KERNEL.getState().ltOwnedSeniorTrancheShares, idleBeforeReinvest, "deepening the pool must not consume the staged premium");
         assertTrue(_trySetReinvestmentSlippage(uint64(WAD - 1)), "arrange: the slippage gate must open");
         NAV_UNIT ltRawBeforeReinvest = ACCOUNTANT.getState().lastLTRawNAV;
-        vm.prank(KERNEL_ADMIN_ADDRESS);
+        vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN_ADDRESS);
         KERNEL.reinvestLiquidityPremium(type(uint256).max);
         assertEq(KERNEL.getState().ltOwnedSeniorTrancheShares, 0, "the staged premium must fully deploy");
         assertGt(ACCOUNTANT.getState().lastLTRawNAV, ltRawBeforeReinvest, "the committed depth must grow on deployment");

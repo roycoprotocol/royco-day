@@ -496,7 +496,7 @@ contract DayMarketHandler is DayMarketTestBase {
             uint256 amount = _stShares % 2 == 0 ? type(uint256).max : bound(_stShares, 1, s.ltOwnedSeniorTrancheShares == 0 ? 1 : s.ltOwnedSeniorTrancheShares);
             uint256 poolSeniorBefore = seniorTranche.balanceOf(address(balancerVault));
             uint256 idleBefore = kernel.getState().ltOwnedSeniorTrancheShares;
-            vm.prank(MARKET_OPS_ADMIN);
+            vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
             try kernel.reinvestLiquidityPremium(amount) {
                 _recordSuccess("reinvest");
                 uint256 deployed = seniorTranche.balanceOf(address(balancerVault)) - poolSeniorBefore;
