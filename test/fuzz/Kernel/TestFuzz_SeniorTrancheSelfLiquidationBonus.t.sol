@@ -255,20 +255,19 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
     }
 
     /**
-     * @notice Asserts the anti-bank-run neutrality property to wei precision, allowing only the ceil-rounding
+     * @notice Asserts the anti-bank-run neutrality property to wei precision, allowing only the settlement-rounding
      *         envelope the bonus clamp cannot avoid. Coverage utilization is ceil(coveredExposure x minCoverage /
-     *         jtEffectiveNAV), and the bonus is sized so this ratio is non-increasing in EXACT arithmetic. The
-     *         redemption, however, settles the residual marks through floor conversions on both tranches' asset
-     *         legs (the base slice plus the bonus leg), which leaves the committed coveredExposure numerator a
-     *         single rounding wei above the exact utilization-neutral exposure (the drawdown fuzz confirms this
-     *         excess is exactly 1 wei in every dust-regime breach observed). Each such numerator wei lifts the
-     *         ceil by at most ceil(minCoverage / jtEffectiveNAV), so post coverage utilization can only exceed
-     *         the pre value by that envelope, which blows up only when a near-total exit shrinks jtEffectiveNAV to
-     *         dust and the ceil turns hypersensitive. A GENUINE neutrality breach scales with the paid bonus
-     *         (orders of magnitude larger, since the bonus is a macroscopic fraction of jtEffectiveNAV) and still
-     *         fails this bound. The 2-wei slack is a safety margin of one extra rounding wei over the observed
-     *         1-wei excess, covering any compounding of the independent floor conversions along the two-tranche,
-     *         two-leg removal without approaching a real breach
+     *         jtEffectiveNAV). The bonus clamp floors the utilization-neutral bound, so in exact arithmetic the ratio
+     *         is non-increasing, and the junior buffer side settles exactly (the effective NAV bookkeeping removes the
+     *         claim NAV directly, no conversion). The covered exposure side instead settles through floored NAV-to-asset
+     *         conversions, one per payout leg: the senior base leg, the junior base leg, and the bonus split across a
+     *         senior and a junior leg. Each floor pays the redeemer up to one asset wei short and leaves that wei
+     *         invested, so the committed coveredExposure numerator can sit up to 4 wei above the exact utilization-neutral
+     *         exposure (3 in this fixture, where the junior tranche holds no cross-claim on senior raw NAV and the senior
+     *         bonus leg is empty). Each numerator wei lifts the ceil by at most ceil(minCoverage / jtEffectiveNAV), an
+     *         envelope that only turns visible when a near-total exit shrinks jtEffectiveNAV to dust and the ceil goes
+     *         hypersensitive. A GENUINE neutrality breach scales with the paid bonus, a macroscopic fraction of
+     *         jtEffectiveNAV and orders of magnitude past this bound, so it still fails the assertion
      * @param _covPre The pre-redemption coverage utilization
      * @param _covPost The post-redemption coverage utilization on the committed marks
      * @param _jtEffPost The committed post-redemption junior effective NAV, the ceil-division denominator
@@ -278,8 +277,9 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         // leaves zero senior effective NAV behind: coverage utilization is then a vacuous type(uint256).max sentinel over
         // no surviving senior claim, so the anti-bank-run property does not govern this state and there is nothing to bound
         if (_jtEffPost == 0) return;
-        uint256 roundingSlackWei = 2;
-        uint256 toleranceWAD = _jtEffPost == 0 ? 0 : Math.mulDiv(roundingSlackWei, 0.2e18, _jtEffPost, Math.Rounding.Ceil);
+        // One wei per floored payout conversion: senior base, junior base, senior bonus, junior bonus
+        uint256 roundingSlackWei = 4;
+        uint256 toleranceWAD = Math.mulDiv(roundingSlackWei, 0.2e18, _jtEffPost, Math.Rounding.Ceil);
         assertLe(
             _covPost, _covPre + toleranceWAD, "paying the self-liquidation bonus must never increase coverage utilization beyond the ceil-rounding envelope"
         );
