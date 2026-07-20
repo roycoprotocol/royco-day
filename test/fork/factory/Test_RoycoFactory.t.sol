@@ -453,6 +453,53 @@ contract Test_RoycoFactory is Test {
         assertTrue(factory.trancheToKernel(a.seniorTranche) != factory.trancheToKernel(b.seniorTranche), "registries distinct");
     }
 
+    /**
+     * @notice The YDM salt is market-agnostic: two markets deployed with the same (role, model) pair share ONE JT
+     *         YDM instance and ONE LT LDM instance, while each market's JT-vs-LT pair stays distinct (the role tag
+     *         is part of the salt), and each market's accountant initializes its own curve on the shared instance.
+     *         A market configured with a DIFFERENT model resolves to a different instance (the component id is part
+     *         of the salt), so sharing never crosses model boundaries
+     */
+    function test_ExecuteMarketDeployment_SharesYdmInstancesAcrossMarkets() external {
+        _register();
+
+        IRoycoProtocolTemplate.DeploymentResult memory a = _deploy(keccak256("ydm-share-A"));
+        IRoycoProtocolTemplate.DeploymentResult memory b = _deploy(keccak256("ydm-share-B"));
+        assertTrue(a.kernel != b.kernel, "distinct markets");
+
+        // Both markets share one JT YDM and one LT LDM singleton (market-agnostic salts) ...
+        assertEq(a.ydm, b.ydm, "the JT YDM instance must be shared across markets");
+        assertEq(a.ltYdm, b.ltYdm, "the LT LDM instance must be shared across markets");
+        // ... while each market's JT YDM and LT LDM remain distinct instances (the role tag stays in the salt)
+        assertTrue(a.ydm != a.ltYdm, "the JT YDM and LT LDM must remain distinct instances within a market");
+
+        // Each market's accountant initialized its OWN curve on the shared instance (state keyed per accountant):
+        // the snUSD config's V2 curve (0.11e18 at zero, 0.11e18 at target, 0.31e18 at full) decomposes to
+        // yieldShareAtTarget = 0.11e18, discount-at-zero = 0, premium-at-full = 0.2e18 for both accountants
+        assertTrue(a.accountant != b.accountant, "distinct accountants");
+        _assertV2CurveInitialized(a.ydm, a.accountant, "market A on the shared JT YDM");
+        _assertV2CurveInitialized(a.ydm, b.accountant, "market B on the shared JT YDM");
+
+        // A different-model market resolves to different instances: the component id is part of the salt
+        MarketDeploymentConfig.MarketConfig memory staticCfg = deployScript.getMarketConfig("snUSD");
+        staticCfg.ydmType = DeployScript.YDMType.StaticCurve;
+        bytes memory p = abi.encode(deployScript.buildDayParams(staticCfg, keccak256("ydm-share-static"), PROTOCOL_FEE_RECIPIENT, address(0)));
+        vm.prank(DEPLOYER);
+        IRoycoProtocolTemplate.DeploymentResult memory s = factory.executeMarketDeployment(address(template), p);
+        assertTrue(s.ydm != a.ydm, "a different YDM model must not share the adaptive markets' JT YDM instance");
+        assertTrue(s.ltYdm != a.ltYdm, "a different YDM model must not share the adaptive markets' LT LDM instance");
+    }
+
+    /// @dev Asserts the shared V2 YDM instance holds the snUSD config's initialized curve for the given accountant
+    function _assertV2CurveInitialized(address _ydm, address _accountant, string memory _ctx) internal view {
+        (uint64 yieldShareAtTargetWAD, uint32 lastAdaptationTimestamp, uint64 discountToTargetAtZeroUtilWAD, uint64 premiumToTargetAtFullUtilWAD) =
+            AdaptiveCurveYDM_V2(_ydm).accountantToCurve(_accountant);
+        assertEq(yieldShareAtTargetWAD, 0.11e18, string.concat(_ctx, ": yield share at target"));
+        assertEq(discountToTargetAtZeroUtilWAD, 0, string.concat(_ctx, ": discount at zero util"));
+        assertEq(premiumToTargetAtFullUtilWAD, 0.2e18, string.concat(_ctx, ": premium at full util"));
+        assertEq(lastAdaptationTimestamp, 0, string.concat(_ctx, ": no adaptation yet"));
+    }
+
     /// Balancer requires pool tokens registered in ascending address order, so the senior leg's position depends
     /// on how the CREATE3 ST proxy address sorts against the quote asset. Both orderings must land the WITH_RATE +
     /// kernel-rate-provider config on the SENIOR leg (and STANDARD/no-provider on the quote leg) — a sort-dependent

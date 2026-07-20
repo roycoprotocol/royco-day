@@ -267,10 +267,10 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         result.kernel = ROYCO_FACTORY.predictDeterministicAddress(_marketComponentSalt(p.marketId, TAG_KERNEL_PROXY));
         result.accountant = ROYCO_FACTORY.predictDeterministicAddress(_marketComponentSalt(p.marketId, TAG_ACCOUNTANT_PROXY));
 
-        // 2. Deploy the JT YDM (driven by coverage utilization) and the LT YDM / LDM (driven by liquidity utilization), each
-        //    pinning its own model-specific constructor params
-        (result.ydm,) = _deployYDM(_marketComponentSalt(p.marketId, TAG_YDM), p.jtYdmConstructorArgs, p.ydmComponentId);
-        (result.ltYdm,) = _deployYDM(_marketComponentSalt(p.marketId, TAG_LDM), p.ltYdmConstructorArgs, p.ydmComponentId);
+        // 2. Deploy (or reuse) the JT YDM (driven by coverage utilization) and the LT YDM / LDM (driven by liquidity
+        //    utilization)
+        (result.ydm,) = _deployYDM(_ydmSalt(TAG_YDM, p.ydmComponentId), p.jtYdmConstructorArgs, p.ydmComponentId);
+        (result.ltYdm,) = _deployYDM(_ydmSalt(TAG_LDM, p.ydmComponentId), p.ltYdmConstructorArgs, p.ydmComponentId);
 
         // 3. Deploy ST impl + proxy first, the pool needs ST_PROXY as one of its tokens
         address stImpl = _deploySeniorTrancheImpl(p.stAsset, result.kernel, _marketComponentSalt(p.marketId, TAG_ST_IMPL));
