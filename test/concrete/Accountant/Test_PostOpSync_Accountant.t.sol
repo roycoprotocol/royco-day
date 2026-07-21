@@ -14,6 +14,10 @@ import { AccountantTestBase } from "../../utils/AccountantTestBase.sol";
  *         requires, the effective NAV bookkeeping of each operation, the self-liquidation bonus split,
  *         the coverage and liquidity gates at their exact WAD boundaries with per-operation exemptions,
  *         conservation over every valid shape, and the committed liquidity mark's downstream effects
+ * @notice The LT flows are split per variant: LT_DEPOSIT and LT_REDEEM are the in-kind ops that can only
+ *         move the liquidity mark (and, for redeem, hand out idle premium shares), LT_MULTI_ASSET_DEPOSIT
+ *         and LT_MULTI_ASSET_REDEEM are the underlying-asset ops that can also mint or unwind senior
+ *         exposure, so each branch pins the exact deltas its flow can produce and nothing more
  */
 contract Test_PostOpSync_Accountant is AccountantTestBase {
     function setUp() public {
@@ -157,15 +161,35 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
     }
 
     /// a multi-asset LT deposit (positive senior delta) adds the freshly minted senior value to the senior
-    /// effective NAV — the ST shares joined into the pool are real new senior exposure that coverage must track
-    function test_PostOp_LTDepositMultiAsset_addsSTDeltaToSTEffective() public {
+    /// effective NAV, the ST shares joined into the pool are real new senior exposure that coverage must track
+    function test_PostOp_LTMultiAssetDeposit_addsSTDeltaToSTEffective() public {
         _seedFlatWithLT(SEED_LT_RAW);
         SyncedAccountingState memory state = kernel.doPostOp(
-            Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW + 50e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW + 20e18), ZERO_NAV_UNITS, false
+            Operation.LT_MULTI_ASSET_DEPOSIT, toNAVUnits(SEED_ST_RAW + 50e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW + 20e18), ZERO_NAV_UNITS, false
         );
         assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW + 50e18, "st effective NAV grows by the minted senior value");
         assertEq(toUint256(state.ltRawNAV), SEED_LT_RAW + 20e18, "lt raw NAV reflects the joined BPT value");
         assertEq(toUint256(accountant.getState().lastSTEffectiveNAV), SEED_ST_RAW + 50e18, "st effective NAV committed");
+    }
+
+    /// a quote-only multi-asset LT deposit (zero senior delta) passes and leaves both effective NAVs untouched,
+    /// the quote leg joins the pool without minting senior shares so no senior claim is created
+    function test_PostOp_LTMultiAssetDeposit_zeroSTDeltaPasses() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        SyncedAccountingState memory state = kernel.doPostOp(
+            Operation.LT_MULTI_ASSET_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW + 30e18), ZERO_NAV_UNITS, false
+        );
+        assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW, "st effective NAV untouched by the quote-only leg");
+        assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW, "jt effective NAV untouched");
+        assertEq(toUint256(state.ltRawNAV), SEED_LT_RAW + 30e18, "lt raw NAV reflects the deposit");
+    }
+
+    /// an in-kind LT deposit with a positive senior raw NAV delta violates the shape require, the in-kind flow
+    /// only moves pre-minted BPT so a rising senior mark is unsynced senior gain bypassing the premium split
+    function test_RevertIf_LTDepositPositiveSTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_DEPOSIT));
+        kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW + 50e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW + 20e18), ZERO_NAV_UNITS, false);
     }
 
     /// an LT deposit with a zero liquidity raw NAV delta violates the shape require — a liquidity deposit that
@@ -184,12 +208,48 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
         kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW + 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW - 1), ZERO_NAV_UNITS, false);
     }
 
-    /// an LT deposit with a negative senior raw NAV delta violates the shape require — the multi-asset flow can
-    /// only MINT senior shares, so a falling senior mark is an unsynced senior loss bypassing the waterfall
+    /// an in-kind LT deposit with a negative senior raw NAV delta violates the shape require, a falling senior
+    /// mark is an unsynced senior loss that must run the waterfall so junior coverage can absorb it
     function test_RevertIf_LTDepositNegativeSTDelta() public {
         _seedFlatWithLT(SEED_LT_RAW);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_DEPOSIT));
         kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW - 1), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW + 10e18), ZERO_NAV_UNITS, false);
+    }
+
+    /// a multi-asset LT deposit with a negative senior raw NAV delta violates the shape require, the flow can
+    /// only MINT senior shares so a falling senior mark is an unsynced senior loss bypassing the waterfall
+    function test_RevertIf_LTMultiAssetDepositNegativeSTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_MULTI_ASSET_DEPOSIT));
+        kernel.doPostOp(Operation.LT_MULTI_ASSET_DEPOSIT, toNAVUnits(SEED_ST_RAW - 1), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW + 10e18), ZERO_NAV_UNITS, false);
+    }
+
+    /// a multi-asset LT deposit with a zero or negative liquidity raw NAV delta violates the shape require, a
+    /// liquidity deposit that added no pooled depth would mint LT claims against nothing
+    function test_RevertIf_LTMultiAssetDepositNonpositiveLTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_MULTI_ASSET_DEPOSIT));
+        kernel.doPostOp(Operation.LT_MULTI_ASSET_DEPOSIT, toNAVUnits(SEED_ST_RAW + 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_MULTI_ASSET_DEPOSIT));
+        kernel.doPostOp(Operation.LT_MULTI_ASSET_DEPOSIT, toNAVUnits(SEED_ST_RAW + 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW - 1), ZERO_NAV_UNITS, false);
+    }
+
+    /// a multi-asset LT deposit with a nonzero junior raw NAV delta violates the shape require in both
+    /// directions, no LT flow touches junior assets
+    function test_RevertIf_LTMultiAssetDepositNonzeroJTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_MULTI_ASSET_DEPOSIT));
+        kernel.doPostOp(Operation.LT_MULTI_ASSET_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW + 1), toNAVUnits(SEED_LT_RAW + 10e18), ZERO_NAV_UNITS, false);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_MULTI_ASSET_DEPOSIT));
+        kernel.doPostOp(Operation.LT_MULTI_ASSET_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW - 1), toNAVUnits(SEED_LT_RAW + 10e18), ZERO_NAV_UNITS, false);
+    }
+
+    /// a multi-asset LT deposit with a nonzero self-liquidation bonus value violates the shape require, the
+    /// junior-funded bonus exists only on senior redemptions
+    function test_RevertIf_LTMultiAssetDepositNonzeroBonus() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_MULTI_ASSET_DEPOSIT));
+        kernel.doPostOp(Operation.LT_MULTI_ASSET_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW + 10e18), toNAVUnits(uint256(1)), false);
     }
 
     /// an LT deposit with a nonzero junior raw NAV delta violates the shape require in both directions — no LT
@@ -319,27 +379,133 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
     }
 
     /**
-     * an LT redemption with a zero liquidity delta but a positive total passes — the idle-premium-share-only
-     * leg, where the redeemer takes idle premium senior shares without touching the BPT
-     * NOTE: this pins the fix for a previously flagged edge (a zero-BPT-slice in-kind LT
-     * redemption formerly tripped INVALID_POST_OP_STATE)
+     * a multi-asset LT redemption with a zero liquidity delta but a positive total passes: the zero-BPT-slice
+     * leg, where the redeemer's BPT slice floors to zero while the embedded senior redemption still unwinds
+     * senior venue assets
      */
-    function test_PostOp_LTRedeem_zeroLTDeltaWithPositiveTotalPasses() public {
+    function test_PostOp_LTMultiAssetRedeem_zeroLTDeltaWithPositiveTotalPasses() public {
         _seedFlatWithLT(SEED_LT_RAW);
-        SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(SEED_ST_RAW - 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
-        assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW - 10e18, "st effective NAV bears the idle-share redemption");
-        assertEq(toUint256(state.ltRawNAV), SEED_LT_RAW, "lt raw NAV untouched by the idle-share-only leg");
+        SyncedAccountingState memory state = kernel.doPostOp(
+            Operation.LT_MULTI_ASSET_REDEEM, toNAVUnits(SEED_ST_RAW - 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false
+        );
+        assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW - 10e18, "st effective NAV bears the unwound senior leg");
+        assertEq(toUint256(state.ltRawNAV), SEED_LT_RAW, "lt raw NAV untouched by the zero-BPT-slice leg");
     }
 
     /// a multi-asset LT redemption with both a negative liquidity delta and a positive total passes
-    function test_PostOp_LTRedeem_bothLegsPass() public {
+    function test_PostOp_LTMultiAssetRedeem_bothLegsPass() public {
         _seedFlatWithLT(SEED_LT_RAW);
         SyncedAccountingState memory state = kernel.doPostOp(
-            Operation.LT_REDEEM, toNAVUnits(SEED_ST_RAW - 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW - 40e18), ZERO_NAV_UNITS, false
+            Operation.LT_MULTI_ASSET_REDEEM, toNAVUnits(SEED_ST_RAW - 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW - 40e18), ZERO_NAV_UNITS, false
         );
         assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW - 10e18, "st effective NAV bears the unwound senior leg");
         assertEq(toUint256(state.ltRawNAV), SEED_LT_RAW - 40e18, "lt raw NAV reflects the burned BPT slice");
+    }
+
+    /**
+     * a multi-asset LT redemption with a self-liquidation bonus reduces the junior effective NAV by exactly
+     * the bonus and the senior effective NAV by the total redeemed value minus the bonus, mirroring ST_REDEEM
+     * Derivation: total = 50e18 + 5e18 = 55e18, jtEffectiveNAV = 200e18 - 5e18, stEffectiveNAV = 1000e18 - (55e18 - 5e18)
+     */
+    function test_PostOp_LTMultiAssetRedeem_bonusSplitsAcrossJTAndST() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        SyncedAccountingState memory state = kernel.doPostOp(
+            Operation.LT_MULTI_ASSET_REDEEM,
+            toNAVUnits(SEED_ST_RAW - 50e18),
+            toNAVUnits(SEED_JT_RAW - 5e18),
+            toNAVUnits(SEED_LT_RAW - 40e18),
+            toNAVUnits(uint256(5e18)),
+            false
+        );
+        assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW - 5e18, "jt effective NAV funds exactly the bonus");
+        assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW - 50e18, "st effective NAV bears the redemption net of the bonus");
+        IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
+        assertEq(
+            toUint256(s.lastSTRawNAV) + toUint256(s.lastJTRawNAV),
+            toUint256(s.lastSTEffectiveNAV) + toUint256(s.lastJTEffectiveNAV),
+            "conservation holds through the bonus split"
+        );
+    }
+
+    /// a multi-asset LT redemption with a positive liquidity delta violates the shape require
+    function test_RevertIf_LTMultiAssetRedeemPositiveLTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_MULTI_ASSET_REDEEM));
+        kernel.doPostOp(Operation.LT_MULTI_ASSET_REDEEM, toNAVUnits(SEED_ST_RAW - 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW + 1), ZERO_NAV_UNITS, false);
+    }
+
+    /**
+     * a positive senior or junior raw NAV delta during a multi-asset LT redemption reverts inside
+     * toNAVUnits(int256) with ASSETS_MUST_BE_NON_NEGATIVE, the total redeemed value is computed before the
+     * shape require can run, mirroring ST_REDEEM
+     */
+    function test_RevertIf_LTMultiAssetRedeemPositiveSTOrJTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(ASSETS_MUST_BE_NON_NEGATIVE.selector);
+        kernel.doPostOp(
+            Operation.LT_MULTI_ASSET_REDEEM, toNAVUnits(SEED_ST_RAW + 1), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW - 10e18), ZERO_NAV_UNITS, false
+        );
+        vm.expectRevert(ASSETS_MUST_BE_NON_NEGATIVE.selector);
+        kernel.doPostOp(
+            Operation.LT_MULTI_ASSET_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW + 1), toNAVUnits(SEED_LT_RAW - 10e18), ZERO_NAV_UNITS, false
+        );
+    }
+
+    /// a bonus exceeding the junior effective NAV underflows the junior debit with an arithmetic panic (0x11),
+    /// the junior buffer is debited before the senior leg, mirroring ST_REDEEM
+    function test_RevertIf_LTMultiAssetRedeemBonusExceedsJTEffective() public {
+        _seedState(SEED_ST_RAW, 5e18, SEED_ST_RAW, 5e18, 0, SEED_LT_RAW, MarketState.PERPETUAL);
+        vm.expectRevert(stdError.arithmeticError);
+        kernel.doPostOp(
+            Operation.LT_MULTI_ASSET_REDEEM,
+            toNAVUnits(SEED_ST_RAW - 10e18),
+            toNAVUnits(uint256(5e18)),
+            toNAVUnits(SEED_LT_RAW - 1e18),
+            toNAVUnits(uint256(6e18)),
+            false
+        );
+    }
+
+    /// a bonus exceeding the total redeemed value (while within the junior buffer) underflows the
+    /// total-minus-bonus subtraction with an arithmetic panic (0x11), mirroring ST_REDEEM
+    function test_RevertIf_LTMultiAssetRedeemBonusExceedsTotal() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(stdError.arithmeticError);
+        kernel.doPostOp(
+            Operation.LT_MULTI_ASSET_REDEEM,
+            toNAVUnits(SEED_ST_RAW - 10e18),
+            toNAVUnits(SEED_JT_RAW),
+            toNAVUnits(SEED_LT_RAW - 1e18),
+            toNAVUnits(uint256(11e18)),
+            false
+        );
+    }
+
+    /// an in-kind LT redemption with a nonzero senior raw NAV delta violates the shape require in both
+    /// directions, the in-kind flow only transfers BPT and idle premium shares so no venue position may move
+    function test_RevertIf_LTRedeemNonzeroSTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_REDEEM));
+        kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(SEED_ST_RAW - 10e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW - 40e18), ZERO_NAV_UNITS, false);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_REDEEM));
+        kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(SEED_ST_RAW + 1), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW - 40e18), ZERO_NAV_UNITS, false);
+    }
+
+    /// an in-kind LT redemption with a nonzero junior raw NAV delta violates the shape require in both directions
+    function test_RevertIf_LTRedeemNonzeroJTDelta() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_REDEEM));
+        kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW - 1), toNAVUnits(SEED_LT_RAW - 40e18), ZERO_NAV_UNITS, false);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_REDEEM));
+        kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW + 1), toNAVUnits(SEED_LT_RAW - 40e18), ZERO_NAV_UNITS, false);
+    }
+
+    /// an in-kind LT redemption with a nonzero self-liquidation bonus value violates the shape require, the
+    /// bonus exists only where a senior leg is unwound and the in-kind flow never unwinds one
+    function test_RevertIf_LTRedeemNonzeroBonus() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.LT_REDEEM));
+        kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(SEED_LT_RAW - 40e18), toNAVUnits(uint256(1)), false);
     }
 
     /**
@@ -429,12 +595,12 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
     function testFuzz_PostOp_conservationHoldsForValidShapes(uint256 _stRaw0, uint256 _jtRaw0, uint256 _lt0, uint256 _value, uint256 _opSeed) public {
         // Bounds: checkpoint raw NAVs uniform in [1e18, 1e30] (the strategy magnitude bound), the committed
         // liquidity value uniform in [2, 1e30] so an LT redemption always has a withdrawable wei, the op value
-        // uniform in [1, 1e18] so redemptions stay inside every tranche, and the op uniform across all six members
+        // uniform in [1, 1e18] so redemptions stay inside every tranche, and the op uniform across all eight members
         _stRaw0 = bound(_stRaw0, 1e18, 1e30);
         _jtRaw0 = bound(_jtRaw0, 1e18, 1e30);
         _lt0 = bound(_lt0, 2, 1e30);
         _value = bound(_value, 1, 1e18);
-        Operation op = Operation(bound(_opSeed, 0, 5));
+        Operation op = Operation(bound(_opSeed, 0, 7));
         _seedState(_stRaw0, _jtRaw0, _stRaw0, _jtRaw0, 0, _lt0, MarketState.PERPETUAL);
 
         uint256 stRaw1 = _stRaw0;
@@ -453,8 +619,18 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
         } else if (op == Operation.JT_REDEEM) {
             jtRaw1 = _jtRaw0 - _value;
         } else if (op == Operation.LT_DEPOSIT) {
+            // The in-kind deposit only deepens the liquidity mark
+            lt1 = _lt0 + _value;
+        } else if (op == Operation.LT_MULTI_ASSET_DEPOSIT) {
+            // The multi-asset deposit deepens the liquidity mark and can mint a senior leg
             lt1 = _lt0 + _value;
             stRaw1 = _stRaw0 + (_value / 2);
+        } else if (op == Operation.LT_MULTI_ASSET_REDEEM) {
+            // The multi-asset redemption burns a BPT slice and unwinds a senior leg with a junior bonus slice
+            lt1 = _lt0 - (_value < _lt0 ? _value : _lt0 - 1);
+            stRaw1 = _stRaw0 - _value;
+            jtRaw1 = _jtRaw0 - (_value / 2);
+            bonus = toNAVUnits(_value / 2);
         } else {
             lt1 = _lt0 - (_value < _lt0 ? _value : _lt0 - 1);
         }
@@ -552,6 +728,16 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
         assertGt(state.liquidityUtilizationWAD, WAD, "liquidity still breached after the lt deposit");
         // LT_REDEEM deepens the liquidity breach and still passes
         state = kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(uint256(1050e18)), toNAVUnits(uint256(50e18)), toNAVUnits(uint256(5e18)), ZERO_NAV_UNITS, false);
+        assertGt(state.coverageUtilizationWAD, WAD, "coverage still breached after the lt redemption");
+        // LT_MULTI_ASSET_DEPOSIT deepens the coverage breach with a senior leg and still passes
+        state = kernel.doPostOp(
+            Operation.LT_MULTI_ASSET_DEPOSIT, toNAVUnits(uint256(1100e18)), toNAVUnits(uint256(50e18)), toNAVUnits(uint256(6e18)), ZERO_NAV_UNITS, false
+        );
+        assertGt(state.coverageUtilizationWAD, WAD, "coverage still breached after the multi-asset lt deposit");
+        // LT_MULTI_ASSET_REDEEM deepens the liquidity breach with an unwound senior leg and still passes
+        state = kernel.doPostOp(
+            Operation.LT_MULTI_ASSET_REDEEM, toNAVUnits(uint256(1050e18)), toNAVUnits(uint256(50e18)), toNAVUnits(uint256(5e18)), ZERO_NAV_UNITS, false
+        );
         assertGt(state.coverageUtilizationWAD, WAD, "coverage still breached at the end");
         assertGt(state.liquidityUtilizationWAD, WAD, "liquidity still breached at the end");
     }
@@ -574,18 +760,31 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
     }
 
     /**
-     * the coverage gate for LT_DEPOSIT (multi-asset, senior-minting) passes at exactly WAD and fires at WAD + 1
+     * the coverage gate for LT_MULTI_ASSET_DEPOSIT (senior-minting) passes at exactly WAD and fires at WAD + 1
      * Arithmetic: minting senior to stRawNAV 2000e18 against jtEffectiveNAV 200e18 gives coverageUtilization exactly 1e18, the follow-up
      * wei of senior against a fresh BPT wei gives ceil((2000e18 + 1) * 0.1e18 / 200e18) = 1e18 + 1
      */
-    function test_PostOp_coverageGate_ltDepositExactBoundary() public {
+    function test_PostOp_coverageGate_ltMultiAssetDepositExactBoundary() public {
         _seedFlatWithLT(SEED_LT_RAW);
         // Coinvested coverage folds JT_RAW in, so the senior mark hits the WAD boundary at 9 * jtRaw = 1800e18 (jtEff 200e18)
-        SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(uint256(1800e18)), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(150e18)), ZERO_NAV_UNITS, true);
+        SyncedAccountingState memory state = kernel.doPostOp(
+            Operation.LT_MULTI_ASSET_DEPOSIT, toNAVUnits(uint256(1800e18)), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(150e18)), ZERO_NAV_UNITS, true
+        );
         assertEq(state.coverageUtilizationWAD, WAD, "coverage utilization lands exactly on WAD and passes");
         vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(uint256(1800e18 + 1)), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(150e18 + 1)), ZERO_NAV_UNITS, true);
+        kernel.doPostOp(
+            Operation.LT_MULTI_ASSET_DEPOSIT, toNAVUnits(uint256(1800e18 + 1)), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(150e18 + 1)), ZERO_NAV_UNITS, true
+        );
+    }
+
+    /// an in-kind LT deposit passes an enforced coverage breach because pre-minted BPT can never add senior
+    /// exposure, only the multi-asset variant sits inside the coverage gate
+    function test_PostOp_gateExemptions_ltDepositPassesCoverageBreach() public {
+        _seedState(SEED_ST_RAW, 50e18, SEED_ST_RAW, 50e18, 0, SEED_LT_RAW, MarketState.PERPETUAL);
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(uint256(50e18)), toNAVUnits(uint256(150e18)), ZERO_NAV_UNITS, true);
+        assertGt(state.coverageUtilizationWAD, WAD, "coverage breached yet the in-kind lt deposit passed");
+        assertLe(state.liquidityUtilizationWAD, WAD, "the liquidity requirement itself is satisfied");
     }
 
     /**
@@ -621,21 +820,21 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
     }
 
     /**
-     * the liquidity gate for LT_DEPOSIT (multi-asset) passes at exactly WAD and fires at WAD + 1
+     * the liquidity gate for LT_MULTI_ASSET_DEPOSIT passes at exactly WAD and fires at WAD + 1
      * Arithmetic: minting senior to stEffectiveNAV 2020e18 against ltRawNAV 101e18 gives liquidityUtilization = ceil(2020e18 * 0.05e18
      * / 101e18) = 1e18 exactly. The follow-up deposit adds 21 wei of senior against one BPT wei, so the
      * numerator grows by 21 * 5e16 = 1.05e18 while the denominator threshold grows by only 1e18, landing the
      * ceil exactly on 1e18 + 1 (coverageUtilization stays near 0.6733e18 against the 300e18 junior buffer)
      */
-    function test_PostOp_liquidityGate_ltDepositExactBoundary() public {
+    function test_PostOp_liquidityGate_ltMultiAssetDepositExactBoundary() public {
         _seedState(SEED_ST_RAW, 300e18, SEED_ST_RAW, 300e18, 0, 100e18, MarketState.PERPETUAL);
         SyncedAccountingState memory state = kernel.doPostOp(
-            Operation.LT_DEPOSIT, toNAVUnits(uint256(2020e18)), toNAVUnits(uint256(300e18)), toNAVUnits(uint256(101e18)), ZERO_NAV_UNITS, true
+            Operation.LT_MULTI_ASSET_DEPOSIT, toNAVUnits(uint256(2020e18)), toNAVUnits(uint256(300e18)), toNAVUnits(uint256(101e18)), ZERO_NAV_UNITS, true
         );
         assertEq(state.liquidityUtilizationWAD, WAD, "liquidity utilization lands exactly on WAD and passes");
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         kernel.doPostOp(
-            Operation.LT_DEPOSIT, toNAVUnits(uint256(2020e18 + 21)), toNAVUnits(uint256(300e18)), toNAVUnits(uint256(101e18 + 1)), ZERO_NAV_UNITS, true
+            Operation.LT_MULTI_ASSET_DEPOSIT, toNAVUnits(uint256(2020e18 + 21)), toNAVUnits(uint256(300e18)), toNAVUnits(uint256(101e18 + 1)), ZERO_NAV_UNITS, true
         );
     }
 
@@ -654,26 +853,43 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
     }
 
     /**
-     * Current behavior: an in-kind BPT-only LT deposit that IMPROVES a breached liquidity utilization but does
-     * not fully heal it reverts under enforcement
-     *
-     * An LT deposit can only add pooled depth: it raises ltRawNAV, never the senior exposure, so every BPT-only
-     * deposit strictly lowers liquidity utilization and is a pure restoring force on a breach. The accountant
-     * nonetheless enforces the minimum-liquidity requirement after EVERY enforced operation, deposits included
-     * (the same requirement maxSTDeposit's liquidity leg encodes): LT_DEPOSIT (and ST_DEPOSIT) sit inside the
-     * liquidity gate. The consequence is that enforcement blocks the exact healing capital (external LT deposits
-     * drawn in by a high liquidity premium) that would close the breach, unless the kernel passes enforce =
-     * false for LT deposits, so the outcome rests on the kernel's flag choice
+     * the liquidity gate for LT_MULTI_ASSET_REDEEM passes at exactly WAD and fires at WAD + 1
+     * Arithmetic: the redemption unwinds 100e18 of senior alongside the BPT slice, so the boundary sits at
+     * ltRawNAV 45e18: liquidityUtilization = ceil(900e18 * 0.05e18 / 45e18) = 1e18 exactly, one more redeemed
+     * BPT wei gives ceil(4.5e37 / (4.5e19 - 1)) = 1e18 + 1
      */
-    function test_PostOp_liquidityGate_blocksHealingLTDepositUnderBreach() public {
-        _seedState(SEED_ST_RAW, SEED_JT_RAW, SEED_ST_RAW, SEED_JT_RAW, 0, 10e18, MarketState.PERPETUAL);
-        // A BPT-only deposit lifting ltRawNAV from 10e18 to 25e18 improves liquidityUtilization from 5e18 to 2e18 yet reverts
+    function test_PostOp_liquidityGate_ltMultiAssetRedeemExactBoundary() public {
+        _seedFlatWithLT(SEED_LT_RAW);
+        SyncedAccountingState memory state = kernel.doPostOp(
+            Operation.LT_MULTI_ASSET_REDEEM, toNAVUnits(SEED_ST_RAW - 100e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(45e18)), ZERO_NAV_UNITS, true
+        );
+        assertEq(state.liquidityUtilizationWAD, WAD, "liquidity utilization lands exactly on WAD and passes");
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
-        kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(25e18)), ZERO_NAV_UNITS, true);
-        // Healing the breach entirely (ltRawNAV 50e18 puts liquidityUtilization at exactly WAD) is the only enforced way in
+        kernel.doPostOp(
+            Operation.LT_MULTI_ASSET_REDEEM, toNAVUnits(SEED_ST_RAW - 100e18), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(45e18 - 1)), ZERO_NAV_UNITS, true
+        );
+    }
+
+    /**
+     * an in-kind BPT-only LT deposit that IMPROVES a breached liquidity utilization passes under enforcement
+     * even when the breach is not fully healed
+     *
+     * An in-kind LT deposit can only add pooled depth: it raises ltRawNAV, never the senior exposure, so every
+     * BPT-only deposit strictly lowers liquidity utilization and is a pure restoring force on a breach. The
+     * liquidity gate therefore exempts LT_DEPOSIT, healing capital (external LT deposits drawn in by a high
+     * liquidity premium) is never blocked mid-breach
+     * NOTE: this pins the fix for the previously documented wart where the gate blocked partially-healing
+     * deposits and only a fully-healing deposit could enter under enforcement
+     */
+    function test_PostOp_liquidityGate_ltDepositHealingPassesUnderBreach() public {
+        _seedState(SEED_ST_RAW, SEED_JT_RAW, SEED_ST_RAW, SEED_JT_RAW, 0, 10e18, MarketState.PERPETUAL);
+        // A BPT-only deposit lifting ltRawNAV from 10e18 to 25e18 improves liquidityUtilization from 5e18 to 2e18 and passes
         SyncedAccountingState memory state =
-            kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(50e18)), ZERO_NAV_UNITS, true);
-        assertEq(state.liquidityUtilizationWAD, WAD, "a fully healing lt deposit passes at exactly WAD");
+            kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(25e18)), ZERO_NAV_UNITS, true);
+        assertEq(state.liquidityUtilizationWAD, 2e18, "the partially healing deposit lands mid-breach and still passes");
+        // A follow-up deposit healing the breach entirely (ltRawNAV 50e18) lands at exactly WAD
+        state = kernel.doPostOp(Operation.LT_DEPOSIT, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW), toNAVUnits(uint256(50e18)), ZERO_NAV_UNITS, true);
+        assertEq(state.liquidityUtilizationWAD, WAD, "a fully healing lt deposit lands at exactly WAD");
     }
 
     /**
@@ -707,6 +923,21 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
         SyncedAccountingState memory state =
             kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(uint256(50e18)), toNAVUnits(uint256(60e18)), ZERO_NAV_UNITS, true);
         assertGt(state.coverageUtilizationWAD, WAD, "coverage breached yet the lt redemption passed");
+        assertLe(state.liquidityUtilizationWAD, WAD, "its own liquidity gate was satisfied");
+    }
+
+    /**
+     * LT_MULTI_ASSET_REDEEM passes an enforced coverage breach because unwinding senior exposure can only
+     * improve coverage
+     * NOTE a redemption with a bonus consumes the junior buffer and can worsen coverage, but the accountant
+     * exempts it by design, the kernel bounds the bonus to be utilization-neutral, mirroring ST_REDEEM
+     */
+    function test_PostOp_gateExemptions_ltMultiAssetRedeemPassesCoverageBreach() public {
+        _seedState(SEED_ST_RAW, 50e18, SEED_ST_RAW, 50e18, 0, SEED_LT_RAW, MarketState.PERPETUAL);
+        SyncedAccountingState memory state = kernel.doPostOp(
+            Operation.LT_MULTI_ASSET_REDEEM, toNAVUnits(SEED_ST_RAW - 10e18), toNAVUnits(uint256(50e18)), toNAVUnits(uint256(60e18)), ZERO_NAV_UNITS, true
+        );
+        assertGt(state.coverageUtilizationWAD, WAD, "coverage breached yet the multi-asset lt redemption passed");
         assertLe(state.liquidityUtilizationWAD, WAD, "its own liquidity gate was satisfied");
     }
 

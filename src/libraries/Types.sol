@@ -100,8 +100,10 @@ struct SyncedAccountingState {
  * @custom:type ST_REDEEM - A senior tranche redemption that decreases ST's effective NAV
  * @custom:type JT_DEPOSIT - A junior tranche deposit that increases JT's effective NAV
  * @custom:type JT_REDEEM - A junior tranche redemption that decreases JT's effective NAV
- * @custom:type LT_DEPOSIT - A liquidity tranche deposit that increases LT's effective NAV
- * @custom:type LT_REDEEM - A liquidity tranche redemption that decreases LT's effective NAV
+ * @custom:type LT_DEPOSIT - An in-kind liquidity tranche deposit that only adds market-making inventory
+ * @custom:type LT_REDEEM - An in-kind liquidity tranche redemption that only removes market-making inventory and idle premium shares
+ * @custom:type LT_MULTI_ASSET_DEPOSIT - A multi-asset liquidity tranche deposit that can also mint and deploy senior exposure via its senior leg
+ * @custom:type LT_MULTI_ASSET_REDEEM - A multi-asset liquidity tranche redemption that also unwinds senior exposure and can pay a self-liquidation bonus
  */
 enum Operation {
     ST_DEPOSIT,
@@ -109,7 +111,9 @@ enum Operation {
     JT_DEPOSIT,
     JT_REDEEM,
     LT_DEPOSIT,
-    LT_REDEEM
+    LT_REDEEM,
+    LT_MULTI_ASSET_DEPOSIT,
+    LT_MULTI_ASSET_REDEEM
 }
 
 /**

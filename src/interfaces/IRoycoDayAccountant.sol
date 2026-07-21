@@ -275,9 +275,12 @@ interface IRoycoDayAccountant {
      * @dev Unlike the pre-op sync, the post-op sync runs no waterfall and pays no premium, so it can commit the liquidity tranche raw NAV
      *      directly (the kernel marks it after the operation's pool mutation has settled) and report the resulting liquidity utilization
      * @dev When enforcement is requested, fails fast on the coverage requirement for operations that can worsen coverage (add senior exposure or
-     *      remove the junior loss-absorption buffer: ST_DEPOSIT, LT_DEPOSIT, JT_REDEEM) and on the liquidity requirement for operations that can
-     *      worsen liquidity (raise the senior effective NAV or reduce the depth of the AMM or another market-making venue: ST_DEPOSIT, the multi-asset
-     *      LT_DEPOSIT, and any LT_REDEEM), enforced even while the liquidation coverage threshold is breached so a multi-asset exit cannot unwind senior depth from the venue to relax its own liquidity floor and drain the market below the senior requirement
+     *      remove the junior loss-absorption buffer: ST_DEPOSIT, LT_MULTI_ASSET_DEPOSIT, JT_REDEEM) and on the liquidity requirement for operations
+     *      that can worsen liquidity (raise the senior effective NAV or reduce the depth of the AMM or another market-making venue: ST_DEPOSIT,
+     *      LT_MULTI_ASSET_DEPOSIT, LT_REDEEM, and LT_MULTI_ASSET_REDEEM), enforced even while the liquidation coverage threshold is breached so a
+     *      multi-asset exit cannot unwind senior depth from the venue to relax its own liquidity floor and drain the market below the senior requirement
+     *      The in-kind LT_DEPOSIT sits in neither gate: pre-minted BPT can only deepen liquidity and never adds senior exposure, so blocking it would
+     *      only block healing capital mid-breach
      *      Intermediate multi-asset sub-syncs pass false, deferring enforcement to the final post-op sync that books the combined exposure
      * @param _op The operation being executed in between the pre and post operation synchronizations
      * @param _stRawNAV The post-op senior tranche's raw NAV

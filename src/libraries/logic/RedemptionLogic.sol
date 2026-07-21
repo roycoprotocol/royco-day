@@ -208,7 +208,7 @@ library RedemptionLogic {
         TrancheClaimsLogic._withdrawAssets($, _immutables, stClaims, _receiver);
 
         // Execute a post-redeem sync on accounting with the applied ST liquidation bonus
-        AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.LT_REDEEM, stSelfLiquidationBonusNAV, true);
+        AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.LT_MULTI_ASSET_REDEEM, stSelfLiquidationBonusNAV, true);
     }
 
     // =============================

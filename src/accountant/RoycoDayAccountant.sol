@@ -245,15 +245,21 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             // New JT deposits are treated as an addition to the future loss-absorption buffer
             jtEffectiveNAV = jtEffectiveNAV + toNAVUnits(deltaJTRawNAV);
         } else if (_op == Operation.LT_DEPOSIT) {
-            // The ST delta can be greater than 0 if this was a multi-asset LT deposit which minted ST shares during the deposit
+            // An in-kind LT deposit only adds market-making inventory, the ST and JT positions cannot move
+            require(deltaLTRawNAV > 0 && deltaSTRawNAV == 0 && deltaJTRawNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
+        } else if (_op == Operation.LT_MULTI_ASSET_DEPOSIT) {
+            // A multi-asset LT deposit adds market-making inventory and can mint and deploy new ST shares for its senior leg
             require(deltaLTRawNAV > 0 && deltaSTRawNAV >= 0 && deltaJTRawNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
             stEffectiveNAV = stEffectiveNAV + toNAVUnits(deltaSTRawNAV);
+        } else if (_op == Operation.LT_REDEEM) {
+            // An in-kind LT redemption only transfers out market-making inventory and idle premium shares, the ST and JT positions cannot move and no bonus is paid
+            require(deltaLTRawNAV <= 0 && deltaSTRawNAV == 0 && deltaJTRawNAV == 0 && _stSelfLiquidationBonusNAV == ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
         } else {
             // Compute the total value redeemed from ST and JT
             NAV_UNIT totalSTAndJTRedemptionNAV = (toNAVUnits(-deltaSTRawNAV) + toNAVUnits(-deltaJTRawNAV));
-            if (_op == Operation.ST_REDEEM || _op == Operation.LT_REDEEM) {
-                if (_op == Operation.LT_REDEEM) require(deltaLTRawNAV <= 0, INVALID_POST_OP_STATE(_op));
-                else require(deltaLTRawNAV == 0 && totalSTAndJTRedemptionNAV > ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
+            if (_op == Operation.ST_REDEEM || _op == Operation.LT_MULTI_ASSET_REDEEM) {
+                if (_op == Operation.ST_REDEEM) require(deltaLTRawNAV == 0 && totalSTAndJTRedemptionNAV > ZERO_NAV_UNITS, INVALID_POST_OP_STATE(_op));
+                else require(deltaLTRawNAV <= 0, INVALID_POST_OP_STATE(_op));
                 // Reduce JT effective NAV by the the bonus provided from its assets
                 jtEffectiveNAV = jtEffectiveNAV - _stSelfLiquidationBonusNAV;
                 // Reduce ST effective NAV by the total redemptions without the bonus provided from JT effective NAV
@@ -313,12 +319,14 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
         if (!_enforceCoverageAndLiquidityRequirements) return state;
 
         // Enforce the coverage requirement for operations that can violate it (add senior exposure or remove the junior loss-absorption buffer)
-        if (_op == Operation.ST_DEPOSIT || _op == Operation.LT_DEPOSIT || _op == Operation.JT_REDEEM) {
+        // An in-kind LT deposit cannot add senior exposure, only the multi-asset variant mints a senior leg
+        if (_op == Operation.ST_DEPOSIT || _op == Operation.LT_MULTI_ASSET_DEPOSIT || _op == Operation.JT_REDEEM) {
             require(state.coverageUtilizationWAD <= WAD, COVERAGE_REQUIREMENT_VIOLATED());
         }
 
         // Enforce the liquidity requirement for operations that can violate it (raise the senior exposure or reduce the depth of the liquidity tranche)
-        if (_op == Operation.ST_DEPOSIT || _op == Operation.LT_DEPOSIT || _op == Operation.LT_REDEEM) {
+        // An in-kind LT deposit only deepens liquidity so it is exempt, both LT redemption variants remove depth
+        if (_op == Operation.ST_DEPOSIT || _op == Operation.LT_MULTI_ASSET_DEPOSIT || _op == Operation.LT_REDEEM || _op == Operation.LT_MULTI_ASSET_REDEEM) {
             require(state.liquidityUtilizationWAD <= WAD, LIQUIDITY_REQUIREMENT_VIOLATED());
         }
     }
