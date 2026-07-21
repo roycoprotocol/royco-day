@@ -16,8 +16,7 @@ interface IRoycoFactory {
      * @custom:field trancheToKernel - Maps each of a market's tranches (senior, junior, and liquidity) to the market's
      *                kernel
      *                The kernel's immutables carry the full tranche set, so any one tranche resolves the whole
-     *                market via `getMarket` without a three-way mapping, also serves as the "is this a factory-deployed
-     *                Royco tranche" registry check (zero for unknown addresses)
+     *                market.
      */
     struct RoycoFactoryState {
         mapping(address template => bool enabled) isTemplateEnabled;
@@ -30,6 +29,8 @@ interface IRoycoFactory {
     event TemplateDisabled(address indexed template);
     /// @notice Emitted when a market deployment completes
     event MarketDeploymentCompleted(address indexed template, address indexed deployer, IRoycoProtocolTemplate.DeploymentResult result);
+    /// @notice Emitted when a proxy is deployed via `deployDeterministicProxy`
+    event ProxyDeployed(address indexed proxy, address indexed implementation, bytes32 salt);
 
     /// @notice Thrown when a factory primitive is called by anything other than the active template
     error ONLY_ACTIVE_TEMPLATE();
@@ -43,10 +44,10 @@ interface IRoycoFactory {
     error TEMPLATE_CANNOT_BE_ZERO_ADDRESS();
     /// @notice Thrown when registering an already-registered template
     error TEMPLATE_ALREADY_REGISTERED();
-    /// @notice Thrown when registering a template whose component bytecode store was never initialized
-    error TEMPLATE_NOT_INITIALIZED();
     /// @notice Thrown when the template's bound factory is not this factory
     error TEMPLATE_BOUND_TO_DIFFERENT_FACTORY();
+    /// @notice Thrown when `deployDeterministicProxy` targets a salt whose CREATE3 address already has code
+    error PROXY_ALREADY_DEPLOYED(address deployed, bytes32 salt);
     /// @notice Thrown when deploying via a template that is not enabled
     error TEMPLATE_NOT_ENABLED();
     /// @notice Thrown when a deployment is started while another is in progress
@@ -56,6 +57,8 @@ interface IRoycoFactory {
 
     /// @notice Thrown when a template returns a deployment result with a zero tranche or kernel address
     error INVALID_DEPLOYMENT_RESULT();
+    /// @notice Thrown when index-aligned array arguments have mismatched lengths
+    error LENGTH_MISMATCH();
 
     /// @notice Returns the AccessManager that governs this factory and its markets
     function ROYCO_AUTHORITY() external view returns (address);
@@ -81,11 +84,19 @@ interface IRoycoFactory {
      */
     function executeMarketDeployment(address _template, bytes calldata _params) external returns (IRoycoProtocolTemplate.DeploymentResult memory result);
 
-    /// @notice CREATE3-deploys a contract from creation code, callable only by the active template
-    function deployDeterministicContract(bytes calldata _creationCode, bytes32 _salt) external returns (address deployed, bool alreadyDeployed);
+    /**
+     * @notice CREATE3-deploys an ERC1967 proxy outside a deployment window, gated to the deployer role
+     * @dev Used to pre-deploy the market proxies (e.g. the senior tranche) that later deployment steps depend on,
+     *      before the market's `executeMarketDeployment` wiring transaction.
+     * @param _implementation The proxy's initial implementation
+     * @param _initData The proxy's initialization calldata (empty skips the delegatecall on construction)
+     * @param _salt The CREATE3 salt
+     * @return deployed The deployed proxy address
+     */
+    function deployDeterministicProxy(address _implementation, bytes calldata _initData, bytes32 _salt) external returns (address deployed);
 
     /// @notice CREATE3-deploys an ERC1967 proxy, callable only by the active template
-    function deployDeterministicProxy(
+    function deployDeterministicProxyFromTemplate(
         address _implementation,
         bytes calldata _initData,
         bytes32 _salt
@@ -96,11 +107,23 @@ interface IRoycoFactory {
     /// @notice Predicts the CREATE3 address for a salt
     function predictDeterministicAddress(bytes32 _salt) external view returns (address);
 
-    /// @notice Binds a target's selector to a role on the AccessManager, callable only by the active template
-    function setMarketTargetFunctionRole(address _target, bytes4 _selector, uint64 _roleId) external;
+    /**
+     * @notice Binds each target's selector to a role on the AccessManager, callable only by the active template
+     * @dev The three arrays are index-aligned: `_selectors[i]` on `_targets[i]` is bound to `_roleIds[i]`
+     * @param _targets The contracts whose functions are being access-gated, index-aligned with `_selectors`/`_roleIds`
+     * @param _selectors The function selectors to bind, index-aligned with `_targets`/`_roleIds`
+     * @param _roleIds The role id required to call each corresponding selector, index-aligned with `_targets`/`_selectors`
+     */
+    function setMarketTargetFunctionRole(address[] calldata _targets, bytes4[] calldata _selectors, uint64[] calldata _roleIds) external;
 
-    /// @notice Grants a role on the AccessManager, callable only by the active template
-    function grantMarketRole(uint64 _roleId, address _account, uint32 _executionDelay) external;
+    /**
+     * @notice Grants each role to an account on the AccessManager, callable only by the active template
+     * @dev The three arrays are index-aligned: `_roleIds[i]` is granted to `_accounts[i]` with `_executionDelays[i]`
+     * @param _roleIds The role ids to grant, index-aligned with `_accounts`/`_executionDelays`
+     * @param _accounts The accounts receiving each role, index-aligned with `_roleIds`/`_executionDelays`
+     * @param _executionDelays The access-manager execution delay applied to each grant, index-aligned with `_roleIds`/`_accounts`
+     */
+    function grantMarketRole(uint64[] calldata _roleIds, address[] calldata _accounts, uint32[] calldata _executionDelays) external;
 
     /// @notice Forwards an arbitrary call as the factory, callable only by the active template
     function executeAsFactory(address _target, bytes calldata _data) external returns (bytes memory result);
