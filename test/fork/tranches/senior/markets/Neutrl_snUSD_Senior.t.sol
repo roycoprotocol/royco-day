@@ -39,7 +39,7 @@ contract Neutrl_snUSD_Senior is Test_SeniorTrancheDepositWithdrawBase {
             DEPLOY_SCRIPT.getMarketConfig("snUSD"),
             OWNER_ADDRESS,
             PROTOCOL_FEE_RECIPIENT_ADDRESS,
-            DEPLOY_SCRIPT.getChainConfig(block.chainid).scheduledOperationsExpirySeconds,
+            DEPLOY_SCRIPT.getChainConfig(block.chainid, false).scheduledOperationsExpirySeconds,
             _generateRoleAssignments(),
             DEPLOYER.privateKey
         );

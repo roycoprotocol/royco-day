@@ -159,18 +159,43 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     /// @dev Per-DeployScript-instance cache of registered templates, keyed by kernel type.
     mapping(uint256 kernelType => address template) internal kernelTypeToTemplate;
 
-    /// @notice Entry point for `forge script`. Reads DEPLOYER_PRIVATE_KEY and MARKET_NAME from env.
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DEPLOYMENT LOGGING
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev Prints a phase header (gated on `ENABLE_LOGGING`).
+    function _logSection(string memory _title) internal view {
+        if (ENABLE_LOGGING) console2.log(string.concat("\n== ", _title, " =="));
+    }
+
+    /// @dev Prints one contract's disposition: `[deployed]` (freshly created) or `[reused]` (found at its
+    ///      deterministic address). `_reused` is the `isAlreadyDeployed` flag the deterministic deployers return.
+    function _logDeploy(string memory _name, address _addr, bool _reused) internal view {
+        if (ENABLE_LOGGING) console2.log(string.concat(_reused ? "  [reused]   " : "  [deployed] ", _name), _addr);
+    }
+
+    /// @dev Prints a contract that is always freshly created (no deterministic reuse), e.g. the pool / BPT oracle.
+    function _logCreated(string memory _name, address _addr) internal view {
+        if (ENABLE_LOGGING) console2.log(string.concat("  [deployed] ", _name), _addr);
+    }
+
+    /// @notice Entry point for `forge script`. Reads DEPLOYER_PRIVATE_KEY, MARKET_NAME, and the test/prod flag from env.
+    /// @dev `IS_TEST_DEPLOYMENT=true` selects the test environment (single-admin roles + `_TEST` salt suffix);
+    ///      anything else (or unset) is a production deployment. `TEST_ADMIN` overrides the single test admin address.
     function run() external virtual {
         ENABLE_LOGGING = true;
+        isTestEnv = vm.envOr("IS_TEST_DEPLOYMENT", false);
+        testDeploymentAdmin = vm.envOr("TEST_ADMIN", testDeploymentAdmin);
+        console2.log(isTestEnv ? "Environment: TEST" : "Environment: PRODUCTION");
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         string memory marketName = vm.envString("MARKET_NAME");
         console2.log("Deploying market from config:", marketName);
         deployFromConfig(marketName, deployerPrivateKey);
     }
 
-    /// @notice Deploy a market using Solidity configuration.
+    /// @notice Deploy a market using Solidity configuration for the current environment (`isTestEnv`).
     function deployFromConfig(string memory marketName, uint256 deployerPrivateKey) public returns (DeploymentResult memory) {
-        ChainConfig memory chainConfig = getChainConfig(block.chainid);
+        ChainConfig memory chainConfig = getChainConfig(block.chainid, isTestEnv);
         MarketConfig memory marketConfig = getMarketConfig(marketName);
 
         RoleAssignment[] memory roleAssignments = generateRolesAssignments(
@@ -253,6 +278,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
 
         // Role graph (grants + admin/guardian re-pointing) on a freshly deployed AccessManager.
         if (!amExisted) _applyRoleGraph(s.accessManager, _factoryAdmin, _deployer, _roleAssignments);
+        if (ENABLE_LOGGING) console2.log(amExisted ? "  [reused]    AccessManager role graph (already applied)" : "  [applied]   AccessManager role graph");
 
         // Chain's shared blacklist (governed by the AccessManager, not the factory).
         s.roycoBlacklist = _deployBlacklist(address(s.accessManager));
@@ -270,6 +296,10 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         // The pre-mined marketId for this market against this exact factory (its senior-tranche proxy sorts before the
         // quote asset, so the ST is pool token0).
         s.marketId = getMarketId(_config.marketName, address(s.factory));
+        if (ENABLE_LOGGING) {
+            console2.log(string.concat("  marketId (", _config.marketName, "):"));
+            console2.logBytes32(s.marketId);
+        }
 
         // Drop the deployer's admin roles now that the admin-gated setup is complete.
         _renounceDeployerAdminRoles(s.accessManager, _deployer, _factoryAdmin, amExisted);
@@ -340,15 +370,21 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     /// @dev The role graph is applied by the caller (when `amExisted` is false) AFTER the periphery singletons are
     ///      deployed, so grants that require default (ADMIN_ROLE) role admins can land before pass 2 re-points them.
     function _deployAccessManagerAndFactory(address _deployer) internal returns (AccessManager accessManager, RoycoFactory factory, bool amExisted) {
+        _logSection("Protocol scaffolding");
+
         // Deploy the AccessManager with the deployer as the initial admin so it can wire roles during this broadcast.
         address amAddr;
-        (amAddr, amExisted) = deployWithSanityChecks(ACCESS_MANAGER_SALT, abi.encodePacked(type(AccessManager).creationCode, abi.encode(_deployer)), false);
+        (amAddr, amExisted) =
+            deployWithSanityChecks(_singletonSalt("ROYCO_ACCESS_MANAGER"), abi.encodePacked(type(AccessManager).creationCode, abi.encode(_deployer)), false);
         accessManager = AccessManager(amAddr);
+        _logDeploy("AccessManager      ", amAddr, amExisted);
 
         // Predict the factory proxy address so we can grant it ADMIN_ROLE before its constructor runs `initialize`.
-        (address factoryImpl,) = deployWithSanityChecks(FACTORY_IMPL_SALT, type(RoycoFactory).creationCode, false);
+        (address factoryImpl, bool factoryImplExisted) =
+            deployWithSanityChecks(_singletonSalt("ROYCO_FACTORY_IMPLEMENTATION"), type(RoycoFactory).creationCode, false);
+        _logDeploy("Factory (impl)     ", factoryImpl, factoryImplExisted);
         bytes memory factoryProxyCreationCode = getERC1967ProxyCreationCode(factoryImpl, abi.encodeCall(RoycoFactory.initialize, (amAddr)));
-        address predictedFactory = generateDeterminsticAddress(FACTORY_PROXY_SALT, factoryProxyCreationCode);
+        address predictedFactory = generateDeterminsticAddress(_singletonSalt("ROYCO_FACTORY_PROXY"), factoryProxyCreationCode);
 
         if (predictedFactory.code.length == 0) {
             accessManager.grantRole(ADMIN_ROLE, predictedFactory, 0);
@@ -358,9 +394,10 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             accessManager.grantRole(LP_ROLE_ADMIN_ROLE, predictedFactory, 0);
         }
 
-        (address factoryProxy,) = deployWithSanityChecks(FACTORY_PROXY_SALT, factoryProxyCreationCode, false);
+        (address factoryProxy, bool factoryProxyExisted) = deployWithSanityChecks(_singletonSalt("ROYCO_FACTORY_PROXY"), factoryProxyCreationCode, false);
         require(factoryProxy == predictedFactory, "factory address mismatch");
         factory = RoycoFactory(factoryProxy);
+        _logDeploy("Factory (proxy)    ", factoryProxy, factoryProxyExisted);
     }
 
     /// @notice Deploys the market's off-factory contracts, executes the factory wiring transaction, and assembles the
@@ -381,6 +418,14 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         BalancerV3_GyroECLP_LT_DeploymentTemplate.DayParams memory params =
             _buildDayParams(_config, marketId, _protocolFeeRecipient, _s.roycoBlacklist, marketContracts);
         IRoycoProtocolTemplate.DeploymentResult memory r = _s.factory.executeMarketDeployment(_s.template, abi.encode(params));
+
+        // The template deploys the remaining proxies (kernel, JT, LT, accountant) and the real hook inside this wiring
+        // transaction (the senior tranche + hook proxies were pre-deployed above) and wires the whole market.
+        _logSection("Market wiring transaction (executeMarketDeployment)");
+        _logCreated("Kernel (proxy)         ", r.kernel);
+        _logCreated("JuniorTranche (proxy)  ", r.juniorTranche);
+        _logCreated("LiquidityTranche (proxy)", r.liquidityTranche);
+        _logCreated("Accountant (proxy)     ", r.accountant);
 
         return DeploymentResult({
             factory: _s.factory,
@@ -448,13 +493,17 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         returns (address template)
     {
         template = kernelTypeToTemplate[uint256(_kernelType)];
-        if (template != address(0)) return template;
+        if (template != address(0)) {
+            _logDeploy("Template           ", template, true);
+            return template;
+        }
 
         IRoycoFactory factoryIface = IRoycoFactory(address(_factory));
         template = _deployTemplate(factoryIface, _kernelType, _entryPoint, _marketSyncer);
 
         _factory.registerTemplate(template);
         kernelTypeToTemplate[uint256(_kernelType)] = template;
+        _logDeploy("Template           ", template, false);
     }
 
     /// @notice Public wrapper over `_buildDayParams` so tests can construct real template deploy params from a market config.
@@ -492,7 +541,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     function _deployTemplate(IRoycoFactory _factory, KernelType _kernelType, address _entryPoint, address _marketSyncer) internal returns (address template) {
         // The concrete Balancer-V3 templates are constructed with the chain's Gyro E-CLP pool factory and the
         // pre-deployed periphery singletons (entry point + market syncer) the template configures for each deployed market.
-        ChainConfig memory chainConfig = getChainConfig(block.chainid);
+        ChainConfig memory chainConfig = getChainConfig(block.chainid, isTestEnv);
         GyroECLPPoolFactory poolFactory = GyroECLPPoolFactory(chainConfig.gyroECLPPoolFactory);
 
         if (_kernelType == KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel) {
@@ -641,7 +690,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     /// @notice Deploys a YDM model of the configured type at the given target utilization, via the canonical CREATE2 deployer
     /// @dev CREATE2's initcode-address binding means identical `(model, ctor args)` dedups to one instance, and distinct
     ///      args produce distinct addresses (so a market can never silently reuse another's curve params)
-    function _deployYDM(YDMType _ydmType, uint256 _targetUtilizationWAD, bytes32 _ydmSalt) internal returns (address ydm) {
+    function _deployYDM(string memory _name, YDMType _ydmType, uint256 _targetUtilizationWAD, bytes32 _ydmSalt) internal returns (address ydm) {
         bytes memory creationCode;
         if (_ydmType == YDMType.StaticCurve) {
             creationCode = type(StaticCurveYDM).creationCode;
@@ -652,7 +701,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         } else {
             revert UnsupportedYDMType(_ydmType);
         }
-        (ydm,) = deployWithSanityChecks(_ydmSalt, abi.encodePacked(creationCode, _ydmConstructorArgs(_ydmType, _targetUtilizationWAD)), false);
+        bool ydmExisted;
+        (ydm, ydmExisted) = deployWithSanityChecks(_ydmSalt, abi.encodePacked(creationCode, _ydmConstructorArgs(_ydmType, _targetUtilizationWAD)), false);
+        _logDeploy(_name, ydm, ydmExisted);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -679,6 +730,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         internal
         returns (BalancerV3_GyroECLP_LT_DeploymentTemplate.MarketContracts memory mc)
     {
+        _logSection("Market off-factory contracts (impls, YDMs, pool, pre-deployed proxies)");
+
         // Predict the kernel proxy address the implementations pin as immutables (the template deploys the kernel proxy
         // at the same `_salt(marketId, TAG_KERNEL_PROXY)`, so its prediction matches)
         address kernelProxy = _factory.predictDeterministicAddress(_salt(_marketId, TAG_KERNEL_PROXY));
@@ -706,9 +759,15 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         returns (BalancerV3_GyroECLP_LT_DeploymentTemplate.MarketContracts memory mc)
     {
         mc.balancerPool = _balancerPool;
-        mc.jtImpl = _deployImplWithArgs(type(RoycoJuniorTranche).creationCode, abi.encode(_config.juniorAsset, _kernelProxy), _salt(_marketId, TAG_JT_IMPL));
-        mc.ltImpl = _deployImplWithArgs(type(RoycoLiquidityTranche).creationCode, abi.encode(_balancerPool, _kernelProxy), _salt(_marketId, TAG_LT_IMPL));
-        mc.accountantImpl = _deployImplWithArgs(type(RoycoDayAccountant).creationCode, abi.encode(_kernelProxy), _salt(_marketId, TAG_ACCOUNTANT_IMPL));
+        mc.jtImpl = _deployImplWithArgs(
+            "JuniorTranche (impl)   ", type(RoycoJuniorTranche).creationCode, abi.encode(_config.juniorAsset, _kernelProxy), _salt(_marketId, TAG_JT_IMPL)
+        );
+        mc.ltImpl = _deployImplWithArgs(
+            "LiquidityTranche (impl)", type(RoycoLiquidityTranche).creationCode, abi.encode(_balancerPool, _kernelProxy), _salt(_marketId, TAG_LT_IMPL)
+        );
+        mc.accountantImpl = _deployImplWithArgs(
+            "Accountant (impl)      ", type(RoycoDayAccountant).creationCode, abi.encode(_kernelProxy), _salt(_marketId, TAG_ACCOUNTANT_IMPL)
+        );
         mc.kernelImpl = _deployKernelImpl(_config, _factory, _marketId, _balancerPool);
         // The real kernel-bound hook implementation is deployed inside the template's wiring tx (its constructor reads
         // the kernel's LT_ASSET, so it cannot be deployed before the kernel proxy exists)
@@ -721,8 +780,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     ///      per-market curve state is keyed per accountant). CREATE2's initcode binding still gives distinct params
     ///      distinct addresses (no silent first-writer-wins reuse) and keeps the JT YDM and LT LDM distinct
     function _deployYDMs(MarketConfig memory _config) internal returns (address jtYdm, address ltYdm) {
-        jtYdm = _deployYDM(_config.ydmType, _config.jtYdmTargetUtilizationWAD, _ydmSalt(TAG_YDM));
-        ltYdm = _deployYDM(_config.ydmType, _config.ltYdmTargetUtilizationWAD, _ydmSalt(TAG_LDM));
+        jtYdm = _deployYDM("JT YDM (shared)        ", _config.ydmType, _config.jtYdmTargetUtilizationWAD, _ydmSalt(TAG_YDM));
+        ltYdm = _deployYDM("LT LDM (shared)        ", _config.ydmType, _config.ltYdmTargetUtilizationWAD, _ydmSalt(TAG_LDM));
     }
 
     /// @notice Market-agnostic, role-specific CREATE2 salt for a shared YDM singleton (`TAG_YDM` for the JT YDM,
@@ -732,17 +791,21 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     }
 
     /// @notice CREATE2-deploys an implementation from its creation code with ABI-encoded constructor args appended
-    function _deployImplWithArgs(bytes memory _creationCode, bytes memory _ctorArgs, bytes32 _implSalt) internal returns (address impl) {
-        (impl,) = deployWithSanityChecks(_implSalt, abi.encodePacked(_creationCode, _ctorArgs), false);
+    function _deployImplWithArgs(string memory _name, bytes memory _creationCode, bytes memory _ctorArgs, bytes32 _implSalt) internal returns (address impl) {
+        bool existed;
+        (impl, existed) = deployWithSanityChecks(_implSalt, abi.encodePacked(_creationCode, _ctorArgs), false);
+        _logDeploy(_name, impl, existed);
     }
 
     /// @notice Deploys the market's manipulation-resistant E-CLP BPT TVL oracle through Balancer's LP oracle factory
     /// @dev Each pool leg's live balance is already priced by its rate provider, so every leg uses the shared stateless
     ///      constant-1.0 price feed. The kernel's LT quoter verifies `oracle.pool() == LT_ASSET` on-chain at init
     function _deployBPTOracle(address _pool) internal returns (address bptOracle) {
-        ChainConfig memory chainConfig = getChainConfig(block.chainid);
+        ChainConfig memory chainConfig = getChainConfig(block.chainid, isTestEnv);
         IVault vault = IVault(address(GyroECLPPoolFactory(chainConfig.gyroECLPPoolFactory).getVault()));
-        (address constantPriceFeed,) = deployWithSanityChecks(CONSTANT_PRICE_FEED_SALT, type(ConstantPriceFeed).creationCode, false);
+        (address constantPriceFeed, bool constantPriceFeedExisted) =
+            deployWithSanityChecks(_singletonSalt("ROYCO_BPT_ORACLE_CONSTANT_PRICE_FEED"), type(ConstantPriceFeed).creationCode, false);
+        _logDeploy("ConstantPriceFeed (shared)", constantPriceFeed, constantPriceFeedExisted);
 
         IERC20[] memory poolTokens = vault.getPoolTokens(_pool);
         BalancerAggregatorV3Interface[] memory feeds = new BalancerAggregatorV3Interface[](poolTokens.length);
@@ -754,6 +817,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             ILPOracleFactoryBase(chainConfig.eclpLPOracleFactory)
                 .create({ pool: IBasePool(_pool), shouldUseBlockTimeForOldestFeedUpdate: false, shouldRevertIfVaultUnlocked: false, feeds: feeds })
         );
+        _logCreated("BPT oracle             ", bptOracle);
     }
 
     /// @notice Deploys the senior tranche impl and its pre-deployed proxy (built with the market authority; the
@@ -767,16 +831,18 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     )
         internal
     {
-        (address stImpl,) = deployWithSanityChecks(
+        (address stImpl, bool stImplExisted) = deployWithSanityChecks(
             _salt(_marketId, TAG_ST_IMPL), abi.encodePacked(type(RoycoSeniorTranche).creationCode, abi.encode(_config.seniorAsset, _kernelProxy)), false
         );
+        _logDeploy("SeniorTranche (impl)   ", stImpl, stImplExisted);
         bytes memory stInitData = abi.encodeCall(
             RoycoSeniorTranche.initialize,
             (IRoycoVaultTranche.RoycoTrancheInitParams({
                     name: _config.seniorTrancheName, symbol: _config.seniorTrancheSymbol, initialAuthority: _accessManager
                 }))
         );
-        _factory.deployDeterministicProxy(stImpl, stInitData, _salt(_marketId, TAG_ST_PROXY));
+        address stProxy = _factory.deployDeterministicProxy(stImpl, stInitData, _salt(_marketId, TAG_ST_PROXY));
+        _logCreated("SeniorTranche (proxy)  ", stProxy);
     }
 
     /// @notice Pre-deploys the pool-hook proxy against the stand-in impl, creates the market's Gyro E-CLP pool, and
@@ -800,9 +866,11 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         address hookProxy = _factory.deployDeterministicProxy(
             BalancerV3_GyroECLP_LT_DeploymentTemplate(_template).BALANCER_HOOK_STANDIN_IMPL(), bytes("no-op"), _salt(_marketId, TAG_BALANCER_HOOK_PROXY)
         );
+        _logCreated("Pool hook (proxy)      ", hookProxy);
 
         balancerPool =
             _createBalancerV3Pool(_config.gyroECLPPoolParams, _seniorTranche, _kernelProxy, hookProxy, _accessManager, _salt(_marketId, TAG_BALANCER_V3_POOL));
+        _logCreated("Balancer E-CLP pool    ", balancerPool);
         bptOracle = _deployBPTOracle(balancerPool);
     }
 
@@ -849,7 +917,9 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         } else {
             revert UnsupportedKernelType(_config.kernelType);
         }
-        (kernelImpl,) = deployWithSanityChecks(_salt(_marketId, TAG_KERNEL_IMPL), creationCode, false);
+        bool kernelImplExisted;
+        (kernelImpl, kernelImplExisted) = deployWithSanityChecks(_salt(_marketId, TAG_KERNEL_IMPL), creationCode, false);
+        _logDeploy("Kernel (impl)          ", kernelImpl, kernelImplExisted);
     }
 
     /// @notice Creates the Gyro E-CLP pool with tokens `{ST_share, quote}` (ported from the template's former pool creation)
@@ -875,7 +945,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         BalancerV3PoolRoleAccounts memory roleAccounts =
             BalancerV3PoolRoleAccounts({ pauseManager: _authority, swapFeeManager: _authority, poolCreator: _authority });
 
-        balancerV3Pool = GyroECLPPoolFactory(getChainConfig(block.chainid).gyroECLPPoolFactory)
+        balancerV3Pool = GyroECLPPoolFactory(getChainConfig(block.chainid, isTestEnv).gyroECLPPoolFactory)
             .create({
             name: _p.name,
             symbol: _p.symbol,
@@ -920,17 +990,25 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     /// @param _factory The Royco factory baked into the entry point's provenance validation.
     function _deployPeripherySingletons(AccessManager _accessManager, address _factory) internal returns (address entryPoint, address marketSyncer) {
         // Deploy the entry point implementation + proxy, initialized with no tranche configs.
-        (address entryPointImpl,) =
-            deployWithSanityChecks(ENTRY_POINT_IMPL_SALT, abi.encodePacked(type(RoycoDayEntryPoint).creationCode, abi.encode(_factory)), false);
+        (address entryPointImpl, bool entryPointImplExisted) = deployWithSanityChecks(
+            _singletonSalt("ROYCO_DAY_ENTRY_POINT_IMPLEMENTATION"), abi.encodePacked(type(RoycoDayEntryPoint).creationCode, abi.encode(_factory)), false
+        );
+        _logDeploy("EntryPoint (impl)  ", entryPointImpl, entryPointImplExisted);
         bytes memory entryPointInitData = abi.encodeCall(RoycoDayEntryPoint.initialize, (new address[](0), new IRoycoDayEntryPoint.TrancheConfig[](0)));
         bool entryPointExisted;
-        (entryPoint, entryPointExisted) = deployWithSanityChecks(ENTRY_POINT_PROXY_SALT, getERC1967ProxyCreationCode(entryPointImpl, entryPointInitData), false);
+        (entryPoint, entryPointExisted) =
+            deployWithSanityChecks(_singletonSalt("ROYCO_DAY_ENTRY_POINT_PROXY"), getERC1967ProxyCreationCode(entryPointImpl, entryPointInitData), false);
+        _logDeploy("EntryPoint (proxy) ", entryPoint, entryPointExisted);
 
         // Deploy the market syncer implementation + proxy, initialized with no registered kernels.
-        (address syncerImpl,) = deployWithSanityChecks(SYNCER_IMPL_SALT, type(RoycoMarketSyncer).creationCode, false);
+        (address syncerImpl, bool syncerImplExisted) =
+            deployWithSanityChecks(_singletonSalt("ROYCO_MARKET_SYNCER_IMPLEMENTATION"), type(RoycoMarketSyncer).creationCode, false);
+        _logDeploy("MarketSyncer (impl)", syncerImpl, syncerImplExisted);
         bytes memory syncerInitData = abi.encodeCall(RoycoMarketSyncer.initialize, (address(_accessManager), new address[](0)));
         bool syncerExisted;
-        (marketSyncer, syncerExisted) = deployWithSanityChecks(SYNCER_PROXY_SALT, getERC1967ProxyCreationCode(syncerImpl, syncerInitData), false);
+        (marketSyncer, syncerExisted) =
+            deployWithSanityChecks(_singletonSalt("ROYCO_MARKET_SYNCER_PROXY"), getERC1967ProxyCreationCode(syncerImpl, syncerInitData), false);
+        _logDeploy("MarketSyncer (proxy)", marketSyncer, syncerExisted);
 
         // Wire each singleton's full role surface on first deployment. Runs before the role graph re-points any
         // role admins, so the LP role grants below can be made by the deployer (ADMIN_ROLE).
@@ -999,9 +1077,13 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     /// @notice Deploys (or returns) the chain's shared RoycoBlacklist via CREATE2.
     /// @param _authority The AccessManager that governs the blacklist's restricted functions.
     function _deployBlacklist(address _authority) internal returns (address blacklist) {
-        (address implAddr,) = deployWithSanityChecks(BLACKLIST_IMPL_SALT, type(RoycoBlacklist).creationCode, false);
+        (address implAddr, bool implExisted) =
+            deployWithSanityChecks(_singletonSalt("ROYCO_BLACKLIST_IMPLEMENTATION"), type(RoycoBlacklist).creationCode, false);
+        _logDeploy("Blacklist (impl)   ", implAddr, implExisted);
         address[] memory initialBlacklistedAccounts = new address[](0);
         bytes memory initData = abi.encodeCall(RoycoBlacklist.initialize, (_authority, address(0), initialBlacklistedAccounts));
-        (blacklist,) = deployWithSanityChecks(BLACKLIST_PROXY_SALT, getERC1967ProxyCreationCode(implAddr, initData), false);
+        bool blacklistExisted;
+        (blacklist, blacklistExisted) = deployWithSanityChecks(_singletonSalt("ROYCO_BLACKLIST_PROXY"), getERC1967ProxyCreationCode(implAddr, initData), false);
+        _logDeploy("Blacklist (proxy)  ", blacklist, blacklistExisted);
     }
 }

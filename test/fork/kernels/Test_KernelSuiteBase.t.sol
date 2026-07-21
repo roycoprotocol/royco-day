@@ -123,7 +123,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
             LT = IRoycoVaultTranche(KERNEL.LIQUIDITY_TRANCHE());
             POOL = KERNEL.LT_ASSET();
             LT_YDM = ACCOUNTANT.getState().ltYDM;
-            VAULT = IVault(address(GyroECLPPoolFactory(DEPLOY_SCRIPT.getChainConfig(block.chainid).gyroECLPPoolFactory).getVault()));
+            VAULT = IVault(address(GyroECLPPoolFactory(DEPLOY_SCRIPT.getChainConfig(block.chainid, false).gyroECLPPoolFactory).getVault()));
             BALANCER_HOOK = VAULT.getHooksConfig(POOL).hooksContract;
             vm.label(address(LT), "LT");
             vm.label(POOL, "BalancerPool");

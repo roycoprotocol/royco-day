@@ -121,7 +121,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         LT = IRoycoVaultTranche(KERNEL.LIQUIDITY_TRANCHE());
         POOL = KERNEL.LT_ASSET();
         LT_YDM = ACCOUNTANT.getState().ltYDM;
-        VAULT = IVault(address(GyroECLPPoolFactory(DEPLOY_SCRIPT.getChainConfig(block.chainid).gyroECLPPoolFactory).getVault()));
+        VAULT = IVault(address(GyroECLPPoolFactory(DEPLOY_SCRIPT.getChainConfig(block.chainid, false).gyroECLPPoolFactory).getVault()));
         BALANCER_HOOK = VAULT.getHooksConfig(POOL).hooksContract;
     }
 
@@ -489,7 +489,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         address bptOracle = BalancerV3_LT_BPTOracle_Quoter(address(KERNEL)).getBalancerV3QuoterState().bptOracle;
         assertTrue(bptOracle != address(0), "bptOracle unset");
         assertGt(bptOracle.code.length, 0, "bptOracle has no code");
-        address eclpOracleFactory = DEPLOY_SCRIPT.getChainConfig(block.chainid).eclpLPOracleFactory;
+        address eclpOracleFactory = DEPLOY_SCRIPT.getChainConfig(block.chainid, false).eclpLPOracleFactory;
         assertTrue(ILPOracleFactoryBase(eclpOracleFactory).isOracleFromFactory(ILPOracleBase(bptOracle)), "not from oracle factory");
 
         // The oracle prices THIS market's pool (the same identity the kernel's setBPTOracle guard enforces).

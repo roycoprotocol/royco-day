@@ -42,20 +42,26 @@ abstract contract MarketDeploymentConfig {
     address internal constant PROTOCOL_FEE_RECIPIENT = 0x05ea95aE815809D77153Ed3500Ad6d936712b639;
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // ENVIRONMENT (test vs production)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev Selects the deployment environment. Production (false) is the DEFAULT, so the whole test suite exercises
+    ///      the production config; the deploy entrypoints override it from the env. Drives the singleton salt suffix
+    ///      and the role config `getChainConfig` returns.
+    bool internal isTestEnv;
+
+    /// @dev The single admin every role resolves to for a test deployment. Overridable via the TEST_ADMIN env var.
+    address internal testDeploymentAdmin = 0x77777Cc68b333a2256B436D675E8D257699Aa667;
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // SINGLETON CREATE2 SALTS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @dev CREATE2 salts for the protocol singletons (AccessManager, factory, etc.) so reruns within a test reuse them
-    bytes32 internal constant ACCESS_MANAGER_SALT = keccak256("ROYCO_ACCESS_MANAGER");
-    bytes32 internal constant FACTORY_IMPL_SALT = keccak256("ROYCO_FACTORY_IMPLEMENTATION");
-    bytes32 internal constant FACTORY_PROXY_SALT = keccak256("ROYCO_FACTORY_PROXY");
-    bytes32 internal constant BLACKLIST_IMPL_SALT = keccak256("ROYCO_BLACKLIST_IMPLEMENTATION");
-    bytes32 internal constant BLACKLIST_PROXY_SALT = keccak256("ROYCO_BLACKLIST_PROXY");
-    bytes32 internal constant ENTRY_POINT_IMPL_SALT = keccak256("ROYCO_DAY_ENTRY_POINT_IMPLEMENTATION");
-    bytes32 internal constant ENTRY_POINT_PROXY_SALT = keccak256("ROYCO_DAY_ENTRY_POINT_PROXY");
-    bytes32 internal constant SYNCER_IMPL_SALT = keccak256("ROYCO_MARKET_SYNCER_IMPLEMENTATION");
-    bytes32 internal constant SYNCER_PROXY_SALT = keccak256("ROYCO_MARKET_SYNCER_PROXY");
-    bytes32 internal constant CONSTANT_PRICE_FEED_SALT = keccak256("ROYCO_BPT_ORACLE_CONSTANT_PRICE_FEED");
+    /// @dev CREATE2 salt for a protocol singleton (AccessManager, factory, etc.), suffixed with the environment so a
+    ///      test deployment and a production deployment never collide on a deterministic address.
+    function _singletonSalt(string memory _seed) internal view returns (bytes32) {
+        return keccak256(abi.encodePacked(_seed, isTestEnv ? "_TEST" : "_PROD"));
+    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // TOKEN ADDRESSES
@@ -116,10 +122,12 @@ abstract contract MarketDeploymentConfig {
     ///      production deployer and the test harness's `vm.createWallet("DEPLOYER")` each stand up.
     function _initializeMinedMarketIds() internal {
         bytes32 snUSDHash = keccak256(bytes(SNUSD));
-        // snUSD against the production factory.
-        _marketIds[snUSDHash][0x76fF747399Ed12F0B631323d6d4c6E1b66cB7c89] = 0xdad618951447dde839beee414c1ff98055c009873b5833ac1976bf31d29771f2;
-        // snUSD against the local test factory.
-        _marketIds[snUSDHash][0x87F4fccE54F4D03De715A0C6fcd28b7Ea24664d1] = 0xb3d433a58a0d62af783a1fcb783e83f5efc3867dfa2e807ed7455be4373d0bda;
+        // snUSD against the production factory (prod deployer, "_PROD" salts).
+        _marketIds[snUSDHash][0x8a49E091fc78Ec84f8c75DB9508891F3Ea69f29A] = 0xb3d433a58a0d62af783a1fcb783e83f5efc3867dfa2e807ed7455be4373d0bda;
+        // snUSD against the local test factory (test-harness deployer, "_PROD" salts — the suite runs on the prod config).
+        _marketIds[snUSDHash][0xE650e118eaEa886a5B415f27a9Dc08d5AE93a6Ed] = 0xb3d433a58a0d62af783a1fcb783e83f5efc3867dfa2e807ed7455be4373d0bda;
+        // snUSD against the test-environment factory on mainnet ("_TEST" salts).
+        _marketIds[snUSDHash][0xE9B3356dAc63Cca56fAAAdD9Ba91C41712BF121C] = 0xb3d433a58a0d62af783a1fcb783e83f5efc3867dfa2e807ed7455be4373d0bda;
     }
 
     /// @notice The pre-mined marketId for `_marketName` against `_factory`. Reverts if none is configured.
@@ -132,30 +140,40 @@ abstract contract MarketDeploymentConfig {
     // CHAIN CONFIG GETTER
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function getChainConfig(uint256 _chainId) public view returns (ChainConfig memory) {
+    /// @notice The chain-level config for `_chainId`. In a test deployment (`_isTest`) every role resolves to the
+    ///         single `testDeploymentAdmin`; in production each role points at its dedicated multisig. The chain-level
+    ///         addresses (pool factory, oracle factory) are the same real addresses in both environments.
+    function getChainConfig(uint256 _chainId, bool _isTest) public view returns (ChainConfig memory) {
+        // Role holders: one test admin for a test deployment, dedicated multisigs for production.
+        address factoryAdmin = _isTest ? testDeploymentAdmin : ROOT_MULTISIG;
+        address rootRole = _isTest ? testDeploymentAdmin : ROOT_MULTISIG;
+        address guardian = _isTest ? testDeploymentAdmin : EXECUTOR_MULTISIG;
+        address entryPointAdmin = _isTest ? testDeploymentAdmin : EXECUTOR_MULTISIG;
+        address protocolFeeRecipient = _isTest ? testDeploymentAdmin : PROTOCOL_FEE_RECIPIENT;
+
         return ChainConfig({
-            factoryAdmin: ROOT_MULTISIG,
-            protocolFeeRecipient: PROTOCOL_FEE_RECIPIENT,
-            pauserAddress: ROOT_MULTISIG,
-            unpauserAddress: ROOT_MULTISIG,
-            upgraderAddress: ROOT_MULTISIG,
-            syncRoleAddress: ROOT_MULTISIG,
-            adminKernelAddress: ROOT_MULTISIG,
-            adminAccountantAddress: ROOT_MULTISIG,
-            adminProtocolFeeSetterAddress: ROOT_MULTISIG,
-            adminOracleQuoterAddress: ROOT_MULTISIG,
-            lpRoleAdminAddress: ROOT_MULTISIG,
-            guardianAddress: EXECUTOR_MULTISIG,
+            factoryAdmin: factoryAdmin,
+            protocolFeeRecipient: protocolFeeRecipient,
+            pauserAddress: rootRole,
+            unpauserAddress: rootRole,
+            upgraderAddress: rootRole,
+            syncRoleAddress: rootRole,
+            adminKernelAddress: rootRole,
+            adminAccountantAddress: rootRole,
+            adminProtocolFeeSetterAddress: rootRole,
+            adminOracleQuoterAddress: rootRole,
+            lpRoleAdminAddress: rootRole,
+            guardianAddress: guardian,
             deployerAddress: DEPLOYER,
-            deployerAdminAddress: ROOT_MULTISIG,
+            deployerAdminAddress: rootRole,
             scheduledOperationsExpirySeconds: 1 weeks,
             gyroECLPPoolFactory: GYRO_ECLP_POOL_FACTORY[_chainId],
             eclpLPOracleFactory: ECLP_LP_ORACLE_FACTORY[_chainId],
-            balancerPoolManagerAddress: ROOT_MULTISIG,
-            marketOpsAddress: ROOT_MULTISIG,
-            marketReinvestLiquidityPremiumAddress: ROOT_MULTISIG,
-            adminEntryPointAddress: EXECUTOR_MULTISIG,
-            entryPointFeeCollectorAddress: ROOT_MULTISIG
+            balancerPoolManagerAddress: rootRole,
+            marketOpsAddress: rootRole,
+            marketReinvestLiquidityPremiumAddress: rootRole,
+            adminEntryPointAddress: entryPointAdmin,
+            entryPointFeeCollectorAddress: rootRole
         });
     }
 

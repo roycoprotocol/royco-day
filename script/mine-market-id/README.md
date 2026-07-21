@@ -15,7 +15,7 @@ bake it into the config keyed by factory.
 
 ```
 cargo run --release -- \
-  --factory 0x76fF747399Ed12F0B631323d6d4c6E1b66cB7c89 \
+  --factory 0x8a49E091fc78Ec84f8c75DB9508891F3Ea69f29A \
   --quote   0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 \
   --name    snUSD
 ```
