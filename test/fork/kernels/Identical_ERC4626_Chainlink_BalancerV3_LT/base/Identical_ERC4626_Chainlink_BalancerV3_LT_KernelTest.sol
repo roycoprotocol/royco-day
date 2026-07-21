@@ -216,7 +216,12 @@ abstract contract Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest is Test_K
     /**
      * @notice The multi-asset preview on the uninitialized real pool simulates the genesis through the Vault's
      *         real invariant math and unwinds it: the quote equals the executed shares to the wei while latching
-     *         nothing, and a minimum-out at exactly the quote passes where one wei above must fail
+     *         nothing
+     * @dev The quote is in LT SHARE units, not BPT: a concentrated E-CLP genesis mints far fewer BPT than the
+     *      seed's NAV (the invariant, thousands of times smaller for a tight stable band), and the bootstrap
+     *      prices shares 1:1 with that NAV through the BPT oracle, so the share quote must never be fed into
+     *      minLTAssetsOut (the BPT floor). The exact BPT floor boundary is pinned in the mock suite where the
+     *      linear venue makes the two units coincide by construction
      */
     function test_LTMultiAssetDeposit_UninitializedPoolPreview_MatchesExecutionAndLatchesNothing() public {
         if (!testConfig.hasLiquidityTranche) return;
@@ -232,8 +237,8 @@ abstract contract Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest is Test_K
         assertFalse(VAULT.isPoolInitialized(POOL), "the preview must unwind the simulated genesis initialization");
         assertEq(IERC20(POOL).totalSupply(), 0, "the preview must unwind the simulated genesis mint");
 
-        // The executed genesis matches the quote to the wei, pinned as the deposit's own minimum-out floor
-        OpReceipt memory r = _doDepositLTMulti(LT_ALICE_ADDRESS, stAssets, quoteAssets, quoted);
+        // The executed genesis matches the quote to the wei
+        OpReceipt memory r = _doDepositLTMulti(LT_ALICE_ADDRESS, stAssets, quoteAssets, 0);
         assertEq(r.shares, quoted, "the preview must quote exactly the executed genesis seed's shares");
     }
 }
