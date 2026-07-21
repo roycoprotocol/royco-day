@@ -3,28 +3,28 @@ pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import {
-    ADMIN_PAUSER_ROLE,
-    ADMIN_UNPAUSER_ROLE,
-    ADMIN_UPGRADER_ROLE,
-    ST_LP_ROLE,
-    JT_LP_ROLE,
-    LT_LP_ROLE,
-    BURNER_ROLE,
-    SYNC_ROLE,
-    ADMIN_KERNEL_ROLE,
-    ADMIN_MARKET_OPS_ROLE,
     ADMIN_ACCOUNTANT_ROLE,
-    ADMIN_PROTOCOL_FEE_SETTER_ROLE,
-    ADMIN_ORACLE_QUOTER_ROLE,
+    ADMIN_BALANCER_POOL_MANAGER_ROLE,
     ADMIN_ENTRY_POINT_ROLE,
     ADMIN_ENTRY_POINT_ROLE_CLAIM_FEE,
-    ADMIN_BALANCER_POOL_MANAGER_ROLE,
     ADMIN_FACTORY_ROLE,
+    ADMIN_KERNEL_ROLE,
+    ADMIN_MARKET_OPS_ROLE,
+    ADMIN_ORACLE_QUOTER_ROLE,
+    ADMIN_PAUSER_ROLE,
+    ADMIN_PROTOCOL_FEE_SETTER_ROLE,
+    ADMIN_UNPAUSER_ROLE,
+    ADMIN_UPGRADER_ROLE,
+    BURNER_ROLE,
     DEPLOYER_ROLE,
     DEPLOYER_ROLE_ADMIN_ROLE,
+    GUARDIAN_ROLE,
+    JT_LP_ROLE,
     LP_ROLE_ADMIN_ROLE,
-    GUARDIAN_ROLE
-} from "../../../src/factory/RolesConfiguration.sol";
+    LT_LP_ROLE,
+    ST_LP_ROLE,
+    SYNC_ROLE
+} from "../../../src/factory/Roles.sol";
 
 /**
  * @notice Local single-function redeclaration of Balancer v3's two-argument withdrawPoolCreatorFees overload,
@@ -37,13 +37,13 @@ interface IWithdrawPoolCreatorFeesTwoArgOverload {
 }
 
 /**
- * @title Test_RolesConfiguration
+ * @title Test_Roles
  * @notice Pins the role-id registry: every hashed role id must derive from its own "ROYCO_<NAME>" string, all ids
  *         must be pairwise distinct, and none may collide with AccessManager's reserved ADMIN_ROLE (0) or
  *         PUBLIC_ROLE (type(uint64).max). Also pins the hand-hashed withdrawPoolCreatorFees selector the factory
  *         template binds a role to, against the compiler-derived selector of the real two-argument overload
  */
-contract Test_RolesConfiguration is Test {
+contract Test_Roles is Test {
     /**
      * A colliding or reserved-value role id silently merges two permission sets: AccessManager keys permissions by
      * the uint64 id alone, so two roles hashing to the same id would grant each other's targets, an id of 0 would
@@ -125,20 +125,26 @@ contract Test_RolesConfiguration is Test {
     }
 
     /**
-     * The factory template binds ADMIN_BALANCER_POOL_MANAGER_ROLE to the hand-hashed selector
-     * bytes4(keccak256("withdrawPoolCreatorFees(address,address)")) because Balancer's IProtocolFeeController
-     * overloads the function name and .selector is ambiguous there. A typo in that signature string (wrong
-     * parameter list, stray space, wrong casing) would bind the fee-withdrawal role to a dead selector that no
-     * function on the fee controller ever matches, silently bricking pool-creator fee withdrawal. The compiler
-     * derives the true selector from a local single-function interface declaring the exact two-argument Balancer
-     * signature, and the hand-hash must match it, plus the offline-derived literal 0xf7061445 as a fixed anchor
+     * The factory template binds ADMIN_BALANCER_POOL_MANAGER_ROLE to the two-argument
+     * withdrawPoolCreatorFees(address,address) overload. Because Balancer's IProtocolFeeController overloads the name
+     * (it also declares a one-argument version), IProtocolFeeController.withdrawPoolCreatorFees.selector is ambiguous
+     * and non-compiling, so the template derives the selector from a local single-function interface declaring only the
+     * two-argument overload. This test pins that compiler-derived selector to the offline-derived literal 0xf7061445 so
+     * a future edit to the interface signature (wrong parameter list, stray space, wrong casing) that would silently
+     * bind fee withdrawal to a dead selector is caught here
      */
-    function test_HandHashedWithdrawPoolCreatorFeesSelector_MatchesOverloadedInterfaceSignature() public pure {
-        // the exact expression the factory template uses to build the role binding
-        bytes4 handHashed = bytes4(keccak256("withdrawPoolCreatorFees(address,address)"));
+    function test_WithdrawPoolCreatorFeesSelector_MatchesOverloadedInterfaceSignature() public pure {
         // compiler-derived selector of the unambiguous local redeclaration of the two-argument overload
-        assertEq(handHashed, IWithdrawPoolCreatorFeesTwoArgOverload.withdrawPoolCreatorFees.selector, "hand-hash != compiler-derived overload selector");
-        // hand-derived offline: cast sig "withdrawPoolCreatorFees(address,address)" = 0xf7061445
-        assertEq(handHashed, bytes4(0xf7061445), "hand-hash != offline-derived selector literal");
+        assertEq(
+            IWithdrawPoolCreatorFeesTwoArgOverload.withdrawPoolCreatorFees.selector,
+            bytes4(0xf7061445),
+            "overload selector != offline-derived selector literal"
+        );
+        // sanity: the raw keccak of the canonical signature agrees with the compiler-derived selector
+        assertEq(
+            IWithdrawPoolCreatorFeesTwoArgOverload.withdrawPoolCreatorFees.selector,
+            bytes4(keccak256("withdrawPoolCreatorFees(address,address)")),
+            "overload selector != keccak of canonical signature"
+        );
     }
 }

@@ -15,7 +15,7 @@ import {
     LT_LP_ROLE,
     PUBLIC_ROLE,
     ST_LP_ROLE
-} from "../../src/factory/RolesConfiguration.sol";
+} from "../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayEntryPoint } from "../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoVaultTranche } from "../../src/interfaces/IRoycoVaultTranche.sol";
@@ -94,8 +94,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
         entryPoint = IRoycoDayEntryPoint(
             address(
                 new ERC1967Proxy(
-                    address(entryPointImpl),
-                    abi.encodeCall(RoycoDayEntryPoint.initialize, (new address[](0), new IRoycoDayEntryPoint.TrancheConfig[](0)))
+                    address(entryPointImpl), abi.encodeCall(RoycoDayEntryPoint.initialize, (new address[](0), new IRoycoDayEntryPoint.TrancheConfig[](0)))
                 )
             )
         );

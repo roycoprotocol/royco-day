@@ -13,20 +13,19 @@ import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/prox
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
-import { MarketDeploymentConfig } from "../../../script/config/MarketDeploymentConfig.sol";
-import { RoycoDayEntryPoint } from "../../../src/entrypoint/RoycoDayEntryPoint.sol";
 import {
-    ADMIN_ENTRY_POINT_ROLE,
-    ADMIN_FACTORY_ROLE,
-    ADMIN_ORACLE_QUOTER_ROLE,
-    ADMIN_ROLE,
-    DEPLOYER_ROLE,
-    SYNC_ROLE
-} from "../../../src/factory/RolesConfiguration.sol";
+    DeploymentResult,
+    IdenticalAssets_ST_JT_ChainlinkToAdminOracle_QuoterKernelParams,
+    KernelType,
+    MarketConfig
+} from "../../../script/config/DeploymentTypes.sol";
+import { RoycoDayEntryPoint } from "../../../src/entrypoint/RoycoDayEntryPoint.sol";
+import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ORACLE_QUOTER_ROLE, ADMIN_ROLE, DEPLOYER_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import {
     Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
 } from "../../../src/factory/templates/Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
+import { BalancerV3_GyroECLP_LT_DeploymentTemplate } from "../../../src/factory/templates/liquidity-tranche/BalancerV3_GyroECLP_LT_DeploymentTemplate.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
@@ -116,13 +115,15 @@ contract Test_ChainlinkToAdminMarketDeployment is Test {
         syncerSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
         am.setTargetFunctionRole(address(syncer), syncerSelectors, SYNC_ROLE);
 
-        // The real Chainlink-to-admin Day template, bound to this factory. `deployScript` is used only for its
-        // pure/view build helpers (`dayTemplateComponentsForKernelType`, `buildDayParams`, `getMarketConfig`).
+        // The real Chainlink-to-admin Day template, bound to this factory. `deployScript` externally deploys each
+        // market's impls/YDMs/pool and pre-deploys its ST + hook proxies (`deployMarketContractsForTest`), then builds
+        // the template params (`buildDayParams`). Its nested `deployDeterministicProxy` calls run with
+        // `msg.sender == address(deployScript)`, so the deployScript must hold DEPLOYER_ROLE.
         deployScript = new DeployScript();
+        am.grantRole(DEPLOYER_ROLE, address(deployScript), 0);
         template = new Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
             IRoycoFactory(address(factory)),
             GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY),
-            ILPOracleFactoryBase(ECLP_LP_ORACLE_FACTORY),
             address(entryPoint),
             address(syncer)
         );
@@ -131,21 +132,17 @@ contract Test_ChainlinkToAdminMarketDeployment is Test {
     // ─── helpers ───
 
     function _register() internal {
-        (bytes32[] memory ids, bytes[] memory codes) = deployScript.dayTemplateComponentsForKernelType(
-            DeployScript.KernelType.Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel
-        );
-        template.initialize(ids, codes);
         vm.prank(FACTORY_ADMIN);
         factory.registerTemplate(address(template));
     }
 
     /// @dev Clones the snUSD market config in memory and swaps in the CTA kernel type + params blob. No config
     ///      file entry exists for this kernel yet, so the test IS the params source (MarketDeploymentConfig untouched).
-    function _marketConfig() internal view returns (MarketDeploymentConfig.MarketConfig memory cfg) {
+    function _marketConfig() internal view returns (MarketConfig memory cfg) {
         cfg = deployScript.getMarketConfig("snUSD");
-        cfg.kernelType = DeployScript.KernelType.Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel;
+        cfg.kernelType = KernelType.Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel;
         cfg.kernelSpecificParams = abi.encode(
-            DeployScript.IdenticalAssets_ST_JT_ChainlinkToAdminOracle_QuoterKernelParams({
+            IdenticalAssets_ST_JT_ChainlinkToAdminOracle_QuoterKernelParams({
                 stAndJTQuoterParams: IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter.ST_JT_QuoterSpecificParams({
                     // The CTA family mandates an admin set reference->NAV rate, the zero sentinel is rejected
                     initialConversionRateWAD: INITIAL_ADMIN_RATE_WAD,
@@ -164,9 +161,12 @@ contract Test_ChainlinkToAdminMarketDeployment is Test {
     }
 
     function _deploy(bytes32 _marketId) internal returns (IRoycoProtocolTemplate.DeploymentResult memory) {
-        // Precompute the params first: the builders make external calls to `deployScript`, which would otherwise
-        // consume the `vm.prank(DEPLOYER)` intended for `executeMarketDeployment`.
-        bytes memory p = abi.encode(deployScript.buildDayParams(_marketConfig(), _marketId, PROTOCOL_FEE_RECIPIENT, address(0)));
+        // Precompute the params first: the builders externally deploy the market contracts as `deployScript`, which
+        // would otherwise consume the `vm.prank(DEPLOYER)` intended for `executeMarketDeployment`.
+        MarketConfig memory cfg = _marketConfig();
+        BalancerV3_GyroECLP_LT_DeploymentTemplate.MarketContracts memory mc =
+            deployScript.deployMarketContractsForTest(cfg, _marketId, factory, address(template), address(am));
+        bytes memory p = abi.encode(deployScript.buildDayParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(0), mc));
         vm.prank(DEPLOYER);
         return factory.executeMarketDeployment(address(template), p);
     }

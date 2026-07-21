@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Test } from "../../../lib/forge-std/src/Test.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
-import { MockERC20C } from "../../mocks/MockERC20C.sol";
+import { RoleAssignment, RoleAssignmentAddresses, RoleConfig } from "../../../script/config/DeploymentTypes.sol";
 import {
     ADMIN_ACCOUNTANT_ROLE,
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
@@ -28,7 +28,8 @@ import {
     LT_LP_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
-} from "../../../src/factory/RolesConfiguration.sol";
+} from "../../../src/factory/Roles.sol";
+import { MockERC20C } from "../../mocks/MockERC20C.sol";
 
 /**
  * @title Test_DeployScriptConfig
@@ -66,7 +67,7 @@ contract Test_DeployScriptConfig is Test {
         // 18 distinct dummy addresses, one per RoleAssignmentAddresses field (the struct's full address surface).
         // The fee recipient deliberately carries three LP roles (ST/JT/LT) and market ops carries the blacklist
         // admin role alongside its own, which is how 18 addresses fan out to 21 assignments.
-        DeployScript.RoleAssignmentAddresses memory addresses = DeployScript.RoleAssignmentAddresses({
+        RoleAssignmentAddresses memory addresses = RoleAssignmentAddresses({
             pauserAddress: address(0x1001),
             unpauserAddress: address(0x1002),
             upgraderAddress: address(0x1003),
@@ -87,7 +88,7 @@ contract Test_DeployScriptConfig is Test {
             entryPointFeeCollectorAddress: address(0x1011)
         });
 
-        DeployScript.RoleAssignment[] memory assignments = deployScript.generateRolesAssignments(addresses);
+        RoleAssignment[] memory assignments = deployScript.generateRolesAssignments(addresses);
 
         // Independently derived count: the address surface is 18 fields, of which the fee recipient maps to the
         // three LP roles, market ops maps to its own role plus the blacklist admin role, and the other 16 map
@@ -99,7 +100,7 @@ contract Test_DeployScriptConfig is Test {
 
             // Pass 2 of _applyRoleGraph calls getRoleConfig(role) for every granted assignment. If any emitted
             // role were unmapped this call would revert UNKNOWN_ROLE and abort the deployment mid-broadcast.
-            DeployScript.RoleConfig memory cfg = deployScript.getRoleConfig(role);
+            RoleConfig memory cfg = deployScript.getRoleConfig(role);
 
             // The admin re-pointing in pass 2 is only safe if every target admin role is itself rooted in the
             // graph: ADMIN_ROLE (held by the factory admin), or one of the two meta-admin roles that pass 1
@@ -170,7 +171,7 @@ contract Test_DeployScriptConfig is Test {
      */
     function test_RevertIf_GetRoleConfigQueriedWithUnmappedRole() public {
         // The revert must carry the exact queried id so the operator can see WHICH role the config mis-references.
-        vm.expectRevert(abi.encodeWithSelector(DeployScript.UNKNOWN_ROLE.selector, BURNER_ROLE));
+        vm.expectRevert(abi.encodeWithSelector(DeployScript.UnknownRole.selector, BURNER_ROLE));
         deployScript.getRoleConfig(BURNER_ROLE);
     }
 
@@ -198,7 +199,7 @@ contract Test_DeployScriptConfig is Test {
         assertNotEq(marketIdA, marketIdB, "abi.encode keeps shifted name boundaries distinct");
 
         // An identical config rerun in the same block still derives the same id (no nonce) — accepted, because the
-        // colliding redeploy reverts MARKET_COMPONENT_ALREADY_DEPLOYED loudly rather than aliasing components.
+        // colliding redeploy reverts MARKET_COMPONENT_ALREADY_DEPLOYED loudly rather than aliasing Constants.
         bytes32 rerunId = keccak256(abi.encode(string("Senior AB"), string("C-JT"), block.timestamp, block.chainid));
         assertEq(marketIdA, rerunId, "same names in the same block derive the same id, a loud redeploy revert not silent aliasing");
 

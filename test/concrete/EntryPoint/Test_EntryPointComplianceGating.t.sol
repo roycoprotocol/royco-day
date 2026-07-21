@@ -3,14 +3,14 @@ pragma solidity ^0.8.28;
 
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
-import { ST_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { ST_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoBlacklist } from "../../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { toTrancheUnits } from "../../../src/libraries/Units.sol";
+import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 
 /**
  * @title Test_EntryPointComplianceGating

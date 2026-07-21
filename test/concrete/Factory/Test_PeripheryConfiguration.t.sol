@@ -3,14 +3,14 @@ pragma solidity ^0.8.28;
 
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
+import { SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { EntryPointConfigurer } from "../../../src/factory/templates/periphery/EntryPointConfigurer.sol";
 import { MarketSyncerConfigurer } from "../../../src/factory/templates/periphery/MarketSyncerConfigurer.sol";
-import { SYNC_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoFactory } from "../../../src/interfaces/factory/IRoycoFactory.sol";
+import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 
 /**
  * @title PeripheryConfiguratorHarness
@@ -21,14 +21,7 @@ import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 contract PeripheryConfiguratorHarness is EntryPointConfigurer, MarketSyncerConfigurer {
     IRoycoFactory internal immutable FACTORY;
 
-    constructor(
-        address _entryPoint,
-        address _syncer,
-        IRoycoFactory _factory
-    )
-        EntryPointConfigurer(_entryPoint, _factory)
-        MarketSyncerConfigurer(_syncer)
-    {
+    constructor(address _entryPoint, address _syncer, IRoycoFactory _factory) EntryPointConfigurer(_entryPoint, _factory) MarketSyncerConfigurer(_syncer) {
         FACTORY = _factory;
     }
 
@@ -79,7 +72,8 @@ contract Test_PeripheryConfiguration is EntryPointTestBase {
 
     /// @dev Builds a TrancheConfig with a marker deposit delay so a test can prove which tranche received which config
     function _markerConfig(uint24 _depositDelay) internal pure returns (IRoycoDayEntryPoint.TrancheConfig memory) {
-        return IRoycoDayEntryPoint.TrancheConfig({ enabled: true, depositDelaySeconds: _depositDelay, redemptionDelaySeconds: 1 hours, oracleClock: address(0) });
+        return
+            IRoycoDayEntryPoint.TrancheConfig({ enabled: true, depositDelaySeconds: _depositDelay, redemptionDelaySeconds: 1 hours, oracleClock: address(0) });
     }
 
     // ---------------------------------------------------------------------
@@ -128,6 +122,8 @@ contract Test_PeripheryConfiguration is EntryPointTestBase {
         assertEq(entryPoint.getTrancheConfig(address(seniorTranche)).baseConfig.depositDelaySeconds, 111, "ST took its paired config");
         assertEq(entryPoint.getTrancheConfig(address(liquidityTranche)).baseConfig.depositDelaySeconds, 333, "LT took its paired config");
         // The skipped slot's config (999) was never applied to the junior tranche, its delay is untouched
-        assertEq(entryPoint.getTrancheConfig(address(juniorTranche)).baseConfig.depositDelaySeconds, defaultDelay, "the absent tranche's config was never applied");
+        assertEq(
+            entryPoint.getTrancheConfig(address(juniorTranche)).baseConfig.depositDelaySeconds, defaultDelay, "the absent tranche's config was never applied"
+        );
     }
 }

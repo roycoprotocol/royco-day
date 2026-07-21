@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { Initializable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import { UUPSUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import { Initializable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
 import { RoycoDayEntryPoint } from "../../../src/entrypoint/RoycoDayEntryPoint.sol";
-import { ADMIN_ENTRY_POINT_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { ADMIN_ENTRY_POINT_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { TrancheType } from "../../../src/libraries/Types.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
 import { MockRoycoFactory } from "../../mocks/MockRoycoFactory.sol";
+import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 
 /**
  * @title Test_EntryPointConstructionAndAdmin
@@ -114,9 +114,7 @@ contract Test_EntryPointConstructionAndAdmin is EntryPointTestBase {
         configs[1].redemptionDelaySeconds = 3 hours;
         entryPointFactory.executeAsFactory(address(entryPoint), abi.encodeCall(IRoycoDayEntryPoint.modifyTrancheConfigs, (tranches, configs)));
 
-        assertEq(
-            entryPoint.getTrancheConfig(tranches[1]).baseConfig.redemptionDelaySeconds, 3 hours, "the factory-routed config update must be stored"
-        );
+        assertEq(entryPoint.getTrancheConfig(tranches[1]).baseConfig.redemptionDelaySeconds, 3 hours, "the factory-routed config update must be stored");
     }
 
     function test_factoryRoute_revertsWhenFactoryLacksRole() public {

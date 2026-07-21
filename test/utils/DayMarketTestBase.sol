@@ -24,7 +24,7 @@ import {
     LT_LP_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
-} from "../../src/factory/RolesConfiguration.sol";
+} from "../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
@@ -822,7 +822,7 @@ abstract contract DayMarketTestBase is Assertions {
             accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoVaultTranche.deposit.selector), _depositRole);
             accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoVaultTranche.redeem.selector), _redeemRole);
         }
-        // Pause/unpause are bound for parity with the other components, but the tranche enforces no pause of its own:
+        // Pause/unpause are bound for parity with the other Constants, but the tranche enforces no pause of its own:
         // the kernel is the market's single pause authority, so a tranche-level pause is inert
         accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         accessManager.setTargetFunctionRole(_tranche, _sels(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);

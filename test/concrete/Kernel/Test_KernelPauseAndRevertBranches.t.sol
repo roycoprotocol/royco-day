@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { stdError } from "../../../lib/forge-std/src/Test.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
-import { LT_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { LT_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
@@ -224,7 +224,7 @@ contract Test_KernelPauseAndRevertBranches is DayMarketTestBase {
 
     /**
      * @notice A tranche-level pause is inert: it sets the tranche's own flag (bound for parity with the other
-     *         components, mirroring the accountant) but gates nothing, because every tranche operation and token
+     *         Constants, mirroring the accountant) but gates nothing, because every tranche operation and token
      *         movement is gated on the kernel's pause. Only pausing the kernel freezes the tranche
      * @dev An operator who reaches for a tranche pause changes nothing, so the market's single pause authority is the
      *      kernel: this pins that a tranche flag is inert while a kernel pause is enforced on the same flow

@@ -3,10 +3,10 @@ pragma solidity ^0.8.28;
 
 import { ERC20PermitUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
-import { JT_LP_ROLE, LT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { JT_LP_ROLE, LT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/Roles.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_TranchePermit_Tranches
@@ -89,7 +89,8 @@ contract Test_TranchePermit_Tranches is DayMarketTestBase {
         vm.prank(ST_PROVIDER);
         seniorTranche.transfer(PERMIT_OWNER, 10e18);
         assertEq(seniorTranche.nonces(PERMIT_OWNER), 0, "a fresh owner must start at nonce zero on the senior tranche");
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(PERMIT_OWNER_KEY, _permitDigest(address(seniorTranche), "Royco Senior Tranche", ST_DELEGATE, 10e18, 0, deadline));
+        (uint8 v, bytes32 r, bytes32 s) =
+            vm.sign(PERMIT_OWNER_KEY, _permitDigest(address(seniorTranche), "Royco Senior Tranche", ST_DELEGATE, 10e18, 0, deadline));
         // Anyone may submit the signed permit, the signature alone authorizes the approval
         seniorTranche.permit(PERMIT_OWNER, ST_DELEGATE, 10e18, deadline, v, r, s);
         assertEq(seniorTranche.allowance(PERMIT_OWNER, ST_DELEGATE), 10e18, "the permit must set the allowance to exactly the signed value");
@@ -145,7 +146,8 @@ contract Test_TranchePermit_Tranches is DayMarketTestBase {
 
         // --- Expired: the deadline check fires before any signature work, one second past is already dead ---
         uint256 expiredDeadline = block.timestamp - 1;
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(PERMIT_OWNER_KEY, _permitDigest(address(seniorTranche), "Royco Senior Tranche", ST_DELEGATE, 10e18, 0, expiredDeadline));
+        (uint8 v, bytes32 r, bytes32 s) =
+            vm.sign(PERMIT_OWNER_KEY, _permitDigest(address(seniorTranche), "Royco Senior Tranche", ST_DELEGATE, 10e18, 0, expiredDeadline));
         vm.expectRevert(abi.encodeWithSelector(ERC20PermitUpgradeable.ERC2612ExpiredSignature.selector, expiredDeadline));
         seniorTranche.permit(PERMIT_OWNER, ST_DELEGATE, 10e18, expiredDeadline, v, r, s);
         assertEq(seniorTranche.allowance(PERMIT_OWNER, ST_DELEGATE), 0, "an expired permit must not set any allowance");
@@ -191,7 +193,8 @@ contract Test_TranchePermit_Tranches is DayMarketTestBase {
 
         // The signature-based approval lands even under pause
         uint256 deadline = block.timestamp + 1 hours;
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(PERMIT_OWNER_KEY, _permitDigest(address(seniorTranche), "Royco Senior Tranche", ST_DELEGATE, 2e18, 0, deadline));
+        (uint8 v, bytes32 r, bytes32 s) =
+            vm.sign(PERMIT_OWNER_KEY, _permitDigest(address(seniorTranche), "Royco Senior Tranche", ST_DELEGATE, 2e18, 0, deadline));
         seniorTranche.permit(PERMIT_OWNER, ST_DELEGATE, 2e18, deadline, v, r, s);
         assertEq(seniorTranche.allowance(PERMIT_OWNER, ST_DELEGATE), 2e18, "a paused market must still accept the pure-approval permit");
         assertEq(seniorTranche.nonces(PERMIT_OWNER), 1, "the permit must consume the nonce even while paused");
