@@ -21,7 +21,7 @@ import {
     ADMIN_UPGRADER_ROLE,
     DEPLOYER_ROLE,
     SYNC_ROLE
-} from "./RolesConfiguration.sol";
+} from "./Roles.sol";
 
 /**
  * @title RoycoFactory
