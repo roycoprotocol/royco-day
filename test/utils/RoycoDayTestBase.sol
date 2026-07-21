@@ -5,7 +5,8 @@ import { Test } from "../../lib/forge-std/src/Test.sol";
 import { Vm } from "../../lib/forge-std/src/Vm.sol";
 import { AccessManager } from "../../lib/openzeppelin-contracts/contracts/access/manager/AccessManager.sol";
 import { DeployScript } from "../../script/Deploy.s.sol";
-import { ADMIN_UNPAUSER_ROLE, JT_LP_ROLE, ST_LP_ROLE } from "../../src/factory/RolesConfiguration.sol";
+import { DeploymentResult, RoleAssignment, RoleAssignmentAddresses } from "../../script/config/DeploymentTypes.sol";
+import { ADMIN_UNPAUSER_ROLE, JT_LP_ROLE, ST_LP_ROLE } from "../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../src/factory/RoycoFactory.sol";
 import { IRoycoBlacklist } from "../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
@@ -241,7 +242,7 @@ abstract contract RoycoDayTestBase is Test, Assertions {
         providers.push(JT_DAN_ADDRESS);
     }
 
-    function _setDeployedMarket(DeployScript.DeploymentResult memory _deploymentResult) internal {
+    function _setDeployedMarket(DeploymentResult memory _deploymentResult) internal {
         YDM = _deploymentResult.ydm;
         vm.label(address(YDM), "YDM");
 
@@ -270,7 +271,7 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     }
 
     /// @dev Wires roles that live in `ExtraRoles` and are intentionally NOT passed through
-    ///      `factory.initialize` (canonical `RolesConfiguration.getRoleConfig` doesn't know
+    ///      `factory.initialize` (canonical `Roles.getRoleConfig` doesn't know
     ///      them, so including them in the init array would revert). Pranks FNDN (the
     ///      admin-role holder): `OWNER_ADDRESS` for a fresh in-memory deploy, `ROOT_MULTISIG`
     ///      when the test forks a chain where the factory is already on-chain.
@@ -348,9 +349,9 @@ abstract contract RoycoDayTestBase is Test, Assertions {
 
     /// @notice Generates role assignments using the role-specific addresses
     /// @return roleAssignments Array of role assignment configurations
-    function _generateRoleAssignments() internal view returns (DeployScript.RoleAssignment[] memory roleAssignments) {
+    function _generateRoleAssignments() internal view returns (RoleAssignment[] memory roleAssignments) {
         return DEPLOY_SCRIPT.generateRolesAssignments(
-            DeployScript.RoleAssignmentAddresses({
+            RoleAssignmentAddresses({
                 pauserAddress: PAUSER_ADDRESS,
                 unpauserAddress: UNPAUSER_ADDRESS,
                 upgraderAddress: UPGRADER_ADDRESS,

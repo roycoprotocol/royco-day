@@ -19,7 +19,7 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { SafeCast } from "../../../lib/openzeppelin-contracts/contracts/utils/math/SafeCast.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
-import { MarketDeploymentConfig } from "../../../script/config/MarketDeploymentConfig.sol";
+import { DeploymentResult, MarketConfig } from "../../../script/config/DeploymentTypes.sol";
 import {
     ADMIN_BALANCER_POOL_MANAGER_ROLE,
     ADMIN_ENTRY_POINT_ROLE,
@@ -39,7 +39,7 @@ import {
     PUBLIC_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
-} from "../../../src/factory/RolesConfiguration.sol";
+} from "../../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
@@ -103,7 +103,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
 
         // Deploy the Day-shaped SNUSD market end to end through the real script, sourcing the market config from the config
         // file (single source of truth) — not an inline test fixture.
-        DeployScript.DeploymentResult memory result = DEPLOY_SCRIPT.deploy(
+        DeploymentResult memory result = DEPLOY_SCRIPT.deploy(
             DEPLOY_SCRIPT.getMarketConfig("snUSD"),
             FACTORY_ADMIN, // factory admin (holds AccessManager ADMIN_ROLE)
             PROTOCOL_FEE_RECIPIENT_ADDRESS,
@@ -338,7 +338,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertEq(ENTRY_POINT.ROYCO_FACTORY(), address(FACTORY), "entry point factory binding");
         assertEq(AccessManagedUpgradeable(address(ENTRY_POINT)).authority(), address(ACCESS_MANAGER), "entry point authority");
 
-        MarketDeploymentConfig.MarketConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig("snUSD");
+        MarketConfig memory cfg = DEPLOY_SCRIPT.getMarketConfig("snUSD");
         _assertEntryPointConfig(address(ST), cfg.stEntryPointConfig, "ST");
         _assertEntryPointConfig(address(JT), cfg.jtEntryPointConfig, "JT");
         _assertEntryPointConfig(address(LT), cfg.ltEntryPointConfig, "LT");

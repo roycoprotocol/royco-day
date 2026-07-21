@@ -180,6 +180,10 @@ interface IRoycoDayKernel {
     /// @return quoteAsset The quote asset's address
     function QUOTE_ASSET() external view returns (address quoteAsset);
 
+    /// @notice Whether the market enforces the vault-shares transfer whitelist on tranche balance updates
+    /// @return enforced True if transfer-whitelist screening is enforced for this market
+    function ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER() external view returns (bool enforced);
+
     /**
      * @notice Sets the new protocol fee recipient
      * @dev Only callable by a designated admin

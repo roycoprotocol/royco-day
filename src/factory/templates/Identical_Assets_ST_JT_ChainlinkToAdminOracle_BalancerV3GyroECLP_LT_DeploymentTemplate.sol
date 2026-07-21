@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.28;
 
-import { ILPOracleFactoryBase } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/oracles/ILPOracleFactoryBase.sol";
 import { GyroECLPPoolFactory } from "../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/GyroECLPPoolFactory.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoFactory } from "../../interfaces/factory/IRoycoFactory.sol";
@@ -10,8 +9,7 @@ import {
 } from "../../kernels/Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
 import { IdenticalAssets_ST_JT_ChainlinkOracle_Quoter } from "../../kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol";
 import { IdenticalAssets_ST_JT_Oracle_Quoter } from "../../kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_Oracle_Quoter.sol";
-import { ADMIN_ORACLE_QUOTER_ROLE } from "../RolesConfiguration.sol";
-import { COMPONENT_ID_DAY_KERNEL_IDENTICAL_CHAINLINK_TO_ADMIN } from "./base/Components.sol";
+import { ADMIN_ORACLE_QUOTER_ROLE } from "../Roles.sol";
 import { BalancerV3_GyroECLP_LT_DeploymentTemplate } from "./liquidity-tranche/BalancerV3_GyroECLP_LT_DeploymentTemplate.sol";
 
 /**
@@ -23,17 +21,11 @@ contract Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3GyroECLP_LT_Dep
     constructor(
         IRoycoFactory _factory,
         GyroECLPPoolFactory _balancerV3PoolFactory,
-        ILPOracleFactoryBase _eclpLPOracleFactory,
         address _roycoDayEntryPoint,
         address _roycoMarketSyncer
     )
-        BalancerV3_GyroECLP_LT_DeploymentTemplate(_factory, _balancerV3PoolFactory, _eclpLPOracleFactory, _roycoDayEntryPoint, _roycoMarketSyncer)
+        BalancerV3_GyroECLP_LT_DeploymentTemplate(_factory, _balancerV3PoolFactory, _roycoDayEntryPoint, _roycoMarketSyncer)
     { }
-
-    /// @inheritdoc BalancerV3_GyroECLP_LT_DeploymentTemplate
-    function _kernelComponentId() internal pure override(BalancerV3_GyroECLP_LT_DeploymentTemplate) returns (bytes32) {
-        return COMPONENT_ID_DAY_KERNEL_IDENTICAL_CHAINLINK_TO_ADMIN;
-    }
 
     /// @inheritdoc BalancerV3_GyroECLP_LT_DeploymentTemplate
     function _kernelInitData(
@@ -59,22 +51,21 @@ contract Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3GyroECLP_LT_Dep
      *      to ADMIN_ORACLE_QUOTER_ROLE. (Every restricted selector must be explicitly bound: an unbound selector
      *      silently defaults to ADMIN_ROLE under OZ AccessManager.)
      */
-    function _kernelQuoterBinding(address _kernel) internal view override(BalancerV3_GyroECLP_LT_DeploymentTemplate) returns (TargetBinding memory) {
-        TargetBinding memory base = super._kernelQuoterBinding(_kernel);
+    function _kernelQuoterBinding() internal view override(BalancerV3_GyroECLP_LT_DeploymentTemplate) returns (bytes4[] memory s, uint64[] memory r) {
+        (bytes4[] memory bs, uint64[] memory br) = super._kernelQuoterBinding();
 
-        bytes4[] memory s = new bytes4[](base.selectors.length + 3);
-        uint64[] memory r = new uint64[](base.selectors.length + 3);
-        for (uint256 i; i < base.selectors.length; ++i) {
-            s[i] = base.selectors[i];
-            r[i] = base.roleIds[i];
+        s = new bytes4[](bs.length + 3);
+        r = new uint64[](bs.length + 3);
+        for (uint256 i; i < bs.length; ++i) {
+            s[i] = bs[i];
+            r[i] = br[i];
         }
-        uint256 j = base.selectors.length;
+        uint256 j = bs.length;
         s[j] = IdenticalAssets_ST_JT_Oracle_Quoter.setConversionRate.selector;
         r[j] = ADMIN_ORACLE_QUOTER_ROLE;
         s[j + 1] = IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.setChainlinkOracle.selector;
         r[j + 1] = ADMIN_ORACLE_QUOTER_ROLE;
         s[j + 2] = IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.setSequencerUptimeFeed.selector;
         r[j + 2] = ADMIN_ORACLE_QUOTER_ROLE;
-        return TargetBinding({ target: _kernel, selectors: s, roleIds: r });
     }
 }

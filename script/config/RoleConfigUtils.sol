@@ -24,12 +24,12 @@ import {
     LT_LP_ROLE,
     ST_LP_ROLE,
     SYNC_ROLE
-} from "../../src/factory/RolesConfiguration.sol";
+} from "../../src/factory/Roles.sol";
 
 /**
  * @title RoleConfigUtils
  * @notice Provides the legacy `RoleConfig` struct and `getRoleConfig` lookup that used to live on the
- *         `RolesConfiguration` contract. Now that `RolesConfiguration.sol` is a file of free role-id
+ *         `Roles` contract. Now that `Roles.sol` is a file of free role-id
  *         constants, scripts that need the per-role admin/guardian/delay configuration inherit this
  *         helper instead.
  */

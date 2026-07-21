@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { JT_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { JT_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { MAX_MINT_DILUTION_WAD, WAD } from "../../../src/libraries/Constants.sol";
 import { SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";

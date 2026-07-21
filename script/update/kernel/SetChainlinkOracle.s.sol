@@ -12,7 +12,7 @@ import { ParameterUpdateBase } from "../base/ParameterUpdateBase.sol";
  *         address + staleness threshold across multiple markets and chains.
  *
  * @dev `setChainlinkOracle` on the kernel is gated by `ADMIN_ORACLE_QUOTER_ROLE`, which has an
- *      execution delay of 0 (Immediate per `RolesConfiguration`). So this uses the harness's
+ *      execution delay of 0 (Immediate per `Roles`). So this uses the harness's
  *      direct-call flow (`_processChainDirect`) — one Safe JSON per chain, no schedule/execute
  *      split. `ROOT_MULTISIG` holds the role on production factories.
  *

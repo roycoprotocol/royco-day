@@ -13,23 +13,22 @@ import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/in
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { RoycoMarketSyncer } from "../../../lib/royco-periphery/src/syncer/RoycoMarketSyncer.sol";
-import { CREATE3 } from "../../../lib/solady/src/utils/CREATE3.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
-import { MarketDeploymentConfig } from "../../../script/config/MarketDeploymentConfig.sol";
-import { RoycoDayEntryPoint } from "../../../src/entrypoint/RoycoDayEntryPoint.sol";
 import {
-    ADMIN_ENTRY_POINT_ROLE,
-    ADMIN_FACTORY_ROLE,
-    ADMIN_ORACLE_QUOTER_ROLE,
-    ADMIN_ROLE,
-    DEPLOYER_ROLE,
-    SYNC_ROLE
-} from "../../../src/factory/RolesConfiguration.sol";
+    DeploymentResult,
+    Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_QuoterKernelParams,
+    KernelType,
+    MarketConfig
+} from "../../../script/config/DeploymentTypes.sol";
+import { Create2DeployUtils } from "../../../script/utils/Create2DeployUtils.sol";
+import { RoycoDayEntryPoint } from "../../../src/entrypoint/RoycoDayEntryPoint.sol";
+import { ADMIN_ENTRY_POINT_ROLE, ADMIN_FACTORY_ROLE, ADMIN_ORACLE_QUOTER_ROLE, ADMIN_ROLE, DEPLOYER_ROLE, SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoFactory } from "../../../src/factory/RoycoFactory.sol";
 import {
     Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3GyroECLP_LT_DeploymentTemplate
 } from "../../../src/factory/templates/Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3GyroECLP_LT_DeploymentTemplate.sol";
-import { TAG_ST_PROXY } from "../../../src/factory/templates/base/Components.sol";
+import { TAG_ST_PROXY } from "../../../src/factory/templates/base/Constants.sol";
+import { BalancerV3_GyroECLP_LT_DeploymentTemplate } from "../../../src/factory/templates/liquidity-tranche/BalancerV3_GyroECLP_LT_DeploymentTemplate.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IIdleCDO } from "../../../src/interfaces/external/idle-finance/IIdleCDO.sol";
@@ -75,6 +74,10 @@ contract Test_IdleCDOMarketDeployment is Test {
     address internal FACTORY_ADMIN = makeAddr("FACTORY_ADMIN");
     address internal DEPLOYER = makeAddr("DEPLOYER");
     address internal PROTOCOL_FEE_RECIPIENT = makeAddr("PROTOCOL_FEE_RECIPIENT");
+
+    /// @dev Pre-mined marketId whose senior-tranche CREATE3 proxy sorts below the quote asset (ST is pool token0) for
+    ///      this suite's deterministic `factory`; the deployment path asserts that ordering. Mined via script/mine-market-id.
+    bytes32 internal constant MARKET_ID = 0x7537556461b25c033e9fe151342e829a6439dc9c0f467afe0667ee9235315cae;
 
     function setUp() public {
         string memory rpc = vm.envString("MAINNET_RPC_URL");
@@ -124,13 +127,15 @@ contract Test_IdleCDOMarketDeployment is Test {
         syncerSelectors[0] = RoycoMarketSyncer.addMarketKernels.selector;
         am.setTargetFunctionRole(address(syncer), syncerSelectors, SYNC_ROLE);
 
-        // The real Idle CDO Day template, bound to this factory. `deployScript` is used only for its pure/view build
-        // helpers (`dayTemplateComponentsForKernelType`, `buildDayParams`, `getMarketConfig`).
+        // The real Idle CDO Day template, bound to this factory. `deployScript` externally deploys each market's
+        // impls/YDMs/pool and pre-deploys its ST + hook proxies (`deployMarketContractsForTest`), then builds the
+        // template params (`buildDayParams`). Its nested `deployDeterministicProxy` calls run with `msg.sender == address(deployScript)`,
+        // so the deployScript must hold DEPLOYER_ROLE.
         deployScript = new DeployScript();
+        am.grantRole(DEPLOYER_ROLE, address(deployScript), 0);
         template = new Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
             IRoycoFactory(address(factory)),
             GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY),
-            ILPOracleFactoryBase(ECLP_LP_ORACLE_FACTORY),
             address(entryPoint),
             address(syncer)
         );
@@ -139,10 +144,6 @@ contract Test_IdleCDOMarketDeployment is Test {
     // ─── helpers ───
 
     function _register() internal {
-        (bytes32[] memory ids, bytes[] memory codes) = deployScript.dayTemplateComponentsForKernelType(
-            DeployScript.KernelType.Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel
-        );
-        template.initialize(ids, codes);
         vm.prank(FACTORY_ADMIN);
         factory.registerTemplate(address(template));
     }
@@ -150,13 +151,13 @@ contract Test_IdleCDOMarketDeployment is Test {
     /// @dev Clones the snUSD market config in memory and swaps in the ST/JT asset plus the Idle CDO kernel type +
     ///      params blob. No config file entry exists for this kernel yet, so the test IS the params source
     ///      (MarketDeploymentConfig untouched).
-    function _marketConfig(address _idleCDO, address _stJtAsset) internal view returns (MarketDeploymentConfig.MarketConfig memory cfg) {
+    function _marketConfig(address _idleCDO, address _stJtAsset) internal view returns (MarketConfig memory cfg) {
         cfg = deployScript.getMarketConfig("snUSD");
         cfg.seniorAsset = _stJtAsset;
         cfg.juniorAsset = _stJtAsset;
-        cfg.kernelType = DeployScript.KernelType.Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel;
+        cfg.kernelType = KernelType.Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel;
         cfg.kernelSpecificParams = abi.encode(
-            DeployScript.Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_QuoterKernelParams({
+            Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_QuoterKernelParams({
                 idleCDO: _idleCDO,
                 stAndJTQuoterParams: IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter.ST_JT_QuoterSpecificParams({
                     // Virtual-price-primary configuration: the zero sentinel makes the quoter read the CDO's
@@ -171,13 +172,16 @@ contract Test_IdleCDOMarketDeployment is Test {
         );
     }
 
-    function _encodedParams(bytes32 _marketId, address _idleCDO, address _stJtAsset) internal view returns (bytes memory) {
-        return abi.encode(deployScript.buildDayParams(_marketConfig(_idleCDO, _stJtAsset), _marketId, PROTOCOL_FEE_RECIPIENT, address(0)));
+    function _encodedParams(bytes32 _marketId, address _idleCDO, address _stJtAsset) internal returns (bytes memory) {
+        MarketConfig memory cfg = _marketConfig(_idleCDO, _stJtAsset);
+        BalancerV3_GyroECLP_LT_DeploymentTemplate.MarketContracts memory mc =
+            deployScript.deployMarketContractsForTest(cfg, _marketId, factory, address(template), address(am));
+        return abi.encode(deployScript.buildDayParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(0), mc));
     }
 
     function _deploy(bytes32 _marketId) internal returns (IRoycoProtocolTemplate.DeploymentResult memory) {
-        // Precompute the params first: `_encodedParams` makes external calls to `deployScript`, which would otherwise
-        // consume the `vm.prank(DEPLOYER)` intended for `executeMarketDeployment`.
+        // Precompute the params first: `_encodedParams` externally deploys the market contracts as `deployScript`,
+        // which would otherwise consume the `vm.prank(DEPLOYER)` intended for `executeMarketDeployment`.
         bytes memory p = _encodedParams(_marketId, PARETO_FALCONX_CDO, AA_TRANCHE_TOKEN);
         vm.prank(DEPLOYER);
         return factory.executeMarketDeployment(address(template), p);
@@ -193,7 +197,7 @@ contract Test_IdleCDOMarketDeployment is Test {
     ///         and prices the senior pool leg via the kernel
     function test_ExecuteMarketDeployment_IdleCDOKernelWiring() external {
         _register();
-        IRoycoProtocolTemplate.DeploymentResult memory r = _deploy(keccak256("idle-cdo-market-A"));
+        IRoycoProtocolTemplate.DeploymentResult memory r = _deploy(MARKET_ID);
 
         // The kernel proxy pinned the REAL CDO as its constructor immutable.
         assertEq(
@@ -246,20 +250,22 @@ contract Test_IdleCDOMarketDeployment is Test {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice The REAL CDO's AA tranche token mismatches a market whose ST asset is the snUSD vault, failing
-    ///         the kernel constructor's TRANCHE_ASSET_MUST_BE_CDO_AA_TRANCHE guard inside the CREATE3 initcode
-    ///         (solady surfaces creation reverts as DeploymentFailed), and the whole deployment unwinds atomically:
-    ///         no market contracts, no registry entries
+    ///         the kernel constructor's TRANCHE_ASSET_MUST_BE_CDO_AA_TRANCHE guard. Under the split deployment flow the
+    ///         kernel implementation is deployed EXTERNALLY (in `deployMarketContractsForTest`) before the wiring
+    ///         transaction, so the mismatch now aborts there: the CREATE2 factory surfaces the constructor revert as a
+    ///         failed deployment, and the whole external call unwinds atomically — no market contracts, no registry entries
     function test_RevertIf_CDOAATrancheMismatchesSTAsset_DeploymentUnwindsAtomically() external {
         _register();
 
-        bytes32 marketId = keccak256("idle-cdo-bad-asset");
+        bytes32 marketId = MARKET_ID;
         // The REAL CDO against the WRONG ST asset (the snUSD vault, not the CDO's AA tranche token).
-        bytes memory p = _encodedParams(marketId, PARETO_FALCONX_CDO, SNUSD_VAULT);
+        MarketConfig memory cfg = _marketConfig(PARETO_FALCONX_CDO, SNUSD_VAULT);
         address predictedST = factory.predictDeterministicAddress(keccak256(abi.encodePacked("ROYCO_MARKET_", marketId, TAG_ST_PROXY)));
 
-        vm.prank(DEPLOYER);
-        vm.expectRevert(CREATE3.DeploymentFailed.selector);
-        factory.executeMarketDeployment(address(template), p);
+        // The canonical CREATE2 deployer swallows the kernel quoter's constructor revert reason, so the failure
+        // surfaces as `DeploymentFailed` with empty return data
+        vm.expectRevert(abi.encodeWithSelector(Create2DeployUtils.DeploymentFailed.selector, bytes("")));
+        deployScript.deployMarketContractsForTest(cfg, marketId, factory, address(template), address(am));
 
         // Atomic unwind: nothing was deployed or registered.
         assertEq(predictedST.code.length, 0, "no tranche deployed");

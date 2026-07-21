@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
-import { ST_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { ST_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";

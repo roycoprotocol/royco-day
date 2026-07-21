@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { RoycoBlacklist } from "../../../src/auth/RoycoBlacklist.sol";
-import { JT_LP_ROLE, LT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { JT_LP_ROLE, LT_LP_ROLE, ST_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoBlacklist } from "../../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";

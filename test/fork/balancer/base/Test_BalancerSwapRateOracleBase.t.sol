@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-
 import { GyroECLPMath } from "../../../../lib/balancer-v3-monorepo/pkg/pool-gyro/contracts/lib/GyroECLPMath.sol";
 import { PausableUpgradeable } from "../../../../lib/openzeppelin-contracts-upgradeable/contracts/utils/PausableUpgradeable.sol";
 import { Math } from "../../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 
-import { ADMIN_UNPAUSER_ROLE } from "../../../../src/factory/RolesConfiguration.sol";
+import { ADMIN_UNPAUSER_ROLE } from "../../../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayAccountant } from "../../../../src/interfaces/IRoycoDayAccountant.sol";
 import { WAD } from "../../../../src/libraries/Constants.sol";

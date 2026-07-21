@@ -8,7 +8,7 @@ import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/ac
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
-import { ADMIN_ORACLE_QUOTER_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { ADMIN_ORACLE_QUOTER_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import {
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel as ShippedKernel

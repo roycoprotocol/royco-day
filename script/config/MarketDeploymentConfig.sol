@@ -3,13 +3,20 @@ pragma solidity ^0.8.28;
 
 import { IGyroECLPPool } from "../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/pool-gyro/IGyroECLPPool.sol";
 import { IERC20Metadata } from "../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { BalancerV3_GyroECLP_LT_DeploymentTemplate } from "../../src/factory/templates/liquidity-tranche/BalancerV3_GyroECLP_LT_DeploymentTemplate.sol";
 import { IRoycoDayEntryPoint } from "../../src/interfaces/IRoycoDayEntryPoint.sol";
 import {
     IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
 } from "../../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
 import { BalancerV3_LT_BPTOracle_Quoter } from "../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
-import { DeployScript } from "../Deploy.s.sol";
+import {
+    AdaptiveCurveYDM_V2_Params,
+    ChainConfig,
+    GyroECLPPoolParams,
+    IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams,
+    KernelType,
+    MarketConfig,
+    YDMType
+} from "./DeploymentTypes.sol";
 
 /**
  * @title MarketDeploymentConfig
@@ -34,9 +41,28 @@ abstract contract MarketDeploymentConfig {
     address internal constant ROOT_MULTISIG = 0x7c405bbD131e42af506d14e752f2e59B19D49997;
     address internal constant PROTOCOL_FEE_RECIPIENT = 0x05ea95aE815809D77153Ed3500Ad6d936712b639;
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SINGLETON CREATE2 SALTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @dev CREATE2 salts for the protocol singletons (AccessManager, factory, etc.) so reruns within a test reuse them
+    bytes32 internal constant ACCESS_MANAGER_SALT = keccak256("ROYCO_ACCESS_MANAGER");
+    bytes32 internal constant FACTORY_IMPL_SALT = keccak256("ROYCO_FACTORY_IMPLEMENTATION");
+    bytes32 internal constant FACTORY_PROXY_SALT = keccak256("ROYCO_FACTORY_PROXY");
+    bytes32 internal constant BLACKLIST_IMPL_SALT = keccak256("ROYCO_BLACKLIST_IMPLEMENTATION");
+    bytes32 internal constant BLACKLIST_PROXY_SALT = keccak256("ROYCO_BLACKLIST_PROXY");
+    bytes32 internal constant ENTRY_POINT_IMPL_SALT = keccak256("ROYCO_DAY_ENTRY_POINT_IMPLEMENTATION");
+    bytes32 internal constant ENTRY_POINT_PROXY_SALT = keccak256("ROYCO_DAY_ENTRY_POINT_PROXY");
+    bytes32 internal constant SYNCER_IMPL_SALT = keccak256("ROYCO_MARKET_SYNCER_IMPLEMENTATION");
+    bytes32 internal constant SYNCER_PROXY_SALT = keccak256("ROYCO_MARKET_SYNCER_PROXY");
+    bytes32 internal constant CONSTANT_PRICE_FEED_SALT = keccak256("ROYCO_BPT_ORACLE_CONSTANT_PRICE_FEED");
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // TOKEN ADDRESSES
+    // ═══════════════════════════════════════════════════════════════════════════
+
     mapping(uint256 chainId => address) internal USDC;
     mapping(uint256 chainId => address) internal GYRO_ECLP_POOL_FACTORY;
-    /// @dev Balancer's E-CLP LP oracle factory (deploys the manipulation-resistant BPT TVL oracle per pool).
     mapping(uint256 chainId => address) internal ECLP_LP_ORACLE_FACTORY;
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -46,90 +72,17 @@ abstract contract MarketDeploymentConfig {
     string public constant SNUSD = "snUSD";
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // CHAIN-SPECIFIC CONFIG (defined once per chain)
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    struct ChainConfig {
-        address factoryAdmin;
-        address protocolFeeRecipient;
-        address pauserAddress;
-        address unpauserAddress;
-        address upgraderAddress;
-        address syncRoleAddress;
-        address adminKernelAddress;
-        address adminAccountantAddress;
-        address adminProtocolFeeSetterAddress;
-        address adminOracleQuoterAddress;
-        address lpRoleAdminAddress;
-        address guardianAddress;
-        address deployerAddress;
-        address deployerAdminAddress;
-        uint32 scheduledOperationsExpirySeconds;
-        // Day: the Balancer V3 Gyro E-CLP pool factory the LT pool is created against.
-        address gyroECLPPoolFactory;
-        // Day: Balancer's E-CLP LP oracle factory; the template deploys each market's BPT oracle through it.
-        address eclpLPOracleFactory;
-        // Foundation ("fndn") operational role holders.
-        address balancerPoolManagerAddress;
-        address marketOpsAddress;
-        // Holder of the dedicated liquidity-premium reinvestment retry knob (split from market ops).
-        address marketReinvestLiquidityPremiumAddress;
-        // Entry point admins: config changes (delays, oracle clocks, enable flags) and protocol fee collection.
-        address adminEntryPointAddress;
-        address entryPointFeeCollectorAddress;
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // MARKET-SPECIFIC CONFIG
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    struct MarketConfig {
-        // Market identification
-        string marketName;
-        uint256 chainId;
-        // Tranche metadata
-        string seniorTrancheName;
-        string seniorTrancheSymbol;
-        string juniorTrancheName;
-        string juniorTrancheSymbol;
-        string liquidityTrancheName;
-        string liquidityTrancheSymbol;
-        // Assets
-        address seniorAsset;
-        address juniorAsset;
-        // Dust tolerances
-        uint256 stDustTolerance;
-        uint256 jtDustTolerance;
-        // Kernel
-        DeployScript.KernelType kernelType;
-        bytes kernelSpecificParams;
-        uint64 stSelfLiquidationBonusWAD;
-        bool enforceVaultSharesTransferWhitelist;
-        // Accountant
-        uint64 stProtocolFeeWAD;
-        uint64 jtProtocolFeeWAD;
-        uint64 jtYieldShareProtocolFeeWAD;
-        uint64 minCoverageWAD;
-        uint256 coverageLiquidationUtilizationWAD;
-        uint24 fixedTermDurationSeconds;
-        DeployScript.YDMType ydmType;
-        bytes ydmSpecificParams; // JT YDM curve
-        bytes ltYdmSpecificParams; // LDM curve
-        uint256 jtYdmTargetUtilizationWAD; // JT YDM target-utilization kink
-        uint256 ltYdmTargetUtilizationWAD; // LDM target-utilization kink
-        // Liquidity tranche: the Gyro E-CLP {ST_share, quote} pool the LT BPT is minted from.
-        BalancerV3_GyroECLP_LT_DeploymentTemplate.GyroECLPPoolParams gyroECLPPoolParams;
-        // Entry point config per tranche
-        IRoycoDayEntryPoint.TrancheConfig stEntryPointConfig;
-        IRoycoDayEntryPoint.TrancheConfig jtEntryPointConfig;
-        IRoycoDayEntryPoint.TrancheConfig ltEntryPointConfig;
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
     // MARKET CONFIG MAPPING
     // ═══════════════════════════════════════════════════════════════════════════
 
     mapping(string marketName => MarketConfig) internal _marketConfigs;
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MINED MARKET IDs (per market, per factory)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice The pre-mined marketId to use for `marketName` when deploying against `factory`.
+    mapping(bytes32 marketNameHash => mapping(address factory => bytes32 marketId)) internal _marketIds;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // ERRORS
@@ -137,6 +90,7 @@ abstract contract MarketDeploymentConfig {
 
     error MarketConfigNotFound(string marketName);
     error MarketChainIdMismatch(string marketName, uint256 expectedChainId, uint256 actualChainId);
+    error MarketIdNotConfigured(string marketName, address factory);
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CONSTRUCTOR
@@ -153,6 +107,25 @@ abstract contract MarketDeploymentConfig {
         ECLP_LP_ORACLE_FACTORY[MAINNET] = 0x301EDe5Fd4f9d7266B09c3A2E38F97776447154B;
 
         _initializeMarketConfigs();
+        _initializeMinedMarketIds();
+    }
+
+    /// @notice Registers each market's pre-mined marketId, keyed by the factory it was mined against.
+    /// @dev Mined offline (script/mine-market-id); re-mine and update the value if a market's factory changes (new
+    ///      deployer or changed singleton salts). The factory addresses are the deterministic proxy addresses the
+    ///      production deployer and the test harness's `vm.createWallet("DEPLOYER")` each stand up.
+    function _initializeMinedMarketIds() internal {
+        bytes32 snUSDHash = keccak256(bytes(SNUSD));
+        // snUSD against the production factory.
+        _marketIds[snUSDHash][0x76fF747399Ed12F0B631323d6d4c6E1b66cB7c89] = 0xdad618951447dde839beee414c1ff98055c009873b5833ac1976bf31d29771f2;
+        // snUSD against the local test factory.
+        _marketIds[snUSDHash][0x87F4fccE54F4D03De715A0C6fcd28b7Ea24664d1] = 0xb3d433a58a0d62af783a1fcb783e83f5efc3867dfa2e807ed7455be4373d0bda;
+    }
+
+    /// @notice The pre-mined marketId for `_marketName` against `_factory`. Reverts if none is configured.
+    function getMarketId(string memory _marketName, address _factory) public view returns (bytes32 marketId) {
+        marketId = _marketIds[keccak256(bytes(_marketName))][_factory];
+        require(marketId != bytes32(0), MarketIdNotConfigured(_marketName, _factory));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -181,8 +154,6 @@ abstract contract MarketDeploymentConfig {
             balancerPoolManagerAddress: ROOT_MULTISIG,
             marketOpsAddress: ROOT_MULTISIG,
             marketReinvestLiquidityPremiumAddress: ROOT_MULTISIG,
-            // The operational (executor) multisig manages entry point tranche configs, mirroring the WCE-immediate
-            // model of the retired standalone entry point deployment; the root multisig collects protocol fees.
             adminEntryPointAddress: EXECUTOR_MULTISIG,
             entryPointFeeCollectorAddress: ROOT_MULTISIG
         });
@@ -243,24 +214,24 @@ abstract contract MarketDeploymentConfig {
             juniorAsset: 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313,
             stDustTolerance: 5,
             jtDustTolerance: 5,
-            kernelType: DeployScript.KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel,
+            kernelType: KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel,
             kernelSpecificParams: abi.encode(
-                DeployScript.IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams({
-                    stAndJTQuoterParams: IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams({
-                        // Enable the oracle leg by using the sentinel initial conversion rate
-                        initialConversionRateWAD: 0,
-                        baseAssetToNavAssetOracle: 0x5e7281f74e74D76347f0b8f4a36Fd3cb29c19d95,
-                        // RedStone pushes updates ~every 12 hours; 48h staleness threshold for safety
-                        stalenessThresholdSeconds: 48 hours,
-                        // Ethereum mainnet has no L2 sequencer, so the sequencer-uptime check is disabled
-                        sequencerUptimeFeed: address(0),
-                        gracePeriodSeconds: 0
-                    }),
-                    ltQuoterParams: BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams({
-                        bptOracle: address(0), // This is deployed by the template after the pool is created and ignored here
-                        maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
+                IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams({
+                        stAndJTQuoterParams: IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.ST_JT_QuoterSpecificParams({
+                            // Enable the oracle leg by using the sentinel initial conversion rate
+                            initialConversionRateWAD: 0,
+                            baseAssetToNavAssetOracle: 0x5e7281f74e74D76347f0b8f4a36Fd3cb29c19d95,
+                            // RedStone pushes updates ~every 12 hours; 48h staleness threshold for safety
+                            stalenessThresholdSeconds: 48 hours,
+                            // Ethereum mainnet has no L2 sequencer, so the sequencer-uptime check is disabled
+                            sequencerUptimeFeed: address(0),
+                            gracePeriodSeconds: 0
+                        }),
+                        ltQuoterParams: BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams({
+                            bptOracle: address(0), // This is deployed by the template after the pool is created and ignored here
+                            maxReinvestmentSlippageWAD: 0.001e18 // 10 bps single-sided liquidity-premium reinvestment slippage gate
+                        })
                     })
-                })
             ),
             enforceVaultSharesTransferWhitelist: false,
             stSelfLiquidationBonusWAD: 0.005e18,
@@ -270,20 +241,16 @@ abstract contract MarketDeploymentConfig {
             minCoverageWAD: 0.1e18,
             coverageLiquidationUtilizationWAD: 1.0009009e18,
             fixedTermDurationSeconds: 0, // stable market, no fixed term
-            ydmType: DeployScript.YDMType.AdaptiveCurve_V2,
+            ydmType: YDMType.AdaptiveCurve_V2,
             ydmSpecificParams: abi.encode(
-                DeployScript.AdaptiveCurveYDM_V2_Params({
-                    yieldShareAtZeroUtilWAD: 0.11e18, yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18
-                })
+                AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.11e18, yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18 })
             ),
             ltYdmSpecificParams: abi.encode(
-                DeployScript.AdaptiveCurveYDM_V2_Params({
-                        yieldShareAtZeroUtilWAD: 0.11e18, yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18
-                    })
+                AdaptiveCurveYDM_V2_Params({ yieldShareAtZeroUtilWAD: 0.11e18, yieldShareAtTargetUtilWAD: 0.11e18, yieldShareAtFullUtilWAD: 0.31e18 })
             ),
             jtYdmTargetUtilizationWAD: 0.9e18,
             ltYdmTargetUtilizationWAD: 0.9e18,
-            gyroECLPPoolParams: BalancerV3_GyroECLP_LT_DeploymentTemplate.GyroECLPPoolParams({
+            gyroECLPPoolParams: GyroECLPPoolParams({
                 name: _poolName(SNUSD, USDC[block.chainid]),
                 symbol: _poolSymbol(SNUSD, USDC[block.chainid]),
                 eclpParams: IGyroECLPPool.EclpParams({

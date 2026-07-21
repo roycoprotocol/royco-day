@@ -12,7 +12,8 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { IERC20Metadata } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { DeployScript } from "../../../script/Deploy.s.sol";
-import { ADMIN_ACCOUNTANT_ROLE, ADMIN_UNPAUSER_ROLE, LT_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { DeploymentResult } from "../../../script/config/DeploymentTypes.sol";
+import { ADMIN_ACCOUNTANT_ROLE, ADMIN_UNPAUSER_ROLE, LT_LP_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoBlacklist } from "../../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
@@ -58,7 +59,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Deploys the kernel + market for this test, typically `DEPLOY_SCRIPT.deploy(getMarketConfig("<name>"), ...)`.
-    function _deployKernelAndMarket() internal virtual returns (DeployScript.DeploymentResult memory result);
+    function _deployKernelAndMarket() internal virtual returns (DeploymentResult memory result);
 
     /// @inheritdoc IKernelTestHooks
     function getTestConfig() public view virtual override(IKernelTestHooks) returns (TestConfig memory);
@@ -1288,9 +1289,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         OpReceipt memory r = _doDepositST(ST_BOB_ADDRESS, assets);
 
         assertEq(r.shares, previewShares, "previewDeposit must equal the executed deposit exactly");
-        assertApproxEqAbs(
-            r.post.lastSTRawNAV - r.pre.lastSTRawNAV, depositNAV, maxNAVDelta(), "the quoter-valued deposit must match the booked raw delta"
-        );
+        assertApproxEqAbs(r.post.lastSTRawNAV - r.pre.lastSTRawNAV, depositNAV, maxNAVDelta(), "the quoter-valued deposit must match the booked raw delta");
         assertEq(r.post.stSupply, r.pre.stSupply + r.shares, "supply must grow by exactly the minted shares");
         _assertCommittedConservation();
     }
@@ -1586,9 +1585,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         OpReceipt memory r = _doDepositJT(JT_BOB_ADDRESS, assets);
 
         assertEq(r.shares, previewShares, "previewDeposit must equal the executed deposit exactly");
-        assertApproxEqAbs(
-            r.post.lastJTRawNAV - r.pre.lastJTRawNAV, depositNAV, maxNAVDelta(), "the quoter-valued deposit must match the booked raw delta"
-        );
+        assertApproxEqAbs(r.post.lastJTRawNAV - r.pre.lastJTRawNAV, depositNAV, maxNAVDelta(), "the quoter-valued deposit must match the booked raw delta");
         assertEq(r.post.jtSupply, r.pre.jtSupply + r.shares, "supply must grow by exactly the minted shares");
         _assertCommittedConservation();
     }

@@ -15,13 +15,13 @@ import { PausableUpgradeable } from "../../../lib/openzeppelin-contracts-upgrade
 import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/access/manager/IAccessManaged.sol";
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import { SYNC_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { SYNC_ROLE } from "../../../src/factory/Roles.sol";
 import { RoycoDayBalancerV3Hooks } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/hooks/RoycoDayBalancerV3Hooks.sol";
 import { RoycoDayBalancerV3HooksStandIn } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/hooks/RoycoDayBalancerV3HooksStandIn.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_SyncDispatch_BalancerV3Hooks
@@ -128,9 +128,7 @@ contract Test_SyncDispatch_BalancerV3Hooks is DayMarketTestBase {
         applySTPnL(500); // a further +5% on the new rate: 1.05 x 1.05 = 1.1025
         vm.prank(address(balancerVault));
         assertTrue(
-            hooks.onBeforeRemoveLiquidity(
-                EXTERNAL_ROUTER, address(bpt), RemoveLiquidityKind.PROPORTIONAL, 0, new uint256[](2), new uint256[](2), ""
-            ),
+            hooks.onBeforeRemoveLiquidity(EXTERNAL_ROUTER, address(bpt), RemoveLiquidityKind.PROPORTIONAL, 0, new uint256[](2), new uint256[](2), ""),
             "the externally-routed removal must pass after syncing"
         );
         assertEq(

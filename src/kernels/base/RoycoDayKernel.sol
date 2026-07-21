@@ -53,8 +53,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     /// @inheritdoc IRoycoDayKernel
     address public immutable override(IRoycoDayKernel) ACCOUNTANT;
 
-    /// @notice Whether to enforce the tranche whitelist on share transfers
-    bool public immutable ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER;
+    /// @inheritdoc IRoycoDayKernel
+    bool public immutable override(IRoycoDayKernel) ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER;
 
     /// @dev Permissions the function to only be callable by this contract via a self-call, the seam through which the delegatecall logic libraries reach callback into the kernel
     modifier onlySelf() {

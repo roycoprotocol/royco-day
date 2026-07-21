@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { DeployScript } from "../../../../../script/Deploy.s.sol";
+import { DeploymentResult } from "../../../../../script/config/DeploymentTypes.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits } from "../../../../../src/libraries/Units.sol";
 import { Test_BalancerLPGateReinvestBase } from "../../../balancer/base/Test_BalancerLPGateReinvestBase.t.sol";
 
@@ -34,7 +35,7 @@ contract Neutrl_snUSD is Test_BalancerLPGateReinvestBase {
         });
     }
 
-    function _deployKernelAndMarket() internal override returns (DeployScript.DeploymentResult memory) {
+    function _deployKernelAndMarket() internal override returns (DeploymentResult memory) {
         return DEPLOY_SCRIPT.deploy(
             DEPLOY_SCRIPT.getMarketConfig("snUSD"),
             OWNER_ADDRESS,

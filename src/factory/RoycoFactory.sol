@@ -21,7 +21,7 @@ import {
     ADMIN_UPGRADER_ROLE,
     DEPLOYER_ROLE,
     SYNC_ROLE
-} from "./RolesConfiguration.sol";
+} from "./Roles.sol";
 
 /**
  * @title RoycoFactory
@@ -73,8 +73,9 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         __RoycoBase_init(_roycoAccessManager);
 
         // Bind factory-level gated selectors to their roles
-        bytes4[] memory deployerSelectors = new bytes4[](1);
+        bytes4[] memory deployerSelectors = new bytes4[](2);
         deployerSelectors[0] = IRoycoFactory.executeMarketDeployment.selector;
+        deployerSelectors[1] = IRoycoFactory.deployDeterministicProxy.selector;
         am.setTargetFunctionRole(address(this), deployerSelectors, DEPLOYER_ROLE);
 
         bytes4[] memory upgraderSelectors = new bytes4[](1);
@@ -86,7 +87,7 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         adminFactorySelectors[1] = IRoycoFactory.disableTemplate.selector;
         am.setTargetFunctionRole(address(this), adminFactorySelectors, ADMIN_FACTORY_ROLE);
 
-        // Bind the factory's pause/unpause to the pauser/unpauser roles (else they default to ADMIN_ROLE)
+        // Bind the factory's pause/unpause to the pauser/unpauser roles
         bytes4[] memory pauserSelectors = new bytes4[](1);
         pauserSelectors[0] = IRoycoAuth.pause.selector;
         am.setTargetFunctionRole(address(this), pauserSelectors, ADMIN_PAUSER_ROLE);
@@ -120,9 +121,6 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
 
         // Sanity: template was constructed pointing at this factory
         require(address(IBaseTemplate(_template).ROYCO_FACTORY()) == address(this), TEMPLATE_BOUND_TO_DIFFERENT_FACTORY());
-
-        // Check if the template is initialized
-        require(IBaseTemplate(_template).isInitialized(), TEMPLATE_NOT_INITIALIZED());
 
         $.isTemplateEnabled[_template] = true;
         emit TemplateRegistered(_template);
@@ -165,19 +163,16 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
         // Deploy the market
         result = IBaseTemplate(_template).deployMarket(_params);
 
-        // A valid market must have a kernel, a senior tranche, and at least one complementary tranche (junior, liquidity, or both)
-        require(
-            result.kernel != address(0) && result.seniorTranche != address(0) && (result.juniorTranche != address(0) || result.liquidityTranche != address(0)),
-            INVALID_DEPLOYMENT_RESULT()
-        );
+        // A valid market must have a kernel, a senior tranche and a liquidity tranche
+        require(result.kernel != address(0) && result.seniorTranche != address(0) && result.liquidityTranche != address(0), INVALID_DEPLOYMENT_RESULT());
 
-        // Register each deployed tranche against the market's kernel, skipping an absent junior or liquidity tranche
+        // Register each deployed tranche against the market's kernel
         $.trancheToKernel[result.seniorTranche] = result.kernel;
-        if (result.juniorTranche != address(0)) $.trancheToKernel[result.juniorTranche] = result.kernel;
-        if (result.liquidityTranche != address(0)) $.trancheToKernel[result.liquidityTranche] = result.kernel;
+        $.trancheToKernel[result.juniorTranche] = result.kernel;
+        $.trancheToKernel[result.liquidityTranche] = result.kernel;
 
         // Configure the market's periphery, may read trancheToKernel mapping set above.
-        IBaseTemplate(_template).configureMarketPeriphery(result, _params);
+        IBaseTemplate(_template).postMarketRegistration(result, _params);
 
         // Explicitly clear for clarity: transient storage auto-clears at the end of the transaction as a backstop
         _activeTemplate = address(0);
@@ -190,26 +185,29 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @inheritdoc IRoycoFactory
-    function deployDeterministicContract(
-        bytes calldata _creationCode,
+    function deployDeterministicProxy(
+        address _implementation,
+        bytes calldata _initData,
         bytes32 _salt
     )
         external
         override(IRoycoFactory)
-        onlyActiveTemplate
+        restricted
         whenNotPaused
-        returns (address deployed, bool alreadyDeployed)
+        returns (address deployed)
     {
-        // Check if the contract already exists at the predicted address
+        // Every market proxy must be a fresh deployment: reject a salt whose address is already occupied
         deployed = CREATE3.predictDeterministicAddress(_salt);
-        if (deployed.code.length > 0) return (deployed, true);
+        require(deployed.code.length == 0, PROXY_ALREADY_DEPLOYED(deployed, _salt));
 
-        // Deploy the contract
-        return (CREATE3.deployDeterministic(_creationCode, _salt), false);
+        // Deploy the proxy
+        bytes memory creationCode = abi.encodePacked(type(ERC1967Proxy).creationCode, abi.encode(_implementation, _initData));
+        deployed = CREATE3.deployDeterministic(creationCode, _salt);
+        emit ProxyDeployed(deployed, _implementation, _salt);
     }
 
     /// @inheritdoc IRoycoFactory
-    function deployDeterministicProxy(
+    function deployDeterministicProxyFromTemplate(
         address _implementation,
         bytes calldata _initData,
         bytes32 _salt
@@ -236,15 +234,43 @@ contract RoycoFactory is AccessManagedUpgradeable, RoycoBase, IRoycoFactory {
     }
 
     /// @inheritdoc IRoycoFactory
-    function setMarketTargetFunctionRole(address _target, bytes4 _selector, uint64 _roleId) external override(IRoycoFactory) whenNotPaused onlyActiveTemplate {
-        bytes4[] memory selectors = new bytes4[](1);
-        selectors[0] = _selector;
-        AccessManager(authority()).setTargetFunctionRole(_target, selectors, _roleId);
+    function setMarketTargetFunctionRole(
+        address[] calldata _targets,
+        bytes4[] calldata _selectors,
+        uint64[] calldata _roleIds
+    )
+        external
+        override(IRoycoFactory)
+        whenNotPaused
+        onlyActiveTemplate
+    {
+        require(_targets.length == _selectors.length && _selectors.length == _roleIds.length, LENGTH_MISMATCH());
+
+        AccessManager am = AccessManager(authority());
+        bytes4[] memory selector = new bytes4[](1);
+        for (uint256 i; i < _targets.length; ++i) {
+            selector[0] = _selectors[i];
+            am.setTargetFunctionRole(_targets[i], selector, _roleIds[i]);
+        }
     }
 
     /// @inheritdoc IRoycoFactory
-    function grantMarketRole(uint64 _roleId, address _account, uint32 _executionDelay) external override(IRoycoFactory) whenNotPaused onlyActiveTemplate {
-        AccessManager(authority()).grantRole(_roleId, _account, _executionDelay);
+    function grantMarketRole(
+        uint64[] calldata _roleIds,
+        address[] calldata _accounts,
+        uint32[] calldata _executionDelays
+    )
+        external
+        override(IRoycoFactory)
+        whenNotPaused
+        onlyActiveTemplate
+    {
+        require(_roleIds.length == _accounts.length && _accounts.length == _executionDelays.length, LENGTH_MISMATCH());
+
+        AccessManager am = AccessManager(authority());
+        for (uint256 i; i < _roleIds.length; ++i) {
+            am.grantRole(_roleIds[i], _accounts[i], _executionDelays[i]);
+        }
     }
 
     /// @inheritdoc IRoycoFactory

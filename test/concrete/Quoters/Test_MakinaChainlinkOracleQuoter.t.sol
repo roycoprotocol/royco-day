@@ -14,6 +14,9 @@ import {
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel as ShippedKernel
 } from "../../../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
 import {
+    Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel as MakinaChainlinkKernel
+} from "../../../src/kernels/Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
+import {
     IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter
 } from "../../../src/kernels/base/quoter/identical-st-jt/IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
 import {
@@ -25,9 +28,6 @@ import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Un
 import { RoycoJuniorTranche } from "../../../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoLiquidityTranche } from "../../../src/tranches/RoycoLiquidityTranche.sol";
 import { RoycoSeniorTranche } from "../../../src/tranches/RoycoSeniorTranche.sol";
-import {
-    Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel as MakinaChainlinkKernel
-} from "../../../src/kernels/Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
 import { MockAggregatorV3 } from "../../mocks/MockAggregatorV3.sol";
 import { MockBPT } from "../../mocks/MockBPT.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
@@ -203,7 +203,7 @@ abstract contract MakinaChainlinkMarketTestBase is DayMarketTestBase {
         _wireRoleGrants();
     }
 
-    /// @notice Builds the standard kernel construction params over the currently deployed market components
+    /// @notice Builds the standard kernel construction params over the currently deployed market Constants
     /// @dev Reused by construction-boundary tests that construct throwaway kernel impls against the live wiring
     function _makinaConstructionParams() internal view returns (IRoycoDayKernel.RoycoDayKernelConstructionParams memory) {
         return IRoycoDayKernel.RoycoDayKernelConstructionParams({

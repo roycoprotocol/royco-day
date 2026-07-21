@@ -8,9 +8,12 @@ import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/ac
 import { ERC1967Proxy } from "../../../lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
-import { ADMIN_ORACLE_QUOTER_ROLE } from "../../../src/factory/RolesConfiguration.sol";
+import { ADMIN_ORACLE_QUOTER_ROLE } from "../../../src/factory/Roles.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
+import {
+    Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel as ChainlinkToAdminKernel
+} from "../../../src/kernels/Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
 import {
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel as ShippedKernel
 } from "../../../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
@@ -27,9 +30,6 @@ import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Un
 import { RoycoJuniorTranche } from "../../../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoLiquidityTranche } from "../../../src/tranches/RoycoLiquidityTranche.sol";
 import { RoycoSeniorTranche } from "../../../src/tranches/RoycoSeniorTranche.sol";
-import {
-    Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel as ChainlinkToAdminKernel
-} from "../../../src/kernels/Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
 import { MockAggregatorV3 } from "../../mocks/MockAggregatorV3.sol";
 import { MockBPT } from "../../mocks/MockBPT.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";

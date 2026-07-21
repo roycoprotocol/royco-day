@@ -167,7 +167,7 @@ abstract contract IdleCDOVirtualPriceMarketTestBase is DayMarketTestBase {
         _wireRoleGrants();
     }
 
-    /// @notice Builds the standard kernel construction params over the currently deployed market components
+    /// @notice Builds the standard kernel construction params over the currently deployed market Constants
     /// @dev Reused by construction-boundary tests that construct throwaway kernel impls against the live wiring
     function _cdoConstructionParams() internal view returns (IRoycoDayKernel.RoycoDayKernelConstructionParams memory) {
         return IRoycoDayKernel.RoycoDayKernelConstructionParams({

@@ -9,6 +9,9 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import {
+    Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel as ChainlinkToAdminKernel
+} from "../../../src/kernels/Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
+import {
     Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel as ERC4626ToAdminKernel
 } from "../../../src/kernels/Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
 import {
@@ -26,9 +29,6 @@ import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { RoycoJuniorTranche } from "../../../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoLiquidityTranche } from "../../../src/tranches/RoycoLiquidityTranche.sol";
 import { RoycoSeniorTranche } from "../../../src/tranches/RoycoSeniorTranche.sol";
-import {
-    Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel as ChainlinkToAdminKernel
-} from "../../../src/kernels/Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
 import { MockAggregatorV3 } from "../../mocks/MockAggregatorV3.sol";
 import { MockBPT } from "../../mocks/MockBPT.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
@@ -298,7 +298,7 @@ contract TestFuzz_AdminOracleQuoterRateComposition_Kernel is Test {
      *      prediction is independent of how many kernels a single fuzz run deploys
      * @param _stJtAsset The shared senior/junior tranche asset
      * @param _deployerLabel A per-kernel label for the dedicated proxy deployer
-     * @return plumbing The deployed components and the predicted kernel address
+     * @return plumbing The deployed Constants and the predicted kernel address
      */
     function _deployPlumbing(address _stJtAsset, string memory _deployerLabel) internal returns (MarketPlumbing memory plumbing) {
         // Liquidity venue wiring: the LT quoter's constructor demands a registered two-token pool pairing the
