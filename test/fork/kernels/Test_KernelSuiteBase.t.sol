@@ -1070,7 +1070,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 _quoteAssets
     )
         internal
-        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut, uint256 ltTotalSupplyAfterMints)
+        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT ltAssetsOut, uint256 ltTotalSupplyAfterMints)
     {
         uint256 snapshotId = vm.snapshotState();
         vm.prank(address(0), address(0));
@@ -1078,7 +1078,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
             address(KERNEL).call(abi.encodeCall(IRoycoDayKernel.ltPreviewDepositMultiAsset, (toTrancheUnits(_stAssets), _quoteAssets)));
         vm.revertToState(snapshotId);
         if (!ok) _bubbleRevert(ret);
-        (valueAllocated, navToMintSharesAt, ltAssetsOut, ltTotalSupplyAfterMints) = abi.decode(ret, (NAV_UNIT, NAV_UNIT, TRANCHE_UNIT, uint256));
+        (depositNAV, effectiveNAV, ltAssetsOut, ltTotalSupplyAfterMints) = abi.decode(ret, (NAV_UNIT, NAV_UNIT, TRANCHE_UNIT, uint256));
     }
 
     /// @notice Sizes a quote-asset amount whose near-peg value approximates `_value` (one whole quote token per WAD of NAV).
@@ -1283,13 +1283,13 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         uint256 assets = testConfig.initialFunding / 20;
         // The quoter value of the deposited assets, the raw NAV delta the deposit must book
-        NAV_UNIT valueAllocated = KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets));
+        NAV_UNIT depositNAV = KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets));
         uint256 previewShares = ST.previewDeposit(toTrancheUnits(assets));
         OpReceipt memory r = _doDepositST(ST_BOB_ADDRESS, assets);
 
         assertEq(r.shares, previewShares, "previewDeposit must equal the executed deposit exactly");
         assertApproxEqAbs(
-            r.post.lastSTRawNAV - r.pre.lastSTRawNAV, valueAllocated, maxNAVDelta(), "the quoter-valued deposit must match the booked raw delta"
+            r.post.lastSTRawNAV - r.pre.lastSTRawNAV, depositNAV, maxNAVDelta(), "the quoter-valued deposit must match the booked raw delta"
         );
         assertEq(r.post.stSupply, r.pre.stSupply + r.shares, "supply must grow by exactly the minted shares");
         _assertCommittedConservation();
@@ -1581,13 +1581,13 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         uint256 assets = testConfig.initialFunding / 20;
         // The quoter value of the deposited assets, the raw NAV delta the deposit must book
-        NAV_UNIT valueAllocated = KERNEL.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets));
+        NAV_UNIT depositNAV = KERNEL.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets));
         uint256 previewShares = JT.previewDeposit(toTrancheUnits(assets));
         OpReceipt memory r = _doDepositJT(JT_BOB_ADDRESS, assets);
 
         assertEq(r.shares, previewShares, "previewDeposit must equal the executed deposit exactly");
         assertApproxEqAbs(
-            r.post.lastJTRawNAV - r.pre.lastJTRawNAV, valueAllocated, maxNAVDelta(), "the quoter-valued deposit must match the booked raw delta"
+            r.post.lastJTRawNAV - r.pre.lastJTRawNAV, depositNAV, maxNAVDelta(), "the quoter-valued deposit must match the booked raw delta"
         );
         assertEq(r.post.jtSupply, r.pre.jtSupply + r.shares, "supply must grow by exactly the minted shares");
         _assertCommittedConservation();
@@ -1683,7 +1683,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(
             shares, toUint256(KERNEL.ltConvertTrancheUnitsToNAVUnits(post.ltOwned - pre.ltOwned)), "the first LT mint must be 1:1 with the minted BPT value"
         );
-        assertEq(shares, expectedShares, "the previewed valueAllocated must equal the executed mint (parity)");
+        assertEq(shares, expectedShares, "the previewed depositNAV must equal the executed mint (parity)");
         assertEq(LT.balanceOf(LT_ALICE_ADDRESS), shares, "receiver LT share balance");
         assertEq(post.ltOwned, pre.ltOwned + previewLtAssetsOut, "ltOwned must grow by exactly the previewed venue mint");
         assertEq(post.stOwned, pre.stOwned + toTrancheUnits(stAssets), "stOwned must grow by the senior leg");
@@ -1765,8 +1765,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         OpReceipt memory r = _doDepositLTMulti(LT_BOB_ADDRESS, 0, quoteAssets, 0);
         assertEq(r.shares, previewShares, "the quote-only preview must equal execution");
-        NAV_UNIT valueAllocated = KERNEL.ltConvertTrancheUnitsToNAVUnits(r.post.ltOwned - r.pre.ltOwned);
-        assertEq(r.shares, _expectedShares(valueAllocated, ltSupplyPre, pre.lastLTRawNAV), "quote-only shares must price at the pre-deposit LT effective NAV");
+        NAV_UNIT depositNAV = KERNEL.ltConvertTrancheUnitsToNAVUnits(r.post.ltOwned - r.pre.ltOwned);
+        assertEq(r.shares, _expectedShares(depositNAV, ltSupplyPre, pre.lastLTRawNAV), "quote-only shares must price at the pre-deposit LT effective NAV");
         assertEq(r.post.stSupply, r.pre.stSupply, "a quote-only deposit must mint no senior shares");
         assertEq(r.post.stOwned, r.pre.stOwned, "a quote-only deposit must add no senior assets");
         assertTrue(r.post.marketState == MarketState.FIXED_TERM, "the market must remain in the fixed term");
@@ -3492,8 +3492,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         // The split valuation surfaces on the real stack: the external convert* exchange rate is BPT-only (raw NAV,
         // no idle senior-share leg), while totalAssets (above) and previewRedeem keep the claimable idle leg — so
-        // the convert quote sits strictly below the redemption quote for the same shares while premium is staged
-        uint256 probeShares = LT.totalSupply() / 3;
+        // the convert quote sits strictly below the redemption quote for the same shares while premium is staged.
+        // previewRedeem simulates the real redemption, so the probe is sized to clear the post-op liquidity gate
+        // (a tenth of the supply leaves utilization near 0.8 / 0.9 against the ~80 percent arranged target)
+        uint256 probeShares = LT.totalSupply() / 10;
         AssetClaims memory convClaims = LT.convertToAssets(probeShares);
         assertEq(convClaims.stShares, 0, "convertToAssets must report no senior-share claim (the idle leg is excluded)");
         assertApproxEqAbs(
@@ -4171,9 +4173,12 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertCommittedConservation();
         _assertSolvency();
 
-        // The unbacked holder is diluted to its floor-scaled dust claim
+        // The unbacked holder is diluted to its floor-scaled dust claim, valued through convertToAssets:
+        // previewRedeem simulates the real redemption and bubbles the still-breached coverage gate like exec
         NAV_UNIT expectedAliceValue = _expectedValue(aliceShares, r.post.jtSupply, r.post.lastJTEffectiveNAV);
-        assertEq(JT.previewRedeem(aliceShares).nav, expectedAliceValue, "the unbacked holder's claim must be the floor-scaled dust slice");
+        assertEq(JT.convertToAssets(aliceShares).nav, expectedAliceValue, "the unbacked holder's claim must be the floor-scaled dust slice");
+        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        JT.previewRedeem(aliceShares);
         assertLt(toUint256(expectedAliceValue) * 100, toUint256(value), "the unbacked holder must be diluted to under a percent of the new value");
     }
 

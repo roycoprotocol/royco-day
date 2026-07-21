@@ -177,11 +177,11 @@ contract Test_LTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
         _enterFixedTerm();
 
         // An ST-leg multi-asset preview in FIXED_TERM returns the fully-zeroed quote
-        (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut, uint256 ltTotalSupplyAfterMints) =
+        (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT ltAssetsOut, uint256 ltTotalSupplyAfterMints) =
             kernel.ltPreviewDepositMultiAsset(toTrancheUnits(stUnit), 0);
 
-        assertEq(toUint256(valueAllocated), 0, "valueAllocated must be zero for a forbidden ST-leg deposit in FIXED_TERM");
-        assertEq(toUint256(navToMintSharesAt), 0, "navToMintSharesAt must be zero for a forbidden ST-leg deposit in FIXED_TERM");
+        assertEq(toUint256(depositNAV), 0, "depositNAV must be zero for a forbidden ST-leg deposit in FIXED_TERM");
+        assertEq(toUint256(effectiveNAV), 0, "effectiveNAV must be zero for a forbidden ST-leg deposit in FIXED_TERM");
         assertEq(toUint256(ltAssetsOut), 0, "ltAssetsOut must be zero for a forbidden ST-leg deposit in FIXED_TERM");
         // The LT supply leg is read before the FIXED_TERM branch, so it stays live (no fee shares mint in FIXED_TERM)
         assertEq(ltTotalSupplyAfterMints, liquidityTranche.totalSupply(), "the LT supply leg stays live and equals the live LT supply");
@@ -195,12 +195,12 @@ contract Test_LTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
         _enterFixedTerm();
 
         // One whole quote adds 1e18 NAV at the fixture's 1.0 NAV-per-BPT, minting exactly 1e18 BPT
-        (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut,) = kernel.ltPreviewDepositMultiAsset(toTrancheUnits(0), quoteUnit);
+        (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT ltAssetsOut,) = kernel.ltPreviewDepositMultiAsset(toTrancheUnits(0), quoteUnit);
 
         assertEq(toUint256(ltAssetsOut), 1e18, "a quote-only deposit mints exactly 1e18 BPT in FIXED_TERM");
-        assertEq(toUint256(valueAllocated), 1e18, "a quote-only deposit allocates exactly 1e18 NAV in FIXED_TERM");
+        assertEq(toUint256(depositNAV), 1e18, "a quote-only deposit allocates exactly 1e18 NAV in FIXED_TERM");
         // No premium accrues on a covered loss, so the LT effective NAV equals the pool depth: the 6e18 auto-seed
-        assertEq(toUint256(navToMintSharesAt), 6e18, "the quote-only LT share price equals the 6e18 pool depth (no idle premium leg)");
+        assertEq(toUint256(effectiveNAV), 6e18, "the quote-only LT share price equals the 6e18 pool depth (no idle premium leg)");
     }
 
     // =============================
