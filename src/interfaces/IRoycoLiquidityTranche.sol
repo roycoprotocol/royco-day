@@ -64,7 +64,7 @@ interface IRoycoLiquidityTranche is IRoycoVaultTranche {
      * @dev A multi-asset redemption redeems its senior tranche share legs in-flow, shrinking the market's liquidity requirement
      *      alongside the withdrawal, so this bound is at least maxRedeem, and strictly exceeds it whenever the liquidity
      *      requirement binds and the removal's senior-share legs carry value
-     * @dev NON-VIEW: sizes the requirement reduction through the venue removal's execute-and-unwind preview, which mutates no state net
+     * @dev NON-VIEW: sizes the requirement reduction through the venue removal's execute-and-revert preview, which mutates no state net
      * @param _owner The address that owns the LT shares being redeemed
      * @return shares The maximum number of LT shares that can be redeemed multi-asset
      */

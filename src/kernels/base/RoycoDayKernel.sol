@@ -181,36 +181,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     // =============================
 
     /// @inheritdoc IRoycoDayKernel
-    function stPreviewDeposit(TRANCHE_UNIT _assets)
-        public
-        view
-        override(IRoycoDayKernel)
-        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares)
-    {
-        return DepositLogic.stPreviewDeposit(_assets);
-    }
-
-    /// @inheritdoc IRoycoDayKernel
-    function jtPreviewDeposit(TRANCHE_UNIT _assets)
-        public
-        view
-        override(IRoycoDayKernel)
-        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares)
-    {
-        return DepositLogic.jtPreviewDeposit(_assets);
-    }
-
-    /// @inheritdoc IRoycoDayKernel
-    function ltPreviewDeposit(TRANCHE_UNIT _assets)
-        external
-        view
-        override(IRoycoDayKernel)
-        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares, NAV_UNIT navToMintSharesAt)
-    {
-        return DepositLogic.ltPreviewDeposit(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _assets);
-    }
-
-    /// @inheritdoc IRoycoDayKernel
     function ltPreviewDepositMultiAsset(
         TRANCHE_UNIT _stAssets,
         uint256 _quoteAssets
@@ -218,7 +188,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         external
         virtual
         override(IRoycoDayKernel)
-        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut, uint256 ltTotalSupplyAfterMints)
+        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT ltAssetsOut, uint256 ltTotalSupplyAfterMints)
     {
         return DepositLogic.ltPreviewDepositMultiAsset(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _stAssets, _quoteAssets);
     }
@@ -231,21 +201,6 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
         return RedemptionLogic.ltPreviewRedeemMultiAsset(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _ltShares);
-    }
-
-    /// @inheritdoc IRoycoDayKernel
-    function stPreviewRedeem(uint256 _shares) public view override(IRoycoDayKernel) returns (AssetClaims memory userClaim) {
-        return RedemptionLogic.stPreviewRedeem(_getRoycoDayKernelStorage(), _shares);
-    }
-
-    /// @inheritdoc IRoycoDayKernel
-    function jtPreviewRedeem(uint256 _shares) public view override(IRoycoDayKernel) returns (AssetClaims memory userClaim) {
-        return RedemptionLogic.jtPreviewRedeem(_shares);
-    }
-
-    /// @inheritdoc IRoycoDayKernel
-    function ltPreviewRedeem(uint256 _shares) public view override(IRoycoDayKernel) returns (AssetClaims memory userClaim) {
-        return RedemptionLogic.ltPreviewRedeem(_shares);
     }
 
     // =============================
@@ -364,7 +319,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         onlySeniorTranche
         nonReentrant
         withQuoterCache
-        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt)
+        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV)
     {
         return DepositLogic.stDeposit(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _assets);
     }
@@ -401,7 +356,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         onlyJuniorTranche
         nonReentrant
         withQuoterCache
-        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt)
+        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV)
     {
         return DepositLogic.jtDeposit(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _assets);
     }
@@ -438,7 +393,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         onlyLiquidityTranche
         nonReentrant
         withQuoterCache
-        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt)
+        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV)
     {
         return DepositLogic.ltDeposit(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _assets);
     }
@@ -475,7 +430,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         onlyLiquidityTranche
         nonReentrant
         withQuoterCache
-        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut)
+        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT ltAssetsOut)
     {
         return DepositLogic.ltDepositMultiAsset(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _stAssets, _quoteAssets, _minLTAssetsOut);
     }

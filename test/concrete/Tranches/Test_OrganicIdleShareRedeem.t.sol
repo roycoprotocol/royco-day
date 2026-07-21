@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
-import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
@@ -92,11 +91,11 @@ contract Test_OrganicIdleShareRedeem is DayMarketTestBase {
         assertEq(bptSlice, 1, "the proportional BPT slice is a positive 1 wei");
         assertGe(idleSlice, 1, "the proportional idle ST-share slice must be positive");
 
-        // Cross-check against the real redeem quote: a single LT share pulls a positive BPT slice and a positive idle
-        // ST-share slice, a valid (non NAV-growing) redemption shape.
-        AssetClaims memory pv = liquidityTranche.previewRedeem(1);
-        assertEq(toUint256(pv.ltAssets), 1, "the quoted BPT slice is a positive 1 wei");
-        assertGe(pv.stShares, 1, "the quoted idle ST-share slice must be positive");
+        // Cross-check against the real redeem quote: previewRedeem executes the actual redemption path, so in this
+        // liquidity-deficient market it bubbles the exact liquidity-gate revert the execution below hits. The preview
+        // agrees with exec that the shape is valid but the gate blocks it, no quote exists for a blocked redemption.
+        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        liquidityTranche.previewRedeem(1);
 
         assertGe(liquidityTranche.balanceOf(LT_PROVIDER), 1, "the redeemer must hold the LT share it redeems");
 

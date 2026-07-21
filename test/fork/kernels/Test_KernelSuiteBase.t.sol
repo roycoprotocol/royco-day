@@ -1269,11 +1269,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /**
      * @notice `previewDeposit` equals the executed deposit exactly in the same block, at a non-1:1 share price after
      *         a warped accrual window.
-     * @dev The final `_sync()` commits the window's rate drift so preview and execution price off one rate: in a
-     *      single-transaction test the quoter's transient cache makes an uncommitted rate move invisible to view
-     *      previews while execution re-caches live, so a pending-PnL parity is structurally unobservable here. The
-     *      pending-PnL deposit pricing itself is pinned independently in `test_STDeposit_emitsDepositEvent` via the
-     *      full tranche accounting recomputation.
+     * @dev The final `_sync()` commits the window's rate drift so the parity is pinned at a committed non-1:1
+     *      rate. `previewDeposit` replays the real mutating deposit inside a reverted simulation, so it prices
+     *      identically to execution by construction. The pending-PnL deposit pricing itself is pinned
+     *      independently in `test_STDeposit_emitsDepositEvent` via the full tranche accounting recomputation.
      */
     function test_STDeposit_previewParity() public {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
@@ -1283,20 +1282,21 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _sync();
 
         uint256 assets = testConfig.initialFunding / 20;
-        (, NAV_UNIT valueAllocated,) = KERNEL.stPreviewDeposit(toTrancheUnits(assets));
+        // The quoter value of the deposited assets, the raw NAV delta the deposit must book
+        NAV_UNIT valueAllocated = KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets));
         uint256 previewShares = ST.previewDeposit(toTrancheUnits(assets));
         OpReceipt memory r = _doDepositST(ST_BOB_ADDRESS, assets);
 
         assertEq(r.shares, previewShares, "previewDeposit must equal the executed deposit exactly");
         assertApproxEqAbs(
-            r.post.lastSTRawNAV - r.pre.lastSTRawNAV, valueAllocated, maxNAVDelta(), "the previewed valueAllocated must match the deposited raw delta"
+            r.post.lastSTRawNAV - r.pre.lastSTRawNAV, valueAllocated, maxNAVDelta(), "the quoter-valued deposit must match the booked raw delta"
         );
         assertEq(r.post.stSupply, r.pre.stSupply + r.shares, "supply must grow by exactly the minted shares");
         _assertCommittedConservation();
     }
 
     /// @notice A zero-asset ST deposit reverts with the accountant's exact-arg `INVALID_POST_OP_STATE(ST_DEPOSIT)`.
-    /// @dev The post-op sync's `deltaSTRawNAV > 0` requirement fires before the tranche's `INVALID_VALUE_ALLOCATED` check can.
+    /// @dev The post-op sync's `deltaSTRawNAV > 0` requirement fires before the tranche's `INVALID_DEPOSIT_NAV` check can.
     function test_RevertIf_STDepositZeroAssets() public {
         vm.prank(ST_ALICE_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
@@ -1580,20 +1580,21 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _sync();
 
         uint256 assets = testConfig.initialFunding / 20;
-        (, NAV_UNIT valueAllocated,) = KERNEL.jtPreviewDeposit(toTrancheUnits(assets));
+        // The quoter value of the deposited assets, the raw NAV delta the deposit must book
+        NAV_UNIT valueAllocated = KERNEL.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets));
         uint256 previewShares = JT.previewDeposit(toTrancheUnits(assets));
         OpReceipt memory r = _doDepositJT(JT_BOB_ADDRESS, assets);
 
         assertEq(r.shares, previewShares, "previewDeposit must equal the executed deposit exactly");
         assertApproxEqAbs(
-            r.post.lastJTRawNAV - r.pre.lastJTRawNAV, valueAllocated, maxNAVDelta(), "the previewed valueAllocated must match the deposited raw delta"
+            r.post.lastJTRawNAV - r.pre.lastJTRawNAV, valueAllocated, maxNAVDelta(), "the quoter-valued deposit must match the booked raw delta"
         );
         assertEq(r.post.jtSupply, r.pre.jtSupply + r.shares, "supply must grow by exactly the minted shares");
         _assertCommittedConservation();
     }
 
     /// @notice A zero-asset JT deposit reverts with the accountant's exact-arg `INVALID_POST_OP_STATE(JT_DEPOSIT)`.
-    /// @dev The post-op sync's `deltaJTRawNAV > 0` requirement fires before the tranche's `INVALID_VALUE_ALLOCATED` check can.
+    /// @dev The post-op sync's `deltaJTRawNAV > 0` requirement fires before the tranche's `INVALID_DEPOSIT_NAV` check can.
     function test_RevertIf_JTDepositZeroAssets() public {
         vm.prank(JT_ALICE_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
@@ -2695,7 +2696,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /// @notice In a fixed-term market both LT redemption flows revert with `DISABLED_IN_FIXED_TERM_STATE`,
-    ///         `maxRedeem` reports zero, and both previews return empty claims (the preview-zeros contract).
+    ///         `maxRedeem` reports zero, the in-kind preview bubbles the exact exec revert (preview == exec),
+    ///         and the multi-asset preview returns empty claims (its preview-zeros contract).
     function test_RevertIf_LTRedeemInFixedTerm() public whenLT {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
         _seedDefaultLT();
@@ -2703,8 +2705,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _enterFixedTerm();
 
         assertEq(LT.maxRedeem(LT_ALICE_ADDRESS), 0, "ltMaxRedeem must report zero in a fixed term");
+        vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
+        LT.previewRedeem(shares);
         AssetClaims memory emptyClaims;
-        _assertClaimsEq(LT.previewRedeem(shares), emptyClaims, "the in-kind preview must zero in a fixed term");
         (AssetClaims memory previewMultiClaims, uint256 previewQuoteAssets) = _previewRedeemLTMulti(shares);
         _assertClaimsEq(previewMultiClaims, emptyClaims, "the multi-asset preview must zero in a fixed term");
         assertEq(previewQuoteAssets, 0, "the multi-asset preview quote must zero in a fixed term");

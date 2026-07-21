@@ -65,14 +65,14 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         if (_quoteAssets != 0) IERC20(IRoycoDayKernel(kernel).QUOTE_ASSET()).safeTransferFrom(msg.sender, kernel, _quoteAssets);
 
         // Orchestrate the multi-asset deposit in the kernel, bounding the liquidity add's slippage by the caller's minimum LT assets out
-        (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut) =
+        (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT ltAssetsOut) =
             IRoycoDayKernel(kernel).ltDepositMultiAsset(toTrancheUnits(_stAssets), _quoteAssets, toTrancheUnits(_minLTAssetsOut));
 
-        // navToMintSharesAt can be zero when the tranche is freshly deployed
-        require(valueAllocated != ZERO_NAV_UNITS, INVALID_VALUE_ALLOCATED());
+        // effectiveNAV can be zero when the tranche is freshly deployed
+        require(depositNAV != ZERO_NAV_UNITS, INVALID_DEPOSIT_NAV());
 
         // Mint the LT shares to the receiver at the pre-deposit LT effective NAV per share
-        shares = ValuationLogic._convertToShares(valueAllocated, navToMintSharesAt, totalSupply(), Math.Rounding.Floor);
+        shares = ValuationLogic._convertToShares(depositNAV, effectiveNAV, totalSupply(), Math.Rounding.Floor);
         require(shares != 0, MUST_MINT_NON_ZERO_SHARES());
         _mint(_receiver, shares);
 
@@ -116,11 +116,11 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
 
     /// @inheritdoc IRoycoLiquidityTranche
     function previewDepositMultiAsset(uint256 _stAssets, uint256 _quoteAssets) external virtual override(IRoycoLiquidityTranche) returns (uint256 shares) {
-        // Simulate the kernel's multi-asset deposit for the value allocated, the pre-deposit LT effective NAV per share, and the LT supply the pre-op sync will have minted
-        (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt,, uint256 ltTotalSupplyAfterMints) =
+        // Simulate the kernel's multi-asset deposit for the deposit NAV, the pre-deposit LT effective NAV per share, and the LT supply the pre-op sync will have minted
+        (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV,, uint256 ltTotalSupplyAfterMints) =
             IRoycoDayKernel(KERNEL).ltPreviewDepositMultiAsset(toTrancheUnits(_stAssets), _quoteAssets);
         // Mint LT shares at the pre-deposit LT effective NAV per share against that post-sync supply, identical to depositMultiAsset's share math
-        shares = ValuationLogic._convertToShares(valueAllocated, navToMintSharesAt, ltTotalSupplyAfterMints, Math.Rounding.Floor);
+        shares = ValuationLogic._convertToShares(depositNAV, effectiveNAV, ltTotalSupplyAfterMints, Math.Rounding.Floor);
     }
 
     /// @inheritdoc IRoycoLiquidityTranche

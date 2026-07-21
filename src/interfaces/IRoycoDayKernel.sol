@@ -295,37 +295,12 @@ interface IRoycoDayKernel {
         returns (NAV_UNIT stClaimNAV, NAV_UNIT stMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees);
 
     /**
-     * @notice Previews the deposit of a specified amount of assets into the senior tranche
-     * @param _assets The amount of assets to deposit, denominated in the senior tranche's tranche units
-     * @return stateBeforeDeposit The state of the senior tranche before the deposit, after applying the pre-op sync
-     * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
-     * @return totalTrancheShares The senior tranche supply after the pre-op sync mints the premium and protocol fee shares
-     */
-    function stPreviewDeposit(TRANCHE_UNIT _assets)
-        external
-        view
-        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares);
-
-    /**
-     * @notice Previews the deposit of a specified amount of assets into the liquidity tranche
-     * @param _assets The amount of assets to deposit, denominated in the liquidity tranche's tranche units
-     * @return stateBeforeDeposit The state of the liquidity tranche before the deposit, after applying the pre-op sync
-     * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
-     * @return totalTrancheShares The liquidity tranche supply after the pre-op sync mints the protocol fee shares
-     * @return navToMintSharesAt The pre-deposit LT effective NAV (value deployed into the AMM or another market-making venue plus the idle liquidity-premium senior shares) to mint LT shares at
-     */
-    function ltPreviewDeposit(TRANCHE_UNIT _assets)
-        external
-        view
-        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares, NAV_UNIT navToMintSharesAt);
-
-    /**
      * @notice Previews a multi-asset LT deposit of (ST underlying + quote) by simulating the venue add
-     * @dev NON-VIEW: routes the venue add through its execute-and-unwind preview, which mutates no state net
+     * @dev NON-VIEW: routes the venue add through its execute-and-revert preview, which mutates no state net
      * @param _stAssets The ST underlying leg, in the ST asset's native units
      * @param _quoteAssets The quote asset leg
-     * @return valueAllocated The NAV value of the LT assets the add would mint
-     * @return navToMintSharesAt The pre-deposit LT effective NAV that LT shares would be minted against
+     * @return depositNAV The NAV value of the LT assets the add would mint
+     * @return effectiveNAV The pre-deposit LT effective NAV that LT shares would be minted against
      * @return ltAssetsOut The LT tranche assets the add would mint
      * @return ltTotalSupplyAfterMints The LT tranche supply post-sync (unchanged by the sync, since the liquidity tranche accrues no protocol fee shares), which LT shares must be priced against
      */
@@ -334,11 +309,11 @@ interface IRoycoDayKernel {
         uint256 _quoteAssets
     )
         external
-        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut, uint256 ltTotalSupplyAfterMints);
+        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT ltAssetsOut, uint256 ltTotalSupplyAfterMints);
 
     /**
      * @notice Previews a multi-asset LT redemption of _ltShares by simulating the proportional venue removal and the senior unwind
-     * @dev NON-VIEW: routes the venue removal through its execute-and-unwind preview, which mutates no state net
+     * @dev NON-VIEW: routes the venue removal through its execute-and-revert preview, which mutates no state net
      * @param _ltShares The number of LT shares to redeem
      * @return stClaims The ST redemption asset claims that would be transferred to the receiver, denominated in the respective tranches' tranche units
      * @return quoteAssets The quote assets the removal would withdraw to the receiver
@@ -346,27 +321,13 @@ interface IRoycoDayKernel {
     function ltPreviewRedeemMultiAsset(uint256 _ltShares) external returns (AssetClaims memory stClaims, uint256 quoteAssets);
 
     /**
-     * @notice Previews the redemption of a specified number of shares from the senior tranche
-     * @param _shares The number of shares to redeem
-     * @return userClaim The distribution of assets that would be transferred to the receiver on redemption, denominated in the respective tranches' tranche units
-     */
-    function stPreviewRedeem(uint256 _shares) external view returns (AssetClaims memory userClaim);
-
-    /**
-     * @notice Previews the redemption of a specified number of shares from the liquidity tranche
-     * @param _shares The number of shares to redeem
-     * @return userClaim The distribution of assets that would be transferred to the receiver on redemption, denominated in the respective tranches' tranche units
-     */
-    function ltPreviewRedeem(uint256 _shares) external view returns (AssetClaims memory userClaim);
-
-    /**
      * @notice Processes the deposit of a specified amount of assets into the senior tranche
      * @dev Assumes that the funds are transferred to the kernel before the deposit call is made
      * @param _assets The amount of assets to deposit, denominated in the senior tranche's tranche units
-     * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
-     * @return navToMintSharesAt The NAV at which the shares will be minted, exclusive of valueAllocated
+     * @return depositNAV The value of the assets deposited, denominated in the kernel's NAV units
+     * @return effectiveNAV The NAV at which the shares will be minted, exclusive of depositNAV
      */
-    function stDeposit(TRANCHE_UNIT _assets) external returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt);
+    function stDeposit(TRANCHE_UNIT _assets) external returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV);
 
     /**
      * @notice Processes the redemption of a specified number of shares from the senior tranche
@@ -421,7 +382,7 @@ interface IRoycoDayKernel {
      *      premium pile) in-flow, shrinking the liquidity requirement alongside the withdrawal, so its bound is at least the
      *      in-kind bound, and strictly exceeds it whenever the liquidity requirement binds and the removal's senior-share
      *      legs carry value
-     * @dev NON-VIEW: sizes the requirement reduction through the venue removal's execute-and-unwind preview, which mutates no state net
+     * @dev NON-VIEW: sizes the requirement reduction through the venue removal's execute-and-revert preview, which mutates no state net
      * @param _owner The address that is withdrawing the assets
      * @return claimOnLTNAV The notional claims on LT assets that the liquidity tranche has denominated in kernel's NAV units
      * @return ltMaxWithdrawableNAV The maximum amount of assets that can be withdrawn multi-asset, denominated in the kernel's NAV units
@@ -432,36 +393,13 @@ interface IRoycoDayKernel {
         returns (NAV_UNIT claimOnLTNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees);
 
     /**
-     * @notice Previews the deposit of a specified amount of assets into the junior tranche
-     * @dev The kernel may decide to simulate the deposit and revert internally with the result
-     * @dev Should revert if deposits are asynchronous
-     * @param _assets The amount of assets to deposit, denominated in the junior tranche's tranche units
-     * @return stateBeforeDeposit The state of the junior tranche before the deposit, after applying the pre-op sync
-     * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
-     * @return totalTrancheShares The junior tranche supply after the pre-op sync mints the protocol fee shares
-     */
-    function jtPreviewDeposit(TRANCHE_UNIT _assets)
-        external
-        view
-        returns (SyncedAccountingState memory stateBeforeDeposit, NAV_UNIT valueAllocated, uint256 totalTrancheShares);
-
-    /**
-     * @notice Previews the redemption of a specified number of shares from the junior tranche
-     * @dev The kernel may decide to simulate the redemption and revert internally with the result
-     * @dev Should revert if redemptions are asynchronous
-     * @param _shares The number of shares to redeem
-     * @return userClaim The distribution of assets that would be transferred to the receiver on redemption, denominated in the respective tranches' tranche units
-     */
-    function jtPreviewRedeem(uint256 _shares) external view returns (AssetClaims memory userClaim);
-
-    /**
      * @notice Processes the deposit of a specified amount of assets into the junior tranche
      * @dev Assumes that the funds are transferred to the kernel before the deposit call is made
      * @param _assets The amount of assets to deposit, denominated in the junior tranche's tranche units
-     * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
-     * @return navToMintSharesAt The NAV at which the shares will be minted, exclusive of valueAllocated
+     * @return depositNAV The value of the assets deposited, denominated in the kernel's NAV units
+     * @return effectiveNAV The NAV at which the shares will be minted, exclusive of depositNAV
      */
-    function jtDeposit(TRANCHE_UNIT _assets) external returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt);
+    function jtDeposit(TRANCHE_UNIT _assets) external returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV);
 
     /**
      * @notice Processes the redemption of a specified number of shares from the junior tranche
@@ -476,10 +414,10 @@ interface IRoycoDayKernel {
      * @notice Processes the deposit of a specified amount of assets into the liquidity tranche
      * @dev An in-kind LT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state (including fixed-term)
      * @param _assets The amount of assets (the liquidity venue's position token) to deposit, denominated in the liquidity tranche's tranche units
-     * @return valueAllocated The value of the assets deposited, denominated in the kernel's NAV units
-     * @return navToMintSharesAt The NAV at which the shares will be minted, exclusive of valueAllocated
+     * @return depositNAV The value of the assets deposited, denominated in the kernel's NAV units
+     * @return effectiveNAV The NAV at which the shares will be minted, exclusive of depositNAV
      */
-    function ltDeposit(TRANCHE_UNIT _assets) external returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt);
+    function ltDeposit(TRANCHE_UNIT _assets) external returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV);
 
     /**
      * @notice Processes the redemption of a specified number of shares from the liquidity tranche
@@ -498,8 +436,8 @@ interface IRoycoDayKernel {
      * @param _stAssets The amount of ST underlying (the senior tranche's base asset) to deposit, denominated in ST tranche units
      * @param _quoteAssets The amount of quote asset to add as the second venue leg
      * @param _minLTAssetsOut The minimum LT tranche assets the liquidity add must mint (slippage bound against an unfavorable venue state)
-     * @return valueAllocated The value of the minted LT tranche assets, denominated in the kernel's NAV units
-     * @return navToMintSharesAt The LT effective NAV at which the LT shares will be minted (pre-deposit)
+     * @return depositNAV The value of the minted LT tranche assets, denominated in the kernel's NAV units
+     * @return effectiveNAV The LT effective NAV at which the LT shares will be minted (pre-deposit)
      * @return ltAssetsOut The amount of LT tranche assets minted and credited to the liquidity tranche
      */
     function ltDepositMultiAsset(
@@ -508,7 +446,7 @@ interface IRoycoDayKernel {
         TRANCHE_UNIT _minLTAssetsOut
     )
         external
-        returns (NAV_UNIT valueAllocated, NAV_UNIT navToMintSharesAt, TRANCHE_UNIT ltAssetsOut);
+        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT ltAssetsOut);
 
     /**
      * @notice Atomically exits the liquidity tranche to the LT assets' constituent assets: proportionally removes the LT-asset slice,
@@ -562,17 +500,17 @@ interface IRoycoDayKernel {
 
     /**
      * @notice Simulates an add of a senior tranche share and quote asset position and returns the liquidity tranche assets it would mint
-     * @dev NON-VIEW: routes the venue add through its execute-and-unwind preview, which mutates no state net
+     * @dev NON-VIEW: routes the venue add through its execute-and-revert preview, which mutates no state net
      * @param _seniorShares The senior tranche shares the add would inject
      * @param _quoteAssets The quote assets the add would inject
      * @return ltAssets The liquidity tranche assets the add would mint
-     * @return valueAllocated The value of the minted liquidity tranche assets against the post-add venue state
+     * @return depositNAV The value of the minted liquidity tranche assets against the post-add venue state
      */
-    function previewAddLiquidity(uint256 _seniorShares, uint256 _quoteAssets) external returns (TRANCHE_UNIT ltAssets, NAV_UNIT valueAllocated);
+    function previewAddLiquidity(uint256 _seniorShares, uint256 _quoteAssets) external returns (TRANCHE_UNIT ltAssets, NAV_UNIT depositNAV);
 
     /**
      * @notice Simulates a proportional removal of liquidity tranche assets and returns the senior tranche share and quote asset constituents it would withdraw
-     * @dev NON-VIEW: routes the venue removal through its execute-and-unwind preview, which mutates no state net and performs no slippage gating
+     * @dev NON-VIEW: routes the venue removal through its execute-and-revert preview, which mutates no state net and performs no slippage gating
      * @param _ltAssets The liquidity tranche assets the removal would burn
      * @return stShares The senior tranche shares the removal would withdraw
      * @return quoteAssets The quote assets the removal would withdraw

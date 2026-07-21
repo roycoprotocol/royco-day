@@ -89,17 +89,19 @@ contract Neutrl_snUSD_Scenario is Test_BalancerLPGateReinvestBase {
         if (testConfig.hasLiquidityTranche) _sweepViewSurface(address(LT), string.concat(_ctx, ": LT"));
     }
 
-    /// @dev Reads every ERC4626-style view on a tranche so a revert (e.g. an empty-tranche panic) surfaces
-    ///      immediately, and cross-checks the effective NAV (totalAssets().nav) against a maxRedeem/previewRedeem
-    ///      round trip where the tranche is non-empty.
-    function _sweepViewSurface(address _tranche, string memory _ctx) internal view {
+    /// @dev Reads every ERC4626-style view on a tranche and runs the redeem-preview simulation so a revert
+    ///      (e.g. an empty-tranche panic) surfaces immediately. `previewRedeem` simulates the real redemption
+    ///      and is not view, and it reverts exactly like `redeem` outside PERPETUAL, so the sweep only quotes
+    ///      when `maxRedeem` reports capacity (it reads 0 in FIXED_TERM, where the quote would revert
+    ///      DISABLED_IN_FIXED_TERM_STATE).
+    function _sweepViewSurface(address _tranche, string memory _ctx) internal {
         IRoycoVaultTranche t = IRoycoVaultTranche(_tranche);
         // Effective NAV read.
         toUint256(t.totalAssets().nav);
         // Deposit-side views.
         toUint256(t.maxDeposit(ST_ALICE_ADDRESS));
         if (t.totalSupply() != 0) {
-            // Redeem-side views only meaningful with supply; a full-supply preview must not revert.
+            // Redeem-side reads only carry meaning with supply, and a full-capacity preview must not revert.
             uint256 maxR = t.maxRedeem(ST_ALICE_ADDRESS);
             if (maxR != 0) t.previewRedeem(maxR);
         }

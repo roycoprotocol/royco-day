@@ -644,8 +644,9 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         applySTPnL(10_000);
         _warpAndRefreshFeed(1 days);
 
-        // Commit the breach so the pre-deposit market state is unambiguous (the sync return is authoritative,
-        // a view preview in the same test transaction would read the previous operation's transient rate cache)
+        // Commit the breach so the pre-deposit market state is unambiguous (the sync return is authoritative
+        // and the assertion must not depend on any read in the same test transaction picking up the previous
+        // operation's transient rate cache)
         SyncedAccountingState memory pre = _sync();
         assertGe(pre.liquidityUtilizationWAD, 1.5e18, "liquidityUtilization must read breached (>= 180e18 x 0.05 / 6e18)");
 
@@ -686,8 +687,9 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
         applySTPnL(-2000);
 
-        // Commit the breach so the pre-deposit market state is unambiguous (the sync return is authoritative,
-        // a view preview in the same test transaction would read the previous operation's transient rate cache)
+        // Commit the breach so the pre-deposit market state is unambiguous (the sync return is authoritative
+        // and the assertion must not depend on any read in the same test transaction picking up the previous
+        // operation's transient rate cache)
         SyncedAccountingState memory pre = _sync();
         assertEq(pre.coverageUtilizationWAD, 5.2e18, "coverageUtilization must be (80 + 24) x 0.2 / 4 = 5.2e18 exactly");
         assertEq(uint8(pre.marketState), uint8(MarketState.FIXED_TERM), "covered drawdown must enter FIXED_TERM");

@@ -12,9 +12,10 @@ import { MarketFuzzTestBase } from "../../utils/MarketFuzzTestBase.sol";
  *         and liquidity deposits, then senior, junior, and liquidity redemptions), chained through one evolving
  *         market so every later preview runs against state the earlier executions actually mutated
  * @dev Each preview is taken immediately before its execution in the same block, so any divergence between the
- *      view pricing path and the state-mutating pricing path (supply snapshots, fee-mint ordering, claim
- *      scaling) fails loudly. Amounts are bounded by the live max reads so no flow can revert on a gate and
- *      every one of the six parity assertions executes on every run
+ *      reverted-simulation pricing path (previews run the real kernel flow and roll it back) and the committed
+ *      execution (supply snapshots, fee-mint ordering, claim scaling) fails loudly. Amounts are bounded by the
+ *      live max reads so no flow can revert on a gate and every one of the six parity assertions executes on
+ *      every run
  */
 contract TestFuzz_PreviewParity_Kernel is MarketFuzzTestBase {
     using Math for uint256;
@@ -114,7 +115,7 @@ contract TestFuzz_PreviewParity_Kernel is MarketFuzzTestBase {
     /**
      * Scenario: a seeded market accrues a strictly positive fuzzed yield (so a liquidity premium exists) and a
      * fuzzed coin flip decides whether the premium stays STAGED (venue slippage armed, reinvestment defers) or
-     * deploys inline at the sync. The split valuation must then hold for any share slice: convertToAssets prices
+     * deploys inline at the sync. The split valuation must then hold for any redeemable share slice: convertToAssets prices
      * the pro-rata BPT-only raw NAV with no idle senior-share leg, previewRedeem prices the pro-rata
      * idle-inclusive effective NAV, the convert quote never exceeds the redemption quote (strictly below whenever
      * the pro-rata idle slice carries value), and the two surfaces coincide on every claim leg iff nothing is staged
@@ -148,7 +149,9 @@ contract TestFuzz_PreviewParity_Kernel is MarketFuzzTestBase {
 
         // Independent recompute of both NAV bases from the just-committed checkpoint (same block as the sync)
         uint256 supply = liquidityTranche.totalSupply();
-        uint256 shares = bound(_sharesSeed, 1, supply); // any slice from one share wei to the whole supply
+        // previewRedeem simulates the real redemption and bubbles every execution gate, so the slice is bounded
+        // by the live liquidity-respecting max, with the dust floor of flow 4 so the payout cannot floor to zero
+        uint256 shares = bound(_sharesSeed, 1e6, liquidityTranche.maxRedeem(LT_PROVIDER));
         uint256 rawNAV = toUint256(accountant.getState().lastLTRawNAV);
         uint256 idleValue = Math.mulDiv(toUint256(accountant.getState().lastSTEffectiveNAV), idle, seniorTranche.totalSupply(), Math.Rounding.Floor);
 

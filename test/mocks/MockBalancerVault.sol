@@ -81,6 +81,9 @@ contract MockBalancerVault {
     /// @dev Whether each pool has been registered
     mapping(address pool => bool registered) private _registered;
 
+    /// @dev Whether a pool has been seeded with its genesis liquidity, mirroring the real vault's initialization latch
+    mapping(address pool => bool initialized) private _initialized;
+
     /// @dev Each registered pool's two tokens, in registration order
     mapping(address pool => IERC20[2] tokens) private _poolTokens;
 
@@ -138,6 +141,11 @@ contract MockBalancerVault {
     /// @notice Returns whether the pool is registered, validated by the kernel quoter constructor
     function isPoolRegistered(address _pool) external view returns (bool) {
         return _registered[_pool];
+    }
+
+    /// @notice Returns whether the pool has been seeded with its genesis liquidity, routing the kernel's add between initialize and addLiquidity
+    function isPoolInitialized(address _pool) external view returns (bool) {
+        return _initialized[_pool];
     }
 
     /// @notice Returns the pool's tokens in registration order, validated by the kernel quoter constructor
@@ -253,6 +261,61 @@ contract MockBalancerVault {
      *      converted to BPT at the pool's current NAV per BPT (1:1 with NAV on an empty pool), haircut by unbalancedFeeBps
      * @dev Reverts BptAmountOutBelowMin with the real vault's error shape when the mint falls under minBptAmountOut
      */
+    /**
+     * @notice Initializes a registered pool by seeding its genesis balances, mirroring VaultExtension.initialize
+     * @dev Prices the seed at fair value with NO unbalanced-add haircut (the real initialize mints the invariant and charges no swap fee),
+     *      mints the POOL_MINIMUM_TOTAL_SUPPLY dead BPT to the null address first, and checks minBptAmountOut against the NET
+     *      amount minted to the receiver, so the slippage bound applies to what the receiver actually gets
+     * @dev Opens the token debts the callback must settle, exactly like addLiquidity, and honors the armed one-shot BPT override
+     *      and the forced-revert mode so venue-failure fixtures drive this branch identically
+     */
+    function initialize(
+        address _pool,
+        address _to,
+        IERC20[] memory _tokens,
+        uint256[] memory _exactAmountsIn,
+        uint256 _minBptAmountOut,
+        bytes memory
+    )
+        external
+        returns (uint256 bptAmountOut)
+    {
+        _ensureUnlocked();
+        require(_registered[_pool], IVaultErrors.PoolNotRegistered(_pool));
+        require(!_initialized[_pool], IVaultErrors.PoolAlreadyInitialized(_pool));
+        require(revertMode != RevertMode.ADD && revertMode != RevertMode.ALL, FORCED_ADD_REVERT());
+        require(_tokens.length == 2 && _exactAmountsIn.length == 2, INVALID_AMOUNTS_LENGTH());
+
+        IERC20[2] storage tokens = _poolTokens[_pool];
+        uint256[2] storage balances = _poolBalances[_pool];
+
+        // The passed tokens must match the pool's registration order, the real vault's cross-check on the seed's ordering
+        for (uint256 i; i < 2; ++i) {
+            require(address(_tokens[i]) == address(tokens[i]), IVaultErrors.TokensMismatch(_pool, address(_tokens[i]), address(tokens[i])));
+        }
+
+        // Price the genesis BPT, the armed one-shot override wins as the net mint, else fair value less the dead minimum
+        if (_nextBptOutOverrideArmed) {
+            bptAmountOut = _nextBptOutOverride;
+            _nextBptOutOverrideArmed = false;
+            _nextBptOutOverride = 0;
+        } else {
+            uint256 grossBptOut = _tokenValueWAD(tokens[0], _exactAmountsIn[0]) + _tokenValueWAD(tokens[1], _exactAmountsIn[1]);
+            require(grossBptOut >= POOL_MINIMUM_TOTAL_SUPPLY, IERC20MultiTokenErrors.PoolTotalSupplyTooLow(grossBptOut));
+            bptAmountOut = grossBptOut - POOL_MINIMUM_TOTAL_SUPPLY;
+        }
+        require(bptAmountOut >= _minBptAmountOut, IVaultErrors.BptAmountOutBelowMin(bptAmountOut, _minBptAmountOut));
+
+        // Commit the seed, credit the pool balances, open the token debts the callback must settle, and mint the BPT with its dead minimum
+        balances[0] += _exactAmountsIn[0];
+        balances[1] += _exactAmountsIn[1];
+        if (_exactAmountsIn[0] > 0) _accountDelta(tokens[0], int256(_exactAmountsIn[0]));
+        if (_exactAmountsIn[1] > 0) _accountDelta(tokens[1], int256(_exactAmountsIn[1]));
+        _mintMinimumSupplyReserve(_pool);
+        _mintBpt(_pool, _to, bptAmountOut);
+        _initialized[_pool] = true;
+    }
+
     function addLiquidity(AddLiquidityParams memory params) external returns (uint256[] memory amountsIn, uint256 bptAmountOut, bytes memory returnData) {
         _ensureUnlocked();
         require(_registered[params.pool], IVaultErrors.PoolNotRegistered(params.pool));
@@ -444,6 +507,8 @@ contract MockBalancerVault {
         }
         if (_bptTotalSupply[_pool] == 0) _mintMinimumSupplyReserve(_pool);
         _mintBpt(_pool, _to, _bptAmount);
+        // Fixture seeding is the pool's genesis liquidity, so it latches initialization exactly like the kernel-driven seed
+        _initialized[_pool] = true;
     }
 
     /**

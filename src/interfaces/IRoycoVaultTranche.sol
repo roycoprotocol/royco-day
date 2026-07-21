@@ -57,8 +57,18 @@ interface IRoycoVaultTranche is IERC20Metadata {
     /// @notice Thrown when the caller of a permissioned function is not the tranche's configured kernel
     error ONLY_KERNEL();
 
-    /// @notice Thrown when the value allocated from a deposit does not match the expected value
-    error INVALID_VALUE_ALLOCATED();
+    /// @notice Thrown when a deposit renders a zero deposit NAV
+    error INVALID_DEPOSIT_NAV();
+
+    /// @notice Thrown when a function that must be invoked via a self-call is called by another account
+    error ONLY_SELF();
+
+    /// @notice Thrown when a simulated operation returns instead of unwinding via its result-carrying revert
+    error PREVIEW_CANNOT_MUTATE_STATE();
+
+    /// @notice The result-carrying revert that unwinds a simulated operation
+    /// @param result The simulated operation's ABI encoded result
+    error PREVIEW_OPERATION_RESULT(bytes result);
 
     /// @notice Returns the address of the kernel that this tranche is associated with
     /// @return kernel The address of the kernel responsible for executing deposits and redemptions for this tranche
@@ -104,19 +114,37 @@ interface IRoycoVaultTranche is IERC20Metadata {
 
     /**
      * @notice Previews the number of shares that would be minted for a given deposit amount
-     * @dev Does not mutate any state
+     * @dev NON-VIEW: routes the deposit through its execute-and-revert simulation, which mutates no state net
+     * @dev The quote is produced by the actual kernel deposit path, so any revert the deposit would raise bubbles unchanged
      * @param _assets The amount of assets to deposit, denominated in the tranche's base asset units
      * @return shares The number of shares that would be minted for the specified deposit amount
      */
-    function previewDeposit(TRANCHE_UNIT _assets) external view returns (uint256 shares);
+    function previewDeposit(TRANCHE_UNIT _assets) external returns (uint256 shares);
+
+    /**
+     * @notice Executes the deposit through the actual kernel deposit flow and unconditionally unwinds every state change via a result-carrying revert
+     * @dev Reverts with PREVIEW_OPERATION_RESULT carrying the ABI encoded priced shares, or bubbles the deposit's own revert unchanged
+     * @dev Only invoked via a self-call from previewDeposit
+     * @param _assets The amount of assets to deposit, denominated in the tranche's base asset units
+     */
+    function previewDepositAndRevert(TRANCHE_UNIT _assets) external;
+
+    /**
+     * @notice Executes the redemption through the actual kernel redemption flow and unconditionally unwinds every state change via a result-carrying revert
+     * @dev Reverts with PREVIEW_OPERATION_RESULT carrying the ABI encoded remitted claims, or bubbles the redemption's own revert unchanged
+     * @dev Only invoked via a self-call from previewRedeem
+     * @param _shares The number of shares to redeem
+     */
+    function previewRedeemAndRevert(uint256 _shares) external;
 
     /**
      * @notice Previews the asset claims that would be received for a given redemption amount
-     * @dev Does not mutate any state
+     * @dev NON-VIEW: routes the redemption through its execute-and-revert simulation, which mutates no state net
+     * @dev The quote is produced by the actual kernel redemption path, so any revert the redemption would raise bubbles unchanged
      * @param _shares The number of shares to redeem
      * @return claims The asset claims that would be received, including claims on ST assets, JT assets, and their total NAV value
      */
-    function previewRedeem(uint256 _shares) external view returns (AssetClaims memory claims);
+    function previewRedeem(uint256 _shares) external returns (AssetClaims memory claims);
 
     /**
      * @notice Converts a specified amount of assets to shares using the current exchange rate

@@ -210,7 +210,12 @@ contract TestFuzz_DepositPricing_Kernel is MarketFuzzTestBase {
         vm.stopPrank();
         assertEq(minted, expectedShares, "liquidity deposit must mint exactly floor(value x supply / ltEffectiveNAV)");
 
-        assertLe(toUint256(liquidityTranche.previewRedeem(minted).nav), value, "immediately redeeming the minted shares must never exceed the deposited value");
+        // No-gain, redeemer side: previewRedeem simulates the real redemption and bubbles every execution gate,
+        // so a down-repriced quote leg can leave the fresh position beyond the liquidity-respecting max. The
+        // unwind is asserted whenever it is executable, and an unexecutable unwind returns the depositor nothing
+        if (minted <= liquidityTranche.maxRedeem(LT_PROVIDER)) {
+            assertLe(toUint256(liquidityTranche.previewRedeem(minted).nav), value, "immediately redeeming the minted shares must never exceed the deposited value");
+        }
         // Incumbent side at the same oracle mark: the pot grew by at least the value the mint was priced on
         uint256 ltEffAfter = poolTVL.mulDiv(ltOwnedBPT + bptIn, bptSupply);
         assertGe(

@@ -45,7 +45,7 @@ library BalancerV3VenueLogic {
     using SafeERC20 for IERC20;
 
     /// @notice Carries a previewed add's minted BPT and its post-add valuation out of the vault callback, unwinding the preview's transient accounting
-    error PREVIEW_ADD_LIQUIDITY_RESULT(uint256 ltAssets, NAV_UNIT valueAllocated);
+    error PREVIEW_ADD_LIQUIDITY_RESULT(uint256 ltAssets, NAV_UNIT depositNAV);
 
     /// @notice Carries a previewed removal's withdrawn constituents out of the vault callback, unwinding the preview's transient accounting
     error PREVIEW_REMOVE_LIQUIDITY_RESULT(uint256 stShares, uint256 quoteAssets);
@@ -77,18 +77,38 @@ library BalancerV3VenueLogic {
         exactAmountsIn[_immutables.stSharePoolIndex] = _seniorShares;
         exactAmountsIn[_immutables.quoteAssetPoolIndex] = _quoteAssets;
 
-        // Credit this kernel with the BPT minted by the unbalanced add of the specified senior tranche shares and quote assets
-        (, ltAssets,) = _immutables.vault
-            .addLiquidity(
-                AddLiquidityParams({
-                    pool: _immutables.ltAsset, // The Balancer pool to add liquidity to is the liquidity tranche's asset (BPT)
-                    to: address(this), // The kernel custodies the BPT balance of the entire liquidity tranche, so the minted BPT is credited to it
-                    maxAmountsIn: exactAmountsIn, // For UNBALANCED adds the Vault treats these as the exact amounts in (not upper bounds)
-                    minBptAmountOut: toUint256(_minLTAssetsOut), // The Vault reverts the add if it would mint fewer BPT than this, bounding the add's slippage
-                    kind: AddLiquidityKind.UNBALANCED, // Unbalanced add: the Vault charges the pool's swap fee on the imbalanced portion
-                    userData: "" // UNBALANCED adds skip the pool's compute callback and this kernel's hooks do not consume userData
-                })
-            );
+        // If the pool is initialized, add liquidity directly, else, the pool must be initialized (seeded)
+        if (_immutables.vault.isPoolInitialized(_immutables.ltAsset)) {
+            // Credit this kernel with the BPT minted by the unbalanced add of the specified senior tranche shares and quote assets
+            (, ltAssets,) = _immutables.vault
+                .addLiquidity(
+                    AddLiquidityParams({
+                        pool: _immutables.ltAsset, // The Balancer pool to add liquidity to is the liquidity tranche's asset (BPT)
+                        to: address(this), // The kernel custodies the BPT balance of the entire liquidity tranche, so the minted BPT is credited to it
+                        maxAmountsIn: exactAmountsIn, // For UNBALANCED adds the Vault treats these as the exact amounts in (not upper bounds)
+                        minBptAmountOut: toUint256(_minLTAssetsOut), // The Vault reverts the add if it would mint fewer BPT than this, bounding the add's slippage
+                        kind: AddLiquidityKind.UNBALANCED, // Unbalanced add: the Vault charges the pool's swap fee on the imbalanced portion
+                        userData: "" // UNBALANCED adds skip the pool's compute callback and this kernel's hooks do not consume userData
+                    })
+                );
+        } else {
+            // The pool's registered tokens, ordered by the pool's token registration
+            IERC20[] memory tokens = new IERC20[](2);
+            tokens[_immutables.stSharePoolIndex] = IERC20(_immutables.seniorTranche);
+            tokens[_immutables.quoteAssetPoolIndex] = IERC20(_immutables.quoteAsset);
+
+            // Credit this kernel with the BPT minted by seeding the pool's initial balances
+            // NOTE: The Vault permanently burns a minimum BPT supply to the null address on initialization, so ltAssets is net of that burn
+            ltAssets = _immutables.vault
+                .initialize(
+                    _immutables.ltAsset, // The Balancer pool to initialize is the liquidity tranche's asset (BPT)
+                    address(this), // The kernel custodies the BPT balance of the entire liquidity tranche, so the minted BPT is credited to it
+                    tokens, // The pool's registered tokens in registration order
+                    exactAmountsIn, // The exact amounts seeding the pool's initial balances
+                    toUint256(_minLTAssetsOut), // The Vault reverts the initialization if it would mint fewer BPT than this, bounding the seed's slippage
+                    "" // Initialization hooks are disabled for this market's pools and this kernel's hooks do not consume userData
+                );
+        }
 
         // A preview carries its result out via this revert, unwinding every transient balance change before settlement is due
         // NOTE: We ensure that the BPT is valued after the liquidity provision which can mutate the invariant

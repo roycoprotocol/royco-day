@@ -17,7 +17,8 @@ import {
  *         per-market test instantiates it by inheriting both this suite and a market fixture (e.g. `Neutrl_snUSD_Market`);
  *         both share `Test_KernelSuiteBase` as the deploy/setUp base.
  * @dev Covers three concerns: (A) deposits mint the correct shares, (B) deposit/withdraw limits from the
- *      coverage + liquidity utilization gates, and (C) the preview/max view surface. Senior mechanics pinned:
+ *      coverage + liquidity utilization gates, and (C) the preview/max surface (previews simulate the real
+ *      deposit/redeem path and are not view). Senior mechanics pinned:
  *      - ST deposit: PERPETUAL-only; post-op coverage gate (`COVERAGE_REQUIREMENT_VIOLATED`) AND liquidity gate
  *        (`LIQUIDITY_REQUIREMENT_VIOLATED`); `maxSTDeposit = min(coverage-branch, liquidity-branch)`.
  *      - ST redeem: PERPETUAL-only; NO coverage/liquidity gate; senior tranche self-liquidation bonus once
@@ -132,8 +133,10 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
 
     /// @notice `previewDeposit` is linear in the deposited amount up to floor dust, so a depositor cannot
     ///         change its price by splitting or merging deposits.
-    function test_previewDeposit_proportionalToAmount() external view {
-        // Views on the un-mutated state: previewDeposit(2x) ~= 2 * previewDeposit(x) (floor split).
+    function test_previewDeposit_proportionalToAmount() external {
+        // Previews simulate the real deposit path, so JT coverage must exist for the quotes to clear the gate.
+        _seedJT(200_000e18);
+        // Each simulation unwinds, so both quotes price the same state: previewDeposit(2x) ~= 2 * previewDeposit(x) (floor split).
         uint256 x = 10_000e18;
         uint256 sx = ST.previewDeposit(toTrancheUnits(x));
         uint256 s2x = ST.previewDeposit(toTrancheUnits(2 * x));

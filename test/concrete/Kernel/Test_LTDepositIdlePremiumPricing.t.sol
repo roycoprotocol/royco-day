@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { LT_LP_ROLE } from "../../../src/factory/RolesConfiguration.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
-import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
+import { MarketState, SyncedAccountingState, TrancheType } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
@@ -36,23 +36,38 @@ contract Test_LTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
      * @notice With idle liquidity premium senior shares outstanding, the LT deposit price is the pool depth PLUS
      *         the idle senior shares valued at the senior share rate, not the pool depth alone
      * @dev Arms venue slippage so a +10% senior gain's premium mints but cannot reinvest, leaving
-     *      ltOwnedSeniorTrancheShares nonzero. The preview's navToMintSharesAt must then equal
+     *      ltOwnedSeniorTrancheShares nonzero. The tranche's previewDeposit quote must then price the shares at
      *      ltRawNAV + floor(idleShares x stEff / stSupply), the exact effective-NAV pricing. A regression that
      *      priced LT deposits off pool depth alone would drop the idle term and undercharge depositors
      */
     function test_LTDeposit_PriceIncludesIdlePremiumLeg() public {
         uint256 idleShares = _accrueIdlePremiumSeniorShares();
 
-        // Preview an in-kind LT deposit of one BPT: navToMintSharesAt is the pre-deposit LT effective NAV
-        (SyncedAccountingState memory st,,, NAV_UNIT navToMintSharesAt) = kernel.ltPreviewDeposit(toTrancheUnits(1e18));
+        // The committed post-sync state the deposit prices against (the +10% gain is already synced)
+        (SyncedAccountingState memory st,,) = kernel.previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
 
         // Independently value the idle leg at the senior share rate: floor(idleShares x stEff / stSupply)
         uint256 idleValue = Math.mulDiv(idleShares, toUint256(st.stEffectiveNAV), seniorTranche.totalSupply(), Math.Rounding.Floor);
         assertTrue(idleValue != 0, "the idle liquidity premium senior shares must carry a nonzero value");
 
-        // The deposit price is pool depth plus the idle leg, so it strictly exceeds pool depth alone
-        assertEq(toUint256(navToMintSharesAt), toUint256(st.ltRawNAV) + idleValue, "LT deposit price must be ltRawNAV plus the idle premium leg value");
-        assertGt(toUint256(navToMintSharesAt), toUint256(st.ltRawNAV), "the idle premium leg must raise the deposit price above pool depth");
+        // Quote an in-kind LT deposit of one BPT through the tranche preview. The one BPT's NAV at the oracle mark
+        // is derived from the mock venue's ledger, never the kernel's own conversion chain
+        uint256 depositValue = Math.mulDiv(bptOracle.computeTVL(), 1e18, balancerVault.totalSupply(address(bpt)), Math.Rounding.Floor);
+        uint256 ltSupply = liquidityTranche.totalSupply();
+        uint256 quotedShares = liquidityTranche.previewDeposit(toTrancheUnits(1e18));
+
+        // The deposit price is pool depth plus the idle leg: the quote mints floor(ltSupply x value / (ltRawNAV + idleValue))
+        // shares, strictly fewer than pool-depth-only pricing would grant
+        assertEq(
+            quotedShares,
+            Math.mulDiv(ltSupply, depositValue, toUint256(st.ltRawNAV) + idleValue, Math.Rounding.Floor),
+            "the quoted shares must be priced on ltRawNAV plus the idle premium leg value"
+        );
+        assertLt(
+            quotedShares,
+            Math.mulDiv(ltSupply, depositValue, toUint256(st.ltRawNAV), Math.Rounding.Floor),
+            "the idle premium leg must raise the deposit price above pool depth"
+        );
     }
 
     /**
@@ -82,13 +97,20 @@ contract Test_LTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
         assertEq(idleShares, 846_660_395_108_184_383, "the staged premium must be the hand-derived senior share count net of the LT protocol fee");
         assertEq(seniorTranche.totalSupply(), 101_599_247_412_982_126_057, "the senior supply must carry exactly the net premium and pooled fee mints");
 
-        (SyncedAccountingState memory st,,, NAV_UNIT navToMintSharesAt) = kernel.ltPreviewDeposit(toTrancheUnits(1e18));
+        (SyncedAccountingState memory st,,) = kernel.previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
         assertEq(toUint256(st.stEffectiveNAV), 108e18, "the senior effective NAV must be exactly seed plus residual gain plus premium");
         assertEq(toUint256(st.ltRawNAV), 6e18, "the pool depth must be exactly the untouched auto-seed");
+        assertEq(liquidityTranche.totalSupply(), 6e18, "the LT supply must be exactly the auto-seed's 1:1 bootstrap mint");
         // Idle leg value = floor(846660395108184383 x 108e18 / 101599247412982126057) = 899999999999999999:
         // the net 0.9e18 premium minus one wei lost across the two floor roundings (share mint, then valuation), so
-        // the deposit price is 6e18 + (0.9e18 - 1) and the rounding wei stays with the pool, never the entrant
-        assertEq(toUint256(navToMintSharesAt), 6_899_999_999_999_999_999, "the deposit price must be pool depth plus the net idle leg, one wei under 6.9e18");
+        // the deposit price is 6e18 + (0.9e18 - 1) and the rounding wei stays with the pool, never the entrant.
+        // One BPT values to exactly 1e18 at the pool's 1.0 NAV per BPT, so the tranche's previewDeposit must quote
+        // floor(6e18 x 1e18 / 6899999999999999999) = 869565217391304347 shares at that idle-leg-inclusive price
+        assertEq(
+            liquidityTranche.previewDeposit(toTrancheUnits(1e18)),
+            869_565_217_391_304_347,
+            "the quoted shares must be priced at pool depth plus the net idle leg, one wei under 6.9e18"
+        );
     }
 
     /**

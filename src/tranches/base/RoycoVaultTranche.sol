@@ -38,6 +38,13 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
         _;
     }
 
+    /// @dev Permissions the function to only be callable by this contract via a self-call, the frame the execute-and-revert previews unwind through
+    /// @dev Should be placed on all execute-and-revert preview functions
+    modifier onlySelf() {
+        require(msg.sender == address(this), ONLY_SELF());
+        _;
+    }
+
     /**
      * @notice Constructs the Royco vault tranche
      * @param _asset The underlying asset for the tranche
@@ -78,21 +85,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
         // Transfer the assets to the kernel
         IERC20(ASSET).safeTransferFrom(msg.sender, KERNEL, toUint256(_assets));
 
-        // Deposit the assets into the Royco market and get the fraction of total assets allocated
-        NAV_UNIT valueAllocated;
-        NAV_UNIT effectiveNAVToMintAt;
-        if (TRANCHE_TYPE() == TrancheType.SENIOR) (valueAllocated, effectiveNAVToMintAt) = IRoycoDayKernel(KERNEL).stDeposit(_assets);
-        else if (TRANCHE_TYPE() == TrancheType.JUNIOR) (valueAllocated, effectiveNAVToMintAt) = IRoycoDayKernel(KERNEL).jtDeposit(_assets);
-        else (valueAllocated, effectiveNAVToMintAt) = IRoycoDayKernel(KERNEL).ltDeposit(_assets);
-
-        // effectiveNAVToMintAt can be zero initially when the tranche is deployed
-        require(valueAllocated != ZERO_NAV_UNITS, INVALID_VALUE_ALLOCATED());
-
-        // valueAllocated represents the value of the assets deposited in the asset that the tranche's NAV is denominated in
-        // shares are minted to the user at the effective NAV of the tranche
-        // effectiveNAVToMintAt is the effective NAV of the tranche before the deposit is made, ie. the NAV at which the shares will be minted
-        shares = ValuationLogic._convertToShares(valueAllocated, effectiveNAVToMintAt, totalSupply(), Math.Rounding.Floor);
-        require(shares != 0, MUST_MINT_NON_ZERO_SHARES());
+        // Deposit the assets into the Royco market and price the shares to mint
+        shares = _deposit(_assets);
 
         // Mint the shares to the receiver
         _mint(_receiver, shares);
@@ -113,16 +107,13 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
         returns (AssetClaims memory claims)
     {
         require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
-        require(_shares != 0, MUST_REQUEST_NON_ZERO_SHARES());
 
         // Spend allowance if msg.sender is not the owner
         if (msg.sender != _owner) _spendAllowance(_owner, msg.sender, _shares);
 
         // Process the withdrawal from the Royco market
         // It is expected that the kernel transfers the assets directly to the receiver
-        if (TRANCHE_TYPE() == TrancheType.SENIOR) claims = IRoycoDayKernel(KERNEL).stRedeem(_shares, _receiver);
-        else if (TRANCHE_TYPE() == TrancheType.JUNIOR) claims = IRoycoDayKernel(KERNEL).jtRedeem(_shares, _receiver);
-        else claims = IRoycoDayKernel(KERNEL).ltRedeem(_shares, _receiver);
+        claims = _redeem(_shares, _receiver);
 
         // Burn shares after kernel processes redemption (kernel depends on pre-burn total supply)
         _burn(_owner, _shares);
@@ -171,36 +162,51 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
      * =============================
      */
 
-    /// @inheritdoc IRoycoVaultTranche
-    function previewDeposit(TRANCHE_UNIT _assets) external view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
-        // Get the value allocated, the NAV to mint shares at (the tranche's pre-deposit effective NAV), and the post-sync supply after the
-        // premium and protocol fee shares are minted (the kernel is the single source of truth for the post-sync supply)
-        NAV_UNIT valueAllocated;
-        NAV_UNIT effectiveNAV;
-        uint256 totalTrancheShares;
-        if (TRANCHE_TYPE() == TrancheType.SENIOR) {
-            SyncedAccountingState memory stateBeforeDeposit;
-            (stateBeforeDeposit, valueAllocated, totalTrancheShares) = IRoycoDayKernel(KERNEL).stPreviewDeposit(_assets);
-            effectiveNAV = stateBeforeDeposit.stEffectiveNAV;
-        } else if (TRANCHE_TYPE() == TrancheType.JUNIOR) {
-            SyncedAccountingState memory stateBeforeDeposit;
-            (stateBeforeDeposit, valueAllocated, totalTrancheShares) = IRoycoDayKernel(KERNEL).jtPreviewDeposit(_assets);
-            effectiveNAV = stateBeforeDeposit.jtEffectiveNAV;
-        } else {
-            // The LT prices its shares at the effective NAV (value deployed into the AMM or another market-making venue plus the idle liquidity-premium senior shares), which is not
-            // carried in SyncedAccountingState, so the kernel surfaces it directly as navToMintSharesAt
-            (, valueAllocated, totalTrancheShares, effectiveNAV) = IRoycoDayKernel(KERNEL).ltPreviewDeposit(_assets);
+    /**
+     * @inheritdoc IRoycoVaultTranche
+     * @dev Routes the deposit through the execute-and-revert pattern so the quote is produced by the actual kernel deposit path under its real semantics
+     * @dev Any revert that the deposit itself raises is propagated unchanged, maintaining symmetry with actual execution
+     */
+    function previewDeposit(TRANCHE_UNIT _assets) external virtual override(IRoycoVaultTranche) returns (uint256 shares) {
+        bytes memory callbackRevertData = _previewOperation(abi.encodeCall(this.previewDepositAndRevert, (_assets)));
+        assembly ("memory-safe") {
+            shares := mload(add(callbackRevertData, 0x64))
         }
-
-        // Calculate the shares to be minted to the receiver against the post-sync supply, so the preview matches execution
-        shares = ValuationLogic._convertToShares(valueAllocated, effectiveNAV, totalTrancheShares, Math.Rounding.Floor);
     }
 
-    /// @inheritdoc IRoycoVaultTranche
-    function previewRedeem(uint256 _shares) external view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
-        if (TRANCHE_TYPE() == TrancheType.SENIOR) claims = IRoycoDayKernel(KERNEL).stPreviewRedeem(_shares);
-        else if (TRANCHE_TYPE() == TrancheType.JUNIOR) claims = IRoycoDayKernel(KERNEL).jtPreviewRedeem(_shares);
-        else claims = IRoycoDayKernel(KERNEL).ltPreviewRedeem(_shares);
+    /**
+     * @inheritdoc IRoycoVaultTranche
+     * @dev Routes the redemption through the execute-and-revert pattern so the quote is produced by the actual kernel redemption path under its real semantics
+     * @dev Any revert that the redemption itself raises is propagated unchanged, maintaining symmetry with actual execution
+     */
+    function previewRedeem(uint256 _shares) external virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
+        bytes memory callbackRevertData = _previewOperation(abi.encodeCall(this.previewRedeemAndRevert, (_shares)));
+        assembly ("memory-safe") {
+            claims := add(callbackRevertData, 0x64)
+        }
+    }
+
+    /**
+     * @inheritdoc IRoycoVaultTranche
+     * @dev Executes the deposit through the actual kernel flow under its real semantics and unwinds every state change by
+     *      reverting with the priced shares. The simulation omits only asset custody and the share mint, since the kernel
+     *      accounts deposits against its owned-asset counters
+     * @dev Only invoked via a self-call from previewDeposit
+     */
+    function previewDepositAndRevert(TRANCHE_UNIT _assets) external virtual override(IRoycoVaultTranche) onlySelf {
+        revert PREVIEW_OPERATION_RESULT(abi.encode(_deposit(_assets)));
+    }
+
+    /**
+     * @inheritdoc IRoycoVaultTranche
+     * @dev Executes the redemption through the actual kernel flow under its real semantics and unwinds every state change
+     *      by reverting with the remitted claims. The simulation omits only the allowance spend and the share burn (the
+     *      kernel reads the pre-burn supply) and remits to the kernel itself (whitelist-exempt and never blacklisted), so
+     *      the quote stays receiver-agnostic
+     * @dev Only invoked via a self-call from previewRedeem
+     */
+    function previewRedeemAndRevert(uint256 _shares) external virtual override(IRoycoVaultTranche) onlySelf {
+        revert PREVIEW_OPERATION_RESULT(abi.encode(_redeem(_shares, KERNEL)));
     }
 
     /// @inheritdoc IRoycoVaultTranche
@@ -259,7 +265,7 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
         // We do not allow redemptions if the tranche has no claim on the assets
         if (claimNAV == ZERO_NAV_UNITS) return 0;
 
-        // The maximum redeemable shares s' = min(s, T * L / N), flooring the pro-rata conversion in favor of the market
+        // The maximum redeemable shares are the minimum of the owner's share balance and the globally redeemable shares
         shares = Math.min(balanceOf(_owner), totalTrancheShares.mulDiv(maxWithdrawableNAV, claimNAV, Math.Rounding.Floor));
     }
 
@@ -298,6 +304,72 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
 
     /// @dev Returns the type of the tranche (Senior, Junior, or Liquidity)
     function TRANCHE_TYPE() public pure virtual returns (TrancheType);
+
+    /**
+     * =============================
+     * Internal Utility Functions
+     * =============================
+     */
+
+    /**
+     * @dev Deposits the assets into the Royco market through this tranche's kernel deposit entrypoint and prices the shares to mint
+     * @dev Shares are priced at the tranche's pre-deposit effective NAV against the post-sync supply, after the kernel
+     *      deposit has minted any premium and protocol fee shares
+     * @param _assets The amount of assets to deposit, denominated in the tranche's base asset units
+     * @return shares The number of shares to mint for the deposit
+     */
+    function _deposit(TRANCHE_UNIT _assets) internal virtual returns (uint256 shares) {
+        // Deposit the assets into the Royco market and get the fraction of total assets allocated
+        NAV_UNIT depositNAV;
+        NAV_UNIT effectiveNAV;
+        if (TRANCHE_TYPE() == TrancheType.SENIOR) (depositNAV, effectiveNAV) = IRoycoDayKernel(KERNEL).stDeposit(_assets);
+        else if (TRANCHE_TYPE() == TrancheType.JUNIOR) (depositNAV, effectiveNAV) = IRoycoDayKernel(KERNEL).jtDeposit(_assets);
+        else (depositNAV, effectiveNAV) = IRoycoDayKernel(KERNEL).ltDeposit(_assets);
+
+        // NOTE: effectiveNAV can be zero initially when the tranche is deployed
+        require(depositNAV != ZERO_NAV_UNITS, INVALID_DEPOSIT_NAV());
+
+        // depositNAV represents the value of the assets deposited in the asset that the tranche's NAV is denominated in
+        // shares are minted to the user at the effective NAV of the tranche
+        // effectiveNAV is the NAV of the tranche's total claims before the deposit is made
+        require((shares = ValuationLogic._convertToShares(depositNAV, effectiveNAV, totalSupply(), Math.Rounding.Floor)) != 0, MUST_MINT_NON_ZERO_SHARES());
+    }
+
+    /**
+     * @dev Redeems the shares from the Royco market through this tranche's kernel redemption entrypoint
+     * @dev The kernel transfers the redeemed assets directly to the receiver
+     * @param _shares The number of shares to redeem
+     * @param _receiver The address that receives the redeemed assets
+     * @return claims The distribution of assets transferred to the receiver on redemption
+     */
+    function _redeem(uint256 _shares, address _receiver) internal virtual returns (AssetClaims memory claims) {
+        require(_shares != 0, MUST_REQUEST_NON_ZERO_SHARES());
+
+        if (TRANCHE_TYPE() == TrancheType.SENIOR) return IRoycoDayKernel(KERNEL).stRedeem(_shares, _receiver);
+        else if (TRANCHE_TYPE() == TrancheType.JUNIOR) return IRoycoDayKernel(KERNEL).jtRedeem(_shares, _receiver);
+        else return IRoycoDayKernel(KERNEL).ltRedeem(_shares, _receiver);
+    }
+
+    /**
+     * @dev Simulates an operation through the execute-and-revert pattern and returns the raw result-carrying revert data
+     * @param _callData The ABI encoded call to the operation's execute-and-revert preview function
+     * @return callbackRevertData The validated result-carrying revert data
+     */
+    function _previewOperation(bytes memory _callData) internal returns (bytes memory callbackRevertData) {
+        bool success;
+        (success, callbackRevertData) = address(this).call(_callData);
+        // Unreachable: a preview operation callback always reverts with its return data
+        if (success) revert PREVIEW_CANNOT_MUTATE_STATE();
+
+        bytes4 expectedErrorSelector = IRoycoVaultTranche.PREVIEW_OPERATION_RESULT.selector;
+        assembly ("memory-safe") {
+            // Revert with any genuine operation failure, mimicking the operation exactly
+            let errorSelectorPtr := add(callbackRevertData, 0x20)
+            if iszero(eq(shr(224, mload(errorSelectorPtr)), shr(224, expectedErrorSelector))) {
+                revert(errorSelectorPtr, mload(callbackRevertData))
+            }
+        }
+    }
 
     /**
      * @inheritdoc ERC20Upgradeable

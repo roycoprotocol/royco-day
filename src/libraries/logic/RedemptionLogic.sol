@@ -216,57 +216,8 @@ library RedemptionLogic {
     // =============================
 
     /**
-     * @notice Previews the redemption of a specified number of shares from the senior tranche
-     * @param _shares The number of shares to redeem
-     * @return userClaim The distribution of assets that would be transferred to the receiver on redemption, denominated in the respective tranches' tranche units
-     */
-    function stPreviewRedeem(IRoycoDayKernel.RoycoDayKernelState storage $, uint256 _shares) external view returns (AssetClaims memory userClaim) {
-        // Preview the total claims the senior tranche has on each tranche's assets and the total shares after minting any protocol fee and liquidity premium fee shares post-sync
-        (SyncedAccountingState memory state, AssetClaims memory stClaims, uint256 totalShares) =
-            IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.SENIOR);
-        // ST redemptions are disabled during a fixed-term market state: return an empty claim, matching the reverting redeem path
-        if (state.marketState == MarketState.FIXED_TERM) return userClaim;
-
-        // Calculate the user's claims based on the shares redeemed
-        userClaim = TrancheClaimsLogic._scaleAssetClaims(stClaims, _shares, totalShares);
-        (userClaim,) = SelfLiquidationLogic.applySeniorTrancheSelfLiquidationBonus($, state, userClaim);
-    }
-
-    /**
-     * @notice Previews the redemption of a specified number of shares from the junior tranche
-     * @dev The kernel may decide to simulate the redemption and revert internally with the result
-     * @dev Should revert if redemptions are asynchronous
-     * @param _shares The number of shares to redeem
-     * @return userClaim The distribution of assets that would be transferred to the receiver on redemption, denominated in the respective tranches' tranche units
-     */
-    function jtPreviewRedeem(uint256 _shares) external view returns (AssetClaims memory userClaim) {
-        // Preview the total claims the junior tranche has on each tranche's assets and the total shares after minting any protocol fee shares post-sync
-        (SyncedAccountingState memory state, AssetClaims memory jtClaims, uint256 totalShares) =
-            IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.JUNIOR);
-        // JT redemptions are disabled during a fixed-term market state: return an empty claim, matching the reverting redeem path
-        if (state.marketState == MarketState.FIXED_TERM) return userClaim;
-        // Calculate the user's claims based on the shares redeemed
-        userClaim = TrancheClaimsLogic._scaleAssetClaims(jtClaims, _shares, totalShares);
-    }
-
-    /**
-     * @notice Previews the redemption of a specified number of shares from the liquidity tranche
-     * @param _shares The number of shares to redeem
-     * @return userClaim The distribution of assets that would be transferred to the receiver on redemption, denominated in the respective tranches' tranche units
-     */
-    function ltPreviewRedeem(uint256 _shares) external view returns (AssetClaims memory userClaim) {
-        // Preview the total claims the liquidity tranche has on each tranche's assets and the total shares after minting any protocol fee shares post-sync
-        (SyncedAccountingState memory state, AssetClaims memory ltClaims, uint256 totalShares) =
-            IRoycoDayKernel(address(this)).previewSyncTrancheAccounting(TrancheType.LIQUIDITY);
-        // LT redemptions are disabled during a fixed-term market state: return an empty claim, matching the reverting redeem path
-        if (state.marketState == MarketState.FIXED_TERM) return userClaim;
-        // Calculate the user's claims based on the shares redeemed
-        userClaim = TrancheClaimsLogic._scaleAssetClaims(ltClaims, _shares, totalShares);
-    }
-
-    /**
      * @notice Previews a multi-asset LT redemption of _ltShares by simulating the proportional venue removal and the senior unwind
-     * @dev NON-VIEW: routes the venue removal through its execute-and-unwind preview, which mutates no state net
+     * @dev NON-VIEW: routes the venue removal through its execute-and-revert preview, which mutates no state net
      * @param _ltShares The number of LT shares to redeem
      * @return stClaims The ST redemption asset claims that would be transferred to the receiver, denominated in the respective tranches' tranche units
      * @return quoteAssets The quote assets the removal would withdraw to the receiver
@@ -428,7 +379,7 @@ library RedemptionLogic {
      * @return claimOnLTNAV The notional claims on LT assets that the liquidity tranche has denominated in kernel's NAV units
      * @return ltMaxWithdrawableNAV The maximum amount of assets that can be withdrawn multi-asset, denominated in the kernel's NAV units
      * @return totalTrancheShares The total number of shares that exist in the liquidity tranche
-     * @dev NON-VIEW: routes the venue removal through its execute-and-unwind preview, which mutates no state net
+     * @dev NON-VIEW: routes the venue removal through its execute-and-revert preview, which mutates no state net
      */
     function ltMaxWithdrawableMultiAsset(
         IRoycoDayKernel.RoycoDayKernelState storage $,

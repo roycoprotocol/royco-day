@@ -57,8 +57,10 @@ contract Test_LTConvertRawPricing_Tranches is DayMarketTestBase {
         uint256 effNAV = rawNAV + idleValue;
         assertGt(idleValue, 0, "arrange: the staged premium must carry nonzero value for the split to be observable");
 
-        // The convert surface: BPT-only claims for a third of the supply
-        uint256 shares = supply / 3;
+        // The convert surface: BPT-only claims for a sixteenth of the supply. The slice stays small because
+        // previewRedeem executes the real redemption path, so the simulated exit must clear the 5% liquidity floor:
+        // required 0.05 x stEff 107e18 = 5.35e18 against the 6e18 depth leaves under 11% of the depth redeemable
+        uint256 shares = supply / 16;
         AssetClaims memory conv = liquidityTranche.convertToAssets(shares);
         assertEq(conv.stShares, 0, "convertToAssets must report no senior-share claim (the idle leg is excluded)");
         assertEq(toUint256(conv.nav), Math.mulDiv(rawNAV, shares, supply, Math.Rounding.Floor), "convertToAssets NAV must be the pro-rata slice of the BPT-only raw NAV");
@@ -193,7 +195,9 @@ contract Test_LTConvertRawPricing_Tranches is DayMarketTestBase {
         _sync();
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, 0, "arrange: nothing may be staged");
 
-        uint256 shares = liquidityTranche.totalSupply() / 4;
+        // An eighth of the supply keeps the simulated exit above the 5% liquidity floor (previewRedeem executes the
+        // real redemption path): redeeming 0.75e18 of the 6e18 depth leaves 5.25e18 >= required 0.05 x 100e18 = 5e18
+        uint256 shares = liquidityTranche.totalSupply() / 8;
         AssetClaims memory conv = liquidityTranche.convertToAssets(shares);
         AssetClaims memory prev = liquidityTranche.previewRedeem(shares);
         assertEq(keccak256(abi.encode(conv)), keccak256(abi.encode(prev)), "convertToAssets must equal previewRedeem on every leg when nothing is staged");

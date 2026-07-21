@@ -205,7 +205,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         external
         override(IRoycoDayKernel)
         onlySelf
-        returns (TRANCHE_UNIT ltAssets, NAV_UNIT valueAllocated)
+        returns (TRANCHE_UNIT ltAssets, NAV_UNIT depositNAV)
     {
         try _vault.unlock(abi.encodeCall(this.addBalancerV3Liquidity, (true, _seniorShares, _quoteAssets, ZERO_TRANCHE_UNITS))) {
             // Unreachable: a preview-mode callback always unwinds via its result-carrying revert
@@ -214,7 +214,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
             _validatePreviewResult(callbackRevertData, BalancerV3VenueLogic.PREVIEW_ADD_LIQUIDITY_RESULT.selector);
             assembly ("memory-safe") {
                 ltAssets := mload(add(callbackRevertData, 0x24))
-                valueAllocated := mload(add(callbackRevertData, 0x44))
+                depositNAV := mload(add(callbackRevertData, 0x44))
             }
         }
     }
