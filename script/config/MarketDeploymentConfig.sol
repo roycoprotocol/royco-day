@@ -78,11 +78,19 @@ abstract contract MarketDeploymentConfig {
     mapping(string marketName => MarketConfig) internal _marketConfigs;
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // MINED MARKET IDs (per market, per factory)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice The pre-mined marketId to use for `marketName` when deploying against `factory`.
+    mapping(bytes32 marketNameHash => mapping(address factory => bytes32 marketId)) internal _marketIds;
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // ERRORS
     // ═══════════════════════════════════════════════════════════════════════════
 
     error MarketConfigNotFound(string marketName);
     error MarketChainIdMismatch(string marketName, uint256 expectedChainId, uint256 actualChainId);
+    error MarketIdNotConfigured(string marketName, address factory);
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CONSTRUCTOR
@@ -99,6 +107,25 @@ abstract contract MarketDeploymentConfig {
         ECLP_LP_ORACLE_FACTORY[MAINNET] = 0x301EDe5Fd4f9d7266B09c3A2E38F97776447154B;
 
         _initializeMarketConfigs();
+        _initializeMinedMarketIds();
+    }
+
+    /// @notice Registers each market's pre-mined marketId, keyed by the factory it was mined against.
+    /// @dev Mined offline (script/mine-market-id); re-mine and update the value if a market's factory changes (new
+    ///      deployer or changed singleton salts). The factory addresses are the deterministic proxy addresses the
+    ///      production deployer and the test harness's `vm.createWallet("DEPLOYER")` each stand up.
+    function _initializeMinedMarketIds() internal {
+        bytes32 snUSDHash = keccak256(bytes(SNUSD));
+        // snUSD against the production factory.
+        _marketIds[snUSDHash][0x76fF747399Ed12F0B631323d6d4c6E1b66cB7c89] = 0xdad618951447dde839beee414c1ff98055c009873b5833ac1976bf31d29771f2;
+        // snUSD against the local test factory.
+        _marketIds[snUSDHash][0x87F4fccE54F4D03De715A0C6fcd28b7Ea24664d1] = 0xb3d433a58a0d62af783a1fcb783e83f5efc3867dfa2e807ed7455be4373d0bda;
+    }
+
+    /// @notice The pre-mined marketId for `_marketName` against `_factory`. Reverts if none is configured.
+    function getMarketId(string memory _marketName, address _factory) public view returns (bytes32 marketId) {
+        marketId = _marketIds[keccak256(bytes(_marketName))][_factory];
+        require(marketId != bytes32(0), MarketIdNotConfigured(_marketName, _factory));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

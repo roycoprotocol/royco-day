@@ -347,9 +347,9 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         BalancerV3HooksConfig memory hooksConfig = BALANCER_V3_VAULT.getHooksConfig(_pool);
         require(hooksConfig.hooksContract == _hook, INVALID_POOL_CONFIGURATION(_pool));
 
-        // Exactly two tokens, one of which is the senior tranche share (the quote leg is pinned in `_validateDeployment`)
+        // The market id should guarantee that the deployed ST share is "less" than the quote token
         IERC20[] memory tokens = BALANCER_V3_VAULT.getPoolTokens(_pool);
-        require(tokens.length == 2 && (address(tokens[0]) == _seniorTranche || address(tokens[1]) == _seniorTranche), INVALID_POOL_CONFIGURATION(_pool));
+        require(tokens.length == 2 && address(tokens[0]) == _seniorTranche, INVALID_POOL_CONFIGURATION(_pool));
     }
 
     /**
@@ -397,10 +397,10 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         require(kernel.LT_ASSET() == pool, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
         require(kernel.ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER() == _p.enforceVaultSharesTransferWhitelist, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
 
-        // Pin the pool's quote leg to the kernel's resolved quote asset, fully constraining the `{ST_share, quote}` token set
+        // The market id should guarantee that the deployed ST share is "less" than the quote token
         IERC20[] memory tokens = BALANCER_V3_VAULT.getPoolTokens(pool);
-        address quoteToken = address(tokens[0]) == _r.seniorTranche ? address(tokens[1]) : address(tokens[0]);
-        require(quoteToken == kernel.QUOTE_ASSET(), MARKET_WIRING_VERIFICATION_FAILED(pool));
+        require(address(tokens[0]) == _r.seniorTranche, MARKET_WIRING_VERIFICATION_FAILED(pool));
+        require(address(tokens[1]) == kernel.QUOTE_ASSET(), MARKET_WIRING_VERIFICATION_FAILED(pool));
 
         // Accountant: kernel binding and the injected JT YDM / LT LDM instances
         require(IRoycoDayAccountant(_r.accountant).KERNEL() == _r.kernel, MARKET_WIRING_VERIFICATION_FAILED(_r.accountant));

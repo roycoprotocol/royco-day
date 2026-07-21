@@ -152,6 +152,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     error UnsupportedYDMType(YDMType ydmType);
     error UnknownRole(uint64 role);
     error RateProviderRequiredWhenPayingYieldFees(address token);
+    error SeniorTrancheNotFirstPoolToken(address seniorTranche, address quoteAsset);
 
     bool ENABLE_LOGGING = false;
 
@@ -266,6 +267,10 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         // Register (or reuse) the Day template for this kernel type.
         s.template = _getOrRegisterTemplate(s.factory, _config.kernelType, s.entryPoint, s.marketSyncer);
 
+        // The pre-mined marketId for this market against this exact factory (its senior-tranche proxy sorts before the
+        // quote asset, so the ST is pool token0).
+        s.marketId = getMarketId(_config.marketName, address(s.factory));
+
         // Drop the deployer's admin roles now that the admin-gated setup is complete.
         _renounceDeployerAdminRoles(s.accessManager, _deployer, _factoryAdmin, amExisted);
     }
@@ -370,7 +375,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         internal
         returns (DeploymentResult memory)
     {
-        bytes32 marketId = keccak256(abi.encode(_config.seniorTrancheName, _config.juniorTrancheName, block.timestamp, block.chainid));
+        bytes32 marketId = _s.marketId;
         BalancerV3_GyroECLP_LT_DeploymentTemplate.MarketContracts memory marketContracts =
             _deployMarketContracts(_config, marketId, _s.factory, _s.template, address(_s.accessManager));
         BalancerV3_GyroECLP_LT_DeploymentTemplate.DayParams memory params =
@@ -862,12 +867,10 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     {
         BalancerV3TokenConfig[] memory tokens = new BalancerV3TokenConfig[](2);
 
-        // Balancer V3 requires a pool's tokens registered in ascending address order
-        {
-            uint256 seniorTrancheIndex = uint160(_seniorTranche) < uint160(_p.quoteAsset) ? 0 : 1;
-            tokens[seniorTrancheIndex] = _buildTokenConfig(_seniorTranche, _seniorRateProvider, _p.chargeYieldFeeOnSeniorTrancheShares);
-            tokens[1 - seniorTrancheIndex] = _buildTokenConfig(_p.quoteAsset, _p.quoteAssetRateProvider, _p.chargeYieldFeeOnQuoteAsset);
-        }
+        // Guaranteed by the mined marketId: the senior-tranche proxy sorts before the quote asset, so the ST is pool token0.
+        require(uint160(_seniorTranche) < uint160(_p.quoteAsset), SeniorTrancheNotFirstPoolToken(_seniorTranche, _p.quoteAsset));
+        tokens[0] = _buildTokenConfig(_seniorTranche, _seniorRateProvider, _p.chargeYieldFeeOnSeniorTrancheShares);
+        tokens[1] = _buildTokenConfig(_p.quoteAsset, _p.quoteAssetRateProvider, _p.chargeYieldFeeOnQuoteAsset);
 
         BalancerV3PoolRoleAccounts memory roleAccounts =
             BalancerV3PoolRoleAccounts({ pauseManager: _authority, swapFeeManager: _authority, poolCreator: _authority });

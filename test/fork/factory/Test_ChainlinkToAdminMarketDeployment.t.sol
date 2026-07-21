@@ -67,6 +67,10 @@ contract Test_ChainlinkToAdminMarketDeployment is Test {
     address internal DEPLOYER = makeAddr("DEPLOYER");
     address internal PROTOCOL_FEE_RECIPIENT = makeAddr("PROTOCOL_FEE_RECIPIENT");
 
+    /// @dev Pre-mined marketId whose senior-tranche CREATE3 proxy sorts below the quote asset (ST is pool token0) for
+    ///      this suite's deterministic `factory`; the deployment path asserts that ordering. Mined via script/mine-market-id.
+    bytes32 internal constant MARKET_ID = 0x7537556461b25c033e9fe151342e829a6439dc9c0f467afe0667ee9235315cae;
+
     function setUp() public {
         string memory rpc = vm.envString("MAINNET_RPC_URL");
         vm.createSelectFork(rpc, FORK_BLOCK);
@@ -163,10 +167,11 @@ contract Test_ChainlinkToAdminMarketDeployment is Test {
     function _deploy(bytes32 _marketId) internal returns (IRoycoProtocolTemplate.DeploymentResult memory) {
         // Precompute the params first: the builders externally deploy the market contracts as `deployScript`, which
         // would otherwise consume the `vm.prank(DEPLOYER)` intended for `executeMarketDeployment`.
+        bytes32 marketId = _marketId;
         MarketConfig memory cfg = _marketConfig();
         BalancerV3_GyroECLP_LT_DeploymentTemplate.MarketContracts memory mc =
-            deployScript.deployMarketContractsForTest(cfg, _marketId, factory, address(template), address(am));
-        bytes memory p = abi.encode(deployScript.buildDayParams(cfg, _marketId, PROTOCOL_FEE_RECIPIENT, address(0), mc));
+            deployScript.deployMarketContractsForTest(cfg, marketId, factory, address(template), address(am));
+        bytes memory p = abi.encode(deployScript.buildDayParams(cfg, marketId, PROTOCOL_FEE_RECIPIENT, address(0), mc));
         vm.prank(DEPLOYER);
         return factory.executeMarketDeployment(address(template), p);
     }
@@ -180,7 +185,7 @@ contract Test_ChainlinkToAdminMarketDeployment is Test {
     ///         ADMIN_ORACLE_QUOTER_ROLE, and prices the senior pool leg via the kernel
     function test_ExecuteMarketDeployment_ChainlinkToAdminKernelWiring() external {
         _register();
-        IRoycoProtocolTemplate.DeploymentResult memory r = _deploy(keccak256("cta-market-A"));
+        IRoycoProtocolTemplate.DeploymentResult memory r = _deploy(MARKET_ID);
 
         // The kernel initialized with the configured admin rate (this family's init path, not the golden's).
         assertEq(

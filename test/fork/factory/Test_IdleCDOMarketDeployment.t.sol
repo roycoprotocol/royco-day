@@ -75,6 +75,10 @@ contract Test_IdleCDOMarketDeployment is Test {
     address internal DEPLOYER = makeAddr("DEPLOYER");
     address internal PROTOCOL_FEE_RECIPIENT = makeAddr("PROTOCOL_FEE_RECIPIENT");
 
+    /// @dev Pre-mined marketId whose senior-tranche CREATE3 proxy sorts below the quote asset (ST is pool token0) for
+    ///      this suite's deterministic `factory`; the deployment path asserts that ordering. Mined via script/mine-market-id.
+    bytes32 internal constant MARKET_ID = 0x7537556461b25c033e9fe151342e829a6439dc9c0f467afe0667ee9235315cae;
+
     function setUp() public {
         string memory rpc = vm.envString("MAINNET_RPC_URL");
         vm.createSelectFork(rpc, FORK_BLOCK);
@@ -193,7 +197,7 @@ contract Test_IdleCDOMarketDeployment is Test {
     ///         and prices the senior pool leg via the kernel
     function test_ExecuteMarketDeployment_IdleCDOKernelWiring() external {
         _register();
-        IRoycoProtocolTemplate.DeploymentResult memory r = _deploy(keccak256("idle-cdo-market-A"));
+        IRoycoProtocolTemplate.DeploymentResult memory r = _deploy(MARKET_ID);
 
         // The kernel proxy pinned the REAL CDO as its constructor immutable.
         assertEq(
@@ -253,7 +257,7 @@ contract Test_IdleCDOMarketDeployment is Test {
     function test_RevertIf_CDOAATrancheMismatchesSTAsset_DeploymentUnwindsAtomically() external {
         _register();
 
-        bytes32 marketId = keccak256("idle-cdo-bad-asset");
+        bytes32 marketId = MARKET_ID;
         // The REAL CDO against the WRONG ST asset (the snUSD vault, not the CDO's AA tranche token).
         MarketConfig memory cfg = _marketConfig(PARETO_FALCONX_CDO, SNUSD_VAULT);
         address predictedST = factory.predictDeterministicAddress(keccak256(abi.encodePacked("ROYCO_MARKET_", marketId, TAG_ST_PROXY)));

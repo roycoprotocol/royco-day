@@ -164,6 +164,7 @@ struct ProtocolScaffolding {
     address marketSyncer;
     address roycoBlacklist;
     address template;
+    bytes32 marketId;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
