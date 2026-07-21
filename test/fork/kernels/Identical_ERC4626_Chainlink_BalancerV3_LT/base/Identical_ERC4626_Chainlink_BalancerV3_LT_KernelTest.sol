@@ -187,6 +187,7 @@ abstract contract Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest is Test_K
      */
     function test_LTMultiAssetDeposit_FirstDepositInitializesPool_ProductionGenesis() public {
         if (!testConfig.hasLiquidityTranche) return;
+        _setupLTProviders();
         _seedMarket(testConfig.initialFunding / 100, testConfig.initialFunding / 100);
         assertFalse(VAULT.isPoolInitialized(POOL), "precondition: the deploy script must leave the pool uninitialized");
         assertEq(
@@ -219,6 +220,7 @@ abstract contract Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest is Test_K
      */
     function test_LTMultiAssetDeposit_UninitializedPoolPreview_MatchesExecutionAndLatchesNothing() public {
         if (!testConfig.hasLiquidityTranche) return;
+        _setupLTProviders();
         _seedMarket(testConfig.initialFunding / 100, testConfig.initialFunding / 100);
         assertFalse(VAULT.isPoolInitialized(POOL), "precondition: the deploy script must leave the pool uninitialized");
 
