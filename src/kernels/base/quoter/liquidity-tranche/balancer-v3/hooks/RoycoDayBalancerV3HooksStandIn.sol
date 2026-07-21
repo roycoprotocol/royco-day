@@ -18,10 +18,24 @@ import { UUPSUpgradeable } from "../../../../../../../lib/openzeppelin-contracts
  *      `getHookFlags` AT REGISTRATION TIME, so this stand-in advertises the EXACT SAME flags as the real hook
  *      After the kernel is deployed, the deploy template upgrades this proxy to the real `RoycoDayBalancerV3Hooks`
  *      implementation, and the frozen flags then match the real hook's callbacks
- *      `_authorizeUpgrade` is intentionally open because the proxy is upgraded to the real,
- *      access-controlled hook within the same deployment transaction, the open window never survives the deploy
+ *
+ *      The proxy against this stand-in is deployed BEFORE the market's wiring transaction (so the pool can be created
+ *      script-side) and therefore persists across transactions, so `_authorizeUpgrade` is restricted to the deploying
+ *      template (pinned at construction) rather than left open: the template is the sole party allowed to upgrade the
+ *      proxy to the real hook, closing the cross-transaction window an open upgrade would expose
  */
 contract RoycoDayBalancerV3HooksStandIn is BaseHooks, UUPSUpgradeable {
+    /// @notice Thrown when a party other than the deploying template attempts to upgrade the stand-in proxy
+    error ONLY_TEMPLATE();
+
+    /// @notice The deployment template that instantiated this stand-in, the only party allowed to upgrade its proxy
+    /// @dev Pinned to the constructing template (the stand-in impl is deployed inside the template's constructor)
+    address public immutable TEMPLATE;
+
+    constructor() {
+        TEMPLATE = msg.sender;
+    }
+
     /// @inheritdoc BaseHooks
     /// @dev No-op: returns true so the Vault accepts the pool registration against this stand-in
     function onRegister(address, address, TokenConfig[] memory, LiquidityManagement calldata) public pure override(BaseHooks) returns (bool) {
@@ -48,8 +62,11 @@ contract RoycoDayBalancerV3HooksStandIn is BaseHooks, UUPSUpgradeable {
         });
     }
 
-    /// @dev Open by design, see contract-level notice: the proxy is upgraded to the real hook during the deploy tx
-    function _authorizeUpgrade(address) internal pure override(UUPSUpgradeable) { }
+    /// @dev Restricted to the deploying template, see contract-level notice: the proxy persists across transactions
+    ///      before the wiring tx upgrades it to the real hook, so only the template may perform that upgrade
+    function _authorizeUpgrade(address) internal view override(UUPSUpgradeable) {
+        require(msg.sender == TEMPLATE, ONLY_TEMPLATE());
+    }
 
     /// noop fallback to prevent the proxy from reverting if it receives a call
     fallback() external { }
