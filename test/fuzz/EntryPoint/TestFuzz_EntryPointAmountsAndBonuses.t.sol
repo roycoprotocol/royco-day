@@ -71,8 +71,11 @@ contract TestFuzz_EntryPointAmountsAndBonuses is EntryPointTestBase {
         uint256 receiverDelta = stJtVault.balanceOf(USER_B) - receiverBefore;
         assertEq(receiverDelta, toUint256(userClaims.stAssets) + toUint256(userClaims.jtAssets), "the receiver must get exactly the reported user claims");
         assertEq(stJtVault.balanceOf(address(entryPoint)), 0, "no claim assets may remain in the entry point");
-        // The executor's slice is the flooring bonus fraction of the total delivered (2 wei tolerance: one floor per leg)
-        assertApproxEqAbs(executorDelta, ((executorDelta + receiverDelta) * _bonusWAD) / 1e18, 2, "the bonus split must conserve the total claims");
+        // The executor's slice is the flooring bonus fraction of the total delivered. The bonus is a
+        // _scaleAssetClaims slice priced against the virtual-shares effective denominator (WAD + 1e6), not WAD, so the
+        // derivation divides by (1e18 + 1e6). Conservation of the ACTUAL claim holds exactly (remit sets the receiver
+        // leg to total-minus-bonus with no re-conversion); the 2-wei tolerance is one bonus floor per delivered leg (ST + JT).
+        assertApproxEqAbs(executorDelta, ((executorDelta + receiverDelta) * _bonusWAD) / (1e18 + 1e6), 2, "the bonus split must conserve the total claims");
     }
 
     /// @notice Escrow accounting is exact for any partial execution amount

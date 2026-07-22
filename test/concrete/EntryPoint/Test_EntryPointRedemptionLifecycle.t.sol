@@ -178,9 +178,11 @@ contract Test_EntryPointRedemptionLifecycle is EntryPointTestBase {
         uint256 receiverDelta = stJtVault.balanceOf(USER_B) - receiverBefore;
         assertGt(executorDelta, 0, "the executor must receive its bonus slice of the claims");
         assertEq(receiverDelta, toUint256(userClaims.stAssets) + toUint256(userClaims.jtAssets), "the receiver must get the post-bonus user claims");
-        // Bonus conservation: the executor's slice is ~1% of the total delivered claims (floor rounding per leg)
+        // Bonus conservation: the executor's slice is ~1% of the total delivered claims (floor rounding per leg).
+        // The bonus is a _scaleAssetClaims slice priced against the virtual-shares effective denominator (WAD + 1e6),
+        // so the derivation divides by (1e18 + 1e6), not WAD.
         uint256 total = executorDelta + receiverDelta;
-        assertApproxEqAbs(executorDelta, (total * DEFAULT_EXECUTOR_BONUS) / 1e18, 2, "the executor slice must equal the flooring bonus fraction");
+        assertApproxEqAbs(executorDelta, (total * DEFAULT_EXECUTOR_BONUS) / (1e18 + 1e6), 2, "the executor slice must equal the flooring bonus fraction");
         // Nothing may be left stranded in the entry point
         assertEq(stJtVault.balanceOf(address(entryPoint)), 0, "no claim assets may remain in the entry point after the split");
     }

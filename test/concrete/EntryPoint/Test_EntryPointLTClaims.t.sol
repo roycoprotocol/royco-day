@@ -71,10 +71,12 @@ contract Test_EntryPointLTClaims is EntryPointTestBase {
         uint256 totalStShares = executorStShares + userClaims.stShares;
         assertEq(bpt.balanceOf(USER_B), toUint256(userClaims.ltAssets), "the receiver must get the post-bonus BPT leg");
         assertEq(seniorTranche.balanceOf(USER_B), userClaims.stShares, "the receiver must get the post-bonus senior-share leg");
-        // The executor slice is the flooring bonus fraction of each leg
-        assertApproxEqAbs(executorBpt, (totalBpt * DEFAULT_EXECUTOR_BONUS) / 1e18, 1, "the BPT bonus slice must equal the flooring bonus fraction");
+        // The executor slice is the flooring bonus fraction of each leg. The bonus is a _scaleAssetClaims slice
+        // priced against the virtual-shares effective denominator (WAD + 1e6), not WAD, so the derivation divides
+        // by (1e18 + 1e6). totalBpt/totalStShares are the actual (bonus + receiver) totals redeemed.
+        assertApproxEqAbs(executorBpt, (totalBpt * DEFAULT_EXECUTOR_BONUS) / (1e18 + 1e6), 1, "the BPT bonus slice must equal the flooring bonus fraction");
         assertApproxEqAbs(
-            executorStShares, (totalStShares * DEFAULT_EXECUTOR_BONUS) / 1e18, 1, "the senior-share bonus slice must equal the flooring bonus fraction"
+            executorStShares, (totalStShares * DEFAULT_EXECUTOR_BONUS) / (1e18 + 1e6), 1, "the senior-share bonus slice must equal the flooring bonus fraction"
         );
         // Nothing may be left stranded in the entry point
         assertEq(bpt.balanceOf(address(entryPoint)), 0, "no BPT may remain in the entry point after the split");

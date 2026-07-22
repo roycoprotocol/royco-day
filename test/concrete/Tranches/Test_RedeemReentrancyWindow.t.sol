@@ -93,27 +93,35 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
      *      so an unguarded redeem would double-count those shares against a kernel ledger already debited by the
      *      in-flight payout, an unguarded deposit would mint against mid-operation state, and an unguarded sync
      *      would commit a checkpoint halfway through a redemption. All three must revert with the guard's error.
-     *      Every literal is 1:1 at the pinned 1.0 rate with no PnL and no fee mints (fees accrue only on gains):
-     *      control redeem 10e18 of 100e18 shares pays floor(100e18 x 10e18 / 100e18) = 10e18 tokens, the probe's
-     *      5e18-token deposit mints floor(5e18 x 90e18 / 90e18) = 5e18 shares, and the hooked redeem of 10e18 of
-     *      the 95e18 supply pays floor(95e18 x 10e18 / 95e18) = 10e18 tokens, identical to the control payout
+     *      Every literal carries the virtual-shares/assets offset at the pinned 1.0 rate with no PnL and no fee
+     *      mints (fees accrue only on gains): control redeem 10e18 of 100e18 shares pays
+     *      floor(100e18 x 10e18 / (100e18 + 1e6)) = 9999999999999900000 tokens (the kernel retains the virtual
+     *      dust, so its ST ledger lands at 90000000000000100000 over a 90e18 supply); the probe's 5e18-token
+     *      deposit then mints floor((90e18 + 1e6) x 5e18 / (90000000000000100000 + 1)) = 5000000000000049999
+     *      shares; and the hooked redeem of 10e18 of the resulting 95000000000000049999 supply against the
+     *      95000000000000100000 ledger pays floor(95000000000000100000 x 10e18 / (95000000000000049999 + 1e6)) =
+     *      9999999999999900000 tokens, byte-identical to the control payout
      */
     function test_RevertIf_RedeemPayoutReentersKernelMutatingFlows() public {
         // Control run, no hook armed: the clean-path payout every hooked delta below must match exactly
         address controlReceiver = makeAddr("CONTROL_RECEIVER");
         vm.prank(ST_PROVIDER);
         AssetClaims memory controlClaims = seniorTranche.redeem(10e18, controlReceiver, ST_PROVIDER);
-        assertEq(toUint256(controlClaims.stAssets), 10e18, "the control redemption must pay floor(100e18 x 10e18 / 100e18) = 10e18 tokens");
-        assertEq(stJtUnderlying.balanceOf(controlReceiver), 10e18, "the control receiver must hold exactly the 10e18 payout");
+        assertEq(toUint256(controlClaims.stAssets), 9999999999999900000, "the control redemption must pay floor(100e18 x 10e18 / (100e18 + 1e6)) = 9999999999999900000 tokens");
+        assertEq(stJtUnderlying.balanceOf(controlReceiver), 9999999999999900000, "the control receiver must hold exactly the 9999999999999900000 payout");
 
-        // Qualify the probe before arming the hook: 6e18 tokens minted, 5e18 deposited (minting 5e18 shares at the
-        // 1:1 rate against the post-control 90e18 claims over 90e18 shares), 1e18 kept to fund the reentrant deposit
+        // Qualify the probe before arming the hook: 6e18 tokens minted, 5e18 deposited (minting the offset-adjusted
+        // quote against the post-control 90000000000000100000 claims over 90e18 shares), 1e18 kept to fund the reentrant deposit
         stJtUnderlying.mint(address(probe), 6e18);
         vm.startPrank(address(probe));
         stJtUnderlying.approve(address(seniorTranche), type(uint256).max);
         seniorTranche.deposit(toTrancheUnits(5e18), address(probe));
         vm.stopPrank();
-        assertEq(seniorTranche.balanceOf(address(probe)), 5e18, "the probe's qualifying deposit must mint exactly 5e18 senior shares");
+        assertEq(
+            seniorTranche.balanceOf(address(probe)),
+            5000000000000049999,
+            "the probe's qualifying deposit must mint floor((90e18 + 1e6) x 5e18 / (90000000000000100000 + 1)) = 5000000000000049999 senior shares"
+        );
 
         // Arm one attempt per kernel-mutating flow: redeem the probe's own shares, deposit the probe's kept tokens,
         // and sync the accounting, all fully qualified so only the guard stands between them and execution
@@ -140,13 +148,21 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
         // The outer redemption must settle byte-identically to the control run: same claims, same payout, and the
         // same one-for-one deltas on shares and the kernel's senior asset ledger (-10e18 each, like the control)
         assertEq(toUint256(hookedClaims.stAssets), toUint256(controlClaims.stAssets), "the hooked redemption's claims must equal the control run's");
-        assertEq(stJtUnderlying.balanceOf(address(probe)), 11e18, "the probe must hold its kept 1e18 plus exactly the control-equal 10e18 payout");
+        assertEq(
+            stJtUnderlying.balanceOf(address(probe)),
+            10999999999999900000,
+            "the probe must hold its kept 1e18 plus exactly the control-equal 9999999999999900000 payout"
+        );
         assertEq(seniorTranche.balanceOf(ST_PROVIDER), 80e18, "the owner's shares must drop 100e18 -> 90e18 -> 80e18, 10e18 per redemption");
-        assertEq(seniorTranche.totalSupply(), 85e18, "supply must be 100e18 - 10e18 + 5e18 - 10e18 = 85e18, no phantom mint or burn");
+        assertEq(
+            seniorTranche.totalSupply(),
+            85000000000000049999,
+            "supply must be 100e18 - 10e18 + 5000000000000049999 - 10e18 = 85000000000000049999, no phantom mint or burn"
+        );
         assertEq(
             toUint256(kernel.getState().stOwnedYieldBearingAssets),
-            85e18,
-            "the kernel's senior asset ledger must mirror the supply at the 1:1 rate, untouched by the rejected reentries"
+            85000000000000200000,
+            "the kernel's senior asset ledger runs the supply plus the retained virtual dust (two redemptions each leaving a 1e5-token sliver), untouched by the rejected reentries"
         );
     }
 
@@ -156,11 +172,12 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
      *         holding both the assets and the shares
      * @dev This is the one window action the reentrancy guard cannot stop: a plain share transfer never enters the
      *      kernel's guarded surface (the pre-balance-update hook is unguarded by design, it must run inside guarded
-     *      kernel flows). The double-claim attempt is: redeem all 20e18 shares, receive the 20e18-token payout, and
-     *      mid-transfer ship the still-unburned 20e18 shares to an accomplice for a second redemption. The defense
-     *      is ordering, not the guard: the tranche burns AFTER the kernel pays, so the burn finds a zero balance and
-     *      reverts ERC20InsufficientBalance(probe, 0, 20e18), atomically unwinding the payout, the share transfer,
-     *      and the kernel's ledger debit. Payout literal: floor(120e18 claims x 20e18 / 120e18 supply) = 20e18
+     *      kernel flows). The probe's 20e18-token deposit mints the offset-adjusted 20000000000000199999 shares; the
+     *      double-claim attempt is: redeem 20e18 shares, receive the payout, and mid-transfer ship the probe's entire
+     *      still-unburned balance to an accomplice for a second redemption. The defense is ordering, not the guard:
+     *      the tranche burns AFTER the kernel pays, so the burn finds a zero balance and reverts
+     *      ERC20InsufficientBalance(probe, 0, 20e18), atomically unwinding the payout, the share transfer, and the
+     *      kernel's ledger debit. Would-be payout: floor(120e18 claims x 20e18 / (120000000000000199999 + 1e6)) = 19999999999999800000
      */
     function test_RevertIf_OwnerSharesMovedAwayDuringRedeemPayout() public {
         // The probe becomes a real senior LP with 20e18 shares (1:1 against the seeded 100e18 claims over 100e18 shares)
@@ -169,18 +186,23 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
         stJtUnderlying.approve(address(seniorTranche), 20e18);
         seniorTranche.deposit(toTrancheUnits(20e18), address(probe));
         vm.stopPrank();
-        assertEq(seniorTranche.balanceOf(address(probe)), 20e18, "the probe's deposit must mint exactly 20e18 senior shares");
+        assertEq(
+            seniorTranche.balanceOf(address(probe)),
+            20000000000000199999,
+            "the probe's deposit must mint floor((100e18 + 1e6) x 20e18 / (100e18 + 1)) = 20000000000000199999 senior shares"
+        );
 
-        // Arm the share exfiltration and wire the hook AFTER the qualifying deposit so setup transfers stay silent
+        // Arm the share exfiltration and wire the hook AFTER the qualifying deposit so setup transfers stay silent.
+        // Ship the probe's ENTIRE offset-inflated balance so the post-payout burn of 20e18 finds a zero balance
         address accomplice = makeAddr("ACCOMPLICE");
-        probe.armCall(address(seniorTranche), abi.encodeCall(seniorTranche.transfer, (accomplice, 20e18)));
+        probe.armCall(address(seniorTranche), abi.encodeCall(seniorTranche.transfer, (accomplice, 20000000000000199999)));
         stJtUnderlying.setTransferHook(address(probe));
         stJtUnderlying.setBehaviors(MockBehaviors.BEHAVIOR_HOOK_ON_TRANSFER);
 
         // Pre-attack ledgers: the burn must find the shares gone (balance 0 against the 20e18 burn), so the whole
         // transaction must roll every one of these back to exactly these values
         assertEq(stJtUnderlying.balanceOf(address(kernel)), 150e18, "the kernel must custody the seeded 100e18 + 30e18 plus the probe's 20e18");
-        assertEq(seniorTranche.totalSupply(), 120e18, "the pre-attack senior supply is the seeded 100e18 plus the probe's 20e18");
+        assertEq(seniorTranche.totalSupply(), 120000000000000199999, "the pre-attack senior supply is the seeded 100e18 plus the probe's offset-adjusted 20000000000000199999 shares");
 
         // The full-balance redemption: the kernel debits its ledger and pays 20e18 tokens, the hook ships the
         // unburned shares to the accomplice, and the tranche's burn then reverts on the emptied balance
@@ -192,13 +214,13 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
         // back too): shares back with the probe, nothing with the accomplice, payout back in the kernel
         assertFalse(probe.fired(), "the probe's fired latch must have been rolled back with the reverted transaction");
         assertEq(probe.outcomeCount(), 0, "the probe's recorded outcomes must have been rolled back with the reverted transaction");
-        assertEq(seniorTranche.balanceOf(address(probe)), 20e18, "the owner's shares must be fully restored by the unwind");
+        assertEq(seniorTranche.balanceOf(address(probe)), 20000000000000199999, "the owner's shares must be fully restored by the unwind");
         assertEq(seniorTranche.balanceOf(accomplice), 0, "the accomplice must be left with nothing");
         assertEq(stJtUnderlying.balanceOf(address(probe)), 0, "the payout must be unwound, the redeemer cannot keep assets AND shares");
         assertEq(stJtUnderlying.balanceOf(address(kernel)), 150e18, "the kernel's asset custody must be byte-identical to the pre-attack value");
         assertEq(toUint256(kernel.getState().stOwnedYieldBearingAssets), 120e18, "the kernel's senior asset ledger debit must be unwound");
         assertEq(toUint256(kernel.getState().jtOwnedYieldBearingAssets), 30e18, "the kernel's junior asset ledger must be untouched");
-        assertEq(seniorTranche.totalSupply(), 120e18, "no share may be burned by a redemption that failed to settle");
+        assertEq(seniorTranche.totalSupply(), 120000000000000199999, "no share may be burned by a redemption that failed to settle");
     }
 
     // =============================

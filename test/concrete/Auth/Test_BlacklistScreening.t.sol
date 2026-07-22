@@ -372,13 +372,18 @@ contract Test_BlacklistScreening_RoycoBlacklist is DayMarketTestBase {
         assertEq(seniorTranche.balanceOf(CLEAN), 5e18, "the receiver must hold exactly the transferred shares");
 
         // The previously-bricked deposit path also lands: 10e18 vault shares into a junior tranche holding
-        // 30e18 shares against 30e18 effective NAV mint 10e18 x 30 / 30 = 10e18 new shares
+        // 30e18 shares against 30e18 effective NAV mints floor((30e18+1e6) x 10e18 / (30e18+1)) = 10000000000000333332
+        // new shares (the virtual-shares offset nudges the fair mint a few hundred thousand wei above the naive 1:1)
         stJtVault.mintShares(JT_PROVIDER, 10e18);
         vm.startPrank(JT_PROVIDER);
         stJtVault.approve(address(juniorTranche), 10e18);
         juniorTranche.deposit(toTrancheUnits(10e18), JT_PROVIDER);
         vm.stopPrank();
-        assertEq(juniorTranche.balanceOf(JT_PROVIDER), 40e18, "the junior provider must hold the seeded 30e18 plus the 10e18 minted");
+        assertEq(
+            juniorTranche.balanceOf(JT_PROVIDER),
+            30e18 + 10_000_000_000_000_333_332,
+            "the junior provider must hold the seeded 30e18 plus the offset-derived minted shares"
+        );
     }
 
     /**

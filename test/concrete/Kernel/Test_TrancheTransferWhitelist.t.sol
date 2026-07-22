@@ -126,15 +126,20 @@ contract Test_TrancheTransferWhitelist_Kernel is DayMarketTestBase {
         uint256 vaultSharesBefore = stJtVault.balanceOf(ST_PROVIDER);
 
         // Partial redemption of 40e18 of the 100e18 senior shares. Everything is still flat, so the pro-rata
-        // slice is 40e18 / 100e18 of the 100e18 vault shares the senior tranche owns = exactly 40e18 vault
-        // shares, with no premium, fee, or self-liquidation-bonus leg to distort it
+        // slice is the 100e18 vault shares the senior tranche owns scaled by the redeemer's fraction of the
+        // EFFECTIVE supply (100e18 + 1e6 virtual shares): floor(100e18 * 40e18 / (100e18 + 1e6)) =
+        // 39999999999999600000, a virtual-share sliver under 40e18 that stays behind with the remaining holders
         vm.prank(ST_PROVIDER);
         AssetClaims memory claims = seniorTranche.redeem(40e18, ST_PROVIDER, ST_PROVIDER);
 
         // The burn (receiver address(0)) sailed past the whitelist, and the exit paid exactly the pro-rata slice
-        assertEq(toUint256(claims.stAssets), 40e18, "the redemption must claim exactly the pro-rata 40e18 vault shares");
+        assertEq(toUint256(claims.stAssets), 39_999_999_999_999_600_000, "the redemption must claim exactly floor(100e18 * 40e18 / (100e18 + 1e6)) vault shares");
         assertEq(seniorTranche.balanceOf(ST_PROVIDER), 60e18, "the share balance must drop by exactly the redeemed shares (100e18 - 40e18)");
-        assertEq(stJtVault.balanceOf(ST_PROVIDER) - vaultSharesBefore, 40e18, "the redeemer's asset balance must grow by exactly the returned vault shares");
+        assertEq(
+            stJtVault.balanceOf(ST_PROVIDER) - vaultSharesBefore,
+            39_999_999_999_999_600_000,
+            "the redeemer's asset balance must grow by exactly the returned vault shares"
+        );
     }
 
     /**

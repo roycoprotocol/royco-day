@@ -260,14 +260,15 @@ contract Test_SeniorShareRateProvider_BPTOracleQuoter is DayMarketTestBase {
     /**
      * @notice The live rate path is exact and the post-sync cached rate equals it, hand-derived on the
      *         zero-fee/zero-premium market
-     * @dev Seeded 100e18 ST at rate 1.0 gives stEff = 100e18 over supply 100e18 = 1.0. A +10% vault accrual moves
-     *      stEff to 110e18 with the supply unchanged (no fee and liquidity premium share mint at zero config), so
-     *      the live rate is floor(110e18 x 1e18 / 100e18) = 1.1e18, and the post-sync cache must equal it
+     * @dev Seeded 100e18 ST at rate 1.0. A +10% vault accrual moves stEff to 110e18 with the supply unchanged (no fee
+     *      and liquidity premium share mint at zero config). The rate is _convertToValue(WAD, supply, stEff), which now
+     *      carries the virtual-shares/assets offset: floor((110e18 + 1) x 1e18 / (100e18 + 1e6)) = 1099999999999989000,
+     *      and the post-sync cache must equal it
      */
     function test_GetRate_LivePathExact_AndCacheParityAfterSync() public {
         applySTPnL(1000); // +10.00%
         uint256 liveRate = kernel.getRate(); // cache unset at test entry: live preview path
-        assertEq(liveRate, 1.1e18, "the live rate must be the hand-derived 1.1e18");
+        assertEq(liveRate, 1099999999999989000, "the live rate must be the offset-aware floor((110e18 + 1) x 1e18 / (100e18 + 1e6))");
 
         vm.prank(SYNC_OPERATOR);
         kernel.syncTrancheAccounting(); // writes the transient senior share rate cache
@@ -295,7 +296,8 @@ contract Test_SeniorShareRateProvider_BPTOracleQuoter is DayMarketTestBase {
             100e18
         );
 
-        assertEq(cachedRate, 1e18, "arrange: the cached rate at seed must be exactly 1.0");
+        // Seed rate = _convertToValue(WAD, 100e18, 100e18) with the offset: floor((100e18 + 1) x 1e18 / (100e18 + 1e6))
+        assertEq(cachedRate, 999999999999990000, "arrange: the cached rate at seed must be the offset-aware floor near 1.0");
         assertEq(rateAfterInlineMint, cachedRate, "the rate must be unchanged by an inline supply move, the cache pins it");
     }
 
@@ -307,15 +309,16 @@ contract Test_SeniorShareRateProvider_BPTOracleQuoter is DayMarketTestBase {
      *      reads recompute live from committed state and the live supply
      */
     function test_GetRate_MissPathPreviewsLiveOffCurrentSeniorSupply() public {
-        // Cache unset (no sync in the body): 100e18 stEff over the seeded 100e18 supply previews live to exactly 1.0
-        assertEq(kernel.getRate(), 1e18, "arrange: the uncached rate at seed must preview live to exactly 1.0");
+        // Cache unset (no sync in the body): 100e18 stEff over the seeded 100e18 supply previews live to the offset-aware
+        // _convertToValue(WAD, 100e18, 100e18) = floor((100e18 + 1) x 1e18 / (100e18 + 1e6)) = 999999999999990000
+        assertEq(kernel.getRate(), 999999999999990000, "arrange: the uncached rate at seed must preview live to the offset-aware floor near 1.0");
 
         // Senior mint doubles the supply (through the tranche's kernel-only mint gate) and adds no backing NAV
         vm.prank(address(kernel));
         seniorTranche.mint(makeAddr("INLINE_MINT_RECIPIENT"), 100e18);
 
-        // Still uncached, so the read previews live: floor(100e18 x 1e18 / 200e18) = 0.5e18
-        assertEq(kernel.getRate(), 0.5e18, "an uncached read previews live, halving the rate on a doubled senior supply");
+        // Still uncached, so the read previews live: floor((100e18 + 1) x 1e18 / (200e18 + 1e6)) = 499999999999997500
+        assertEq(kernel.getRate(), 499999999999997500, "an uncached read previews live, halving the rate on a doubled senior supply");
     }
 }
 

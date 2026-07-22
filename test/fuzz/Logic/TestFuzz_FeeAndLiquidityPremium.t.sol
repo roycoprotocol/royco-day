@@ -23,6 +23,9 @@ contract TestFuzz_FeeAndLiquidityPremium_Logic is Test {
     /// @notice Suite-wide NAV and share-supply ceiling
     uint256 internal constant MAX_NAV = 1e30;
 
+    /// @notice The virtual-shares offset each ST share mint prices against (mirrors src Constants.VIRTUAL_SHARES)
+    uint256 internal constant VIRTUAL_SHARES = 1e6;
+
     /// @dev Builds the minimal synced state the pure share-mint computation reads
     function _syncedState(uint256 _stEff, uint256 _premium, uint256 _fee) internal pure returns (SyncedAccountingState memory s) {
         s.stEffectiveNAV = toNAVUnits(_stEff);
@@ -37,9 +40,9 @@ contract TestFuzz_FeeAndLiquidityPremium_Logic is Test {
      * LT/fee recipient or over-dilutes senior. Property (FeeAndLiquidityPremiumLogic.sol:88-104):
      *   supplyAfter == preSupply + premiumShares + feeShares                     [exact supply identity]
      *   (premiumShares, feeShares, supplyAfter) == RoycoTestMath.computeSTFeeAndLiquidityPremiumSharesToMint(...)   [exact, incl. both edges]
-     * The zero-supply first-mint edge is included and additionally pinned 1:1 with the premium and fee NAV values,
-     * and the retained == 0 degenerate (premium + fee == stEffectiveNAV) routes through the 1-wei denominator per
-     * ValuationLogic.sol:106
+     * The genuinely-fresh first-mint edge (preSupply == 0 AND retained == 0) is included and additionally pinned
+     * 1:1 with the premium and fee NAV values; under the virtual-shares offset preSupply == 0 with positive retained
+     * is empty-with-backing and is priced, not 1:1 (ValuationLogic.sol:106)
      */
     function testFuzz_FeeAndLiquidityPremiumShareMint_SharesMatchMirrorAndSupplyIdentity(
         uint256 _stEff,
@@ -67,11 +70,12 @@ contract TestFuzz_FeeAndLiquidityPremium_Logic is Test {
         assertEq(feeShares, rtmFee, "fee shares == RoycoTestMath.computeSTFeeAndLiquidityPremiumSharesToMint");
         assertEq(supplyAfter, rtmSupply, "supply after == RoycoTestMath.computeSTFeeAndLiquidityPremiumSharesToMint");
 
-        // First-mint edge re-pinned independently of the mirror: both legs mint 1:1 with their NAV values
-        // (the bootstrap mint is exempt from the dilution clamp)
-        if (_preSupply == 0) {
-            assertEq(premiumShares, _prem, "zero pre-supply mints the premium 1:1");
-            assertEq(feeShares, _fee, "zero pre-supply mints the fee 1:1");
+        // First-mint edge re-pinned independently of the mirror: a GENUINELY fresh mint (preSupply == 0 AND
+        // retained == 0, so both legs hit the supply == 0 && totalValue == 0 branch) mints 1:1 with its NAV. Under
+        // the virtual-shares offset a preSupply == 0 with positive retained is empty-with-backing and is priced.
+        if (_preSupply == 0 && (_stEff - _prem - _fee) == 0) {
+            assertEq(premiumShares, _prem, "genuinely fresh mint mints the premium 1:1");
+            assertEq(feeShares, _fee, "genuinely fresh mint mints the fee 1:1");
         }
     }
 
@@ -83,8 +87,9 @@ contract TestFuzz_FeeAndLiquidityPremium_Logic is Test {
      * and the identical bound for the fee leg.
      *
      * Bound derivation (a one-sided `value <= prem` draft is refutable, the uplift side is real):
-     * pShares = S*P/R - a and fShares = S*F/R - b with floor losses a, b in [0, 1) share units, each share
-     * worth about stEffectiveNAV/supplyAfter. The a-loss pushes the premium value DOWN (undersized mint), the b-loss
+     * pShares = floor(S'*P/R') and fShares = floor(S'*F/R') with effective supply S' = preSupply + VIRTUAL_SHARES and
+     * denominator R' = retained + VIRTUAL_ASSETS, floor losses a, b in [0, 1) share units, each share worth about
+     * stEffectiveNAV/supplyAfter. The a-loss pushes the premium value DOWN (undersized mint), the b-loss
      * pushes it UP (the sibling mint's floor dust stays in the pot and accrues pro-rata to ALL
      * post-mint shares including the premium shares), and the final valuation floor loses < 1, so
      * |value - P| < (a + b) * ceil(stEffectiveNAV/supplyAfter) + 1 < 2*ceil(stEffectiveNAV/supplyAfter) + 2.
@@ -96,15 +101,16 @@ contract TestFuzz_FeeAndLiquidityPremium_Logic is Test {
      *
      * The value bound is a FAIR-pricing property, so it is conditioned on the mint-dilution clamp
      * (never an early return: every arm carries its own exact assertion):
-     *   - a binding leg deliberately mints less than its NAV is worth (the clamp's whole point),
-     *     so it asserts shares == cap = floor(preSupply * MAX_MINT_DILUTION_WAD / (WAD - MAX_MINT_DILUTION_WAD)) exactly;
+     *   - a binding leg deliberately mints less than its NAV is worth (the clamp's whole point), so it asserts
+     *     shares == cap = floor((preSupply + VIRTUAL_SHARES) * MAX_MINT_DILUTION_WAD / (WAD - MAX_MINT_DILUTION_WAD)) exactly;
      *   - a fair leg whose SIBLING binds cannot use the value bound either — the sibling's under-mint
      *     shrinks supplyAfter, so every post-mint share (including this leg's) is worth more than the
-     *     fair derivation assumed — so it asserts its exact floor formula shares == floor(S*leg/denom);
+     *     fair derivation assumed — so it asserts its exact floor formula shares == floor((preSupply + VIRTUAL_SHARES)*leg/denom);
      *   - only when NEITHER leg binds does the two-sided value bound apply, with its original derivation.
      * The bind predicate is recomputed here from first principles at the protocol constant:
      * leg binds iff legNAV * (WAD - MAX_MINT_DILUTION_WAD) > denom * MAX_MINT_DILUTION_WAD, with denom the
-     * retained NAV pinned to 1 wei when zero (the integer-equivalent form of production's ordering)
+     * retained NAV plus VIRTUAL_ASSETS (= retained + 1, which also pins it to 1 wei when retained is zero;
+     * the integer-equivalent form of production's ordering)
      */
     function testFuzz_FeeAndLiquidityPremiumShareMint_MintedValueMatchesMintedNAVWithinDerivedDust(
         uint256 _stEff,
@@ -126,13 +132,15 @@ contract TestFuzz_FeeAndLiquidityPremium_Logic is Test {
         // Derived per state, never a literal: 2*ceil(stEffectiveNAV/supplyAfter) + 2 (derivation in the property comment)
         uint256 mintValueDustDerivedBound = 2 * Math.ceilDiv(_stEff, supplyAfter) + 2;
 
-        // The bind predicate per leg, recomputed from first principles (see the property comment)
-        uint256 denom = (_stEff - _prem - _fee) == 0 ? 1 : (_stEff - _prem - _fee);
-        // No overflow: legNAV, denom <= 1e30 and WAD - MAX_MINT_DILUTION_WAD = 1e6, so both products stay below 1e48
+        // The bind predicate per leg, recomputed from first principles (see the property comment). Under the
+        // virtual-assets offset the denominator is retained + VIRTUAL_ASSETS (= retained + 1), which also pins it
+        // to 1 wei when retained is zero.
+        uint256 denom = (_stEff - _prem - _fee) + 1;
+        // No overflow: legNAV <= 1e30, denom <= 1e30 + 1 and WAD - MAX_MINT_DILUTION_WAD = 1e6, so both products stay below 1e48
         bool premBinds = _prem * (WAD - MAX_MINT_DILUTION_WAD) > denom * MAX_MINT_DILUTION_WAD;
         bool feeBinds = _fee * (WAD - MAX_MINT_DILUTION_WAD) > denom * MAX_MINT_DILUTION_WAD;
-        // cap <= 1e30 * (1e12 - 1) < 1e43: the fuzz domain sits far below the cap's overflow cliff
-        uint256 cap = Math.mulDiv(_preSupply, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD);
+        // Offset-aware cap floor((preSupply + VIRTUAL_SHARES) * MAX / (WAD - MAX)); still < 1e43, far below the overflow cliff
+        uint256 cap = Math.mulDiv(_preSupply + VIRTUAL_SHARES, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD);
 
         if (premiumShares != 0) {
             if (premBinds) {
@@ -140,7 +148,9 @@ contract TestFuzz_FeeAndLiquidityPremium_Logic is Test {
             } else if (feeBinds) {
                 // The sibling's under-mint invalidates the value derivation; the fair floor formula stays exact
                 assertEq(
-                    premiumShares, Math.mulDiv(_preSupply, _prem, denom, Math.Rounding.Floor), "a fair premium leg beside a binding sibling floors exactly"
+                    premiumShares,
+                    Math.mulDiv(_preSupply + VIRTUAL_SHARES, _prem, denom, Math.Rounding.Floor),
+                    "a fair premium leg beside a binding sibling floors exactly"
                 );
             } else {
                 uint256 premValue = toUint256(ValuationLogic._convertToValue(premiumShares, supplyAfter, toNAVUnits(_stEff), Math.Rounding.Floor));
@@ -153,7 +163,11 @@ contract TestFuzz_FeeAndLiquidityPremium_Logic is Test {
                 assertEq(feeShares, cap, "a binding fee leg mints exactly the dilution cap");
             } else if (premBinds) {
                 // The sibling's under-mint invalidates the value derivation; the fair floor formula stays exact
-                assertEq(feeShares, Math.mulDiv(_preSupply, _fee, denom, Math.Rounding.Floor), "a fair fee leg beside a binding sibling floors exactly");
+                assertEq(
+                    feeShares,
+                    Math.mulDiv(_preSupply + VIRTUAL_SHARES, _fee, denom, Math.Rounding.Floor),
+                    "a fair fee leg beside a binding sibling floors exactly"
+                );
             } else {
                 uint256 feeValue = toUint256(ValuationLogic._convertToValue(feeShares, supplyAfter, toNAVUnits(_stEff), Math.Rounding.Floor));
                 assertLe(feeValue, _fee + mintValueDustDerivedBound, "fee value uplift within the derived floor-dust bound");

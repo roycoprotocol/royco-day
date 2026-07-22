@@ -42,7 +42,8 @@ contract Test_LTConvertRawPricing_Tranches is DayMarketTestBase {
      * @notice While an idle premium is staged, convertToAssets prices on the BPT leg alone (zero senior-share claim)
      *         and previewRedeem prices the same shares strictly higher, including the pro-rata idle slice
      * @dev Every expectation is recomputed independently from the oracle, vault, and ledger primitives:
-     *      raw = floor(TVL x ownedBpt / bptSupply), idleValue = floor(stEff x idle / stSupply), eff = raw + idleValue
+     *      raw = floor(TVL x ownedBpt / bptSupply), idleValue = floor((stEff + 1) x idle / (stSupply + 1e6)) (the
+     *      virtual-shares/assets offset the share<->value conversion now carries), eff = raw + idleValue
      */
     function test_ConvertToAssets_BptOnlyWhilePremiumStaged_PreviewRedeemKeepsIdleLeg() public {
         _deployMarket(cellA(), defaultParams());
@@ -53,7 +54,8 @@ contract Test_LTConvertRawPricing_Tranches is DayMarketTestBase {
         // preview the views run internally resolves to exactly this committed state)
         uint256 supply = liquidityTranche.totalSupply();
         uint256 rawNAV = _independentRawNAV();
-        uint256 idleValue = Math.mulDiv(toUint256(accountant.getState().lastSTEffectiveNAV), idleShares, seniorTranche.totalSupply(), Math.Rounding.Floor);
+        uint256 idleValue =
+            Math.mulDiv(toUint256(accountant.getState().lastSTEffectiveNAV) + 1, idleShares, seniorTranche.totalSupply() + 1e6, Math.Rounding.Floor);
         uint256 effNAV = rawNAV + idleValue;
         assertGt(idleValue, 0, "arrange: the staged premium must carry nonzero value for the split to be observable");
 
@@ -63,18 +65,20 @@ contract Test_LTConvertRawPricing_Tranches is DayMarketTestBase {
         uint256 shares = supply / 16;
         AssetClaims memory conv = liquidityTranche.convertToAssets(shares);
         assertEq(conv.stShares, 0, "convertToAssets must report no senior-share claim (the idle leg is excluded)");
-        assertEq(toUint256(conv.nav), Math.mulDiv(rawNAV, shares, supply, Math.Rounding.Floor), "convertToAssets NAV must be the pro-rata slice of the BPT-only raw NAV");
+        assertEq(
+            toUint256(conv.nav), Math.mulDiv(rawNAV, shares, supply + 1e6, Math.Rounding.Floor), "convertToAssets NAV must be the pro-rata slice of the BPT-only raw NAV"
+        );
         assertEq(
             toUint256(conv.ltAssets),
-            Math.mulDiv(toUint256(kernel.getState().ltOwnedYieldBearingAssets), shares, supply, Math.Rounding.Floor),
+            Math.mulDiv(toUint256(kernel.getState().ltOwnedYieldBearingAssets), shares, supply + 1e6, Math.Rounding.Floor),
             "convertToAssets must still report the pro-rata BPT claim"
         );
 
         // The preview surface: idle-inclusive claims for the SAME shares, strictly richer
         AssetClaims memory prev = liquidityTranche.previewRedeem(shares);
-        assertEq(prev.stShares, Math.mulDiv(idleShares, shares, supply, Math.Rounding.Floor), "previewRedeem must report the pro-rata idle senior-share slice");
+        assertEq(prev.stShares, Math.mulDiv(idleShares, shares, supply + 1e6, Math.Rounding.Floor), "previewRedeem must report the pro-rata idle senior-share slice");
         assertGt(prev.stShares, 0, "arrange: the previewed idle slice must be nonzero");
-        assertEq(toUint256(prev.nav), Math.mulDiv(effNAV, shares, supply, Math.Rounding.Floor), "previewRedeem NAV must be the pro-rata slice of the idle-inclusive effective NAV");
+        assertEq(toUint256(prev.nav), Math.mulDiv(effNAV, shares, supply + 1e6, Math.Rounding.Floor), "previewRedeem NAV must be the pro-rata slice of the idle-inclusive effective NAV");
         assertGt(toUint256(prev.nav), toUint256(conv.nav), "the redemption quote must be strictly richer than the BPT-only exchange rate while premium is staged");
 
         // The inverse surface: convertToShares divides by the raw NAV, so a BPT quotes MORE shares than
@@ -83,8 +87,8 @@ contract Test_LTConvertRawPricing_Tranches is DayMarketTestBase {
         uint256 bptValue = Math.mulDiv(bptOracle.computeTVL(), bptIn, balancerVault.totalSupply(address(bpt)), Math.Rounding.Floor);
         uint256 convShares = liquidityTranche.convertToShares(toTrancheUnits(bptIn));
         uint256 previewShares = liquidityTranche.previewDeposit(toTrancheUnits(bptIn));
-        assertEq(convShares, Math.mulDiv(supply, bptValue, rawNAV, Math.Rounding.Floor), "convertToShares must quote against the BPT-only raw NAV");
-        assertEq(previewShares, Math.mulDiv(supply, bptValue, effNAV, Math.Rounding.Floor), "previewDeposit must quote against the idle-inclusive effective NAV");
+        assertEq(convShares, Math.mulDiv(supply + 1e6, bptValue, rawNAV + 1, Math.Rounding.Floor), "convertToShares must quote against the BPT-only raw NAV");
+        assertEq(previewShares, Math.mulDiv(supply + 1e6, bptValue, effNAV + 1, Math.Rounding.Floor), "previewDeposit must quote against the idle-inclusive effective NAV");
         assertGt(convShares, previewShares, "the raw-NAV denominator is strictly smaller, so convertToShares must quote strictly more shares");
     }
 
@@ -93,7 +97,8 @@ contract Test_LTConvertRawPricing_Tranches is DayMarketTestBase {
      *         slice AND the pro-rata idle senior-share slice, exactly matching previewRedeem — not the BPT-only
      *         convert quote
      * @dev Zero-min-liquidity market so no liquidity gate constrains the exit; every slice is derived from the
-     *      pre-redeem ledgers as floor(shares x leg / totalSupply)
+     *      pre-redeem ledgers as floor(shares x leg / (totalSupply + 1e6)), matching the virtual-shares offset the
+     *      claim scaler now carries
      */
     function test_RedeemExecution_StillPaysIdleSlice_MatchingPreviewNotConvert() public {
         _deployZeroMinLiquidityMarketWithPremium();
@@ -102,8 +107,8 @@ contract Test_LTConvertRawPricing_Tranches is DayMarketTestBase {
         uint256 supply = liquidityTranche.totalSupply();
         uint256 ownedBpt = toUint256(kernel.getState().ltOwnedYieldBearingAssets);
         uint256 shares = liquidityTranche.balanceOf(LT_PROVIDER) / 2;
-        uint256 expectedBptSlice = Math.mulDiv(shares, ownedBpt, supply, Math.Rounding.Floor);
-        uint256 expectedIdleSlice = Math.mulDiv(shares, idleShares, supply, Math.Rounding.Floor);
+        uint256 expectedBptSlice = Math.mulDiv(shares, ownedBpt, supply + 1e6, Math.Rounding.Floor);
+        uint256 expectedIdleSlice = Math.mulDiv(shares, idleShares, supply + 1e6, Math.Rounding.Floor);
         assertGt(expectedIdleSlice, 0, "arrange: the redeemed idle slice must be nonzero");
 
         // The convert quote for the same shares excludes the idle leg entirely — the executed redemption must NOT
@@ -156,8 +161,9 @@ contract Test_LTConvertRawPricing_Tranches is DayMarketTestBase {
         // The OLD idle-inclusive price at stage, recomputed by hand: raw + idleValue over the same supply
         uint256 supply = liquidityTranche.totalSupply();
         uint256 rawNAV = _independentRawNAV();
-        uint256 idleValue = Math.mulDiv(toUint256(accountant.getState().lastSTEffectiveNAV), idleShares, seniorTranche.totalSupply(), Math.Rounding.Floor);
-        uint256 effPriceAtStage = Math.mulDiv(rawNAV + idleValue, probe, supply, Math.Rounding.Floor);
+        uint256 idleValue =
+            Math.mulDiv(toUint256(accountant.getState().lastSTEffectiveNAV) + 1, idleShares, seniorTranche.totalSupply() + 1e6, Math.Rounding.Floor);
+        uint256 effPriceAtStage = Math.mulDiv(rawNAV + idleValue, probe, supply + 1e6, Math.Rounding.Floor);
         assertGt(effPriceAtStage, p1, "arrange: the idle-inclusive price must sit strictly above the BPT-only price while staged");
 
         // Deploy at the gate's exact floor: a 10 bps haircut on the staged value (the worst deploy the gate admits)
@@ -172,7 +178,11 @@ contract Test_LTConvertRawPricing_Tranches is DayMarketTestBase {
         // The BPT-only price strictly rises at deploy (BPT credited, no LT shares minted), exactly to the
         // recomputed post-deploy raw NAV per share
         uint256 p2 = toUint256(liquidityTranche.convertToAssets(probe).nav);
-        assertEq(p2, Math.mulDiv(_independentRawNAV(), probe, supply, Math.Rounding.Floor), "the post-deploy price must equal the recomputed BPT-only raw NAV per share");
+        // convertToAssets prices the LT nav as the offset-aware pro-rata slice of the BPT-only raw NAV:
+        // floor(rawNAV * probe / (supply + VIRTUAL_SHARES)). The recomputation must carry the +1e6 offset.
+        assertEq(
+            p2, Math.mulDiv(_independentRawNAV(), probe, supply + 1e6, Math.Rounding.Floor), "the post-deploy price must equal the recomputed BPT-only raw NAV per share"
+        );
         assertGt(p2, p1, "the BPT-only price must strictly rise when the staged premium lands as pool depth");
 
         // The documented dip this change removes: with the idle pile gone, the idle-inclusive price collapses onto
@@ -237,7 +247,7 @@ contract Test_LTConvertRawPricing_Tranches is DayMarketTestBase {
 
         // The redemption quote still carries the idle slice: the claimable leg is priced and deliverable
         AssetClaims memory prev = liquidityTranche.previewRedeem(shares);
-        assertEq(prev.stShares, Math.mulDiv(idleShares, shares, supply, Math.Rounding.Floor), "previewRedeem must still report the pro-rata idle slice");
+        assertEq(prev.stShares, Math.mulDiv(idleShares, shares, supply + 1e6, Math.Rounding.Floor), "previewRedeem must still report the pro-rata idle slice");
         assertGt(toUint256(prev.nav), 0, "the redemption quote must still price the idle leg");
     }
 

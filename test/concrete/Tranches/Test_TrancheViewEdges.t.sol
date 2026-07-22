@@ -94,7 +94,8 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
         require(inKindShares != 0, "setup: the holder must have a splittable balance");
         uint256 idleBeforeInKind = kernel.getState().ltOwnedSeniorTrancheShares;
         uint256 supplyBeforeInKind = liquidityTranche.totalSupply();
-        uint256 expectedInKindSlice = Math.mulDiv(inKindShares, idleBeforeInKind, supplyBeforeInKind, Math.Rounding.Floor);
+        // The claim scaler divides by the effective supply (totalSupply + 1e6 virtual shares), leaving a virtual-dust sliver behind
+        uint256 expectedInKindSlice = Math.mulDiv(inKindShares, idleBeforeInKind, supplyBeforeInKind + 1e6, Math.Rounding.Floor);
         assertGt(expectedInKindSlice, 0, "the in-kind idle slice must be nonzero for the delivery to matter");
 
         vm.prank(LT_PROVIDER);
@@ -113,7 +114,7 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
         uint256 remaining = liquidityTranche.balanceOf(LT_PROVIDER);
         uint256 idleBeforeMulti = kernel.getState().ltOwnedSeniorTrancheShares;
         uint256 supplyBeforeMulti = liquidityTranche.totalSupply();
-        uint256 expectedMultiSlice = Math.mulDiv(remaining, idleBeforeMulti, supplyBeforeMulti, Math.Rounding.Floor);
+        uint256 expectedMultiSlice = Math.mulDiv(remaining, idleBeforeMulti, supplyBeforeMulti + 1e6, Math.Rounding.Floor);
         assertGt(expectedMultiSlice, 0, "the multi-asset idle slice must be nonzero");
         uint256 stSupplyBefore = seniorTranche.totalSupply();
         uint256 stOwnedBefore = toUint256(kernel.getState().stOwnedYieldBearingAssets);
@@ -151,7 +152,7 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
      * @dev This is the healthy-state contract maxRedeem must honor: with no liquidity floor to protect, nothing
      *      constrains an LT exit, so the largest redeemable amount is the holder's whole balance and the payout
      *      is proportional on both legs. Each slice is derived from the pre-redeem ledgers as
-     *      floor(balance x leg / totalSupply), never from the redemption's own quote
+     *      floor(balance x leg / (totalSupply + 1e6)), never from the redemption's own quote
      */
     function test_LTMaxRedeem_FullBalanceRedeemableWithIdlePremiumAndPoolDepth() public {
         _deployZeroMinLiquidityMarketWithPremium();
@@ -168,9 +169,10 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
         // With no minimum liquidity requirement there is no depth floor to protect, so the whole balance is redeemable
         assertEq(liquidityTranche.maxRedeem(LT_PROVIDER), balance, "maxRedeem must report the full balance when no liquidity floor constrains the exit");
 
-        // Each payout leg is an independent pro-rata slice of the pre-redeem ledgers
-        uint256 expectedBptSlice = Math.mulDiv(balance, ownedBpt, totalSupply, Math.Rounding.Floor);
-        uint256 expectedIdleSlice = Math.mulDiv(balance, idleShares, totalSupply, Math.Rounding.Floor);
+        // Each payout leg is an independent pro-rata slice of the pre-redeem ledgers, scaled by the effective
+        // supply (totalSupply + 1e6 virtual shares) the claim scaler now carries
+        uint256 expectedBptSlice = Math.mulDiv(balance, ownedBpt, totalSupply + 1e6, Math.Rounding.Floor);
+        uint256 expectedIdleSlice = Math.mulDiv(balance, idleShares, totalSupply + 1e6, Math.Rounding.Floor);
         assertGt(expectedBptSlice, 0, "the pooled BPT slice must be nonzero");
         assertGt(expectedIdleSlice, 0, "the idle senior share slice must be nonzero");
 

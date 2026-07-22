@@ -189,24 +189,27 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
 
     /**
      * @notice The mint-dilution clamp (MAX_MINT_DILUTION_WAD = WAD - 1e6) bounds the zero-NAV dilution mint per
-     *         cycle, but with no absolute supply ceiling the cap computation
-     *         floor(supply x MAX_MINT_DILUTION_WAD / (WAD - MAX_MINT_DILUTION_WAD)) itself overflows uint256 once
-     *         supply > floor((2^256 - 1) x (WAD - MAX_MINT_DILUTION_WAD) / MAX_MINT_DILUTION_WAD), so repeated
-     *         total-wipe dilution cycles (each growing the supply by up to
+     *         cycle, but with no absolute supply ceiling the cap computation, now taken over the EFFECTIVE supply
+     *         (supply + VIRTUAL_SHARES), floor((supply + 1e6) x MAX_MINT_DILUTION_WAD / (WAD - MAX_MINT_DILUTION_WAD))
+     *         itself overflows uint256 once (supply + 1e6) > floor((2^256 - 1) x (WAD - MAX_MINT_DILUTION_WAD) /
+     *         MAX_MINT_DILUTION_WAD), so repeated total-wipe dilution cycles (each growing the supply by up to
      *         xMAX_MINT_DILUTION_WAD/(WAD - MAX_MINT_DILUTION_WAD) ~ 1e12) terminate in a Panic(0x11) after
      *         ~4 cycles, including inside the sync's fee mint
-     * @dev The boundary supply floor((2^256 - 1)/k) succeeds and one share-wei past it panics
+     * @dev The virtual-share offset shifts the boundary down by exactly VIRTUAL_SHARES: the largest supply whose
+     *      cap still fits is now floor((2^256 - 1)/k) - 1e6 (its effective supply is floor((2^256 - 1)/k), whose
+     *      cap is the largest multiple of k that fits), and one share-wei past it panics
      *      (k = MAX_MINT_DILUTION_WAD/(WAD - MAX_MINT_DILUTION_WAD) = 1e12 - 1 exactly, so the cap multiply is
-     *      exact and the floor identity max - S_ok x k < k gives the crisp +1 boundary)
+     *      exact and the floor identity max - M x k < k gives the crisp +1 boundary)
      */
     function test_mintDilutionClamp_capComputationOverflowBoundary() public {
         uint256 k = MAX_MINT_DILUTION_WAD / (WAD - MAX_MINT_DILUTION_WAD); // 1e12 - 1, exact division
-        uint256 supplyAtCliff = type(uint256).max / k; // the largest supply whose cap still fits in uint256
+        // The cap is taken over the effective supply (supply + 1e6), so the largest supply whose cap fits is max/k - 1e6
+        uint256 supplyAtCliff = type(uint256).max / k - 1e6;
         uint256 bindingValue = 1e18; // over a 1-wei denominator this always binds: ceil(1e18 x 1e6 / (1e18 - 1e6)) > 1
 
-        // Just below the cliff the clamped mint succeeds and returns the exact cap
+        // Just below the cliff the clamped mint succeeds and returns the exact cap on the effective supply
         uint256 minted = this.convertToSharesCliffProbe(bindingValue, 0, supplyAtCliff);
-        assertEq(minted, Math.mulDiv(supplyAtCliff, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD), "at the boundary the cap still fits");
+        assertEq(minted, Math.mulDiv(supplyAtCliff + 1e6, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD), "at the boundary the cap still fits");
 
         // One share-wei past the cliff the cap computation overflows uint256 and the mint panics
         vm.expectRevert(stdError.arithmeticError);
@@ -236,15 +239,19 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
      *      (10 - 2 - 1)e18 x 0.1 = 0.7e18; stEffectiveNAV = 100e18 + 7e18 + 1e18 = 108e18. The 10% LT protocol
      *      fee carves 0.1e18 out of the premium and is remitted as senior shares to the protocol, so the LT's idle
      *      leg is the net 0.9e18 and no LT shares mint for it. The net premium mints against the retained senior
-     *      NAV 108e18 - 1e18 - 0.7e18 = 106.3e18 over the 100e18 pre-sync supply: idleShares =
-     *      floor(0.9e18 x 100e18 / 106.3e18) = 846660395108184383. The pooled senior fee mint (0.7e18 ST + 0.1e18
-     *      LT) is floor(0.8e18 x 100e18 / 106.3e18) = 752587017873941674, so the senior supply lands at
-     *      101599247412982126057
+     *      NAV 108e18 - 1e18 - 0.7e18 = 106.3e18 over the 100e18 pre-sync supply, through the virtual-share/asset
+     *      offset (effective supply 100e18 + 1e6, denominator 106.3e18 + 1): idleShares =
+     *      floor((100e18 + 1e6) x 0.9e18 / (106.3e18 + 1)) = 846660395108192850. The pooled senior fee mint
+     *      (0.7e18 ST + 0.1e18 LT) is floor((100e18 + 1e6) x 0.8e18 / (106.3e18 + 1)) = 752587017873949200, so the
+     *      senior supply lands at 101599247412982142050
      * @dev Redemption slice derivation: the LT protocol fee mints no LT shares, so the LT supply stays the 6e18
-     *      seed and the provider still owns the whole tranche. Redeeming the full 6e18 takes the entire idle slice
-     *      of 846660395108184383 senior shares, unwound to the yield-bearing asset: the total senior claim is
-     *      floor(108e18 / 1.1) = 98181818181818181818 vault shares, so the redeemer receives
-     *      floor(98181818181818181818 x 846660395108184383 / 101599247412982126057) = 818181818181818181
+     *      seed and the provider still owns the whole tranche. Redeeming the full 6e18 of the 6e18 supply scales the
+     *      idle pile by the redeemer's fraction of the EFFECTIVE LT supply (6e18 + 1e6): stSharesToRedeem =
+     *      floor(846660395108192850 x 6e18 / (6e18 + 1e6)) = 846660395108051739, a virtual-share sliver (141111)
+     *      short of the whole pile. Unwound to the yield-bearing asset, the total senior claim is
+     *      floor(108e18 x 1e18 / 1.1e18) = 98181818181818181818 vault shares, scaled by the redeemed senior shares
+     *      over the effective senior supply: floor(98181818181818181818 x 846660395108051739 /
+     *      (101599247412982142050 + 1e6)) = 818181818181681816
      */
     function test_ltRedeemMultiAsset_zeroVenueSlice_enforcesSlippageFloorsAndPaysIdlePremium() public {
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
@@ -255,7 +262,9 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
         applySTPnL(1000);
         _sync();
         uint256 idleShares = kernel.getState().ltOwnedSeniorTrancheShares;
-        assertEq(idleShares, 846_660_395_108_184_383, "the staged premium must be floor(0.9e18 x 100e18 / 106.3e18) senior shares net of the LT fee");
+        assertEq(
+            idleShares, 846_660_395_108_192_850, "the staged premium must be floor((100e18 + 1e6) x 0.9e18 / (106.3e18 + 1)) senior shares net of the LT fee"
+        );
 
         // Retire the liquidity requirement so the redemption reaches the missing slippage check instead of the
         // post-op liquidity gate (with zero pool depth and a positive minimum, every LT redemption would revert
@@ -290,15 +299,22 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
         assertEq(bpt.balanceOf(LT_PROVIDER), 0, "the worthless pool position pays out no BPT either");
 
         // The fair idle premium slice is paid: the idle senior shares are unwound to the yield-bearing asset at the 1.1 rate
-        assertEq(toUint256(stClaims.stAssets), 818_181_818_181_818_181, "the idle slice must unwind to its full vault shares");
+        assertEq(toUint256(stClaims.stAssets), 818_181_818_181_681_816, "the idle slice must unwind to its virtual-share-scaled vault shares");
         assertEq(toUint256(stClaims.jtAssets), 0, "a healthy market's senior claim has no junior-asset leg");
-        assertEq(stJtVault.balanceOf(LT_PROVIDER), 818_181_818_181_818_181, "the unwound vault shares must land on the redeemer");
+        assertEq(stJtVault.balanceOf(LT_PROVIDER), 818_181_818_181_681_816, "the unwound vault shares must land on the redeemer");
 
-        // The shares are burned and the kernel state reflects a completed redemption: the idle pile fully drains
-        // while the (worthless) pooled BPT never left kernel custody
+        // The shares are burned and the kernel state reflects a completed redemption: the idle pile drains to its
+        // virtual-share sliver while the (worthless) pooled BPT never left kernel custody
         assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 0, "the redeemed LT shares must be burned");
         assertEq(liquidityTranche.totalSupply(), 0, "no LT shares remain: the provider held the whole supply and the LT fee mints none");
-        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, 0, "the idle pile must drain to zero: the sole holder redeemed the entire idle slice");
+        // The sole holder redeems its whole balance, but the virtual-share offset scales its slice against the
+        // effective supply (6e18 + 1e6), so a 141111-share sliver of the idle pile (846660395108192850 -
+        // 846660395108051739) is left behind rather than draining to zero
+        assertEq(
+            kernel.getState().ltOwnedSeniorTrancheShares,
+            141_111,
+            "the idle pile drains to its virtual-share sliver: idleShares minus floor(idleShares x 6e18 / (6e18 + 1e6))"
+        );
         assertEq(
             toUint256(kernel.getState().ltOwnedYieldBearingAssets),
             SEEDED_LT_RAW_NAV,

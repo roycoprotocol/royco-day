@@ -43,12 +43,13 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     /**
      * Nominal share mint at realistic post-sync outputs (FeeAndLiquidityPremiumLogic.sol:88-104): the premium
      * and fee mints price jointly against the retained senior NAV, never against each other. At the default
-     * residual eps = 1e6 the mint-dilution clamp is provably inert here (bind iff 2.5e18 * 1e6 > 1038.25e18 *
-     * (1e18 - 1e6), i.e. 2.5e24 > ~1.038e39, false for both legs), so the literals hold unchanged.
+     * residual eps = 1e6 the mint-dilution clamp is provably inert here (bind iff 2.5e18 * 1e6 > (1038.25e18+1) *
+     * (1e18 - 1e6), i.e. 2.5e24 > ~1.038e39, false for both legs), so neither leg clamps.
+     * Virtual-shares offset: each leg mints floor((preSupply+1e6) * legNAV / (retained+1)).
      * retained = 1045e18 - 2.5e18 - 4.25e18 = 1038.25e18 (shared denominator, joint pricing)
-     * premShares = floor(1000e18 * 2.5e18 / 1038.25e18)  = 2_407_897_905_128_822_537
-     * feeShares  = floor(1000e18 * 4.25e18 / 1038.25e18) = 4_093_426_438_718_998_314
-     * supplyAfter = 1000e18 + premShares + feeShares     = 1_006_501_324_343_847_820_851
+     * premShares = floor((1000e18+1e6) * 2.5e18 / (1038.25e18+1))  = 2_407_897_905_128_824_945
+     * feeShares  = floor((1000e18+1e6) * 4.25e18 / (1038.25e18+1)) = 4_093_426_438_719_002_407
+     * supplyAfter = 1000e18 + premShares + feeShares               = 1_006_501_324_343_847_827_352
      * Joint pricing: both mints divide by the SAME retained NAV at the SAME pre-sync supply, so the fee mint
      * does not dilute the premium mint — pinned by the counterfactual below where the fee is pre-already deducted from
      * the effective NAV instead (stEffectiveNAV' = stEffectiveNAV - fee, fee 0, identical retained denominator, identical shares)
@@ -56,9 +57,9 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     function test_STFeeAndLiquidityPremiumShareMint_NominalJointPricing() public pure {
         (uint256 premShares, uint256 feeShares, uint256 supplyAfter) =
             FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(_mintState(1045e18, 2.5e18, 4.25e18), 1000e18);
-        assertEq(premShares, 2_407_897_905_128_822_537, "premium shares floor over the retained denominator");
-        assertEq(feeShares, 4_093_426_438_718_998_314, "fee shares floor over the same retained denominator");
-        assertEq(supplyAfter, 1_006_501_324_343_847_820_851, "supply after both mints");
+        assertEq(premShares, 2_407_897_905_128_824_945, "premium shares floor over the retained denominator");
+        assertEq(feeShares, 4_093_426_438_719_002_407, "fee shares floor over the same retained denominator");
+        assertEq(supplyAfter, 1_006_501_324_343_847_827_352, "supply after both mints");
 
         // RoycoTestMath cross-assert (the computeSTFeeAndLiquidityPremiumSharesToMint mirror)
         (uint256 rtmPrem, uint256 rtmFee, uint256 rtmSupply) = RoycoTestMath.computeSTFeeAndLiquidityPremiumSharesToMint(1045e18, 2.5e18, 4.25e18, 1000e18);
@@ -79,18 +80,18 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
      * eps = 1e6 both legs BIND the mint-dilution clamp instead of minting unbounded shares.
      * retained = 10e18 - 4e18 - 6e18 = 0 -> the 1-wei denominator branch, and both legs bind:
      *   bind: ceil(4e18 * 1e6 / (1e18 - 1e6)) = ceil(~4.000004e6) > 1 (and likewise for the fee leg)
-     *   cap  = floor(1e18 * (1e18 - 1e6) / 1e6) = 1e18 * 999_999_999_999 = 999_999_999_999e18
-     * premShares = feeShares = cap (each mint may own at most (1 - 1e-12) of the post-mint supply)
-     * supplyAfter = 1e18 + 2 * cap = 1_999_999_999_998e18 + 1e18
+     *   cap  = floor((1e18+1e6) * (1e18 - 1e6) / 1e6) = 999_999_999_999_999_999_999_999_000_000
+     * premShares = feeShares = cap (each mint may own at most (1 - 1e-12) of the post-mint EFFECTIVE supply)
+     * supplyAfter = 1e18 + 2 * cap = 2_000_000_000_000_999_999_999_998_000_000
      * The pre-existing 1e18 shares retain ~1e-12 of the tranche per mint — the intended near-total dilution
      * of unbacked holders, now bounded so repeated wipe cycles cannot race the supply to uint256
      */
     function test_STFeeAndLiquidityPremiumShareMint_DegenerateFullNAVMint_ClampsBothLegs() public pure {
         (uint256 premShares, uint256 feeShares, uint256 supplyAfter) =
             FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(_mintState(10e18, 4e18, 6e18), 1e18);
-        assertEq(premShares, 999_999_999_999e18, "premium shares clamp to the dilution cap");
-        assertEq(feeShares, 999_999_999_999e18, "fee shares clamp to the same dilution cap");
-        assertEq(supplyAfter, 1_999_999_999_998e18 + 1e18, "supply after the two capped mints");
+        assertEq(premShares, 999_999_999_999_999_999_999_999_000_000, "premium shares clamp to the dilution cap");
+        assertEq(feeShares, 999_999_999_999_999_999_999_999_000_000, "fee shares clamp to the same dilution cap");
+        assertEq(supplyAfter, 2_000_000_000_000_999_999_999_998_000_000, "supply after the two capped mints");
 
         (uint256 rtmPrem, uint256 rtmFee, uint256 rtmSupply) = RoycoTestMath.computeSTFeeAndLiquidityPremiumSharesToMint(10e18, 4e18, 6e18, 1e18);
         assertEq(premShares, rtmPrem, "RTM premium shares");
@@ -99,17 +100,22 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     }
 
     /**
-     * Zero pre-sync supply mints both share mints 1:1 with their NAV values (ValuationLogic.sol:104), the
-     * first-mint semantics of a market whose senior supply has never existed.
-     * premShares = 2.5e18 and feeShares = 4.25e18 exactly (first-mint semantics), supplyAfter = 6.75e18
+     * Zero pre-sync supply with a NONZERO retained backing is the "empty but backed" state the virtual-shares
+     * mitigation deliberately does NOT mint 1:1 (ValuationLogic.sol:120-125): the fresh-tranche exemption fires
+     * only when supply == 0 AND totalValue == 0, but here retained = 1038.25e18 > 0 (a premium/fee staged against
+     * an empty senior supply), so each leg falls through to the priced branch and captures the staged backing at
+     * the virtual-share floor 1e6 over (retained+1) instead of handing it out one-for-one.
+     * premShares = floor((0+1e6) * 2.5e18 / (1038.25e18+1))  = 2407
+     * feeShares  = floor((0+1e6) * 4.25e18 / (1038.25e18+1)) = 4093
+     * supplyAfter = 0 + premShares + feeShares               = 6500
      */
-    function test_STFeeAndLiquidityPremiumShareMint_ZeroPreSupplyMintsOneToOne() public pure {
-        // The bootstrap mint is exempt from the dilution clamp (a first mint dilutes nobody)
+    function test_STFeeAndLiquidityPremiumShareMint_ZeroPreSupplyEmptyBackedDoesNotMintOneToOne() public pure {
+        // Empty-but-backed (supply 0, retained > 0) is NOT the fresh exemption: the priced branch applies the offset
         (uint256 premShares, uint256 feeShares, uint256 supplyAfter) =
             FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(_mintState(1045e18, 2.5e18, 4.25e18), 0);
-        assertEq(premShares, 2.5e18, "premium shares 1:1 with NAV at zero supply");
-        assertEq(feeShares, 4.25e18, "fee shares 1:1 with NAV at zero supply");
-        assertEq(supplyAfter, 6.75e18, "supply after the first mints");
+        assertEq(premShares, 2407, "empty-but-backed premium mint prices at the virtual-share floor, not 1:1");
+        assertEq(feeShares, 4093, "empty-but-backed fee mint prices at the virtual-share floor, not 1:1");
+        assertEq(supplyAfter, 6500, "supply after the two virtual-share-scaled mints");
 
         (uint256 rtmPrem, uint256 rtmFee, uint256 rtmSupply) = RoycoTestMath.computeSTFeeAndLiquidityPremiumSharesToMint(1045e18, 2.5e18, 4.25e18, 0);
         assertEq(premShares, rtmPrem, "RTM premium shares");
@@ -146,7 +152,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
      * The coverage-neutral premium mint invariant. Across _processFeesAndLiquidityPremium with the nominal
      * joint-pricing inputs above and a slippage-deferred reinvestment (drain 0):
      * - delta stOwnedYieldBearingAssets == 0 (no senior assets enter or leave, so stRawNAV and coverageUtilization cannot move)
-     * - delta ST supply == premShares + feeShares = 2_407_897_905_128_822_537 + 4_093_426_438_718_998_314
+     * - delta ST supply == premShares + feeShares = 2_407_897_905_128_824_945 + 4_093_426_438_719_002_407
      * - delta idle premium share balance == premShares - reinvested = premShares - 0
      * - the reinvestment attempt is called once with (uint256 max, stEffectiveNAV, post-mint supply) so the idle premium senior shares
      *   are valued at the synced senior share rate
@@ -167,20 +173,20 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
         // Coverage neutrality: the mint reassigns share ownership only, so every coverageUtilization input is untouched
         assertEq(flp.stOwnedYieldBearingAssets(), 1000e18, "senior raw assets unchanged by the mint");
         // Supply delta is exactly the two share mints
-        assertEq(flp.ST_LEDGER().totalSupply(), 1_006_501_324_343_847_820_851, "supply grows by premShares + feeShares");
+        assertEq(flp.ST_LEDGER().totalSupply(), 1_006_501_324_343_847_827_352, "supply grows by premShares + feeShares");
         assertEq(flp.ST_LEDGER().premiumMintCallCount(), 1, "one premium mint");
-        assertEq(flp.ST_LEDGER().lastPremiumSharesMinted(), 2_407_897_905_128_822_537, "premium share count");
+        assertEq(flp.ST_LEDGER().lastPremiumSharesMinted(), 2_407_897_905_128_824_945, "premium share count");
         assertEq(flp.ST_LEDGER().lastPremiumMintTo(), address(flp), "premium shares mint to the kernel");
         assertEq(flp.ST_LEDGER().feeMintCallCount(), 1, "one senior fee mint");
-        assertEq(flp.ST_LEDGER().lastFeeSharesMinted(), 4_093_426_438_718_998_314, "fee share count");
+        assertEq(flp.ST_LEDGER().lastFeeSharesMinted(), 4_093_426_438_719_002_407, "fee share count");
         assertEq(flp.ST_LEDGER().lastFeeMintTo(), flp.PROTOCOL_FEE_RECIPIENT(), "fee shares mint to the recipient");
         // Idle pile delta == premShares - reinvested (reinvested == 0 on the deferred path)
-        assertEq(flp.ltOwnedSeniorTrancheShares(), 5e18 + 2_407_897_905_128_822_537, "idle premium share balance grows by exactly the premium shares");
+        assertEq(flp.ltOwnedSeniorTrancheShares(), 5e18 + 2_407_897_905_128_824_945, "idle premium share balance grows by exactly the premium shares");
         // Reinvestment attempt args pin the post-mint valuation basis
         assertEq(flp.reinvestCallCount(), 1, "one reinvestment attempt");
         assertEq(flp.lastReinvestSharesArg(), type(uint256).max, "attempts to deploy the entire idle premium share balance");
         assertEq(toUint256(flp.lastReinvestSTEffectiveNAVArg()), 1045e18, "valued at the synced senior effective NAV");
-        assertEq(flp.lastReinvestTotalSTSharesArg(), 1_006_501_324_343_847_820_851, "valued at the post-mint supply");
+        assertEq(flp.lastReinvestTotalSTSharesArg(), 1_006_501_324_343_847_827_352, "valued at the post-mint supply");
 
         // RTM cross-assert of the two share counts driving the deltas
         (uint256 rtmPrem, uint256 rtmFee,) = RoycoTestMath.computeSTFeeAndLiquidityPremiumSharesToMint(1045e18, 2.5e18, 4.25e18, 1000e18);
@@ -191,7 +197,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     /**
      * The partial-reinvestment arm of the coverage-neutral mint: with the stub draining 1e18 shares inside
      * the reinvestment attempt, the idle premium share balance lands at pre + premShares - drained
-     * = 5e18 + 2_407_897_905_128_822_537 - 1e18, so a partial deploy never strands or double-counts shares
+     * = 5e18 + 2_407_897_905_128_824_945 - 1e18, so a partial deploy never strands or double-counts shares
      */
     function test_ProcessFeesAndLiquidityPremium_PartialReinvestmentDrainsIdlePremiumShares() public {
         flp.ST_LEDGER().setTotalSupply(1000e18);
@@ -201,7 +207,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
 
         flp.processFeesAndLiquidityPremium(s);
 
-        assertEq(flp.ltOwnedSeniorTrancheShares(), 5e18 + 2_407_897_905_128_822_537 - 1e18, "idle delta == premShares - reinvested");
+        assertEq(flp.ltOwnedSeniorTrancheShares(), 5e18 + 2_407_897_905_128_824_945 - 1e18, "idle delta == premShares - reinvested");
     }
 
     /*//////////////////////////////////////////////////////////////////////
@@ -243,11 +249,12 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
      * The two-sided mint-value bound at adversarial non-binding (stEffectiveNAV, prem, fee, supply) tuples: what each
      * minted leg is WORTH after both mints must track the NAV it was minted for, within the derived rounding
      * bound. Hand-derived worked examples (all provably below the bind: legNAV * 1e6 <= denom * (1e18 - 1e6)):
-     * - (7, 3, 3, 5): retained 1 -> premShares 15, feeShares 15, S_post 35, value floor(7*15/35) = 3,
-     *   diff 0 <= 2*ceil(7/35)+2 = 4
+     * - (7, 3, 3, 5): retained 1 -> premShares floor((5+1e6)*3/(1+1)) = 1500007, feeShares 1500007, S_post 3000019,
+     *   value floor((7+1)*1500007/(3000019+1e6)) = 2, diff 1 <= 2*ceil(7/3000019)+2 = 4
      * - (1045e18, 2.5e18, 4.25e18, 1000e18): premValue = 2.5e18 - 1 (one wei of downward floor slack),
-     *   diff 1 <= 2*ceil(1045e18/1006501324343847820851)+2 = 6
-     * - (3, 1, 1, 1e24): retained 1 -> both mints 1e24 shares, S_post 3e24, value floor(3*1e24/3e24) = 1, diff 0
+     *   diff 1 <= 2*ceil(1045e18/1006501324343847827352)+2 = 6
+     * - (3, 1, 1, 1e24): retained 1 -> both mints floor((1e24+1e6)*1/(1+1)) = 500000000000000000500000 shares,
+     *   S_post 2000000000000000001000000, value floor((3+1)*500000000000000000500000/(S_post+1e6)) = 1, diff 0
      */
     function test_STFeeAndLiquidityPremiumShareMint_TwoSidedMintValueBound() public pure {
         _assertMintValueBound(7, 3, 3, 5);
@@ -260,16 +267,16 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
      * mints less than the minted NAV is worth, and what it mints is exactly
      * cap = floor(preSupply * (WAD - eps) / eps) at eps = 1e6.
      * Tuple (10e18, 4e18, 6e18, 1e18) (the degenerate full-NAV state): both legs bind (retained 0 -> 1-wei denominator,
-     * bind since ceil(4e18 * 1e6 / (1e18 - 1e6)) > 1), cap = 1e18 * (1e12 - 1) = 999_999_999_999e18.
-     * Tuple (1e30, 1e30 - 2, 1, 3) (retained 1): the PREMIUM leg binds ((1e30 - 2) * 1e6 > 1 * (1e18 - 1e6))
-     * and clamps to cap = 3 * (1e12 - 1) = 2_999_999_999_997, while the FEE leg stays fair
-     * (1 * 1e6 <= 1e18 - 1e6) and floors to floor(3 * 1 / 1) = 3 — the mixed case
+     * bind since ceil(4e18 * 1e6 / (1e18 - 1e6)) > 1), cap = floor((1e18+1e6) * (1e18 - 1e6) / 1e6) = 999_999_999_999_999_999_999_999_000_000.
+     * Tuple (1e30, 1e30 - 2, 1, 3) (retained 1): the PREMIUM leg binds ((1e30 - 2) * 1e6 > (1+1) * (1e18 - 1e6))
+     * and clamps to cap = floor((3+1e6) * (1e18 - 1e6) / 1e6) = 1_000_002_999_998_999_997, while the FEE leg stays fair
+     * (1 * 1e6 <= (1+1) * (1e18 - 1e6)) and floors to floor((3+1e6) * 1 / (1+1)) = 500001 — the mixed case
      */
     function test_STFeeAndLiquidityPremiumShareMint_BindingLegsMintExactlyTheCap() public pure {
         (uint256 premShares, uint256 feeShares, uint256 supplyAfter) =
             FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(_mintState(10e18, 4e18, 6e18), 1e18);
-        uint256 cap = Math.mulDiv(1e18, WAD - 1e6, 1e6);
-        assertEq(cap, 999_999_999_999e18, "hand-derived cap literal");
+        uint256 cap = Math.mulDiv(1e18 + 1e6, WAD - 1e6, 1e6);
+        assertEq(cap, 999_999_999_999_999_999_999_999_000_000, "hand-derived cap literal (effective supply carries the virtual shares)");
         assertEq(premShares, cap, "binding premium leg mints exactly the cap");
         assertEq(feeShares, cap, "binding fee leg mints exactly the cap");
         assertEq(supplyAfter, 1e18 + 2 * cap, "supply identity across two capped mints");
@@ -277,9 +284,9 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
         // The mixed case: one binding leg beside one fair leg
         (uint256 premMixed, uint256 feeMixed, uint256 supplyMixed) =
             FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(_mintState(1e30, 1e30 - 2, 1), 3);
-        assertEq(premMixed, 2_999_999_999_997, "binding premium leg clamps to 3*(1e12-1)");
-        assertEq(feeMixed, 3, "fair fee leg floors to floor(3*1/1) beside the binding sibling");
-        assertEq(supplyMixed, 3 + 2_999_999_999_997 + 3, "supply identity across the mixed mints");
+        assertEq(premMixed, 1_000_002_999_998_999_997, "binding premium leg clamps to floor((3+1e6)*(1e18-1e6)/1e6)");
+        assertEq(feeMixed, 500001, "fair fee leg floors to floor((3+1e6)*1/(1+1)) beside the binding sibling");
+        assertEq(supplyMixed, 3 + 1_000_002_999_998_999_997 + 500001, "supply identity across the mixed mints");
     }
 
     /*//////////////////////////////////////////////////////////////////////
@@ -289,14 +296,14 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     /**
      * The LT effective NAV (ValuationLogic.sol:73-91) is the raw pool depth plus the idle premium shares
      * valued at the senior share price, flooring on the idle leg — the claimable leg a redeemer is owed.
-     * ltEff = 100e18 + floor(3e18 * 1045e18 / 1004e18) = 100e18 + 3_122_509_960_159_362_549
+     * ltEff = 100e18 + floor((1045e18+1) * 3e18 / (1004e18+1e6)) = 100e18 + 3_122_509_960_159_359_439
      * Edges: idleShares == 0 returns the raw NAV exactly, and stSupply == 0 returns the raw NAV exactly
      */
     function test_LTEffectiveNAV_IdleLegAndEdges() public {
         flp.setLTOwnedYieldBearingAssets(100e18);
         flp.setLTOwnedSeniorTrancheShares(3e18);
         assertEq(
-            toUint256(flp.ltEffectiveNAV(toNAVUnits(uint256(1045e18)), 1004e18)), 100e18 + 3_122_509_960_159_362_549, "raw depth plus the floored idle leg"
+            toUint256(flp.ltEffectiveNAV(toNAVUnits(uint256(1045e18)), 1004e18)), 100e18 + 3_122_509_960_159_359_439, "raw depth plus the floored idle leg"
         );
         assertEq(
             toUint256(flp.ltEffectiveNAV(toNAVUnits(uint256(1045e18)), 1004e18)),
@@ -321,9 +328,9 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
      * LT fee to the protocol fee recipient, both priced over the same retained senior NAV.
      * stEff 1045e18, gross premium 2.5e18, ST fee 4.25e18, LT fee 0.5e18, pre-sync supply 1000e18:
      *   retained = 1045e18 - 2.5e18 - 4.25e18 = 1038.25e18 (the LT fee is inside the premium, so retained is unchanged)
-     *   premShares = floor((2.5e18 - 0.5e18) * 1000e18 / 1038.25e18) = 1_926_318_324_103_058_030
-     *   feeShares  = floor((4.25e18 + 0.5e18) * 1000e18 / 1038.25e18) = 4_575_006_019_744_762_822
-     *   supplyAfter = 1000e18 + premShares + feeShares = 1_006_501_324_343_847_820_852
+     *   premShares = floor((1000e18+1e6) * (2.5e18 - 0.5e18) / (1038.25e18+1)) = 1_926_318_324_103_059_956
+     *   feeShares  = floor((1000e18+1e6) * (4.25e18 + 0.5e18) / (1038.25e18+1)) = 4_575_006_019_744_767_397
+     *   supplyAfter = 1000e18 + premShares + feeShares = 1_006_501_324_343_847_827_353
      */
     function test_LTProtocolFeeMint_CarvedFromPremiumAsSeniorSharesNoLTShares() public {
         flp.ST_LEDGER().setTotalSupply(1000e18);
@@ -337,13 +344,13 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
 
         // The premium leg mints the premium NET of the LT fee, to the kernel's idle pile
         assertEq(flp.ST_LEDGER().premiumMintCallCount(), 1, "one premium mint");
-        assertEq(flp.ST_LEDGER().lastPremiumSharesMinted(), 1_926_318_324_103_058_030, "premium shares are net of the LT fee");
+        assertEq(flp.ST_LEDGER().lastPremiumSharesMinted(), 1_926_318_324_103_059_956, "premium shares are net of the LT fee");
         assertEq(flp.ST_LEDGER().lastPremiumMintTo(), address(flp), "premium shares mint to the kernel");
-        assertEq(flp.ltOwnedSeniorTrancheShares(), 5e18 + 1_926_318_324_103_058_030, "idle pile grows by exactly the net premium shares");
+        assertEq(flp.ltOwnedSeniorTrancheShares(), 5e18 + 1_926_318_324_103_059_956, "idle pile grows by exactly the net premium shares");
 
         // The senior fee leg mints the ST fee PLUS the carved LT fee, to the protocol fee recipient
         assertEq(flp.ST_LEDGER().feeMintCallCount(), 1, "one senior fee mint");
-        assertEq(flp.ST_LEDGER().lastFeeSharesMinted(), 4_575_006_019_744_762_822, "fee shares pool the ST fee and the carved LT fee");
+        assertEq(flp.ST_LEDGER().lastFeeSharesMinted(), 4_575_006_019_744_767_397, "fee shares pool the ST fee and the carved LT fee");
         assertEq(flp.ST_LEDGER().lastFeeMintTo(), flp.PROTOCOL_FEE_RECIPIENT(), "fee shares mint to the recipient");
 
         // The liquidity tranche mints no shares for the LT protocol fee

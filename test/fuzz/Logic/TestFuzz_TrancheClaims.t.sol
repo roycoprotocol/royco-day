@@ -20,6 +20,9 @@ contract TestFuzz_TrancheClaims_Logic is Test {
     /// @notice Suite-wide NAV, tranche-unit, and share-supply ceiling
     uint256 internal constant MAX_NAV = 1e30;
 
+    /// @notice The virtual-shares offset every claim slice is priced against (mirrors src Constants.VIRTUAL_SHARES)
+    uint256 internal constant VIRTUAL_SHARES = 1e6;
+
     /// @dev Wraps five raw claim totals into the production AssetClaims struct
     function _claims(uint256 _st, uint256 _jt, uint256 _lt, uint256 _stShares, uint256 _nav) internal pure returns (AssetClaims memory c) {
         c.stAssets = toTrancheUnits(_st);
@@ -42,9 +45,9 @@ contract TestFuzz_TrancheClaims_Logic is Test {
      * A redeemer burning `shares` of a `totalShares` supply is owed the same fraction of every claim leg,
      * floored — including the idle liquidity premium senior shares an LT redeemer receives directly — so no leg can
      * be scaled by a different rule and quietly favor one side. Property (TrancheClaimsLogic.sol:117-131):
-     *   scaled == floor(claim * shares / totalShares) == RoycoTestMath.scaleClaims(...)  [exact, all five]
+     *   scaled == floor(claim * shares / (totalShares + VIRTUAL_SHARES)) == RoycoTestMath.scaleClaims(...)  [exact, all five]
      * and the floor direction caps the redeemer at pro-rata: scaled <= total per field whenever
-     * shares <= totalShares (the redeemer cannot extract more than its slice)
+     * shares <= totalShares (the virtual-shares offset only lowers the slice, so the cap holds a fortiori)
      */
     function testFuzz_ScaleClaims_MatchesMirrorAllFields(
         uint256 _st,
@@ -83,13 +86,15 @@ contract TestFuzz_TrancheClaims_Logic is Test {
     }
 
     /**
-     * Three redeemers together burning the entire supply (s1 + s2 + s3 == totalShares) must collectively
-     * receive the whole pot minus at most floor dust — over-payment would drain the tranche and a larger
-     * shortfall would strand claims with no shares left to redeem them. Per field the redeemed sum obeys
-     *   total - 2 <= sum of the three slices <= total
-     * Upper side: each slice floors, so the sum of exact pro-rata terms (which telescopes to exactly the
-     * total) only shrinks. Lower side (derived floor-dust bound): each of the three floors loses strictly
-     * less than one unit, so the integer sum loses at most 3 - 1 = 2 units
+     * Three redeemers together burning the entire supply (s1 + s2 + s3 == totalShares) collectively receive the
+     * whole pot minus (a) the virtual-share sliver the offset permanently withholds and (b) at most floor dust —
+     * over-payment would drain the tranche. Each slice is floor(claim * s_i / (totalShares + VIRTUAL_SHARES)), so the
+     * exact pro-rata terms sum to claim * totalShares / (totalShares + VIRTUAL_SHARES), short of the total by the
+     * virtual-share portion V = claim * VIRTUAL_SHARES / (totalShares + VIRTUAL_SHARES). Per field the redeemed sum obeys
+     *   total - ceil(V) - 2 <= sum of the three slices <= total
+     * Upper side: each slice floors sub-total terms, so the sum never exceeds the total. Lower side (derived):
+     * sum = total - V - Σfrac with Σfrac in [0, 3), and ceil(V) + 2 bounds V + Σfrac from above for the integer sum.
+     * The withheld virtual-share sliver stays permanently behind — the donation/premium extraction guard.
      */
     function testFuzz_ScaleClaims_FullSupplyPartitionFloorDust(
         uint256 _st,
@@ -119,14 +124,20 @@ contract TestFuzz_TrancheClaims_Logic is Test {
         AssetClaims memory b = TrancheClaimsLogic._scaleAssetClaims(total, _sharesB, _totalShares);
         AssetClaims memory c = TrancheClaimsLogic._scaleAssetClaims(total, sharesC, _totalShares);
 
-        // Derived floor-dust bound for a 3-way partition: 3 floors each lose < 1 unit, integer total loss <= 3 - 1 = 2
-        uint256 partitionFloorDustDerivedBound = 2;
+        // Per-field bound: the withheld virtual-share sliver ceil(field*VIRTUAL_SHARES/(totalShares+VIRTUAL_SHARES))
+        // plus < 3 floor dust from the three slices (integer bound + 2).
+        _assertPartitionField(toUint256(a.stAssets) + toUint256(b.stAssets) + toUint256(c.stAssets), _st, _partitionDustBound(_st, _totalShares), "stAssets");
+        _assertPartitionField(toUint256(a.jtAssets) + toUint256(b.jtAssets) + toUint256(c.jtAssets), _jt, _partitionDustBound(_jt, _totalShares), "jtAssets");
+        _assertPartitionField(toUint256(a.ltAssets) + toUint256(b.ltAssets) + toUint256(c.ltAssets), _lt, _partitionDustBound(_lt, _totalShares), "ltAssets");
+        _assertPartitionField(a.stShares + b.stShares + c.stShares, _stShares, _partitionDustBound(_stShares, _totalShares), "stShares");
+        _assertPartitionField(toUint256(a.nav) + toUint256(b.nav) + toUint256(c.nav), _nav, _partitionDustBound(_nav, _totalShares), "nav");
+    }
 
-        _assertPartitionField(toUint256(a.stAssets) + toUint256(b.stAssets) + toUint256(c.stAssets), _st, partitionFloorDustDerivedBound, "stAssets");
-        _assertPartitionField(toUint256(a.jtAssets) + toUint256(b.jtAssets) + toUint256(c.jtAssets), _jt, partitionFloorDustDerivedBound, "jtAssets");
-        _assertPartitionField(toUint256(a.ltAssets) + toUint256(b.ltAssets) + toUint256(c.ltAssets), _lt, partitionFloorDustDerivedBound, "ltAssets");
-        _assertPartitionField(a.stShares + b.stShares + c.stShares, _stShares, partitionFloorDustDerivedBound, "stShares");
-        _assertPartitionField(toUint256(a.nav) + toUint256(b.nav) + toUint256(c.nav), _nav, partitionFloorDustDerivedBound, "nav");
+    /// @dev The maximum a full-supply 3-way partition may leave behind for one field: the virtual-share sliver
+    ///      ceil(field * VIRTUAL_SHARES / (totalShares + VIRTUAL_SHARES)) plus 2 (the < 3 floor-dust units, integer-bounded)
+    function _partitionDustBound(uint256 _field, uint256 _totalShares) internal pure returns (uint256) {
+        uint256 denom = _totalShares + VIRTUAL_SHARES;
+        return (_field * VIRTUAL_SHARES + denom - 1) / denom + 2; // ceil(field*VIRTUAL_SHARES/denom) + 2
     }
 
     /// @dev Asserts one field's partition sum sits in [total - dustBound, total]

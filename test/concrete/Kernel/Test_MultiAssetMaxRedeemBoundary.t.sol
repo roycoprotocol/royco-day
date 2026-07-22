@@ -179,7 +179,13 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
 
         uint256 multiAssetMax = liquidityTranche.maxRedeemMultiAsset(LT_PROVIDER);
         uint256 inKindMax = liquidityTranche.maxRedeem(LT_PROVIDER);
-        assertEq(multiAssetMax, inKindMax, "zero relief must collapse the multi-asset bound onto the in-kind bound");
+        // At zero relief the two bounds share identical NAV inputs (same maxLTWithdrawal W, ltRawNAV claimNAV, supply S),
+        // so they differ only by the virtual-shares offset: maxRedeem prices through _convertToShares
+        // (floor((S+1e6)*W/(claimNAV+1))) while maxRedeemMultiAsset uses a raw mulDiv (floor(S*W/claimNAV)). The in-kind
+        // bound therefore WEAKLY DOMINATES, and the gap is bounded by 1e6*W/(claimNAV+1) < VIRTUAL_SHARES (W <= claimNAV).
+        // The pre-offset exact equality softens to weak dominance within the virtual-shares offset.
+        assertLe(multiAssetMax, inKindMax, "zero relief: the multi-asset bound must not exceed the in-kind bound");
+        assertLe(inKindMax - multiAssetMax, 1e6, "zero relief: the bounds coincide up to the virtual-shares offset");
         assertGt(multiAssetMax, 0, "the equality must be tested with live capacity");
         assertLt(multiAssetMax, liquidityTranche.balanceOf(LT_PROVIDER), "the equality must be on the gate branch, not the balance clamp");
     }
@@ -194,9 +200,13 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         _deployMarket(cellA(), defaultParams());
         _seedMarket(0, 30_000e18);
         _seedLT(10_000e18, 2000e18, 8000 * QUOTE_UNIT);
-        // Sweep the acquisition cushion so the pool holds every circulating senior share
+        // Sweep the acquisition cushion so the pool holds every circulating senior share. Under the virtual-shares
+        // offset a wei-scale ST redemption values to zero NAV (convertToValue(1, supply, value) floors to 0 once
+        // supply carries the +VIRTUAL_SHARES buffer), and the accountant rejects a zero-NAV ST redemption with
+        // INVALID_POST_OP_STATE(ST_REDEEM). So the dust residue cannot be burned via redeem; it is swept by transfer
+        // into the pool instead, which keeps the invariant "every circulating senior share sits in the pool" exact.
         uint256 residue = seniorTranche.balanceOf(address(this));
-        if (residue != 0) seniorTranche.redeem(residue, address(this), address(this));
+        if (residue != 0) seniorTranche.transfer(address(balancerVault), residue);
         _sync();
         assertEq(seniorTranche.balanceOf(address(balancerVault)), seniorTranche.totalSupply(), "setup: every circulating senior share must sit in the pool");
         assertGt(seniorTranche.totalSupply(), 0, "setup: the senior supply must be live");
@@ -425,7 +435,8 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         uint256 idleBeforeInKind = kernel.getState().ltOwnedSeniorTrancheShares;
         uint256 supplyBeforeInKind = liquidityTranche.totalSupply();
         uint256 seniorBeforeInKind = seniorTranche.balanceOf(LT_PROVIDER);
-        uint256 expectedIdleSlice = Math.mulDiv(1e18, idleBeforeInKind, supplyBeforeInKind, Math.Rounding.Floor);
+        // The redeemer's slice scales against the EFFECTIVE supply (supply + 1e6 virtual shares)
+        uint256 expectedIdleSlice = Math.mulDiv(1e18, idleBeforeInKind, supplyBeforeInKind + 1e6, Math.Rounding.Floor);
         assertGt(expectedIdleSlice, 0, "the in-kind idle slice must be nonzero");
 
         vm.prank(LT_PROVIDER);

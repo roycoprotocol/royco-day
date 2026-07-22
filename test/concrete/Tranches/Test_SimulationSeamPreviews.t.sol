@@ -101,22 +101,25 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
     /**
      * @notice On the flat seeded market every deposit preview quotes the exact 1:1 mint and the same-block
      *         execution mints exactly the previewed shares on all three tranches
-     * @dev All rates are 1.0 so each quote is pinned absolutely, not just relatively: ST 10e18 assets = 10e18 NAV
-     *      against 100e18 effective NAV over 100e18 shares mints 10e18, JT the same at 30e18 over 30e18, and LT
-     *      5e18 quote-backed BPT (NAV-per-BPT 1.0) against 6e18 effective NAV over 6e18 shares mints 5e18
+     * @dev All rates are 1.0 so each quote is pinned absolutely, not just relatively, under the virtual-shares/assets
+     *      offset the mint carries (floor((supply + 1e6) x value / (effNAV + 1))): ST 10e18 assets = 10e18 NAV against
+     *      100e18 effective NAV over 100e18 shares mints floor((100e18 + 1e6) x 10e18 / (100e18 + 1)) = 10000000000000099999,
+     *      JT the same at 30e18 over 30e18 mints floor((30e18 + 1e6) x 10e18 / (30e18 + 1)) = 10000000000000333332, and LT
+     *      5e18 quote-backed BPT (NAV-per-BPT 1.0) against 6e18 effective NAV over 6e18 shares mints
+     *      floor((6e18 + 1e6) x 5e18 / (6e18 + 1)) = 5000000000000833332
      */
     function test_PreviewDeposit_FreshMarket_ExactQuotesAndExecParity() public {
         uint256 stPreviewed = seniorTranche.previewDeposit(toTrancheUnits(10e18));
-        assertEq(stPreviewed, 10e18, "the flat-market senior quote must be the exact 1:1 mint");
+        assertEq(stPreviewed, 10000000000000099999, "the flat-market senior quote must be the exact offset-adjusted mint");
         assertEq(_depositSenior(10e18), stPreviewed, "the senior deposit must mint exactly the previewed shares");
 
         uint256 jtPreviewed = juniorTranche.previewDeposit(toTrancheUnits(10e18));
-        assertEq(jtPreviewed, 10e18, "the flat-market junior quote must be the exact 1:1 mint");
+        assertEq(jtPreviewed, 10000000000000333332, "the flat-market junior quote must be the exact offset-adjusted mint");
         assertEq(_depositJunior(10e18), jtPreviewed, "the junior deposit must mint exactly the previewed shares");
 
         _mintQuoteBackedBPT(LT_PROVIDER, 5e18, 5e6);
         uint256 ltPreviewed = liquidityTranche.previewDeposit(toTrancheUnits(5e18));
-        assertEq(ltPreviewed, 5e18, "the flat-market liquidity quote must be the exact 1:1 mint");
+        assertEq(ltPreviewed, 5000000000000833332, "the flat-market liquidity quote must be the exact offset-adjusted mint");
         vm.startPrank(LT_PROVIDER);
         bpt.approve(address(liquidityTranche), 5e18);
         assertEq(liquidityTranche.deposit(toTrancheUnits(5e18), LT_PROVIDER), ltPreviewed, "the liquidity deposit must mint exactly the previewed shares");
@@ -160,29 +163,31 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
     /**
      * @notice On the flat seeded market every redemption preview quotes the exact pro-rata claims and the
      *         same-block execution pays exactly the previewed claims on every leg, on all three tranches
-     * @dev All value sits on each tranche's own raw NAV at a 1.0 rate, so the quotes are pinned absolutely:
-     *      10e18 ST shares claim exactly 10e18 senior assets worth 10e18 NAV, 5e18 JT shares claim 5e18 junior
-     *      assets, 1e18 LT shares claim 1e18 BPT. The LT slice is sized so the post-redemption depth 5e18 clears
-     *      the 5% liquidity floor on the post-exit senior effective NAV of 90e18 (required 4.5e18)
+     * @dev All value sits on each tranche's own raw NAV at a 1.0 rate, and the claim scaler carries the virtual-shares
+     *      offset (floor(leg x shares / (supply + 1e6)), leaving a virtual-dust sliver): 10e18 ST shares of 100e18
+     *      supply claim floor(100e18 x 10e18 / (100e18 + 1e6)) = 9999999999999900000 senior assets and NAV, 5e18 JT
+     *      shares of 30e18 claim floor(30e18 x 5e18 / (30e18 + 1e6)) = 4999999999999833333, 1e18 LT shares of 6e18
+     *      claim floor(6e18 x 1e18 / (6e18 + 1e6)) = 999999999999833333 BPT. The LT slice is sized so the
+     *      post-redemption depth 5e18 clears the 5% liquidity floor on the post-exit senior effective NAV of 90e18 (required 4.5e18)
      */
     function test_PreviewRedeem_FreshMarket_ExactQuotesAndExecParity() public {
         AssetClaims memory stPreviewed = seniorTranche.previewRedeem(10e18);
-        assertEq(stPreviewed.stAssets, toTrancheUnits(10e18), "the senior quote must claim exactly its pro-rata senior assets");
-        assertEq(stPreviewed.nav, toNAVUnits(uint256(10e18)), "the senior quote must claim exactly its pro-rata NAV");
+        assertEq(stPreviewed.stAssets, toTrancheUnits(9999999999999900000), "the senior quote must claim exactly its pro-rata senior assets");
+        assertEq(stPreviewed.nav, toNAVUnits(uint256(9999999999999900000)), "the senior quote must claim exactly its pro-rata NAV");
         vm.prank(ST_PROVIDER);
         AssetClaims memory stClaims = seniorTranche.redeem(10e18, ST_PROVIDER, ST_PROVIDER);
         _assertClaimsParity(stClaims, stPreviewed, "senior redemption");
 
         AssetClaims memory jtPreviewed = juniorTranche.previewRedeem(5e18);
-        assertEq(jtPreviewed.jtAssets, toTrancheUnits(5e18), "the junior quote must claim exactly its pro-rata junior assets");
-        assertEq(jtPreviewed.nav, toNAVUnits(uint256(5e18)), "the junior quote must claim exactly its pro-rata NAV");
+        assertEq(jtPreviewed.jtAssets, toTrancheUnits(4999999999999833333), "the junior quote must claim exactly its pro-rata junior assets");
+        assertEq(jtPreviewed.nav, toNAVUnits(uint256(4999999999999833333)), "the junior quote must claim exactly its pro-rata NAV");
         vm.prank(JT_PROVIDER);
         AssetClaims memory jtClaims = juniorTranche.redeem(5e18, JT_PROVIDER, JT_PROVIDER);
         _assertClaimsParity(jtClaims, jtPreviewed, "junior redemption");
 
         AssetClaims memory ltPreviewed = liquidityTranche.previewRedeem(1e18);
-        assertEq(ltPreviewed.ltAssets, toTrancheUnits(1e18), "the liquidity quote must claim exactly its pro-rata BPT");
-        assertEq(ltPreviewed.nav, toNAVUnits(uint256(1e18)), "the liquidity quote must claim exactly its pro-rata NAV");
+        assertEq(ltPreviewed.ltAssets, toTrancheUnits(999999999999833333), "the liquidity quote must claim exactly its pro-rata BPT");
+        assertEq(ltPreviewed.nav, toNAVUnits(uint256(999999999999833333)), "the liquidity quote must claim exactly its pro-rata NAV");
         vm.prank(LT_PROVIDER);
         AssetClaims memory ltClaims = liquidityTranche.redeem(1e18, LT_PROVIDER, LT_PROVIDER);
         _assertClaimsParity(ltClaims, ltPreviewed, "liquidity redemption");
@@ -223,9 +228,11 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
      *         self-liquidation bonus, and the same-block execution pays exactly the previewed claims
      * @dev A covered -21% drawdown marks coverage utilization at ceil(102.7e18 x 0.2 / 2.7e18) = 7.608e18, past
      *      the 6.4667e18 liquidation threshold, which forces the market PERPETUAL with the bonus armed. The loss
-     *      is fully covered so 10e18 of the 100e18 senior shares claim a base NAV of exactly 10e18, and the paid
-     *      bonus is min(configured 1% x 10e18, junior buffer 2.7e18, neutral cap 10e18 x 2.7 / 100) = 0.1e18,
-     *      so the previewed claim NAV must be exactly 10.1e18 and execution must match it on every leg
+     *      is fully covered so 10e18 of the 100e18 senior shares claim a base NAV of floor(100e18 x 10e18 /
+     *      (100e18 + 1e6)) = 9999999999999900000 (the virtual-shares offset), and the paid bonus is
+     *      min(configured 1% x base = base / 100, junior buffer 2.7e18, neutral cap base x 2.7 / 100) =
+     *      99999999999999000, so the previewed claim NAV must be exactly 9999999999999900000 + 99999999999999000 =
+     *      10099999999999899000 and execution must match it on every leg
      */
     function test_PreviewRedeem_LiquidationRegime_SelfLiquidationBonusParity() public {
         applySTPnL(-2100);
@@ -234,7 +241,7 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "a liquidation breach forces the market PERPETUAL so the redemption stays open");
 
         AssetClaims memory previewed = seniorTranche.previewRedeem(10e18);
-        assertEq(previewed.nav, toNAVUnits(uint256(10.1e18)), "the quote must carry the base 10e18 slice plus exactly the 0.1e18 bonus");
+        assertEq(previewed.nav, toNAVUnits(uint256(10099999999999899000)), "the quote must carry the base 9999999999999900000 slice plus exactly the 99999999999999000 bonus");
 
         vm.prank(ST_PROVIDER);
         AssetClaims memory claims = seniorTranche.redeem(10e18, ST_PROVIDER, ST_PROVIDER);
@@ -478,12 +485,13 @@ contract Test_SimulationSeamPreviewsFixedTerm_Tranches is SimulationSeamPreviews
      * @notice In FIXED_TERM the LT in-kind deposit preview still quotes (the in-kind LT deposit only deepens
      *         liquidity and stays enabled in every market state) and execution matches it exactly
      * @dev The drawdown lives entirely on the ST/JT vault rate: the quote-only pool is untouched, so 5e18
-     *      quote-backed BPT is worth 5e18 NAV against the 6e18 LT effective NAV over 6e18 shares, minting 5e18
+     *      quote-backed BPT is worth 5e18 NAV against the 6e18 LT effective NAV over 6e18 shares, minting the
+     *      offset-adjusted floor((6e18 + 1e6) x 5e18 / (6e18 + 1)) = 5000000000000833332
      */
     function test_FixedTerm_LiquidityPreviewDepositStillQuotes_ExecParity() public {
         _mintQuoteBackedBPT(LT_PROVIDER, 5e18, 5e6);
         uint256 previewed = liquidityTranche.previewDeposit(toTrancheUnits(5e18));
-        assertEq(previewed, 5e18, "the fixed-term LT quote must price the exact 1:1 mint on the untouched pool");
+        assertEq(previewed, 5000000000000833332, "the fixed-term LT quote must price the exact offset-adjusted mint on the untouched pool");
         vm.startPrank(LT_PROVIDER);
         bpt.approve(address(liquidityTranche), 5e18);
         assertEq(liquidityTranche.deposit(toTrancheUnits(5e18), LT_PROVIDER), previewed, "the fixed-term LT deposit must mint exactly the previewed shares");

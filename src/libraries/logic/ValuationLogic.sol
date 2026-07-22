@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
-import { MAX_MINT_DILUTION_WAD, VIRTUAL_ASSETS, VIRTUAL_SHARES, WAD } from "../Constants.sol";
+import { MAX_MINT_DILUTION_WAD, VIRTUAL_ASSETS, VIRTUAL_SHARES, WAD, ZERO_NAV_UNITS } from "../Constants.sol";
 import { Math, NAV_UNIT, RoycoUnitsMath, toUint256 } from "../Units.sol";
 
 /**
@@ -117,6 +117,8 @@ library ValuationLogic {
      * @return shares The number of shares that have a claim on the specified value
      */
     function _convertToShares(NAV_UNIT _value, NAV_UNIT _totalValue, uint256 _totalSupply, Math.Rounding _rounding) internal pure returns (uint256 shares) {
+        // A genuinely fresh tranche (no shares AND no backing) mints 1:1
+        if (_totalSupply == 0 && _totalValue == ZERO_NAV_UNITS) return toUint256(_value);
         // The effective supply is the total supply plus the virtual shares
         uint256 effectiveSupply = _totalSupply + VIRTUAL_SHARES;
         NAV_UNIT denominator = _totalValue + VIRTUAL_ASSETS;
@@ -140,6 +142,8 @@ library ValuationLogic {
      * @return value The value in NAV units that the shares have a claim on
      */
     function _convertToValue(uint256 _shares, uint256 _totalSupply, NAV_UNIT _totalValue, Math.Rounding _rounding) internal pure returns (NAV_UNIT value) {
+        // A fresh tranche (no shares, no backing) has nothing to claim
+        if (_totalSupply == 0 && _totalValue == ZERO_NAV_UNITS) return ZERO_NAV_UNITS;
         return (_totalValue + VIRTUAL_ASSETS).mulDiv(_shares, _totalSupply + VIRTUAL_SHARES, _rounding);
     }
 

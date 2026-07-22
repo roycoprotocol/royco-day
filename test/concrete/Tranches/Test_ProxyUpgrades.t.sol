@@ -92,11 +92,12 @@ contract Test_ProxyUpgrades_Tranches is DayMarketTestBase {
         vm.stopPrank();
         require(vm.revertToState(snapshotId), "control-state rewind failed");
 
-        // Hand-derived control values: flat market at the 1.0 seed rate, so 10e18 vault shares are 10e18 NAV and
-        // mint 10e18 x 100e18 supply / 100e18 senior effective NAV = 10e18 shares; redeeming 5e18 of the resulting
-        // 110e18 supply claims 110e18 x 5 / 110 = exactly 5e18 vault shares
-        assertEq(controlShares, 10e18, "the control deposit must mint exactly 10e18 senior shares at the 1.0 seed rate");
-        assertEq(toUint256(controlClaims.stAssets), 5e18, "the control redemption must claim exactly the pro-rata 5e18 vault shares");
+        // Hand-derived control values under the virtual-shares/assets offset: flat market at the 1.0 seed rate, so
+        // 10e18 vault shares are 10e18 NAV and mint floor((100e18 + 1e6) x 10e18 / (100e18 + 1)) = 10000000000000099999
+        // shares; redeeming 5e18 of the resulting 110000000000000099999 supply (110e18 vault-share claims) pays
+        // floor(110e18 x 5e18 / (110000000000000099999 + 1e6)) = 4999999999999950000 vault shares
+        assertEq(controlShares, 10000000000000099999, "the control deposit must mint exactly the offset-adjusted quote at the 1.0 seed rate");
+        assertEq(toUint256(controlClaims.stAssets), 4999999999999950000, "the control redemption must claim exactly the offset-adjusted pro-rata vault shares");
 
         // Pre-upgrade digests of everything an upgrade must not touch
         address oldStImpl = _implOf(address(seniorTranche));

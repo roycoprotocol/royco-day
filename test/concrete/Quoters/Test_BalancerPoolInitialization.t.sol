@@ -175,14 +175,20 @@ contract Test_BalancerPoolInitialization_SeniorLeg_Kernel is DayMarketTestBase {
 
     /**
      * @notice A both-legs first deposit initializes the pool with the senior leg minted and deployed in the same flow
-     * @dev Derivation: 100 vault shares mint 100e18 senior shares at the committed 1.0 senior rate and value to 100e18
-     *      WAD through the live rate provider, the 100 quote units value to 100e18 WAD, so the genesis mint is 200e18
-     *      gross and 200e18 - 1e6 net
+     * @dev Derivation with the virtual-shares/assets offset. The ST leg mints _convertToShares(100e18, 1000e18, 1000e18)
+     *      = floor((1000e18 + 1e6) x 100e18 / (1000e18 + 1)) = 100000000000000099999 senior shares (slightly over the
+     *      naive 100e18 as the offset lifts the numerator supply). The pool prices that leg at the pre-op cached senior
+     *      rate _convertToValue(WAD, 1000e18, 1000e18) = 999999999999999000, so the senior leg values to
+     *      floor(100000000000000099999 x 999999999999999000 / 1e18) = 99999999999999999998 WAD; the 100 quote units value
+     *      to 100e18 WAD, so the genesis mint is 199999999999999999998 gross and 199999999999998999998 net of the 1e6
+     *      dead minimum. NAV-per-BPT is exactly 1.0 (gross value == gross supply), so the fresh LT bootstrap mints the net
+     *      1:1
      */
     function test_FirstMultiAssetDeposit_BothLegs_InitializesPool() public {
         uint256 stAssets = 100e18;
         uint256 quoteAssets = 100 * QUOTE_UNIT;
-        uint256 expectedNet = 200e18 - balancerVault.POOL_MINIMUM_TOTAL_SUPPLY();
+        // Offset-derived net genesis NAV (see docstring): 199999999999999999998 gross less the 1e6 dead minimum
+        uint256 expectedNet = 199999999999998999998;
         _fundDepositLegs(LT_PROVIDER, stAssets, quoteAssets);
 
         vm.prank(LT_PROVIDER);
@@ -190,24 +196,26 @@ contract Test_BalancerPoolInitialization_SeniorLeg_Kernel is DayMarketTestBase {
 
         assertTrue(balancerVault.isPoolInitialized(address(bpt)), "the first deposit must latch the pool initialized");
         assertEq(shares, expectedNet, "the LT bootstrap must mint shares 1:1 with the net genesis deposit NAV");
-        assertEq(seniorTranche.totalSupply(), 1100e18, "the senior leg must mint exactly the deposited vault shares at the committed 1.0 rate");
+        assertEq(seniorTranche.totalSupply(), 1100000000000000099999, "the senior leg must mint exactly the offset-priced deposited vault shares (1000e18 seed + 100000000000000099999)");
         uint256[2] memory poolBalances = balancerVault.getPoolBalances(address(bpt));
-        assertEq(poolBalances[stPoolTokenIndex], 100e18, "the minted senior shares must seed the pool's senior balance");
+        assertEq(poolBalances[stPoolTokenIndex], 100000000000000099999, "the minted senior shares must seed the pool's senior balance");
         assertEq(poolBalances[1 - stPoolTokenIndex], quoteAssets, "the quote leg must seed the pool balance exactly");
     }
 
     /**
      * @notice A genesis seed too small to cover the dead minimum reverts with the Vault's total-supply floor, the
      *         real vault's guard against dust-value initialization
-     * @dev Derivation: 1000 wei of vault shares mint 1000 wei of senior shares at the committed 1.0 rate, valuing to
-     *      1000 WAD wei, under the 1e6 dead minimum, so the Vault refuses to initialize and the whole deposit unwinds
+     * @dev Derivation with the offset: 1000 wei of vault shares mint _convertToShares(1000, 1000e18, 1000e18) = 1000 wei
+     *      of senior shares (the offset leaves this dust mint unchanged), valued at the pre-op cached senior rate
+     *      999999999999999000, so the genesis gross BPT is floor(1000 x 999999999999999000 / 1e18) = 999 WAD wei, under
+     *      the 1e6 dead minimum, so the Vault refuses to initialize with the gross figure and the whole deposit unwinds
      */
     function test_RevertIf_GenesisSeedBelowDeadMinimum() public {
         uint256 stAssets = 1000;
         _fundDepositLegs(LT_PROVIDER, stAssets, 0);
 
         vm.prank(LT_PROVIDER);
-        vm.expectRevert(abi.encodeWithSelector(IERC20MultiTokenErrors.PoolTotalSupplyTooLow.selector, 1000));
+        vm.expectRevert(abi.encodeWithSelector(IERC20MultiTokenErrors.PoolTotalSupplyTooLow.selector, 999));
         liquidityTranche.depositMultiAsset(stAssets, 0, 0, LT_PROVIDER);
         assertFalse(balancerVault.isPoolInitialized(address(bpt)), "a dust seed must leave the pool uninitialized");
         assertEq(seniorTranche.totalSupply(), 1000e18, "the reverted seed must unwind its senior leg mint");

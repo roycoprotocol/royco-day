@@ -388,23 +388,32 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     ///      a single mint owns at most (1 − 1e-12) of the post-mint supply
     uint256 internal constant MAX_MINT_DILUTION = 1e18 - 1e6;
 
+    /// @dev The OZ ERC4626 virtual-shares/assets offset (Constants.sol VIRTUAL_SHARES / VIRTUAL_ASSETS): every
+    ///      non-fresh share conversion prices against the effective supply (supply + 1e6) over the effective
+    ///      value (totalValue + 1). Restated here (not imported) so a silent src change diverges loudly
+    uint256 internal constant VIRTUAL_SHARES = 1e6;
+    uint256 internal constant VIRTUAL_ASSETS = 1;
+
     /// @notice Expected shares minted for `_value` against `_supply` shares backed by `_totalNAV` (floor).
-    /// @dev Mirrors `ValuationLogic._convertToShares` including its zero-supply and zero-NAV boundaries and
-    ///      the mint-dilution clamp (bind iff value·(WAD − MAX_MINT_DILUTION) > denominator·MAX_MINT_DILUTION, products fit on the suite domain).
+    /// @dev Mirrors `ValuationLogic._convertToShares` including its fresh-tranche exemption, the virtual
+    ///      shares/assets offset, and the mint-dilution clamp (bind iff
+    ///      value·(WAD − MAX_MINT_DILUTION) > denominator·MAX_MINT_DILUTION, products fit on the suite domain).
     function _expectedShares(NAV_UNIT _value, uint256 _supply, NAV_UNIT _totalNAV) internal pure returns (uint256) {
-        if (_supply == 0) return toUint256(_value);
-        uint256 denominator = toUint256(_totalNAV) == 0 ? ZERO_NAV_SHARE_PRICING_DENOMINATOR : toUint256(_totalNAV);
+        // A genuinely fresh tranche (no shares AND no backing) mints 1:1; every other state prices through the offset
+        if (_supply == 0 && toUint256(_totalNAV) == 0) return toUint256(_value);
+        uint256 effectiveSupply = _supply + VIRTUAL_SHARES;
+        uint256 denominator = toUint256(_totalNAV) + VIRTUAL_ASSETS;
         if (toUint256(_value) * (WAD - MAX_MINT_DILUTION) > denominator * MAX_MINT_DILUTION) {
-            return Math.mulDiv(_supply, MAX_MINT_DILUTION, WAD - MAX_MINT_DILUTION);
+            return Math.mulDiv(effectiveSupply, MAX_MINT_DILUTION, WAD - MAX_MINT_DILUTION);
         }
-        return Math.mulDiv(toUint256(_value), _supply, denominator);
+        return Math.mulDiv(toUint256(_value), effectiveSupply, denominator);
     }
 
     /// @notice Expected value redeemed for `_shares` against `_supply` shares backed by `_totalNAV` (floor).
-    /// @dev Mirrors `ValuationLogic._convertToValue` including its zero-supply boundary.
+    /// @dev Mirrors `ValuationLogic._convertToValue` including its fresh-tranche exemption and the offset.
     function _expectedValue(uint256 _shares, uint256 _supply, NAV_UNIT _totalNAV) internal pure returns (NAV_UNIT) {
-        if (_supply == 0) return toNAVUnits(uint256(0));
-        return toNAVUnits(Math.mulDiv(toUint256(_totalNAV), _shares, _supply));
+        if (_supply == 0 && toUint256(_totalNAV) == 0) return toNAVUnits(uint256(0));
+        return toNAVUnits(Math.mulDiv(toUint256(_totalNAV) + VIRTUAL_ASSETS, _shares, _supply + VIRTUAL_SHARES));
     }
 
     /// @notice Independent coverage utilization recomputation (ceil), mirroring `UtilizationLogic._computeCoverageUtilization`.
@@ -663,11 +672,24 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      *      a deposit rode the same sync). Pre-existing holders keep `preSupply / postSupply` of the post-op senior
      *      effective NAV, which must cover at least the value the checkpoint retains for them
      *      (`stEffectiveNAV - mintedForValue`): `stEffPost * preSupply >= (stEffPost - minted) * postSupply`.
+     *
+     *      Virtual-shares dust: every mint now prices against the effective supply (P + VIRTUAL_SHARES) over the
+     *      effective denom (D + VIRTUAL_ASSETS), so each mint M_i overshoots its fair floor by strictly less than
+     *      v_i·VIRTUAL_SHARES/D_i (the OZ inflation-attack sliver). Summed and re-lumped against the shared
+     *      `retained` denominator this gives `retained·totalMinted − mintedForValue·preSupply < mintedForValue·
+     *      VIRTUAL_SHARES` (rigorous for the sync legs AND a deposit leg riding the same sync), so the bound below
+     *      carries exactly that one-sided dust tolerance. It stays a real check: a genuine over-mint beyond the
+     *      virtual-share sliver still trips it.
      */
     function _assertSeniorMintsNonDilutive(uint256 _stSupplyPre, NAV_UNIT _mintedForValue) internal view {
         uint256 stEffPost = toUint256(ACCOUNTANT.getState().lastSTEffectiveNAV);
         uint256 retained = stEffPost - toUint256(_mintedForValue);
-        assertGe(stEffPost * _stSupplyPre, retained * ST.totalSupply(), "the senior share mints must never dilute pre-existing holders' NAV-per-share");
+        uint256 virtualShareDust = toUint256(_mintedForValue) * VIRTUAL_SHARES;
+        assertGe(
+            stEffPost * _stSupplyPre + virtualShareDust,
+            retained * ST.totalSupply(),
+            "the senior share mints must never dilute pre-existing holders beyond the virtual-shares offset dust"
+        );
     }
 
     /**
@@ -1977,13 +1999,16 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         }
     }
 
-    /// @notice Floor-scales every claims field by `_shares / _totalShares`, mirroring `TrancheClaimsLogic._scaleAssetClaims`.
+    /// @notice Floor-scales every claims field by `_shares / (_totalShares + VIRTUAL_SHARES)`, mirroring
+    ///         `TrancheClaimsLogic._scaleAssetClaims`, which now divides by the effective supply so a sole holder
+    ///         can never redeem the whole tranche 1:1 (the virtual-share sliver stays behind).
     function _scaleExpectedClaims(AssetClaims memory _claims, uint256 _shares, uint256 _totalShares) internal pure returns (AssetClaims memory scaled) {
-        scaled.nav = toNAVUnits(Math.mulDiv(toUint256(_claims.nav), _shares, _totalShares));
-        scaled.stAssets = toTrancheUnits(Math.mulDiv(toUint256(_claims.stAssets), _shares, _totalShares));
-        scaled.jtAssets = toTrancheUnits(Math.mulDiv(toUint256(_claims.jtAssets), _shares, _totalShares));
-        scaled.ltAssets = toTrancheUnits(Math.mulDiv(toUint256(_claims.ltAssets), _shares, _totalShares));
-        scaled.stShares = Math.mulDiv(_claims.stShares, _shares, _totalShares);
+        uint256 effectiveTotalShares = _totalShares + VIRTUAL_SHARES;
+        scaled.nav = toNAVUnits(Math.mulDiv(toUint256(_claims.nav), _shares, effectiveTotalShares));
+        scaled.stAssets = toTrancheUnits(Math.mulDiv(toUint256(_claims.stAssets), _shares, effectiveTotalShares));
+        scaled.jtAssets = toTrancheUnits(Math.mulDiv(toUint256(_claims.jtAssets), _shares, effectiveTotalShares));
+        scaled.ltAssets = toTrancheUnits(Math.mulDiv(toUint256(_claims.ltAssets), _shares, effectiveTotalShares));
+        scaled.stShares = Math.mulDiv(_claims.stShares, _shares, effectiveTotalShares);
     }
 
     /**
@@ -3685,7 +3710,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         // Step 1: a redeemer takes 25 percent in kind and is paid its idle liquidity premium slice directly
         uint256 ltSupply = LT.totalSupply();
         uint256 shares = LT.balanceOf(LT_BOB_ADDRESS) / 4;
-        uint256 expectedIdleSlice = Math.mulDiv(idleStaged, shares, ltSupply);
+        // The idle-premium share slice scales through _scaleAssetClaims, dividing by the effective supply (+ 1e6)
+        uint256 expectedIdleSlice = Math.mulDiv(idleStaged, shares, ltSupply + VIRTUAL_SHARES);
         assertGt(expectedIdleSlice, 0, "arrange: the redemption must claim an idle liquidity premium slice");
         uint256 redeemerSTSharesPre = ST.balanceOf(LT_BOB_ADDRESS);
         OpReceipt memory r = _doRedeemLT(LT_BOB_ADDRESS, shares);
@@ -4168,7 +4194,12 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         NAV_UNIT value = KERNEL.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets));
         uint256 expectedShares = _expectedShares(value, jtSupplyPre, ZERO_NAV_UNITS);
         assertGt(toUint256(value) * (WAD - MAX_MINT_DILUTION), MAX_MINT_DILUTION, "arrange: the dilution deposit must bind the clamp");
-        assertEq(expectedShares, Math.mulDiv(jtSupplyPre, MAX_MINT_DILUTION, WAD - MAX_MINT_DILUTION), "the zero-NAV branch must clamp to the dilution cap");
+        // The clamp cap now prices against the effective supply (jtSupplyPre + VIRTUAL_SHARES) per the offset
+        assertEq(
+            expectedShares,
+            Math.mulDiv(jtSupplyPre + VIRTUAL_SHARES, MAX_MINT_DILUTION, WAD - MAX_MINT_DILUTION),
+            "the zero-NAV branch must clamp to the dilution cap against the effective supply"
+        );
 
         OpReceipt memory r = _doDepositJT(JT_BOB_ADDRESS, assets);
         assertEq(r.shares, expectedShares, "deposit shares must match the zero-NAV denominator formula exactly");

@@ -75,11 +75,12 @@ contract Test_TranchePermit_Tranches is DayMarketTestBase {
      * @notice A permit signature sets the delegate's allowance and advances the owner's nonce on every tranche, and
      *         the delegate then redeems the owner's shares with the assets landing at the receiver
      * @dev The permit-then-redeem pair is the gasless-onboarding path for every tranche share (the owner never
-     *      sends a transaction), so it is proven on ST, JT, and LT in one run. Payouts at the seeded 1.0 rates:
-     *      ST: 10e18 of 100e18 senior shares claim 100e18 vault shares -> 10e18 x 100e18 / 100e18 = 10e18 vault shares.
-     *      JT: 3e18 of 30e18 junior shares claim 30e18 vault shares -> 3e18 x 30e18 / 30e18 = 3e18 vault shares
+     *      sends a transaction), so it is proven on ST, JT, and LT in one run. Payouts at the seeded 1.0 rates,
+     *      scaled by the virtual-shares offset the claim scaler now carries (leg x shares / (supply + 1e6)):
+     *      ST: 10e18 of 100e18 senior shares claim 100e18 vault shares -> floor(100e18 x 10e18 / (100e18 + 1e6)) = 9999999999999900000 vault shares.
+     *      JT: 3e18 of 30e18 junior shares claim 30e18 vault shares -> floor(30e18 x 3e18 / (30e18 + 1e6)) = 2999999999999900000 vault shares
      *      (post-redemption coverage (90 + 27) x 0.2 / 27 = 0.8667 <= 1, so the coverage gate clears).
-     *      LT: 0.5e18 of 6e18 liquidity shares claim 6e18 BPT -> 0.5e18 x 6e18 / 6e18 = 0.5e18 BPT
+     *      LT: 0.5e18 of 6e18 liquidity shares claim 6e18 BPT -> floor(6e18 x 0.5e18 / (6e18 + 1e6)) = 499999999999916666 BPT
      *      (post-redemption ltRawNAV 5.5e18 >= required 90e18 x 0.05 = 4.5e18, so the liquidity gate clears)
      */
     function test_Permit_SignatureSetsAllowanceAndDelegateRedeems() public {
@@ -98,7 +99,7 @@ contract Test_TranchePermit_Tranches is DayMarketTestBase {
 
         vm.prank(ST_DELEGATE);
         seniorTranche.redeem(10e18, ST_DELEGATE, PERMIT_OWNER);
-        assertEq(stJtVault.balanceOf(ST_DELEGATE), 10e18, "the delegate must receive exactly the 10e18 redeemed vault shares");
+        assertEq(stJtVault.balanceOf(ST_DELEGATE), 9999999999999900000, "the delegate must receive exactly floor(100e18 x 10e18 / (100e18 + 1e6)) = 9999999999999900000 vault shares");
         assertEq(seniorTranche.balanceOf(PERMIT_OWNER), 0, "the owner's senior shares must be fully redeemed through the permit allowance");
         assertEq(seniorTranche.allowance(PERMIT_OWNER, ST_DELEGATE), 0, "the delegated redemption must consume the permit allowance in full");
 
@@ -113,7 +114,7 @@ contract Test_TranchePermit_Tranches is DayMarketTestBase {
 
         vm.prank(JT_DELEGATE);
         juniorTranche.redeem(3e18, JT_DELEGATE, PERMIT_OWNER);
-        assertEq(stJtVault.balanceOf(JT_DELEGATE), 3e18, "the delegate must receive exactly the 3e18 redeemed vault shares");
+        assertEq(stJtVault.balanceOf(JT_DELEGATE), 2999999999999900000, "the delegate must receive exactly floor(30e18 x 3e18 / (30e18 + 1e6)) = 2999999999999900000 vault shares");
         assertEq(juniorTranche.balanceOf(PERMIT_OWNER), 0, "the owner's junior shares must be fully redeemed through the permit allowance");
         assertEq(juniorTranche.allowance(PERMIT_OWNER, JT_DELEGATE), 0, "the delegated junior redemption must consume the permit allowance in full");
 
@@ -127,7 +128,7 @@ contract Test_TranchePermit_Tranches is DayMarketTestBase {
 
         vm.prank(LT_DELEGATE);
         liquidityTranche.redeem(0.5e18, LT_DELEGATE, PERMIT_OWNER);
-        assertEq(bpt.balanceOf(LT_DELEGATE), 0.5e18, "the delegate must receive exactly the 0.5e18 redeemed BPT in kind");
+        assertEq(bpt.balanceOf(LT_DELEGATE), 499999999999916666, "the delegate must receive exactly floor(6e18 x 0.5e18 / (6e18 + 1e6)) = 499999999999916666 BPT in kind");
         assertEq(liquidityTranche.balanceOf(PERMIT_OWNER), 0, "the owner's liquidity shares must be fully redeemed through the permit allowance");
         assertEq(liquidityTranche.allowance(PERMIT_OWNER, LT_DELEGATE), 0, "the delegated liquidity redemption must consume the permit allowance in full");
     }
