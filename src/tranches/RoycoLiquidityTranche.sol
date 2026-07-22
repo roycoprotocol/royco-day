@@ -135,7 +135,6 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         override(IRoycoLiquidityTranche)
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
-        // The kernel stands in as receiver so the quote stays receiver-agnostic, its screening gates preview and execution alike
         (stClaims, quoteAssets) = _redeemMultiAsset(true, _shares, 0, 0, KERNEL);
     }
 

@@ -22,10 +22,6 @@ library TrancheClaimsLogic {
     using RoycoUnitsMath for uint256;
     using Math for uint256;
 
-    // =============================
-    // Internal Functions
-    // =============================
-
     /**
      * @notice Derives the cumulative asset claims that the specified tranche is entitled to
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function

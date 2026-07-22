@@ -75,6 +75,8 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         // coverage error surfaces whenever covBound <= liqBound, otherwise only liquidity is violated
         bytes4 expectedError =
             covBound <= liqBound ? IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector : IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector;
+        vm.expectRevert(expectedError);
+        seniorTranche.previewDeposit(toTrancheUnits(uint256(1)));
         stJtVault.mintShares(ST_PROVIDER, 1);
         vm.prank(ST_PROVIDER);
         stJtVault.approve(address(seniorTranche), 1);
@@ -127,7 +129,9 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
             );
         }
 
-        // One share past the boundary makes 4w > 4jt - st and violates the coverage requirement
+        // One share past the boundary makes 4w > 4jt - st and violates the coverage requirement, from the preview and the execution alike
+        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        juniorTranche.previewRedeem(1);
         vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
         vm.prank(JT_PROVIDER);
         juniorTranche.redeem(1, JT_PROVIDER, JT_PROVIDER);
@@ -189,7 +193,9 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
             assertLe(RoycoTestMath.computeLiquidityUtilization(st, 0.05e18, requiredFloor), WAD, "liquidity utilization must sit at or below 100% exactly at the floor");
         }
 
-        // One share below the floor makes the remaining depth insufficient and violates the liquidity requirement
+        // One share below the floor makes the remaining depth insufficient and violates the liquidity requirement, from the preview and the execution alike
+        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        liquidityTranche.previewRedeem(1);
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         vm.prank(LT_PROVIDER);
         liquidityTranche.redeem(1, LT_PROVIDER, LT_PROVIDER);

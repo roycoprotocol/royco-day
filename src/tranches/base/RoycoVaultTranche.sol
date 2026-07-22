@@ -159,11 +159,8 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
         return _deposit(true, _assets);
     }
 
-    /**
-     * @inheritdoc IRoycoVaultTranche
-     * @dev Routes the redemption through the execute-and-revert pattern so the quote is produced by the actual kernel redemption path under its real semantics
-     * @dev The kernel stands in as receiver so the quote stays receiver-agnostic, its screening gates preview and execution alike
-     */
+    /// @inheritdoc IRoycoVaultTranche
+    /// @dev Routes the redemption through the execute-and-revert pattern so the quote is produced by the actual kernel redemption path under its real semantics
     function previewRedeem(uint256 _shares) external virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
         return _redeem(true, _shares, KERNEL);
     }

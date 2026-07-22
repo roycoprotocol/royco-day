@@ -623,6 +623,16 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         assertEq(quoteOut, previewQuote, "the mid-transaction preview must match the execution that follows it");
     }
 
+    /// @notice The zero-leg guard fires from the preview exactly as from the execution, both legs empty quotes nothing
+    function test_RevertIf_DepositMultiAssetBothLegsZero_PreviewAndExecution() public {
+        vm.expectRevert(IRoycoDayKernel.MUST_DEPOSIT_NON_ZERO_ASSETS.selector);
+        liquidityTranche.previewDepositMultiAsset(0, 0);
+
+        vm.prank(LT_PROVIDER);
+        vm.expectRevert(IRoycoDayKernel.MUST_DEPOSIT_NON_ZERO_ASSETS.selector);
+        liquidityTranche.depositMultiAsset(0, 0, 0, LT_PROVIDER);
+    }
+
     /// @notice Post-op gate parity on the redemption side: a redemption sized just past the multi-asset maximum
     ///         reverts LIQUIDITY_REQUIREMENT_VIOLATED from the preview exactly as from the execution, because the
     ///         preview runs the same post-op enforcement at the venue-marked LT raw NAV
