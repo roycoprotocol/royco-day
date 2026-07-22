@@ -5,7 +5,7 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { SafeERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../interfaces/IRoycoVaultTranche.sol";
-import { ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../Constants.sol";
+import { VIRTUAL_SHARES, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../Constants.sol";
 import { AssetClaims, SyncedAccountingState, TrancheType } from "../Types.sol";
 import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toUint256 } from "../Units.sol";
 import { ValuationLogic } from "./ValuationLogic.sol";
@@ -126,12 +126,13 @@ library TrancheClaimsLogic {
         // If the total tranche shares is zero, it has no claims on the assets, so return zero claims
         if (_totalTrancheShares == 0) return scaledClaims;
 
-        // Scale the claims by the given shares
-        scaledClaims.nav = _claims.nav.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
-        scaledClaims.stAssets = _claims.stAssets.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
-        scaledClaims.jtAssets = _claims.jtAssets.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
-        scaledClaims.ltAssets = _claims.ltAssets.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
-        scaledClaims.stShares = _claims.stShares.mulDiv(_shares, _totalTrancheShares, Math.Rounding.Floor);
+        // Scale the claims by the redeemer's fraction of the EFFECTIVE supply
+        uint256 effectiveTrancheShares = _totalTrancheShares + VIRTUAL_SHARES;
+        scaledClaims.nav = _claims.nav.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
+        scaledClaims.stAssets = _claims.stAssets.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
+        scaledClaims.jtAssets = _claims.jtAssets.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
+        scaledClaims.ltAssets = _claims.ltAssets.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
+        scaledClaims.stShares = _claims.stShares.mulDiv(_shares, effectiveTrancheShares, Math.Rounding.Floor);
     }
 
     /**

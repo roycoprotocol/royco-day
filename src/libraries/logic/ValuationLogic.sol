@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
-import { MAX_MINT_DILUTION_WAD, ONE_NAV_UNIT, WAD, ZERO_NAV_UNITS } from "../Constants.sol";
+import { MAX_MINT_DILUTION_WAD, VIRTUAL_ASSETS, VIRTUAL_SHARES, WAD } from "../Constants.sol";
 import { Math, NAV_UNIT, RoycoUnitsMath, toUint256 } from "../Units.sol";
 
 /**
@@ -117,18 +117,17 @@ library ValuationLogic {
      * @return shares The number of shares that have a claim on the specified value
      */
     function _convertToShares(NAV_UNIT _value, NAV_UNIT _totalValue, uint256 _totalSupply, Math.Rounding _rounding) internal pure returns (uint256 shares) {
-        // With no shares outstanding the conversion is 1:1 with the value, mirroring the tranche's first mint
-        if (_totalSupply == 0) return toUint256(_value);
-        // When the total value is zero, assume all existing shares are backed by a single NAV unit so new depositors dilute the existing unbacked holders
-        NAV_UNIT denominator = (_totalValue == ZERO_NAV_UNITS ? ONE_NAV_UNIT : _totalValue);
-        // The overflow-free bind test, run before the fair-shares division:
+        // The effective supply is the total supply plus the virtual shares
+        uint256 effectiveSupply = _totalSupply + VIRTUAL_SHARES;
+        NAV_UNIT denominator = _totalValue + VIRTUAL_ASSETS;
+        // The overflow-free bind test, run before the fair-shares division.
         // fair > cap ⟺ value·(WAD − MAX_MINT_DILUTION_WAD) > denominator·MAX_MINT_DILUTION_WAD
         //           ⟺ ⌈value·(WAD − MAX_MINT_DILUTION_WAD) / MAX_MINT_DILUTION_WAD⌉ > denominator
         if (_value.mulDiv((WAD - MAX_MINT_DILUTION_WAD), MAX_MINT_DILUTION_WAD, Math.Rounding.Ceil) > denominator) {
-            // The mint binds the clamp: pre-existing holders retain at least the complement of the max dilution
-            return Math.mulDiv(_totalSupply, MAX_MINT_DILUTION_WAD, (WAD - MAX_MINT_DILUTION_WAD));
+            // The mint binds the clamp: the mint owns at most MAX_MINT_DILUTION_WAD of the post-mint EFFECTIVE supply
+            return Math.mulDiv(effectiveSupply, MAX_MINT_DILUTION_WAD, (WAD - MAX_MINT_DILUTION_WAD));
         }
-        return _totalSupply.mulDiv(_value, denominator, _rounding);
+        return effectiveSupply.mulDiv(_value, denominator, _rounding);
     }
 
     /**
@@ -141,9 +140,7 @@ library ValuationLogic {
      * @return value The value in NAV units that the shares have a claim on
      */
     function _convertToValue(uint256 _shares, uint256 _totalSupply, NAV_UNIT _totalValue, Math.Rounding _rounding) internal pure returns (NAV_UNIT value) {
-        // With no shares outstanding there is nothing to have a claim on, so the conversion is zero
-        if (_totalSupply == 0) return ZERO_NAV_UNITS;
-        return _totalValue.mulDiv(_shares, _totalSupply, _rounding);
+        return (_totalValue + VIRTUAL_ASSETS).mulDiv(_shares, _totalSupply + VIRTUAL_SHARES, _rounding);
     }
 
     /**
