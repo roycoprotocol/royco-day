@@ -539,12 +539,12 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
             kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW - 50e18), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
         assertEq(toUint256(state.jtEffectiveNAV), SEED_JT_RAW - 50e18, "jt effective NAV bears the redemption");
         assertEq(toUint256(state.stEffectiveNAV), SEED_ST_RAW, "st effective NAV untouched");
-        assertEq(toUint256(state.jtCoverageImpermanentLoss), 0, "zero il stays zero through the redemption");
-        assertEq(toUint256(accountant.getState().lastJTCoverageImpermanentLoss), 0, "committed il untouched");
+        assertEq(toUint256(state.jtImpermanentLoss), 0, "zero il stays zero through the redemption");
+        assertEq(toUint256(accountant.getState().lastJTImpermanentLoss), 0, "committed il untouched");
     }
 
     /**
-     * a JT redemption floor-scales a live coverage impermanent loss by the junior effective NAV ratio and
+     * a JT redemption floor-scales a live impermanent loss by the junior effective NAV ratio and
      * persists it immediately, compounding across successive redemptions
      * Derivation from the (900e18, 300e18, 1000e18, 200e18, il 100e18) fixed-term checkpoint:
      *   redeem 60e18: jtEffectiveNAV = 140e18, il = floor(100e18 * 140e18 / 200e18) = 70e18
@@ -555,13 +555,13 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
         SyncedAccountingState memory state =
             kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(uint256(900e18)), toNAVUnits(uint256(240e18)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
         assertEq(toUint256(state.jtEffectiveNAV), 140e18, "jt effective NAV bears the redemption");
-        assertEq(toUint256(state.jtCoverageImpermanentLoss), 70e18, "il floor-scaled by the effective NAV ratio");
-        assertEq(toUint256(accountant.getState().lastJTCoverageImpermanentLoss), 70e18, "scaled il persisted immediately");
+        assertEq(toUint256(state.jtImpermanentLoss), 70e18, "il floor-scaled by the effective NAV ratio");
+        assertEq(toUint256(accountant.getState().lastJTImpermanentLoss), 70e18, "scaled il persisted immediately");
 
         state =
             kernel.doPostOp(Operation.JT_REDEEM, toNAVUnits(uint256(900e18)), toNAVUnits(uint256(240e18 - 7)), toNAVUnits(SEED_LT_RAW), ZERO_NAV_UNITS, false);
-        assertEq(toUint256(state.jtCoverageImpermanentLoss), 70e18 - 4, "second scaling floors the awkward wei ratio");
-        assertEq(toUint256(accountant.getState().lastJTCoverageImpermanentLoss), 70e18 - 4, "compounded il persisted immediately");
+        assertEq(toUint256(state.jtImpermanentLoss), 70e18 - 4, "second scaling floors the awkward wei ratio");
+        assertEq(toUint256(accountant.getState().lastJTImpermanentLoss), 70e18 - 4, "compounded il persisted immediately");
     }
 
     /// a JT redemption with a nonzero liquidity raw NAV delta violates the shape require in both directions
@@ -669,7 +669,7 @@ contract Test_PostOpSync_Accountant is AccountantTestBase {
         assertEq(toUint256(state.ltRawNAV), 130e18, "lt raw NAV passthrough");
         assertEq(toUint256(state.stEffectiveNAV), 1000e18, "st effective NAV unchanged by the BPT-only deposit");
         assertEq(toUint256(state.jtEffectiveNAV), 200e18, "jt effective NAV unchanged");
-        assertEq(toUint256(state.jtCoverageImpermanentLoss), 100e18, "il passthrough");
+        assertEq(toUint256(state.jtImpermanentLoss), 100e18, "il passthrough");
         assertEq(toUint256(state.ltLiquidityPremium), 0, "no premium accrues on an operation");
         assertEq(toUint256(state.stProtocolFee), 0, "no st fee on an operation");
         assertEq(toUint256(state.jtProtocolFee), 0, "no jt fee on an operation");

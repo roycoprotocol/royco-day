@@ -28,7 +28,7 @@ contract SeniorJuniorMarketDriver is DayMarketTestBase {
      * @custom:field jtRawNAV - The committed junior raw NAV
      * @custom:field stEffectiveNAV - The committed senior effective NAV
      * @custom:field jtEffectiveNAV - The committed junior effective NAV
-     * @custom:field jtCoverageLoss - The committed junior coverage-loss ledger
+     * @custom:field jtImpermanentLoss - The committed junior impermanent-loss ledger
      * @custom:field marketState - The committed market state ordinal
      * @custom:field fixedTermEndTimestamp - The committed fixed-term end timestamp
      * @custom:field stSupply - The senior tranche share supply
@@ -43,7 +43,7 @@ contract SeniorJuniorMarketDriver is DayMarketTestBase {
         uint256 jtRawNAV;
         uint256 stEffectiveNAV;
         uint256 jtEffectiveNAV;
-        uint256 jtCoverageLoss;
+        uint256 jtImpermanentLoss;
         uint8 marketState;
         uint256 fixedTermEndTimestamp;
         uint256 stSupply;
@@ -161,7 +161,7 @@ contract SeniorJuniorMarketDriver is DayMarketTestBase {
         t.jtRawNAV = toUint256(a.lastJTRawNAV);
         t.stEffectiveNAV = toUint256(a.lastSTEffectiveNAV);
         t.jtEffectiveNAV = toUint256(a.lastJTEffectiveNAV);
-        t.jtCoverageLoss = toUint256(a.lastJTCoverageImpermanentLoss);
+        t.jtImpermanentLoss = toUint256(a.lastJTImpermanentLoss);
         t.marketState = uint8(a.lastMarketState);
         t.fixedTermEndTimestamp = uint256(a.fixedTermEndTimestamp);
         t.stSupply = seniorTranche.totalSupply();
@@ -312,7 +312,7 @@ contract Invariant_ReductionEquivalence is Test {
         assertEq(a.jtRawNAV, b.jtRawNAV, "junior raw NAV diverged");
         assertEq(a.stEffectiveNAV, b.stEffectiveNAV, "senior effective NAV diverged");
         assertEq(a.jtEffectiveNAV, b.jtEffectiveNAV, "junior effective NAV diverged");
-        assertEq(a.jtCoverageLoss, b.jtCoverageLoss, "junior coverage-loss ledger diverged");
+        assertEq(a.jtImpermanentLoss, b.jtImpermanentLoss, "junior impermanent-loss ledger diverged");
         assertEq(a.marketState, b.marketState, "market state diverged");
         assertEq(a.fixedTermEndTimestamp, b.fixedTermEndTimestamp, "fixed-term end diverged");
         assertEq(a.stSupply, b.stSupply, "senior share supply diverged (a liquidity premium mint would land here)");

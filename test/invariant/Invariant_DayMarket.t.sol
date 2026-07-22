@@ -115,7 +115,7 @@ contract Invariant_DayMarket is StdInvariant, Test {
         console2.log("premium shares minted     ", handler.ghost_liquidityPremiumSharesMinted());
         console2.log("premium shares reinvested ", handler.ghost_liquidityPremiumSharesReinvested());
         console2.log("idle shares paid out      ", handler.ghost_idlePremiumSeniorSharesPaidToRedeemers());
-        console2.log("coverage-loss events      ", handler.jtCoverageImpermanentLossEventCount());
+        console2.log("impermanent-loss events      ", handler.jtImpermanentLossEventCount());
         _logOpLedger("stDeposit");
         _logOpLedger("stRedeem");
         _logOpLedger("jtDeposit");

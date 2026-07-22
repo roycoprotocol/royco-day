@@ -14,7 +14,7 @@ import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
  *      sync entrypoints (call them directly with the kernel set to the test contract, or prank as the configured
  *      kernel address)
  * @dev seedCheckpoint bypasses initialize entirely: it writes the full accountant state field set (checkpointed
- *      raw and effective NAVs, the JT coverage impermanent loss ledger, the time-weighted yield share
+ *      raw and effective NAVs, the JT impermanent loss ledger, the time-weighted yield share
  *      accumulators, the max yield shares, all four protocol fee percentages, the market state and fixed-term
  *      fields, the accrual and premium payment clocks, the YDM addresses, and the dust tolerances) so any
  *      reachable or hypothetical checkpoint can be pinned exactly
@@ -50,12 +50,12 @@ contract WaterfallSyncDriver is RoycoDayAccountant {
         $.maxJTYieldShareWAD = _seed.maxJTYieldShareWAD;
         $.twLTYieldShareAccruedWAD = _seed.twLTYieldShareAccruedWAD;
         $.maxLTYieldShareWAD = _seed.maxLTYieldShareWAD;
-        // Checkpointed NAVs and the JT coverage impermanent loss ledger
+        // Checkpointed NAVs and the JT impermanent loss ledger
         $.lastSTRawNAV = _seed.lastSTRawNAV;
         $.lastJTRawNAV = _seed.lastJTRawNAV;
         $.lastSTEffectiveNAV = _seed.lastSTEffectiveNAV;
         $.lastJTEffectiveNAV = _seed.lastJTEffectiveNAV;
-        $.lastJTCoverageImpermanentLoss = _seed.lastJTCoverageImpermanentLoss;
+        $.lastJTImpermanentLoss = _seed.lastJTImpermanentLoss;
         $.lastLTRawNAV = _seed.lastLTRawNAV;
         // Dust tolerances
         $.stNAVDustTolerance = _seed.stNAVDustTolerance;
@@ -73,7 +73,7 @@ contract WaterfallSyncDriver is RoycoDayAccountant {
      * @return state The post-sync accounting state the waterfall produces
      * @return initialMarketState The market state the sync transitions from
      * @return premiumsPaid Whether the JT risk and LT liquidity premiums were paid out of ST yield
-     * @return jtCoverageImpermanentLossErased The JT coverage impermanent loss the sync erased
+     * @return jtImpermanentLossErased The JT impermanent loss the sync erased
      */
     function runSync(
         uint256 _stRawNAV,
@@ -83,7 +83,7 @@ contract WaterfallSyncDriver is RoycoDayAccountant {
     )
         external
         view
-        returns (SyncedAccountingState memory state, MarketState initialMarketState, bool premiumsPaid, NAV_UNIT jtCoverageImpermanentLossErased)
+        returns (SyncedAccountingState memory state, MarketState initialMarketState, bool premiumsPaid, NAV_UNIT jtImpermanentLossErased)
     {
         return _previewSyncTrancheAccounting(toNAVUnits(_stRawNAV), toNAVUnits(_jtRawNAV), _twJTYieldShareAccruedWAD, _twLTYieldShareAccruedWAD);
     }

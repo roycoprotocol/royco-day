@@ -223,9 +223,10 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
      *         self-liquidation bonus, and the same-block execution pays exactly the previewed claims
      * @dev A covered -21% drawdown marks coverage utilization at ceil(102.7e18 x 0.2 / 2.7e18) = 7.608e18, past
      *      the 6.4667e18 liquidation threshold, which forces the market PERPETUAL with the bonus armed. The loss
-     *      is fully covered so 10e18 of the 100e18 senior shares claim a base NAV of exactly 10e18, and the paid
+     *      is fully covered so 10e18 of the 100e18 senior shares claim a base NAV of exactly 10e18, the sized
      *      bonus is min(configured 1% x 10e18, junior buffer 2.7e18, neutral cap 10e18 x 2.7 / 100) = 0.1e18,
-     *      so the previewed claim NAV must be exactly 10.1e18 and execution must match it on every leg
+     *      and the report is the value of the granted assets: floor(floor(0.1e18 / 0.79) x 0.79) = 0.1e18 - 1,
+     *      so the previewed claim NAV must be exactly 10.1e18 - 1 and execution must match it on every leg
      */
     function test_PreviewRedeem_LiquidationRegime_SelfLiquidationBonusParity() public {
         applySTPnL(-2100);
@@ -234,7 +235,7 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "a liquidation breach forces the market PERPETUAL so the redemption stays open");
 
         AssetClaims memory previewed = seniorTranche.previewRedeem(10e18);
-        assertEq(previewed.nav, toNAVUnits(uint256(10.1e18)), "the quote must carry the base 10e18 slice plus exactly the 0.1e18 bonus");
+        assertEq(previewed.nav, toNAVUnits(uint256(10.1e18 - 1)), "the quote must carry the base 10e18 slice plus the asset-quantized bonus");
 
         vm.prank(ST_PROVIDER);
         AssetClaims memory claims = seniorTranche.redeem(10e18, ST_PROVIDER, ST_PROVIDER);
@@ -523,7 +524,7 @@ contract Test_SimulationSeamPreviewsFixedTerm_Tranches is SimulationSeamPreviews
  *         appreciation states, and operation sizes: every preview equals its same-block execution exactly, and
  *         every preview leaves the full market state byte-identical
  * @dev The PnL band spans -5% to +100%. Appreciation runs sync-free so pending premium and fee mints commit
- *      inside the simulated frame. A covered drawdown beyond dust books JT coverage impermanent loss and the next
+ *      inside the simulated frame. A covered drawdown beyond dust books JT impermanent loss and the next
  *      sync enters FIXED_TERM regardless of utilization, so the drawdown arm first syncs into FIXED_TERM and then
  *      lets the two-week protection term lapse: every flow reopens and each preview must reconcile the
  *      FIXED_TERM-to-PERPETUAL transition (including the IL erasure) inside its own frame, exactly like exec
@@ -560,7 +561,7 @@ contract TestFuzz_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestB
 
         applySTPnL(pnlBps);
         if (pnlBps < 0) {
-            // A covered loss beyond dust always books JT coverage IL, so the sync must land in FIXED_TERM. Letting
+            // A covered loss beyond dust always books JT IL, so the sync must land in FIXED_TERM. Letting
             // the two-week term lapse reopens every flow and leaves the state transition itself pending, so every
             // preview and execution below must reconcile the FIXED_TERM-to-PERPETUAL flip in its own sync
             SyncedAccountingState memory ftState = _sync();

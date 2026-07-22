@@ -51,7 +51,7 @@ library RoycoTestMath {
      * @custom:field jtRawNAVLast - Junior raw NAV at the last committed checkpoint
      * @custom:field stEffectiveNAVLast - Senior effective NAV at the last committed checkpoint
      * @custom:field jtEffectiveNAVLast - Junior effective NAV at the last committed checkpoint
-     * @custom:field jtCoverageImpermanentLossLast - JT coverage impermanent loss carried from the last checkpoint
+     * @custom:field jtImpermanentLossLast - JT impermanent loss carried from the last checkpoint
      * @custom:field marketStateLast - Market state committed at the last checkpoint
      * @custom:field fixedTermEndTimestampLast - Fixed-term end timestamp committed at the last checkpoint (0 if none)
      * @custom:field stRawNAVDelta - Signed senior raw-NAV delta since the last checkpoint (the attribution input)
@@ -80,7 +80,7 @@ library RoycoTestMath {
         uint256 jtRawNAVLast;
         uint256 stEffectiveNAVLast;
         uint256 jtEffectiveNAVLast;
-        uint256 jtCoverageImpermanentLossLast;
+        uint256 jtImpermanentLossLast;
         MarketState marketStateLast;
         uint256 fixedTermEndTimestampLast;
         int256 stRawNAVDelta;
@@ -113,7 +113,7 @@ library RoycoTestMath {
      * @custom:field ltRawNAV - Post-sync LT raw NAV (committed pass-through of ltRawNAVNew)
      * @custom:field stEffectiveNAV - Post-sync senior effective NAV
      * @custom:field jtEffectiveNAV - Post-sync junior effective NAV
-     * @custom:field jtCoverageImpermanentLoss - Post-sync JT coverage impermanent loss
+     * @custom:field jtImpermanentLoss - Post-sync JT impermanent loss
      * @custom:field jtRiskPremium - JT risk premium paid out of ST gain on this sync (folded into jtEffectiveNAV, mirror-only observable)
      * @custom:field ltLiquidityPremium - LT liquidity premium paid out of ST gain on this sync
      * @custom:field stProtocolFee - Protocol fee taken on ST gain on this sync
@@ -124,7 +124,7 @@ library RoycoTestMath {
      * @custom:field marketState - Post-sync market state per the state-machine predicate
      * @custom:field fixedTermEndTimestamp - Post-sync fixed-term end timestamp (0 outside FIXED_TERM)
      * @custom:field premiumsPaid - Whether the premium dust gate cleared, driving the accumulator reset
-     * @custom:field ilErased - The JT coverage IL erased by a forced-PERPETUAL commit, the exact reset-event arg
+     * @custom:field ilErased - The JT IL erased by a forced-PERPETUAL commit, the exact reset-event arg
      */
     struct SyncOutputs {
         uint256 stRawNAV;
@@ -132,7 +132,7 @@ library RoycoTestMath {
         uint256 ltRawNAV;
         uint256 stEffectiveNAV;
         uint256 jtEffectiveNAV;
-        uint256 jtCoverageImpermanentLoss;
+        uint256 jtImpermanentLoss;
         uint256 jtRiskPremium;
         uint256 ltLiquidityPremium;
         uint256 stProtocolFee;
@@ -521,15 +521,19 @@ library RoycoTestMath {
 
         uint256 stEffectiveNAV = in_.stEffectiveNAVLast;
         uint256 jtEffectiveNAV = in_.jtEffectiveNAVLast;
-        uint256 il = in_.jtCoverageImpermanentLossLast;
+        uint256 il = in_.jtImpermanentLossLast;
         uint256 jtNetGain;
 
-        // JT leg first: losses are unfee'd, gains take the dust-gated jtProtocolFeeWAD fee (Floor)
+        // JT leg first: losses are unfee'd and book IL, gains take the dust-gated jtProtocolFeeWAD fee (Floor) and recover IL first
+        // IL is JT's drawdown from its high-water mark: JT losses and coverage deepen it, JT gains and ST recoveries repay it
         if (deltaJTEff < 0) {
-            jtEffectiveNAV -= uint256(-deltaJTEff);
+            uint256 jtLoss = uint256(-deltaJTEff);
+            jtEffectiveNAV -= jtLoss;
+            il += jtLoss;
         } else if (deltaJTEff > 0) {
             jtNetGain = uint256(deltaJTEff);
             if (jtNetGain > in_.effectiveDust) out.jtProtocolFee = Math.mulDiv(jtNetGain, in_.jtProtocolFeeWAD, WAD);
+            il -= Math.min(jtNetGain, il);
             jtEffectiveNAV += jtNetGain;
         }
 
@@ -616,7 +620,7 @@ library RoycoTestMath {
 
         out.stEffectiveNAV = stEffectiveNAV;
         out.jtEffectiveNAV = jtEffectiveNAV;
-        out.jtCoverageImpermanentLoss = il;
+        out.jtImpermanentLoss = il;
         out.liquidityUtilizationWAD = computeLiquidityUtilization(stEffectiveNAV, in_.minLiquidityWAD, in_.ltRawNAVNew);
     }
 
@@ -742,6 +746,34 @@ library RoycoTestMath {
         uint256 desiredBonusNAV = Math.mulDiv(in_.userClaimNAV, in_.bonusWAD, WAD);
         uint256 maxNeutralBonusNAV = _maxCoverageUtilizationNeutralBonus(in_);
         bonusNAV = Math.min(Math.min(desiredBonusNAV, in_.jtEffectiveNAV), maxNeutralBonusNAV);
+    }
+
+    /**
+     * @dev Mirrors src SelfLiquidationLogic.applySeniorTrancheSelfLiquidationBonus (the reported bonus NAV).
+     *      The sized bonus splits across JT's claims (senior assets first), floors into tranche units at each
+     *      leg's NAV-per-unit rate, and re-values: the report is the value of the assets actually granted.
+     *      Rounding: Floor on both conversion directions per leg. Favors: the market (never overstates).
+     * @param in_ The bonus input set
+     * @param stNAVPerUnitWAD The senior leg's NAV per tranche unit in WAD
+     * @param jtNAVPerUnitWAD The junior leg's NAV per tranche unit in WAD
+     * @return reportedBonusNAV The asset-quantized self-liquidation bonus in NAV units
+     */
+    function seniorTrancheSelfLiquidationBonusReported(
+        SeniorTrancheSelfLiquidationBonusInputs memory in_,
+        uint256 stNAVPerUnitWAD,
+        uint256 jtNAVPerUnitWAD
+    )
+        internal
+        pure
+        returns (uint256 reportedBonusNAV)
+    {
+        uint256 bonusNAV = seniorTrancheSelfLiquidationBonus(in_);
+        if (bonusNAV == 0) return 0;
+        uint256 bonusFromJTClaimOnSTRaw = Math.min(bonusNAV, _sat(in_.jtEffectiveNAV, in_.jtRawNAV));
+        uint256 bonusFromJTClaimOnJTRaw = bonusNAV - bonusFromJTClaimOnSTRaw;
+        uint256 stBonusAssets = Math.mulDiv(bonusFromJTClaimOnSTRaw, WAD, stNAVPerUnitWAD);
+        uint256 jtBonusAssets = Math.mulDiv(bonusFromJTClaimOnJTRaw, WAD, jtNAVPerUnitWAD);
+        reportedBonusNAV = Math.mulDiv(stBonusAssets, stNAVPerUnitWAD, WAD) + Math.mulDiv(jtBonusAssets, jtNAVPerUnitWAD, WAD);
     }
 
     /**

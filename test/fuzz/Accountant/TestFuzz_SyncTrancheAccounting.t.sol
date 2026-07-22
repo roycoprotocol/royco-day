@@ -16,14 +16,14 @@ import { AccountantFuzzTestBase } from "../../utils/AccountantFuzzTestBase.sol";
  *         independent fee-cap and carve-out-fit bounds on all three protocol fees, and the isolation of
  *         senior/junior accounting from the liquidity tranche's mark
  * @dev Every run drives a reachable market: a symmetric deposit-seeded checkpoint, a preparatory sync
- *      that can book coverage impermanent loss or enter a fixed term, then the measured sync from there
+ *      that can book impermanent loss or enter a fixed term, then the measured sync from there
  */
 contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
     /**
      * Scenario: a market is seeded through real deposits, run through one preparatory PnL sync (which can
-     * absorb a senior loss into the junior buffer, book coverage IL, or flip the market into a fixed term),
+     * absorb a senior loss into the junior buffer, book IL, or flip the market into a fixed term),
      * then synced again after an arbitrary elapsed window with fresh senior/junior marks and a fresh
-     * liquidity mark. The measured sync's complete output — raw and effective NAVs, coverage IL, liquidity
+     * liquidity mark. The measured sync's complete output — raw and effective NAVs, IL, liquidity
      * premium, all three protocol fees, coverage utilization, market state, and term end — must equal the
      * independently derived expectation field for field, and the two-term conservation identity must hold
      * at wei precision on production's own outputs. Junior-first loss priority and the premium bound are
@@ -65,7 +65,7 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
         _seedSymmetric(_stRaw0, _jtRaw0, _ltRaw0);
 
         // Preparatory sync: move both raws so the measured sync starts from an asymmetric checkpoint that can
-        // carry coverage IL, cross-tranche claims, or a fixed-term state, not just the pristine symmetric seed
+        // carry IL, cross-tranche claims, or a fixed-term state, not just the pristine symmetric seed
         vm.warp(block.timestamp + _warp1);
         uint256 stRaw1 = _afterMove(_stRaw0, _stBps1);
         uint256 jtRaw1 = _afterMove(_jtRaw0, _jtBps1);
@@ -88,7 +88,7 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
         assertEq(toUint256(st.jtRawNAV), out.jtRawNAV, "sync: junior raw NAV");
         assertEq(toUint256(st.stEffectiveNAV), out.stEffectiveNAV, "sync: senior effective NAV");
         assertEq(toUint256(st.jtEffectiveNAV), out.jtEffectiveNAV, "sync: junior effective NAV");
-        assertEq(toUint256(st.jtCoverageImpermanentLoss), out.jtCoverageImpermanentLoss, "sync: junior coverage impermanent loss");
+        assertEq(toUint256(st.jtImpermanentLoss), out.jtImpermanentLoss, "sync: junior impermanent loss");
         assertEq(toUint256(st.ltLiquidityPremium), out.ltLiquidityPremium, "sync: liquidity premium");
         assertEq(toUint256(st.stProtocolFee), out.stProtocolFee, "sync: senior protocol fee");
         assertEq(toUint256(st.jtProtocolFee), out.jtProtocolFee, "sync: junior protocol fee");
@@ -141,7 +141,7 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
         IRoycoDayAccountant.RoycoDayAccountantState memory sAfter = accountant.getState();
         assertEq(toUint256(sAfter.lastSTEffectiveNAV), out.stEffectiveNAV, "checkpoint: senior effective NAV");
         assertEq(toUint256(sAfter.lastJTEffectiveNAV), out.jtEffectiveNAV, "checkpoint: junior effective NAV");
-        assertEq(toUint256(sAfter.lastJTCoverageImpermanentLoss), out.jtCoverageImpermanentLoss, "checkpoint: junior coverage impermanent loss");
+        assertEq(toUint256(sAfter.lastJTImpermanentLoss), out.jtImpermanentLoss, "checkpoint: junior impermanent loss");
         assertEq(toUint256(sAfter.lastLTRawNAV), _ltRaw2, "checkpoint: committed liquidity mark");
         assertEq(uint8(sAfter.lastMarketState), uint8(out.marketState), "checkpoint: market state");
         assertEq(uint256(sAfter.fixedTermEndTimestamp), out.fixedTermEndTimestamp, "checkpoint: fixed-term end");
@@ -152,8 +152,9 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
     /**
      * @dev Recomputes the senior effective delta from the pre-sync checkpoint (claims decomposition plus
      *      attribution, without running the mirror's sync pipeline) and asserts the loss and gain legs:
-     *      on a senior loss the junior buffer absorbs first and every covered wei books as impermanent loss,
-     *      on a senior gain the two premiums fit inside the gain left after impermanent-loss recovery
+     *      the junior leg first books its own loss as impermanent (or recovers with its own gain), then on a
+     *      senior loss the junior buffer absorbs first and every covered wei deepens the impermanent loss,
+     *      and on a senior gain the two premiums fit inside the gain left after impermanent-loss recovery
      */
     function _assertLossPriorityAndPremiumBound(
         RoycoTestMath.SyncInputs memory in_,
@@ -172,6 +173,10 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
             (in_.stRawNAVLast == 0 ? (in_.stEffectiveNAVLast > 0 ? in_.stRawNAVDelta : int256(0)) : RoycoTestMath.attributeDeltaToClaimOnRawNAV(in_.stRawNAVDelta, stClaimOnSTRaw, in_.stRawNAVLast))
                 + RoycoTestMath.attributeDeltaToClaimOnRawNAV(in_.jtRawNAVDelta, stClaimOnJTRaw, in_.jtRawNAVLast);
         int256 deltaJTEff = (in_.stRawNAVDelta + in_.jtRawNAVDelta) - deltaSTEff;
+        // The junior leg adjusts the impermanent loss before the senior leg: a junior loss deepens it, a junior gain recovers it
+        uint256 ilAfterJTLeg = deltaJTEff < 0
+            ? in_.jtImpermanentLossLast + uint256(-deltaJTEff)
+            : in_.jtImpermanentLossLast - Math.min(uint256(deltaJTEff), in_.jtImpermanentLossLast);
 
         if (deltaSTEff < 0) {
             // Loss priority: the junior buffer (after its own PnL) covers first, senior books only the residual
@@ -182,18 +187,16 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
             assertEq(toUint256(st.jtEffectiveNAV), jtEffAfterOwnPnl - coverageApplied, "loss priority: the junior buffer absorbs the covered loss");
             // Every covered wei becomes a senior liability to the junior tranche, unless a forced wind-down erased it
             if (out.ilErased == 0) {
-                assertEq(
-                    toUint256(st.jtCoverageImpermanentLoss), in_.jtCoverageImpermanentLossLast + coverageApplied, "loss priority: coverage applied books as impermanent loss"
-                );
+                assertEq(toUint256(st.jtImpermanentLoss), ilAfterJTLeg + coverageApplied, "loss priority: coverage applied books as impermanent loss");
             } else {
-                assertEq(toUint256(st.jtCoverageImpermanentLoss), 0, "loss priority: a forced wind-down erases the impermanent loss");
-                assertEq(out.ilErased, in_.jtCoverageImpermanentLossLast + coverageApplied, "loss priority: exactly the pre-erasure balance is erased");
+                assertEq(toUint256(st.jtImpermanentLoss), 0, "loss priority: a forced wind-down erases the impermanent loss");
+                assertEq(out.ilErased, ilAfterJTLeg + coverageApplied, "loss priority: exactly the pre-erasure balance is erased");
             }
             assertEq(toUint256(st.ltLiquidityPremium), 0, "loss priority: no liquidity premium on a senior loss");
         } else if (deltaSTEff > 0) {
             // Premium bound: after recovering the junior tranche's impermanent loss (the first claim on senior
             // appreciation), the risk and liquidity premiums together can never exceed the residual gain
-            uint256 recovery = Math.min(uint256(deltaSTEff), in_.jtCoverageImpermanentLossLast);
+            uint256 recovery = Math.min(uint256(deltaSTEff), ilAfterJTLeg);
             uint256 residualGain = uint256(deltaSTEff) - recovery;
             assertLe(out.jtRiskPremium + out.ltLiquidityPremium, residualGain, "premium bound: both premiums fit inside the residual senior gain");
         }
@@ -251,7 +254,7 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
         assertEq(toUint256(stA.stEffectiveNAV), toUint256(stB.stEffectiveNAV), "isolation: senior effective NAV moved with the liquidity mark");
         assertEq(toUint256(stA.jtEffectiveNAV), toUint256(stB.jtEffectiveNAV), "isolation: junior effective NAV moved with the liquidity mark");
         assertEq(
-            toUint256(stA.jtCoverageImpermanentLoss), toUint256(stB.jtCoverageImpermanentLoss), "isolation: impermanent loss moved with the liquidity mark"
+            toUint256(stA.jtImpermanentLoss), toUint256(stB.jtImpermanentLoss), "isolation: impermanent loss moved with the liquidity mark"
         );
         assertEq(stA.coverageUtilizationWAD, stB.coverageUtilizationWAD, "isolation: coverage utilization moved with the liquidity mark");
         assertEq(uint8(stA.marketState), uint8(stB.marketState), "isolation: market state moved with the liquidity mark");

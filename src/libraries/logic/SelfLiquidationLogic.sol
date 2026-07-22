@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { WAD, ZERO_NAV_UNITS } from "../Constants.sol";
 import { AssetClaims, SyncedAccountingState } from "../Types.sol";
-import { Math, NAV_UNIT, RoycoUnitsMath } from "../Units.sol";
+import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT } from "../Units.sol";
 import { TrancheClaimsLogic } from "./TrancheClaimsLogic.sol";
 
 /**
@@ -57,8 +57,13 @@ library SelfLiquidationLogic {
         NAV_UNIT bonusFromJTClaimOnJTRawNAV = (stSelfLiquidationBonusNAV - bonusFromJTClaimOnSTRawNAV);
 
         // Apply the derived bonus to the user's asset claims
-        stUserClaimsWithBonus.stAssets = _stUserClaims.stAssets + IRoycoDayKernel(address(this)).stConvertNAVUnitsToTrancheUnits(bonusFromJTClaimOnSTRawNAV);
-        stUserClaimsWithBonus.jtAssets = _stUserClaims.jtAssets + IRoycoDayKernel(address(this)).jtConvertNAVUnitsToTrancheUnits(bonusFromJTClaimOnJTRawNAV);
+        TRANCHE_UNIT stBonusAssets = IRoycoDayKernel(address(this)).stConvertNAVUnitsToTrancheUnits(bonusFromJTClaimOnSTRawNAV);
+        TRANCHE_UNIT jtBonusAssets = IRoycoDayKernel(address(this)).jtConvertNAVUnitsToTrancheUnits(bonusFromJTClaimOnJTRawNAV);
+        // Report the bonus at the value of the assets actually granted
+        stSelfLiquidationBonusNAV = IRoycoDayKernel(address(this)).stConvertTrancheUnitsToNAVUnits(stBonusAssets)
+            + IRoycoDayKernel(address(this)).jtConvertTrancheUnitsToNAVUnits(jtBonusAssets);
+        stUserClaimsWithBonus.stAssets = _stUserClaims.stAssets + stBonusAssets;
+        stUserClaimsWithBonus.jtAssets = _stUserClaims.jtAssets + jtBonusAssets;
         stUserClaimsWithBonus.nav = _stUserClaims.nav + stSelfLiquidationBonusNAV;
     }
 

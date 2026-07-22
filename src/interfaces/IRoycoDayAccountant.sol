@@ -77,8 +77,7 @@ interface IRoycoDayAccountant {
      * @custom:field lastJTRawNAV - The last recorded pure NAV (excluding any coverage given and yield shared) of the junior tranche
      * @custom:field lastSTEffectiveNAV - The last recorded effective NAV (including any prior applied coverage, ST yield distribution, and uncovered losses) of the senior tranche
      * @custom:field lastJTEffectiveNAV - The last recorded effective NAV (including any prior provided coverage, JT yield, ST yield distribution, and JT losses) of the junior tranche
-     * @custom:field lastJTCoverageImpermanentLoss - The impermanent loss that JT has suffered after providing coverage for ST losses
-     *                                           This represents the claim on capital that the junior tranche has on future ST recoveries
+     * @custom:field lastJTImpermanentLoss - The junior tranche's impermanent loss: JT's recoverable drawdown, deepened by JT losses and provided coverage, repaid by JT gains and JT's first claim on ST appreciation
      * @custom:field lastLTRawNAV - The last recorded raw NAV of the liquidity tranche: the mark-to-market value of its invested assets
      * @custom:field stNAVDustTolerance - The worst case dust tolerance for stRawNAV from underlying NAV quoting/rounding
      * @custom:field jtNAVDustTolerance - The worst case dust tolerance for jtRawNAV from underlying NAV quoting/rounding
@@ -114,7 +113,7 @@ interface IRoycoDayAccountant {
         NAV_UNIT lastJTRawNAV;
         NAV_UNIT lastSTEffectiveNAV;
         NAV_UNIT lastJTEffectiveNAV;
-        NAV_UNIT lastJTCoverageImpermanentLoss;
+        NAV_UNIT lastJTImpermanentLoss;
         NAV_UNIT lastLTRawNAV;
         NAV_UNIT stNAVDustTolerance;
         NAV_UNIT jtNAVDustTolerance;
@@ -179,8 +178,8 @@ interface IRoycoDayAccountant {
     event JuniorTrancheDustToleranceUpdated(NAV_UNIT jtNAVDustTolerance);
 
     /// @notice Emitted when JT's coverage loss is realized and reset to zero when transitioning from a fixed term state to a perpetual state
-    /// @param jtCoverageImpermanentLossErased The amount of JT coverage loss erased when transitioning from a fixed term state to a perpetual state
-    event JuniorTrancheCoverageImpermanentLossReset(NAV_UNIT jtCoverageImpermanentLossErased);
+    /// @param jtImpermanentLossErased The amount of JT impermanent loss erased, effectively marking the JT losses as realized
+    event JuniorTrancheImpermanentLossReset(NAV_UNIT jtImpermanentLossErased);
 
     /// @notice Emitted when a fixed term regime is ended by this market
     event FixedTermEnded();
@@ -242,7 +241,7 @@ interface IRoycoDayAccountant {
     error LIQUIDITY_REQUIREMENT_VIOLATED();
 
     /// @notice Retrieves the address of the kernel tied to this accountant
-    /// @return kernel The kernel that this accountant maintains mark-to-market NAV, JT coverage impermanent loss, and fee accounting for
+    /// @return kernel The kernel that this accountant maintains mark-to-market NAV, JT impermanent loss, and fee accounting for
     function KERNEL() external view returns (address kernel);
 
     /**

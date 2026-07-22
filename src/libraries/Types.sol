@@ -13,13 +13,13 @@ import { NAV_UNIT, TRANCHE_UNIT } from "./Units.sol";
  *      - Premiums and protocol fees accrue on ST yield, and adaptive curve YDMs adapt to this market's coverage and liquidity utilization
  * @custom:state FIXED_TERM
  *      Temporary recovery state entered when JT covers an ST drawdown while coverage stays within the liquidation threshold
- *      - Entered when a non-dust JT coverage impermanent loss is first incurred
+ *      - Entered when a non-dust JT impermanent loss is first incurred
  *      - ST deposits and redemptions blocked: stops ST withdrawing coverage from existing JT on arbitrary volatility
  *      - JT deposits and redemptions blocked: stops new JT diluting existing JT on arbitrary volatility
  *      - LT redemptions blocked: keeps the LT market making the ST when secondary liquidity is most valuable
  *      - No liquidity premium is paid and no protocol fees are taken, since there is no yield to distribute during recovery
  *      - Adaptive curve YDMs do not adapt, since utilization moves on underlying PNL rather than market forces during recovery
- *      - Transitions back to PERPETUAL when the JT coverage impermanent loss clears or the term elapses, and is forced back on a liquidation breach or an uncollateralized market, clearing the JT coverage impermanent loss
+ *      - Transitions back to PERPETUAL when the JT impermanent loss clears or the term elapses, and is forced back on a liquidation breach or an uncollateralized market, clearing the JT impermanent loss
  */
 enum MarketState {
     PERPETUAL,
@@ -55,8 +55,7 @@ struct AssetClaims {
  * @custom:field ltRawNAV - The liquidity tranche's current raw NAV: the pure value of its invested assets
  * @custom:field stEffectiveNAV - Senior tranche effective NAV: includes applied coverage, its share of ST yield, and uncovered losses
  * @custom:field jtEffectiveNAV - Junior tranche effective NAV: includes provided coverage, JT yield, its share of ST yield, and JT losses
- * @custom:field jtCoverageImpermanentLoss - The impermanent loss that JT has suffered after providing coverage for ST losses
- *                                   This represents the claim on capital that the junior tranche has on future ST recoveries
+ * @custom:field jtImpermanentLoss - The junior tranche's impermanent loss: JT's recoverable drawdown, deepened by JT losses and provided coverage, repaid by JT gains and JT's first claim on ST appreciation
  * @custom:field ltLiquidityPremium - The liquidity premium accrued to the liquidity tranche on this sync: LT's share of senior yield, minted as senior tranche shares to LT (coverage-neutral)
  * @custom:field stProtocolFee - Protocol fee taken on ST yield on this sync
  * @custom:field jtProtocolFee - Protocol fee taken on JT yield on this sync
@@ -71,13 +70,13 @@ struct AssetClaims {
 struct SyncedAccountingState {
     // The market's current operating state (PERPETUAL or FIXED_TERM)
     MarketState marketState;
-    // The market's marked-to-market NAVs, JT coverage impermanent loss, LT liquidity premium, and fees
+    // The market's marked-to-market NAVs, JT impermanent loss, LT liquidity premium, and fees
     NAV_UNIT stRawNAV;
     NAV_UNIT jtRawNAV;
     NAV_UNIT ltRawNAV;
     NAV_UNIT stEffectiveNAV;
     NAV_UNIT jtEffectiveNAV;
-    NAV_UNIT jtCoverageImpermanentLoss;
+    NAV_UNIT jtImpermanentLoss;
     NAV_UNIT ltLiquidityPremium;
     NAV_UNIT stProtocolFee;
     NAV_UNIT jtProtocolFee;

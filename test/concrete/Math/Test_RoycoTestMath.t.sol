@@ -528,7 +528,7 @@ contract Test_RoycoTestMath is Test {
         in_.jtRawNAVLast = jtRawNAVLast;
         in_.stEffectiveNAVLast = stEffectiveNAVLast;
         in_.jtEffectiveNAVLast = jtEffectiveNAVLast;
-        in_.jtCoverageImpermanentLossLast = il;
+        in_.jtImpermanentLossLast = il;
         in_.marketStateLast = stateLast;
         in_.fixedTermEndTimestampLast = endLast;
         in_.stRawNAVDelta = int256(stRawNew) - int256(stRawNAVLast);
@@ -560,7 +560,7 @@ contract Test_RoycoTestMath is Test {
         assertEq(actual.ltRawNAV, expected.ltRawNAV, "ltRawNAV");
         assertEq(actual.stEffectiveNAV, expected.stEffectiveNAV, "stEffectiveNAV");
         assertEq(actual.jtEffectiveNAV, expected.jtEffectiveNAV, "jtEffectiveNAV");
-        assertEq(actual.jtCoverageImpermanentLoss, expected.jtCoverageImpermanentLoss, "jtCoverageImpermanentLoss");
+        assertEq(actual.jtImpermanentLoss, expected.jtImpermanentLoss, "jtImpermanentLoss");
         assertEq(actual.jtRiskPremium, expected.jtRiskPremium, "jtRiskPremium");
         assertEq(actual.ltLiquidityPremium, expected.ltLiquidityPremium, "ltLiquidityPremium");
         assertEq(actual.stProtocolFee, expected.stProtocolFee, "stProtocolFee");
@@ -600,7 +600,7 @@ contract Test_RoycoTestMath is Test {
         expected.ltRawNAV = 100e18;
         expected.stEffectiveNAV = 1045e18;
         expected.jtEffectiveNAV = 225e18;
-        expected.jtCoverageImpermanentLoss = 0;
+        expected.jtImpermanentLoss = 0;
         expected.jtRiskPremium = 5e18;
         expected.ltLiquidityPremium = 2.5e18;
         expected.stProtocolFee = 4.25e18;
@@ -635,7 +635,7 @@ contract Test_RoycoTestMath is Test {
         expected.ltRawNAV = 100e18;
         expected.stEffectiveNAV = 1000e18;
         expected.jtEffectiveNAV = 170e18;
-        expected.jtCoverageImpermanentLoss = 50e18;
+        expected.jtImpermanentLoss = 50e18;
         expected.coverageUtilizationWAD = 688_235_294_117_647_059;
         expected.liquidityUtilizationWAD = 500_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.FIXED_TERM;
@@ -682,7 +682,7 @@ contract Test_RoycoTestMath is Test {
         expected.ltRawNAV = 100e18;
         expected.stEffectiveNAV = 900e18;
         expected.jtEffectiveNAV = 0;
-        expected.jtCoverageImpermanentLoss = 0;
+        expected.jtImpermanentLoss = 0;
         expected.coverageUtilizationWAD = type(uint256).max;
         expected.liquidityUtilizationWAD = 450_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
@@ -744,12 +744,13 @@ contract Test_RoycoTestMath is Test {
      * Checkpoint: stRawNAV 1000e18−1, jtRawNAV 100e18, stEffectiveNAV 1000e18, jtEffectiveNAV 100e18−1 (1-wei cross-claim:
      * stClaimOnJT = 1), IL 0, dust 0, FIXED_TERM, end T0+D. Sync (1050e18, 80e18):
      *   dST = +(50e18+1) attributes 1:1 (stClaimOnST = stRawNAVLast), the JT-delta attribution to ST floors to 0
-     *   (⌊20e18·1/100e18⌋ = 0) ⇒ deltaSTEff = 50e18+1, deltaJTEff = −20e18 ⇒ jtEffectiveNAV = 80e18−1.
-     *   stGain 50e18+1: jtPrem = ⌊(50e18+1)·0.1⌋ = 5e18, ltPrem = ⌊(50e18+1)·0.05⌋ = 2.5e18,
-     *   jtFee = 0.5e18, ltFee = 0.25e18, residual 42.5e18+1 ⇒ stFee = ⌊(42.5e18+1)·0.1⌋ = 4.25e18,
-     *   stEffectiveNAV = 1000e18 + (42.5e18+1) + 2.5e18 = 1045e18+1, jtEffectiveNAV = (80e18−1) + 5e18 = 85e18−1.
-     *   Conservation 1050e18 + 80e18 = (1045e18+1) + (85e18−1). IL 0 ⇒ PERPETUAL exit (premiums imply PERPETUAL).
-     *   coverageUtilizationWAD = ⌈(1050e18 + 80e18)·0.1e18/(85e18−1)⌉ = 1329411764705882353. liquidityUtilizationWAD = ⌈(1045e18+1)/2000⌉ = 522500000000000001.
+     *   (⌊20e18·1/100e18⌋ = 0) ⇒ deltaSTEff = 50e18+1, deltaJTEff = −20e18 ⇒ jtEffectiveNAV = 80e18−1, IL = 20e18.
+     *   stGain 50e18+1 recovers the full IL: jtEffectiveNAV = 100e18−1, IL 0, stGain = 30e18+1.
+     *   jtPrem = ⌊(30e18+1)·0.1⌋ = 3e18, ltPrem = ⌊(30e18+1)·0.05⌋ = 1.5e18,
+     *   jtFee = 0.3e18, ltFee = 0.15e18, residual 25.5e18+1 ⇒ stFee = ⌊(25.5e18+1)·0.1⌋ = 2.55e18,
+     *   stEffectiveNAV = 1000e18 + (25.5e18+1) + 1.5e18 = 1027e18+1, jtEffectiveNAV = (100e18−1) + 3e18 = 103e18−1.
+     *   Conservation 1050e18 + 80e18 = (1027e18+1) + (103e18−1). IL 0 ⇒ PERPETUAL exit (premiums imply PERPETUAL).
+     *   coverageUtilizationWAD = ⌈(1050e18 + 80e18)·0.1e18/(103e18−1)⌉ = 1097087378640776700. liquidityUtilizationWAD = ⌈(1027e18+1)/2000⌉ = 513500000000000001.
      */
     function test_SyncTrancheAccounting_GainPlusOneWeiFloors_ExitsFixedTerm() public pure {
         RoycoTestMath.SyncInputs memory in_ =
@@ -758,15 +759,15 @@ contract Test_RoycoTestMath is Test {
         expected.stRawNAV = 1050e18;
         expected.jtRawNAV = 80e18;
         expected.ltRawNAV = 100e18;
-        expected.stEffectiveNAV = 1045e18 + 1;
-        expected.jtEffectiveNAV = 85e18 - 1;
-        expected.jtRiskPremium = 5e18;
-        expected.ltLiquidityPremium = 2.5e18;
-        expected.stProtocolFee = 4.25e18;
-        expected.jtProtocolFee = 0.5e18;
-        expected.ltProtocolFee = 0.25e18;
-        expected.coverageUtilizationWAD = 1_329_411_764_705_882_353;
-        expected.liquidityUtilizationWAD = 522_500_000_000_000_001;
+        expected.stEffectiveNAV = 1027e18 + 1;
+        expected.jtEffectiveNAV = 103e18 - 1;
+        expected.jtRiskPremium = 3e18;
+        expected.ltLiquidityPremium = 1.5e18;
+        expected.stProtocolFee = 2.55e18;
+        expected.jtProtocolFee = 0.3e18;
+        expected.ltProtocolFee = 0.15e18;
+        expected.coverageUtilizationWAD = 1_097_087_378_640_776_700;
+        expected.liquidityUtilizationWAD = 513_500_000_000_000_001;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
         expected.premiumsPaid = true;
         _assertSyncOutputs(RoycoTestMath.syncTrancheAccounting(in_), expected);
@@ -777,13 +778,13 @@ contract Test_RoycoTestMath is Test {
      * offsets, pinning every floor in the premium chain at once.
      * Checkpoint: 1000e18/200e18/(1000e18+5)/(200e18−5), IL 5, effectiveDust 7, PERPETUAL. Sync (1050e18, 180e18):
      *   Attribution: stClaimOnJT = 5 floors out of the JT delta (⌊20e18·5/200e18⌋ = 0) ⇒ deltaSTEff = +50e18,
-     *   deltaJTEff = −20e18 ⇒ jtEffectiveNAV = 180e18−5.
-     *   IL recovery: rec = min(50e18, 5) = 5 ⇒ IL 0, jtEffectiveNAV 180e18, stGain = 50e18−5.
-     *   Premium block: premiumsPaid (> 7). jtPrem = ⌊(50e18−5)·0.1⌋ = 5e18−1, ltPrem = ⌊(50e18−5)·0.05⌋ = 2.5e18−1,
-     *   jtFee = ⌊(5e18−1)·0.1⌋ = 0.5e18−1, ltFee = 0.25e18−1, residual (50e18−5)−(5e18−1)−(2.5e18−1) = 42.5e18−3,
-     *   stFee = ⌊(42.5e18−3)·0.1⌋ = 4.25e18−1, stEffectiveNAV = (1000e18+5) + (42.5e18−3) + (2.5e18−1) = 1045e18+1,
-     *   jtEffectiveNAV = 180e18 + (5e18−1) = 185e18−1. Conservation 1050+180 = (1045e18+1)+(185e18−1). IL 0 ⇒ PERPETUAL.
-     *   coverageUtilizationWAD = ⌈(1050e18 + 180e18)·0.1e18/(185e18−1)⌉ = 664864864864864865. liquidityUtilizationWAD = ⌈(1045e18+1)/2000⌉ = 522500000000000001.
+     *   deltaJTEff = −20e18 ⇒ jtEffectiveNAV = 180e18−5, IL = 5 + 20e18.
+     *   IL recovery: rec = min(50e18, 20e18+5) = 20e18+5 ⇒ IL 0, jtEffectiveNAV 200e18, stGain = 30e18−5.
+     *   Premium block: premiumsPaid (> 7). jtPrem = ⌊(30e18−5)·0.1⌋ = 3e18−1, ltPrem = ⌊(30e18−5)·0.05⌋ = 1.5e18−1,
+     *   jtFee = ⌊(3e18−1)·0.1⌋ = 0.3e18−1, ltFee = 0.15e18−1, residual (30e18−5)−(3e18−1)−(1.5e18−1) = 25.5e18−3,
+     *   stFee = ⌊(25.5e18−3)·0.1⌋ = 2.55e18−1, stEffectiveNAV = (1000e18+5) + (25.5e18−3) + (1.5e18−1) = 1027e18+1,
+     *   jtEffectiveNAV = 200e18 + (3e18−1) = 203e18−1. Conservation 1050+180 = (1027e18+1)+(203e18−1). IL 0 ⇒ PERPETUAL.
+     *   coverageUtilizationWAD = ⌈(1050e18 + 180e18)·0.1e18/(203e18−1)⌉ = 605911330049261084. liquidityUtilizationWAD = ⌈(1027e18+1)/2000⌉ = 513500000000000001.
      */
     function test_SyncTrancheAccounting_DustIL_RecoveryThenAwkwardPremiumFloors() public pure {
         RoycoTestMath.SyncInputs memory in_ =
@@ -792,15 +793,15 @@ contract Test_RoycoTestMath is Test {
         expected.stRawNAV = 1050e18;
         expected.jtRawNAV = 180e18;
         expected.ltRawNAV = 100e18;
-        expected.stEffectiveNAV = 1045e18 + 1;
-        expected.jtEffectiveNAV = 185e18 - 1;
-        expected.jtRiskPremium = 5e18 - 1;
-        expected.ltLiquidityPremium = 2.5e18 - 1;
-        expected.stProtocolFee = 4.25e18 - 1;
-        expected.jtProtocolFee = 0.5e18 - 1;
-        expected.ltProtocolFee = 0.25e18 - 1;
-        expected.coverageUtilizationWAD = 664_864_864_864_864_865;
-        expected.liquidityUtilizationWAD = 522_500_000_000_000_001;
+        expected.stEffectiveNAV = 1027e18 + 1;
+        expected.jtEffectiveNAV = 203e18 - 1;
+        expected.jtRiskPremium = 3e18 - 1;
+        expected.ltLiquidityPremium = 1.5e18 - 1;
+        expected.stProtocolFee = 2.55e18 - 1;
+        expected.jtProtocolFee = 0.3e18 - 1;
+        expected.ltProtocolFee = 0.15e18 - 1;
+        expected.coverageUtilizationWAD = 605_911_330_049_261_084;
+        expected.liquidityUtilizationWAD = 513_500_000_000_000_001;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
         expected.premiumsPaid = true;
         _assertSyncOutputs(RoycoTestMath.syncTrancheAccounting(in_), expected);
@@ -823,7 +824,7 @@ contract Test_RoycoTestMath is Test {
         expected.ltRawNAV = 100e18;
         expected.stEffectiveNAV = 1000e18;
         expected.jtEffectiveNAV = 200e18 - 5;
-        expected.jtCoverageImpermanentLoss = 5;
+        expected.jtImpermanentLoss = 5;
         expected.coverageUtilizationWAD = 600_000_000_000_000_001;
         expected.liquidityUtilizationWAD = 500_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.FIXED_TERM;
@@ -832,16 +833,15 @@ contract Test_RoycoTestMath is Test {
     }
 
     /**
-     * The sticky FIXED_TERM branch zeroes a LIVE JT fee: a JT gain books its provisional fee, but the commit
-     * lands in the dust-IL sticky state, which zeroes fees like any FIXED_TERM commit. The gain NAV itself is
-     * kept, only the fee is dropped.
+     * A JT gain recovers the dust-sized IL to exactly zero, exiting the term: the PERPETUAL branch does not
+     * zero fees, so the provisional JT fee survives alongside the organic recovery.
      * Checkpoint: stRawNAV 1000e18−5, jtRawNAV 200e18, stEffectiveNAV 1000e18, jtEffectiveNAV 200e18−5, IL 5, dust 7, FIXED_TERM,
      * end T0+D. Sync (1000e18−5, 220e18): the JT-delta attribution to ST floors to 0 (⌊20e18·5/200e18⌋ = 0)
-     * so deltaJTEff = +20e18 > dust 7 ⇒ provisional jtFee 2e18, jtEffectiveNAV = 220e18−5. No ST move ⇒ IL stays 5 ⇒
-     * sticky FIXED_TERM zeroes the fee.
+     * so deltaJTEff = +20e18 > dust 7 ⇒ jtFee 2e18, IL = 5 − min(20e18, 5) = 0, jtEffectiveNAV = 220e18−5.
+     * IL 0 ⇒ PERPETUAL exit keeping the fee, end deleted.
      * coverageUtilizationWAD = ⌈(1220e18−5)·0.1e18/(220e18−5)⌉ = 554545454545454546.
      */
-    function test_SyncTrancheAccounting_StickyFixedTerm_ZeroesLiveJtFee() public pure {
+    function test_SyncTrancheAccounting_JtGainRecoversDustIL_ExitsFixedTermKeepingFee() public pure {
         RoycoTestMath.SyncInputs memory in_ =
             _syncInputs(1000e18 - 5, 200e18, 1000e18, 200e18 - 5, 5, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 7, 1000e18 - 5, 220e18);
         RoycoTestMath.SyncOutputs memory expected;
@@ -850,12 +850,12 @@ contract Test_RoycoTestMath is Test {
         expected.ltRawNAV = 100e18;
         expected.stEffectiveNAV = 1000e18;
         expected.jtEffectiveNAV = 220e18 - 5;
-        expected.jtCoverageImpermanentLoss = 5;
-        expected.jtProtocolFee = 0;
+        expected.jtImpermanentLoss = 0;
+        expected.jtProtocolFee = 2e18;
         expected.coverageUtilizationWAD = 554_545_454_545_454_546;
         expected.liquidityUtilizationWAD = 500_000_000_000_000_000;
-        expected.marketState = RoycoTestMath.MarketState.FIXED_TERM;
-        expected.fixedTermEndTimestamp = T0 + DURATION;
+        expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
+        expected.fixedTermEndTimestamp = 0;
         _assertSyncOutputs(RoycoTestMath.syncTrancheAccounting(in_), expected);
     }
 
@@ -876,7 +876,7 @@ contract Test_RoycoTestMath is Test {
         expected.ltRawNAV = 100e18;
         expected.stEffectiveNAV = 1000e18 + 5;
         expected.jtEffectiveNAV = 200e18 - 5;
-        expected.jtCoverageImpermanentLoss = 5;
+        expected.jtImpermanentLoss = 5;
         expected.coverageUtilizationWAD = 600_000_000_000_000_001;
         expected.liquidityUtilizationWAD = 500_000_000_000_000_001;
         expected.marketState = RoycoTestMath.MarketState.FIXED_TERM;
@@ -886,13 +886,13 @@ contract Test_RoycoTestMath is Test {
 
     /**
      * Cross-claim state: after prior coverage, ST holds a claim on JT raw, so a JT-only loss bleeds into ST
-     * through that claim and is immediately re-covered from the remaining JT buffer — the IL grows by exactly
-     * the re-covered amount while stEffectiveNAV never moves.
+     * through that claim and is immediately re-covered from the remaining JT buffer — the IL grows by JT's
+     * full drawdown, its own loss share plus the re-covered amount, while stEffectiveNAV never moves.
      * Checkpoint: 900e18/300e18/1000e18/200e18, IL 100e18, dust 0, FIXED_TERM, end T0+D.
      * Sync (900e18, 280e18) with k = ⌊20e18·100e18/300e18⌋ = 6666666666666666666:
      *   deltaSTEff = −k, deltaJTEff = −20e18 + k = −13333333333333333334.
-     *   JT leg: jtEffectiveNAV = 200e18 − 13333333333333333334 = 186666666666666666666.
-     *   ST loss leg: coverage = k ⇒ jtEffectiveNAV = 180e18 exact, IL = 100e18 + k = 106666666666666666666, stEffectiveNAV unchanged.
+     *   JT leg: jtEffectiveNAV = 200e18 − 13333333333333333334 = 186666666666666666666, IL = 113333333333333333334.
+     *   ST loss leg: coverage = k ⇒ jtEffectiveNAV = 180e18 exact, IL = 120e18 exact, stEffectiveNAV unchanged.
      *   Conservation 900 + 280 = 1000 + 180. FIXED_TERM stays, end kept.
      *   coverageUtilizationWAD = ⌈(900e18 + 280e18)·0.1e18/180e18⌉ = ⌈655555555555555555.56⌉ = 655555555555555556.
      */
@@ -905,7 +905,7 @@ contract Test_RoycoTestMath is Test {
         expected.ltRawNAV = 100e18;
         expected.stEffectiveNAV = 1000e18;
         expected.jtEffectiveNAV = 180e18;
-        expected.jtCoverageImpermanentLoss = 106_666_666_666_666_666_666;
+        expected.jtImpermanentLoss = 120e18;
         expected.coverageUtilizationWAD = 655_555_555_555_555_556;
         expected.liquidityUtilizationWAD = 500_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.FIXED_TERM;
@@ -919,8 +919,8 @@ contract Test_RoycoTestMath is Test {
      * Checkpoint: 900e18/300e18/1000e18/200e18, IL 100e18, dust 0, FIXED_TERM, end T0+D.
      * Sync (950e18, 280e18) with k = ⌊20e18·100e18/300e18⌋ = 6666666666666666666:
      *   deltaSTEff = 50e18 − k = 43333333333333333334, deltaJTEff = 30e18 − deltaSTEff = −13333333333333333334.
-     *   JT leg loss ⇒ jtEffectiveNAV 186666666666666666666. IL recovery: rec = min(gain, 100e18) = gain ⇒
-     *   IL = 100e18 − 43333333333333333334 = 56666666666666666666, jtEffectiveNAV = 230e18 exact, stGain = 0 ⇒ premium
+     *   JT leg loss ⇒ jtEffectiveNAV 186666666666666666666, IL 113333333333333333334. IL recovery: rec = min(gain, IL) = gain ⇒
+     *   IL = 113333333333333333334 − 43333333333333333334 = 70e18, jtEffectiveNAV = 230e18 exact, stGain = 0 ⇒ premium
      *   block skipped, premiumsPaid false. stEffectiveNAV 1000e18. FIXED_TERM stays, end kept.
      *   coverageUtilizationWAD = ⌈(950e18 + 280e18)·0.1e18/230e18⌉ = ⌈534782608695652173.91⌉ = 534782608695652174.
      */
@@ -933,7 +933,7 @@ contract Test_RoycoTestMath is Test {
         expected.ltRawNAV = 100e18;
         expected.stEffectiveNAV = 1000e18;
         expected.jtEffectiveNAV = 230e18;
-        expected.jtCoverageImpermanentLoss = 56_666_666_666_666_666_666;
+        expected.jtImpermanentLoss = 70e18;
         expected.coverageUtilizationWAD = 534_782_608_695_652_174;
         expected.liquidityUtilizationWAD = 500_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.FIXED_TERM;
@@ -1107,7 +1107,7 @@ contract Test_RoycoTestMath is Test {
         expected.ltRawNAV = 100e18;
         expected.stEffectiveNAV = 50e18;
         expected.jtEffectiveNAV = 60e18;
-        expected.jtCoverageImpermanentLoss = 40e18;
+        expected.jtImpermanentLoss = 40e18;
         expected.coverageUtilizationWAD = 183_333_333_333_333_334;
         expected.liquidityUtilizationWAD = 25_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.FIXED_TERM;

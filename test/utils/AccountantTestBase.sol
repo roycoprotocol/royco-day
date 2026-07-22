@@ -180,7 +180,7 @@ abstract contract AccountantTestBase is Test {
         assertEq(toUint256(s.lastJTRawNAV), _jtRaw, "seed: jtRawNAV");
         assertEq(toUint256(s.lastSTEffectiveNAV), _stEff, "seed: stEffectiveNAV");
         assertEq(toUint256(s.lastJTEffectiveNAV), _jtEff, "seed: jtEffectiveNAV");
-        assertEq(toUint256(s.lastJTCoverageImpermanentLoss), _il, "seed: il");
+        assertEq(toUint256(s.lastJTImpermanentLoss), _il, "seed: il");
         assertEq(toUint256(s.lastLTRawNAV), _ltRaw, "seed: ltRawNAV");
         assertEq(uint8(s.lastMarketState), uint8(_targetState), "seed: market state");
     }
@@ -233,7 +233,7 @@ abstract contract AccountantTestBase is Test {
 
     /**
      * @dev Regime seed, 0 < IL <= dust regime: dust tolerances (st 3, jt 4, effective 7) and a persisted 5 wei
-     * coverage impermanent loss in a PERPETUAL market (checkpoint 1000e18 / 200e18 / 1000e18+5 / 200e18-5)
+     * impermanent loss in a PERPETUAL market (checkpoint 1000e18 / 200e18 / 1000e18+5 / 200e18-5)
      * @dev Claims at this checkpoint: stClaimOnJTRaw = 5 wei so a 20e18 JT delta attributes floor(20e18 * 5 / 200e18) = 0 to ST
      */
     function _seedDustIL() internal {
@@ -280,7 +280,7 @@ abstract contract AccountantTestBase is Test {
         assertEq(toUint256(s.lastJTRawNAV), 100e18, "seed fixed-term no-IL: jtRawNAV");
         assertEq(toUint256(s.lastSTEffectiveNAV), 1000e18, "seed fixed-term no-IL: stEffectiveNAV");
         assertEq(toUint256(s.lastJTEffectiveNAV), 100e18 - 1, "seed fixed-term no-IL: jtEffectiveNAV");
-        assertEq(toUint256(s.lastJTCoverageImpermanentLoss), 0, "seed fixed-term no-IL: il floored to 0");
+        assertEq(toUint256(s.lastJTImpermanentLoss), 0, "seed fixed-term no-IL: il floored to 0");
         assertEq(toUint256(s.lastLTRawNAV), SEED_LT_RAW, "seed fixed-term no-IL: ltRawNAV");
         assertEq(uint8(s.lastMarketState), uint8(MarketState.FIXED_TERM), "seed fixed-term no-IL: market state");
         assertEq(s.fixedTermEndTimestamp, uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS), "seed fixed-term no-IL: fixed term end");
@@ -315,7 +315,7 @@ abstract contract AccountantTestBase is Test {
         assertEq(toUint256(s.lastJTRawNAV), 200e18, "seed fixed-term dust-IL: jtRawNAV");
         assertEq(toUint256(s.lastSTEffectiveNAV), 1000e18, "seed fixed-term dust-IL: stEffectiveNAV");
         assertEq(toUint256(s.lastJTEffectiveNAV), 200e18 - 5, "seed fixed-term dust-IL: jtEffectiveNAV");
-        assertEq(toUint256(s.lastJTCoverageImpermanentLoss), 5, "seed fixed-term dust-IL: sticky dust il");
+        assertEq(toUint256(s.lastJTImpermanentLoss), 5, "seed fixed-term dust-IL: sticky dust il");
         assertEq(uint8(s.lastMarketState), uint8(MarketState.FIXED_TERM), "seed fixed-term dust-IL: market state");
         assertEq(s.fixedTermEndTimestamp, uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS), "seed fixed-term dust-IL: original end kept");
 
@@ -343,7 +343,7 @@ abstract contract AccountantTestBase is Test {
         assertEq(toUint256(s.lastJTRawNAV), toUint256(before.lastJTRawNAV), "seed shrunk-dust: jtRawNAV untouched");
         assertEq(toUint256(s.lastSTEffectiveNAV), toUint256(before.lastSTEffectiveNAV), "seed shrunk-dust: stEffectiveNAV untouched");
         assertEq(toUint256(s.lastJTEffectiveNAV), toUint256(before.lastJTEffectiveNAV), "seed shrunk-dust: jtEffectiveNAV untouched");
-        assertEq(toUint256(s.lastJTCoverageImpermanentLoss), 5, "seed shrunk-dust: il 5 persists");
+        assertEq(toUint256(s.lastJTImpermanentLoss), 5, "seed shrunk-dust: il 5 persists");
         assertEq(toUint256(s.lastLTRawNAV), toUint256(before.lastLTRawNAV), "seed shrunk-dust: ltRawNAV untouched");
         assertEq(uint8(s.lastMarketState), uint8(MarketState.PERPETUAL), "seed shrunk-dust: market state untouched");
         assertEq(s.fixedTermEndTimestamp, before.fixedTermEndTimestamp, "seed shrunk-dust: fixed term end untouched");
@@ -409,7 +409,7 @@ abstract contract AccountantTestBase is Test {
         st.ltRawNAV = s.lastLTRawNAV;
         st.stEffectiveNAV = s.lastSTEffectiveNAV;
         st.jtEffectiveNAV = s.lastJTEffectiveNAV;
-        st.jtCoverageImpermanentLoss = s.lastJTCoverageImpermanentLoss;
+        st.jtImpermanentLoss = s.lastJTImpermanentLoss;
         st.coverageUtilizationWAD = _specCoverageUtilization(
             toUint256(s.lastSTRawNAV), toUint256(s.lastJTRawNAV), s.minCoverageWAD, toUint256(s.lastJTEffectiveNAV)
         );

@@ -79,7 +79,7 @@ contract Test_EntryPointMarketStateGating is EntryPointTestBase {
         _enterFixedTerm();
         assertEq(_executeDepositMax(USER_A, USER_A, nonce), 0, "the request must skip while the term is active");
 
-        // The underlying recovers past the entry drawdown, clearing the coverage IL and exiting the term
+        // The underlying recovers past the entry drawdown, clearing the IL and exiting the term
         applySTPnL(2600);
         SyncedAccountingState memory state = _sync();
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "the recovery must exit FIXED_TERM");

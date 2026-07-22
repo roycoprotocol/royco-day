@@ -115,7 +115,7 @@ contract Test_Setters_Accountant is AccountantTestBase {
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
         assertEq(s.fixedTermDurationSeconds, 1_209_600, "duration written");
         assertEq(uint8(s.lastMarketState), uint8(MarketState.FIXED_TERM), "market state untouched");
-        assertEq(toUint256(s.lastJTCoverageImpermanentLoss), 100e18, "il untouched");
+        assertEq(toUint256(s.lastJTImpermanentLoss), 100e18, "il untouched");
         assertEq(s.fixedTermEndTimestamp, endBefore, "end timestamp untouched");
     }
 
@@ -123,32 +123,32 @@ contract Test_Setters_Accountant is AccountantTestBase {
     function test_SetFixedTermDuration_zeroForcesPerpetualAndErasesIL() public {
         _seedState(900e18, 300e18, 1000e18, 200e18, 100e18, SEED_LT_RAW, MarketState.FIXED_TERM);
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.JuniorTrancheCoverageImpermanentLossReset(toNAVUnits(uint256(100e18)));
+        emit IRoycoDayAccountant.JuniorTrancheImpermanentLossReset(toNAVUnits(uint256(100e18)));
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayAccountant.FixedTermDurationUpdated(0);
         accountant.setFixedTermDuration(0);
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
         assertEq(s.fixedTermDurationSeconds, 0, "duration zeroed");
         assertEq(uint8(s.lastMarketState), uint8(MarketState.PERPETUAL), "forced perpetual");
-        assertEq(toUint256(s.lastJTCoverageImpermanentLoss), 0, "il erased");
+        assertEq(toUint256(s.lastJTImpermanentLoss), 0, "il erased");
         assertEq(s.fixedTermEndTimestamp, 0, "end timestamp deleted");
 
         // A fresh covered loss on the next sync is erased on the spot and the market stays perpetual
         // Attribution: jtEffectiveNAV 200e18 < jtRawNAV 300e18 so all of the 50e18 ST raw loss lands on ST, is covered by JT,
         // and the permanently-perpetual branch erases the resulting 50e18 IL within the same sync
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.JuniorTrancheCoverageImpermanentLossReset(toNAVUnits(uint256(50e18)));
+        emit IRoycoDayAccountant.JuniorTrancheImpermanentLossReset(toNAVUnits(uint256(50e18)));
         kernel.doPreOp(toNAVUnits(uint256(850e18)), toNAVUnits(uint256(300e18)));
         s = accountant.getState();
         assertEq(uint8(s.lastMarketState), uint8(MarketState.PERPETUAL), "sync respects permanently-perpetual");
-        assertEq(toUint256(s.lastJTCoverageImpermanentLoss), 0, "il erased on sync");
+        assertEq(toUint256(s.lastJTImpermanentLoss), 0, "il erased on sync");
         assertEq(toUint256(s.lastJTEffectiveNAV), 150e18, "coverage still applied to jt");
     }
 
     /// the IL reset event fires from the zero-duration setter even when the erased amount is zero
     function test_SetFixedTermDuration_zeroEmitsResetEventEvenWhenILZero() public {
         vm.expectEmit(true, true, true, true, address(accountant));
-        emit IRoycoDayAccountant.JuniorTrancheCoverageImpermanentLossReset(ZERO_NAV_UNITS);
+        emit IRoycoDayAccountant.JuniorTrancheImpermanentLossReset(ZERO_NAV_UNITS);
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayAccountant.FixedTermDurationUpdated(0);
         accountant.setFixedTermDuration(0);
@@ -273,11 +273,11 @@ contract Test_Setters_Accountant is AccountantTestBase {
 
         // A genuine 10% senior raw loss (1100e18 -> 990e18) at checkpoint stEff 1090e18 / jtEff 210e18:
         // JT's 10e18 premium claim on senior raw NAV takes floor(110e18 * 10e18 / 1100e18) = 1e18 of the drop
-        // directly, and the remaining 109e18 senior loss is fully covered by the junior buffer, so
-        // jtEffectiveNAV = 210e18 - 1e18 - 109e18 = 100e18 with a 109e18 coverage impermanent loss
+        // directly (booked as impermanent), and the remaining 109e18 senior loss is fully covered by the junior
+        // buffer, so jtEffectiveNAV = 210e18 - 1e18 - 109e18 = 100e18 with a 110e18 impermanent loss
         state = kernel.doPreOp(toNAVUnits(uint256(990e18)), toNAVUnits(SEED_JT_RAW));
         assertEq(toUint256(state.jtEffectiveNAV), 100e18, "junior buffer paid 109e18 of coverage plus its 1e18 direct loss");
-        assertEq(toUint256(state.jtCoverageImpermanentLoss), 109e18, "over half the junior buffer is owed back as il");
+        assertEq(toUint256(state.jtImpermanentLoss), 110e18, "over half the junior buffer is owed back as il");
 
         // With zero dust a 109e18 il enters FIXED_TERM to protect the junior tranche while senior repays it,
         // but 109e18 <= 1e45 reads as dust so the market never leaves PERPETUAL despite the real loss

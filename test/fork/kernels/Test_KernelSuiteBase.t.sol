@@ -204,7 +204,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         NAV_UNIT lastLTRawNAV;
         NAV_UNIT lastSTEffectiveNAV;
         NAV_UNIT lastJTEffectiveNAV;
-        NAV_UNIT lastJTCoverageImpermanentLoss;
+        NAV_UNIT lastJTImpermanentLoss;
         MarketState marketState;
         uint32 fixedTermEnd;
         uint32 lastAccrualTs;
@@ -251,7 +251,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         s.lastLTRawNAV = a.lastLTRawNAV;
         s.lastSTEffectiveNAV = a.lastSTEffectiveNAV;
         s.lastJTEffectiveNAV = a.lastJTEffectiveNAV;
-        s.lastJTCoverageImpermanentLoss = a.lastJTCoverageImpermanentLoss;
+        s.lastJTImpermanentLoss = a.lastJTImpermanentLoss;
         s.marketState = a.lastMarketState;
         s.fixedTermEnd = a.fixedTermEndTimestamp;
         s.lastAccrualTs = a.lastYieldShareAccrualTimestamp;
@@ -465,7 +465,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         NAV_UNIT lastJTRawNAV;
         NAV_UNIT lastSTEffectiveNAV;
         NAV_UNIT lastJTEffectiveNAV;
-        NAV_UNIT lastJTCoverageImpermanentLoss;
+        NAV_UNIT lastJTImpermanentLoss;
         // Inputs: the premium window (yield shares capped at the max* config, accumulators as stored)
         uint256 jtYieldShareWAD;
         uint256 ltYieldShareWAD;
@@ -484,7 +484,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         // Outputs
         NAV_UNIT stEffectiveNAV;
         NAV_UNIT jtEffectiveNAV;
-        NAV_UNIT jtCoverageImpermanentLoss;
+        NAV_UNIT jtImpermanentLoss;
         NAV_UNIT ltLiquidityPremium;
         NAV_UNIT stProtocolFee;
         NAV_UNIT jtProtocolFee;
@@ -496,8 +496,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /**
      * @notice Re-derives the full tranche accounting sync from the written accounting rules, independently of production code.
      * @dev Mirrors `RoycoDayAccountant._previewSyncTrancheAccounting`: claim decomposition, floor-on-magnitude
-     *      attribution with JT absorbing the rounding residual, JT loss/gain booking with the dust-gated JT fee,
-     *      coverage `min(stLoss, jtEffectiveNAV)` with the JT-fee recompute, IL recovery `min(stGain, IL)`, premiums
+     *      attribution with JT absorbing the rounding residual, JT loss/gain booking with the dust-gated JT fee
+     *      (losses book impermanent loss and gains recover it first), coverage `min(stLoss, jtEffectiveNAV)`
+     *      with the JT-fee recompute, IL recovery `min(stGain, IL)`, premiums
      *      `floor(stGain * (twStart + yieldShare * elapsed) / (premiumElapsed * WAD))`, the time-weighted
      *      average yield share over the full window since the last premium payment, which reduces to
      *      `floor(stGain * yieldShare / WAD)` for a single constant-share window, with the same-block
@@ -508,7 +509,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function _expectedSync(SyncExpectation memory _e) internal pure returns (SyncExpectation memory) {
         uint256 stEffectiveNAV = toUint256(_e.lastSTEffectiveNAV);
         uint256 jtEffectiveNAV = toUint256(_e.lastJTEffectiveNAV);
-        uint256 jtCoverageImpermanentLoss = toUint256(_e.lastJTCoverageImpermanentLoss);
+        uint256 jtImpermanentLoss = toUint256(_e.lastJTImpermanentLoss);
         uint256 dust = toUint256(_e.effectiveDust);
 
         // STEP_APPLY_PNL_ATTRIBUTION: decompose the checkpointed claims and attribute each raw delta
@@ -528,14 +529,17 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
             dJtEff = (deltaSTRaw + deltaJTRaw) - dStEff;
         }
 
-        // STEP_APPLY_JT_LOSS / STEP_APPLY_JT_GAIN
+        // STEP_APPLY_JT_LOSS / STEP_APPLY_JT_GAIN: losses book impermanent loss, gains recover it first
         uint256 jtNetGain;
         uint256 jtProtocolFee;
         if (dJtEff < 0) {
-            jtEffectiveNAV -= uint256(-dJtEff);
+            uint256 jtLoss = uint256(-dJtEff);
+            jtEffectiveNAV -= jtLoss;
+            jtImpermanentLoss += jtLoss;
         } else if (dJtEff > 0) {
             jtNetGain = uint256(dJtEff);
             if (jtNetGain > dust) jtProtocolFee = Math.mulDiv(jtNetGain, _e.jtProtocolFeeWAD, WAD);
+            jtImpermanentLoss -= Math.min(jtNetGain, jtImpermanentLoss);
             jtEffectiveNAV += jtNetGain;
         }
 
@@ -554,16 +558,16 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
                     jtProtocolFee = jtNetGain > dust ? Math.mulDiv(jtNetGain, _e.jtProtocolFeeWAD, WAD) : 0;
                 }
                 jtEffectiveNAV -= coverageApplied;
-                jtCoverageImpermanentLoss += coverageApplied;
+                jtImpermanentLoss += coverageApplied;
                 stLoss -= coverageApplied;
             }
             if (stLoss != 0) stEffectiveNAV -= stLoss;
         } else if (dStEff > 0) {
-            // STEP_JT_COVERAGE_IMPERMANENT_LOSS_RECOVERY + STEP_PAY_PREMIUMS
+            // STEP_JT_IMPERMANENT_LOSS_RECOVERY + STEP_PAY_PREMIUMS
             uint256 stGain = uint256(dStEff);
-            uint256 ilRecovery = Math.min(stGain, jtCoverageImpermanentLoss);
+            uint256 ilRecovery = Math.min(stGain, jtImpermanentLoss);
             if (ilRecovery != 0) {
-                jtCoverageImpermanentLoss -= ilRecovery;
+                jtImpermanentLoss -= ilRecovery;
                 jtEffectiveNAV += ilRecovery;
                 stGain -= ilRecovery;
             }
@@ -594,7 +598,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         _e.stEffectiveNAV = toNAVUnits(stEffectiveNAV);
         _e.jtEffectiveNAV = toNAVUnits(jtEffectiveNAV);
-        _e.jtCoverageImpermanentLoss = toNAVUnits(jtCoverageImpermanentLoss);
+        _e.jtImpermanentLoss = toNAVUnits(jtImpermanentLoss);
         _e.ltLiquidityPremium = toNAVUnits(ltLiquidityPremium);
         _e.stProtocolFee = toNAVUnits(stProtocolFee);
         _e.jtProtocolFee = toNAVUnits(jtProtocolFee);
@@ -1157,7 +1161,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(post.lastLTRawNAV, _pre.lastLTRawNAV, "atomicity: committed LT raw NAV moved");
         assertEq(post.lastSTEffectiveNAV, _pre.lastSTEffectiveNAV, "atomicity: committed ST effective NAV moved");
         assertEq(post.lastJTEffectiveNAV, _pre.lastJTEffectiveNAV, "atomicity: committed JT effective NAV moved");
-        assertEq(post.lastJTCoverageImpermanentLoss, _pre.lastJTCoverageImpermanentLoss, "atomicity: committed JT coverage IL moved");
+        assertEq(post.lastJTImpermanentLoss, _pre.lastJTImpermanentLoss, "atomicity: committed JT IL moved");
         assertTrue(post.marketState == _pre.marketState, "atomicity: market state moved");
         assertEq(post.kernelSTAssetBal, _pre.kernelSTAssetBal, "atomicity: kernel ST asset balance moved");
         assertEq(post.kernelJTAssetBal, _pre.kernelJTAssetBal, "atomicity: kernel JT asset balance moved");
@@ -1522,7 +1526,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
             e.stEffectiveNAV + (aPost.lastSTRawNAV - e.stRawNAVNew),
             "committed ST effective NAV must be the sync output plus the deposit"
         );
-        assertEq(aPost.lastJTCoverageImpermanentLoss, e.jtCoverageImpermanentLoss, "committed IL must match the independent recomputation");
+        assertEq(aPost.lastJTImpermanentLoss, e.jtImpermanentLoss, "committed IL must match the independent recomputation");
         assertEq(uint256(aPost.lastPremiumPaymentTimestamp), block.timestamp, "the premium payment must stamp");
         assertEq(uint256(aPost.twJTYieldShareAccruedWAD), 0, "the accrual accumulators must reset after payment");
         // Counterweight independent of the share-pricing mirror: the premium, fee, and deposit mints all pay for
@@ -1989,8 +1993,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /**
      * @notice Applies the expected ST self-liquidation bonus to a redeemer's base claims, mirroring
      *         `SelfLiquidationLogic.applySeniorTrancheSelfLiquidationBonus` on the committed checkpoint.
-     * @dev The bonus is `min(floor(nav * bonusWAD / WAD), jtEffectiveNAV, maxUtilizationNeutralBonus)` with the neutral cap
-     *      from the library's documented derivation, sourced ST-assets-first. Quoter conversions
+     * @dev The sized bonus is `min(floor(nav * bonusWAD / WAD), jtEffectiveNAV, maxUtilizationNeutralBonus)` with the
+     *      neutral cap from the library's documented derivation, sourced ST-assets-first, and the returned bonus NAV
+     *      is the value of the assets actually granted (the src quantization). Quoter conversions
      *      of the claim legs are inputs. Callers must have synced in the same block.
      */
     function _expectedClaimsWithSelfLiquidationBonus(AssetClaims memory _userClaims)
@@ -2020,10 +2025,13 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         uint256 bonus = Math.min(Math.min(desiredBonus, jtEffectiveNAV), maxNeutralBonus);
         if (bonus == 0) return (_userClaims, ZERO_NAV_UNITS);
-        bonusNAV = toNAVUnits(bonus);
         uint256 bonusFromSTRawNAV = Math.min(bonus, jtClaimOnSTRawNAV);
-        claimsWithBonus.stAssets = _userClaims.stAssets + KERNEL.stConvertNAVUnitsToTrancheUnits(toNAVUnits(bonusFromSTRawNAV));
-        claimsWithBonus.jtAssets = _userClaims.jtAssets + KERNEL.jtConvertNAVUnitsToTrancheUnits(toNAVUnits(bonus - bonusFromSTRawNAV));
+        TRANCHE_UNIT stBonusAssets = KERNEL.stConvertNAVUnitsToTrancheUnits(toNAVUnits(bonusFromSTRawNAV));
+        TRANCHE_UNIT jtBonusAssets = KERNEL.jtConvertNAVUnitsToTrancheUnits(toNAVUnits(bonus - bonusFromSTRawNAV));
+        // Report the bonus at the value of the assets actually granted, mirroring the src quantization
+        bonusNAV = KERNEL.stConvertTrancheUnitsToNAVUnits(stBonusAssets) + KERNEL.jtConvertTrancheUnitsToNAVUnits(jtBonusAssets);
+        claimsWithBonus.stAssets = _userClaims.stAssets + stBonusAssets;
+        claimsWithBonus.jtAssets = _userClaims.jtAssets + jtBonusAssets;
         claimsWithBonus.nav = _userClaims.nav + bonusNAV;
     }
 
@@ -2338,7 +2346,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         NAV_UNIT redemptionNAV = (pre.lastSTRawNAV - post.lastSTRawNAV) + (pre.lastJTRawNAV - post.lastJTRawNAV);
         assertEq(post.lastJTEffectiveNAV, pre.lastJTEffectiveNAV - redemptionNAV, "the junior effective NAV must fall by exactly the measured redemption NAV");
         assertEq(post.lastSTEffectiveNAV, pre.lastSTEffectiveNAV, "the senior effective NAV must be untouched");
-        assertEq(post.lastJTCoverageImpermanentLoss, pre.lastJTCoverageImpermanentLoss, "no impermanent loss may move on a redemption without IL");
+        assertEq(post.lastJTImpermanentLoss, pre.lastJTImpermanentLoss, "no impermanent loss may move on a redemption without IL");
         assertApproxEqAbs(redemptionNAV, expectedClaims.nav, maxNAVDelta(), "the measured redemption NAV must round-trip the claim NAV");
         assertGe(post.coverageUtilizationWAD, pre.coverageUtilizationWAD, "a JT redemption cannot lower coverage utilization");
         _assertCommittedConservation();
@@ -2447,7 +2455,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
         assertTrue(a.lastMarketState == MarketState.PERPETUAL, "arrange: the dust-classified loss must keep the market perpetual");
-        NAV_UNIT il0 = a.lastJTCoverageImpermanentLoss;
+        NAV_UNIT il0 = a.lastJTImpermanentLoss;
         assertGt(toUint256(il0), 0, "arrange: the impermanent loss must be retained");
         NAV_UNIT jtEff0 = a.lastJTEffectiveNAV;
 
@@ -2456,7 +2464,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         NAV_UNIT jtEff1 = r.post.lastJTEffectiveNAV;
         assertEq(jtEff1, jtEff0 - redemptionNAV, "the junior effective NAV must fall by exactly the measured redemption NAV");
         NAV_UNIT expectedIL = toNAVUnits(Math.mulDiv(toUint256(il0), toUint256(jtEff1), toUint256(jtEff0)));
-        assertEq(r.post.lastJTCoverageImpermanentLoss, expectedIL, "the impermanent loss must floor-scale by the junior effective NAV ratio");
+        assertEq(r.post.lastJTImpermanentLoss, expectedIL, "the impermanent loss must floor-scale by the junior effective NAV ratio");
         _assertCommittedConservation();
     }
 
@@ -2812,7 +2820,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         e.lastJTRawNAV = a.lastJTRawNAV;
         e.lastSTEffectiveNAV = a.lastSTEffectiveNAV;
         e.lastJTEffectiveNAV = a.lastJTEffectiveNAV;
-        e.lastJTCoverageImpermanentLoss = a.lastJTCoverageImpermanentLoss;
+        e.lastJTImpermanentLoss = a.lastJTImpermanentLoss;
         e.stProtocolFeeWAD = a.stProtocolFeeWAD;
         e.jtProtocolFeeWAD = a.jtProtocolFeeWAD;
         e.jtYieldShareProtocolFeeWAD = a.jtYieldShareProtocolFeeWAD;
@@ -2938,7 +2946,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(second.ltRawNAV, first.ltRawNAV, "the liquidity raw NAV must not move");
         assertEq(second.stEffectiveNAV, first.stEffectiveNAV, "the senior effective NAV must not move");
         assertEq(second.jtEffectiveNAV, first.jtEffectiveNAV, "the junior effective NAV must not move");
-        assertEq(second.jtCoverageImpermanentLoss, first.jtCoverageImpermanentLoss, "the impermanent loss must not move");
+        assertEq(second.jtImpermanentLoss, first.jtImpermanentLoss, "the impermanent loss must not move");
         assertEq(second.coverageUtilizationWAD, first.coverageUtilizationWAD, "the coverage utilization must not move");
         assertEq(second.liquidityUtilizationWAD, first.liquidityUtilizationWAD, "the liquidity utilization must not move");
         assertEq(second.ltLiquidityPremium, ZERO_NAV_UNITS, "the second sync must pay no liquidity premium");
@@ -2951,7 +2959,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(post.lastLTRawNAV, pre.lastLTRawNAV, "the committed LT raw NAV must not move");
         assertEq(post.lastSTEffectiveNAV, pre.lastSTEffectiveNAV, "the committed ST effective NAV must not move");
         assertEq(post.lastJTEffectiveNAV, pre.lastJTEffectiveNAV, "the committed JT effective NAV must not move");
-        assertEq(post.lastJTCoverageImpermanentLoss, pre.lastJTCoverageImpermanentLoss, "the committed impermanent loss must not move");
+        assertEq(post.lastJTImpermanentLoss, pre.lastJTImpermanentLoss, "the committed impermanent loss must not move");
         assertEq(post.stSupply, pre.stSupply, "no senior shares may mint");
         assertEq(post.jtSupply, pre.jtSupply, "no junior shares may mint");
         assertEq(post.ltSupply, pre.ltSupply, "no liquidity shares may mint");
@@ -3051,7 +3059,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         _assertSyncMatchesExpectation(state, e);
         MarketSnapshot memory post = _snap();
-        assertEq(post.lastJTCoverageImpermanentLoss, e.jtCoverageImpermanentLoss, "committed impermanent loss must match the independent recomputation");
+        assertEq(post.lastJTImpermanentLoss, e.jtImpermanentLoss, "committed impermanent loss must match the independent recomputation");
         assertEq(post.stSupply, pre.stSupply + premShares + stFeeShares, "ST supply must grow by exactly the premium and fee mints");
         assertEq(post.jtSupply, pre.jtSupply + jtFeeShares, "JT supply must grow by exactly the fee mint");
         assertEq(post.feeRecipientSTShares - pre.feeRecipientSTShares, stFeeShares, "ST fee shares minted to the recipient");
@@ -3075,19 +3083,19 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _applySTLoss(0.02e18);
         SyncExpectation memory e = _buildSyncExpectation(false);
         assertLt(e.stRawNAVNew, e.lastSTRawNAV, "arrange: the senior raw NAV must have depreciated");
-        assertGt(toUint256(e.jtCoverageImpermanentLoss), 0, "arrange: coverage must be applied");
+        assertGt(toUint256(e.jtImpermanentLoss), 0, "arrange: coverage must be applied");
         assertGt(toUint256(e.jtEffectiveNAV), 0, "arrange: the loss must not exhaust the junior tranche");
         assertEq(e.stEffectiveNAV, e.lastSTEffectiveNAV, "the covered loss must leave the senior effective NAV whole");
 
         vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
-        emit IRoycoDayAccountant.JuniorTrancheCoverageImpermanentLossReset(e.jtCoverageImpermanentLoss);
+        emit IRoycoDayAccountant.JuniorTrancheImpermanentLossReset(e.jtImpermanentLoss);
         SyncedAccountingState memory state = _syncWithState();
 
         _assertSyncMatchesExpectation(state, e);
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
         assertTrue(a.lastMarketState == MarketState.PERPETUAL, "the market must stay perpetual");
-        assertEq(a.lastJTCoverageImpermanentLoss, ZERO_NAV_UNITS, "the forced perpetual transition must erase the impermanent loss");
-        assertEq(state.jtCoverageImpermanentLoss, ZERO_NAV_UNITS, "the returned packet must carry the erased impermanent loss");
+        assertEq(a.lastJTImpermanentLoss, ZERO_NAV_UNITS, "the forced perpetual transition must erase the impermanent loss");
+        assertEq(state.jtImpermanentLoss, ZERO_NAV_UNITS, "the returned packet must carry the erased impermanent loss");
         assertEq(state.stProtocolFee, ZERO_NAV_UNITS, "a loss sync must take no ST fee");
         assertEq(state.jtProtocolFee, ZERO_NAV_UNITS, "a loss sync must take no JT fee");
     }
@@ -3112,7 +3120,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _applySTLoss(0.02e18);
 
         SyncExpectation memory e = _buildSyncExpectation(true);
-        assertGt(e.jtCoverageImpermanentLoss, e.effectiveDust, "arrange: the coverage applied must exceed the dust tolerance");
+        assertGt(e.jtImpermanentLoss, e.effectiveDust, "arrange: the coverage applied must exceed the dust tolerance");
         assertGt(toUint256(e.jtEffectiveNAV), 0, "arrange: the loss must not exhaust the junior tranche");
         assertGt(e.ltYieldShareWAD, 0, "arrange: a liquidity premium must have been accruing");
         uint32 expectedEndTimestamp = uint32(block.timestamp + 7 days);
@@ -3130,7 +3138,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
         assertTrue(a.lastMarketState == MarketState.FIXED_TERM, "the market must enter the fixed term");
         assertEq(uint256(a.fixedTermEndTimestamp), uint256(expectedEndTimestamp), "the fixed-term end must stamp exactly");
-        assertEq(a.lastJTCoverageImpermanentLoss, e.jtCoverageImpermanentLoss, "the impermanent loss must be retained exactly");
+        assertEq(a.lastJTImpermanentLoss, e.jtImpermanentLoss, "the impermanent loss must be retained exactly");
         assertEq(uint256(a.twJTYieldShareAccruedWAD), e.twJTStart + e.jtYieldShareWAD * e.elapsed, "the unpaid JT accrual must be retained");
         assertEq(uint256(a.twLTYieldShareAccruedWAD), e.twLTStart + e.ltYieldShareWAD * e.elapsed, "the unpaid LT accrual must be retained");
         assertEq(uint256(a.lastPremiumPaymentTimestamp), premiumTsPre, "no premium payment may stamp on a loss sync");
@@ -3153,12 +3161,12 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a0 = ACCOUNTANT.getState();
         assertTrue(a0.lastMarketState == MarketState.FIXED_TERM, "arrange: the market must be in a fixed term");
-        assertGt(a0.lastJTCoverageImpermanentLoss, ZERO_NAV_UNITS, "arrange: an impermanent loss must be retained");
+        assertGt(a0.lastJTImpermanentLoss, ZERO_NAV_UNITS, "arrange: an impermanent loss must be retained");
 
         _warpForward(1 days);
         _applySTYield(0.05e18);
         SyncExpectation memory e = _buildSyncExpectation(false);
-        assertEq(e.jtCoverageImpermanentLoss, ZERO_NAV_UNITS, "arrange: the gain must fully recover the impermanent loss");
+        assertEq(e.jtImpermanentLoss, ZERO_NAV_UNITS, "arrange: the gain must fully recover the impermanent loss");
         assertTrue(e.premiumsPaid, "arrange: a residual gain must remain after the recovery");
         assertGt(toUint256(e.stProtocolFee), 0, "arrange: the exited market must take fees again");
 
@@ -3169,7 +3177,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertSyncMatchesExpectation(state, e);
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
         assertTrue(a.lastMarketState == MarketState.PERPETUAL, "the market must exit the fixed term");
-        assertEq(a.lastJTCoverageImpermanentLoss, ZERO_NAV_UNITS, "the impermanent loss must be fully recovered");
+        assertEq(a.lastJTImpermanentLoss, ZERO_NAV_UNITS, "the impermanent loss must be fully recovered");
         assertEq(uint256(a.fixedTermEndTimestamp), 0, "the fixed-term end must clear");
         assertEq(uint256(a.lastPremiumPaymentTimestamp), block.timestamp, "the premium payment must stamp");
         assertEq(uint256(a.twJTYieldShareAccruedWAD), 0, "the JT accrual accumulator must reset after payment");
@@ -3186,7 +3194,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a0 = ACCOUNTANT.getState();
         assertTrue(a0.lastMarketState == MarketState.FIXED_TERM, "arrange: the market must be in a fixed term");
-        NAV_UNIT ilBefore = a0.lastJTCoverageImpermanentLoss;
+        NAV_UNIT ilBefore = a0.lastJTImpermanentLoss;
         assertGt(ilBefore, ZERO_NAV_UNITS, "arrange: an impermanent loss must be retained");
 
         _warpForward(uint256(a0.fixedTermDurationSeconds) + 1);
@@ -3195,20 +3203,20 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         // The elapsed window may carry streaming drift, so the settlement runs on the measured deltas
         SyncExpectation memory e = _buildSyncExpectation(false);
-        assertGt(toUint256(e.jtCoverageImpermanentLoss), 0, "arrange: an unrecovered impermanent loss must remain to erase");
-        assertLe(e.jtCoverageImpermanentLoss, ilBefore, "arrange: recovery can only shrink the retained impermanent loss");
+        assertGt(toUint256(e.jtImpermanentLoss), 0, "arrange: an unrecovered impermanent loss must remain to erase");
+        assertLe(e.jtImpermanentLoss, ilBefore, "arrange: recovery can only shrink the retained impermanent loss");
 
         vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
         emit IRoycoDayAccountant.FixedTermEnded();
         vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
-        emit IRoycoDayAccountant.JuniorTrancheCoverageImpermanentLossReset(e.jtCoverageImpermanentLoss);
+        emit IRoycoDayAccountant.JuniorTrancheImpermanentLossReset(e.jtImpermanentLoss);
         SyncedAccountingState memory state = _syncWithState();
 
         _assertSyncMatchesExpectation(state, e);
         MarketSnapshot memory post = _snap();
         assertTrue(state.marketState == MarketState.PERPETUAL, "the market must be forced perpetual");
-        assertEq(post.lastJTCoverageImpermanentLoss, ZERO_NAV_UNITS, "the unrecovered impermanent loss must be erased");
-        assertEq(state.jtCoverageImpermanentLoss, ZERO_NAV_UNITS, "the returned packet must carry the erased impermanent loss");
+        assertEq(post.lastJTImpermanentLoss, ZERO_NAV_UNITS, "the unrecovered impermanent loss must be erased");
+        assertEq(state.jtImpermanentLoss, ZERO_NAV_UNITS, "the returned packet must carry the erased impermanent loss");
         assertEq(uint256(post.fixedTermEnd), 0, "the fixed-term end must clear");
         assertEq(uint256(post.lastPremiumTs), e.premiumsPaid ? block.timestamp : premiumTsPre, "the premium stamp must track the payment");
         assertEq(uint256(post.twJT), e.premiumsPaid ? 0 : e.twJTStart + e.jtYieldShareWAD * e.elapsed, "the accumulator must reset only on payment");
@@ -3238,7 +3246,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         _assertSyncMatchesExpectation(state, e);
         MarketSnapshot memory post = _snap();
-        assertEq(post.lastJTCoverageImpermanentLoss, e.jtCoverageImpermanentLoss, "committed impermanent loss must match the independent recomputation");
+        assertEq(post.lastJTImpermanentLoss, e.jtImpermanentLoss, "committed impermanent loss must match the independent recomputation");
         assertEq(post.stSupply, stSupplyPre + premShares + stFeeShares, "ST supply must grow by exactly the premium and fee mints");
         assertEq(post.jtSupply, jtSupplyPre + jtFeeShares, "JT supply must grow by exactly the fee mint");
         assertEq(uint256(post.lastPremiumTs), e.premiumsPaid ? block.timestamp : premiumTsPre, "the premium stamp must track the payment");
@@ -3268,18 +3276,18 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertLt(e.jtRawNAVNew, e.lastJTRawNAV, "arrange: the junior raw NAV must have depreciated");
         assertLt(e.jtEffectiveNAV, e.lastJTEffectiveNAV, "the junior effective NAV must absorb the loss");
 
-        if (toUint256(e.jtCoverageImpermanentLoss) > 0) {
+        if (toUint256(e.jtImpermanentLoss) > 0) {
             // Coupled hooks: the senior raw NAV depreciated alongside, so coverage applied and is erased
             assertLt(e.stRawNAVNew, e.lastSTRawNAV, "a nonzero coverage application requires a measured senior depreciation");
             vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
-            emit IRoycoDayAccountant.JuniorTrancheCoverageImpermanentLossReset(e.jtCoverageImpermanentLoss);
+            emit IRoycoDayAccountant.JuniorTrancheImpermanentLossReset(e.jtImpermanentLoss);
         }
         SyncedAccountingState memory state = _syncWithState();
 
         _assertSyncMatchesExpectation(state, e);
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
         assertTrue(a.lastMarketState == MarketState.PERPETUAL, "the market must stay perpetual");
-        assertEq(a.lastJTCoverageImpermanentLoss, ZERO_NAV_UNITS, "the forced perpetual transition must erase the impermanent loss");
+        assertEq(a.lastJTImpermanentLoss, ZERO_NAV_UNITS, "the forced perpetual transition must erase the impermanent loss");
         assertEq(state.stProtocolFee, ZERO_NAV_UNITS, "a loss sync must take no ST fee");
         assertEq(state.jtProtocolFee, ZERO_NAV_UNITS, "a loss sync must take no JT fee");
         assertEq(state.ltLiquidityPremium, ZERO_NAV_UNITS, "a loss sync must pay no liquidity premium");
@@ -3304,18 +3312,18 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertLt(e.stRawNAVNew, e.lastSTRawNAV, "arrange: the senior raw NAV must have depreciated");
         assertEq(e.jtEffectiveNAV, ZERO_NAV_UNITS, "the coverage application must exhaust the junior effective NAV to exactly zero");
         assertLt(e.stEffectiveNAV, e.lastSTEffectiveNAV, "the residual loss must fall on the senior effective NAV");
-        assertGt(toUint256(e.jtCoverageImpermanentLoss), 0, "arrange: the applied coverage must book an impermanent loss");
+        assertGt(toUint256(e.jtImpermanentLoss), 0, "arrange: the applied coverage must book an impermanent loss");
 
         // The exhausted (jtEffectiveNAV == 0, stEffectiveNAV > 0) market is forced perpetual, erasing the just-booked IL
         vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
-        emit IRoycoDayAccountant.JuniorTrancheCoverageImpermanentLossReset(e.jtCoverageImpermanentLoss);
+        emit IRoycoDayAccountant.JuniorTrancheImpermanentLossReset(e.jtImpermanentLoss);
         SyncedAccountingState memory state = _syncWithState();
 
         _assertSyncMatchesExpectation(state, e);
         assertEq(state.coverageUtilizationWAD, type(uint256).max, "coverage utilization must saturate with an exhausted junior tranche");
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
         assertTrue(a.lastMarketState == MarketState.PERPETUAL, "the exhausted market must be forced perpetual");
-        assertEq(a.lastJTCoverageImpermanentLoss, ZERO_NAV_UNITS, "the forced perpetual transition must erase the impermanent loss");
+        assertEq(a.lastJTImpermanentLoss, ZERO_NAV_UNITS, "the forced perpetual transition must erase the impermanent loss");
         assertEq(state.stProtocolFee, ZERO_NAV_UNITS, "a loss sync must take no ST fee");
         assertEq(state.jtProtocolFee, ZERO_NAV_UNITS, "a loss sync must take no JT fee");
     }

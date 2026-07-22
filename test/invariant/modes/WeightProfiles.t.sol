@@ -72,7 +72,7 @@ contract Invariant_CalmMarket is WeightProfileBase {
  * @notice A market under sustained stress: rate moves on every feed dominate, the venue's slippage flaps so
  *         the premium repeatedly sits idle and then deploys, and external pool activity drifts the composition
  * @dev This regime concentrates on the tranche accounting sync's loss and recovery arms, the
- *      jtCoverageImpermanentLoss ledger, the idle liquidity premium senior shares under a hostile venue,
+ *      jtImpermanentLoss ledger, the idle liquidity premium senior shares under a hostile venue,
  *      and pool marks that move underneath the liquidity gate, while a thin stream of flows keeps every
  *      gate prediction exercised against the shifting state
  */
@@ -117,7 +117,7 @@ contract Invariant_StressedMarket is WeightProfileBase {
  * @notice A market repeatedly driven to and past the liquidation coverage threshold, then wound down and
  *         recapitalized: closed-form losses to the threshold, full exits, and heavy redemption pressure
  * @dev This regime concentrates on the breached-coverage regime the default mix only touches: the liquidity
- *      gate standing down in liquidation, the senior tranche self-liquidation bonus, the coverage-loss
+ *      gate standing down in liquidation, the senior tranche self-liquidation bonus, the impermanent-loss
  *      erasure on forced-perpetual transitions, zero-supply edges after full exits, and junior recapitalization
  */
 contract Invariant_LiquidationMarket is WeightProfileBase {

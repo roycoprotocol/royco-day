@@ -90,17 +90,18 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         uint256 baseSTAssets = totalSTAssets.mulDiv(shares, st);
         uint256 baseJTAssets = totalJTAssets.mulDiv(shares, st);
         assertEq(kernel.getState().stSelfLiquidationBonusWAD, CONFIGURED_BONUS_WAD, "the deployed bonus config must match the pinned 1% rate");
-        uint256 expectedBonus = RoycoTestMath.seniorTrancheSelfLiquidationBonus(
-            RoycoTestMath.SeniorTrancheSelfLiquidationBonusInputs({
-                stRawNAV: toUint256(state.stRawNAV),
-                jtRawNAV: toUint256(state.jtRawNAV),
-                jtEffectiveNAV: toUint256(state.jtEffectiveNAV),
-                coverageUtilizationWAD: covPre,
-                coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_THRESHOLD_WAD,
-                bonusWAD: CONFIGURED_BONUS_WAD,
-                userClaimNAV: baseNav
-            })
-        );
+        RoycoTestMath.SeniorTrancheSelfLiquidationBonusInputs memory bonusIn = RoycoTestMath.SeniorTrancheSelfLiquidationBonusInputs({
+            stRawNAV: toUint256(state.stRawNAV),
+            jtRawNAV: toUint256(state.jtRawNAV),
+            jtEffectiveNAV: toUint256(state.jtEffectiveNAV),
+            coverageUtilizationWAD: covPre,
+            coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_THRESHOLD_WAD,
+            bonusWAD: CONFIGURED_BONUS_WAD,
+            userClaimNAV: baseNav
+        });
+        uint256 expectedBonus = RoycoTestMath.seniorTrancheSelfLiquidationBonus(bonusIn);
+        // The reported bonus is the value of the granted assets, floored through the junior leg's round trip at the drawn-down rate
+        uint256 expectedBonusReported = RoycoTestMath.seniorTrancheSelfLiquidationBonusReported(bonusIn, rate, rate);
 
         // Independent caps on the mirrored bonus, derived without re-running the sizing formula: the bonus is a
         // sweetener paid out of the junior buffer, so it can never exceed the configured 1% of the claim NAV nor
@@ -118,13 +119,13 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         );
 
         uint256 balBefore = stJtVault.balanceOf(ST_PROVIDER);
-        _expectBonusBoostedRedeemEvent(baseSTAssets, baseJTAssets, baseNav, expectedBonus, rate, shares);
+        _expectBonusBoostedRedeemEvent(baseSTAssets, baseJTAssets, baseNav, expectedBonus, expectedBonusReported, rate, shares);
         vm.prank(ST_PROVIDER);
         AssetClaims memory claims = seniorTranche.redeem(shares, ST_PROVIDER, ST_PROVIDER);
 
         // Exact payout: the bonus lands on the junior-asset leg because the junior tranche's claims sit
         // entirely on its own raw NAV here (it holds no cross-claim on senior raw NAV to source from first)
-        assertEq(toUint256(claims.nav), baseNav + expectedBonus, "the redeemed NAV must be the pro-rata slice plus exactly the derived bonus");
+        assertEq(toUint256(claims.nav), baseNav + expectedBonusReported, "the redeemed NAV must be the pro-rata slice plus exactly the reported bonus");
         assertEq(toUint256(claims.stAssets), baseSTAssets, "the senior-asset leg must be the unboosted pro-rata slice");
         assertEq(
             toUint256(claims.jtAssets), baseJTAssets + expectedBonus.mulDiv(1e18, rate), "the junior-asset leg must carry the bonus at the drawn-down rate"
@@ -204,17 +205,18 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
 
         // The exact bonus the stack must pay: min(desired, junior buffer, utilization-neutral max), mirrored
         // with the fuzzed above-WAD config in place of the deployed 1% rate
-        uint256 expectedBonus = RoycoTestMath.seniorTrancheSelfLiquidationBonus(
-            RoycoTestMath.SeniorTrancheSelfLiquidationBonusInputs({
-                stRawNAV: toUint256(state.stRawNAV),
-                jtRawNAV: toUint256(state.jtRawNAV),
-                jtEffectiveNAV: jtEffHand,
-                coverageUtilizationWAD: covPre,
-                coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_THRESHOLD_WAD,
-                bonusWAD: bonusWAD,
-                userClaimNAV: baseNav
-            })
-        );
+        RoycoTestMath.SeniorTrancheSelfLiquidationBonusInputs memory bonusIn = RoycoTestMath.SeniorTrancheSelfLiquidationBonusInputs({
+            stRawNAV: toUint256(state.stRawNAV),
+            jtRawNAV: toUint256(state.jtRawNAV),
+            jtEffectiveNAV: jtEffHand,
+            coverageUtilizationWAD: covPre,
+            coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_THRESHOLD_WAD,
+            bonusWAD: bonusWAD,
+            userClaimNAV: baseNav
+        });
+        uint256 expectedBonus = RoycoTestMath.seniorTrancheSelfLiquidationBonus(bonusIn);
+        // The reported bonus is the value of the granted assets, floored through the junior leg's round trip at the drawn-down rate
+        uint256 expectedBonusReported = RoycoTestMath.seniorTrancheSelfLiquidationBonusReported(bonusIn, rate, rate);
 
         // Independent caps derived without the sizing formula: the config demands up to just under the full
         // claim over again (bonusWAD in [0.5e18, WAD - 1] so desired is 50-100% of baseNav), but the
@@ -227,13 +229,13 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         assertLt(expectedBonus, baseNav, "a near-100% configured bonus must still pay out only a small fraction of the claim");
 
         uint256 balBefore = stJtVault.balanceOf(ST_PROVIDER);
-        _expectBonusBoostedRedeemEvent(baseSTAssets, baseJTAssets, baseNav, expectedBonus, rate, shares);
+        _expectBonusBoostedRedeemEvent(baseSTAssets, baseJTAssets, baseNav, expectedBonus, expectedBonusReported, rate, shares);
         vm.prank(ST_PROVIDER);
         AssetClaims memory claims = seniorTranche.redeem(shares, ST_PROVIDER, ST_PROVIDER);
 
         // Exact payout: the clamped bonus lands on the junior-asset leg (the junior tranche holds no cross-claim
         // on senior raw NAV here to source from first) and the wallet delta matches both legs
-        assertEq(toUint256(claims.nav), baseNav + expectedBonus, "the redeemed NAV must be the pro-rata slice plus exactly the clamped bonus");
+        assertEq(toUint256(claims.nav), baseNav + expectedBonusReported, "the redeemed NAV must be the pro-rata slice plus exactly the reported bonus");
         assertEq(toUint256(claims.stAssets), baseSTAssets, "the senior-asset leg must be the unboosted pro-rata slice");
         assertEq(
             toUint256(claims.jtAssets), baseJTAssets + expectedBonus.mulDiv(1e18, rate), "the junior-asset leg must carry the bonus at the drawn-down rate"
@@ -293,15 +295,17 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         uint256 _baseJTAssets,
         uint256 _baseNav,
         uint256 _expectedBonus,
+        uint256 _expectedBonusReported,
         uint256 _rate,
         uint256 _shares
     )
         private
     {
+        // The asset leg prices the sized bonus into tranche units, the NAV leg carries the reported value of those granted assets
         AssetClaims memory expectedClaims;
         expectedClaims.stAssets = toTrancheUnits(_baseSTAssets);
         expectedClaims.jtAssets = toTrancheUnits(_baseJTAssets + _expectedBonus.mulDiv(1e18, _rate));
-        expectedClaims.nav = toNAVUnits(_baseNav + _expectedBonus);
+        expectedClaims.nav = toNAVUnits(_baseNav + _expectedBonusReported);
         vm.expectEmit(true, true, true, true, address(seniorTranche));
         emit IRoycoVaultTranche.Redeem(ST_PROVIDER, ST_PROVIDER, expectedClaims, _shares);
     }

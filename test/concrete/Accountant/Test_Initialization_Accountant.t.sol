@@ -328,7 +328,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
         assertEq(toUint256(s.lastJTRawNAV), 0, "lastJTRawNAV");
         assertEq(toUint256(s.lastSTEffectiveNAV), 0, "lastSTEffectiveNAV");
         assertEq(toUint256(s.lastJTEffectiveNAV), 0, "lastJTEffectiveNAV");
-        assertEq(toUint256(s.lastJTCoverageImpermanentLoss), 0, "lastJTCoverageImpermanentLoss");
+        assertEq(toUint256(s.lastJTImpermanentLoss), 0, "lastJTImpermanentLoss");
         assertEq(toUint256(s.lastLTRawNAV), 0, "lastLTRawNAV");
         assertEq(toUint256(s.stNAVDustTolerance), 3, "stNAVDustTolerance");
         assertEq(toUint256(s.jtNAVDustTolerance), 4, "jtNAVDustTolerance");

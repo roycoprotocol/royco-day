@@ -119,22 +119,21 @@ contract Test_QuoterComposedZeroRate is DayMarketTestBase {
 
     /**
      * @notice A sync at the zero composed rate marks stRaw and jtRaw to zero and the waterfall commits a
-     *         checkpoint that zeroes both effective NAVs, while both risk metrics read zero. The senior
-     *         max-deposit view then reverts instead of returning a number
+     *         checkpoint that zeroes both effective NAVs, while both risk metrics read zero. The booked
+     *         impermanent loss enters the fixed term, whose gate zeroes the senior max-deposit view
      * @dev Hand derivation from the seeded amounts: 100e18 senior shares and 30e18 junior shares deposited at a
      *      1.0 share price and a 1.0 feed mark stRaw = 100e18 and jtRaw = 30e18. At the collapsed rate the raw
      *      marks become floor(100e18 x 0 / 1e18) = 0 and floor(30e18 x 0 / 1e18) = 0, and the waterfall's
      *      conservation identity (stRaw + jtRaw == stEff + jtEff) forces stEff = jtEff = 0. The zeroed state
      *      reads healthy: coverage utilization returns 0 because there is no covered exposure left (0 raw NAV
      *      needs no protection), and liquidity utilization returns 0 because there is no senior value left to
-     *      market-make, so the market stays PERPETUAL. The sync commits the zeroed checkpoint
-     * @dev Max-deposit revert derivation: the view previews the sync at the live zero rate (previewed
-     *      jtEffectiveNAV = 0), so the coverage-bounded max is floor(0 x 1e18 / 0.2e18) saturating-minus the
-     *      dust-padded exposure = 0 NAV, the liquidity-bounded max is floor(6e18 x 1e18 / 0.05e18) - (0 + 1) =
-     *      120e18 - 1 NAV, and the binding minimum is 0 NAV. Zero is not the unlimited sentinel, so the view
-     *      backward-converts it at the live composed rate: floor(0 x 1e18 / 0) divides by zero, Panic(0x12)
+     *      market-make, but the junior wipe books its 30e18 drawdown as impermanent loss and the market enters
+     *      FIXED_TERM. The sync commits the zeroed checkpoint
+     * @dev Max-deposit derivation: the view previews the sync at the live zero rate, and the previewed state
+     *      carries the booked impermanent loss so it reads FIXED_TERM: the senior-deposit gate short-circuits
+     *      to zero tranche units before the backward conversion ever divides by the zero composed rate
      */
-    function test_ComposedZeroRate_syncCommitsZeroedNAVsAndMaxDepositReverts() public {
+    function test_ComposedZeroRate_syncCommitsZeroedNAVsAndMaxDepositReturnsZero() public {
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
         _collapseToComposedZeroRate();
 
@@ -158,18 +157,18 @@ contract Test_QuoterComposedZeroRate is DayMarketTestBase {
         assertEq(toUint256(committed.lastSTEffectiveNAV), 0, "the committed checkpoint must carry the wiped senior effective NAV");
         assertEq(toUint256(committed.lastJTEffectiveNAV), 0, "the committed checkpoint must carry the wiped junior effective NAV");
 
-        // Both risk metrics read healthy: zero exposure needs no coverage and zero senior value needs no
-        // liquidity, so the total wipe presents as a clean PERPETUAL market with nothing wrong
+        // Both risk metrics read healthy (zero exposure needs no coverage and zero senior value needs no
+        // liquidity), but the junior wipe books its full 30e18 drawdown as impermanent loss so the market enters FIXED_TERM
         assertEq(state.coverageUtilizationWAD, 0, "coverage utilization must read a healthy 0 (no covered exposure survives the wipe)");
         assertEq(state.liquidityUtilizationWAD, 0, "liquidity utilization must read a healthy 0 (no senior value survives the wipe)");
-        assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "the wipe must not move the state machine, the market still reads PERPETUAL");
+        assertEq(toUint256(state.jtImpermanentLoss), 30e18, "the junior wipe must book its full drawdown as impermanent loss");
+        assertEq(uint8(state.marketState), uint8(MarketState.FIXED_TERM), "the booked impermanent loss must enter the fixed term");
 
         // The quote-only LT pool is untouched by the senior share price, its 6e18 mark survives the collapse
         assertEq(toUint256(state.ltRawNAV), SEEDED_LT_RAW_NAV, "the quote-only LT depth must be unaffected by the senior pricing collapse");
 
-        // The max-deposit view reverts: converting the 0-NAV coverage-bounded max back to tranche units divides
-        // by the live zero composed rate, so integrators polling deposit capacity get a division-by-zero panic
-        vm.expectRevert(stdError.divisionError);
-        kernel.stMaxDeposit(ST_PROVIDER);
+        // The max-deposit view returns zero: the previewed FIXED_TERM state gates senior deposits before the
+        // backward conversion can divide by the live zero composed rate
+        assertEq(toUint256(kernel.stMaxDeposit(ST_PROVIDER)), 0, "the fixed-term gate must zero the senior deposit capacity without a panic");
     }
 }

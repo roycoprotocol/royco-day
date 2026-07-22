@@ -122,25 +122,25 @@ contract DayMarketHandler is DayMarketTestBase {
     /// @notice Cumulative idle liquidity premium senior shares handed directly to redeemers
     uint256 public ghost_idlePremiumSeniorSharesPaidToRedeemers;
 
-    /// @dev The cause of one recorded jtCoverageImpermanentLoss ledger movement
-    enum JTCoverageImpermanentLossCause {
+    /// @dev The cause of one recorded jtImpermanentLoss ledger movement
+    enum JTImpermanentLossCause {
         COVERAGE_APPLIED,
         RECOVERY,
         JT_REDEEM_SCALE,
         ERASED
     }
 
-    /// @dev One recorded jtCoverageImpermanentLoss ledger movement
-    struct JTCoverageImpermanentLossEvent {
-        JTCoverageImpermanentLossCause cause;
+    /// @dev One recorded jtImpermanentLoss ledger movement
+    struct JTImpermanentLossEvent {
+        JTImpermanentLossCause cause;
         uint256 magnitude;
     }
 
-    /// @notice The append-only log of every jtCoverageImpermanentLoss ledger movement with its cause
-    JTCoverageImpermanentLossEvent[] public ghost_jtCoverageImpermanentLossEvents;
+    /// @notice The append-only log of every jtImpermanentLoss ledger movement with its cause
+    JTImpermanentLossEvent[] public ghost_jtImpermanentLossEvents;
 
-    /// @dev The jtCoverageImpermanentLoss value implied by replaying the event log, checked against the committed value
-    uint256 internal ghost_jtCoverageImpermanentLossReplay;
+    /// @dev The jtImpermanentLoss value implied by replaying the event log, checked against the committed value
+    uint256 internal ghost_jtImpermanentLossReplay;
 
     // =============================
     // Share-price monotonicity trackers
@@ -238,7 +238,7 @@ contract DayMarketHandler is DayMarketTestBase {
         uint256 ltRawNAV;
         uint256 stEffectiveNAV;
         uint256 jtEffectiveNAV;
-        uint256 jtCoverageImpermanentLoss;
+        uint256 jtImpermanentLoss;
         uint256 coverageUtilizationWAD;
         uint256 minCoverageWAD;
         uint256 minLiquidityWAD;
@@ -297,7 +297,7 @@ contract DayMarketHandler is DayMarketTestBase {
         // Baseline the ghost ledgers and the price high-water marks off one verified sync
         _syncAndVerify("constructor");
         ghost_transferredIn[address(stJtVault)] = stJtVault.balanceOf(address(kernel));
-        ghost_jtCoverageImpermanentLossReplay = toUint256(accountant.getState().lastJTCoverageImpermanentLoss);
+        ghost_jtImpermanentLossReplay = toUint256(accountant.getState().lastJTImpermanentLoss);
     }
 
     // =============================
@@ -850,7 +850,7 @@ contract DayMarketHandler is DayMarketTestBase {
     /// @dev Runs one junior redemption under an independently derived revert prediction
     function _execJtRedeem(address _actor, uint256 _shares, Snap memory s) internal {
         Pred memory p;
-        uint256 jtCoverageImpermanentLossExpected = ghost_jtCoverageImpermanentLossReplay;
+        uint256 jtImpermanentLossExpected = ghost_jtImpermanentLossReplay;
         if (s.fixedTerm) {
             _expect(p, SEL_DISABLED_FT);
         } else if (s.jtSupply == 0) {
@@ -867,8 +867,8 @@ contract DayMarketHandler is DayMarketTestBase {
             if (totalRedeemed == 0) _expect(p, SEL_INVALID_POST_OP);
             uint256 jtEffAfter = s.jtEffectiveNAV - totalRedeemed;
             if (RoycoTestMath.computeCoverageUtilization(rawAfterST, rawAfterJT, s.minCoverageWAD, jtEffAfter) > WAD) _expect(p, SEL_COVERAGE);
-            if (totalRedeemed != 0 && s.jtCoverageImpermanentLoss != 0) {
-                jtCoverageImpermanentLossExpected = s.jtCoverageImpermanentLoss.mulDiv(jtEffAfter, s.jtEffectiveNAV);
+            if (totalRedeemed != 0 && s.jtImpermanentLoss != 0) {
+                jtImpermanentLossExpected = s.jtImpermanentLoss.mulDiv(jtEffAfter, s.jtEffectiveNAV);
             }
             if (_shares > juniorTranche.balanceOf(_actor)) _expect(p, SEL_ERC20_BALANCE);
         }
@@ -877,18 +877,18 @@ contract DayMarketHandler is DayMarketTestBase {
         try juniorTranche.redeem(_shares, _actor, _actor) {
             _recordSuccess("jtRedeem");
             ghost_transferredOut[address(stJtVault)] += stJtVault.balanceOf(_actor) - outBefore;
-            // A junior exit realizes its slice of the coverage loss ledger pro rata
-            if (jtCoverageImpermanentLossExpected != ghost_jtCoverageImpermanentLossReplay) {
-                ghost_jtCoverageImpermanentLossEvents.push(
-                    JTCoverageImpermanentLossEvent(
-                        JTCoverageImpermanentLossCause.JT_REDEEM_SCALE, ghost_jtCoverageImpermanentLossReplay - jtCoverageImpermanentLossExpected
+            // A junior exit realizes its slice of the impermanent loss ledger pro rata
+            if (jtImpermanentLossExpected != ghost_jtImpermanentLossReplay) {
+                ghost_jtImpermanentLossEvents.push(
+                    JTImpermanentLossEvent(
+                        JTImpermanentLossCause.JT_REDEEM_SCALE, ghost_jtImpermanentLossReplay - jtImpermanentLossExpected
                     )
                 );
-                ghost_jtCoverageImpermanentLossReplay = jtCoverageImpermanentLossExpected;
+                ghost_jtImpermanentLossReplay = jtImpermanentLossExpected;
             }
             _flag(
-                toUint256(accountant.getState().lastJTCoverageImpermanentLoss) == jtCoverageImpermanentLossExpected,
-                "jtRedeem coverage-loss scaling diverges from the floor mirror"
+                toUint256(accountant.getState().lastJTImpermanentLoss) == jtImpermanentLossExpected,
+                "jtRedeem impermanent-loss scaling diverges from the floor mirror"
             );
         } catch (bytes memory err) {
             _classify("jtRedeem", err, p);
@@ -1283,7 +1283,7 @@ contract DayMarketHandler is DayMarketTestBase {
             jtRawNAVLast: toUint256(a0.lastJTRawNAV),
             stEffectiveNAVLast: toUint256(a0.lastSTEffectiveNAV),
             jtEffectiveNAVLast: toUint256(a0.lastJTEffectiveNAV),
-            jtCoverageImpermanentLossLast: toUint256(a0.lastJTCoverageImpermanentLoss),
+            jtImpermanentLossLast: toUint256(a0.lastJTImpermanentLoss),
             marketStateLast: c.state0 == MarketState.PERPETUAL ? RoycoTestMath.MarketState.PERPETUAL : RoycoTestMath.MarketState.FIXED_TERM,
             fixedTermEndTimestampLast: uint256(a0.fixedTermEndTimestamp),
             stRawNAVDelta: int256(c.stRawNew) - int256(toUint256(a0.lastSTRawNAV)),
@@ -1343,8 +1343,8 @@ contract DayMarketHandler is DayMarketTestBase {
                 string.concat(_label, ": committed junior effective NAV diverges from the recomputation")
             );
             _flag(
-                toUint256(a1.lastJTCoverageImpermanentLoss) == c.w.jtCoverageImpermanentLoss,
-                string.concat(_label, ": committed coverage loss diverges from the recomputation")
+                toUint256(a1.lastJTImpermanentLoss) == c.w.jtImpermanentLoss,
+                string.concat(_label, ": committed impermanent loss diverges from the recomputation")
             );
             _flag(
                 (a1.lastMarketState == MarketState.PERPETUAL) == (c.w.marketState == RoycoTestMath.MarketState.PERPETUAL),
@@ -1355,11 +1355,11 @@ contract DayMarketHandler is DayMarketTestBase {
                 string.concat(_label, ": committed fixed-term end diverges from the recomputation")
             );
 
-            // Replay the coverage-loss ledger through its only four sanctioned movements
-            _recordCoverageImpermanentLossMovement(a0, c.w);
+            // Replay the impermanent-loss ledger through its only four sanctioned movements
+            _recordImpermanentLossMovement(a0, c.w);
             _flag(
-                ghost_jtCoverageImpermanentLossReplay == toUint256(a1.lastJTCoverageImpermanentLoss),
-                string.concat(_label, ": coverage-loss ledger replay diverges from the committed value")
+                ghost_jtImpermanentLossReplay == toUint256(a1.lastJTImpermanentLoss),
+                string.concat(_label, ": impermanent-loss ledger replay diverges from the committed value")
             );
 
             // The senior supply may grow only by the fee and liquidity premium share mint, both legs floor-priced
@@ -1453,33 +1453,33 @@ contract DayMarketHandler is DayMarketTestBase {
         s = _buildSnap(a1, k1, ltEffNavMirror);
     }
 
-    /// @dev Appends this sync's coverage-loss movement to the event log and advances the replay value
-    function _recordCoverageImpermanentLossMovement(IRoycoDayAccountant.RoycoDayAccountantState memory a0, RoycoTestMath.SyncOutputs memory w) internal {
-        uint256 jtCoverageImpermanentLossBefore = toUint256(a0.lastJTCoverageImpermanentLoss);
+    /// @dev Appends this sync's impermanent-loss movement to the event log and advances the replay value
+    function _recordImpermanentLossMovement(IRoycoDayAccountant.RoycoDayAccountantState memory a0, RoycoTestMath.SyncOutputs memory w) internal {
+        uint256 jtImpermanentLossBefore = toUint256(a0.lastJTImpermanentLoss);
         if (w.ilErased > 0) {
             // Erasure runs after any same-sync growth or recovery, so log that movement first
-            uint256 preErase = w.jtCoverageImpermanentLoss + w.ilErased;
-            if (preErase > jtCoverageImpermanentLossBefore) {
-                ghost_jtCoverageImpermanentLossEvents.push(
-                    JTCoverageImpermanentLossEvent(JTCoverageImpermanentLossCause.COVERAGE_APPLIED, preErase - jtCoverageImpermanentLossBefore)
+            uint256 preErase = w.jtImpermanentLoss + w.ilErased;
+            if (preErase > jtImpermanentLossBefore) {
+                ghost_jtImpermanentLossEvents.push(
+                    JTImpermanentLossEvent(JTImpermanentLossCause.COVERAGE_APPLIED, preErase - jtImpermanentLossBefore)
                 );
-            } else if (preErase < jtCoverageImpermanentLossBefore) {
-                ghost_jtCoverageImpermanentLossEvents.push(
-                    JTCoverageImpermanentLossEvent(JTCoverageImpermanentLossCause.RECOVERY, jtCoverageImpermanentLossBefore - preErase)
+            } else if (preErase < jtImpermanentLossBefore) {
+                ghost_jtImpermanentLossEvents.push(
+                    JTImpermanentLossEvent(JTImpermanentLossCause.RECOVERY, jtImpermanentLossBefore - preErase)
                 );
             }
-            ghost_jtCoverageImpermanentLossEvents.push(JTCoverageImpermanentLossEvent(JTCoverageImpermanentLossCause.ERASED, w.ilErased));
-            ghost_jtCoverageImpermanentLossReplay = w.jtCoverageImpermanentLoss;
-        } else if (w.jtCoverageImpermanentLoss > jtCoverageImpermanentLossBefore) {
-            ghost_jtCoverageImpermanentLossEvents.push(
-                JTCoverageImpermanentLossEvent(JTCoverageImpermanentLossCause.COVERAGE_APPLIED, w.jtCoverageImpermanentLoss - jtCoverageImpermanentLossBefore)
+            ghost_jtImpermanentLossEvents.push(JTImpermanentLossEvent(JTImpermanentLossCause.ERASED, w.ilErased));
+            ghost_jtImpermanentLossReplay = w.jtImpermanentLoss;
+        } else if (w.jtImpermanentLoss > jtImpermanentLossBefore) {
+            ghost_jtImpermanentLossEvents.push(
+                JTImpermanentLossEvent(JTImpermanentLossCause.COVERAGE_APPLIED, w.jtImpermanentLoss - jtImpermanentLossBefore)
             );
-            ghost_jtCoverageImpermanentLossReplay = ghost_jtCoverageImpermanentLossReplay + (w.jtCoverageImpermanentLoss - jtCoverageImpermanentLossBefore);
-        } else if (w.jtCoverageImpermanentLoss < jtCoverageImpermanentLossBefore) {
-            ghost_jtCoverageImpermanentLossEvents.push(
-                JTCoverageImpermanentLossEvent(JTCoverageImpermanentLossCause.RECOVERY, jtCoverageImpermanentLossBefore - w.jtCoverageImpermanentLoss)
+            ghost_jtImpermanentLossReplay = ghost_jtImpermanentLossReplay + (w.jtImpermanentLoss - jtImpermanentLossBefore);
+        } else if (w.jtImpermanentLoss < jtImpermanentLossBefore) {
+            ghost_jtImpermanentLossEvents.push(
+                JTImpermanentLossEvent(JTImpermanentLossCause.RECOVERY, jtImpermanentLossBefore - w.jtImpermanentLoss)
             );
-            ghost_jtCoverageImpermanentLossReplay = ghost_jtCoverageImpermanentLossReplay - (jtCoverageImpermanentLossBefore - w.jtCoverageImpermanentLoss);
+            ghost_jtImpermanentLossReplay = ghost_jtImpermanentLossReplay - (jtImpermanentLossBefore - w.jtImpermanentLoss);
         }
     }
 
@@ -1568,7 +1568,7 @@ contract DayMarketHandler is DayMarketTestBase {
         s.ltRawNAV = toUint256(a1.lastLTRawNAV);
         s.stEffectiveNAV = toUint256(a1.lastSTEffectiveNAV);
         s.jtEffectiveNAV = toUint256(a1.lastJTEffectiveNAV);
-        s.jtCoverageImpermanentLoss = toUint256(a1.lastJTCoverageImpermanentLoss);
+        s.jtImpermanentLoss = toUint256(a1.lastJTImpermanentLoss);
         s.coverageUtilizationWAD = RoycoTestMath.computeCoverageUtilization(s.stRawNAV, s.jtRawNAV, a1.minCoverageWAD, s.jtEffectiveNAV);
         s.minCoverageWAD = a1.minCoverageWAD;
         s.minLiquidityWAD = a1.minLiquidityWAD;
@@ -1665,8 +1665,8 @@ contract DayMarketHandler is DayMarketTestBase {
                 report,
                 " ltRawNAV=",
                 vm.toString(toUint256(a.lastLTRawNAV)),
-                " jtCoverageImpermanentLoss=",
-                vm.toString(toUint256(a.lastJTCoverageImpermanentLoss)),
+                " jtImpermanentLoss=",
+                vm.toString(toUint256(a.lastJTImpermanentLoss)),
                 " marketState=",
                 vm.toString(uint256(a.lastMarketState)),
                 " fixedTermEndTimestamp=",
@@ -1686,9 +1686,9 @@ contract DayMarketHandler is DayMarketTestBase {
         }
     }
 
-    /// @notice The number of recorded coverage-loss ledger movements
-    function jtCoverageImpermanentLossEventCount() external view returns (uint256) {
-        return ghost_jtCoverageImpermanentLossEvents.length;
+    /// @notice The number of recorded impermanent-loss ledger movements
+    function jtImpermanentLossEventCount() external view returns (uint256) {
+        return ghost_jtImpermanentLossEvents.length;
     }
 
     /// @notice String-keyed read of the anti-vacuity op-invocation ledger

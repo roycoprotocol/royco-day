@@ -72,7 +72,7 @@ abstract contract AccountantFuzzTestBase is AccountantTestBase {
         in_.jtRawNAVLast = toUint256(s.lastJTRawNAV);
         in_.stEffectiveNAVLast = toUint256(s.lastSTEffectiveNAV);
         in_.jtEffectiveNAVLast = toUint256(s.lastJTEffectiveNAV);
-        in_.jtCoverageImpermanentLossLast = toUint256(s.lastJTCoverageImpermanentLoss);
+        in_.jtImpermanentLossLast = toUint256(s.lastJTImpermanentLoss);
         in_.marketStateLast = RoycoTestMath.MarketState(uint8(s.lastMarketState));
         in_.fixedTermEndTimestampLast = s.fixedTermEndTimestamp;
         in_.stRawNAVDelta = int256(_stRawNew) - int256(in_.stRawNAVLast);

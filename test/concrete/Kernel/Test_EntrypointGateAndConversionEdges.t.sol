@@ -104,7 +104,7 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
      *      the 21e18 ST loss is fully covered so stEffectiveNAV = 100e18 and jtEffectiveNAV = 30e18 - 6.3e18 -
      *      21e18 = 2.7e18, coverageUtilizationWAD = ceil((79e18 + 23.7e18) x 0.2e18 / 2.7e18) =
      *      7607407407407407408 >= 6.4667e18, which takes the forced-PERPETUAL liquidation branch
-     *      (RoycoDayAccountant.sol:666-678) and erases the coverage IL
+     *      (RoycoDayAccountant.sol:666-678) and erases the IL
      * @dev LT gate derivation: redeeming 3e18 of the 6e18 LT shares would leave ltRawNAV = 3e18, and the post-op
      *      liquidityUtilizationWAD = ceil(100e18 x 0.05e18 / 3e18) = 1666666666666666667 > WAD, so the liquidity
      *      gate fires even though coverage is in liquidation
@@ -113,7 +113,7 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
         applySTPnL(-2100);
 
-        // Commit the liquidation breach: forced PERPETUAL with the coverage IL erased
+        // Commit the liquidation breach: forced PERPETUAL with the IL erased
         SyncedAccountingState memory pre = _sync();
         assertEq(toUint256(pre.stRawNAV), 79e18, "stRawNAV must be 100 whole shares x 0.79 x 1.0");
         assertEq(toUint256(pre.jtRawNAV), 23.7e18, "jtRawNAV must be 30 whole shares x 0.79 x 1.0");
@@ -121,7 +121,7 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
         assertEq(pre.coverageUtilizationWAD, 7_607_407_407_407_407_408, "coverageUtilizationWAD must be ceil(102.7e18 x 0.2e18 / 2.7e18)");
         assertGe(pre.coverageUtilizationWAD, pre.coverageLiquidationUtilizationWAD, "the liquidation threshold must be breached");
         assertEq(uint8(pre.marketState), uint8(MarketState.PERPETUAL), "a liquidation breach must force PERPETUAL");
-        assertEq(toUint256(pre.jtCoverageImpermanentLoss), 0, "the liquidation branch must erase the coverage IL");
+        assertEq(toUint256(pre.jtImpermanentLoss), 0, "the liquidation branch must erase the IL");
 
         // The JT redemption is coverage-gated during liquidation
         uint256 jtShares = juniorTranche.balanceOf(JT_PROVIDER) / 10;
