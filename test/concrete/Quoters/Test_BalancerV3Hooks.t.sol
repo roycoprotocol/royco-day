@@ -197,6 +197,57 @@ contract Test_SyncDispatch_BalancerV3Hooks is DayMarketTestBase {
     }
 
     /**
+     * @notice While the hook contract is paused, externally-routed add and remove liquidity are both halted at the
+     *         pre-operation sync, the same EnforcedPause gate that blocks external swaps
+     */
+    function test_RevertIf_ExternalAddOrRemoveLiquidityWhileHookPaused() public {
+        hooks.pause();
+
+        vm.prank(address(balancerVault));
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        hooks.onBeforeAddLiquidity(EXTERNAL_ROUTER, address(bpt), AddLiquidityKind.UNBALANCED, new uint256[](2), 0, new uint256[](2), "");
+
+        vm.prank(address(balancerVault));
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        hooks.onBeforeRemoveLiquidity(EXTERNAL_ROUTER, address(bpt), RemoveLiquidityKind.PROPORTIONAL, 0, new uint256[](2), new uint256[](2), "");
+    }
+
+    /**
+     * @notice Unpausing the hook restores externally-routed add and remove liquidity, and the restored path still
+     *         syncs, committing pending senior PnL before each operation rather than passing vacuously
+     */
+    function test_ExternalAddAndRemoveLiquidity_RecoverAfterUnpause() public {
+        _seedMarket(100e18, 50e18);
+        uint256 ownedAssets = toUint256(kernel.getState().stOwnedYieldBearingAssets);
+        hooks.pause();
+        hooks.unpause();
+
+        applySTPnL(500); // +5%: vault rate 1.0 -> 1.05
+        vm.prank(address(balancerVault));
+        assertTrue(
+            hooks.onBeforeAddLiquidity(EXTERNAL_ROUTER, address(bpt), AddLiquidityKind.UNBALANCED, new uint256[](2), 0, new uint256[](2), ""),
+            "the externally-routed add must pass after the unpause"
+        );
+        assertEq(
+            toUint256(accountant.getState().lastSTRawNAV),
+            Math.mulDiv(ownedAssets, 1.05e18, 1e18, Math.Rounding.Floor),
+            "the recovered add hook must still commit the pending senior PnL"
+        );
+
+        applySTPnL(500); // a further +5% on the new rate: 1.05 x 1.05 = 1.1025
+        vm.prank(address(balancerVault));
+        assertTrue(
+            hooks.onBeforeRemoveLiquidity(EXTERNAL_ROUTER, address(bpt), RemoveLiquidityKind.PROPORTIONAL, 0, new uint256[](2), new uint256[](2), ""),
+            "the externally-routed removal must pass after the unpause"
+        );
+        assertEq(
+            toUint256(accountant.getState().lastSTRawNAV),
+            Math.mulDiv(ownedAssets, 1.1025e18, 1e18, Math.Rounding.Floor),
+            "the recovered remove hook must still commit the compounded senior PnL"
+        );
+    }
+
+    /**
      * @notice A hook deployed WITHOUT the sync role makes every external pool operation revert with the hook's own
      *         AccessManagedUnauthorized, so a deploy-time grant omission produces an operationally dead pool
      * @dev This pins the liveness dependency from the failure side: the pool's external flow depends on one role

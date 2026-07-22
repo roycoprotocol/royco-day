@@ -27,10 +27,8 @@ abstract contract BaseDeploymentTemplate is IBaseTemplate {
     // ERRORS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /**
-     * @notice Thrown when a market proxy was already deployed at its CREATE3 address, signals a `marketId`
-     *         collision that would re-use the pre-existing contract instead of producing a fresh market
-     */
+    /// @notice Thrown when a market proxy was already deployed at its CREATE3 address, signals a `marketId`
+    ///         collision that would re-use the pre-existing contract instead of producing a fresh market
     error MARKET_COMPONENT_ALREADY_DEPLOYED(address deployedAt, bytes32 salt);
 
     // ═══════════════════════════════════════════════════════════════════════════

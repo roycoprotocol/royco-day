@@ -13,11 +13,12 @@ import { IRoycoDayKernel } from "../../../../../interfaces/IRoycoDayKernel.sol";
 import { Cache, CacheKey } from "../../../../../libraries/Cache.sol";
 import { WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../../../../libraries/Constants.sol";
 import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../../../libraries/Units.sol";
+import { DispatchLogic } from "../../../../../libraries/logic/DispatchLogic.sol";
 import { FeeAndLiquidityPremiumLogic } from "../../../../../libraries/logic/FeeAndLiquidityPremiumLogic.sol";
 import { ValuationLogic } from "../../../../../libraries/logic/ValuationLogic.sol";
 import { RoycoDayKernel, SyncedAccountingState } from "../../../RoycoDayKernel.sol";
 import { IBalancerV3VenueCallbacks } from "./interfaces/IBalancerV3VenueCallbacks.sol";
-import { BalancerV3VenueImmutableState, BalancerV3VenueLogic } from "./libraries/BalancerV3VenueLogic.sol";
+import { BalancerV3VenueLogic } from "./libraries/BalancerV3VenueLogic.sol";
 
 /**
  * @title BalancerV3_LT_BPTOracle_Quoter
@@ -29,6 +30,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     using RoycoUnitsMath for NAV_UNIT;
     using RoycoUnitsMath for TRANCHE_UNIT;
     using SafeERC20 for IERC20;
+    using DispatchLogic for address;
 
     /// @dev Storage slot for BalancerV3_LT_BPTOracle_QuoterState using ERC-7201 pattern
     // keccak256(abi.encode(uint256(keccak256("Royco.storage.BalancerV3_LT_BPTOracle_QuoterState")) - 1)) & ~bytes32(uint256(0xff))
@@ -48,7 +50,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
      * @notice The namespaced storage for the BalancerV3_LT_BPTOracle_Quoter
      * @custom:storage-location erc7201:Royco.storage.BalancerV3_LT_BPTOracle_QuoterState
      * @custom:field bptOracle - The manipulation-resistant Balancer V3 pool token (BPT) oracle used to value the liquidity tranche assets
-     * @custom:field maxReinvestmentSlippageWAD - The maximum slippage tolerated when single-sided reinvesting the liquidity premium ST shares into the BPT, scaled to WAD precision, above this threshold the reinvestment defers to the auction fallback
+     * @custom:field maxReinvestmentSlippageWAD - The maximum slippage tolerated when single-sided reinvesting the liquidity premium ST shares into the BPT, scaled to WAD precision, a reinvestment breaching it is skipped and the premium shares remain idle
      */
     struct BalancerV3_LT_BPTOracle_QuoterState {
         address bptOracle;
@@ -90,11 +92,8 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
     /// @notice Thrown when the BPT oracle prices a pool other than this market's registered liquidity tranche pool
     error BPT_ORACLE_POOL_MISMATCH();
 
-    /// @notice Thrown when the BPT oracle reverts while the vault is unlocked, which the venue reads it through (previews and hooks)
+    /// @notice Thrown when setting a BPT oracle configured to revert while the vault is unlocked, the venue reads it through the unlocked vault (previews and hooks)
     error BPT_ORACLE_CANNOT_REVERT_WHILE_VAULT_UNLOCKED();
-
-    /// @notice Thrown when a preview-mode venue callback returns instead of unwinding via its result-carrying revert
-    error PREVIEW_CANNOT_MUTATE_STATE();
 
     /// @notice Constructs the Balancer V3 liquidity tranche quoter
     /// @param _balancerV3Vault The instance of the singleton Balancer V3 Vault
@@ -192,60 +191,12 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
 
     /**
      * @inheritdoc IRoycoDayKernel
-     * @dev Routes the add through the unlocked Vault so it simulates the BPT minted, and their valuation against the
-     *      post-add pool state, under the Vault's real semantics. The preview-mode callback unwinds every transient balance
-     *      change by reverting with the result decoded here, so the preview is callable inside a transaction (the Vault's
-     *      query mode is restricted to static calls)
-     * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
-     */
-    function previewAddLiquidity(
-        uint256 _seniorShares,
-        uint256 _quoteAssets
-    )
-        external
-        override(IRoycoDayKernel)
-        onlySelf
-        returns (TRANCHE_UNIT ltAssets, NAV_UNIT depositNAV)
-    {
-        try _vault.unlock(abi.encodeCall(this.addBalancerV3Liquidity, (true, _seniorShares, _quoteAssets, ZERO_TRANCHE_UNITS))) {
-            // Unreachable: a preview-mode callback always unwinds via its result-carrying revert
-            revert PREVIEW_CANNOT_MUTATE_STATE();
-        } catch (bytes memory callbackRevertData) {
-            _validatePreviewResult(callbackRevertData, BalancerV3VenueLogic.PREVIEW_ADD_LIQUIDITY_RESULT.selector);
-            assembly ("memory-safe") {
-                ltAssets := mload(add(callbackRevertData, 0x24))
-                depositNAV := mload(add(callbackRevertData, 0x44))
-            }
-        }
-    }
-
-    /**
-     * @inheritdoc IRoycoDayKernel
-     * @dev Routes the removal through the unlocked Vault so it simulates the constituents withdrawn under the Vault's real
-     *      semantics. The preview-mode callback unwinds every transient balance change by reverting with the result decoded
-     *      here, so the preview is callable inside a transaction (the Vault's query mode is restricted to static calls)
-     * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
-     */
-    function previewRemoveLiquidity(TRANCHE_UNIT _ltAssets) external override(IRoycoDayKernel) onlySelf returns (uint256 stShares, uint256 quoteAssets) {
-        try _vault.unlock(abi.encodeCall(this.removeBalancerV3Liquidity, (true, _ltAssets, uint256(0), uint256(0), address(0)))) {
-            // Unreachable: a preview-mode callback always unwinds via its result-carrying revert
-            revert PREVIEW_CANNOT_MUTATE_STATE();
-        } catch (bytes memory callbackRevertData) {
-            _validatePreviewResult(callbackRevertData, BalancerV3VenueLogic.PREVIEW_REMOVE_LIQUIDITY_RESULT.selector);
-            assembly ("memory-safe") {
-                stShares := mload(add(callbackRevertData, 0x24))
-                quoteAssets := mload(add(callbackRevertData, 0x44))
-            }
-        }
-    }
-
-    /**
-     * @inheritdoc IRoycoDayKernel
-     * @dev Unlocks the Balancer V3 Vault and dispatches into the add liquidity callback above
-     * @dev The vault is required to be unlocked with a callback in order to transition into a transient accounting state, expecting the callback to settle all credit and debt before returning
+     * @dev Dispatches the add liquidity callback below through the unlocked Vault
+     * @dev A preview unwinds every transient balance change via the callback's result-carrying revert
      * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
      */
     function addLiquidity(
+        bool _isPreview,
         uint256 _seniorShares,
         uint256 _quoteAssets,
         TRANCHE_UNIT _minLTAssetsOut
@@ -253,22 +204,30 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         external
         override(IRoycoDayKernel)
         onlySelf
-        returns (TRANCHE_UNIT ltAssets)
+        returns (TRANCHE_UNIT ltAssets, NAV_UNIT depositNAV, NAV_UNIT postOpLTRawNAV)
     {
-        // Unlock the Balancer vault, execute the callback to mint the liquidity position from the specified senior tranche shares and quote assets
-        bytes memory callbackReturnData = _vault.unlock(abi.encodeCall(this.addBalancerV3Liquidity, (false, _seniorShares, _quoteAssets, _minLTAssetsOut)));
-        assembly ("memory-safe") {
-            ltAssets := mload(add(callbackReturnData, 0x20))
-        }
+        // Both transports yield the unlock's ABI encoded bytes return byte for byte
+        (ltAssets, depositNAV, postOpLTRawNAV) = abi.decode(
+            abi.decode(
+                address(_vault)
+                    ._dispatch(
+                        _isPreview,
+                        abi.encodeCall(_vault.unlock, (abi.encodeCall(this.addBalancerV3Liquidity, (_isPreview, _seniorShares, _quoteAssets, _minLTAssetsOut))))
+                    ),
+                (bytes)
+            ),
+            (TRANCHE_UNIT, NAV_UNIT, NAV_UNIT)
+        );
     }
 
     /**
      * @inheritdoc IRoycoDayKernel
-     * @dev Unlocks the Balancer V3 Vault and dispatches into the remove liquidity callback above
-     * @dev The vault is required to be unlocked with a callback in order to transition into a transient accounting state, expecting the callback to settle all credit and debt before returning
+     * @dev Dispatches the remove liquidity callback below through the unlocked Vault
+     * @dev A preview unwinds every transient balance change via the callback's result-carrying revert
      * @dev Only invoked via a self-call from the kernel's delegatecall logic libraries
      */
     function removeLiquidity(
+        bool _isPreview,
         TRANCHE_UNIT _ltAssets,
         uint256 _minSTSharesOut,
         uint256 _minQuoteAssetsOut,
@@ -277,15 +236,23 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         external
         override(IRoycoDayKernel)
         onlySelf
-        returns (uint256 stShares, uint256 quoteAssets)
+        returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT postOpLTRawNAV)
     {
-        // Unlock the Balancer vault, execute the callback to unwrap the specified units of the liquidity position
-        bytes memory callbackReturnData =
-            _vault.unlock(abi.encodeCall(this.removeBalancerV3Liquidity, (false, _ltAssets, _minSTSharesOut, _minQuoteAssetsOut, _quoteAssetsReceiver)));
-        assembly ("memory-safe") {
-            stShares := mload(add(callbackReturnData, 0x20))
-            quoteAssets := mload(add(callbackReturnData, 0x40))
-        }
+        // Both transports yield the unlock's ABI encoded bytes return byte for byte
+        (stShares, quoteAssets, postOpLTRawNAV) = abi.decode(
+            abi.decode(
+                address(_vault)
+                    ._dispatch(
+                        _isPreview,
+                        abi.encodeCall(
+                            _vault.unlock,
+                            (abi.encodeCall(this.removeBalancerV3Liquidity, (_isPreview, _ltAssets, _minSTSharesOut, _minQuoteAssetsOut, _quoteAssetsReceiver)))
+                        )
+                    ),
+                (bytes)
+            ),
+            (uint256, uint256, NAV_UNIT)
+        );
     }
 
     /**
@@ -328,9 +295,11 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         external
         override(IBalancerV3VenueCallbacks)
         onlyVault
-        returns (uint256 ltAssets)
+        returns (uint256 ltAssets, NAV_UNIT depositNAV, NAV_UNIT postOpLTRawNAV)
     {
-        return BalancerV3VenueLogic.addBalancerV3Liquidity(_getBalancerV3VenueImmutableState(), _isPreview, _seniorShares, _quoteAssets, _minLTAssetsOut);
+        return BalancerV3VenueLogic.addBalancerV3Liquidity(
+            _getBalancerV3VenueImmutableState(), _isPreview, _getRoycoDayKernelStorage().ltOwnedYieldBearingAssets, _seniorShares, _quoteAssets, _minLTAssetsOut
+        );
     }
 
     /// @inheritdoc IBalancerV3VenueCallbacks
@@ -344,10 +313,16 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         external
         override(IBalancerV3VenueCallbacks)
         onlyVault
-        returns (uint256 stShares, uint256 quoteAssets)
+        returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT postOpLTRawNAV)
     {
         return BalancerV3VenueLogic.removeBalancerV3Liquidity(
-            _getBalancerV3VenueImmutableState(), _isPreview, _ltAssets, _minSTSharesOut, _minQuoteAssetsOut, _quoteAssetsReceiver
+            _getBalancerV3VenueImmutableState(),
+            _isPreview,
+            _getRoycoDayKernelStorage().ltOwnedYieldBearingAssets,
+            _ltAssets,
+            _minSTSharesOut,
+            _minQuoteAssetsOut,
+            _quoteAssetsReceiver
         );
     }
 
@@ -385,20 +360,6 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         return (_account == address(_vault));
     }
 
-    /**
-     * @dev Asserts that a caught preview revert carries the expected result, bubbling any genuine venue failure unchanged
-     * @param _callbackRevertData The revert data caught from the vault callback
-     * @param _expectedErrorSelector The expected preview result error selector
-     */
-    function _validatePreviewResult(bytes memory _callbackRevertData, bytes4 _expectedErrorSelector) internal pure {
-        assembly ("memory-safe") {
-            // Revert with any genuine, unexpected venue failure
-            if iszero(eq(shr(224, mload(add(_callbackRevertData, 0x20))), shr(224, _expectedErrorSelector))) {
-                revert(add(_callbackRevertData, 0x20), mload(_callbackRevertData))
-            }
-        }
-    }
-
     /// @notice Sets the new BPT oracle
     /// @param _bptOracle The new manipulation-resistant balancer pool token (BPT) oracle
     function _setBPTOracle(address _bptOracle) internal {
@@ -426,8 +387,8 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
      * @dev A delegatecalled library cannot read the quoter's immutables directly, so they are passed in via this struct
      * @return immutables The quoter's Balancer V3 vault, required asset and tranche addresses, and the corresponding asset indexes in the pool
      */
-    function _getBalancerV3VenueImmutableState() internal view returns (BalancerV3VenueImmutableState memory immutables) {
-        return BalancerV3VenueImmutableState({
+    function _getBalancerV3VenueImmutableState() internal view returns (IBalancerV3VenueCallbacks.BalancerV3VenueImmutableState memory immutables) {
+        return IBalancerV3VenueCallbacks.BalancerV3VenueImmutableState({
             vault: _vault,
             ltAsset: LT_ASSET,
             seniorTranche: SENIOR_TRANCHE,

@@ -45,10 +45,8 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
     // Construction and Initialization Functions
     // =============================
 
-    /**
-     * @dev Constructs the accountant with the specified kernel
-     * @param _kernel The kernel that this accountant maintains mark-to-market NAV, JT coverage impermanent loss, and fee accounting for
-     */
+    /// @dev Constructs the accountant with the specified kernel
+    /// @param _kernel The kernel that this accountant maintains mark-to-market NAV, JT coverage impermanent loss, and fee accounting for
     constructor(address _kernel) {
         // Ensure the specified kernel is not null and immutably set it
         require(_kernel != address(0), NULL_ADDRESS());

@@ -111,9 +111,11 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkOracle_Quoter is IdenticalAsset
             trancheAssetPriceInReferenceAsset.mulDiv(referenceAssetToNAVUnitConversionRateWAD, pricePrecision, Math.Rounding.Floor);
     }
 
-    /// @inheritdoc IdenticalAssets_ST_JT_Oracle_Quoter
-    /// @dev The sentinel value (0) routes pricing back to the Chainlink (compatible) oracle, so it is only accepted while an oracle is configured
-    /// @dev Access control is enforced by the root setter this dispatches to, a second restricted here would consume a delayed admin operation twice
+    /**
+     * @inheritdoc IdenticalAssets_ST_JT_Oracle_Quoter
+     * @dev The sentinel value (0) routes pricing back to the Chainlink (compatible) oracle, so it is only accepted while an oracle is configured
+     * @dev Access control is enforced by the root setter this dispatches to, a second restricted here would consume a delayed admin operation twice
+     */
     function setConversionRate(uint256 _conversionRateWAD, bool _syncBeforeUpdate) public virtual override(IdenticalAssets_ST_JT_Oracle_Quoter) {
         // Storing the sentinel without an oracle would leave the market with no price source
         require(

@@ -216,13 +216,41 @@ library AccountingSyncLogic {
         internal
         returns (SyncedAccountingState memory state)
     {
+        return _postOpSyncTrancheAccounting(
+            $, _immutables, _op, ValuationLogic._getLiquidityTrancheRawNAV($), _stSelfLiquidationBonusNAV, _enforceCoverageAndLiquidityRequirements
+        );
+    }
+
+    /**
+     * @notice Executes a post-operation sync at a caller-marked liquidity tranche raw NAV
+     * @dev Used by flows whose venue interaction marked the post-op LT raw NAV inside the venue frame, so preview and
+     *      execution enforce against the same mark
+     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
+     * @param _op The operation being executed in between the pre and post synchronizations
+     * @param _ltRawNAV The post-op liquidity tranche raw NAV, marked by the caller at the venue's post-op state
+     * @param _stSelfLiquidationBonusNAV The NAV of assets from JT effective NAV used as a bonus for ST redemptions (only nonzero if _op == ST_REDEEM || LT_MULTI_ASSET_REDEEM)
+     * @param _enforceCoverageAndLiquidityRequirements Whether to enforce the market's coverage and liquidity requirements applicable to the operation
+     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
+     */
+    function _postOpSyncTrancheAccounting(
+        IRoycoDayKernel.RoycoDayKernelState storage $,
+        IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
+        Operation _op,
+        NAV_UNIT _ltRawNAV,
+        NAV_UNIT _stSelfLiquidationBonusNAV,
+        bool _enforceCoverageAndLiquidityRequirements
+    )
+        internal
+        returns (SyncedAccountingState memory state)
+    {
         // Execute the post-op sync on the accountant, committing the final state of the accounting and enforcing the market's requirements if specified
         state = IRoycoDayAccountant(_immutables.accountant)
             .postOpSyncTrancheAccounting(
                 _op,
                 ValuationLogic._getSeniorTrancheRawNAV($),
                 ValuationLogic._getJuniorTrancheRawNAV($),
-                ValuationLogic._getLiquidityTrancheRawNAV($),
+                _ltRawNAV,
                 _stSelfLiquidationBonusNAV,
                 _enforceCoverageAndLiquidityRequirements
             );

@@ -59,7 +59,7 @@ contract Test_BalancerPoolInitialization_Kernel is DayMarketTestBase {
         _fundDepositLegs(LT_PROVIDER, 0, quoteAssets);
 
         vm.prank(LT_PROVIDER);
-        uint256 shares = liquidityTranche.depositMultiAsset(0, quoteAssets, expectedNet, LT_PROVIDER);
+        (uint256 shares,) = liquidityTranche.depositMultiAsset(0, quoteAssets, expectedNet, LT_PROVIDER);
 
         assertTrue(balancerVault.isPoolInitialized(address(bpt)), "the first deposit must latch the pool initialized");
         assertEq(shares, expectedNet, "the LT bootstrap must mint shares 1:1 with the net genesis deposit NAV");
@@ -94,7 +94,7 @@ contract Test_BalancerPoolInitialization_Kernel is DayMarketTestBase {
 
         // Side 2: exactly the net mint passes and seeds the pool
         vm.prank(LT_PROVIDER);
-        uint256 shares = liquidityTranche.depositMultiAsset(0, quoteAssets, expectedNet, LT_PROVIDER);
+        (uint256 shares,) = liquidityTranche.depositMultiAsset(0, quoteAssets, expectedNet, LT_PROVIDER);
         assertEq(shares, expectedNet, "the floor at exactly the net mint must pass");
         assertTrue(balancerVault.isPoolInitialized(address(bpt)), "the exact-floor seed must latch the pool initialized");
     }
@@ -107,12 +107,12 @@ contract Test_BalancerPoolInitialization_Kernel is DayMarketTestBase {
         uint256 quoteAssets = 8000 * QUOTE_UNIT;
         _fundDepositLegs(LT_PROVIDER, 0, quoteAssets);
 
-        uint256 quoted = liquidityTranche.previewDepositMultiAsset(0, quoteAssets);
+        (uint256 quoted,) = liquidityTranche.previewDepositMultiAsset(0, quoteAssets);
         assertFalse(balancerVault.isPoolInitialized(address(bpt)), "the preview must unwind the simulated seed's initialization latch");
         assertEq(bpt.totalSupply(), 0, "the preview must unwind the simulated genesis mint");
 
         vm.prank(LT_PROVIDER);
-        uint256 shares = liquidityTranche.depositMultiAsset(0, quoteAssets, 0, LT_PROVIDER);
+        (uint256 shares,) = liquidityTranche.depositMultiAsset(0, quoteAssets, 0, LT_PROVIDER);
         assertEq(quoted, shares, "the preview must quote exactly the executed genesis seed's shares");
     }
 
@@ -186,7 +186,7 @@ contract Test_BalancerPoolInitialization_SeniorLeg_Kernel is DayMarketTestBase {
         _fundDepositLegs(LT_PROVIDER, stAssets, quoteAssets);
 
         vm.prank(LT_PROVIDER);
-        uint256 shares = liquidityTranche.depositMultiAsset(stAssets, quoteAssets, expectedNet, LT_PROVIDER);
+        (uint256 shares,) = liquidityTranche.depositMultiAsset(stAssets, quoteAssets, expectedNet, LT_PROVIDER);
 
         assertTrue(balancerVault.isPoolInitialized(address(bpt)), "the first deposit must latch the pool initialized");
         assertEq(shares, expectedNet, "the LT bootstrap must mint shares 1:1 with the net genesis deposit NAV");

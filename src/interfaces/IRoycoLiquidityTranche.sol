@@ -13,9 +13,6 @@ import { IRoycoVaultTranche } from "./IRoycoVaultTranche.sol";
  *      own hooks, so this surface stays venue-agnostic
  */
 interface IRoycoLiquidityTranche is IRoycoVaultTranche {
-    /// @notice Thrown when a multi-asset deposit is made with zero of both constituent assets (ST underlying and quote)
-    error MUST_DEPOSIT_NON_ZERO_ASSETS();
-
     /**
      * @notice Emitted on a multi-asset LT deposit (ST underlying + quote -> LP token -> LT shares)
      * @param caller The address that initiated the deposit
@@ -47,28 +44,16 @@ interface IRoycoLiquidityTranche is IRoycoVaultTranche {
      * @param _minLTAssetsOut The minimum LP token the liquidity add must mint (slippage bound against an unfavorable pool state), denominated in the LT asset's native units
      * @param _receiver The address that receives the minted LT shares
      * @return shares The number of LT shares minted to the receiver
+     * @return ltAssetsOut The LT tranche assets (the LP token) minted by the liquidity add and deposited into the LT, denominated in the LT asset's native units
      */
-    function depositMultiAsset(uint256 _stAssets, uint256 _quoteAssets, uint256 _minLTAssetsOut, address _receiver) external returns (uint256 shares);
-
-    /**
-     * @notice Previews a multi-asset LT deposit of (ST underlying + quote): the LT shares it would mint
-     * @dev NON-VIEW: simulates the venue add by executing it and unwinding via a result-carrying revert, mutating no state net
-     * @param _stAssets The ST underlying leg, denominated in the ST asset's native units
-     * @param _quoteAssets The quote asset leg
-     * @return shares The LT shares that would be minted to a receiver
-     */
-    function previewDepositMultiAsset(uint256 _stAssets, uint256 _quoteAssets) external returns (uint256 shares);
-
-    /**
-     * @notice Returns the maximum number of LT shares that can be redeemed from the specified owner's balance via a multi-asset redemption
-     * @dev A multi-asset redemption redeems its senior tranche share legs in-flow, shrinking the market's liquidity requirement
-     *      alongside the withdrawal, so this bound is at least maxRedeem, and strictly exceeds it whenever the liquidity
-     *      requirement binds and the removal's senior-share legs carry value
-     * @dev NON-VIEW: sizes the requirement reduction through the venue removal's execute-and-revert preview, which mutates no state net
-     * @param _owner The address that owns the LT shares being redeemed
-     * @return shares The maximum number of LT shares that can be redeemed multi-asset
-     */
-    function maxRedeemMultiAsset(address _owner) external returns (uint256 shares);
+    function depositMultiAsset(
+        uint256 _stAssets,
+        uint256 _quoteAssets,
+        uint256 _minLTAssetsOut,
+        address _receiver
+    )
+        external
+        returns (uint256 shares, uint256 ltAssetsOut);
 
     /**
      * @notice Exits the LT to the LP token's constituent assets: ST underlying + quote
@@ -93,11 +78,35 @@ interface IRoycoLiquidityTranche is IRoycoVaultTranche {
         returns (AssetClaims memory stClaims, uint256 quoteAssets);
 
     /**
+     * @notice Previews a multi-asset LT deposit of (ST underlying + quote): the LT shares it would mint and the LT tranche assets the add would produce
+     * @dev NON-VIEW: routes the deposit through its execute-and-revert simulation, which mutates no state net
+     * @dev The quote is produced by the actual kernel multi-asset deposit path, so any revert the deposit would raise bubbles unchanged
+     * @param _stAssets The ST underlying leg, denominated in the ST asset's native units
+     * @param _quoteAssets The quote asset leg
+     * @return shares The LT shares that would be minted to a receiver
+     * @return ltAssetsOut The LT tranche assets the liquidity add would mint, denominated in the LT asset's native units
+     */
+    function previewDepositMultiAsset(uint256 _stAssets, uint256 _quoteAssets) external returns (uint256 shares, uint256 ltAssetsOut);
+
+    /**
      * @notice Previews a multi-asset LT redemption of _shares: the ST underlying claims and quote it would yield
-     * @dev NON-VIEW: simulates the venue removal by executing it and unwinding via a result-carrying revert, mutating no state net
+     * @dev NON-VIEW: routes the redemption through its execute-and-revert simulation, which mutates no state net
+     * @dev The quote is produced by the actual kernel multi-asset redemption path, so any revert the redemption would raise bubbles unchanged
      * @param _shares The number of LT shares to redeem
      * @return stClaims The ST redemption asset claims that would be transferred to the receiver
      * @return quoteAssets The quote assets that would be transferred to the receiver
      */
     function previewRedeemMultiAsset(uint256 _shares) external returns (AssetClaims memory stClaims, uint256 quoteAssets);
+
+    /**
+     * @notice Returns the maximum number of LT shares that can be redeemed from the specified owner's balance via a multi-asset redemption
+     * @dev A multi-asset redemption redeems its senior tranche share legs in-flow, shrinking the market's liquidity requirement
+     *      alongside the withdrawal, so this bound is at least maxRedeem, and strictly exceeds it whenever the liquidity
+     *      requirement binds and the removal's senior-share legs carry value
+     * @dev NON-VIEW: sizes the requirement reduction through the venue removal's execute-and-revert preview, which mutates no state net
+     * @param _owner The address that owns the LT shares being redeemed
+     * @return shares The maximum number of LT shares that can be redeemed multi-asset
+     */
+    function maxRedeemMultiAsset(address _owner) external returns (uint256 shares);
+
 }

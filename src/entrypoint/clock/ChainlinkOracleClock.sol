@@ -27,8 +27,7 @@ contract ChainlinkOracleClock is IOracleClock {
     /// @inheritdoc IOracleClock
     function poke() external view override(IOracleClock) returns (uint32 lastUpdatedAt) {
         (,,, uint256 updatedAt,) = ORACLE.latestRoundData();
-        // The cast must fail loudly: truncating a garbage timestamp could disguise a future time as a past one,
-        // defeating the entry point's fail-shut future-timestamp check
+        // The cast must fail loudly, truncating garbage could disguise a future timestamp as past and defeat the fail-shut check
         return updatedAt.toUint32();
     }
 

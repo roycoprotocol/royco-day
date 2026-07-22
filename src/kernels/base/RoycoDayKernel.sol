@@ -177,38 +177,11 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     function ltConvertNAVUnitsToTrancheUnits(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
 
     // =============================
-    // Tranche Preview Deposit and Redeem Functions
-    // =============================
-
-    /// @inheritdoc IRoycoDayKernel
-    function ltPreviewDepositMultiAsset(
-        TRANCHE_UNIT _stAssets,
-        uint256 _quoteAssets
-    )
-        external
-        virtual
-        override(IRoycoDayKernel)
-        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT ltAssetsOut, uint256 ltTotalSupplyAfterMints)
-    {
-        return DepositLogic.ltPreviewDepositMultiAsset(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _stAssets, _quoteAssets);
-    }
-
-    /// @inheritdoc IRoycoDayKernel
-    function ltPreviewRedeemMultiAsset(uint256 _ltShares)
-        external
-        virtual
-        override(IRoycoDayKernel)
-        returns (AssetClaims memory stClaims, uint256 quoteAssets)
-    {
-        return RedemptionLogic.ltPreviewRedeemMultiAsset(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _ltShares);
-    }
-
-    // =============================
     // Tranche Max Deposit and Redeem Functions
     // =============================
 
     /// @inheritdoc IRoycoDayKernel
-    /// @dev ST deposits are allowed only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-deposit
+    /// @dev ST deposits are allowed only in a PERPETUAL market state, granted that the market's coverage and liquidity requirements are satisfied post-deposit
     function stMaxDeposit(address _receiver) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT) {
         return DepositLogic.stMaxDeposit(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _receiver);
     }
@@ -310,8 +283,8 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     // =============================
 
     /// @inheritdoc IRoycoDayKernel
-    /// @dev ST deposits are enabled only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-deposit
-    function stDeposit(TRANCHE_UNIT _assets)
+    /// @dev ST deposits are enabled only in a PERPETUAL market state, granted that the market's coverage and liquidity requirements are satisfied post-deposit
+    function stDeposit(bool _isPreview, TRANCHE_UNIT _assets)
         external
         virtual
         override(IRoycoDayKernel)
@@ -319,14 +292,15 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         onlySeniorTranche
         nonReentrant
         withQuoterCache
-        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV)
+        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, uint256 totalTrancheShares)
     {
-        return DepositLogic.stDeposit(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _assets);
+        return DepositLogic.stDeposit(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _isPreview, _assets);
     }
 
     /// @inheritdoc IRoycoDayKernel
     /// @dev ST redemptions are enabled if the market is in a PERPETUAL state
     function stRedeem(
+        bool _isPreview,
         uint256 _shares,
         address _receiver
     )
@@ -339,7 +313,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         withQuoterCache
         returns (AssetClaims memory userAssetClaims)
     {
-        return RedemptionLogic.stRedeem(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _shares, _receiver);
+        return RedemptionLogic.stRedeem(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _isPreview, _shares, _receiver);
     }
 
     // =============================
@@ -348,7 +322,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @inheritdoc IRoycoDayKernel
     /// @dev JT deposits are enabled if the market is in a PERPETUAL state
-    function jtDeposit(TRANCHE_UNIT _assets)
+    function jtDeposit(bool _isPreview, TRANCHE_UNIT _assets)
         external
         virtual
         override(IRoycoDayKernel)
@@ -356,14 +330,15 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         onlyJuniorTranche
         nonReentrant
         withQuoterCache
-        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV)
+        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, uint256 totalTrancheShares)
     {
-        return DepositLogic.jtDeposit(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _assets);
+        return DepositLogic.jtDeposit(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _isPreview, _assets);
     }
 
     /// @inheritdoc IRoycoDayKernel
     /// @dev JT redemptions are enabled only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-redemption
     function jtRedeem(
+        bool _isPreview,
         uint256 _shares,
         address _receiver
     )
@@ -376,7 +351,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         withQuoterCache
         returns (AssetClaims memory userAssetClaims)
     {
-        return RedemptionLogic.jtRedeem(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _shares, _receiver);
+        return RedemptionLogic.jtRedeem(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _isPreview, _shares, _receiver);
     }
 
     // =============================
@@ -385,7 +360,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @inheritdoc IRoycoDayKernel
     /// @dev An in-kind LT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state and enforces no requirements
-    function ltDeposit(TRANCHE_UNIT _assets)
+    function ltDeposit(bool _isPreview, TRANCHE_UNIT _assets)
         external
         virtual
         override(IRoycoDayKernel)
@@ -393,14 +368,15 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         onlyLiquidityTranche
         nonReentrant
         withQuoterCache
-        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV)
+        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, uint256 totalTrancheShares)
     {
-        return DepositLogic.ltDeposit(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _assets);
+        return DepositLogic.ltDeposit(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _isPreview, _assets);
     }
 
     /// @inheritdoc IRoycoDayKernel
     /// @dev LT redemptions are enabled only in a PERPETUAL market state, granted that the market's liquidity requirement is satisfied post-redemption
     function ltRedeem(
+        bool _isPreview,
         uint256 _shares,
         address _receiver
     )
@@ -413,12 +389,13 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         withQuoterCache
         returns (AssetClaims memory userAssetClaims)
     {
-        return RedemptionLogic.ltRedeem(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _shares, _receiver);
+        return RedemptionLogic.ltRedeem(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _isPreview, _shares, _receiver);
     }
 
     /// @inheritdoc IRoycoDayKernel
     /// @dev LT multi-asset deposits are enabled in a PERPETUAL market state (granted the market's coverage and liquidity requirements are satisfied against the new senior exposure), and in a fixed-term market only for a quote-only deposit that mints no senior shares
     function ltDepositMultiAsset(
+        bool _isPreview,
         TRANCHE_UNIT _stAssets,
         uint256 _quoteAssets,
         TRANCHE_UNIT _minLTAssetsOut
@@ -432,12 +409,15 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         withQuoterCache
         returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT ltAssetsOut)
     {
-        return DepositLogic.ltDepositMultiAsset(_getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _stAssets, _quoteAssets, _minLTAssetsOut);
+        return DepositLogic.ltDepositMultiAsset(
+            _getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _isPreview, _stAssets, _quoteAssets, _minLTAssetsOut
+        );
     }
 
     /// @inheritdoc IRoycoDayKernel
     /// @dev LT multi-asset redemptions are enabled only in a PERPETUAL market state, granted the market's liquidity requirement is satisfied post-redemption
     function ltRedeemMultiAsset(
+        bool _isPreview,
         uint256 _ltShares,
         uint256 _minSTSharesOut,
         uint256 _minQuoteAssetsOut,
@@ -453,7 +433,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
         return RedemptionLogic.ltRedeemMultiAsset(
-            _getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _ltShares, _minSTSharesOut, _minQuoteAssetsOut, _receiver
+            _getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _isPreview, _ltShares, _minSTSharesOut, _minQuoteAssetsOut, _receiver
         );
     }
 

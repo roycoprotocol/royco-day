@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.28;
 
-import { TRANCHE_UNIT } from "../../../../../../libraries/Units.sol";
+import { IVault } from "../../../../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVault.sol";
+import { NAV_UNIT, TRANCHE_UNIT } from "../../../../../../libraries/Units.sol";
 
 /**
  * @title IBalancerV3VenueCallbacks
@@ -9,6 +10,24 @@ import { TRANCHE_UNIT } from "../../../../../../libraries/Units.sol";
  * @notice Declares the Balancer V3 Vault callbacks the liquidity tranche venue logic library encodes and dispatches into
  */
 interface IBalancerV3VenueCallbacks {
+    /**
+     * @notice The immutable liquidity venue configuration a delegatecalled venue logic function needs, carried in from the kernel mixin
+     * @custom:field vault - The Balancer V3 Vault the kernel's pool is registered with
+     * @custom:field ltAsset - The liquidity tranche asset (the Balancer Pool Token) the kernel custodies
+     * @custom:field seniorTranche - The senior tranche share token, one of the pool's two constituents
+     * @custom:field quoteAsset - The quote asset, the pool's other constituent
+     * @custom:field stSharePoolIndex - The senior tranche share token's index in the pool's token registration order
+     * @custom:field quoteAssetPoolIndex - The quote asset's index in the pool's token registration order
+     */
+    struct BalancerV3VenueImmutableState {
+        IVault vault;
+        address ltAsset;
+        address seniorTranche;
+        address quoteAsset;
+        uint256 stSharePoolIndex;
+        uint256 quoteAssetPoolIndex;
+    }
+
     /**
      * @notice Callback that performs the unbalanced BPT mint inside the unlocked Balancer V3 Vault's context
      * @dev Only callable by the Balancer V3 Vault
@@ -19,6 +38,8 @@ interface IBalancerV3VenueCallbacks {
      * @param _quoteAssets The exact amount of quote assets to add into the pool from this kernel's balance
      * @param _minLTAssetsOut The minimum BPT (LT assets) that must be minted, bounding the add's slippage at the Vault
      * @return ltAssets The BPT (LT assets) minted to this kernel by the add
+     * @return depositNAV The value of the minted BPT against the post-add pool state, denominated in the kernel's NAV units
+     * @return postOpLTRawNAV The post-op LT raw NAV marked against the post-add pool state, the mark the post-op sync enforces at
      */
     function addBalancerV3Liquidity(
         bool _isPreview,
@@ -27,7 +48,7 @@ interface IBalancerV3VenueCallbacks {
         TRANCHE_UNIT _minLTAssetsOut
     )
         external
-        returns (uint256 ltAssets);
+        returns (uint256 ltAssets, NAV_UNIT depositNAV, NAV_UNIT postOpLTRawNAV);
 
     /**
      * @notice Callback that performs the proportional BPT unwrap inside the unlocked Balancer V3 Vault's context
@@ -41,6 +62,7 @@ interface IBalancerV3VenueCallbacks {
      * @param _quoteAssetsReceiver The recipient of the quote assets withdrawn
      * @return stShares The senior tranche shares withdrawn back to this kernel by the unwrap
      * @return quoteAssets The quote assets withdrawn directly to the specified receiver
+     * @return postOpLTRawNAV The post-op LT raw NAV marked against the post-remove pool state, the mark the post-op sync enforces at
      */
     function removeBalancerV3Liquidity(
         bool _isPreview,
@@ -50,5 +72,5 @@ interface IBalancerV3VenueCallbacks {
         address _quoteAssetsReceiver
     )
         external
-        returns (uint256 stShares, uint256 quoteAssets);
+        returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT postOpLTRawNAV);
 }

@@ -233,7 +233,7 @@ abstract contract Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest is Test_K
         uint256 quoteAssets = _quoteAssetsForValue(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(stAssets)));
 
         // The execute-and-revert preview runs the real initialize inside the unlocked Vault and unwinds it whole
-        uint256 quoted = IRoycoLiquidityTranche(address(LT)).previewDepositMultiAsset(stAssets, quoteAssets);
+        (uint256 quoted,) = IRoycoLiquidityTranche(address(LT)).previewDepositMultiAsset(stAssets, quoteAssets);
         assertFalse(VAULT.isPoolInitialized(POOL), "the preview must unwind the simulated genesis initialization");
         assertEq(IERC20(POOL).totalSupply(), 0, "the preview must unwind the simulated genesis mint");
 

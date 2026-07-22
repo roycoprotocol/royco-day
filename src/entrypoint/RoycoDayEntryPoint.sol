@@ -63,9 +63,11 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         _modifyTrancheConfigs(_tranches, _configs);
     }
 
-    /// =============================
-    /// Entry Point Deposit Functions
-    /// =============================
+    /**
+     * =============================
+     * Entry Point Deposit Functions
+     * =============================
+     */
 
     /// @inheritdoc IRoycoDayEntryPoint
     function requestDeposit(
@@ -164,9 +166,11 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         _cancelDepositRequest(_requestNonce, _receiver);
     }
 
-    /// =============================
-    /// Entry Point Redemption Functions
-    /// =============================
+    /**
+     * =============================
+     * Entry Point Redemption Functions
+     * =============================
+     */
 
     /// @inheritdoc IRoycoDayEntryPoint
     function requestRedemption(
@@ -266,9 +270,11 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         _cancelRedemptionRequest(_requestNonce, _receiver);
     }
 
-    /// =============================
-    /// Admin Functions
-    /// =============================
+    /**
+     * =============================
+     * Admin Functions
+     * =============================
+     */
 
     /// @inheritdoc IRoycoDayEntryPoint
     function pokeOracleClock(address _tranche) external override(IRoycoDayEntryPoint) whenNotPaused restricted returns (uint32 lastUpdatedAtTimestamp) {
@@ -307,9 +313,11 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         }
     }
 
-    /// =============================
-    /// State Accessor Functions
-    /// =============================
+    /**
+     * =============================
+     * State Accessor Functions
+     * =============================
+     */
 
     /// @inheritdoc IRoycoDayEntryPoint
     function getLastRequestNonce() external view override(IRoycoDayEntryPoint) returns (uint256 nonce) {
@@ -336,9 +344,11 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         return _getRoycoDayEntryPointStorage().trancheToProtocolFeeShares[_tranche];
     }
 
-    /// =============================
-    /// Internal Utility Functions
-    /// =============================
+    /**
+     * =============================
+     * Internal Utility Functions
+     * =============================
+     */
 
     /**
      * @notice Executes a pending deposit request for the specified user

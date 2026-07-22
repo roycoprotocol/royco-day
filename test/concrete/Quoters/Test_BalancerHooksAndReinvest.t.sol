@@ -2,9 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { stdError } from "../../../lib/forge-std/src/StdError.sol";
-import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
-import { WAD } from "../../../src/libraries/Constants.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
@@ -252,8 +250,8 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
 
 /**
  * @title Test_MultiAssetPreviewParity_LiquidityTranche
- * @notice Multi-asset LT deposit and redeem preview parity: exact at zero venue fee, a compliant lower bound under
- *         a nonzero venue fee, and exact for the multi-asset redemption
+ * @notice Multi-asset LT deposit and redeem preview parity: exact at zero venue fee, exact under a nonzero venue
+ *         fee, and exact for the multi-asset redemption
  * @dev Preview-vs-execution parity is the one property a preview cannot prove about itself, so each test runs both
  *      paths in the same block and compares
  */
@@ -274,22 +272,17 @@ contract Test_MultiAssetPreviewParity_LiquidityTranche is DayMarketTestBase {
     }
 
     /**
-     * @notice With a venue fee the preview is a compliant LOWER bound (a preview must never overestimate):
-     *         execution marks the fresh BPT AFTER the add, when the depositor's own fee has already accrued to the
-     *         pool's TVL-per-BPT, while the preview's quote discards that post-add uplift
-     * @dev The gap is bounded by the fee itself: the depositor recaptures at most their own 30 bps, so
-     *      preview <= minted <= ceil(preview x (1 + fee))
+     * @notice A nonzero venue fee keeps EXACT preview parity: the preview runs the real add through the venue via
+     *         execute-and-revert, so the fee-haircut BPT and the post-add depositNAV mark are identical in both
+     *         modes and the share math coincides to the wei
+     * @dev This pins the migration away from the discarded-quote preview, which could only lower-bound execution
+     *      under a fee because it marked the fresh BPT before the depositor's own fee accrued to TVL-per-BPT
      */
-    function test_LTDepositMultiAsset_PreviewLowerBoundsExecution_WithVenueFee() public {
+    function test_LTDepositMultiAsset_PreviewParityExact_WithVenueFee() public {
         balancerVault.setUnbalancedFeeBps(30);
         (uint256 previewShares, uint256 mintedShares) = _previewThenExecuteMultiAssetDeposit(5e18, 5e6);
-
-        assertGe(mintedShares, previewShares, "the preview must never overestimate the minted shares");
-        assertLe(
-            mintedShares,
-            Math.mulDiv(previewShares, WAD + 0.003e18, WAD, Math.Rounding.Ceil),
-            "the preview gap must be bounded by the 30 bps venue fee the depositor recaptures"
-        );
+        assertEq(mintedShares, previewShares, "nonzero venue fee: the multi-asset deposit preview must equal execution in the same block");
+        assertGt(mintedShares, 0, "arrange: the deposit must be non-degenerate");
     }
 
     /// @notice previewRedeemMultiAsset equals the executed redeemMultiAsset (senior tranche claims plus quote out), same block
@@ -330,8 +323,8 @@ contract Test_MultiAssetPreviewParity_LiquidityTranche is DayMarketTestBase {
         vm.startPrank(LT_PROVIDER);
         stJtVault.approve(address(liquidityTranche), _stLeg);
         quoteToken.approve(address(liquidityTranche), _quoteLeg);
-        previewShares = liquidityTranche.previewDepositMultiAsset(_stLeg, _quoteLeg);
-        mintedShares = liquidityTranche.depositMultiAsset(_stLeg, _quoteLeg, 0, LT_PROVIDER);
+        (previewShares,) = liquidityTranche.previewDepositMultiAsset(_stLeg, _quoteLeg);
+        (mintedShares,) = liquidityTranche.depositMultiAsset(_stLeg, _quoteLeg, 0, LT_PROVIDER);
         vm.stopPrank();
     }
 }

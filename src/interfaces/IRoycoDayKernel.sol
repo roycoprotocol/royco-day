@@ -145,7 +145,7 @@ interface IRoycoDayKernel {
     /// @notice Thrown when the senior tranche self-liquidation bonus is set above 100% (WAD)
     error INVALID_SELF_LIQUIDATION_BONUS();
 
-    /// @notice Thrown when an LT multi-asset deposit/redeem is made with zero of both constituent assets (ST underlying and quote)
+    /// @notice Thrown when an LT multi-asset deposit is made with zero of both constituent assets (ST underlying and quote)
     error MUST_DEPOSIT_NON_ZERO_ASSETS();
 
     /// @notice Retrieves the senior tranche address
@@ -164,10 +164,6 @@ interface IRoycoDayKernel {
     /// @return jtAsset The junior tranche's base asset address
     function JT_ASSET() external view returns (address jtAsset);
 
-    /// @notice Retrieves the accountant address
-    /// @return accountant The accountant responsible for maintaining this Royco market's accounting state and marking tranche NAVs to market
-    function ACCOUNTANT() external view returns (address accountant);
-
     /// @notice Retrieves the liquidity tranche address
     /// @return liquidityTranche The address of the liquidity tranche for this Royco market
     function LIQUIDITY_TRANCHE() external view returns (address liquidityTranche);
@@ -180,35 +176,13 @@ interface IRoycoDayKernel {
     /// @return quoteAsset The quote asset's address
     function QUOTE_ASSET() external view returns (address quoteAsset);
 
+    /// @notice Retrieves the accountant address
+    /// @return accountant The accountant responsible for maintaining this Royco market's accounting state and marking tranche NAVs to market
+    function ACCOUNTANT() external view returns (address accountant);
+
     /// @notice Whether the market enforces the vault-shares transfer whitelist on tranche balance updates
     /// @return enforced True if transfer-whitelist screening is enforced for this market
     function ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER() external view returns (bool enforced);
-
-    /**
-     * @notice Sets the new protocol fee recipient
-     * @dev Only callable by a designated admin
-     * @param _protocolFeeRecipient The address of the new protocol fee recipient
-     */
-    function setProtocolFeeRecipient(address _protocolFeeRecipient) external;
-
-    /**
-     * @notice Sets the ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached
-     * @dev Only callable by a designated admin
-     * @param _stSelfLiquidationBonusWAD The ST self liquidation bonus, scaled to WAD precision
-     */
-    function setSeniorTrancheSelfLiquidationBonus(uint64 _stSelfLiquidationBonusWAD) external;
-
-    /**
-     * @notice Sets the blacklist contract consulted on tranche balance updates for this market
-     * @dev Only callable by a designated admin
-     * @dev Setting the blacklist to the null address disables blacklist screening for this market
-     * @param _roycoBlacklist The address of the market's blacklist contract (or the null address to disable screening)
-     */
-    function setRoycoBlacklist(address _roycoBlacklist) external;
-
-    /// @notice Retrieves the state of the Royco kernel
-    /// @return state The Royco kernel's state, including the protocol fee recipient and the kernel's controlled tranche and base assets
-    function getState() external view returns (RoycoDayKernelState memory state);
 
     /**
      * @notice Converts the specified ST assets denominated in its tranche units to the kernel's NAV units
@@ -253,33 +227,6 @@ interface IRoycoDayKernel {
     function ltConvertNAVUnitsToTrancheUnits(NAV_UNIT _value) external view returns (TRANCHE_UNIT ltAssets);
 
     /**
-     * @notice Synchronizes and persists the raw and effective NAVs of all tranches
-     * @dev Only executes a pre-op sync because there is no operation being executed in the same call as this sync
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
-     */
-    function syncTrancheAccounting() external returns (SyncedAccountingState memory state);
-
-    /**
-     * @notice Syncs the tranche accounting and attempts to reinvest the liquidity tranche's idle liquidity-premium senior shares into its market-making inventory
-     * @dev Values the reinvested shares against the freshly synced senior share rate, so a smaller amount can clear the venue's slippage gate when reinvesting the entire idle balance would not
-     * @param _stShares The amount of idle liquidity-premium senior shares to reinvest, or type(uint256).max to reinvest the entire idle balance
-     */
-    function reinvestLiquidityPremium(uint256 _stShares) external;
-
-    /**
-     * @notice Previews a synchronization of the raw and effective NAVs of all tranches
-     * @dev Does not mutate any state
-     * @param _trancheType An enumerator indicating which tranche to execute this preview for
-     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
-     * @return claims The claims on ST and JT assets that the specified tranche has denominated in tranche-native units
-     * @return totalTrancheShares The total number of shares that exist in the specified tranche after the post-sync mint of its accrued shares: the protocol fee shares for the senior and junior tranches, plus the liquidity premium shares for the senior tranche (the liquidity tranche mints none)
-     */
-    function previewSyncTrancheAccounting(TrancheType _trancheType)
-        external
-        view
-        returns (SyncedAccountingState memory state, AssetClaims memory claims, uint256 totalTrancheShares);
-
-    /**
      * @notice Returns the maximum amount of assets that can be deposited into the senior tranche
      * @param _receiver The address that will receive the ST shares equating to the deposited assets
      * @return assets The maximum amount of assets that can be deposited into the senior tranche, denominated in the senior tranche's tranche units
@@ -297,50 +244,6 @@ interface IRoycoDayKernel {
         external
         view
         returns (NAV_UNIT stClaimNAV, NAV_UNIT stMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees);
-
-    /**
-     * @notice Previews a multi-asset LT deposit of (ST underlying + quote) by simulating the venue add
-     * @dev NON-VIEW: routes the venue add through its execute-and-revert preview, which mutates no state net
-     * @param _stAssets The ST underlying leg, in the ST asset's native units
-     * @param _quoteAssets The quote asset leg
-     * @return depositNAV The NAV value of the LT assets the add would mint
-     * @return effectiveNAV The pre-deposit LT effective NAV that LT shares would be minted against
-     * @return ltAssetsOut The LT tranche assets the add would mint
-     * @return ltTotalSupplyAfterMints The LT tranche supply post-sync (unchanged by the sync, since the liquidity tranche accrues no protocol fee shares), which LT shares must be priced against
-     */
-    function ltPreviewDepositMultiAsset(
-        TRANCHE_UNIT _stAssets,
-        uint256 _quoteAssets
-    )
-        external
-        returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT ltAssetsOut, uint256 ltTotalSupplyAfterMints);
-
-    /**
-     * @notice Previews a multi-asset LT redemption of _ltShares by simulating the proportional venue removal and the senior unwind
-     * @dev NON-VIEW: routes the venue removal through its execute-and-revert preview, which mutates no state net
-     * @param _ltShares The number of LT shares to redeem
-     * @return stClaims The ST redemption asset claims that would be transferred to the receiver, denominated in the respective tranches' tranche units
-     * @return quoteAssets The quote assets the removal would withdraw to the receiver
-     */
-    function ltPreviewRedeemMultiAsset(uint256 _ltShares) external returns (AssetClaims memory stClaims, uint256 quoteAssets);
-
-    /**
-     * @notice Processes the deposit of a specified amount of assets into the senior tranche
-     * @dev Assumes that the funds are transferred to the kernel before the deposit call is made
-     * @param _assets The amount of assets to deposit, denominated in the senior tranche's tranche units
-     * @return depositNAV The value of the assets deposited, denominated in the kernel's NAV units
-     * @return effectiveNAV The NAV at which the shares will be minted, exclusive of depositNAV
-     */
-    function stDeposit(TRANCHE_UNIT _assets) external returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV);
-
-    /**
-     * @notice Processes the redemption of a specified number of shares from the senior tranche
-     * @dev The function is expected to transfer the senior and junior assets directly to the receiver, based on the redemption claims
-     * @param _shares The number of shares to redeem
-     * @param _receiver The address that is receiving the assets
-     * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
-     */
-    function stRedeem(uint256 _shares, address _receiver) external returns (AssetClaims memory userAssetClaims);
 
     /**
      * @notice Returns the maximum amount of assets that can be deposited into the junior tranche
@@ -397,39 +300,99 @@ interface IRoycoDayKernel {
         returns (NAV_UNIT claimOnLTNAV, NAV_UNIT ltMaxWithdrawableNAV, uint256 totalTrancheSharesAfterMintingFees);
 
     /**
+     * @notice Synchronizes and persists the raw and effective NAVs of all tranches
+     * @dev Only executes a pre-op sync because there is no operation being executed in the same call as this sync
+     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
+     */
+    function syncTrancheAccounting() external returns (SyncedAccountingState memory state);
+
+    /**
+     * @notice Syncs the tranche accounting and attempts to reinvest the liquidity tranche's idle liquidity-premium senior shares into its market-making inventory
+     * @dev Values the reinvested shares against the freshly synced senior share rate, so a smaller amount can clear the venue's slippage gate when reinvesting the entire idle balance would not
+     * @param _stShares The amount of idle liquidity-premium senior shares to reinvest, or type(uint256).max to reinvest the entire idle balance
+     */
+    function reinvestLiquidityPremium(uint256 _stShares) external;
+
+    /**
+     * @notice Previews a synchronization of the raw and effective NAVs of all tranches
+     * @dev Does not mutate any state
+     * @param _trancheType An enumerator indicating which tranche to execute this preview for
+     * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
+     * @return claims The claims on ST and JT assets that the specified tranche has denominated in tranche-native units
+     * @return totalTrancheShares The total number of shares that exist in the specified tranche after the post-sync mint of its accrued shares: the protocol fee shares for the senior and junior tranches, plus the liquidity premium shares for the senior tranche (the liquidity tranche mints none)
+     */
+    function previewSyncTrancheAccounting(TrancheType _trancheType)
+        external
+        view
+        returns (SyncedAccountingState memory state, AssetClaims memory claims, uint256 totalTrancheShares);
+
+    /**
+     * @notice Processes the deposit of a specified amount of assets into the senior tranche
+     * @dev Assumes that the funds are transferred to the kernel before the deposit call is made
+     * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
+     * @param _isPreview Whether this is a preview of the operation which must not mutate state
+     * @param _assets The amount of assets to deposit, denominated in the senior tranche's tranche units
+     * @return depositNAV The value of the assets deposited, denominated in the kernel's NAV units
+     * @return effectiveNAV The NAV at which the shares will be minted, exclusive of depositNAV
+     * @return totalTrancheShares The tranche's total share supply after the sync's premium and protocol fee mints, the supply the shares price against
+     */
+    function stDeposit(bool _isPreview, TRANCHE_UNIT _assets) external returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, uint256 totalTrancheShares);
+
+    /**
+     * @notice Processes the redemption of a specified number of shares from the senior tranche
+     * @dev The function is expected to transfer the senior and junior assets directly to the receiver, based on the redemption claims
+     * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
+     * @param _isPreview Whether this is a preview of the operation which must not mutate state
+     * @param _shares The number of shares to redeem
+     * @param _receiver The address that is receiving the assets
+     * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
+     */
+    function stRedeem(bool _isPreview, uint256 _shares, address _receiver) external returns (AssetClaims memory userAssetClaims);
+
+    /**
      * @notice Processes the deposit of a specified amount of assets into the junior tranche
      * @dev Assumes that the funds are transferred to the kernel before the deposit call is made
+     * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
+     * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _assets The amount of assets to deposit, denominated in the junior tranche's tranche units
      * @return depositNAV The value of the assets deposited, denominated in the kernel's NAV units
      * @return effectiveNAV The NAV at which the shares will be minted, exclusive of depositNAV
+     * @return totalTrancheShares The tranche's total share supply after the sync's premium and protocol fee mints, the supply the shares price against
      */
-    function jtDeposit(TRANCHE_UNIT _assets) external returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV);
+    function jtDeposit(bool _isPreview, TRANCHE_UNIT _assets) external returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, uint256 totalTrancheShares);
 
     /**
      * @notice Processes the redemption of a specified number of shares from the junior tranche
      * @dev The function is expected to transfer the senior and junior assets directly to the receiver, based on the redemption claims
+     * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
+     * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _shares The number of shares to redeem
      * @param _receiver The address that is receiving the assets
      * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
      */
-    function jtRedeem(uint256 _shares, address _receiver) external returns (AssetClaims memory userAssetClaims);
+    function jtRedeem(bool _isPreview, uint256 _shares, address _receiver) external returns (AssetClaims memory userAssetClaims);
 
     /**
      * @notice Processes the deposit of a specified amount of assets into the liquidity tranche
      * @dev An in-kind LT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state (including fixed-term)
+     * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
+     * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _assets The amount of assets (the liquidity venue's position token) to deposit, denominated in the liquidity tranche's tranche units
      * @return depositNAV The value of the assets deposited, denominated in the kernel's NAV units
      * @return effectiveNAV The NAV at which the shares will be minted, exclusive of depositNAV
+     * @return totalTrancheShares The tranche's total share supply after the sync's premium and protocol fee mints, the supply the shares price against
      */
-    function ltDeposit(TRANCHE_UNIT _assets) external returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV);
+    function ltDeposit(bool _isPreview, TRANCHE_UNIT _assets) external returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, uint256 totalTrancheShares);
 
     /**
      * @notice Processes the redemption of a specified number of shares from the liquidity tranche
+     * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
+     * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _shares The number of shares to redeem
      * @param _receiver The address that is receiving the assets
      * @return userAssetClaims The distribution of assets that were transferred to the receiver on redemption
      */
-    function ltRedeem(uint256 _shares, address _receiver) external returns (AssetClaims memory userAssetClaims);
+    function ltRedeem(bool _isPreview, uint256 _shares, address _receiver) external returns (AssetClaims memory userAssetClaims);
 
     /**
      * @notice Atomically enters the liquidity tranche with the LT assets' constituent assets: deposits ST underlying (minting senior
@@ -437,6 +400,8 @@ interface IRoycoDayKernel {
      * @dev Assumes the ST underlying and quote have been transferred to the kernel before this call (by the LT tranche)
      * @dev Enabled in a PERPETUAL market state, and in a fixed-term market only for a quote-only deposit (_stAssets == 0) that mints no senior shares, an ST-leg deposit reverts in a fixed-term market
      * @dev The combined new senior exposure is gated by the market's coverage and liquidity requirements, reverts if either is unsatisfied
+     * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
+     * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _stAssets The amount of ST underlying (the senior tranche's base asset) to deposit, denominated in ST tranche units
      * @param _quoteAssets The amount of quote asset to add as the second venue leg
      * @param _minLTAssetsOut The minimum LT tranche assets the liquidity add must mint (slippage bound against an unfavorable venue state)
@@ -445,6 +410,7 @@ interface IRoycoDayKernel {
      * @return ltAssetsOut The amount of LT tranche assets minted and credited to the liquidity tranche
      */
     function ltDepositMultiAsset(
+        bool _isPreview,
         TRANCHE_UNIT _stAssets,
         uint256 _quoteAssets,
         TRANCHE_UNIT _minLTAssetsOut
@@ -455,6 +421,8 @@ interface IRoycoDayKernel {
     /**
      * @notice Atomically exits the liquidity tranche to the LT assets' constituent assets: proportionally removes the LT-asset slice,
      *         redeems the venue-held senior shares to ST underlying, and returns (ST underlying + quote) to the receiver
+     * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
+     * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _ltShares The number of LT shares being redeemed (used to size the proportional LT-asset slice)
      * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must return (slippage bound)
      * @param _minQuoteAssetsOut The minimum quote to return (slippage bound)
@@ -463,6 +431,7 @@ interface IRoycoDayKernel {
      * @return quoteAssets The quote assets returned to the receiver
      */
     function ltRedeemMultiAsset(
+        bool _isPreview,
         uint256 _ltShares,
         uint256 _minSTSharesOut,
         uint256 _minQuoteAssetsOut,
@@ -471,72 +440,27 @@ interface IRoycoDayKernel {
         external
         returns (AssetClaims memory stClaims, uint256 quoteAssets);
 
-    // =============================
-    // Liquidity Tranche Venue Drivers
-    // =============================
+    /**
+     * @notice Sets the new protocol fee recipient
+     * @dev Only callable by a designated admin
+     * @param _protocolFeeRecipient The address of the new protocol fee recipient
+     */
+    function setProtocolFeeRecipient(address _protocolFeeRecipient) external;
 
     /**
-     * @notice Adds a senior tranche share and quote asset position into the liquidity venue and returns the liquidity tranche assets minted
-     * @param _seniorShares The exact amount of senior tranche shares to add into the liquidity venue
-     * @param _quoteAssets The exact amount of quote assets to add into the liquidity venue
-     * @param _minLTAssetsOut The minimum liquidity tranche assets that must be minted, bounding the add's slippage
-     * @return ltAssets The liquidity tranche assets minted by the add
+     * @notice Sets the ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached
+     * @dev Only callable by a designated admin
+     * @param _stSelfLiquidationBonusWAD The ST self liquidation bonus, scaled to WAD precision
      */
-    function addLiquidity(uint256 _seniorShares, uint256 _quoteAssets, TRANCHE_UNIT _minLTAssetsOut) external returns (TRANCHE_UNIT ltAssets);
+    function setSeniorTrancheSelfLiquidationBonus(uint64 _stSelfLiquidationBonusWAD) external;
 
     /**
-     * @notice Proportionally removes a slice of liquidity tranche assets from the liquidity venue into its senior tranche share and quote asset constituents
-     * @param _ltAssets The exact liquidity tranche assets to burn
-     * @param _minSTSharesOut The minimum senior tranche shares that must be withdrawn, bounding the removal's slippage
-     * @param _minQuoteAssetsOut The minimum quote assets that must be withdrawn, bounding the removal's slippage
-     * @param _quoteAssetsReceiver The recipient of the withdrawn quote assets, the withdrawn senior shares are returned to the kernel for the combined senior unwind
-     * @return stShares The senior tranche shares withdrawn by the removal
-     * @return quoteAssets The quote assets withdrawn by the removal
+     * @notice Sets the blacklist contract consulted on tranche balance updates for this market
+     * @dev Only callable by a designated admin
+     * @dev Setting the blacklist to the null address disables blacklist screening for this market
+     * @param _roycoBlacklist The address of the market's blacklist contract (or the null address to disable screening)
      */
-    function removeLiquidity(
-        TRANCHE_UNIT _ltAssets,
-        uint256 _minSTSharesOut,
-        uint256 _minQuoteAssetsOut,
-        address _quoteAssetsReceiver
-    )
-        external
-        returns (uint256 stShares, uint256 quoteAssets);
-
-    /**
-     * @notice Simulates an add of a senior tranche share and quote asset position and returns the liquidity tranche assets it would mint
-     * @dev NON-VIEW: routes the venue add through its execute-and-revert preview, which mutates no state net
-     * @param _seniorShares The senior tranche shares the add would inject
-     * @param _quoteAssets The quote assets the add would inject
-     * @return ltAssets The liquidity tranche assets the add would mint
-     * @return depositNAV The value of the minted liquidity tranche assets against the post-add venue state
-     */
-    function previewAddLiquidity(uint256 _seniorShares, uint256 _quoteAssets) external returns (TRANCHE_UNIT ltAssets, NAV_UNIT depositNAV);
-
-    /**
-     * @notice Simulates a proportional removal of liquidity tranche assets and returns the senior tranche share and quote asset constituents it would withdraw
-     * @dev NON-VIEW: routes the venue removal through its execute-and-revert preview, which mutates no state net and performs no slippage gating
-     * @param _ltAssets The liquidity tranche assets the removal would burn
-     * @return stShares The senior tranche shares the removal would withdraw
-     * @return quoteAssets The quote assets the removal would withdraw
-     */
-    function previewRemoveLiquidity(TRANCHE_UNIT _ltAssets) external returns (uint256 stShares, uint256 quoteAssets);
-
-    /**
-     * @notice Attempts to reinvest the liquidity tranche's idle liquidity-premium senior shares into its market-making inventory
-     * @dev Tolerates reversions gracefully so it is non-blocking for the tranche operation that invokes it
-     * @param _stSharesToReinvest The amount of idle liquidity-premium senior shares to reinvest, or type(uint256).max to reinvest the entire idle balance
-     * @param _stEffectiveNAV The synced senior tranche effective NAV used to value the liquidity tranche's idle premium senior shares
-     * @param _totalSTShares The senior tranche share supply after the liquidity premium and senior tranche protocol fee shares are minted, the denominator of the senior share rate
-     */
-    function attemptLiquidityPremiumReinvestment(uint256 _stSharesToReinvest, NAV_UNIT _stEffectiveNAV, uint256 _totalSTShares) external;
-
-    /**
-     * @notice Reverts if any of the specified accounts is blacklisted by the market's configured blacklist
-     * @dev No-op when no blacklist is configured (the null address disables screening)
-     * @dev Exposes the market's blacklist screening to periphery contracts whose value flows settle outside the tranche balance update hooks
-     * @param _accounts The addresses of the accounts to screen
-     */
-    function enforceNotBlacklisted(address[] memory _accounts) external view;
+    function setRoycoBlacklist(address _roycoBlacklist) external;
 
     /**
      * @notice Pre-balance update hook for the tranche
@@ -548,4 +472,69 @@ interface IRoycoDayKernel {
      * @param _value The amount of the balance being updated
      */
     function preTrancheBalanceUpdateHook(address _caller, address _from, address _to, uint256 _value) external;
+
+    /**
+     * @notice Reverts if any of the specified accounts is blacklisted by the market's configured blacklist
+     * @dev No-op when no blacklist is configured (the null address disables screening)
+     * @dev Exposes the market's blacklist screening to periphery contracts whose value flows settle outside the tranche balance update hooks
+     * @param _accounts The addresses of the accounts to screen
+     */
+    function enforceNotBlacklisted(address[] memory _accounts) external view;
+
+    /// @notice Retrieves the state of the Royco kernel
+    /// @return state The Royco kernel's state, including the protocol fee recipient and the kernel's controlled tranche and base assets
+    function getState() external view returns (RoycoDayKernelState memory state);
+
+    // =============================
+    // Liquidity Tranche Venue Drivers
+    // =============================
+
+    /**
+     * @notice Adds a senior tranche share and quote asset position into the liquidity venue and returns the liquidity tranche assets minted
+     * @param _isPreview Whether this is a preview of the operation which must not mutate state
+     * @param _seniorShares The exact amount of senior tranche shares to add into the liquidity venue
+     * @param _quoteAssets The exact amount of quote assets to add into the liquidity venue
+     * @param _minLTAssetsOut The minimum liquidity tranche assets that must be minted, bounding the add's slippage
+     * @return ltAssets The liquidity tranche assets minted by the add
+     * @return depositNAV The value of the minted liquidity tranche assets against the post-add venue state
+     * @return postOpLTRawNAV The post-op liquidity tranche raw NAV marked against the post-add venue state, the mark the post-op sync enforces at
+     */
+    function addLiquidity(
+        bool _isPreview,
+        uint256 _seniorShares,
+        uint256 _quoteAssets,
+        TRANCHE_UNIT _minLTAssetsOut
+    )
+        external
+        returns (TRANCHE_UNIT ltAssets, NAV_UNIT depositNAV, NAV_UNIT postOpLTRawNAV);
+
+    /**
+     * @notice Proportionally removes a slice of liquidity tranche assets from the liquidity venue into its senior tranche share and quote asset constituents
+     * @param _isPreview Whether this is a preview of the operation which must not mutate state
+     * @param _ltAssets The exact liquidity tranche assets to burn
+     * @param _minSTSharesOut The minimum senior tranche shares that must be withdrawn, bounding the removal's slippage
+     * @param _minQuoteAssetsOut The minimum quote assets that must be withdrawn, bounding the removal's slippage
+     * @param _quoteAssetsReceiver The recipient of the withdrawn quote assets, the withdrawn senior shares are returned to the kernel for the combined senior unwind
+     * @return stShares The senior tranche shares withdrawn by the removal
+     * @return quoteAssets The quote assets withdrawn by the removal
+     * @return postOpLTRawNAV The post-op liquidity tranche raw NAV marked against the post-remove venue state, the mark the post-op sync enforces at
+     */
+    function removeLiquidity(
+        bool _isPreview,
+        TRANCHE_UNIT _ltAssets,
+        uint256 _minSTSharesOut,
+        uint256 _minQuoteAssetsOut,
+        address _quoteAssetsReceiver
+    )
+        external
+        returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT postOpLTRawNAV);
+
+    /**
+     * @notice Attempts to reinvest the liquidity tranche's idle liquidity-premium senior shares into its market-making inventory
+     * @dev Tolerates reversions gracefully so it is non-blocking for the tranche operation that invokes it
+     * @param _stSharesToReinvest The amount of idle liquidity-premium senior shares to reinvest, or type(uint256).max to reinvest the entire idle balance
+     * @param _stEffectiveNAV The synced senior tranche effective NAV used to value the liquidity tranche's idle premium senior shares
+     * @param _totalSTShares The senior tranche share supply after the liquidity premium and senior tranche protocol fee shares are minted, the denominator of the senior share rate
+     */
+    function attemptLiquidityPremiumReinvestment(uint256 _stSharesToReinvest, NAV_UNIT _stEffectiveNAV, uint256 _totalSTShares) external;
 }

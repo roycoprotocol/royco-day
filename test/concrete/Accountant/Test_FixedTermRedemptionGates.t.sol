@@ -70,6 +70,15 @@ contract Test_FixedTermRedemptionGates_Kernel is DayMarketTestBase {
         liquidityTranche.redeemMultiAsset(shares, 0, 0, LT_PROVIDER, LT_PROVIDER);
     }
 
+    /// @notice The multi-asset liquidity redeem preview reverts on the PERPETUAL-only gate in FIXED_TERM, matching the reverting redeemMultiAsset and the zero maxRedeemMultiAsset
+    /// @dev previewRedeemMultiAsset now simulates the real kernel redemption, so the FIXED_TERM gate bubbles from the preview exactly as from exec instead of the deleted empty-claims quote
+    function test_RevertIf_LTPreviewRedeemMultiAssetInFixedTerm() public {
+        uint256 shares = liquidityTranche.balanceOf(LT_PROVIDER) / 2;
+        assertEq(liquidityTranche.maxRedeemMultiAsset(LT_PROVIDER), 0, "liquidity maxRedeemMultiAsset must already zero in FIXED_TERM, so the preview must agree");
+        vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
+        liquidityTranche.previewRedeemMultiAsset(shares);
+    }
+
     /// @notice The senior redeem preview reverts on the PERPETUAL-only gate in FIXED_TERM, matching the reverting redeem and the zero maxRedeem
     /// @dev previewRedeem now simulates the real kernel redemption, so the FIXED_TERM gate bubbles from the preview exactly as from exec
     function test_RevertIf_STPreviewRedeemInFixedTerm() public {

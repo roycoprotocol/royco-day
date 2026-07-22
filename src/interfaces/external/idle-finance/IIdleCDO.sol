@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.28;
 
-/// @title IIdleCDO
-/// @author Idle Labs Inc.
-/// @notice Abridged interface for an Idle CDO (Collateralized Debt Obligation) whose AA tranche token is a Royco market's tranche asset
+/**
+ * @title IIdleCDO
+ * @author Idle Labs Inc.
+ * @notice Abridged interface for an Idle CDO (Collateralized Debt Obligation) whose AA tranche token is a Royco market's tranche asset
+ */
 interface IIdleCDO {
     /// @notice Address of the AA (senior) tranche token contract
     function AATranche() external view returns (address);

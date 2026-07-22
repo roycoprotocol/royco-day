@@ -124,7 +124,7 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
 
         bytes32 digestBefore = _marketDigest(actor);
         vm.prank(actor);
-        try liquidityTranche.depositMultiAsset(stAssets, quoteAssets, minLtAssetsOut, actor) returns (uint256) {
+        try liquidityTranche.depositMultiAsset(stAssets, quoteAssets, minLtAssetsOut, actor) returns (uint256, uint256) {
             fail("the deposit must revert when the venue mints fewer pool tokens than the caller's floor");
         } catch (bytes memory err) {
             assertEq(bytes4(err), IVaultErrors.BptAmountOutBelowMin.selector, "expected the venue's shorted-mint floor error");
@@ -146,7 +146,7 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
 
         bytes32 digestBefore = _marketDigest(actor);
         vm.prank(actor);
-        try liquidityTranche.depositMultiAsset(stAssets, quoteAssets, 0, actor) returns (uint256) {
+        try liquidityTranche.depositMultiAsset(stAssets, quoteAssets, 0, actor) returns (uint256, uint256) {
             fail("the deposit must revert when the venue add reverts");
         } catch (bytes memory err) {
             assertEq(bytes4(err), MockBalancerVault.FORCED_ADD_REVERT.selector, "the venue's revert must bubble out of the whole flow");
@@ -167,7 +167,7 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
 
         bytes32 digestBefore = _marketDigest(actor);
         vm.prank(actor);
-        try liquidityTranche.depositMultiAsset(stAssets, quoteAssets, 0, actor) returns (uint256) {
+        try liquidityTranche.depositMultiAsset(stAssets, quoteAssets, 0, actor) returns (uint256, uint256) {
             fail("the deposit must revert when its senior leg exceeds the market's coverage capacity");
         } catch (bytes memory err) {
             assertEq(bytes4(err), IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector, "expected the coverage gate to reject the whole flow");
@@ -206,7 +206,7 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
         bytes32 digestBefore = _marketDigest(actor);
 
         vm.prank(actor);
-        try liquidityTranche.depositMultiAsset(1, quoteAssets, 0, actor) returns (uint256) {
+        try liquidityTranche.depositMultiAsset(1, quoteAssets, 0, actor) returns (uint256, uint256) {
             fail("the deposit must revert when its senior leg floors to zero senior shares");
         } catch (bytes memory err) {
             assertEq(bytes4(err), IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES.selector, "expected the zero-share senior mint guard to reject the whole flow");

@@ -9,7 +9,7 @@ import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { AssetClaims, MarketState } from "../../../src/libraries/Types.sol";
-import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { NAV_UNIT, toUint256 } from "../../../src/libraries/Units.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
 import { MockBalancerVault } from "../../mocks/MockBalancerVault.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
@@ -24,9 +24,9 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  *         so its bound must weakly dominate the in-kind bound, coincide with it when the removal carries no
  *         senior-share value, be a TRUE maximum at the gate (the reported size executes, a hair more reverts),
  *         and mirror the in-kind max's waiver, fixed-term, blacklist, and pause semantics
- * @dev Also pins the execute-and-unwind multi-asset previews: preview outputs must equal execution's token
+ * @dev Also pins the execute-and-revert multi-asset previews: preview outputs must equal execution's token
  *      deltas exactly, previews must leave every market ledger byte-identical, genuine venue failures must
- *      bubble out of a preview unchanged, and previews must compose inside a state-mutating transaction —
+ *      bubble out of a preview unchanged, and previews must compose inside a state-mutating transaction,
  *      a context the Vault's own query mode can never serve
  */
 contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
@@ -36,7 +36,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
     /**
      * @dev Seeds a market whose liquidity requirement genuinely binds the LT bounds: 30,000 junior vault shares
      *      (coverage first), 100,000 senior vault shares, then real two-leg pool depth of 2,000 senior shares
-     *      against 8,000 quote tokens minted as 10,000e18 pool tokens so NAV-per-BPT stays exactly 1.0 — the
+     *      against 8,000 quote tokens minted as 10,000e18 pool tokens so NAV-per-BPT stays exactly 1.0, the
      *      committed requirement (~5% of ~102,000e18 senior effective NAV) leaves in-kind headroom of roughly
      *      two thirds of the LT supply, so the gate, not the balance, binds both maxima
      */
@@ -114,7 +114,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         assertGt(maxShares, 0, "the fixture must leave multi-asset redemption capacity");
         assertLt(maxShares, liquidityTranche.balanceOf(LT_PROVIDER), "the gate, not the balance, must bind the maximum");
 
-        // Breach first — the reverted attempt leaves no trace (pinned by the atomicity suite). The slack covers
+        // Breach first, the reverted attempt leaves no trace (pinned by the atomicity suite). The slack covers
         // the accountant's one-NAV-wei dust tolerance plus the flow's quote and share quantization floors
         uint256 breachShares =
             maxShares + Math.mulDiv(2e12 + 1, liquidityTranche.totalSupply(), toUint256(accountant.getState().lastLTRawNAV), Math.Rounding.Ceil) + 2;
@@ -136,7 +136,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         assertGt(wedgeShares, liquidityTranche.maxRedeem(LT_PROVIDER) + 1e18, "the wedge window between the two bounds must be real");
 
         // In-kind hands the pool tokens away without touching the senior tranche, so only the requirement's
-        // supply side shrinks — at the wedge size it must breach the gate
+        // supply side shrinks, at the wedge size it must breach the gate
         vm.prank(LT_PROVIDER);
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         liquidityTranche.redeem(wedgeShares, LT_PROVIDER, LT_PROVIDER);
@@ -188,7 +188,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
     ///         total: the venue's minimum-supply reserve (dead pool tokens minted to the zero address at pool
     ///         initialization) permanently strands a pro-rata sliver of the senior leg, so a whole-balance exit
     ///         leaves live senior backing against zero market-making depth and must violate the liquidity
-    ///         requirement — while the reported maximum, a hair under the balance, executes
+    ///         requirement, while the reported maximum, a hair under the balance, executes
     function test_MaxRedeemMultiAsset_AllSeniorSharesInPool_NearFullExitExecutesWholeBalanceReverts() public {
         // Redeploy with no outside senior seed: the only senior shares ever minted are the pool leg's
         _deployMarket(cellA(), defaultParams());
@@ -390,7 +390,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
 
     /// @notice The wiped-mark corner: with the LT mark at zero, an un-reinvested premium pile, and the liquidity
     ///         requirement waived, a multi-asset redemption still executes through the accountant's zero-delta
-    ///         carve-out (senior redemption NAV flows in-flow) while the in-kind path cannot — and both maxima
+    ///         carve-out (senior redemption NAV flows in-flow) while the in-kind path cannot, and both maxima
     ///         conservatively report zero rather than advertising the carve-out
     function test_MaxRedeemMultiAsset_WipedMarkWithPremium_ConservativeZeroWhileCarveOutExecutes() public {
         // Waive only the liquidity requirement: the zero-liquidity preset also zeroes the LT yield share,
@@ -441,7 +441,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
     }
 
     // =============================
-    // The execute-and-unwind previews
+    // The execute-and-revert previews
     // =============================
 
     /// @notice Preview equals execution at the token layer: the receiver's actual quote and vault-share deltas
@@ -483,15 +483,16 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         quoteToken.approve(address(liquidityTranche), quoteAssets);
         vm.stopPrank();
 
-        (,, TRANCHE_UNIT previewLtAssetsOut,) = kernel.ltPreviewDepositMultiAsset(toTrancheUnits(stAssets), quoteAssets);
-        uint256 previewShares = liquidityTranche.previewDepositMultiAsset(stAssets, quoteAssets);
+        // The preview surfaces the venue's pool-token mint directly as its second return
+        (uint256 previewShares, uint256 previewLtAssetsOut) = liquidityTranche.previewDepositMultiAsset(stAssets, quoteAssets);
         uint256 kernelBptBefore = bpt.balanceOf(address(kernel));
 
         vm.prank(actor);
-        uint256 minted = liquidityTranche.depositMultiAsset(stAssets, quoteAssets, 0, actor);
+        (uint256 minted, uint256 ltAssetsOut) = liquidityTranche.depositMultiAsset(stAssets, quoteAssets, 0, actor);
 
-        assertEq(bpt.balanceOf(address(kernel)) - kernelBptBefore, toUint256(previewLtAssetsOut), "the venue must mint exactly the previewed pool tokens");
+        assertEq(bpt.balanceOf(address(kernel)) - kernelBptBefore, previewLtAssetsOut, "the venue must mint exactly the previewed pool tokens");
         assertEq(minted, previewShares, "the tranche must mint exactly the previewed shares");
+        assertEq(ltAssetsOut, previewLtAssetsOut, "the executed deposit must report exactly the previewed pool tokens");
     }
 
     /// @notice Every preview leaves every market ledger byte-identical: the result-carrying revert must unwind
@@ -530,12 +531,11 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         assertEq(toUint256(dustClaims.nav), 0, "a dust preview must floor the claim value to zero");
     }
 
-    /// @notice A dust ST leg that floors to zero senior shares makes the multi-asset preview return zero, matching
-    ///         the execution which reverts on the zero-share senior mint
+    /// @notice A dust ST leg that floors to zero senior shares reverts the multi-asset preview and the execution identically
     /// @dev With senior shares appreciated past one NAV each, a one-wei ST leg values below a whole senior share and
-    ///      floors to zero. The execution path mints that zero senior share and reverts MUST_MINT_NON_ZERO_SHARES, so
-    ///      the preview must not quote a positive share amount for a deposit that deterministically reverts
-    function test_LTDepositMultiAsset_DustSTLegFloorsToZeroSeniorShares_PreviewZeroAndExecutionReverts() public {
+    ///      floors to zero. The execution path mints that zero senior share and reverts MUST_MINT_NON_ZERO_SHARES, and
+    ///      the preview runs that same flow, so the doomed deposit's revert bubbles from the preview unchanged
+    function test_RevertIf_LTDepositMultiAsset_DustSTLegFloorsToZeroSeniorShares_PreviewAndExecution() public {
         // Appreciate the senior leg 20% so each senior share is worth more than one NAV: a one-wei ST leg now floors
         // to zero senior shares in both the preview and the execution
         applySTPnL(2000);
@@ -544,11 +544,11 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         uint256 dustSTLeg = 1;
         uint256 quoteAssets = 100 * QUOTE_UNIT;
 
-        // The preview returns zero shares because the floored senior leg carries no LT assets out
-        uint256 previewShares = liquidityTranche.previewDepositMultiAsset(dustSTLeg, quoteAssets);
-        assertEq(previewShares, 0, "a dust ST leg flooring to zero senior shares must preview zero LT shares");
+        // The preview bubbles the zero-share senior mint's revert, quoting nothing for a deposit that deterministically reverts
+        vm.expectRevert(IRoycoVaultTranche.MUST_MINT_NON_ZERO_SHARES.selector);
+        liquidityTranche.previewDepositMultiAsset(dustSTLeg, quoteAssets);
 
-        // The execution reverts on the zero-share senior mint the preview now mirrors
+        // The execution reverts on the same zero-share senior mint
         stJtVault.mintShares(LT_PROVIDER, dustSTLeg);
         quoteToken.mint(LT_PROVIDER, quoteAssets);
         vm.startPrank(LT_PROVIDER);
@@ -560,12 +560,12 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
 
         // A pure quote-only deposit in the same state is untouched by the dust guard: it previews a positive share
         // amount and executes, because the guard only fires when a nonzero ST leg is supplied
-        uint256 quoteOnlyPreview = liquidityTranche.previewDepositMultiAsset(0, quoteAssets);
+        (uint256 quoteOnlyPreview,) = liquidityTranche.previewDepositMultiAsset(0, quoteAssets);
         assertGt(quoteOnlyPreview, 0, "a quote-only deposit must still preview a positive share amount");
         quoteToken.mint(LT_PROVIDER, quoteAssets);
         vm.startPrank(LT_PROVIDER);
         quoteToken.approve(address(liquidityTranche), quoteAssets);
-        uint256 quoteOnlyMinted = liquidityTranche.depositMultiAsset(0, quoteAssets, 0, LT_PROVIDER);
+        (uint256 quoteOnlyMinted,) = liquidityTranche.depositMultiAsset(0, quoteAssets, 0, LT_PROVIDER);
         vm.stopPrank();
         assertEq(quoteOnlyMinted, quoteOnlyPreview, "a quote-only deposit must execute and mint exactly the previewed shares");
     }
@@ -579,14 +579,14 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         vm.prank(actor);
         stJtVault.approve(address(liquidityTranche), stAssets);
 
-        uint256 previewShares = liquidityTranche.previewDepositMultiAsset(stAssets, 0);
+        (uint256 previewShares,) = liquidityTranche.previewDepositMultiAsset(stAssets, 0);
         vm.prank(actor);
-        uint256 minted = liquidityTranche.depositMultiAsset(stAssets, 0, 0, actor);
+        (uint256 minted,) = liquidityTranche.depositMultiAsset(stAssets, 0, 0, actor);
         assertEq(minted, previewShares, "a senior-only deposit must mint exactly the previewed shares");
     }
 
     /// @notice A genuine venue failure inside a preview bubbles out verbatim instead of decoding as a result,
-    ///         and previews compose inside a state-mutating transaction — a context the Vault's query mode cannot serve
+    ///         and previews compose inside a state-mutating transaction, a context the Vault's query mode cannot serve
     function test_MultiAssetPreviews_BubbleGenuineVenueFailures_AndComposeMidTransaction() public {
         // A forced venue failure must surface as itself through every preview path
         balancerVault.setRevertMode(MockBalancerVault.RevertMode.REMOVE);
@@ -601,15 +601,15 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
             assertEq(bytes4(err), MockBalancerVault.FORCED_REMOVE_REVERT.selector, "the venue's revert must bubble out of the maximum");
         }
         balancerVault.setRevertMode(MockBalancerVault.RevertMode.ADD);
-        try liquidityTranche.previewDepositMultiAsset(1e18, QUOTE_UNIT) returns (uint256) {
+        try liquidityTranche.previewDepositMultiAsset(1e18, QUOTE_UNIT) returns (uint256, uint256) {
             fail("the add preview must bubble a venue failure");
         } catch (bytes memory err) {
             assertEq(bytes4(err), MockBalancerVault.FORCED_ADD_REVERT.selector, "the venue's revert must bubble out of the add preview");
         }
         balancerVault.setRevertMode(MockBalancerVault.RevertMode.NONE);
 
-        // Mutate, preview, then mutate again inside one transaction — the Vault's query mode requires a zeroed
-        // transaction origin, so this composition is only possible on the execute-and-unwind transport
+        // Mutate, preview, then mutate again inside one transaction, the Vault's query mode requires a zeroed
+        // transaction origin, so this composition is only possible on the execute-and-revert transport
         assertTrue(tx.origin != address(0), "the composition must run in a context the Vault's query mode rejects");
         uint256 quoteAssets = 100 * QUOTE_UNIT;
         quoteToken.mint(LT_PROVIDER, quoteAssets);
@@ -621,5 +621,54 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         (, uint256 quoteOut) = liquidityTranche.redeemMultiAsset(maxShares, 0, 0, LT_PROVIDER, LT_PROVIDER);
         vm.stopPrank();
         assertEq(quoteOut, previewQuote, "the mid-transaction preview must match the execution that follows it");
+    }
+
+    /// @notice Post-op gate parity on the redemption side: a redemption sized just past the multi-asset maximum
+    ///         reverts LIQUIDITY_REQUIREMENT_VIOLATED from the preview exactly as from the execution, because the
+    ///         preview runs the same post-op enforcement at the venue-marked LT raw NAV
+    function test_RevertIf_RedeemMultiAssetBreachesLiquidity_PreviewAndExecution() public {
+        uint256 maxShares = liquidityTranche.maxRedeemMultiAsset(LT_PROVIDER);
+        assertGt(maxShares, 0, "the fixture must leave multi-asset redemption capacity");
+
+        // The boundary test's breach sizing: slack for the accountant's one-NAV-wei dust tolerance plus the
+        // flow's quote and share quantization floors, kept inside the balance so the gate, not the clamp, decides
+        uint256 breachShares =
+            maxShares + Math.mulDiv(2e12 + 1, liquidityTranche.totalSupply(), toUint256(accountant.getState().lastLTRawNAV), Math.Rounding.Ceil) + 2;
+        assertLt(breachShares, liquidityTranche.balanceOf(LT_PROVIDER), "the breach probe must sit inside the owner's balance");
+
+        // The preview bubbles the post-op liquidity gate for the doomed size, leaving every ledger untouched
+        bytes32 digestBefore = _marketDigest(LT_PROVIDER);
+        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        liquidityTranche.previewRedeemMultiAsset(breachShares);
+        assertEq(_marketDigest(LT_PROVIDER), digestBefore, "the gate-reverted preview left a trace on the market");
+
+        // The same size executes into the same post-op liquidity gate
+        vm.prank(LT_PROVIDER);
+        vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+        liquidityTranche.redeemMultiAsset(breachShares, 0, 0, LT_PROVIDER, LT_PROVIDER);
+    }
+
+    /// @notice Post-op gate parity on the deposit side: an ST leg sized past the market's senior capacity reverts
+    ///         COVERAGE_REQUIREMENT_VIOLATED from the preview exactly as from the execution, because the preview
+    ///         runs the same post-op enforcement at the venue-marked LT raw NAV
+    function test_RevertIf_DepositMultiAssetBreachesCoverage_PreviewAndExecution() public {
+        // Double the coverage-bound senior capacity breaches coverage outright: the ST leg raises the senior
+        // raw NAV the junior buffer must cover, and the liquidity side only deepens, so coverage is what fires
+        uint256 stLeg = toUint256(seniorTranche.maxDeposit(LT_PROVIDER)) * 2;
+        assertGt(stLeg, 0, "the fixture must leave senior deposit capacity to double");
+
+        // The preview bubbles the post-op coverage gate for the doomed deposit, leaving every ledger untouched
+        bytes32 digestBefore = _marketDigest(LT_PROVIDER);
+        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        liquidityTranche.previewDepositMultiAsset(stLeg, 0);
+        assertEq(_marketDigest(LT_PROVIDER), digestBefore, "the gate-reverted preview left a trace on the market");
+
+        // The same deposit executes into the same post-op coverage gate
+        stJtVault.mintShares(LT_PROVIDER, stLeg);
+        vm.startPrank(LT_PROVIDER);
+        stJtVault.approve(address(liquidityTranche), stLeg);
+        vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
+        liquidityTranche.depositMultiAsset(stLeg, 0, 0, LT_PROVIDER);
+        vm.stopPrank();
     }
 }

@@ -6,6 +6,7 @@ import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/M
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
+import { DispatchLogic } from "../../../src/libraries/logic/DispatchLogic.sol";
 import { AssetClaims, MarketState, Operation, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { MarketFuzzTestBase } from "../../utils/MarketFuzzTestBase.sol";
@@ -385,31 +386,46 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
     }
 
     // =============================
-    // Seam gates (spec: the simulation callbacks admit only the tranche's own self-call)
+    // Simulation gates (spec: a preview-flagged flow can never return, so a preview can never leak state)
     // =============================
 
     /**
-     * @notice The execute-and-revert simulation callbacks reject every external caller with ONLY_SELF for both
-     *         operation kinds on all three tranches
-     * @dev The callbacks run the REAL mutating kernel flows, so an open gate would let anyone execute a
-     *      custody-free deposit or a kernel-received redemption directly. The self-call is the entire defense
+     * @notice Every preview-flagged kernel entrypoint unwinds by reverting with SIMULATION_RESULT even when invoked
+     *         outside a simulation frame, on all three tranches and both multi-asset flows
+     * @dev The flag is self-enforcing: the flow itself terminates in the result-carrying revert, so no caller can run
+     *      a preview whose mutations persist, with or without the tranche's _simulate frame around it
      */
-    function test_RevertIf_SimulationCallbacksCalledExternally() public {
-        address intruder = makeAddr("SIMULATION_INTRUDER");
-        vm.startPrank(intruder);
-        vm.expectRevert(IRoycoVaultTranche.ONLY_SELF.selector);
-        seniorTranche.previewDepositAndRevert(toTrancheUnits(1e18));
-        vm.expectRevert(IRoycoVaultTranche.ONLY_SELF.selector);
-        seniorTranche.previewRedeemAndRevert(1e18);
-        vm.expectRevert(IRoycoVaultTranche.ONLY_SELF.selector);
-        juniorTranche.previewDepositAndRevert(toTrancheUnits(1e18));
-        vm.expectRevert(IRoycoVaultTranche.ONLY_SELF.selector);
-        juniorTranche.previewRedeemAndRevert(1e18);
-        vm.expectRevert(IRoycoVaultTranche.ONLY_SELF.selector);
-        liquidityTranche.previewDepositAndRevert(toTrancheUnits(1e18));
-        vm.expectRevert(IRoycoVaultTranche.ONLY_SELF.selector);
-        liquidityTranche.previewRedeemAndRevert(1e18);
-        vm.stopPrank();
+    function test_RevertIf_FlaggedKernelEntrypointInvokedOutsideSimulation() public {
+        bytes32 digestBefore = keccak256(abi.encode(accountant.getState(), kernel.getState()));
+
+        vm.prank(address(seniorTranche));
+        vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
+        kernel.stDeposit(true, toTrancheUnits(1e18));
+        vm.prank(address(seniorTranche));
+        vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
+        kernel.stRedeem(true, 1e18, address(kernel));
+        vm.prank(address(juniorTranche));
+        vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
+        kernel.jtDeposit(true, toTrancheUnits(1e18));
+        vm.prank(address(juniorTranche));
+        vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
+        kernel.jtRedeem(true, 1e18, address(kernel));
+        vm.prank(address(liquidityTranche));
+        vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
+        kernel.ltDeposit(true, toTrancheUnits(1e18));
+        vm.prank(address(liquidityTranche));
+        vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
+        kernel.ltRedeem(true, 1e18, address(kernel));
+        vm.prank(address(liquidityTranche));
+        vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
+        kernel.ltDepositMultiAsset(true, toTrancheUnits(0), 1e6, toTrancheUnits(0));
+        vm.prank(address(liquidityTranche));
+        vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
+        kernel.ltRedeemMultiAsset(true, 1e18, 0, 0, address(kernel));
+
+        assertEq(
+            keccak256(abi.encode(accountant.getState(), kernel.getState())), digestBefore, "a flagged flow must leave the committed state untouched"
+        );
     }
 }
 
@@ -557,13 +573,27 @@ contract TestFuzz_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestB
         }
         syncVenuePrices();
 
-        // Flow 1: senior deposit, bounded by the live coverage-and-liquidity capacity
+        // Flow 1: senior deposit, bounded by the live coverage-and-liquidity capacity. A pending premium
+        // reinvestment can mark the post-sync LT below the max's idle-premium assumption, overstating the
+        // liquidity-capped capacity, the preview must then revert on the gate exactly like the execution
         {
             uint256 assets = bound(_amountSeedA, 1e12, toUint256(seniorTranche.maxDeposit(ST_PROVIDER))); // dust-to-max sizes
             MarketSnapshot memory before = _snapshotMarket();
-            uint256 previewed = seniorTranche.previewDeposit(toTrancheUnits(assets));
-            _assertSnapshotUnchanged(before, "senior previewDeposit");
-            assertEq(_depositSenior(assets), previewed, "senior deposit must mint exactly the previewed shares");
+            try seniorTranche.previewDeposit(toTrancheUnits(assets)) returns (uint256 previewed) {
+                _assertSnapshotUnchanged(before, "senior previewDeposit");
+                assertEq(_depositSenior(assets), previewed, "senior deposit must mint exactly the previewed shares");
+            } catch (bytes memory err) {
+                assertEq(
+                    bytes4(err), IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector, "the senior deposit preview may only revert on the liquidity gate"
+                );
+                _assertSnapshotUnchanged(before, "senior previewDeposit");
+                stJtVault.mintShares(ST_PROVIDER, assets);
+                vm.startPrank(ST_PROVIDER);
+                stJtVault.approve(address(seniorTranche), assets);
+                vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+                seniorTranche.deposit(toTrancheUnits(assets), ST_PROVIDER);
+                vm.stopPrank();
+            }
         }
 
         // Flow 2: junior deposit, never gated, seed-sized at most
@@ -612,15 +642,25 @@ contract TestFuzz_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestB
             _assertClaimsParity(claims, previewed, "junior redemption");
         }
 
-        // Flow 6: in-kind liquidity redemption, bounded by the live liquidity-respecting max
+        // Flow 6: in-kind liquidity redemption, bounded by the live liquidity-respecting max, guarded on the
+        // gate like flow 1 since the same reinvestment wedge can overstate the redemption capacity
         {
             uint256 shares = bound(_sharesSeedC, 1e6, liquidityTranche.maxRedeem(LT_PROVIDER)); // dust floor as in flow 4
             MarketSnapshot memory before = _snapshotMarket();
-            AssetClaims memory previewed = liquidityTranche.previewRedeem(shares);
-            _assertSnapshotUnchanged(before, "liquidity previewRedeem");
-            vm.prank(LT_PROVIDER);
-            AssetClaims memory claims = liquidityTranche.redeem(shares, LT_PROVIDER, LT_PROVIDER);
-            _assertClaimsParity(claims, previewed, "liquidity redemption");
+            try liquidityTranche.previewRedeem(shares) returns (AssetClaims memory previewed) {
+                _assertSnapshotUnchanged(before, "liquidity previewRedeem");
+                vm.prank(LT_PROVIDER);
+                AssetClaims memory claims = liquidityTranche.redeem(shares, LT_PROVIDER, LT_PROVIDER);
+                _assertClaimsParity(claims, previewed, "liquidity redemption");
+            } catch (bytes memory err) {
+                assertEq(
+                    bytes4(err), IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector, "the liquidity redemption preview may only revert on the liquidity gate"
+                );
+                _assertSnapshotUnchanged(before, "liquidity previewRedeem");
+                vm.prank(LT_PROVIDER);
+                vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
+                liquidityTranche.redeem(shares, LT_PROVIDER, LT_PROVIDER);
+            }
         }
     }
 

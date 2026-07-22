@@ -24,10 +24,8 @@ abstract contract IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter is 
     /// @dev Thrown when the tranche asset is not the CDO's AA tranche token
     error TRANCHE_ASSET_MUST_BE_CDO_AA_TRANCHE();
 
-    /**
-     * @notice The quoter-specific initialization parameters
-     * @custom:field initialConversionRateWAD - The initial conversion rate as defined by the oracle, scaled to WAD precision (0 to query the CDO's virtual price live)
-     */
+    /// @notice The quoter-specific initialization parameters
+    /// @custom:field initialConversionRateWAD - The initial conversion rate as defined by the oracle, scaled to WAD precision (0 to query the CDO's virtual price live)
     struct ST_JT_QuoterSpecificParams {
         uint256 initialConversionRateWAD;
     }

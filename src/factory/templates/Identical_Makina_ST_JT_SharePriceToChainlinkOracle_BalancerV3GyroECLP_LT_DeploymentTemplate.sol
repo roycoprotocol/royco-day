@@ -64,10 +64,8 @@ contract Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3GyroECLP_L
         return abi.encodeCall(Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.initialize, (_kip, p.initParams));
     }
 
-    /**
-     * @inheritdoc BalancerV3_GyroECLP_LT_DeploymentTemplate
-     * @dev Extends the base's LT-quoter setters with this kernel family's ST/JT Chainlink quoter setters, all bound to ADMIN_ORACLE_QUOTER_ROLE.
-     */
+    /// @inheritdoc BalancerV3_GyroECLP_LT_DeploymentTemplate
+    /// @dev Extends the base's LT-quoter setters with this kernel family's ST/JT Chainlink quoter setters, all bound to ADMIN_ORACLE_QUOTER_ROLE.
     function _kernelQuoterBinding() internal view override(BalancerV3_GyroECLP_LT_DeploymentTemplate) returns (bytes4[] memory s, uint64[] memory r) {
         (bytes4[] memory bs, uint64[] memory br) = super._kernelQuoterBinding();
 

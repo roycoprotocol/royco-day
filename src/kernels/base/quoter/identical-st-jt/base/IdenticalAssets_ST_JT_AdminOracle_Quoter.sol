@@ -27,9 +27,11 @@ abstract contract IdenticalAssets_ST_JT_AdminOracle_Quoter is IdenticalAssets_ST
         __IdenticalAssets_ST_JT_Oracle_Quoter_init_unchained(_initialConversionRateWAD);
     }
 
-    /// @inheritdoc IdenticalAssets_ST_JT_Oracle_Quoter
-    /// @dev The conversion rate cannot be set to the sentinel value (0)
-    /// @dev Access control is enforced by the root setter this dispatches to, a second restricted here would consume a delayed admin operation twice
+    /**
+     * @inheritdoc IdenticalAssets_ST_JT_Oracle_Quoter
+     * @dev The conversion rate cannot be set to the sentinel value (0)
+     * @dev Access control is enforced by the root setter this dispatches to, a second restricted here would consume a delayed admin operation twice
+     */
     function setConversionRate(uint256 _conversionRateWAD, bool _syncBeforeUpdate) public virtual override(IdenticalAssets_ST_JT_Oracle_Quoter) {
         // Validate the conversion rate
         require(_conversionRateWAD != SENTINEL_CONVERSION_RATE, INVALID_CONVERSION_RATE());

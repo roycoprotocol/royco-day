@@ -97,7 +97,7 @@ contract Test_FixedTermEntrypointMatrix is DayMarketTestBase {
         quoteToken.mint(a, 10 * quoteUnit);
         vm.startPrank(a);
         quoteToken.approve(address(liquidityTranche), 10 * quoteUnit);
-        uint256 shares = liquidityTranche.depositMultiAsset(0, 10 * quoteUnit, 0, a);
+        (uint256 shares,) = liquidityTranche.depositMultiAsset(0, 10 * quoteUnit, 0, a);
         vm.stopPrank();
         assertGt(shares, 0, "quote-only multi-asset LT deposit must mint shares in FIXED_TERM");
     }

@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { LT_LP_ROLE } from "../../../src/factory/Roles.sol";
+import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { MarketState, SyncedAccountingState, TrancheType } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
@@ -168,39 +169,67 @@ contract Test_LTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
     }
 
     /**
-     * @notice In FIXED_TERM, the multi-asset LT deposit preview zeroes ALL of value/navToMint/ltAssetsOut for an
-     *         ST-leg deposit (which the reverting execution path forbids), while still returning the live LT supply
-     * @dev The reverting ST-leg path returns a fully-zero quote so a caller cannot mistake it for a real quote;
-     *      the supply leg stays live because it is read before the branch
+     * @notice With idle liquidity premium senior shares outstanding, the multi-asset deposit preview matches its
+     *         same-block execution exactly, for a two-leg (ST + quote) and a quote-only deposit
+     * @dev Every other multi-asset deposit parity test runs at ltOwnedSeniorTrancheShares == 0, but the pile
+     *      enters the pricing denominator (the LT effective NAV) and the pre-op sync's reinvestment attempt runs
+     *      inside the preview frame, so a frame-vs-exec divergence in pile handling would misprice quotes only in
+     *      this state. Slippage stays armed so the pile survives both frames, its exec-side survival is asserted
      */
-    function test_LTDepositMultiAsset_PreviewInFixedTerm_ZeroesAllQuoteLegsForSTLeg() public {
-        _enterFixedTerm();
+    function test_LTDepositMultiAsset_PreviewParityWithIdlePremiumPile() public {
+        uint256 idleShares = _accrueIdlePremiumSeniorShares();
+        address entrant = makeAddr("MULTI_ASSET_PILE_ENTRANT");
+        accessManager.grantRole(LT_LP_ROLE, entrant, 0);
 
-        // An ST-leg multi-asset preview in FIXED_TERM returns the fully-zeroed quote
-        (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT ltAssetsOut, uint256 ltTotalSupplyAfterMints) =
-            kernel.ltPreviewDepositMultiAsset(toTrancheUnits(stUnit), 0);
+        // Two-leg deposit: one whole ST asset plus one whole quote, previewed immediately before execution
+        stJtVault.mintShares(entrant, stUnit);
+        quoteToken.mint(entrant, quoteUnit);
+        vm.startPrank(entrant);
+        stJtVault.approve(address(liquidityTranche), stUnit);
+        quoteToken.approve(address(liquidityTranche), quoteUnit);
+        (uint256 previewedTwoLeg,) = liquidityTranche.previewDepositMultiAsset(stUnit, quoteUnit);
+        (uint256 mintedTwoLeg,) = liquidityTranche.depositMultiAsset(stUnit, quoteUnit, 0, entrant);
+        vm.stopPrank();
+        assertEq(mintedTwoLeg, previewedTwoLeg, "the two-leg multi-asset deposit must mint exactly the shares previewed over the idle pile");
+        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares, "the idle pile must survive the two-leg deposit with slippage armed");
 
-        assertEq(toUint256(depositNAV), 0, "depositNAV must be zero for a forbidden ST-leg deposit in FIXED_TERM");
-        assertEq(toUint256(effectiveNAV), 0, "effectiveNAV must be zero for a forbidden ST-leg deposit in FIXED_TERM");
-        assertEq(toUint256(ltAssetsOut), 0, "ltAssetsOut must be zero for a forbidden ST-leg deposit in FIXED_TERM");
-        // The LT supply leg is read before the FIXED_TERM branch, so it stays live (no fee shares mint in FIXED_TERM)
-        assertEq(ltTotalSupplyAfterMints, liquidityTranche.totalSupply(), "the LT supply leg stays live and equals the live LT supply");
+        // Quote-only deposit against the same staged pile
+        quoteToken.mint(entrant, quoteUnit);
+        vm.startPrank(entrant);
+        quoteToken.approve(address(liquidityTranche), quoteUnit);
+        (uint256 previewedQuoteOnly,) = liquidityTranche.previewDepositMultiAsset(0, quoteUnit);
+        (uint256 mintedQuoteOnly,) = liquidityTranche.depositMultiAsset(0, quoteUnit, 0, entrant);
+        vm.stopPrank();
+        assertEq(mintedQuoteOnly, previewedQuoteOnly, "the quote-only multi-asset deposit must mint exactly the shares previewed over the idle pile");
+        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares, "the idle pile must survive the quote-only deposit with slippage armed");
     }
 
     /**
-     * @notice In FIXED_TERM, a quote-only multi-asset LT deposit preview is a real, nonzero quote — it mints no
+     * @notice In FIXED_TERM, the multi-asset LT deposit preview for an ST-leg deposit reverts exactly like the
+     *         forbidden execution path
+     * @dev The preview routes through the actual kernel deposit flow, so the fixed-term ST-leg gate bubbles
+     *      unchanged instead of returning a zeroed quote a caller could mistake for a real one
+     */
+    function test_RevertIf_LTDepositMultiAsset_PreviewInFixedTermWithSTLeg() public {
+        _enterFixedTerm();
+
+        // An ST-leg multi-asset preview in FIXED_TERM bubbles the execution path's exact gate
+        vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
+        liquidityTranche.previewDepositMultiAsset(stUnit, 0);
+    }
+
+    /**
+     * @notice In FIXED_TERM, a quote-only multi-asset LT deposit preview is a real, nonzero quote, it mints no
      *         senior shares and only deepens liquidity, so it is the one multi-asset deposit FIXED_TERM allows
      */
     function test_LTDepositMultiAsset_PreviewInFixedTerm_QuoteOnlyIsNonzero() public {
         _enterFixedTerm();
 
-        // One whole quote adds 1e18 NAV at the fixture's 1.0 NAV-per-BPT, minting exactly 1e18 BPT
-        (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT ltAssetsOut,) = kernel.ltPreviewDepositMultiAsset(toTrancheUnits(0), quoteUnit);
-
-        assertEq(toUint256(ltAssetsOut), 1e18, "a quote-only deposit mints exactly 1e18 BPT in FIXED_TERM");
-        assertEq(toUint256(depositNAV), 1e18, "a quote-only deposit allocates exactly 1e18 NAV in FIXED_TERM");
-        // No premium accrues on a covered loss, so the LT effective NAV equals the pool depth: the 6e18 auto-seed
-        assertEq(toUint256(effectiveNAV), 6e18, "the quote-only LT share price equals the 6e18 pool depth (no idle premium leg)");
+        // One whole quote adds 1e18 NAV at the fixture's 1.0 NAV-per-BPT, minting exactly 1e18 BPT priced at the
+        // 6e18 pool depth (no premium accrues on a covered loss, so there is no idle premium leg): the quoted
+        // shares are 1e18 x ltSupply / 6e18, exactly the execution path's mint
+        (uint256 shares,) = liquidityTranche.previewDepositMultiAsset(0, quoteUnit);
+        assertEq(shares, Math.mulDiv(1e18, liquidityTranche.totalSupply(), 6e18), "the quote-only preview must price at the 6e18 pool depth");
     }
 
     // =============================

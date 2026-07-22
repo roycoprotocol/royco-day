@@ -287,9 +287,11 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         result.extras = abi.encode(ExtraContractsDeployedResult({ balancerPool: mc.balancerPool, balancerHook: balancerHook, bptOracle: mc.bptOracle }));
     }
 
-    /// @notice Deploys the real kernel-bound hook implementation from its SSTORE2-stored creation code, appending the
-    ///         kernel as its constructor arg
-    /// @dev The hook constructor reads `kernel.LT_ASSET()`, so the kernel proxy must already have code
+    /**
+     * @notice Deploys the real kernel-bound hook implementation from its SSTORE2-stored creation code, appending the
+     * kernel as its constructor arg
+     * @dev The hook constructor reads `kernel.LT_ASSET()`, so the kernel proxy must already have code
+     */
     function _deployRealHookImpl(address _kernel) internal returns (address impl) {
         bytes memory initCode = abi.encodePacked(SSTORE2.read(_hookCreationCodePointer), abi.encode(_kernel));
         assembly ("memory-safe") {
@@ -422,10 +424,8 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
     // ROLE BINDINGS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /**
-     * @notice Assembles the market's full role-binding config, pairing each deployment's runtime target addresses with
-     *         the selector/role sets from the per-target binding helpers
-     */
+    /// @notice Assembles the market's full role-binding config, pairing each deployment's runtime target addresses with
+    ///         the selector/role sets from the per-target binding helpers
     function _buildRoleBindings(DeploymentResult memory _r, address _balancerHook) internal view returns (RoleBindings memory) {
         // Runtime target addresses, index-aligned with the binding helpers below
         address[9] memory targets = [

@@ -30,9 +30,11 @@ abstract contract IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter is
         uint48 stalenessThresholdSeconds;
     }
 
-    /// @notice Initializes the identical assets Chainlink (compatible) oracle quoter and the base identical assets oracle quoter
-    /// @dev The oracle prices the mandatory tranche asset to reference asset hop with no stored rate fallback, so a null oracle can never price this composition and is rejected outright
-    /// @param _params The quoter-specific initialization parameters
+    /**
+     * @notice Initializes the identical assets Chainlink (compatible) oracle quoter and the base identical assets oracle quoter
+     * @dev The oracle prices the mandatory tranche asset to reference asset hop with no stored rate fallback, so a null oracle can never price this composition and is rejected outright
+     * @param _params The quoter-specific initialization parameters
+     */
     function __IdenticalAssets_ST_JT_ChainlinkToAdminOracle_Quoter_init(ST_JT_QuoterSpecificParams calldata _params) internal onlyInitializing {
         // The oracle is the only tranche asset to reference asset price source, so it must be set
         require(_params.trancheAssetToReferenceAssetOracle != address(0), NULL_ADDRESS());

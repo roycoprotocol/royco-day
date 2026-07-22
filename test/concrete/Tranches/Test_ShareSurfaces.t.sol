@@ -308,7 +308,7 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
      *      and LT shares are minted at the 6e18 effective NAV over 6e18 supply: 1000e18 x 6e18 / 6e18 = 1000e18
      */
     function test_PreviewDepositMultiAsset_QuoteOnlyQuotesFairValueShares() public {
-        uint256 shares = liquidityTranche.previewDepositMultiAsset(0, 1000e6);
+        (uint256 shares,) = liquidityTranche.previewDepositMultiAsset(0, 1000e6);
         assertEq(shares, 1000e18, "1000 whole quote must preview exactly 1000e18 LT shares at the 1.0 seeded rates");
     }
 

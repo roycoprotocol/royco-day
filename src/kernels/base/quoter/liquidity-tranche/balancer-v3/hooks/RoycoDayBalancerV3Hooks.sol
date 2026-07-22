@@ -128,7 +128,7 @@ contract RoycoDayBalancerV3Hooks is RoycoBase, BaseHooks, VaultGuard {
     }
 
     /// @inheritdoc IHooks
-    /// @dev All liquidity operations execute a PNL accounting sync to ensure that accounting is fresh before the operation
+    /// @dev Externally-initiated operations execute a PNL accounting sync so accounting is fresh before the operation, kernel-routed flows are bracketed by the kernel's own syncs
     function getHookFlags() public view virtual override(BaseHooks) returns (HookFlags memory) {
         return HookFlags({
             enableHookAdjustedAmounts: false,
@@ -153,9 +153,11 @@ contract RoycoDayBalancerV3Hooks is RoycoBase, BaseHooks, VaultGuard {
      * @dev Intended to be invoked from every externally-initiated `onBefore*` hook (add/remove liquidity, swap) so the
      *      kernel captures any oracle drift on the senior side before the operation mutates the pool's composition
      * @dev Requires this hook contract to hold the SYNCER role on the kernel
+     * @dev Gated by this hook contract's own pause, so pausing the hook blocks externally-initiated pool operations while
+     *      kernel-routed flows (which skip this sync) continue
      * @return synced Always true on success, letting callers forward the result directly as the hook's required `bool` return
      */
-    function _preLiquidityOperationSyncTrancheAccounting() internal returns (bool synced) {
+    function _preLiquidityOperationSyncTrancheAccounting() internal whenNotPaused returns (bool synced) {
         IRoycoDayKernel(ROYCO_DAY_KERNEL).syncTrancheAccounting();
         return true;
     }

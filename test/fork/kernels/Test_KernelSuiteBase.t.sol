@@ -18,6 +18,7 @@ import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoBlacklist } from "../../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
+import { DispatchLogic } from "../../../src/libraries/logic/DispatchLogic.sol";
 import { IRoycoLiquidityTranche } from "../../../src/interfaces/IRoycoLiquidityTranche.sol";
 import { IRoycoSeniorTranche } from "../../../src/interfaces/IRoycoSeniorTranche.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
@@ -35,7 +36,7 @@ import { RoycoDayTestBase } from "../../utils/RoycoDayTestBase.sol";
  *         `_deployKernelAndMarket` hook, which selects a market config by name from the config file), wires every deployed
  *         contract into member vars (including the Day-only LT/pool/hook/LDM topology the script's result omits), and
  *         funds the ST/JT providers. Concrete kernel tests then only supply the per-kernel `IKernelTestHooks` and the market
- *         name — following an "abstract kernel test per kernel type" pattern.
+ *         name, following an "abstract kernel test per kernel type" pattern.
  * @dev The shared tests live here on top of the scaffolding, grouped by flow: deposits, redemptions, syncs, adversarial.
  */
 abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
@@ -389,7 +390,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
     /// @notice Expected shares minted for `_value` against `_supply` shares backed by `_totalNAV` (floor).
     /// @dev Mirrors `ValuationLogic._convertToShares` including its zero-supply and zero-NAV boundaries and
-    ///      the mint-dilution clamp (bind iff value·(WAD − MAX_MINT_DILUTION) > denominator·MAX_MINT_DILUTION; products fit on the suite domain).
+    ///      the mint-dilution clamp (bind iff value·(WAD − MAX_MINT_DILUTION) > denominator·MAX_MINT_DILUTION, products fit on the suite domain).
     function _expectedShares(NAV_UNIT _value, uint256 _supply, NAV_UNIT _totalNAV) internal pure returns (uint256) {
         if (_supply == 0) return toUint256(_value);
         uint256 denominator = toUint256(_totalNAV) == 0 ? ZERO_NAV_SHARE_PRICING_DENOMINATOR : toUint256(_totalNAV);
@@ -497,9 +498,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      * @dev Mirrors `RoycoDayAccountant._previewSyncTrancheAccounting`: claim decomposition, floor-on-magnitude
      *      attribution with JT absorbing the rounding residual, JT loss/gain booking with the dust-gated JT fee,
      *      coverage `min(stLoss, jtEffectiveNAV)` with the JT-fee recompute, IL recovery `min(stGain, IL)`, premiums
-     *      `floor(stGain * (twStart + yieldShare * elapsed) / (premiumElapsed * WAD))` — the time-weighted
+     *      `floor(stGain * (twStart + yieldShare * elapsed) / (premiumElapsed * WAD))`, the time-weighted
      *      average yield share over the full window since the last premium payment, which reduces to
-     *      `floor(stGain * yieldShare / WAD)` for a single constant-share window — with the same-block
+     *      `floor(stGain * yieldShare / WAD)` for a single constant-share window, with the same-block
      *      (`premiumElapsed == 0`) instantaneous-share path, fee floors, `premiumsPaid = stGain > dust` gating
      *      every fee, the LT premium folded back into stEffectiveNAV, and the FIXED_TERM zeroing of the LT premium plus
      *      all fees (but NOT the JT risk premium, which is already booked into jtEffectiveNAV).
@@ -718,7 +719,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         vm.startPrank(_lp);
         IERC20(testConfig.stAsset).approve(address(LT), _stAssets);
         IERC20(testConfig.quoteAsset).approve(address(LT), _quoteAssets);
-        r.shares = IRoycoLiquidityTranche(address(LT)).depositMultiAsset(_stAssets, _quoteAssets, _minLTAssetsOut, _lp);
+        (r.shares,) = IRoycoLiquidityTranche(address(LT)).depositMultiAsset(_stAssets, _quoteAssets, _minLTAssetsOut, _lp);
         vm.stopPrank();
         r.post = _snap(_actorArray(_lp));
         _assertSolvency();
@@ -947,7 +948,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         (bool ok, bytes memory ret) = address(LT).call(abi.encodeCall(IRoycoLiquidityTranche.previewDepositMultiAsset, (_stAssets, _quoteAssets)));
         vm.revertToState(snapshotId);
         if (!ok) _bubbleRevert(ret);
-        shares = abi.decode(ret, (uint256));
+        (shares,) = abi.decode(ret, (uint256, uint256));
     }
 
     /**
@@ -1062,9 +1063,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /**
-     * @notice Simulates the kernel's non-view LT multi-asset deposit preview through the venue's query mode.
-     * @dev Same query-context and state-rollback pattern as `_previewDepositLTMulti`, but against the kernel
-     *      surface so the previewed `ltAssetsOut` (the venue add's mint) is observable for event expectations.
+     * @notice Simulates the kernel's preview-mode LT multi-asset deposit flow.
+     * @dev Pranked as the liquidity tranche (the flow's only permitted caller) with the preview flag set, so the
+     *      previewed `ltAssetsOut` (the venue add's mint) is observable for event expectations. The flagged flow
+     *      unwinds itself via its result-carrying revert, whose payload carries the previewed returns.
      */
     function _previewKernelDepositLTMulti(
         uint256 _stAssets,
@@ -1073,13 +1075,16 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         internal
         returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT ltAssetsOut, uint256 ltTotalSupplyAfterMints)
     {
-        uint256 snapshotId = vm.snapshotState();
-        vm.prank(address(0), address(0));
+        vm.prank(address(LT), address(0));
         (bool ok, bytes memory ret) =
-            address(KERNEL).call(abi.encodeCall(IRoycoDayKernel.ltPreviewDepositMultiAsset, (toTrancheUnits(_stAssets), _quoteAssets)));
-        vm.revertToState(snapshotId);
-        if (!ok) _bubbleRevert(ret);
-        (depositNAV, effectiveNAV, ltAssetsOut, ltTotalSupplyAfterMints) = abi.decode(ret, (NAV_UNIT, NAV_UNIT, TRANCHE_UNIT, uint256));
+            address(KERNEL).call(abi.encodeCall(IRoycoDayKernel.ltDepositMultiAsset, (true, toTrancheUnits(_stAssets), _quoteAssets, toTrancheUnits(0))));
+        assertFalse(ok, "the flagged flow must unwind via its result-carrying revert");
+        if (bytes4(ret) != DispatchLogic.SIMULATION_RESULT.selector) _bubbleRevert(ret);
+        bytes memory simulationResult;
+        assembly ("memory-safe") { simulationResult := add(ret, 0x44) }
+        (depositNAV, effectiveNAV, ltAssetsOut) = abi.decode(simulationResult, (NAV_UNIT, NAV_UNIT, TRANCHE_UNIT));
+        // The sync mints no LT shares, so the live supply is the post-sync supply the share quote prices against
+        ltTotalSupplyAfterMints = LT.totalSupply();
     }
 
     /// @notice Sizes a quote-asset amount whose near-peg value approximates `_value` (one whole quote token per WAD of NAV).
@@ -1623,8 +1628,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         OpReceipt memory rST = _doDepositST(ST_ALICE_ADDRESS, toUint256(maxAssets));
         assertLe(rST.post.coverageUtilizationWAD, WAD, "arrange: coverage must be satisfied at the brink");
         // Brink floor derivation: stMaxDeposit under-reports the exact coverage boundary only by the two NAV dust
-        // tolerances plus quoter conversion floors — wei-to-dust magnitudes against an exposure seeded from
-        // `initialFunding` — so the max-size deposit parks utilization within a sliver of 100%. A 99% floor is
+        // tolerances plus quoter conversion floors, wei-to-dust magnitudes against an exposure seeded from
+        // `initialFunding`, so the max-size deposit parks utilization within a sliver of 100%. A 99% floor is
         // orders of magnitude above that slack and cleanly separates "at the brink" from a failed arrange.
         assertGt(rST.post.coverageUtilizationWAD, (WAD * 99) / 100, "arrange: coverage utilization must sit at the brink");
 
@@ -1670,7 +1675,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         IERC20(testConfig.quoteAsset).approve(address(LT), quoteAssets);
         vm.expectEmit(true, true, false, true, address(LT));
         emit IRoycoLiquidityTranche.MultiAssetDeposit(LT_ALICE_ADDRESS, LT_ALICE_ADDRESS, stAssets, quoteAssets, toUint256(previewLtAssetsOut), expectedShares);
-        uint256 shares = IRoycoLiquidityTranche(address(LT)).depositMultiAsset(stAssets, quoteAssets, toUint256(previewLtAssetsOut), LT_ALICE_ADDRESS);
+        (uint256 shares,) = IRoycoLiquidityTranche(address(LT)).depositMultiAsset(stAssets, quoteAssets, toUint256(previewLtAssetsOut), LT_ALICE_ADDRESS);
         vm.stopPrank();
         _assertSolvency();
 
@@ -1748,7 +1753,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /// @notice In a fixed-term market a quote-only multi-asset LT deposit succeeds (minting no senior shares) while
-    ///         any ST-leg deposit reverts, and the preview returns zero shares for the disabled shape.
+    ///         any ST-leg deposit reverts, and the preview bubbles the same revert for the disabled shape.
     function test_LTDepositMultiAsset_quoteOnly_allowedInFixedTerm_stLegReverts() public whenLT {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
         _seedDefaultLT();
@@ -1776,7 +1781,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         IRoycoLiquidityTranche(address(LT)).depositMultiAsset(stAssets, quoteAssets, 0, LT_BOB_ADDRESS);
         vm.stopPrank();
 
-        assertEq(_previewDepositLTMulti(stAssets, quoteAssets), 0, "the preview must return zero shares for the disabled ST-leg shape");
+        vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
+        IRoycoLiquidityTranche(address(LT)).previewDepositMultiAsset(stAssets, quoteAssets);
         _assertCommittedConservation();
     }
 
@@ -2235,7 +2241,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         );
         assertLe(post.coverageUtilizationWAD, pre.coverageUtilizationWAD, "the bonus must never raise coverage utilization");
         // Counterweights independent of the bonus mirror, on measured quantities only: the junior drain (the bonus
-        // actually funded) must stay within the configured bonus fraction of the paid claim — the desired bonus is
+        // actually funded) must stay within the configured bonus fraction of the paid claim, the desired bonus is
         // that fraction of the BASE claim, and the paid claim only exceeds the base, so cross-multiplying is a
         // strict ceiling on plain checked integers.
         uint256 measuredBonus = toUint256(pre.lastJTEffectiveNAV) - toUint256(post.lastJTEffectiveNAV);
@@ -2693,8 +2699,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /// @notice In a fixed-term market both LT redemption flows revert with `DISABLED_IN_FIXED_TERM_STATE`,
-    ///         `maxRedeem` reports zero, the in-kind preview bubbles the exact exec revert (preview == exec),
-    ///         and the multi-asset preview returns empty claims (its preview-zeros contract).
+    ///         `maxRedeem` and `maxRedeemMultiAsset` report zero, and both previews bubble the exact exec
+    ///         revert (preview == exec).
     function test_RevertIf_LTRedeemInFixedTerm() public whenLT {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
         _seedDefaultLT();
@@ -2704,10 +2710,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(LT.maxRedeem(LT_ALICE_ADDRESS), 0, "ltMaxRedeem must report zero in a fixed term");
         vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
         LT.previewRedeem(shares);
-        AssetClaims memory emptyClaims;
-        (AssetClaims memory previewMultiClaims, uint256 previewQuoteAssets) = _previewRedeemLTMulti(shares);
-        _assertClaimsEq(previewMultiClaims, emptyClaims, "the multi-asset preview must zero in a fixed term");
-        assertEq(previewQuoteAssets, 0, "the multi-asset preview quote must zero in a fixed term");
+        assertEq(IRoycoLiquidityTranche(address(LT)).maxRedeemMultiAsset(LT_ALICE_ADDRESS), 0, "ltMaxRedeemMultiAsset must report zero in a fixed term");
+        vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
+        IRoycoLiquidityTranche(address(LT)).previewRedeemMultiAsset(shares);
 
         vm.prank(LT_ALICE_ADDRESS);
         vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
@@ -2850,7 +2855,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
             toUint256(_state.ltProtocolFee) * WAD, grossGain * _e.ltYieldShareProtocolFeeWAD, "the LT fee cannot exceed its rate on the measured gross raw gain"
         );
         // Monotonicity: when neither vault mark fell, attribution and the premium split can only move gain between
-        // tranches — no tranche's effective NAV may fall on a no-loss sync.
+        // tranches, no tranche's effective NAV may fall on a no-loss sync.
         if (toUint256(_e.stRawNAVNew) >= toUint256(_e.lastSTRawNAV) && toUint256(_e.jtRawNAVNew) >= toUint256(_e.lastJTRawNAV)) {
             assertGe(toUint256(a.lastSTEffectiveNAV), toUint256(_e.lastSTEffectiveNAV), "a no-loss sync must not lower the senior effective NAV");
             assertGe(toUint256(a.lastJTEffectiveNAV), toUint256(_e.lastJTEffectiveNAV), "a no-loss sync must not lower the junior effective NAV");
@@ -3488,7 +3493,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertApproxEqAbs(LT.totalAssets().nav, a.lastLTRawNAV + idleValue, maxNAVDelta(), "the LT effective NAV must include the claimable idle leg");
 
         // The split valuation surfaces on the real stack: the external convert* exchange rate is BPT-only (raw NAV,
-        // no idle senior-share leg), while totalAssets (above) and previewRedeem keep the claimable idle leg — so
+        // no idle senior-share leg), while totalAssets (above) and previewRedeem keep the claimable idle leg, so
         // the convert quote sits strictly below the redemption quote for the same shares while premium is staged.
         // previewRedeem simulates the real redemption, so the probe is sized to clear the post-op liquidity gate
         // (a tenth of the supply leaves utilization near 0.8 / 0.9 against the ~80 percent arranged target)
@@ -3521,7 +3526,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
     /**
      * @notice The production steady state: with the slippage gate open against a deep pool, a plain sync mints
-     *         the liquidity premium AND deploys it inline in the same sync — nothing stages, the owned depth
+     *         the liquidity premium AND deploys it inline in the same sync, nothing stages, the owned depth
      *         grows by the reported venue mint clearing the gate's derived minimum, and the freshly deployed
      *         depth is re-committed.
      */
@@ -4135,8 +4140,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /**
      * @notice PINS the zero-NAV live-supply edge (with the mint-dilution clamp): a JT deposit against a
      *         live supply with zero junior effective NAV prices against the documented one-wei denominator and
-     *         BINDS the clamp, so the depositor takes over the tranche up to the 1e-12 residual — the mint is
-     *         exactly cap = floor(supply x (WAD - eps) / eps) instead of the pre-clamp unbounded supply x value —
+     *         BINDS the clamp, so the depositor takes over the tranche up to the 1e-12 residual, the mint is
+     *         exactly cap = floor(supply x (WAD - eps) / eps) instead of the pre-clamp unbounded supply x value ,
      *         and the pre-existing unbacked holder is diluted to its floor-scaled dust claim.
      */
     function test_JTDeposit_zeroNAVLiveSupply_pinned() public {
@@ -4512,22 +4517,32 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         address outsider = _randomOutsider();
         vm.startPrank(outsider);
         vm.expectRevert(IRoycoDayKernel.ONLY_SENIOR_TRANCHE.selector);
-        KERNEL.stDeposit(toTrancheUnits(1));
+        KERNEL.stDeposit(false, toTrancheUnits(1));
         vm.expectRevert(IRoycoDayKernel.ONLY_SENIOR_TRANCHE.selector);
-        KERNEL.stRedeem(1, outsider);
+        KERNEL.stRedeem(false, 1, outsider);
         vm.expectRevert(IRoycoDayKernel.ONLY_JUNIOR_TRANCHE.selector);
-        KERNEL.jtDeposit(toTrancheUnits(1));
+        KERNEL.jtDeposit(false, toTrancheUnits(1));
         vm.expectRevert(IRoycoDayKernel.ONLY_JUNIOR_TRANCHE.selector);
-        KERNEL.jtRedeem(1, outsider);
+        KERNEL.jtRedeem(false, 1, outsider);
         if (testConfig.hasLiquidityTranche) {
             vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_TRANCHE.selector);
-            KERNEL.ltDeposit(toTrancheUnits(1));
+            KERNEL.ltDeposit(false, toTrancheUnits(1));
             vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_TRANCHE.selector);
-            KERNEL.ltRedeem(1, outsider);
+            KERNEL.ltRedeem(false, 1, outsider);
+            // The multi-asset pair in both preview modes: a direct call with _isPreview true would commit the
+            // flow's mutations with no outer preview revert to unwind them, so this gate is the sole defense
+            vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_TRANCHE.selector);
+            KERNEL.ltDepositMultiAsset(false, toTrancheUnits(1), 1, ZERO_TRANCHE_UNITS);
+            vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_TRANCHE.selector);
+            KERNEL.ltDepositMultiAsset(true, toTrancheUnits(1), 1, ZERO_TRANCHE_UNITS);
+            vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_TRANCHE.selector);
+            KERNEL.ltRedeemMultiAsset(false, 1, 0, 0, outsider);
+            vm.expectRevert(IRoycoDayKernel.ONLY_LIQUIDITY_TRANCHE.selector);
+            KERNEL.ltRedeemMultiAsset(true, 1, 0, 0, outsider);
             vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
-            KERNEL.addLiquidity(1, 1, ZERO_TRANCHE_UNITS);
+            KERNEL.addLiquidity(false, 1, 1, ZERO_TRANCHE_UNITS);
             vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
-            KERNEL.removeLiquidity(toTrancheUnits(1), 0, 0, outsider);
+            KERNEL.removeLiquidity(false, toTrancheUnits(1), 0, 0, outsider);
             vm.expectRevert(IRoycoDayKernel.ONLY_SELF.selector);
             KERNEL.attemptLiquidityPremiumReinvestment(1, ZERO_NAV_UNITS, 0);
         }
@@ -4699,7 +4714,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(maxDepositBefore, _expectedMaxSTDepositAssets(), "stMaxDeposit must match the independent recompute");
         assertLt(maxDepositBefore, MAX_TRANCHE_UNITS, "arrange: coverage must bound the deposit");
         // Counterweight independent of the max-deposit mirror: the reported maximum, valued through the quoter,
-        // must itself fit under the coverage gate's defining inequality — depositing it leaves the covered
+        // must itself fit under the coverage gate's defining inequality, depositing it leaves the covered
         // exposure times the minimum coverage within the junior effective NAV (plain cross-multiplied integers).
         assertLe(
             (toUint256(a0.lastSTRawNAV) + toUint256(KERNEL.stConvertTrancheUnitsToNAVUnits(maxDepositBefore)) + toUint256(a0.lastJTRawNAV))

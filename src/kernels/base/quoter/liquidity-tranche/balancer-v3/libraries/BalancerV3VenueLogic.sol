@@ -13,26 +13,9 @@ import { SafeERC20 } from "../../../../../../../lib/openzeppelin-contracts/contr
 import { IRoycoDayKernel } from "../../../../../../interfaces/IRoycoDayKernel.sol";
 import { WAD, ZERO_TRANCHE_UNITS } from "../../../../../../libraries/Constants.sol";
 import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../../../../libraries/Units.sol";
+import { DispatchLogic } from "../../../../../../libraries/logic/DispatchLogic.sol";
 import { ValuationLogic } from "../../../../../../libraries/logic/ValuationLogic.sol";
 import { IBalancerV3VenueCallbacks } from "../interfaces/IBalancerV3VenueCallbacks.sol";
-
-/**
- * @notice The immutable liquidity venue configuration a delegatecalled venue logic function needs, carried in from the kernel mixin
- * @custom:field vault - The Balancer V3 Vault the kernel's pool is registered with
- * @custom:field ltAsset - The liquidity tranche asset (the Balancer Pool Token) the kernel custodies
- * @custom:field seniorTranche - The senior tranche share token, one of the pool's two constituents
- * @custom:field quoteAsset - The quote asset, the pool's other constituent
- * @custom:field stSharePoolIndex - The senior tranche share token's index in the pool's token registration order
- * @custom:field quoteAssetPoolIndex - The quote asset's index in the pool's token registration order
- */
-struct BalancerV3VenueImmutableState {
-    IVault vault;
-    address ltAsset;
-    address seniorTranche;
-    address quoteAsset;
-    uint256 stSharePoolIndex;
-    uint256 quoteAssetPoolIndex;
-}
 
 /**
  * @title BalancerV3VenueLogic
@@ -44,12 +27,6 @@ library BalancerV3VenueLogic {
     using RoycoUnitsMath for TRANCHE_UNIT;
     using SafeERC20 for IERC20;
 
-    /// @notice Carries a previewed add's minted BPT and its post-add valuation out of the vault callback, unwinding the preview's transient accounting
-    error PREVIEW_ADD_LIQUIDITY_RESULT(uint256 ltAssets, NAV_UNIT depositNAV);
-
-    /// @notice Carries a previewed removal's withdrawn constituents out of the vault callback, unwinding the preview's transient accounting
-    error PREVIEW_REMOVE_LIQUIDITY_RESULT(uint256 stShares, uint256 quoteAssets);
-
     /**
      * @notice Callback that performs the unbalanced BPT mint inside the unlocked Balancer V3 Vault's context
      * @dev Only callable by the Balancer V3 Vault
@@ -57,20 +34,24 @@ library BalancerV3VenueLogic {
      * @dev The kernel supplies the senior tranche shares and quote assets it already holds and receives the minted BPT for the liquidity tranche
      * @param _immutables The immutable Balancer V3 venue configuration carried in from the kernel mixin
      * @param _isPreview Whether this is a preview, which computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling
+     * @param _ltOwnedYieldBearingAssets The kernel's current LT-owned BPT holdings, the basis of the post-op LT mark
      * @param _seniorShares The exact amount of senior tranche shares to add into the pool from this kernel's balance
      * @param _quoteAssets The exact amount of quote assets to add into the pool from this kernel's balance
      * @param _minLTAssetsOut The minimum BPT (LT assets) that must be minted, bounding the add's slippage at the Vault
      * @return ltAssets The BPT (LT assets) minted to this kernel by the add
+     * @return depositNAV The value of the minted BPT against the post-add pool state, denominated in the kernel's NAV units
+     * @return postOpLTRawNAV The post-op LT raw NAV marked against the post-add pool state, the mark the post-op sync enforces at
      */
     function addBalancerV3Liquidity(
-        BalancerV3VenueImmutableState memory _immutables,
+        IBalancerV3VenueCallbacks.BalancerV3VenueImmutableState memory _immutables,
         bool _isPreview,
+        TRANCHE_UNIT _ltOwnedYieldBearingAssets,
         uint256 _seniorShares,
         uint256 _quoteAssets,
         TRANCHE_UNIT _minLTAssetsOut
     )
         external
-        returns (uint256 ltAssets)
+        returns (uint256 ltAssets, NAV_UNIT depositNAV, NAV_UNIT postOpLTRawNAV)
     {
         // The exact senior tranche share and quote asset amounts to add, ordered by the pool's token registration
         uint256[] memory exactAmountsIn = new uint256[](2);
@@ -110,11 +91,13 @@ library BalancerV3VenueLogic {
                 );
         }
 
-        // A preview carries its result out via this revert, unwinding every transient balance change before settlement is due
-        // NOTE: We ensure that the BPT is valued after the liquidity provision which can mutate the invariant
-        if (_isPreview) {
-            revert PREVIEW_ADD_LIQUIDITY_RESULT(ltAssets, IRoycoDayKernel(address(this)).ltConvertTrancheUnitsToNAVUnits(toTrancheUnits(ltAssets)));
-        }
+        // Value the minted BPT and the post-op LT holdings against the post-add pool state both modes price and enforce at
+        depositNAV = IRoycoDayKernel(address(this)).ltConvertTrancheUnitsToNAVUnits(toTrancheUnits(ltAssets));
+        postOpLTRawNAV = IRoycoDayKernel(address(this)).ltConvertTrancheUnitsToNAVUnits(_ltOwnedYieldBearingAssets + toTrancheUnits(ltAssets));
+
+        // A preview carries its result out via this revert, unwinding every transient balance change before settlement
+        // NOTE: The error's offset and length prefix mirrors the unlock's bytes return so either mode decodes identically
+        if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(ltAssets, depositNAV, postOpLTRawNAV));
 
         // Settle the senior tranche shares and quote assets this kernel owes the Vault for the add by transferring them in and cancelling the debt
         if (_seniorShares > 0) {
@@ -135,23 +118,26 @@ library BalancerV3VenueLogic {
      * @dev The kernel receives any ST shares withdrawn and is responsible for converting them to the base assets before remitting them to the user
      * @param _immutables The immutable Balancer V3 venue configuration carried in from the kernel mixin
      * @param _isPreview Whether this is a preview, which computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling
+     * @param _ltOwnedYieldBearingAssets The kernel's remaining LT-owned BPT holdings (already debited by the flow), the basis of the post-op LT mark
      * @param _ltAssets The exact BPT amount (LT assets) to burn from this kernel's balance
      * @param _minSTSharesOut The minimum senior tranche shares that must be withdrawn, bounding the removal's slippage at the Vault
      * @param _minQuoteAssetsOut The minimum quote assets that must be withdrawn, bounding the removal's slippage at the Vault
      * @param _quoteAssetsReceiver The recipient of the quote assets withdrawn
      * @return stShares The senior tranche shares withdrawn back to this kernel by the unwrap
      * @return quoteAssets The quote assets withdrawn directly to the specified receiver
+     * @return postOpLTRawNAV The post-op LT raw NAV marked against the post-remove pool state, the mark the post-op sync enforces at
      */
     function removeBalancerV3Liquidity(
-        BalancerV3VenueImmutableState memory _immutables,
+        IBalancerV3VenueCallbacks.BalancerV3VenueImmutableState memory _immutables,
         bool _isPreview,
+        TRANCHE_UNIT _ltOwnedYieldBearingAssets,
         TRANCHE_UNIT _ltAssets,
         uint256 _minSTSharesOut,
         uint256 _minQuoteAssetsOut,
         address _quoteAssetsReceiver
     )
         external
-        returns (uint256 stShares, uint256 quoteAssets)
+        returns (uint256 stShares, uint256 quoteAssets, NAV_UNIT postOpLTRawNAV)
     {
         // The minimum senior tranche share and quote asset amounts out, ordered by the pool's token registration
         uint256[] memory minAmountsOut = new uint256[](2);
@@ -175,8 +161,12 @@ library BalancerV3VenueLogic {
         stShares = amountsOut[_immutables.stSharePoolIndex];
         quoteAssets = amountsOut[_immutables.quoteAssetPoolIndex];
 
-        // A preview carries its result out via this revert, unwinding every transient balance change before settlement is due
-        if (_isPreview) revert PREVIEW_REMOVE_LIQUIDITY_RESULT(stShares, quoteAssets);
+        // Value the post-op LT holdings after the removal, which can mutate the invariant, so both modes enforce at the same post-remove state
+        postOpLTRawNAV = IRoycoDayKernel(address(this)).ltConvertTrancheUnitsToNAVUnits(_ltOwnedYieldBearingAssets);
+
+        // A preview carries its result out via this revert, unwinding every transient balance change before settlement
+        // NOTE: The error's offset and length prefix mirrors the unlock's bytes return so either mode decodes identically
+        if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(stShares, quoteAssets, postOpLTRawNAV));
 
         // Credit the ST shares withdrawn to the kernel for downstream redemption before remitting assets to the user
         if (stShares > 0) _immutables.vault.sendTo(IERC20(_immutables.seniorTranche), address(this), stShares);
@@ -197,7 +187,7 @@ library BalancerV3VenueLogic {
      */
     function attemptLiquidityPremiumReinvestment(
         IRoycoDayKernel.RoycoDayKernelState storage $,
-        BalancerV3VenueImmutableState memory _immutables,
+        IBalancerV3VenueCallbacks.BalancerV3VenueImmutableState memory _immutables,
         uint64 _maxReinvestmentSlippageWAD,
         uint256 _stSharesToReinvest,
         NAV_UNIT _stEffectiveNAV,
@@ -236,9 +226,7 @@ library BalancerV3VenueLogic {
 
         // Decode the BPT minted from the single-sided provision
         TRANCHE_UNIT ltAssetsMinted;
-        assembly ("memory-safe") {
-            ltAssetsMinted := mload(add(callbackReturnData, 0x60))
-        }
+        assembly ("memory-safe") { ltAssetsMinted := mload(add(callbackReturnData, 0x60)) }
 
         // Debit the reinvested ST shares and credit the BPT minted from/to the LT
         $.ltOwnedSeniorTrancheShares = ltOwnedSeniorTrancheShares - stSharesToReinvest;

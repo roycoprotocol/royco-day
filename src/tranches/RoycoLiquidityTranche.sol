@@ -9,6 +9,7 @@ import { IRoycoVaultTranche } from "../interfaces/IRoycoVaultTranche.sol";
 import { ZERO_NAV_UNITS } from "../libraries/Constants.sol";
 import { AssetClaims, TrancheType } from "../libraries/Types.sol";
 import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../libraries/Units.sol";
+import { DispatchLogic } from "../libraries/logic/DispatchLogic.sol";
 import { ValuationLogic } from "../libraries/logic/ValuationLogic.sol";
 import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
 
@@ -21,6 +22,7 @@ import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
 contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
     using SafeERC20 for IERC20;
     using RoycoUnitsMath for uint256;
+    using DispatchLogic for address;
 
     /**
      * @notice Constructs the Royco liquidity tranche vault
@@ -55,7 +57,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         virtual
         override(IRoycoLiquidityTranche)
         restricted
-        returns (uint256 shares)
+        returns (uint256 shares, uint256 ltAssetsOut)
     {
         require(_receiver != address(0), ERC20InvalidReceiver(address(0)));
 
@@ -64,19 +66,15 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         if (_stAssets != 0) IERC20(IRoycoDayKernel(kernel).ST_ASSET()).safeTransferFrom(msg.sender, kernel, _stAssets);
         if (_quoteAssets != 0) IERC20(IRoycoDayKernel(kernel).QUOTE_ASSET()).safeTransferFrom(msg.sender, kernel, _quoteAssets);
 
-        // Orchestrate the multi-asset deposit in the kernel, bounding the liquidity add's slippage by the caller's minimum LT assets out
-        (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT ltAssetsOut) =
-            IRoycoDayKernel(kernel).ltDepositMultiAsset(toTrancheUnits(_stAssets), _quoteAssets, toTrancheUnits(_minLTAssetsOut));
+        // Deposit the constituent assets into the Royco market and price the shares to mint
+        TRANCHE_UNIT ltAssetsMinted;
+        (shares, ltAssetsMinted) = _depositMultiAsset(false, _stAssets, _quoteAssets, _minLTAssetsOut);
+        ltAssetsOut = toUint256(ltAssetsMinted);
 
-        // effectiveNAV can be zero when the tranche is freshly deployed
-        require(depositNAV != ZERO_NAV_UNITS, INVALID_DEPOSIT_NAV());
-
-        // Mint the LT shares to the receiver at the pre-deposit LT effective NAV per share
-        shares = ValuationLogic._convertToShares(depositNAV, effectiveNAV, totalSupply(), Math.Rounding.Floor);
-        require(shares != 0, MUST_MINT_NON_ZERO_SHARES());
+        // Mint the shares to the receiver
         _mint(_receiver, shares);
 
-        emit MultiAssetDeposit(msg.sender, _receiver, _stAssets, _quoteAssets, toUint256(ltAssetsOut), shares);
+        emit MultiAssetDeposit(msg.sender, _receiver, _stAssets, _quoteAssets, ltAssetsOut, shares);
     }
 
     /// @inheritdoc IRoycoLiquidityTranche
@@ -101,8 +99,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
             _spendAllowance(_owner, msg.sender, _shares);
         }
 
-        // Orchestrate the multi-asset redemption in the kernel, bounding the removal's slippage by the caller's minimum senior shares and quote out, it transfers the assets directly to the receiver
-        (stClaims, quoteAssets) = IRoycoDayKernel(KERNEL).ltRedeemMultiAsset(_shares, _minSTSharesOut, _minQuoteAssetsOut, _receiver);
+        (stClaims, quoteAssets) = _redeemMultiAsset(false, _shares, _minSTSharesOut, _minQuoteAssetsOut, _receiver);
 
         // Burn shares after the kernel processes the redemption (kernel depends on pre-burn total supply)
         _burn(_owner, _shares);
@@ -115,23 +112,31 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
     // =============================
 
     /// @inheritdoc IRoycoLiquidityTranche
-    function previewDepositMultiAsset(uint256 _stAssets, uint256 _quoteAssets) external virtual override(IRoycoLiquidityTranche) returns (uint256 shares) {
-        // Simulate the kernel's multi-asset deposit for the deposit NAV, the pre-deposit LT effective NAV per share, and the LT supply the pre-op sync will have minted
-        (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV,, uint256 ltTotalSupplyAfterMints) =
-            IRoycoDayKernel(KERNEL).ltPreviewDepositMultiAsset(toTrancheUnits(_stAssets), _quoteAssets);
-        // Mint LT shares at the pre-deposit LT effective NAV per share against that post-sync supply, identical to depositMultiAsset's share math
-        shares = ValuationLogic._convertToShares(depositNAV, effectiveNAV, ltTotalSupplyAfterMints, Math.Rounding.Floor);
+    /// @dev Routes the deposit through the execute-and-revert pattern so the quote is produced by the actual kernel multi-asset deposit path under its real semantics
+    function previewDepositMultiAsset(
+        uint256 _stAssets,
+        uint256 _quoteAssets
+    )
+        external
+        virtual
+        override(IRoycoLiquidityTranche)
+        returns (uint256 shares, uint256 ltAssetsOut)
+    {
+        TRANCHE_UNIT ltAssetsMinted;
+        (shares, ltAssetsMinted) = _depositMultiAsset(true, _stAssets, _quoteAssets, 0);
+        ltAssetsOut = toUint256(ltAssetsMinted);
     }
 
     /// @inheritdoc IRoycoLiquidityTranche
+    /// @dev Routes the redemption through the execute-and-revert pattern so the quote is produced by the actual kernel multi-asset redemption path under its real semantics
     function previewRedeemMultiAsset(uint256 _shares)
         external
         virtual
         override(IRoycoLiquidityTranche)
         returns (AssetClaims memory stClaims, uint256 quoteAssets)
     {
-        // Simulate the kernel's multi-asset redemption for the ST claims and quote assets the receiver would get, identical to redeemMultiAsset's outputs
-        (stClaims, quoteAssets) = IRoycoDayKernel(KERNEL).ltPreviewRedeemMultiAsset(_shares);
+        // The kernel stands in as receiver so the quote stays receiver-agnostic, its screening gates preview and execution alike
+        (stClaims, quoteAssets) = _redeemMultiAsset(true, _shares, 0, 0, KERNEL);
     }
 
     // =============================
@@ -148,5 +153,78 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         if (claimOnLTNAV == ZERO_NAV_UNITS) return 0;
 
         shares = Math.min(balanceOf(_owner), totalTrancheSharesAfterMintingFees.mulDiv(ltMaxWithdrawableNAV, claimOnLTNAV, Math.Rounding.Floor));
+    }
+
+    // =============================
+    // Internal Utility Function
+    // =============================
+
+    /**
+     * @dev Deposits the constituent assets into the Royco market through the kernel's multi-asset deposit entrypoint and prices the shares to mint
+     * @dev Shares are priced at the pre-deposit LT effective NAV per share (the sync mints no LT shares, so the pre-mint supply is current)
+     * @param _isPreview Whether this is a preview of the operation which must not mutate state
+     * @param _stAssets The amount of ST underlying to deposit, in the ST asset's native units
+     * @param _quoteAssets The amount of quote asset to add as the second venue leg
+     * @param _minLTAssetsOut The minimum LT tranche assets the liquidity add must mint
+     * @return shares The number of shares to mint for the deposit
+     * @return ltAssetsOut The LT tranche assets minted by the add
+     */
+    function _depositMultiAsset(
+        bool _isPreview,
+        uint256 _stAssets,
+        uint256 _quoteAssets,
+        uint256 _minLTAssetsOut
+    )
+        internal
+        virtual
+        returns (uint256 shares, TRANCHE_UNIT ltAssetsOut)
+    {
+        // Orchestrate the multi-asset deposit in the kernel, bounding the liquidity add's slippage by the caller's minimum LT assets out
+        NAV_UNIT depositNAV;
+        NAV_UNIT effectiveNAV;
+        (depositNAV, effectiveNAV, ltAssetsOut) = abi.decode(
+            KERNEL._dispatchAndUnwrap(
+                _isPreview,
+                abi.encodeCall(IRoycoDayKernel.ltDepositMultiAsset, (_isPreview, toTrancheUnits(_stAssets), _quoteAssets, toTrancheUnits(_minLTAssetsOut)))
+            ),
+            (NAV_UNIT, NAV_UNIT, TRANCHE_UNIT)
+        );
+
+        // effectiveNAV can be zero when the tranche is freshly deployed
+        require(depositNAV != ZERO_NAV_UNITS, INVALID_DEPOSIT_NAV());
+
+        // Price the LT shares at the pre-deposit LT effective NAV per share
+        shares = ValuationLogic._convertToShares(depositNAV, effectiveNAV, totalSupply(), Math.Rounding.Floor);
+        require(shares != 0, MUST_MINT_NON_ZERO_SHARES());
+    }
+
+    /**
+     * @dev Redeems the shares through the kernel's multi-asset redemption entrypoint, the kernel transfers the constituents directly to the receiver
+     * @param _isPreview Whether this is a preview of the operation which must not mutate state
+     * @param _shares The number of LT shares to redeem
+     * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must yield (slippage bound)
+     * @param _minQuoteAssetsOut The minimum quote to receive (slippage bound)
+     * @param _receiver The address that receives the ST underlying and quote
+     * @return stClaims The ST redemption asset claims transferred to the receiver
+     * @return quoteAssets The quote transferred to the receiver
+     */
+    function _redeemMultiAsset(
+        bool _isPreview,
+        uint256 _shares,
+        uint256 _minSTSharesOut,
+        uint256 _minQuoteAssetsOut,
+        address _receiver
+    )
+        internal
+        virtual
+        returns (AssetClaims memory stClaims, uint256 quoteAssets)
+    {
+        // Orchestrate the multi-asset redemption in the kernel, bounding the removal's slippage by the caller's minimum senior shares and quote out
+        return abi.decode(
+            KERNEL._dispatchAndUnwrap(
+                _isPreview, abi.encodeCall(IRoycoDayKernel.ltRedeemMultiAsset, (_isPreview, _shares, _minSTSharesOut, _minQuoteAssetsOut, _receiver))
+            ),
+            (AssetClaims, uint256)
+        );
     }
 }

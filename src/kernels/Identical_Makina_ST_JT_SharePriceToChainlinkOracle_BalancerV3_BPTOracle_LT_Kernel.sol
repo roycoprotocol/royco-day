@@ -31,9 +31,11 @@ contract Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle
         BalancerV3_LT_BPTOracle_Quoter.LT_QuoterSpecificParams ltQuoterParams;
     }
 
-    /// @notice Constructs the kernel state, pins the Makina machine, and resolves the quote asset from the liquidity tranche's Balancer V3 pool
-    /// @param _params The standard construction parameters for the Royco Day kernel
-    /// @param _makinaMachine The Makina machine whose share token is the ST/JT tranche asset
+    /**
+     * @notice Constructs the kernel state, pins the Makina machine, and resolves the quote asset from the liquidity tranche's Balancer V3 pool
+     * @param _params The standard construction parameters for the Royco Day kernel
+     * @param _makinaMachine The Makina machine whose share token is the ST/JT tranche asset
+     */
     constructor(
         IRoycoDayKernel.RoycoDayKernelConstructionParams memory _params,
         address _makinaMachine

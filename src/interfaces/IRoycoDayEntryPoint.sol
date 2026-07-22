@@ -389,9 +389,11 @@ interface IRoycoDayEntryPoint {
      */
     function collectProtocolFees(address[] calldata _tranches, uint256[] calldata _sharesToClaim, address _receiver) external;
 
-    /// =============================
-    /// State Accessor Functions
-    /// =============================
+    /**
+     * =============================
+     * State Accessor Functions
+     * =============================
+     */
 
     /// @notice Returns the canonical Royco factory used to validate tranche provenance
     /// @return roycoFactory The address of the canonical Royco factory
