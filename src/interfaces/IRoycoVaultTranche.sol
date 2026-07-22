@@ -183,5 +183,4 @@ interface IRoycoVaultTranche is IERC20Metadata {
     /// @notice Returns the tranche type indicating whether this is a senior, junior, or liquidity tranche
     /// @return trancheType An enumerator indicating SENIOR, JUNIOR, or LIQUIDITY tranche type
     function TRANCHE_TYPE() external view returns (TrancheType trancheType);
-
 }

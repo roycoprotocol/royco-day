@@ -284,7 +284,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @inheritdoc IRoycoDayKernel
     /// @dev ST deposits are enabled only in a PERPETUAL market state, granted that the market's coverage and liquidity requirements are satisfied post-deposit
-    function stDeposit(bool _isPreview, TRANCHE_UNIT _assets)
+    function stDeposit(
+        bool _isPreview,
+        TRANCHE_UNIT _assets
+    )
         external
         virtual
         override(IRoycoDayKernel)
@@ -322,7 +325,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @inheritdoc IRoycoDayKernel
     /// @dev JT deposits are enabled if the market is in a PERPETUAL state
-    function jtDeposit(bool _isPreview, TRANCHE_UNIT _assets)
+    function jtDeposit(
+        bool _isPreview,
+        TRANCHE_UNIT _assets
+    )
         external
         virtual
         override(IRoycoDayKernel)
@@ -360,7 +366,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
 
     /// @inheritdoc IRoycoDayKernel
     /// @dev An in-kind LT deposit mints no new senior shares and only deepens liquidity, so it is enabled in every market state and enforces no requirements
-    function ltDeposit(bool _isPreview, TRANCHE_UNIT _assets)
+    function ltDeposit(
+        bool _isPreview,
+        TRANCHE_UNIT _assets
+    )
         external
         virtual
         override(IRoycoDayKernel)

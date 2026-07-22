@@ -108,5 +108,4 @@ interface IRoycoLiquidityTranche is IRoycoVaultTranche {
      * @return shares The maximum number of LT shares that can be redeemed multi-asset
      */
     function maxRedeemMultiAsset(address _owner) external returns (uint256 shares);
-
 }

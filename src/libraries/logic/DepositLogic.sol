@@ -11,8 +11,8 @@ import { MarketState, Operation, SyncedAccountingState, TrancheType } from "../T
 import { Math, NAV_UNIT, TRANCHE_UNIT } from "../Units.sol";
 import { AccountingSyncLogic } from "./AccountingSyncLogic.sol";
 import { BlacklistLogic } from "./BlacklistLogic.sol";
-import { FeeAndLiquidityPremiumLogic } from "./FeeAndLiquidityPremiumLogic.sol";
 import { DispatchLogic } from "./DispatchLogic.sol";
+import { FeeAndLiquidityPremiumLogic } from "./FeeAndLiquidityPremiumLogic.sol";
 import { ValuationLogic } from "./ValuationLogic.sol";
 
 /**
@@ -211,7 +211,9 @@ library DepositLogic {
 
         // Execute a post-deposit sync on accounting at the venue-marked LT raw NAV: it commits both the ST-leg deposit (deltaSTRawNAV >= 0) and the new venue depth (deltaLTRawNAV > 0), enforcing the market's coverage and liquidity requirements only when senior exposure was added
         // A quote-only deposit mints no senior shares: it cannot worsen coverage and only deepens liquidity, so it is guaranteed to be at least coverage and liquidity neutral
-        AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.LT_MULTI_ASSET_DEPOSIT, postOpLTRawNAV, ZERO_NAV_UNITS, (_stAssets != ZERO_TRANCHE_UNITS));
+        AccountingSyncLogic._postOpSyncTrancheAccounting(
+            $, _immutables, Operation.LT_MULTI_ASSET_DEPOSIT, postOpLTRawNAV, ZERO_NAV_UNITS, (_stAssets != ZERO_TRANCHE_UNITS)
+        );
 
         // A preview carries its result out via this revert, unwinding every mutation this flow made
         if (_isPreview) revert DispatchLogic.SIMULATION_RESULT(abi.encode(depositNAV, effectiveNAV, ltAssetsOut));

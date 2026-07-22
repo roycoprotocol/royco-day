@@ -11,9 +11,9 @@ import { AssetClaims, MarketState, Operation, SyncedAccountingState, TrancheType
 import { Math, NAV_UNIT, RoycoUnitsMath } from "../Units.sol";
 import { AccountingSyncLogic } from "./AccountingSyncLogic.sol";
 import { BlacklistLogic } from "./BlacklistLogic.sol";
+import { DispatchLogic } from "./DispatchLogic.sol";
 import { FeeAndLiquidityPremiumLogic } from "./FeeAndLiquidityPremiumLogic.sol";
 import { SelfLiquidationLogic } from "./SelfLiquidationLogic.sol";
-import { DispatchLogic } from "./DispatchLogic.sol";
 import { TrancheClaimsLogic } from "./TrancheClaimsLogic.sol";
 import { ValuationLogic } from "./ValuationLogic.sol";
 
