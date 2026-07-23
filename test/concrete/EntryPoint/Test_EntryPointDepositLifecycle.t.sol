@@ -6,7 +6,7 @@ import { IAccessManager } from "../../../lib/openzeppelin-contracts/contracts/ac
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoDayEntryPoint } from "../../../src/interfaces/IRoycoDayEntryPoint.sol";
-import { TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { NAV_UNIT, TRANCHE_UNIT, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { EntryPointTestBase, IERC20Like } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
@@ -61,6 +61,31 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
             assertEq(executableAt, uint32(block.timestamp + DEFAULT_DEPOSIT_DELAY), "executableAt must be now + deposit delay");
             assertGt(toUint256(request.baseRequest.navAtRequestTime), 0, "the nav snapshot must be taken on every request");
         }
+    }
+
+    function test_requestDeposit_emitsReceiverAndRequestTimeNAV() public {
+        address tranche = address(juniorTranche);
+        uint256 amount = _depositAmount(tranche);
+        uint256 nonce = entryPoint.getLastRequestNonce() + 1;
+        uint32 executableAt = uint32(block.timestamp + DEFAULT_DEPOSIT_DELAY);
+        NAV_UNIT navAtRequestTime = kernel.convertCollateralAssetsToValue(toTrancheUnits(amount));
+
+        _fundTrancheAssets(USER_A, tranche, amount);
+        vm.startPrank(USER_A);
+        IERC20Like(address(juniorTranche.asset())).approve(address(entryPoint), amount);
+        vm.expectEmit(true, true, true, true, address(entryPoint));
+        emit IRoycoDayEntryPoint.DepositRequested(
+            USER_A,
+            nonce,
+            tranche,
+            toTrancheUnits(amount),
+            USER_B,
+            navAtRequestTime,
+            executableAt,
+            DEFAULT_EXECUTOR_BONUS
+        );
+        entryPoint.requestDeposit(tranche, toTrancheUnits(amount), USER_B, DEFAULT_EXECUTOR_BONUS);
+        vm.stopPrank();
     }
 
     function test_requestDeposit_incrementsGlobalNonce() public {

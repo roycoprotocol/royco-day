@@ -64,6 +64,23 @@ contract Test_EntryPointRedemptionLifecycle is EntryPointTestBase {
         }
     }
 
+    function test_requestRedemption_emitsReceiverAndRequestTimeNAV() public {
+        address tranche = address(juniorTranche);
+        uint256 shares = _acquireTrancheShares(USER_A, tranche, 10 * stUnit);
+        uint256 nonce = entryPoint.getLastRequestNonce() + 1;
+        uint32 executableAt = uint32(block.timestamp + DEFAULT_REDEMPTION_DELAY);
+        AssetClaims memory claims = juniorTranche.convertToAssets(shares);
+
+        vm.startPrank(USER_A);
+        IERC20Like(tranche).approve(address(entryPoint), shares);
+        vm.expectEmit(true, true, true, true, address(entryPoint));
+        emit IRoycoDayEntryPoint.RedemptionRequested(
+            USER_A, nonce, tranche, shares, USER_B, claims.nav, executableAt, DEFAULT_EXECUTOR_BONUS
+        );
+        entryPoint.requestRedemption(tranche, shares, USER_B, DEFAULT_EXECUTOR_BONUS);
+        vm.stopPrank();
+    }
+
     function test_requestRedemption_revertsOnZeroShares() public {
         vm.expectRevert(IRoycoDayEntryPoint.MUST_EXECUTE_NON_ZERO_AMOUNT.selector);
         vm.prank(USER_A);

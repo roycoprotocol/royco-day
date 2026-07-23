@@ -113,7 +113,9 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         IERC20(config.asset).safeTransferFrom(msg.sender, address(this), toUint256(_assets));
 
         // Emit the deposit request event
-        emit DepositRequested(msg.sender, requestNonce, _tranche, _assets, executableAtTimestamp, _executorBonusWAD);
+        emit DepositRequested(
+            msg.sender, requestNonce, _tranche, _assets, _receiver, request.baseRequest.navAtRequestTime, executableAtTimestamp, _executorBonusWAD
+        );
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
@@ -216,7 +218,9 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         IERC20(_tranche).safeTransferFrom(msg.sender, address(this), _shares);
 
         // Emit the redemption request event
-        emit RedemptionRequested(msg.sender, requestNonce, _tranche, _shares, executableAtTimestamp, _executorBonusWAD);
+        emit RedemptionRequested(
+            msg.sender, requestNonce, _tranche, _shares, _receiver, request.baseRequest.navAtRequestTime, executableAtTimestamp, _executorBonusWAD
+        );
     }
 
     /// @inheritdoc IRoycoDayEntryPoint
