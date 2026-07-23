@@ -57,7 +57,7 @@ uint256 constant MAX_PROTOCOL_FEE_WAD = 1e18;
 uint256 constant MAX_MINT_DILUTION_WAD = WAD - 1e6;
 
 /// @dev Constant for the virtual shares injected into the tranche to prevent the first depositor from capturing the pre-existing backing
-/// @dev Set to 1e16 to discourage a fair share of the 18 decimals precision of the NAV units for the virtual shares
+/// @dev Set to 1e6 to discourage a fair share of the 18 decimals precision of the NAV units for the virtual shares
 uint256 constant VIRTUAL_SHARES = 1e6;
 
 /// @dev Constant for the virtual value backing the virtual shares, denominated in NAV units
