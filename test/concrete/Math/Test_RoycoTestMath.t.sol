@@ -21,73 +21,58 @@ contract Test_RoycoTestMath is Test {
     uint256 private constant DURATION = 604_800;
 
     /*//////////////////////////////////////////////////////////////////////////
-                        attributeDeltaToClaimOnCollateralNAV
+                        attributeGainToClaimOnCollateralNAV
     //////////////////////////////////////////////////////////////////////////*/
 
-    /// Zero delta attributes nothing regardless of claim shape.
-    function test_AttributeDeltaToClaimOnCollateralNAV_ZeroDelta_ReturnsZero() public pure {
-        assertEq(RoycoTestMath.attributeDeltaToClaimOnCollateralNAV(0, 5e18, 10e18), 0, "zero delta");
-        assertEq(RoycoTestMath.attributeDeltaToClaimOnCollateralNAV(0, 0, 0), 0, "zero delta with empty market");
+    /// Zero gain attributes nothing regardless of claim shape.
+    function test_AttributeGainToClaimOnCollateralNAV_ZeroGain_ReturnsZero() public pure {
+        assertEq(RoycoTestMath.attributeGainToClaimOnCollateralNAV(0, 5e18, 10e18), 0, "zero gain");
+        assertEq(RoycoTestMath.attributeGainToClaimOnCollateralNAV(0, 0, 0), 0, "zero gain with empty market");
     }
 
-    /// Zero claim attributes nothing in either direction.
-    function test_AttributeDeltaToClaimOnCollateralNAV_ZeroClaim_ReturnsZero() public pure {
-        assertEq(RoycoTestMath.attributeDeltaToClaimOnCollateralNAV(1e18, 0, 10e18), 0, "gain, zero claim");
-        assertEq(RoycoTestMath.attributeDeltaToClaimOnCollateralNAV(-1e18, 0, 10e18), 0, "loss, zero claim");
+    /// Zero claim attributes nothing: the whole gain falls to the JT residual.
+    function test_AttributeGainToClaimOnCollateralNAV_ZeroClaim_ReturnsZero() public pure {
+        assertEq(RoycoTestMath.attributeGainToClaimOnCollateralNAV(1e18, 0, 10e18), 0, "gain, zero claim");
     }
 
-    /// Zero lastCollateralNAV attributes nothing in either direction: an empty checkpoint carries no claims,
-    /// so a delta against it falls entirely to the JT residual.
-    function test_AttributeDeltaToClaimOnCollateralNAV_ZeroLastCollateralNAV_ReturnsZero() public pure {
-        assertEq(RoycoTestMath.attributeDeltaToClaimOnCollateralNAV(1e18, 5e18, 0), 0, "gain, empty checkpoint");
-        assertEq(RoycoTestMath.attributeDeltaToClaimOnCollateralNAV(-1e18, 5e18, 0), 0, "loss, empty checkpoint");
+    /// Zero lastCollateralNAV attributes nothing: an empty checkpoint carries no claims,
+    /// so a gain against it falls entirely to the JT residual.
+    function test_AttributeGainToClaimOnCollateralNAV_ZeroLastCollateralNAV_ReturnsZero() public pure {
+        assertEq(RoycoTestMath.attributeGainToClaimOnCollateralNAV(1e18, 5e18, 0), 0, "gain, empty checkpoint");
     }
 
-    /// Positive delta floors: attribute(+7, claim 1, lastCollateral 3) = ⌊7·1/3⌋ = ⌊2.333…⌋ = 2.
-    function test_AttributeDeltaToClaimOnCollateralNAV_PositiveDelta_FloorsMagnitude() public pure {
-        assertEq(RoycoTestMath.attributeDeltaToClaimOnCollateralNAV(7, 1, 3), 2, "floor(7*1/3) = 2");
+    /// The split floors: attribute(7, claim 1, lastCollateral 3) = ⌊7·1/3⌋ = ⌊2.333…⌋ = 2.
+    function test_AttributeGainToClaimOnCollateralNAV_FloorsQuotient() public pure {
+        assertEq(RoycoTestMath.attributeGainToClaimOnCollateralNAV(7, 1, 3), 2, "floor(7*1/3) = 2");
     }
 
-    /// Negative delta floors the MAGNITUDE then re-applies the sign (toward zero, never away):
-    /// attribute(-7, claim 2, lastCollateral 3) = -⌊7·2/3⌋ = -⌊4.666…⌋ = -4 (not -5).
-    function test_AttributeDeltaToClaimOnCollateralNAV_NegativeDelta_FloorsMagnitudeThenReappliesSign() public pure {
-        assertEq(RoycoTestMath.attributeDeltaToClaimOnCollateralNAV(-7, 2, 3), -4, "-floor(7*2/3) = -4");
+    /// A full claim (claim == lastCollateralNAV) attributes the whole gain exactly.
+    function test_AttributeGainToClaimOnCollateralNAV_FullClaim_Exact() public pure {
+        assertEq(RoycoTestMath.attributeGainToClaimOnCollateralNAV(987_654_321, 55e18, 55e18), 987_654_321, "full claim on gain");
     }
 
-    /// A full claim (claim == lastCollateralNAV) attributes the whole delta exactly, both signs.
-    function test_AttributeDeltaToClaimOnCollateralNAV_FullClaim_Exact() public pure {
-        assertEq(RoycoTestMath.attributeDeltaToClaimOnCollateralNAV(-123_456_789, 1e18, 1e18), -123_456_789, "full claim on loss");
-        assertEq(RoycoTestMath.attributeDeltaToClaimOnCollateralNAV(987_654_321, 55e18, 55e18), 987_654_321, "full claim on gain");
+    /// 1-wei boundary: ⌊1·1/1e30⌋ = 0 (dust vanishes to the JT residual).
+    function test_AttributeGainToClaimOnCollateralNAV_OneWeiGain_FloorsToZero() public pure {
+        assertEq(RoycoTestMath.attributeGainToClaimOnCollateralNAV(1, 1, 1e30), 0, "floor(1*1/1e30) = 0");
+        assertEq(RoycoTestMath.attributeGainToClaimOnCollateralNAV(1, 1e30 - 1, 1e30), 0, "floor(1*(1e30-1)/1e30) = 0");
     }
 
-    /// 1-wei boundary: ⌊1·1/1e30⌋ = 0 and -⌊(1e30-1)·1/1e30⌋ = 0 (dust vanishes to the JT residual).
-    function test_AttributeDeltaToClaimOnCollateralNAV_OneWeiDelta_FloorsToZero() public pure {
-        assertEq(RoycoTestMath.attributeDeltaToClaimOnCollateralNAV(1, 1, 1e30), 0, "floor(1*1/1e30) = 0");
-        assertEq(RoycoTestMath.attributeDeltaToClaimOnCollateralNAV(-1, 1e30 - 1, 1e30), 0, "-floor(1*(1e30-1)/1e30) = 0");
+    /// Max realistic NAV boundary (1e30): ⌊1e30·7e29/1e30⌋ = 7e29 exact, and the full claim at scale.
+    function test_AttributeGainToClaimOnCollateralNAV_MaxRealistic() public pure {
+        assertEq(RoycoTestMath.attributeGainToClaimOnCollateralNAV(MAX_NAV, 7e29, MAX_NAV), 7e29, "floor(1e30*7e29/1e30) = 7e29");
+        assertEq(RoycoTestMath.attributeGainToClaimOnCollateralNAV(MAX_NAV, MAX_NAV, MAX_NAV), MAX_NAV, "full-claim gain at scale");
     }
 
-    /// Max realistic NAV boundary (1e30): ⌊1e30·7e29/1e30⌋ = 7e29 exact, and the full-claim loss at scale.
-    function test_AttributeDeltaToClaimOnCollateralNAV_MaxRealistic() public pure {
-        assertEq(RoycoTestMath.attributeDeltaToClaimOnCollateralNAV(int256(MAX_NAV), 7e29, MAX_NAV), 7e29, "floor(1e30*7e29/1e30) = 7e29");
-        assertEq(RoycoTestMath.attributeDeltaToClaimOnCollateralNAV(-int256(MAX_NAV), MAX_NAV, MAX_NAV), -int256(MAX_NAV), "full-claim loss at scale");
-    }
-
-    /// The split is ST-floored with JT as the residual, so it conserves the delta EXACTLY (no dropped wei):
-    /// delta 7 over lastCollateral 3 with stClaim 1: stPart = ⌊7/3⌋ = 2 and jtResidual = 7 − 2 = 5, sum 7.
-    /// The floor pushes the fractional wei to JT on gains, both parts share the delta's sign by construction.
-    function test_AttributeDeltaToClaimOnCollateralNAV_JTResidual_ConservesDeltaExactly() public pure {
-        int256 delta = 7;
-        int256 stPart = RoycoTestMath.attributeDeltaToClaimOnCollateralNAV(delta, 1, 3);
-        int256 jtResidual = delta - stPart;
+    /// The split is ST-floored with JT as the residual, so it conserves the gain EXACTLY (no dropped wei):
+    /// gain 7 over lastCollateral 3 with stClaim 1: stPart = ⌊7/3⌋ = 2 and jtResidual = 7 − 2 = 5, sum 7.
+    /// The floor pushes the fractional wei to JT.
+    function test_AttributeGainToClaimOnCollateralNAV_JTResidual_ConservesGainExactly() public pure {
+        uint256 gain = 7;
+        uint256 stPart = RoycoTestMath.attributeGainToClaimOnCollateralNAV(gain, 1, 3);
+        uint256 jtResidual = gain - stPart;
         assertEq(stPart, 2, "floor(7*1/3) = 2");
         assertEq(jtResidual, 5, "JT absorbs the floor residual: 7 - 2 = 5");
-        assertEq(stPart + jtResidual, delta, "the residual split conserves the delta exactly");
-
-        // Loss side: the magnitude floors toward zero so JT's loss residual is the larger part
-        int256 lossDelta = -7;
-        int256 stLoss = RoycoTestMath.attributeDeltaToClaimOnCollateralNAV(lossDelta, 1, 3);
-        assertEq(stLoss, -2, "-floor(7*1/3) = -2, the floor favors seniors on losses");
-        assertEq(lossDelta - stLoss, -5, "JT absorbs the loss residual: -7 + 2 = -5");
+        assertEq(stPart + jtResidual, gain, "the residual split conserves the gain exactly");
     }
 
     /*//////////////////////////////////////////////////////////////////////////
@@ -805,63 +790,64 @@ contract Test_RoycoTestMath is Test {
     }
 
     /**
-     * A gain that recovers the whole carried IL through both legs then pays premiums exits FIXED_TERM with
-     * premiums and fees intact, pinning that the exit commit does not zero fees the way a FIXED_TERM commit does.
+     * A gain that repays the whole carried IL off the top then pays premiums on the residual exits FIXED_TERM
+     * with premiums and fees intact, pinning that the exit commit does not zero fees the way a FIXED_TERM commit does.
      * Checkpoint: stEffectiveNAV 1000e18, jtEffectiveNAV 180e18 (collateral 1180e18), IL 20e18, dust 0,
      * FIXED_TERM, end T0+D. Delta +59e18:
-     *   Attribution: deltaSTEff = ⌊59e18·1000e18/1180e18⌋ = 50e18 exact, deltaJTEff = 9e18.
-     *   JT leg: recovery = min(9e18, 20e18) = 9e18 ⇒ IL 11e18, jtEffectiveNAV 189e18, residual 0 so no fee.
-     *   ST gain leg: recovery = min(50e18, 11e18) = 11e18 ⇒ IL 0, jtEffectiveNAV 200e18, stGain 39e18.
-     *   jtPrem = ⌊39e18·0.1⌋ = 3.9e18, ltPrem = ⌊39e18·0.05⌋ = 1.95e18,
-     *   jtFee = 0.39e18, ltFee = 0.195e18, residual 39e18 − 3.9e18 − 1.95e18 = 33.15e18 ⇒ stFee = 3.315e18,
-     *   stEffectiveNAV = 1000e18 + 33.15e18 + 1.95e18 = 1035.1e18, jtEffectiveNAV = 200e18 + 3.9e18 = 203.9e18.
-     *   Conservation 1239 = 1035.1 + 203.9 (e18). IL 0 ⇒ PERPETUAL exit (premiums imply PERPETUAL), end 0.
-     *   coverageUtilizationWAD = ⌈1239e18·0.1e18/203.9e18⌉ = 607650809220205984.
-     *   liquidityUtilizationWAD = ⌈1035.1e18·0.05e18/100e18⌉ = 517550000000000000 exact.
+     *   Repayment = min(59e18, 20e18) = 20e18 ⇒ IL 0, jtEffectiveNAV 200e18, residual 39e18, basis 1200e18.
+     *   Attribution: stGain = ⌊39e18·1000e18/1200e18⌋ = 32.5e18 exact, jtGain = 6.5e18.
+     *   JT leg: jtFee = ⌊6.5e18·0.1⌋ = 0.65e18, jtEffectiveNAV 206.5e18.
+     *   jtPrem = ⌊32.5e18·0.1⌋ = 3.25e18, ltPrem = ⌊32.5e18·0.05⌋ = 1.625e18,
+     *   jtFee += 0.325e18 ⇒ 0.975e18 total, ltFee = 0.1625e18,
+     *   residual 32.5e18 − 3.25e18 − 1.625e18 = 27.625e18 ⇒ stFee = 2.7625e18,
+     *   stEffectiveNAV = 1000e18 + 27.625e18 + 1.625e18 = 1029.25e18, jtEffectiveNAV = 206.5e18 + 3.25e18 = 209.75e18.
+     *   Conservation 1239 = 1029.25 + 209.75 (e18). IL 0 ⇒ PERPETUAL exit (premiums imply PERPETUAL), end 0.
+     *   coverageUtilizationWAD = ⌈1239e18·0.1e18/209.75e18⌉ = 590703218116805722.
+     *   liquidityUtilizationWAD = ⌈1029.25e18·0.05e18/100e18⌉ = 514625000000000000 exact.
      */
     function test_SyncTrancheAccounting_GainRecoversILThenPremiums_ExitsFixedTerm() public pure {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 180e18, 20e18, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 59e18);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1239e18;
         expected.ltRawNAV = 100e18;
-        expected.stEffectiveNAV = 1035.1e18;
-        expected.jtEffectiveNAV = 203.9e18;
-        expected.jtRiskPremium = 3.9e18;
-        expected.ltLiquidityPremium = 1.95e18;
-        expected.stProtocolFee = 3.315e18;
-        expected.jtProtocolFee = 0.39e18;
-        expected.ltProtocolFee = 0.195e18;
-        expected.coverageUtilizationWAD = 607_650_809_220_205_984;
-        expected.liquidityUtilizationWAD = 517_550_000_000_000_000;
+        expected.stEffectiveNAV = 1029.25e18;
+        expected.jtEffectiveNAV = 209.75e18;
+        expected.jtRiskPremium = 3.25e18;
+        expected.ltLiquidityPremium = 1.625e18;
+        expected.stProtocolFee = 2.7625e18;
+        expected.jtProtocolFee = 0.975e18;
+        expected.ltProtocolFee = 0.1625e18;
+        expected.coverageUtilizationWAD = 590_703_218_116_805_722;
+        expected.liquidityUtilizationWAD = 514_625_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
         expected.premiumsPaid = true;
         _assertSyncOutputs(RoycoTestMath.syncTrancheAccounting(in_), expected);
     }
 
     /**
-     * A gain first recovers the dust-sized IL in full, then pays premiums whose inputs carry awkward wei
+     * A gain first repays the dust-sized IL off the top, then pays premiums whose inputs carry awkward wei
      * offsets, pinning every floor in the premium chain at once.
      * Checkpoint: stEffectiveNAV 1000e18+5, jtEffectiveNAV 200e18−5 (collateral 1200e18), IL 5, dust 7,
      * PERPETUAL. Delta +(60e18−7):
-     *   Attribution: deltaSTEff = ⌊(60e18−7)·(1000e18+5)/1200e18⌋ = 50e18−6, deltaJTEff = 10e18−1.
-     *   JT leg: recovery = min(10e18−1, 5) = 5 ⇒ IL 0, jtEffectiveNAV 200e18, residual 10e18−6 > dust 7
-     *   ⇒ jtFee = ⌊(10e18−6)·0.1⌋ = 1e18−1, jtEffectiveNAV = 210e18−6.
-     *   ST gain leg: stGain 50e18−6, no IL left. premiumsPaid (> 7).
-     *   jtPrem = ⌊(50e18−6)·0.1⌋ = 5e18−1, ltPrem = ⌊(50e18−6)·0.05⌋ = 2.5e18−1,
-     *   jtFee += ⌊(5e18−1)·0.1⌋ = 0.5e18−1 ⇒ 1.5e18−2 total, jtEffectiveNAV = 215e18−7,
-     *   ltFee = ⌊(2.5e18−1)·0.1⌋ = 0.25e18−1, residual (50e18−6)−(5e18−1)−(2.5e18−1) = 42.5e18−4,
-     *   stFee = ⌊(42.5e18−4)·0.1⌋ = 4.25e18−1, stEffectiveNAV = (1000e18+5) + (42.5e18−4) + (2.5e18−1) = 1045e18.
-     *   Conservation 1260e18−7 = 1045e18 + (215e18−7). IL 0 ⇒ PERPETUAL.
-     *   coverageUtilizationWAD = ⌈(1260e18−7)·0.1e18/(215e18−7)⌉ = 586046511627906977.
-     *   liquidityUtilizationWAD = ⌈1045e18·0.05e18/100e18⌉ = 522500000000000000 exact.
+     *   Repayment = min(60e18−7, 5) = 5 ⇒ IL 0, jtEffectiveNAV 200e18, residual 60e18−12, basis 1200e18+5.
+     *   Attribution: stGain = ⌊(60e18−12)·(1000e18+5)/(1200e18+5)⌋ = 50e18−10, jtGain = 10e18−2 > dust 7
+     *   ⇒ jtFee = ⌊(10e18−2)·0.1⌋ = 1e18−1, jtEffectiveNAV = 210e18−2.
+     *   ST leg: stGain 50e18−10. premiumsPaid (> 7).
+     *   jtPrem = ⌊(50e18−10)·0.1⌋ = 5e18−1, ltPrem = ⌊(50e18−10)·0.05⌋ = 2.5e18−1,
+     *   jtFee += ⌊(5e18−1)·0.1⌋ = 0.5e18−1 ⇒ 1.5e18−2 total, jtEffectiveNAV = 215e18−3,
+     *   ltFee = ⌊(2.5e18−1)·0.1⌋ = 0.25e18−1, residual (50e18−10)−(5e18−1)−(2.5e18−1) = 42.5e18−8,
+     *   stFee = ⌊(42.5e18−8)·0.1⌋ = 4.25e18−1, stEffectiveNAV = (1000e18+5) + (42.5e18−8) + (2.5e18−1) = 1045e18−4.
+     *   Conservation 1260e18−7 = (1045e18−4) + (215e18−3). IL 0 ⇒ PERPETUAL.
+     *   coverageUtilizationWAD = ⌈(1260e18−7)·0.1e18/(215e18−3)⌉ = 586046511627906977.
+     *   liquidityUtilizationWAD = ⌈(1045e18−4)·0.05e18/100e18⌉ = 522500000000000000.
      */
     function test_SyncTrancheAccounting_DustIL_RecoveryThenAwkwardPremiumFloors() public pure {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18 + 5, 200e18 - 5, 5, RoycoTestMath.MarketState.PERPETUAL, 0, 7, 60e18 - 7);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1260e18 - 7;
         expected.ltRawNAV = 100e18;
-        expected.stEffectiveNAV = 1045e18;
-        expected.jtEffectiveNAV = 215e18 - 7;
+        expected.stEffectiveNAV = 1045e18 - 4;
+        expected.jtEffectiveNAV = 215e18 - 3;
         expected.jtRiskPremium = 5e18 - 1;
         expected.ltLiquidityPremium = 2.5e18 - 1;
         expected.stProtocolFee = 4.25e18 - 1;
@@ -898,33 +884,35 @@ contract Test_RoycoTestMath is Test {
     }
 
     /**
-     * The JT residual leg recovers the dust-sized IL to exactly zero, exiting the term: the PERPETUAL branch
+     * The repayment step recovers the dust-sized IL to exactly zero, exiting the term: the PERPETUAL branch
      * does not zero fees, so the residual gain's JT fee and the premium block's fees survive the exit.
      * Checkpoint: stEffectiveNAV 1000e18, jtEffectiveNAV 200e18−5 (collateral 1200e18−5), IL 5, dust 7,
      * FIXED_TERM, end T0+D. Delta +24e18:
-     *   Attribution: deltaSTEff = ⌊24e18·1000e18/(1200e18−5)⌋ = 20e18 exact, deltaJTEff = 4e18.
-     *   JT leg: recovery = min(4e18, 5) = 5 ⇒ IL 0, jtEffectiveNAV 200e18, residual 4e18−5 > dust 7
-     *   ⇒ jtFee = ⌊(4e18−5)·0.1⌋ = 0.4e18−1, jtEffectiveNAV = 204e18−5.
-     *   ST gain leg: stGain 20e18, IL 0. premiumsPaid (> 7). jtPrem 2e18, ltPrem 1e18,
-     *   jtFee += 0.2e18 ⇒ 0.6e18−1 total, jtEffectiveNAV = 206e18−5, ltFee 0.1e18, residual 17e18
-     *   ⇒ stFee 1.7e18, stEffectiveNAV = 1000e18 + 17e18 + 1e18 = 1018e18.
-     *   Conservation 1224e18−5 = 1018e18 + (206e18−5). IL 0 ⇒ PERPETUAL exit keeping the fees, end deleted.
-     *   coverageUtilizationWAD = ⌈(1224e18−5)·0.1e18/(206e18−5)⌉ = 594174757281553399.
-     *   liquidityUtilizationWAD = ⌈1018e18·0.05e18/100e18⌉ = 509000000000000000 exact.
+     *   Repayment = min(24e18, 5) = 5 ⇒ IL 0, jtEffectiveNAV 200e18, residual 24e18−5, basis 1200e18.
+     *   Attribution: stGain = ⌊(24e18−5)·1000e18/1200e18⌋ = 20e18−5, jtGain = 4e18 > dust 7
+     *   ⇒ jtFee = ⌊4e18·0.1⌋ = 0.4e18, jtEffectiveNAV = 204e18.
+     *   ST leg: stGain 20e18−5. premiumsPaid (> 7). jtPrem = ⌊(20e18−5)·0.1⌋ = 2e18−1,
+     *   ltPrem = ⌊(20e18−5)·0.05⌋ = 1e18−1, jtFee += ⌊(2e18−1)·0.1⌋ = 0.2e18−1 ⇒ 0.6e18−1 total,
+     *   jtEffectiveNAV = 206e18−1, ltFee = ⌊(1e18−1)·0.1⌋ = 0.1e18−1,
+     *   residual (20e18−5)−(2e18−1)−(1e18−1) = 17e18−3 ⇒ stFee = 1.7e18−1,
+     *   stEffectiveNAV = 1000e18 + (17e18−3) + (1e18−1) = 1018e18−4.
+     *   Conservation 1224e18−5 = (1018e18−4) + (206e18−1). IL 0 ⇒ PERPETUAL exit keeping the fees, end deleted.
+     *   coverageUtilizationWAD = ⌈(1224e18−5)·0.1e18/(206e18−1)⌉ = 594174757281553399.
+     *   liquidityUtilizationWAD = ⌈(1018e18−4)·0.05e18/100e18⌉ = 509000000000000000.
      */
     function test_SyncTrancheAccounting_JtResidualRecoversDustIL_ExitsFixedTermKeepingFee() public pure {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18 - 5, 5, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 7, 24e18);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1224e18 - 5;
         expected.ltRawNAV = 100e18;
-        expected.stEffectiveNAV = 1018e18;
-        expected.jtEffectiveNAV = 206e18 - 5;
+        expected.stEffectiveNAV = 1018e18 - 4;
+        expected.jtEffectiveNAV = 206e18 - 1;
         expected.jtImpermanentLoss = 0;
-        expected.jtRiskPremium = 2e18;
-        expected.ltLiquidityPremium = 1e18;
-        expected.stProtocolFee = 1.7e18;
+        expected.jtRiskPremium = 2e18 - 1;
+        expected.ltLiquidityPremium = 1e18 - 1;
+        expected.stProtocolFee = 1.7e18 - 1;
         expected.jtProtocolFee = 0.6e18 - 1;
-        expected.ltProtocolFee = 0.1e18;
+        expected.ltProtocolFee = 0.1e18 - 1;
         expected.coverageUtilizationWAD = 594_174_757_281_553_399;
         expected.liquidityUtilizationWAD = 509_000_000_000_000_000;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
@@ -1063,19 +1051,19 @@ contract Test_RoycoTestMath is Test {
     }
 
     /**
-     * A gain whose recovery leaves exactly 1 wei of senior gain: premiumsPaid fires TRUE while every premium
+     * A gain whose repayment leaves exactly 1 wei of senior gain: premiumsPaid fires TRUE while every premium
      * and fee floors to 0, pinning that even a 1-wei paid sync resets the premium accumulators.
-     * Checkpoint: stEffectiveNAV 1000e18, jtEffectiveNAV 200e18 (collateral 1200e18), IL 24e18−1, dust 0,
-     * FIXED_TERM, end T0+D. Delta +24e18: deltaSTEff = 20e18, deltaJTEff = 4e18.
-     * JT leg: recovery = min(4e18, 24e18−1) = 4e18 ⇒ IL 20e18−1, jtEffectiveNAV 204e18.
-     * ST gain leg: recovery = 20e18−1 ⇒ IL 0, jtEffectiveNAV 224e18−1, stGain = 1 > dust 0 ⇒ premiumsPaid.
-     * jtPrem = ⌊1·0.1⌋ = 0, ltPrem = 0, stFee = ⌊1·0.1⌋ = 0. stEffectiveNAV = 1000e18+1, PERPETUAL, end 0.
-     * Conservation 1224e18 = (1000e18+1) + (224e18−1).
+     * Checkpoint: stEffectiveNAV 1000e18, jtEffectiveNAV 200e18 (collateral 1200e18), IL 24e18−2, dust 0,
+     * FIXED_TERM, end T0+D. Delta +24e18:
+     * Repayment = 24e18−2 ⇒ IL 0, jtEffectiveNAV 224e18−2, residual 2, basis 1224e18−2.
+     * Attribution: stGain = ⌊2·1000e18/(1224e18−2)⌋ = 1, jtGain = 1 (fee floors to 0), jtEffectiveNAV 224e18−1.
+     * stGain = 1 > dust 0 ⇒ premiumsPaid. jtPrem = ⌊1·0.1⌋ = 0, ltPrem = 0, stFee = ⌊1·0.1⌋ = 0.
+     * stEffectiveNAV = 1000e18+1, PERPETUAL, end 0. Conservation 1224e18 = (1000e18+1) + (224e18−1).
      * coverageUtilizationWAD = ⌈1224e18·0.1e18/(224e18−1)⌉ = 546428571428571429.
      * liquidityUtilizationWAD = ⌈(1000e18+1)/2000⌉ = 500000000000000001.
      */
-    function test_SyncTrancheAccounting_GainILPlusOneWei_PremiumsPaidWithZeroPremiums() public pure {
-        RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18, 24e18 - 1, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 24e18);
+    function test_SyncTrancheAccounting_GainILPlusTwoWei_PremiumsPaidWithZeroPremiums() public pure {
+        RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18, 24e18 - 2, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 24e18);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1224e18;
         expected.ltRawNAV = 100e18;
@@ -1085,6 +1073,32 @@ contract Test_RoycoTestMath is Test {
         expected.liquidityUtilizationWAD = 500_000_000_000_000_001;
         expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
         expected.premiumsPaid = true;
+        _assertSyncOutputs(RoycoTestMath.syncTrancheAccounting(in_), expected);
+    }
+
+    /**
+     * A gain whose repayment leaves exactly 1 wei of residual: the junior-favoring floor routes the wei to JT,
+     * no senior gain survives, and premiumsPaid stays FALSE, pinning that a sub-attribution residual never
+     * resets the premium accumulators.
+     * Checkpoint: stEffectiveNAV 1000e18, jtEffectiveNAV 200e18 (collateral 1200e18), IL 24e18−1, dust 0,
+     * FIXED_TERM, end T0+D. Delta +24e18:
+     * Repayment = 24e18−1 ⇒ IL 0, jtEffectiveNAV 224e18−1, residual 1, basis 1224e18−1.
+     * Attribution: stGain = ⌊1·1000e18/(1224e18−1)⌋ = 0, jtGain = 1 (fee floors to 0), jtEffectiveNAV 224e18.
+     * stGain 0 skips the premium block entirely. stEffectiveNAV 1000e18, PERPETUAL, end 0.
+     * Conservation 1224e18 = 1000e18 + 224e18.
+     * coverageUtilizationWAD = ⌈1224e18·0.1e18/224e18⌉ = 546428571428571429.
+     * liquidityUtilizationWAD = 500000000000000000 exact.
+     */
+    function test_SyncTrancheAccounting_GainILPlusOneWei_WeiRoutesToJuniorNoPremiums() public pure {
+        RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18, 24e18 - 1, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 0, 24e18);
+        RoycoTestMath.SyncOutputs memory expected;
+        expected.collateralNAV = 1224e18;
+        expected.ltRawNAV = 100e18;
+        expected.stEffectiveNAV = 1000e18;
+        expected.jtEffectiveNAV = 224e18;
+        expected.coverageUtilizationWAD = 546_428_571_428_571_429;
+        expected.liquidityUtilizationWAD = 500_000_000_000_000_000;
+        expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
         _assertSyncOutputs(RoycoTestMath.syncTrancheAccounting(in_), expected);
     }
 

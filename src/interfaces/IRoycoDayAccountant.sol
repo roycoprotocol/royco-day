@@ -58,18 +58,18 @@ interface IRoycoDayAccountant {
      * @custom:field jtYieldShareProtocolFeeWAD - The market's configured protocol fee percentage charged from the yield share (risk premium) payed from the senior tranche yield to the junior tranche, scaled to WAD precision
      * @custom:field ltYieldShareProtocolFeeWAD - The market's configured protocol fee percentage charged from the yield share (liquidity premium) payed from the senior tranche yield to the liquidity tranche, scaled to WAD precision
      * @custom:field minCoverageWAD - The coverage percentage that the senior tranche is expected to be protected by, scaled to WAD precision
+     * @custom:field minLiquidityWAD - The percentage of the senior tranche NAV that must be in the liquidity tranche's market making inventory, scaled to WAD precision
      * @custom:field fixedTermDurationSeconds - The duration of a fixed term for this market in seconds
      * @custom:field lastMarketState - The last recorded state of this market (perpetual or fixed term)
      * @custom:field fixedTermEndTimestamp - The end timestamp of the currently ongoing fixed term (set to 0 if the market is in a perpetual state)
-     * @custom:field jtYDM - The junior tranche's Yield Distribution Model (JT YDM), responsible for determining the yield share (risk premium) payed from the senior tranche yield to the junior tranche
-     * @custom:field ltYDM - The liquidity tranche's Yield Distribution Model (LT YDM), responsible for determining the yield share (liquidity premium) payed from the senior tranche yield to the liquidity tranche
-     * @custom:field minLiquidityWAD - The percentage of the senior tranche NAV that must be in the liquidity tranche's market making inventory, scaled to WAD precision
-     * @custom:field twJTYieldShareAccruedWAD - The time-weighted junior tranche yield share (JT YDM output) since the last premium payment, scaled to WAD precision
-     * @custom:field maxJTYieldShareWAD - The maximum JT yield share (risk premium) as a percentage of senior appreciation, scaled to WAD precision
-     * @custom:field twLTYieldShareAccruedWAD - The time-weighted liquidity tranche yield share (LT YDM output) since the last premium payment, scaled to WAD precision
-     * @custom:field maxLTYieldShareWAD - The maximum LT yield share (liquidity premium) as a percentage of senior appreciation, scaled to WAD precision
      * @custom:field lastYieldShareAccrualTimestamp - The timestamp at which the time-weighted yield share accumulators were last updated
      * @custom:field lastPremiumPaymentTimestamp - The timestamp at which the last premium payments occurred (the risk and liquidity premiums are always paid together)
+     * @custom:field jtYDM - The junior tranche's Yield Distribution Model (JT YDM), responsible for determining the yield share (risk premium) payed from the senior tranche yield to the junior tranche
+     * @custom:field maxJTYieldShareWAD - The maximum JT yield share (risk premium) as a percentage of senior appreciation, scaled to WAD precision
+     * @custom:field ltYDM - The liquidity tranche's Yield Distribution Model (LT YDM), responsible for determining the yield share (liquidity premium) payed from the senior tranche yield to the liquidity tranche
+     * @custom:field maxLTYieldShareWAD - The maximum LT yield share (liquidity premium) as a percentage of senior appreciation, scaled to WAD precision
+     * @custom:field twJTYieldShareAccruedWAD - The time-weighted junior tranche yield share (JT YDM output) since the last premium payment, scaled to WAD precision
+     * @custom:field twLTYieldShareAccruedWAD - The time-weighted liquidity tranche yield share (LT YDM output) since the last premium payment, scaled to WAD precision
      * @custom:field coverageLiquidationUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
      * @custom:field lastCollateralNAV - The last recorded pure value of the coinvested collateral backing the senior and junior tranches
      * @custom:field lastSTEffectiveNAV - The last recorded effective NAV (including any prior applied coverage, ST yield distribution, and uncovered losses) of the senior tranche
@@ -86,6 +86,7 @@ interface IRoycoDayAccountant {
         uint64 ltYieldShareProtocolFeeWAD;
         // Slot 1
         uint64 minCoverageWAD;
+        uint64 minLiquidityWAD;
         uint24 fixedTermDurationSeconds;
         MarketState lastMarketState;
         uint32 fixedTermEndTimestamp;
@@ -93,16 +94,14 @@ interface IRoycoDayAccountant {
         uint32 lastPremiumPaymentTimestamp;
         // Slot 2
         address jtYDM;
+        uint64 maxJTYieldShareWAD;
         // Slot 3
         address ltYDM;
-        uint64 minLiquidityWAD;
-        // Slot 4
-        uint192 twJTYieldShareAccruedWAD;
-        uint64 maxJTYieldShareWAD;
-        // Slot 5
-        uint192 twLTYieldShareAccruedWAD;
         uint64 maxLTYieldShareWAD;
-        // Slot 6-12
+        // Slot 4 (uint128 holds over 1e13 years of the config-capped WAD-per-second accrual)
+        uint128 twJTYieldShareAccruedWAD;
+        uint128 twLTYieldShareAccruedWAD;
+        // Slot 5-11
         uint256 coverageLiquidationUtilizationWAD;
         NAV_UNIT lastCollateralNAV;
         NAV_UNIT lastSTEffectiveNAV;

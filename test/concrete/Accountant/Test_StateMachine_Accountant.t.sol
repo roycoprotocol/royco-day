@@ -326,10 +326,12 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
      * have fully recovered to zero, which lands PERPETUAL), so the reset-regardless property is pinned on a
      * premium-paying sync that starts in FIXED_TERM and crosses to PERPETUAL
      * Derivation: from the large-IL checkpoint, rates 0.05e18 / 0.02e18 over 500s give tw = (25e18, 10e18).
-     * A +150e18 gain splits deltaST = 125e18 / JT residual 25e18: the JT leg repays 25e18 of il, the ST leg
-     * repays the remaining 75e18, leaving stGain = 50e18: jtPrem = floor(50e18 * 25e18 / (500 * 1e18)) = 2.5e18,
-     * ltPrem = 1e18, fees kept in the resulting PERPETUAL: jtFee 0.25e18, ltFee 0.1e18,
-     * stFee = floor(46.5e18 * 0.1) = 4.65e18, jtEff = 300e18 + 2.5e18, stEff = 1000e18 + 46.5e18 + 1e18
+     * A +150e18 gain repays the 100e18 il off the top (jtEffectiveNAV 300e18, residual 50e18, basis 1300e18):
+     * stGain = floor(50e18 * 1000e18 / 1300e18) = 38461538461538461538, jtGain = 11538461538461538462 books
+     * jtFee 1153846153846153846. jtPrem = floor(stGain * 25e18 / (500 * 1e18)) = 1923076923076923076,
+     * ltPrem = 769230769230769230, fees kept in the resulting PERPETUAL: jtFee += 192307692307692307
+     * (total 1346153846153846153), ltFee 76923076923076923, st residual 35769230769230769232,
+     * stFee 3576923076923076923, jtEff = 313461538461538461538, stEff = 1036538461538461538462
      */
     function test_StateMachine_premiumWindowResetOnFixedTermExit() public {
         _seedLargeIL();
@@ -339,12 +341,12 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
         vm.warp(block.timestamp + 500);
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1350e18)));
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "recovered market exits the term");
-        assertEq(toUint256(state.jtEffectiveNAV), 302.5e18, "recovery plus the time-weighted risk premium");
-        assertEq(toUint256(state.ltLiquidityPremium), 1e18, "time-weighted liquidity premium");
-        assertEq(toUint256(state.stEffectiveNAV), 1047.5e18, "st residual plus the premium value retained senior");
-        assertEq(toUint256(state.jtProtocolFee), 0.25e18, "jt yield-share fee kept");
-        assertEq(toUint256(state.ltProtocolFee), 0.1e18, "lt fee kept");
-        assertEq(toUint256(state.stProtocolFee), 4.65e18, "st fee kept");
+        assertEq(toUint256(state.jtEffectiveNAV), 313_461_538_461_538_461_538, "repayment plus the junior residual and time-weighted risk premium");
+        assertEq(toUint256(state.ltLiquidityPremium), 769_230_769_230_769_230, "time-weighted liquidity premium");
+        assertEq(toUint256(state.stEffectiveNAV), 1_036_538_461_538_461_538_462, "st residual plus the premium value retained senior");
+        assertEq(toUint256(state.jtProtocolFee), 1_346_153_846_153_846_153, "jt residual and yield-share fees kept");
+        assertEq(toUint256(state.ltProtocolFee), 76_923_076_923_076_923, "lt fee kept");
+        assertEq(toUint256(state.stProtocolFee), 3_576_923_076_923_076_923, "st fee kept");
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
         assertEq(s.twJTYieldShareAccruedWAD, 0, "jt accumulator reset on payment");
         assertEq(s.twLTYieldShareAccruedWAD, 0, "lt accumulator reset on payment");

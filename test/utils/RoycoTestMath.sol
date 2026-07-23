@@ -227,26 +227,21 @@ library RoycoTestMath {
     //////////////////////////////////////////////////////////////////////////*/
 
     /**
-     * @notice PnL attribution: attributed = ⌊|delta| · claim / lastCollateralNAV⌋ with the sign of delta re-applied.
-     * @dev Mirrors the proportional split inlined in src RoycoDayAccountant's STEP_APPLY_PNL_ATTRIBUTION.
-     *      Rounding: Floor on the magnitude (a negative delta attributes toward zero, never away from it).
-     *      Favors: the complementary tranche (JT is the residual and absorbs the flooring drift of the split).
-     *      Edge: returns 0 if delta == 0, claim == 0, or lastCollateralNAV == 0. The empty-checkpoint seniority
-     *      tie-break (a zero lastCollateralNAV routes the whole delta to ST) lives at the sync call site, not here.
+     * @notice Gain attribution: attributed = ⌊gain · claim / lastCollateralNAV⌋.
+     * @dev Mirrors the pro-rata split inlined in src RoycoDayAccountant's STEP_ATTRIBUTE_RESIDUAL_GAIN.
+     *      Only gains are ever attributed: the waterfall absorbs a loss junior-first, so a loss never splits.
+     *      Rounding: Floor. Favors: the complementary tranche (JT is the residual and absorbs the flooring drift of the split).
+     *      Edge: returns 0 if gain == 0, claim == 0, or lastCollateralNAV == 0. The empty-checkpoint seniority
+     *      tie-break (a zero lastCollateralNAV routes the whole gain to ST) lives at the sync call site, not here.
      *      Precondition: claim <= lastCollateralNAV (ST's claim is stEffectiveNAV, never exceeding the pool under conservation).
-     * @param delta The signed collateral-NAV delta being attributed
+     * @param gain The collateral-NAV gain being attributed
      * @param claim The attributee's effective NAV claim on the last committed collateral NAV
      * @param lastCollateralNAV The last committed collateral NAV the claim is measured against
-     * @return attributed The signed portion of delta attributed to the claim
+     * @return attributed The portion of the gain attributed to the claim
      */
-    function attributeDeltaToClaimOnCollateralNAV(int256 delta, uint256 claim, uint256 lastCollateralNAV) internal pure returns (int256 attributed) {
-        if (delta == 0 || claim == 0 || lastCollateralNAV == 0) return 0;
-        uint256 magnitude;
-        unchecked {
-            magnitude = delta < 0 ? uint256(0) - uint256(delta) : uint256(delta);
-        }
-        uint256 attributedMagnitude = Math.mulDiv(magnitude, claim, lastCollateralNAV);
-        attributed = delta < 0 ? -int256(attributedMagnitude) : int256(attributedMagnitude);
+    function attributeGainToClaimOnCollateralNAV(uint256 gain, uint256 claim, uint256 lastCollateralNAV) internal pure returns (uint256 attributed) {
+        if (gain == 0 || claim == 0 || lastCollateralNAV == 0) return 0;
+        attributed = Math.mulDiv(gain, claim, lastCollateralNAV);
     }
 
     /**
@@ -495,13 +490,16 @@ library RoycoTestMath {
     /**
      * @notice The full single-collateral-NAV sync mirror, composing attribution, coverage, premiums, fees, and the state machine.
      * @dev Mirrors src AccountingSyncLogic.syncTrancheAccounting (previewed by _previewSyncTrancheAccounting).
-     *      Pipeline: single-delta attribution to ST with JT as the residual, the JT leg with its dust-gated fee,
-     *      the ST loss leg with coverage (no JT-fee recompute), the ST gain leg with IL recovery first and the
-     *      premium block (instantaneous branch when elapsedSincePremiumPayment == 0), the byte-exact conservation
-     *      check, and the state machine: every PERPETUAL commit erases the IL and clears the term, FIXED_TERM
-     *      stickiness keeps the original end, and a FIXED_TERM resolution provably carries no fees (checked).
-     *      Coinvestment invariant: one collateral asset at one rate, so the attributed ST and JT deltas always
-     *      share the sign of collateralNAVDelta (mixed-sign tranche PnL is unrepresentable).
+     *      Pipeline: a collateral gain repays the JT impermanent loss off the top (restoration, never fee'd,
+     *      re-anchoring the attribution basis so a dip-and-recover lands on the direct path's allocation), then the
+     *      residual gain attributes to ST with JT as the residual: the JT leg with its dust-gated fee and the ST leg
+     *      with the premium block (instantaneous branch when elapsedSincePremiumPayment == 0). A collateral loss is
+     *      absorbed junior-first (all of it impermanent) with only the uncovered residual reaching ST. Then the
+     *      byte-exact conservation check and the state machine: every PERPETUAL commit erases the IL and clears the
+     *      term, FIXED_TERM stickiness keeps the original end, and a FIXED_TERM resolution provably carries no fees
+     *      (checked).
+     *      Coinvestment invariant: one collateral asset at one rate, so a loss never splits (junior-first waterfall)
+     *      and only a gain is attributed pro-rata (mixed-sign tranche PnL is unrepresentable).
      *      Mirror-side extras vs the raw production return: out.ltRawNAV echoes in.ltRawNAVNew and
      *      out.liquidityUtilizationWAD is the post-commit view (production returns (0, 0) placeholders).
      *      Preconditions: collateralNAVLast == stEffectiveNAVLast + jtEffectiveNAVLast, the delta does not underflow collateralNAVLast,
@@ -514,50 +512,37 @@ library RoycoTestMath {
         out.collateralNAV = _applyDelta(in_.collateralNAVLast, in_.collateralNAVDelta);
         out.ltRawNAV = in_.ltRawNAVNew;
 
-        // Attribution: the collateral delta is split to ST pro-rata to its effective NAV claim (Floor on the magnitude),
-        // and JT takes the residual so it absorbs all rounding drift on both signs
-        // Seniority tie-break for an empty checkpoint: value marked from a zero collateral NAV has no live claims to split, so it accrues to the senior tranche first
-        int256 deltaSTEff = in_.collateralNAVLast == 0
-            ? in_.collateralNAVDelta
-            : attributeDeltaToClaimOnCollateralNAV(in_.collateralNAVDelta, in_.stEffectiveNAVLast, in_.collateralNAVLast);
-        int256 deltaJTEff = in_.collateralNAVDelta - deltaSTEff;
-
         uint256 stEffectiveNAV = in_.stEffectiveNAVLast;
         uint256 jtEffectiveNAV = in_.jtEffectiveNAVLast;
         uint256 il = in_.jtImpermanentLossLast;
 
-        // JT leg first: losses are unfee'd and book IL, gains recover IL first and only the residual takes the dust-gated jtProtocolFeeWAD fee (Floor)
-        // IL is JT's drawdown from its high-water mark: JT losses and coverage deepen it, JT gains and ST recoveries repay it
-        if (deltaJTEff < 0) {
-            uint256 jtLoss = uint256(-deltaJTEff);
-            jtEffectiveNAV -= jtLoss;
-            il += jtLoss;
-        } else if (deltaJTEff > 0) {
-            uint256 jtGain = uint256(deltaJTEff);
-            uint256 jtRecovery = Math.min(jtGain, il);
-            il -= jtRecovery;
-            jtEffectiveNAV += jtRecovery;
-            jtGain -= jtRecovery;
-            if (jtGain > in_.dustTolerance) out.jtProtocolFee = Math.mulDiv(jtGain, in_.jtProtocolFeeWAD, WAD);
-            jtEffectiveNAV += jtGain;
-        }
+        if (in_.collateralNAVDelta > 0) {
+            uint256 gain = uint256(in_.collateralNAVDelta);
+            uint256 attributionBasis = in_.collateralNAVLast;
 
-        if (deltaSTEff < 0) {
-            // ST loss: coverage from the post-JT-leg jtEffectiveNAV, residual loss to ST
-            uint256 stLoss = uint256(-deltaSTEff);
-            uint256 coverageApplied = Math.min(stLoss, jtEffectiveNAV);
-            jtEffectiveNAV -= coverageApplied;
-            il += coverageApplied;
-            stLoss -= coverageApplied;
-            if (stLoss != 0) stEffectiveNAV -= stLoss;
-        } else if (deltaSTEff > 0) {
-            // ST gain: IL recovery FIRST, exact and never fee'd
-            uint256 stGain = uint256(deltaSTEff);
-            uint256 recovered = Math.min(stGain, il);
-            il -= recovered;
-            jtEffectiveNAV += recovered;
-            stGain -= recovered;
+            // The drawdown is repaid off the top of the gain before any distribution: restoration, never fee'd, and the
+            // restored claims re-anchor the attribution basis so a dip-and-recover lands on the direct path's allocation
+            if (il > 0) {
+                uint256 ilRepayment = Math.min(gain, il);
+                il -= ilRepayment;
+                jtEffectiveNAV += ilRepayment;
+                gain -= ilRepayment;
+                attributionBasis += ilRepayment;
+            }
 
+            // Attribution: the residual gain is split to ST pro-rata to its effective NAV claim (Floor), and JT takes
+            // the residual so it absorbs the rounding drift
+            // Seniority tie-break for an empty checkpoint: value marked from a zero collateral NAV has no live claims to split, so it accrues to the senior tranche first
+            uint256 stGain = attributionBasis == 0 ? gain : Math.mulDiv(gain, stEffectiveNAV, attributionBasis);
+            uint256 jtGain = gain - stGain;
+
+            // JT's residual share is pure fee-gated junior yield (the repayment consumed the drawdown first)
+            if (jtGain != 0) {
+                if (jtGain > in_.dustTolerance) out.jtProtocolFee = Math.mulDiv(jtGain, in_.jtProtocolFeeWAD, WAD);
+                jtEffectiveNAV += jtGain;
+            }
+
+            // ST's residual share is pure senior yield flowing straight to the premium block (the repayment consumed the drawdown first)
             if (stGain != 0) {
                 // Premium block: the dust gate drives fees and the accumulator reset, not the premiums
                 out.premiumsPaid = stGain > in_.dustTolerance;
@@ -586,6 +571,15 @@ library RoycoTestMath {
                 // The LT premium stays a senior claim, so it is re-added after sizing plain ST's retention
                 stEffectiveNAV += stGain + out.ltLiquidityPremium;
             }
+        } else if (in_.collateralNAVDelta < 0) {
+            // Junior-first loss absorption: the buffer takes the loss up to exhaustion, all of it impermanent
+            // (recoverable through the repayment step), and only the uncovered residual reaches ST
+            uint256 loss = uint256(-in_.collateralNAVDelta);
+            uint256 ilIncurred = Math.min(loss, jtEffectiveNAV);
+            jtEffectiveNAV -= ilIncurred;
+            il += ilIncurred;
+            loss -= ilIncurred;
+            if (loss != 0) stEffectiveNAV -= loss;
         }
 
         // Collateral conservation at wei precision: the pool always equals the sum of the tranche effective NAVs

@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
-import { SyncedAccountingState } from "../../../src/libraries/Types.sol";
+import { MarketState, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { AccountantFuzzTestBase } from "../../utils/AccountantFuzzTestBase.sol";
 import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
@@ -286,4 +286,44 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
             "isolation: marketState == PERPETUAL iff jtImpermanentLoss == 0"
         );
     }
+    /**
+     * Scenario: the market dips into a covered drawdown and later recovers. Coverage lends JT value to ST at
+     * the depressed mark, so without the off-the-top IL repayment ST would keep the appreciation earned on the
+     * coverage it consumed. The property is exact path independence in the covered regime: a dip-and-recover
+     * lands on the same tranche allocation as marking straight to the final collateral NAV, to the wei,
+     * because the repayment restores the claims at their original proportions before the residual attributes.
+     *
+     * Domain: the dip stays covered AND below the liquidation threshold: a liquidation-breaching or
+     * junior-wiping dip deliberately erases the restoration claim (extinguished claims stay extinguished),
+     * so path independence is only promised while the drawdown's recovery right survives. The threshold
+     * bound derives from covUtil = dip * minCov / (dip - stEff) < 1.1e18 with minCov 0.1e18, giving
+     * dip > 1100e18. YDM rates are zero so premiums cannot re-order value between the two paths, and the
+     * final mark spans partial recoveries (still below the seed) through full round trips and beyond.
+     */
+    function testFuzz_Sync_dipRecoverMatchesDirectPath(uint256 _dip, uint256 _final) public {
+        // Bounds: the dip keeps the market covered and under the liquidation threshold (dip > 1100e18, padded
+        // a million wei past the boundary because the utilization's ceil rounds a just-under ratio up to the
+        // exact threshold) and the final mark spans [dip, MAX_NAV] so partial and full recoveries are both
+        // exercised; both uniform via bound
+        _dip = bound(_dip, SEED_ST_EFF + 100e18 + 1e6, SEED_ST_EFF + SEED_JT_EFF - 1);
+        _final = bound(_final, _dip, MAX_NAV);
+        _deploy(_defaultParams());
+        jtYDM.setPreviewYieldShareReturn(0);
+        ltYDM.setPreviewYieldShareReturn(0);
+        _seedState(SEED_ST_EFF, SEED_JT_EFF, 0, SEED_LT_RAW, MarketState.PERPETUAL);
+        uint256 snapshotId = vm.snapshotState();
+
+        // Path A: dip then mark to the final collateral NAV
+        kernel.doPreOp(toNAVUnits(_dip));
+        SyncedAccountingState memory recovered = kernel.doPreOp(toNAVUnits(_final));
+
+        // Path B: mark straight to the final collateral NAV
+        vm.revertToState(snapshotId);
+        SyncedAccountingState memory direct = kernel.doPreOp(toNAVUnits(_final));
+
+        assertEq(toUint256(recovered.stEffectiveNAV), toUint256(direct.stEffectiveNAV), "path independence: stEffectiveNAV");
+        assertEq(toUint256(recovered.jtEffectiveNAV), toUint256(direct.jtEffectiveNAV), "path independence: jtEffectiveNAV");
+        assertEq(toUint256(recovered.jtImpermanentLoss), toUint256(direct.jtImpermanentLoss), "path independence: jtImpermanentLoss");
+    }
+
 }

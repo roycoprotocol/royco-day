@@ -104,12 +104,12 @@ contract WaterfallSyncDriver is RoycoDayAccountant {
     }
 
     /// @notice Drives the mutating yield share accrual against the seeded clocks, YDMs, and accumulators
-    function accruePremiumYieldShares() external returns (uint192 twJTYieldShareAccruedWAD, uint192 twLTYieldShareAccruedWAD) {
+    function accruePremiumYieldShares() external returns (uint128 twJTYieldShareAccruedWAD, uint128 twLTYieldShareAccruedWAD) {
         return _accruePremiumYieldShares();
     }
 
     /// @notice Drives the view-path yield share accrual against the seeded clocks, YDMs, and accumulators
-    function previewPremiumYieldShareAccrual() external view returns (uint192 twJTYieldShareAccruedWAD, uint192 twLTYieldShareAccruedWAD) {
+    function previewPremiumYieldShareAccrual() external view returns (uint128 twJTYieldShareAccruedWAD, uint128 twLTYieldShareAccruedWAD) {
         return _previewPremiumYieldShareAccrual();
     }
 

@@ -92,8 +92,8 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         vm.warp(block.timestamp + 3600);
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
-        assertEq(s.twJTYieldShareAccruedWAD, uint192(0.15e18 * 3600), "jt accrues its raw sub-cap rate");
-        assertEq(s.twLTYieldShareAccruedWAD, uint192(0.1e18 * 3600), "lt rate capped at maxLTYieldShareWAD");
+        assertEq(s.twJTYieldShareAccruedWAD, uint128(0.15e18 * 3600), "jt accrues its raw sub-cap rate");
+        assertEq(s.twLTYieldShareAccruedWAD, uint128(0.1e18 * 3600), "lt rate capped at maxLTYieldShareWAD");
         assertEq(s.lastYieldShareAccrualTimestamp, uint32(block.timestamp), "accrual timestamp advanced");
     }
 
@@ -110,8 +110,8 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
         // twJT = 0.15e18 * 3600 + 0.02e18 * 100, twLT = 0.05e18 * 3600 + 0.01e18 * 100
-        assertEq(s.twJTYieldShareAccruedWAD, uint192(0.15e18 * 3600 + 0.02e18 * 100), "jt accumulator compounds");
-        assertEq(s.twLTYieldShareAccruedWAD, uint192(0.05e18 * 3600 + 0.01e18 * 100), "lt accumulator compounds");
+        assertEq(s.twJTYieldShareAccruedWAD, uint128(0.15e18 * 3600 + 0.02e18 * 100), "jt accumulator compounds");
+        assertEq(s.twLTYieldShareAccruedWAD, uint128(0.05e18 * 3600 + 0.01e18 * 100), "lt accumulator compounds");
     }
 
     /// the YDMs are consulted with the last market state and utilizations computed from the last-committed checkpoints
@@ -253,7 +253,7 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
     }
 
     /**
-     * the uint192 accumulators survive a 100-year window at a 100% yield share
+     * the uint128 accumulators survive a 100-year window at a 100% yield share
      * Derivation: 1e18 * (100 * 365 days) = 1e18 * 3153600000 = 3.1536e27, far below 2^192
      */
     function test_Accrual_accumulatorNoOverflowAt100Years() public {
@@ -265,23 +265,23 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         jtYDM.setYieldShareReturn(WAD);
         vm.warp(block.timestamp + 100 * 365 days);
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
-        assertEq(accountant.getState().twJTYieldShareAccruedWAD, uint192(uint256(1e18) * 3_153_600_000), "century-scale accumulator exact");
+        assertEq(accountant.getState().twJTYieldShareAccruedWAD, uint128(uint256(1e18) * 3_153_600_000), "century-scale accumulator exact");
     }
 
     /**
-     * the uint192 accumulator's checked += fails loud once the running total would exceed its width
+     * the uint128 accumulator's checked += fails loud once the running total would exceed its width
      * A market whose accrual window is never consumed (no gain sync ever pays premiums, so the accumulator is
-     * never reset) grows by rate * elapsed forever. When the running total would pass type(uint192).max the
+     * never reset) grows by rate * elapsed forever. When the running total would pass type(uint128).max the
      * checked += reverts with an arithmetic panic, bricking every subsequent sync: a loud failure, in contrast
-     * to the silent single-increment wrap covered by test_AccrualIncrementCastWrapsModuloUint192_DoesNotRevert
+     * to the silent single-increment wrap covered by test_AccrualIncrementCastWrapsModuloUint128_DoesNotRevert
      * Derivation, from the accumulator width alone:
-     *   type(uint192).max = 2^192 - 1 = 6277101735386680763835789423207666416102355444464034512895
-     *   E1 = floor((2^192 - 1) / 1e18) - 1 = 6277101735386680763835789423207666416101
-     *   first increment = 1e18 * E1 = 6277101735386680763835789423207666416101000000000000000000
-     *     which sits 1355444464034512895 under the max, so the uint192 cast is lossless and the += from zero fits
-     *   a second window of E1 seconds doubles the total: 2 * (1e18 * E1) > 2^192 - 1, so the checked += panics
+     *   type(uint128).max = 2^128 - 1 = 340282366920938463463374607431768211455
+     *   E1 = floor((2^128 - 1) / 1e18) = 340282366920938463463, over 1e13 years of the config-capped WAD-per-second accrual
+     *   first increment = 1e18 * E1 = 340282366920938463463000000000000000000
+     *     which sits 374607431768211455 under the max, so the uint128 cast is lossless and the += from zero fits
+     *   a second window of E1 seconds doubles the total: 2 * (1e18 * E1) > 2^128 - 1, so the checked += panics
      */
-    function test_RevertIf_AccrualAccumulatorOverflowsUint192() public {
+    function test_RevertIf_AccrualAccumulatorOverflowsUint128() public {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.maxJTYieldShareWAD = uint64(WAD);
         p.maxLTYieldShareWAD = 0;
@@ -290,21 +290,21 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         jtYDM.setYieldShareReturn(WAD);
 
         // First window: a flat sync (no gain, so nothing pays out or resets the window) lands the accumulator
-        // just under the uint192 ceiling with a lossless cast
-        uint256 elapsedOne = 6_277_101_735_386_680_763_835_789_423_207_666_416_101;
+        // just under the uint128 ceiling with a lossless cast
+        uint256 elapsedOne = 340_282_366_920_938_463_463;
         vm.warp(block.timestamp + elapsedOne);
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
         assertEq(
             uint256(accountant.getState().twJTYieldShareAccruedWAD),
-            6_277_101_735_386_680_763_835_789_423_207_666_416_101_000_000_000_000_000_000,
-            "first window lands the accumulator just under the uint192 ceiling"
+            340_282_366_920_938_463_463_000_000_000_000_000_000,
+            "first window lands the accumulator just under the uint128 ceiling"
         );
 
         // The accrual clock is stored as a uint32, so at this timestamp it holds block.timestamp mod 2^32,
         // warp to storedClock + E1 (a forward warp here) so the next elapsed reads exactly E1 once more
         uint256 storedClock = accountant.getState().lastYieldShareAccrualTimestamp;
         vm.warp(storedClock + elapsedOne);
-        // The second increment alone still fits uint192, but the running total 2 * (1e18 * E1) exceeds the
+        // The second increment alone still fits uint128, but the running total 2 * (1e18 * E1) exceeds the
         // ceiling, so the checked += reverts: the sync bricks loudly instead of wrapping the accumulator to a
         // tiny value that would silently underpay the junior tranche's earned yield share
         vm.expectRevert(stdError.arithmeticError);
@@ -312,18 +312,18 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
     }
 
     /**
-     * a single oversized increment does NOT revert: the explicit uint192() cast truncates before the checked add
-     * The running-total add is checked, but each increment is cast to uint192 first, so one window with
-     * 1e18 * elapsed >= 2^192 wraps modulo 2^192 and lands a dust accumulator instead of panicking: the junior
+     * a single oversized increment does NOT revert: the explicit uint128() cast truncates before the checked add
+     * The running-total add is checked, but each increment is cast to uint128 first, so one window with
+     * 1e18 * elapsed >= 2^128 wraps modulo 2^128 and lands a dust accumulator instead of panicking: the junior
      * tranche's entire earned window silently collapses. The wrap, by hand:
-     *   elapsed E = floor((2^192 - 1) / 1e18) + 1 = 6277101735386680763835789423207666416103
-     *   raw increment = 1e18 * E = 6277101735386680763835789423207666416103000000000000000000
-     *   2^192         =            6277101735386680763835789423207666416102355444464034512896
-     *   raw mod 2^192 = 644555535965487104, worth ~0.64 seconds of accrual at a 100% yield share
-     * Reachability needs one un-synced window of ~2e32 years, so this is a latent width hazard rather than a
-     * live economic path, in asymmetry with the loud += overflow above
+     *   elapsed E = floor((2^128 - 1) / 1e18) + 1 = 340282366920938463464
+     *   raw increment = 1e18 * E = 340282366920938463464000000000000000000
+     *   2^128         =           340282366920938463463374607431768211456
+     *   raw mod 2^128 = 625392568231788544, worth ~0.63 seconds of accrual at a 100% yield share
+     * Reachability needs one un-synced window of over 1e13 years at the config-capped WAD-per-second rate, so
+     * this is a latent width hazard rather than a live economic path, in asymmetry with the loud += overflow above
      */
-    function test_AccrualIncrementCastWrapsModuloUint192_DoesNotRevert() public {
+    function test_AccrualIncrementCastWrapsModuloUint128_DoesNotRevert() public {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.maxJTYieldShareWAD = uint64(WAD);
         p.maxLTYieldShareWAD = 0;
@@ -331,13 +331,13 @@ contract Test_YieldShareAccrual_Accountant is AccountantTestBase {
         _seedAndInitAccrual();
         jtYDM.setYieldShareReturn(WAD);
 
-        // One second past the largest lossless window: the raw increment exceeds 2^192 by
-        // 644555535965487104, which is exactly what the cast leaves behind
-        uint256 elapsed = 6_277_101_735_386_680_763_835_789_423_207_666_416_103;
+        // One second past the largest lossless window: the raw increment exceeds 2^128 by
+        // 625392568231788544, which is exactly what the cast leaves behind
+        uint256 elapsed = 340_282_366_920_938_463_464;
         vm.warp(block.timestamp + elapsed);
         kernel.doPreOp(toNAVUnits(SEED_COLLATERAL));
         assertEq(
-            uint256(accountant.getState().twJTYieldShareAccruedWAD), 644_555_535_965_487_104, "oversized increment wraps modulo 2^192 instead of reverting"
+            uint256(accountant.getState().twJTYieldShareAccruedWAD), 625_392_568_231_788_544, "oversized increment wraps modulo 2^128 instead of reverting"
         );
     }
 

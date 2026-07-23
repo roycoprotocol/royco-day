@@ -907,16 +907,16 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * Sync scenario (gain +20e18, sticky dust): the recovery zeroes the dust il and exits the term with fees kept
-     * Derivation: deltaST = floor(20e18 * 1000e18 / (1200e18-5)) = 16666666666666666666, deltaJT = 3333333333333333334.
-     * The JT leg recovers the 5 wei il first, its residual 3333333333333333329 > dust 7 books
-     * jtFee = floor(3333333333333333329 * 0.1) = 333333333333333332. ST gain premiums (instantaneous 0.1e18 / 0.05e18):
-     *   jtPrem = 1666666666666666666 (fee 166666666666666666, jtFee total 499999999999999998)
+     * Sync scenario (gain +20e18, sticky dust): the repayment zeroes the dust il and exits the term with fees kept
+     * Derivation: repayment 5 zeroes the il (jtEffectiveNAV 200e18, residual 20e18-5, basis 1200e18):
+     * stGain = floor((20e18-5) * 1000e18 / 1200e18) = 16666666666666666662, jtGain = 3333333333333333333 > dust 7
+     * books jtFee = 333333333333333333. ST premiums (instantaneous 0.1e18 / 0.05e18):
+     *   jtPrem = 1666666666666666666 (fee 166666666666666666, jtFee total 499999999999999999)
      *   ltPrem = 833333333333333333, ltFee = 83333333333333333
-     *   st residual = 14166666666666666667, stFee = 1416666666666666666
-     *   jtEffectiveNAV = (200e18-5) + 5 + 3333333333333333329 + 1666666666666666666 = 204999999999999999995
-     *   stEffectiveNAV = 1000e18 + 14166666666666666667 + 833333333333333333 = 1015e18 exact
-     * il 0 exits to PERPETUAL (end deleted, FixedTermEnded), the organic recovery emits no reset event
+     *   st residual = 14166666666666666663, stFee = 1416666666666666666
+     *   jtEffectiveNAV = 200e18 + 3333333333333333333 + 1666666666666666666 = 204999999999999999999
+     *   stEffectiveNAV = 1000e18 + 14166666666666666663 + 833333333333333333 = 1014999999999999999996
+     * il 0 exits to PERPETUAL (end deleted, FixedTermEnded), the organic repayment emits no reset event
      */
     function test_Sync_FixedTermDustIL_Gain20ExitsTermWithFeesKept() public {
         _seedDustILFixedTerm();
@@ -925,12 +925,12 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         _runSyncVector(
             1220e18 - 5,
             ExpectedSync({
-                stEffectiveNAV: 1015e18,
-                jtEffectiveNAV: 205e18 - 5,
+                stEffectiveNAV: 1015e18 - 4,
+                jtEffectiveNAV: 205e18 - 1,
                 il: 0,
                 ltPrem: 833_333_333_333_333_333,
                 stFee: 1_416_666_666_666_666_666,
-                jtFee: 499_999_999_999_999_998,
+                jtFee: 499_999_999_999_999_999,
                 ltFee: 83_333_333_333_333_333,
                 marketState: MarketState.PERPETUAL,
                 fixedTermEndTimestamp: 0
@@ -939,13 +939,13 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * Sync scenario (gain to 1250e18, sticky dust): the offset gain crosses the recovery into full premium flows
-     * Derivation: the gain is 50e18+5: deltaST = floor((50e18+5) * 1000e18 / (1200e18-5)) = 41666666666666666671,
-     * deltaJT = 8333333333333333334. The JT leg recovers the 5 wei il, residual 8333333333333333329 books
-     * jtFee = 833333333333333332. ST premiums: jtPrem = 4166666666666666667 (fee 416666666666666666, total
-     * jtFee 1249999999999999998), ltPrem = 2083333333333333333, ltFee = 208333333333333333,
-     * st residual = 35416666666666666671, stFee = 3541666666666666667,
-     * jtEffectiveNAV = 212499999999999999996, stEffectiveNAV = 1037500000000000000004, PERPETUAL exit
+     * Sync scenario (gain to 1250e18, sticky dust): the offset gain crosses the repayment into full premium flows
+     * Derivation: the gain is 50e18+5: repayment 5 zeroes the il (jtEffectiveNAV 200e18, residual 50e18,
+     * basis 1200e18): stGain = floor(50e18 * 1000e18 / 1200e18) = 41666666666666666666,
+     * jtGain = 8333333333333333334 books jtFee = 833333333333333333. ST premiums: jtPrem = 4166666666666666666
+     * (fee 416666666666666666, total jtFee 1249999999999999999), ltPrem = 2083333333333333333,
+     * ltFee = 208333333333333333, st residual = 35416666666666666667, stFee = 3541666666666666666,
+     * jtEffectiveNAV = 212.5e18 exact, stEffectiveNAV = 1037.5e18 exact, PERPETUAL exit
      */
     function test_Sync_FixedTermDustIL_GainTo1250ExitsTerm() public {
         _seedDustILFixedTerm();
@@ -954,12 +954,12 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         _runSyncVector(
             1250e18,
             ExpectedSync({
-                stEffectiveNAV: 1_037_500_000_000_000_000_004,
-                jtEffectiveNAV: 212_499_999_999_999_999_996,
+                stEffectiveNAV: 1037.5e18,
+                jtEffectiveNAV: 212.5e18,
                 il: 0,
                 ltPrem: 2_083_333_333_333_333_333,
-                stFee: 3_541_666_666_666_666_667,
-                jtFee: 1_249_999_999_999_999_998,
+                stFee: 3_541_666_666_666_666_666,
+                jtFee: 1_249_999_999_999_999_999,
                 ltFee: 208_333_333_333_333_333,
                 marketState: MarketState.PERPETUAL,
                 fixedTermEndTimestamp: 0
@@ -1060,24 +1060,21 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * Sync scenario (gain == il + 1 wei: 1-wei premium floors with premiumsPaid true): from the large-IL
+     * Sync scenario (gain == il + 1 wei: the junior-favoring floor routes the wei to JT): from the large-IL
      * fixed-term checkpoint, sync to 1300e18 + 1
-     * Derivation: deltaST = floor((100e18 + 1) * 5 / 6) = 83333333333333333334, deltaJT = 16666666666666666667.
-     * The JT leg recovers its residual (il 83333333333333333333), the ST recovery consumes 83333333333333333333
-     * leaving stGain = 1. premiumsPaid = (1 > dust 0) = true, yet every floored term floors to zero:
-     * jtPrem = floor(1 * 0.1) = 0, ltPrem = 0, stFee = 0. stEffectiveNAV = 1000e18 + 1, jtEffectiveNAV = 300e18,
-     * PERPETUAL. Pins that premiumsPaid true with all-zero premiums and fees still resets the accumulators and
-     * stamps lastPremiumPaymentTimestamp: the runner's side-effect check asserts the reset path was taken,
-     * and the mirror's premiumsPaid flag is pinned true below
+     * Derivation: the repayment consumes 100e18 of the gain (il 0, jtEffectiveNAV 300e18, residual 1,
+     * basis 1300e18): stGain = floor(1 * 1000e18 / 1300e18) = 0, jtGain = 1 (fee floors to 0).
+     * No senior gain survives, so the premium block is SKIPPED (premiumsPaid false, accumulators NOT reset:
+     * the mirror's premiumsPaid flag is pinned false below). jtEffectiveNAV = 300e18 + 1, PERPETUAL
      */
-    function test_Sync_GainOneWeiAboveILZeroPremiumsStillPay() public {
+    function test_Sync_GainOneWeiAboveILRoutesWeiToJuniorNoPremiums() public {
         _seedLargeIL();
         IRoycoDayAccountant.RoycoDayAccountantState memory pre = accountant.getState();
         _runSyncVector(
             1300e18 + 1,
             ExpectedSync({
-                stEffectiveNAV: 1000e18 + 1,
-                jtEffectiveNAV: 300e18,
+                stEffectiveNAV: 1000e18,
+                jtEffectiveNAV: 300e18 + 1,
                 il: 0,
                 ltPrem: 0,
                 stFee: 0,
@@ -1087,19 +1084,56 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
                 fixedTermEndTimestamp: 0
             })
         );
-        // Pin the mirror's dust-gate outcome explicitly: the 1-wei gain clears the zero dust tolerance
+        // Pin the mirror's gate outcome explicitly: a sub-attribution residual never marks premiums paid
         RoycoTestMath.SyncOutputs memory m = RoycoTestMath.syncTrancheAccounting(_buildSyncInputs(pre, 1300e18 + 1));
-        assertTrue(m.premiumsPaid, "one-wei gain above zero dust pays premiums");
+        assertFalse(m.premiumsPaid, "a wei routed wholly to jt pays no premiums");
     }
 
     /**
-     * Sync scenario (fee-carrying term exit): a gain deep enough that the JT residual survives the recovery,
-     * so BOTH JT fee parts book alongside the full premium block and every fee is kept on the PERPETUAL exit
-     * Derivation: the +660e18 gain on the large-IL checkpoint splits deltaST = 550e18 / deltaJT = 110e18.
-     * JT leg: recovery 100e18 zeroes the il, residual 10e18 books jtFee = 1e18. ST leg: nothing left to
-     * recover, stGain = 550e18 pays instantaneous premiums (0.1e18 / 0.05e18): jtPrem = 55e18 (fee 5.5e18,
-     * jtFee total 6.5e18), ltPrem = 27.5e18 (ltFee 2.75e18), st residual = 467.5e18 (stFee 46.75e18).
-     * jtEffectiveNAV = 200e18 + 110e18 + 55e18 = 365e18, stEffectiveNAV = 1000e18 + 467.5e18 + 27.5e18 = 1495e18.
+     * Sync scenario (gain == il + 2 wei: 1-wei premium floors with premiumsPaid true): from the large-IL
+     * fixed-term checkpoint, sync to 1300e18 + 2
+     * Derivation: the repayment consumes 100e18 of the gain (il 0, jtEffectiveNAV 300e18, residual 2,
+     * basis 1300e18): stGain = floor(2 * 1000e18 / 1300e18) = 1, jtGain = 1 (fee floors to 0).
+     * premiumsPaid = (1 > dust 0) = true, yet every floored term floors to zero:
+     * jtPrem = floor(1 * 0.1) = 0, ltPrem = 0, stFee = 0. stEffectiveNAV = 1000e18 + 1,
+     * jtEffectiveNAV = 300e18 + 1, PERPETUAL. Pins that premiumsPaid true with all-zero premiums and fees
+     * still resets the accumulators and stamps lastPremiumPaymentTimestamp, and the mirror's premiumsPaid
+     * flag is pinned true below
+     */
+    function test_Sync_GainTwoWeiAboveILZeroPremiumsStillPay() public {
+        _seedLargeIL();
+        IRoycoDayAccountant.RoycoDayAccountantState memory pre = accountant.getState();
+        _runSyncVector(
+            1300e18 + 2,
+            ExpectedSync({
+                stEffectiveNAV: 1000e18 + 1,
+                jtEffectiveNAV: 300e18 + 1,
+                il: 0,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.PERPETUAL,
+                fixedTermEndTimestamp: 0
+            })
+        );
+        // Pin the mirror's dust-gate outcome explicitly: the 1-wei senior residual clears the zero dust tolerance
+        RoycoTestMath.SyncOutputs memory m = RoycoTestMath.syncTrancheAccounting(_buildSyncInputs(pre, 1300e18 + 2));
+        assertTrue(m.premiumsPaid, "one-wei senior residual above zero dust pays premiums");
+    }
+
+    /**
+     * Sync scenario (fee-carrying term exit): a gain deep enough that a junior residual survives the
+     * repayment, so BOTH JT fee parts book alongside the full premium block and every fee is kept on the
+     * PERPETUAL exit
+     * Derivation: the +660e18 gain on the large-IL checkpoint repays the 100e18 il off the top
+     * (jtEffectiveNAV 300e18, residual 560e18, basis 1300e18): stGain = floor(560e18 * 1000e18 / 1300e18) =
+     * 430769230769230769230, jtGain = 129230769230769230770 books jtFee = 12923076923076923077.
+     * ST premiums (instantaneous 0.1e18 / 0.05e18): jtPrem = 43076923076923076923 (fee 4307692307692307692,
+     * jtFee total 17230769230769230769), ltPrem = 21538461538461538461 (ltFee 2153846153846153846),
+     * st residual = 366153846153846153846 (stFee 36615384615384615384).
+     * jtEffectiveNAV = 300e18 + 129230769230769230770 + 43076923076923076923 = 472307692307692307693,
+     * stEffectiveNAV = 1000e18 + 366153846153846153846 + 21538461538461538461 = 1387692307692307692307.
      * il 0 exits to PERPETUAL: any fee-carrying resolution is PERPETUAL and keeps its fees (the theorem)
      */
     function test_Sync_FeeCarryingTermExitKeepsAllFees() public {
@@ -1109,13 +1143,13 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         _runSyncVector(
             1860e18,
             ExpectedSync({
-                stEffectiveNAV: 1495e18,
-                jtEffectiveNAV: 365e18,
+                stEffectiveNAV: 1_387_692_307_692_307_692_307,
+                jtEffectiveNAV: 472_307_692_307_692_307_693,
                 il: 0,
-                ltPrem: 27.5e18,
-                stFee: 46.75e18,
-                jtFee: 6.5e18,
-                ltFee: 2.75e18,
+                ltPrem: 21_538_461_538_461_538_461,
+                stFee: 36_615_384_615_384_615_384,
+                jtFee: 17_230_769_230_769_230_769,
+                ltFee: 2_153_846_153_846_153_846,
                 marketState: MarketState.PERPETUAL,
                 fixedTermEndTimestamp: 0
             })
@@ -1330,6 +1364,87 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         assertEq(toUint256(state.jtProtocolFee), 0, "no junior fee without a junior gain");
     }
 
+    /**
+     * dip-and-recover path independence: coverage lends JT value to ST at the depressed mark and inflates ST's
+     * proportional claim, so the off-the-top IL repayment must restore the claims before any distribution or ST
+     * keeps the appreciation earned on the coverage it consumed
+     * Derivation (zero YDM rates so premiums cannot move NAV between the paths):
+     * Seed stEffectiveNAV 100e18 / jtEffectiveNAV 50e18 (collateral 150e18)
+     * Dip to 120e18: deltaST = -floor(30e18 * 100 / 150) = -20e18 covered by JT, deltaJT = -10e18, landing
+     * stEff 100e18, jtEff 20e18, il 30e18
+     * Recover to 300e18: repayment 30e18 off the top (il 0, jtEff 50e18), residual 150e18 attributed on the
+     * restored basis 150e18: deltaST = 100e18 and deltaJT = 50e18, exactly the direct 150e18 gain split, with
+     * identical fees (stFee 10e18 on the 100e18 senior residual, jtFee 5e18 on the 50e18 junior residual)
+     */
+    function test_Sync_dipAndRecoverMatchesDirectPath() public {
+        jtYDM.setPreviewYieldShareReturn(0);
+        ltYDM.setPreviewYieldShareReturn(0);
+        _seedState(100e18, 50e18, 0, SEED_LT_RAW, MarketState.PERPETUAL);
+        uint256 snapshotId = vm.snapshotState();
+
+        // Path A: dip to 120e18 (fully covered, term entered) then recover to 300e18
+        kernel.doPreOp(toNAVUnits(uint256(120e18)));
+        SyncedAccountingState memory recovered = kernel.doPreOp(toNAVUnits(uint256(300e18)));
+        assertEq(toUint256(recovered.stEffectiveNAV), 200e18, "path A: st lands on the direct allocation");
+        assertEq(toUint256(recovered.jtEffectiveNAV), 100e18, "path A: jt lands on the direct allocation");
+        assertEq(toUint256(recovered.jtImpermanentLoss), 0, "path A: drawdown fully repaid off the top");
+        assertEq(toUint256(recovered.stProtocolFee), 10e18, "path A: st fee books on the residual senior gain only");
+        assertEq(toUint256(recovered.jtProtocolFee), 5e18, "path A: jt fee books on the residual junior gain only");
+        assertEq(uint8(recovered.marketState), uint8(MarketState.PERPETUAL), "path A: full repayment exits the term");
+
+        // Path B: the direct 150e18 gain from the same seed
+        vm.revertToState(snapshotId);
+        SyncedAccountingState memory direct = kernel.doPreOp(toNAVUnits(uint256(300e18)));
+        assertEq(toUint256(direct.stEffectiveNAV), 200e18, "path B: direct st allocation");
+        assertEq(toUint256(direct.jtEffectiveNAV), 100e18, "path B: direct jt allocation");
+        assertEq(toUint256(direct.stProtocolFee), 10e18, "path B: direct st fee");
+        assertEq(toUint256(direct.jtProtocolFee), 5e18, "path B: direct jt fee");
+    }
+
+    /**
+     * a gain fully consumed by the IL repayment carries zero fees and zero premiums: the repayment is
+     * restoration, never yield, so nothing remains to fee even with live YDM rates
+     * Derivation: seed stEffectiveNAV 100e18 / jtEffectiveNAV 20e18 / il 30e18 (collateral 120e18), gain
+     * to 140e18. Repayment = min(20e18, 30e18) = 20e18: il 10e18, jtEff 40e18, residual delta 0, so the
+     * attribution and both gain legs are silent and the term persists on the unrecovered drawdown
+     */
+    function test_Sync_gainFullyConsumedByILRepaymentCarriesNoFeesOrPremiums() public {
+        jtYDM.setPreviewYieldShareReturn(0.2e18);
+        ltYDM.setPreviewYieldShareReturn(0.2e18);
+        _seedState(100e18, 20e18, 30e18, SEED_LT_RAW, MarketState.FIXED_TERM);
+        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(140e18)));
+        assertEq(toUint256(state.stEffectiveNAV), 100e18, "st untouched by a restoration-only sync");
+        assertEq(toUint256(state.jtEffectiveNAV), 40e18, "the whole gain restores jt");
+        assertEq(toUint256(state.jtImpermanentLoss), 10e18, "the unrecovered drawdown remains");
+        assertEq(toUint256(state.stProtocolFee), 0, "no st fee on restoration");
+        assertEq(toUint256(state.jtProtocolFee), 0, "no jt fee on restoration");
+        assertEq(toUint256(state.ltProtocolFee), 0, "no lt fee on restoration");
+        assertEq(toUint256(state.ltLiquidityPremium), 0, "no premium despite live YDM rates");
+        assertEq(uint8(state.marketState), uint8(MarketState.FIXED_TERM), "partial repayment keeps the term");
+    }
+
+    /**
+     * a gain exceeding the IL repayment books fees on the post-repayment residual only: the repayment share
+     * is never in any fee base
+     * Derivation: seed stEffectiveNAV 100e18 / jtEffectiveNAV 20e18 / il 30e18 (collateral 120e18), gain
+     * to 180e18. Repayment 30e18 off the top (il 0, jtEff 50e18), residual 30e18 attributed on the restored
+     * basis 150e18: deltaST = floor(30e18 * 100 / 150) = 20e18 and deltaJT = 10e18, so jtFee = 1e18 and
+     * stFee = 2e18. Without the re-anchor the split would run on basis 120e18 (deltaST = 50e18, stFee 5e18),
+     * feeing the restoration as senior yield
+     */
+    function test_Sync_gainExceedingILRepaymentBooksFeesOnResidualOnly() public {
+        jtYDM.setPreviewYieldShareReturn(0);
+        ltYDM.setPreviewYieldShareReturn(0);
+        _seedState(100e18, 20e18, 30e18, SEED_LT_RAW, MarketState.FIXED_TERM);
+        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(180e18)));
+        assertEq(toUint256(state.stEffectiveNAV), 120e18, "st takes its share of the residual only");
+        assertEq(toUint256(state.jtEffectiveNAV), 60e18, "jt takes the repayment plus its residual share");
+        assertEq(toUint256(state.jtImpermanentLoss), 0, "drawdown fully repaid");
+        assertEq(toUint256(state.stProtocolFee), 2e18, "st fee on the 20e18 senior residual, not the repayment");
+        assertEq(toUint256(state.jtProtocolFee), 1e18, "jt fee on the 10e18 junior residual, not the repayment");
+        assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "full repayment exits the term");
+    }
+
     /// a zero delta on a shifted-claims checkpoint short-circuits the attribution and the sync is a pure no-op
     function test_Sync_zeroDeltaShortCircuitsAttribution() public {
         _seedState(980e18, 220e18, 0, SEED_LT_RAW, MarketState.PERPETUAL);
@@ -1456,11 +1571,13 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * fees survive an elapsed-term resolution: a deep gain past the elapsed end books both JT fee parts and
-     * the ST fee, all kept while the elapsed-term disjunct governs the commit
+     * fees survive an elapsed-term resolution: a deep gain past the elapsed end books the JT and ST fees,
+     * all kept while the elapsed-term disjunct governs the commit
      * Derivation: warp past the end, then a +660e18 gain (time-weighted premiums 0 at zero mutating rates):
-     * deltaST = 550e18 / deltaJT = 110e18, JT recovery 100e18 zeroes the il, residual 10e18 books jtFee 1e18,
-     * stGain 550e18 books stFee 55e18. jtEffectiveNAV = 310e18, stEffectiveNAV = 1550e18, PERPETUAL, end 0
+     * the repayment consumes 100e18 (il 0, jtEffectiveNAV 300e18, residual 560e18, basis 1300e18):
+     * stGain = floor(560e18 * 1000e18 / 1300e18) = 430769230769230769230 books stFee 43076923076923076923,
+     * jtGain = 129230769230769230770 books jtFee 12923076923076923077.
+     * jtEffectiveNAV = 429230769230769230770, stEffectiveNAV = 1430769230769230769230, PERPETUAL, end 0
      */
     function test_Sync_feesKeptOnElapsedTermResolution() public {
         _seedLargeIL();
@@ -1468,38 +1585,40 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayAccountant.FixedTermEnded();
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1860e18)));
-        assertEq(toUint256(state.jtProtocolFee), 1e18, "jt residual fee kept on the elapsed-term commit");
-        assertEq(toUint256(state.stProtocolFee), 55e18, "st fee kept on the elapsed-term commit");
-        assertEq(toUint256(state.jtEffectiveNAV), 310e18, "recovery plus the surviving residual");
-        assertEq(toUint256(state.stEffectiveNAV), 1550e18, "st retains its gain");
+        assertEq(toUint256(state.jtProtocolFee), 12_923_076_923_076_923_077, "jt residual fee kept on the elapsed-term commit");
+        assertEq(toUint256(state.stProtocolFee), 43_076_923_076_923_076_923, "st fee kept on the elapsed-term commit");
+        assertEq(toUint256(state.jtEffectiveNAV), 429_230_769_230_769_230_770, "repayment plus the junior residual");
+        assertEq(toUint256(state.stEffectiveNAV), 1_430_769_230_769_230_769_230, "st retains its residual share");
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "elapsed term resolves perpetual");
         assertEq(state.fixedTermEndTimestamp, 0, "end deleted");
     }
 
     /**
      * fees survive a liquidation-coinciding resolution: after the liquidation threshold is shrunk mid-term, a
-     * deep gain whose post-sync coverage utilization still meets the threshold books fees and keeps them
-     * Setup: threshold 1.5e18 at deploy so a covered -100e18 loss locks the term at coverageUtilization 1.1e18,
-     * then the setter shrinks the threshold to 1.05e18 (must stay > WAD)
-     * Derivation of the gain sync to 2310e18 (+1210e18): deltaST = floor(1210e18 * 1000e18 / 1100e18) = 1100e18
-     * exact, deltaJT = 110e18. JT recovery 100e18 zeroes the il, residual 10e18 books jtFee 1e18. stGain 1100e18
-     * books stFee 110e18 (zero preview rates). coverageUtilization = ceil(2310e18 * 0.1e18 / 210e18) = 1.1e18
-     * >= 1.05e18, so the liquidation disjunct governs the PERPETUAL commit and every fee is kept
+     * gain whose post-sync coverage utilization still meets the threshold books fees and keeps them
+     * Setup: threshold 2.5e18 at deploy and a thin junior (100e18) so a covered -50e18 loss locks the term at
+     * coverageUtilization ceil(1050e18 * 0.1e18 / 50e18) = 2.1e18, then the setter shrinks the threshold to
+     * 1.1e18 (must stay > WAD)
+     * Derivation of the gain sync to 1210e18 (+160e18): the repayment consumes 50e18 (il 0,
+     * jtEffectiveNAV 100e18, residual 110e18, basis 1100e18): stGain = floor(110e18 * 1000e18 / 1100e18) =
+     * 100e18 exact books stFee 10e18 (zero preview rates), jtGain = 10e18 books jtFee 1e18.
+     * coverageUtilization = ceil(1210e18 * 0.1e18 / 110e18) = 1.1e18 >= 1.1e18, so the liquidation disjunct
+     * governs the PERPETUAL commit and every fee is kept
      */
     function test_Sync_feesKeptOnLiquidationCoincidingResolution() public {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
-        p.coverageLiquidationUtilizationWAD = 1.5e18;
+        p.coverageLiquidationUtilizationWAD = 2.5e18;
         _deploy(p);
-        _seedState(SEED_ST_EFF, SEED_JT_EFF, 0, SEED_LT_RAW, MarketState.PERPETUAL);
-        kernel.doPreOp(toNAVUnits(uint256(1100e18)));
+        _seedState(SEED_ST_EFF, 100e18, 0, SEED_LT_RAW, MarketState.PERPETUAL);
+        kernel.doPreOp(toNAVUnits(uint256(1050e18)));
         assertEq(uint8(accountant.getState().lastMarketState), uint8(MarketState.FIXED_TERM), "staging: the covered loss locks the term");
-        accountant.setLiquidationCoverageUtilization(1.05e18);
+        accountant.setLiquidationCoverageUtilization(1.1e18);
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayAccountant.FixedTermEnded();
-        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(2310e18)));
+        SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1210e18)));
         assertEq(state.coverageUtilizationWAD, 1.1e18, "post-sync coverage utilization meets the shrunk threshold");
         assertEq(toUint256(state.jtProtocolFee), 1e18, "jt residual fee kept on the liquidation-coinciding commit");
-        assertEq(toUint256(state.stProtocolFee), 110e18, "st fee kept on the liquidation-coinciding commit");
+        assertEq(toUint256(state.stProtocolFee), 10e18, "st fee kept on the liquidation-coinciding commit");
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "liquidation resolves perpetual");
         assertEq(toUint256(state.jtImpermanentLoss), 0, "no drawdown survives a perpetual commit");
     }
@@ -1563,24 +1682,27 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     /**
      * a gain above the il pays premiums only on the residual, via the instantaneous branch with the
      * FIXED_TERM initial state and last-committed checkpoint utilizations as the exact YDM preview arguments
-     * Derivation: the +150e18 gain splits deltaST = 125e18 / deltaJT = 25e18: the JT leg repays 25e18 of il,
-     * the ST leg repays the remaining 75e18 leaving stGain 50e18. Checkpoint utils
+     * Derivation: the +150e18 gain repays the 100e18 il off the top (jtEffectiveNAV 300e18, residual 50e18,
+     * basis 1300e18): stGain = floor(50e18 * 1000e18 / 1300e18) = 38461538461538461538,
+     * jtGain = 11538461538461538462 books jtFee 1153846153846153846. Checkpoint utils
      * coverageUtilization = ceil(1200e18 * 0.1e18 / 200e18) = 0.6e18 and liquidityUtilization = ceil(1000e18 *
-     * 0.05e18 / 100e18) = 0.5e18. Premiums 5e18 / 2.5e18, fees kept because the recovered market lands
-     * PERPETUAL: jtFee 0.5e18, ltFee 0.25e18, stFee = floor(42.5e18 * 0.1) = 4.25e18
+     * 0.05e18 / 100e18) = 0.5e18. Premiums 3846153846153846153 / 1923076923076923076, fees kept because the
+     * recovered market lands PERPETUAL: jtFee += 384615384615384615 (total 1538461538461538461),
+     * ltFee 192307692307692307, st residual 32692307692307692309, stFee 3269230769230769230,
+     * jtEffectiveNAV 315384615384615384615, stEffectiveNAV 1034615384615384615385
      */
     function test_Sync_ilRecoveryThenPremiumOnResidualWithExactYDMArgs() public {
         _seedLargeIL();
         vm.expectCall(address(jtYDM), abi.encodeCall(IYDM.previewYieldShare, (MarketState.FIXED_TERM, 0.6e18)));
         vm.expectCall(address(ltYDM), abi.encodeCall(IYDM.previewYieldShare, (MarketState.FIXED_TERM, 0.5e18)));
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1350e18)));
-        assertEq(toUint256(state.jtImpermanentLoss), 0, "il fully recovered first");
-        assertEq(toUint256(state.jtEffectiveNAV), 305e18, "recovery plus the risk premium on the residual only");
-        assertEq(toUint256(state.ltLiquidityPremium), 2.5e18, "liquidity premium on the residual only");
-        assertEq(toUint256(state.stEffectiveNAV), 1045e18, "st retains residual plus the premium value retained senior");
-        assertEq(toUint256(state.jtProtocolFee), 0.5e18, "jt yield-share fee kept in the resulting perpetual state");
-        assertEq(toUint256(state.ltProtocolFee), 0.25e18, "lt fee kept");
-        assertEq(toUint256(state.stProtocolFee), 4.25e18, "st fee on the retained residual");
+        assertEq(toUint256(state.jtImpermanentLoss), 0, "il fully repaid first");
+        assertEq(toUint256(state.jtEffectiveNAV), 315_384_615_384_615_384_615, "repayment plus the junior residual and risk premium");
+        assertEq(toUint256(state.ltLiquidityPremium), 1_923_076_923_076_923_076, "liquidity premium on the residual only");
+        assertEq(toUint256(state.stEffectiveNAV), 1_034_615_384_615_384_615_385, "st retains residual plus the premium value retained senior");
+        assertEq(toUint256(state.jtProtocolFee), 1_538_461_538_461_538_461, "jt residual and yield-share fees kept in the resulting perpetual state");
+        assertEq(toUint256(state.ltProtocolFee), 192_307_692_307_692_307, "lt fee kept");
+        assertEq(toUint256(state.stProtocolFee), 3_269_230_769_230_769_230, "st fee on the retained residual");
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "full recovery ends the fixed term");
     }
 

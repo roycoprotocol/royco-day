@@ -226,8 +226,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint32 fixedTermEnd;
         uint32 lastAccrualTs;
         uint32 lastPremiumTs;
-        uint192 twJT;
-        uint192 twLT;
+        uint128 twJT;
+        uint128 twLT;
         // Utilizations recomputed live from committed inputs via _expectedCoverageUtilization/_expectedLiquidityUtilization
         uint256 coverageUtilizationWAD;
         uint256 liquidityUtilizationWAD;
@@ -495,19 +495,20 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
     /**
      * @notice Re-derives the full tranche accounting sync from the written accounting rules, independently of production code.
-     * @dev Mirrors `RoycoDayAccountant._previewSyncTrancheAccounting`: the single collateral delta attributed
-     *      to ST pro-rata to its effective NAV claim (floor on the magnitude) with JT taking the residual so it
-     *      absorbs all rounding drift, JT loss/gain booking with the dust-gated JT fee
-     *      (losses book impermanent loss, gains recover it first and only the residual is fee'd),
-     *      coverage `min(stLoss, jtEffectiveNAV)`, IL recovery `min(stGain, IL)`, premiums
+     * @dev Mirrors `RoycoDayAccountant._previewSyncTrancheAccounting`: a collateral gain repays the JT
+     *      impermanent loss off the top (`min(gain, IL)`, restoration, never fee'd, re-anchoring the
+     *      attribution basis to the restored claims), then the residual gain splits to ST pro-rata to its
+     *      effective NAV claim (floor) with JT taking the residual so it absorbs the rounding drift, the JT
+     *      residual with the dust-gated JT fee, and premiums
      *      `floor(stGain * (twStart + yieldShare * elapsed) / (premiumElapsed * WAD))`, the time-weighted
      *      average yield share over the full window since the last premium payment, which reduces to
      *      `floor(stGain * yieldShare / WAD)` for a single constant-share window, with the same-block
      *      (`premiumElapsed == 0`) instantaneous-share path, fee floors, `premiumsPaid = stGain > dust` gating
-     *      every fee, the LT premium folded back into stEffectiveNAV, and the FIXED_TERM zeroing of the LT premium plus
-     *      all fees (but NOT the JT risk premium, which is already booked into jtEffectiveNAV).
-     *      One collateral asset at one rate means the attributed ST and JT deltas always share the sign of the
-     *      collateral delta, so mixed-sign tranche PnL is unrepresentable here.
+     *      every fee, and the LT premium folded back into stEffectiveNAV. A collateral loss is absorbed
+     *      junior-first (`min(loss, jtEffectiveNAV)` booked to the impermanent loss) with only the uncovered
+     *      residual reaching ST.
+     *      One collateral asset at one rate means a loss never splits and only a gain is attributed pro-rata,
+     *      so mixed-sign tranche PnL is unrepresentable here.
      */
     function _expectedSync(SyncExpectation memory _e) internal pure returns (SyncExpectation memory) {
         uint256 stEffectiveNAV = toUint256(_e.lastSTEffectiveNAV);
@@ -515,58 +516,35 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 jtImpermanentLoss = toUint256(_e.lastJTImpermanentLoss);
         uint256 dust = toUint256(_e.dustTolerance);
 
-        // STEP_APPLY_PNL_ATTRIBUTION: attribute the single collateral delta to ST, JT takes the residual
-        // Seniority tie-break: a delta marked from a zero collateral checkpoint accrues to the senior tranche first
-        int256 dStEff;
-        int256 dJtEff;
-        {
-            int256 deltaCollateralNAV = int256(toUint256(_e.collateralNAVNew)) - int256(toUint256(_e.lastCollateralNAV));
-            dStEff = _e.lastCollateralNAV == ZERO_NAV_UNITS
-                ? deltaCollateralNAV
-                : _attributeDelta(deltaCollateralNAV, stEffectiveNAV, toUint256(_e.lastCollateralNAV));
-            dJtEff = deltaCollateralNAV - dStEff;
-        }
-
-        // STEP_APPLY_JT_LOSS / STEP_APPLY_JT_GAIN: losses book impermanent loss, gains recover it first and only the residual is fee'd
         uint256 jtProtocolFee;
-        if (dJtEff < 0) {
-            uint256 jtLoss = uint256(-dJtEff);
-            jtEffectiveNAV -= jtLoss;
-            jtImpermanentLoss += jtLoss;
-        } else if (dJtEff > 0) {
-            uint256 jtGain = uint256(dJtEff);
-            uint256 jtRecovery = Math.min(jtGain, jtImpermanentLoss);
-            jtImpermanentLoss -= jtRecovery;
-            jtEffectiveNAV += jtRecovery;
-            jtGain -= jtRecovery;
-            if (jtGain > dust) jtProtocolFee = Math.mulDiv(jtGain, _e.jtProtocolFeeWAD, WAD);
-            jtEffectiveNAV += jtGain;
-        }
-
         uint256 ltLiquidityPremium;
         uint256 stProtocolFee;
         uint256 ltProtocolFee;
         uint256 jtRiskPremium;
         bool premiumsPaid;
-        if (dStEff < 0) {
-            // STEP_APPLY_JT_COVERAGE_TO_ST + STEP_ST_INCURS_RESIDUAL_LOSSES
-            uint256 stLoss = uint256(-dStEff);
-            uint256 coverageApplied = Math.min(stLoss, jtEffectiveNAV);
-            if (coverageApplied != 0) {
-                jtEffectiveNAV -= coverageApplied;
-                jtImpermanentLoss += coverageApplied;
-                stLoss -= coverageApplied;
+        uint256 collateralNAVNew = toUint256(_e.collateralNAVNew);
+        uint256 lastCollateralNAV = toUint256(_e.lastCollateralNAV);
+        if (collateralNAVNew > lastCollateralNAV) {
+            // STEP_REPAY_JT_IMPERMANENT_LOSS: the drawdown is repaid off the top of the gain, re-anchoring the basis
+            uint256 gain = collateralNAVNew - lastCollateralNAV;
+            uint256 ilRepayment = Math.min(gain, jtImpermanentLoss);
+            jtImpermanentLoss -= ilRepayment;
+            jtEffectiveNAV += ilRepayment;
+            gain -= ilRepayment;
+            lastCollateralNAV += ilRepayment;
+
+            // STEP_ATTRIBUTE_RESIDUAL_GAIN: ST takes its floored pro-rata share, JT the residual
+            // Seniority tie-break: a gain marked from a zero collateral checkpoint accrues to the senior tranche first
+            uint256 stGain = lastCollateralNAV == 0 ? gain : Math.mulDiv(gain, stEffectiveNAV, lastCollateralNAV);
+            uint256 jtGain = gain - stGain;
+
+            // STEP_APPLY_JT_GAIN: the junior residual is pure fee-gated junior yield
+            if (jtGain != 0) {
+                if (jtGain > dust) jtProtocolFee = Math.mulDiv(jtGain, _e.jtProtocolFeeWAD, WAD);
+                jtEffectiveNAV += jtGain;
             }
-            if (stLoss != 0) stEffectiveNAV -= stLoss;
-        } else if (dStEff > 0) {
-            // STEP_JT_IMPERMANENT_LOSS_RECOVERY + STEP_PAY_PREMIUMS
-            uint256 stGain = uint256(dStEff);
-            uint256 ilRecovery = Math.min(stGain, jtImpermanentLoss);
-            if (ilRecovery != 0) {
-                jtImpermanentLoss -= ilRecovery;
-                jtEffectiveNAV += ilRecovery;
-                stGain -= ilRecovery;
-            }
+
+            // STEP_PAY_PREMIUMS: the senior residual is pure senior yield
             if (stGain != 0) {
                 if (stGain > dust) premiumsPaid = true;
                 (jtRiskPremium, ltLiquidityPremium) = _expectedPremiums(_e, stGain);
@@ -582,6 +560,14 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
                 if (premiumsPaid) stProtocolFee = Math.mulDiv(stGain, _e.stProtocolFeeWAD, WAD);
                 stEffectiveNAV += stGain + ltLiquidityPremium;
             }
+        } else if (collateralNAVNew < lastCollateralNAV) {
+            // STEP_APPLY_JT_LOSS + STEP_ST_INCURS_RESIDUAL_LOSSES: junior-first absorption, residual to ST
+            uint256 loss = lastCollateralNAV - collateralNAVNew;
+            uint256 jtImpermanentLossIncurred = Math.min(loss, jtEffectiveNAV);
+            jtEffectiveNAV -= jtImpermanentLossIncurred;
+            jtImpermanentLoss += jtImpermanentLossIncurred;
+            loss -= jtImpermanentLossIncurred;
+            if (loss != 0) stEffectiveNAV -= loss;
         }
 
         // The fee/premium theorem, checked rather than assumed: same-sign attribution means any nonzero fee or
@@ -622,14 +608,6 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         }
         jtRiskPremium = Math.mulDiv(_stGain, twJT, premiumElapsed * WAD);
         ltLiquidityPremium = Math.mulDiv(_stGain, twLT, premiumElapsed * WAD);
-    }
-
-    /// @notice Floor-on-magnitude proportional attribution, mirroring the split inlined in the sync's STEP_APPLY_PNL_ATTRIBUTION.
-    function _attributeDelta(int256 _delta, uint256 _claim, uint256 _lastCollateralNAV) internal pure returns (int256) {
-        if (_delta == 0 || _claim == 0 || _lastCollateralNAV == 0) return 0;
-        uint256 absDelta = _delta < 0 ? uint256(-_delta) : uint256(_delta);
-        uint256 attributedMagnitude = Math.mulDiv(absDelta, _claim, _lastCollateralNAV);
-        return _delta < 0 ? -int256(attributedMagnitude) : int256(attributedMagnitude);
     }
 
     /**
