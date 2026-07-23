@@ -286,6 +286,7 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
             "isolation: marketState == PERPETUAL iff jtImpermanentLoss == 0"
         );
     }
+
     /**
      * Scenario: the market dips into a covered drawdown and later recovers. Coverage lends JT value to ST at
      * the depressed mark, so without the off-the-top IL repayment ST would keep the appreciation earned on the
@@ -325,5 +326,4 @@ contract TestFuzz_SyncTrancheAccounting_Accountant is AccountantFuzzTestBase {
         assertEq(toUint256(recovered.jtEffectiveNAV), toUint256(direct.jtEffectiveNAV), "path independence: jtEffectiveNAV");
         assertEq(toUint256(recovered.jtImpermanentLoss), toUint256(direct.jtImpermanentLoss), "path independence: jtImpermanentLoss");
     }
-
 }

@@ -203,15 +203,15 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
     }
 
     /**
-     * a FIXED_TERM market that recovers down to 0 < il <= dust stays FIXED_TERM (stickiness) with fees and
-     * the lt premium zeroed, then transitions to PERPETUAL with FixedTermEnded only once the il reaches exactly zero
+     * a FIXED_TERM market that recovers down to 0 < il <= dust exits the term at that commit: the dust
+     * disjunct erases the remainder (reset event) and deletes the end, and the next gain is a plain gain
      * Derivation (dust 70): a covered -100e18 loss enters the term (jtEff 100e18, il 100e18). The recovery to
-     * 1200e18-50 is a gain of 100e18-50: deltaST = floor((100e18 - 50) * 1000e18 / 1100e18) = 90909090909090909045
-     * with the JT residual 9090909090909090905, both fully consumed repaying the il down to exactly 50 (no fee
-     * books, restoration is never fee'd), landing il 50 in (0, 70] with the sticky branch keeping the term.
-     * A final 50 wei gain (split 41/9, both recovery) zeroes the il and ends the term
+     * 1200e18-50 is a gain of 100e18-50, fully consumed repaying the il down to exactly 50 (no fee books,
+     * restoration is never fee'd), landing il 50 in (0, 70]: the dust disjunct resolves PERPETUAL, erases the
+     * 50 wei, and ends the term. The final 50 wei gain from the erased checkpoint is a plain dust-sized gain
+     * (stGain = floor(50 * 1000e18 / (1200e18-50)) = 41, jtGain 9, no fees at most dust, no premium reset)
      */
-    function test_StateMachine_fixedTermStickyWithDustILThenEndsAtZero() public {
+    function test_StateMachine_recoveryIntoDustBandErasesAndEndsTerm() public {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
         p.dustTolerance = toNAVUnits(uint256(70));
         // The covered 100e18 loss below marks coverageUtilization ceil(1100e18 * 0.1 / 100e18) = 1.1e18: lift the
@@ -222,21 +222,22 @@ contract Test_StateMachine_Accountant is AccountantTestBase {
         // Enter the fixed term on a covered 100e18 loss
         SyncedAccountingState memory state = kernel.doPreOp(toNAVUnits(uint256(1100e18)));
         assertEq(uint8(state.marketState), uint8(MarketState.FIXED_TERM), "loss above dust enters the term");
-        uint32 end = state.fixedTermEndTimestamp;
-        // Recover into the dust band: stays FIXED_TERM, no fee books since the whole gain repays the drawdown
-        state = kernel.doPreOp(toNAVUnits(uint256(1200e18 - 50)));
-        assertEq(uint8(state.marketState), uint8(MarketState.FIXED_TERM), "dust il keeps the term sticky");
-        assertEq(toUint256(state.jtImpermanentLoss), 50, "il recovered into the dust band");
-        assertEq(toUint256(state.jtEffectiveNAV), 200e18 - 50, "both attribution legs repay the drawdown");
-        assertEq(toUint256(state.jtProtocolFee), 0, "no jt fee books, the gain was fully consumed by the recovery");
-        assertEq(state.fixedTermEndTimestamp, end, "end timestamp kept");
-        // Full recovery to exactly zero il ends the term
+        // Recover into the dust band: the remainder is erased and the term ends at this commit
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayAccountant.FixedTermEnded();
-        state = kernel.doPreOp(toNAVUnits(uint256(1200e18)));
-        assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "zero il ends the sticky term");
-        assertEq(toUint256(state.jtImpermanentLoss), 0, "il fully recovered");
+        vm.expectEmit(true, true, true, true, address(accountant));
+        emit IRoycoDayAccountant.JuniorTrancheImpermanentLossReset(toNAVUnits(uint256(50)));
+        state = kernel.doPreOp(toNAVUnits(uint256(1200e18 - 50)));
+        assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "dust il exits the term at the commit");
+        assertEq(toUint256(state.jtImpermanentLoss), 0, "the dust remainder is erased");
+        assertEq(toUint256(state.jtEffectiveNAV), 200e18 - 50, "the repayment restores jt before the erasure");
+        assertEq(toUint256(state.jtProtocolFee), 0, "no jt fee books, the gain was fully consumed by the repayment");
         assertEq(state.fixedTermEndTimestamp, 0, "end timestamp deleted");
+        // The final 50 wei gain from the erased checkpoint is a plain gain, not a recovery
+        state = kernel.doPreOp(toNAVUnits(uint256(1200e18)));
+        assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "the market stays perpetual");
+        assertEq(toUint256(state.jtImpermanentLoss), 0, "no il accrues on a gain");
+        assertEq(toUint256(state.jtEffectiveNAV), 200e18 - 41, "jt takes the residual of the plain dust gain");
     }
 
     /**

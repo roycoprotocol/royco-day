@@ -258,18 +258,19 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         _warpAndRefreshFeed(1 days);
         syncVenuePrices();
 
-        // Every value-moving mint in the sync is pinned with exact args, in emission order: the NET premium share
-        // mint to the LT (supply is 100e18 + net premium at that instant), the inline reinvestment, the ST and JT
+        // Every value-moving mint in the sync is pinned with exact args, in emission order: the ST and JT
         // protocol fee share mints (the LT fee is folded into the senior fee mint as senior shares, and no
-        // liquidity-tranche shares are minted on a sync), and the final committed LT raw NAV
+        // liquidity-tranche shares are minted on a sync), the NET premium share mint to the LT (supply is the
+        // full post-sync senior supply at that instant since the fee mint precedes it), the inline
+        // reinvestment, and the final committed LT raw NAV
         vm.expectEmit(address(seniorTranche));
-        emit IRoycoSeniorTranche.LiquidityPremiumSharesMinted(address(kernel), LT_PREMIUM_SHARES, 100e18 + LT_PREMIUM_SHARES);
-        vm.expectEmit(address(kernel));
-        emit IRoycoDayKernel.LiquidityPremiumReinvested(LT_PREMIUM_SHARES, toTrancheUnits(REINVESTED_BPT));
-        vm.expectEmit(address(seniorTranche));
-        emit IRoycoVaultTranche.ProtocolFeeSharesMinted(PROTOCOL_FEE_RECIPIENT, ST_FEE_SHARES, POST_SYNC_ST_SUPPLY);
+        emit IRoycoVaultTranche.ProtocolFeeSharesMinted(PROTOCOL_FEE_RECIPIENT, ST_FEE_SHARES, 100e18 + ST_FEE_SHARES);
         vm.expectEmit(address(juniorTranche));
         emit IRoycoVaultTranche.ProtocolFeeSharesMinted(PROTOCOL_FEE_RECIPIENT, JT_FEE_SHARES, POST_SYNC_JT_SUPPLY);
+        vm.expectEmit(address(seniorTranche));
+        emit IRoycoSeniorTranche.LiquidityPremiumSharesMinted(address(kernel), LT_PREMIUM_SHARES, POST_SYNC_ST_SUPPLY);
+        vm.expectEmit(address(kernel));
+        emit IRoycoDayKernel.LiquidityPremiumReinvested(LT_PREMIUM_SHARES, toTrancheUnits(REINVESTED_BPT));
         vm.expectEmit(address(accountant));
         emit IRoycoDayAccountant.LiquidityTrancheRawNAVCommitted(toNAVUnits(POST_DEPLOY_LT_RAW_NAV));
         SyncedAccountingState memory state = _sync();
@@ -523,8 +524,9 @@ abstract contract Test_MarketLifecycleBase is DayMarketTestBase {
         vm.startPrank(attacker);
         stJtVault.approve(address(seniorTranche), depositAssets);
         // The premium mint must precede the attacker's share pricing inside the very same deposit call
+        // The fee mint lands first, so the premium mint's post-mint supply is the full post-sync senior supply
         vm.expectEmit(address(seniorTranche));
-        emit IRoycoSeniorTranche.LiquidityPremiumSharesMinted(address(kernel), LT_PREMIUM_SHARES, 100e18 + LT_PREMIUM_SHARES);
+        emit IRoycoSeniorTranche.LiquidityPremiumSharesMinted(address(kernel), LT_PREMIUM_SHARES, POST_SYNC_ST_SUPPLY);
         vm.expectEmit(address(seniorTranche));
         emit IRoycoVaultTranche.Deposit(attacker, attacker, toTrancheUnits(depositAssets), expectedMintedShares);
         uint256 mintedShares = seniorTranche.deposit(toTrancheUnits(depositAssets), attacker);

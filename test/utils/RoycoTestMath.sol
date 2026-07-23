@@ -496,8 +496,8 @@ library RoycoTestMath {
      *      with the premium block (instantaneous branch when elapsedSincePremiumPayment == 0). A collateral loss is
      *      absorbed junior-first (all of it impermanent) with only the uncovered residual reaching ST. Then the
      *      byte-exact conservation check and the state machine: every PERPETUAL commit erases the IL and clears the
-     *      term, FIXED_TERM stickiness keeps the original end, and a FIXED_TERM resolution provably carries no fees
-     *      (checked).
+     *      term (a drawdown within the dust tolerance always resolves PERPETUAL), an ongoing FIXED_TERM keeps the
+     *      original end, and a FIXED_TERM resolution provably carries no fees (checked).
      *      Coinvestment invariant: one collateral asset at one rate, so a loss never splits (junior-first waterfall)
      *      and only a gain is attributed pro-rata (mixed-sign tranche PnL is unrepresentable).
      *      Mirror-side extras vs the raw production return: out.ltRawNAV echoes in.ltRawNAVNew and
@@ -586,14 +586,13 @@ library RoycoTestMath {
         require(out.collateralNAV == stEffectiveNAV + jtEffectiveNAV, CONSERVATION_VIOLATED());
 
         // State machine on the fresh collateral NAV and the settled post-sync jtEffectiveNAV. The market resolves
-        // PERPETUAL when there is no drawdown, the market is permanently perpetual, the term elapsed, the junior
-        // buffer is wiped (partial or total, extinguishing its dead restoration claim), or the drawdown is dust
-        // from a perpetual state (dust noise never locks the market)
+        // PERPETUAL when the drawdown is within the dust tolerance (fully repaid or dust-sized, so dust noise
+        // never locks or keeps locking the market), the market is permanently perpetual, the term elapsed, or
+        // the junior buffer is wiped (partial or total, extinguishing its dead restoration claim)
         out.coverageUtilizationWAD = computeCoverageUtilization(out.collateralNAV, in_.minCoverageWAD, jtEffectiveNAV);
-        bool perpetual = il == 0 || in_.fixedTermDuration == 0
+        bool perpetual = il <= in_.dustTolerance || in_.fixedTermDuration == 0
             || (in_.marketStateLast == MarketState.FIXED_TERM && in_.fixedTermEndTimestampLast <= in_.nowTimestamp)
-            || out.coverageUtilizationWAD >= in_.coverageLiquidationUtilizationWAD || jtEffectiveNAV == 0
-            || (il <= in_.dustTolerance && in_.marketStateLast == MarketState.PERPETUAL);
+            || out.coverageUtilizationWAD >= in_.coverageLiquidationUtilizationWAD || jtEffectiveNAV == 0;
         if (perpetual) {
             // A perpetual commit always erases the IL and clears the term, so a perpetual market never carries a drawdown
             out.ilErased = il;

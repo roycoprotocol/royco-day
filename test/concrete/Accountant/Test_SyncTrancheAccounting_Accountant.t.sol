@@ -809,16 +809,15 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     ----------------------------------------------------------------------*/
 
     /*
-     * Checkpoint collateral 1200e18-5, stEffectiveNAV 1000e18, jtEffectiveNAV 200e18-5, il 5, dust 7,
-     * FIXED_TERM with end T0+D (the sticky-dust state: il in (0, dust] entered from a deeper drawdown).
-     * Attribution: a delta d attributes floor(|d| * 1000e18 / (1200e18-5)) to ST with JT the residual.
+     * Checkpoint collateral 1200e18-12, stEffectiveNAV 1000e18, jtEffectiveNAV 200e18-12, il 12, dust 7,
+     * FIXED_TERM with end T0+D (il just above the dust tolerance: a FIXED_TERM checkpoint with il <= dust is
+     * unrepresentable because the dust disjunct erases it at commit).
      */
 
     /**
-     * Sync scenario (deep loss to 1130e18, sticky dust): staging offsets cancel to round outputs
-     * Derivation: the loss is 70e18-5: deltaST = -floor((70e18-5) * 1000e18 / (1200e18-5)) = -58333333333333333329,
-     * deltaJT = -11666666666666666666, fully covered: jtEffectiveNAV = 130e18 exact, il = 5 + (70e18-5) = 70e18,
-     * stEffectiveNAV unchanged, term persists with the original end
+     * Sync scenario (deep loss to 1130e18, above-dust il): staging offsets cancel to round outputs
+     * Derivation: the loss is 70e18-12, absorbed junior-first in full: jtEffectiveNAV = 130e18 exact,
+     * il = 12 + (70e18-12) = 70e18, stEffectiveNAV unchanged, term persists with the original end
      */
     function test_Sync_FixedTermDustIL_LossTo1130() public {
         _seedDustILFixedTerm();
@@ -839,8 +838,8 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * Sync scenario (loss to 1150e18, sticky dust)
-     * Derivation: loss 50e18-5 lands wholly on JT: jtEffectiveNAV = 150e18, il = 50e18, original end kept
+     * Sync scenario (loss to 1150e18, above-dust il)
+     * Derivation: loss 50e18-12 lands wholly on JT: jtEffectiveNAV = 150e18, il = 50e18, original end kept
      */
     function test_Sync_FixedTermDustIL_LossTo1150() public {
         _seedDustILFixedTerm();
@@ -861,18 +860,18 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * Sync scenario (loss -20e18, sticky dust): the drawdown deepens past the dust band and the term persists
-     * Derivation: deltaST = -16666666666666666666, deltaJT = -3333333333333333334, fully covered:
-     * jtEffectiveNAV = 180e18-5, il = 20e18+5, original end kept
+     * Sync scenario (loss -20e18, above-dust il): the drawdown deepens and the term persists
+     * Derivation: the 20e18 loss is absorbed junior-first in full:
+     * jtEffectiveNAV = 180e18-12, il = 20e18+12, original end kept
      */
     function test_Sync_FixedTermDustIL_Loss20() public {
         _seedDustILFixedTerm();
         _runSyncVector(
-            1180e18 - 5,
+            1180e18 - 12,
             ExpectedSync({
                 stEffectiveNAV: 1000e18,
-                jtEffectiveNAV: 180e18 - 5,
-                il: 20e18 + 5,
+                jtEffectiveNAV: 180e18 - 12,
+                il: 20e18 + 12,
                 ltPrem: 0,
                 stFee: 0,
                 jtFee: 0,
@@ -884,38 +883,67 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * Sync scenario (flat, sticky dust): the pure dust-IL stickiness scenario
-     * Derivation: zero delta, il 5 in (0, 7] with initial FIXED_TERM stays FIXED_TERM with the ORIGINAL end
-     * (the dust-erasure disjunct requires an initial PERPETUAL), all fee and premium fields zero
+     * Sync scenario (flat, above-dust il): il just above the dust tolerance keeps the term
+     * Derivation: zero delta, il 12 > dust 7 with initial FIXED_TERM stays FIXED_TERM with the ORIGINAL end,
+     * all fee and premium fields zero
      */
     function test_Sync_FixedTermDustIL_Flat() public {
         _seedDustILFixedTerm();
+        _runSyncVector(
+            1200e18 - 12,
+            ExpectedSync({
+                stEffectiveNAV: 1000e18,
+                jtEffectiveNAV: 200e18 - 12,
+                il: 12,
+                ltPrem: 0,
+                stFee: 0,
+                jtFee: 0,
+                ltFee: 0,
+                marketState: MarketState.FIXED_TERM,
+                fixedTermEndTimestamp: uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS)
+            })
+        );
+    }
+
+    /**
+     * Sync scenario (gain +7, above-dust il): a partial repayment landing inside the dust band erases the
+     * remainder and exits the term mid-recovery
+     * Derivation: the +7 gain repays 7 of the 12 wei il (jtEffectiveNAV 200e18-5, residual 0, no fees or
+     * premiums), leaving il 5 <= dust 7: the dust disjunct resolves PERPETUAL, erases the 5 wei (reset event),
+     * and deletes the end (FixedTermEnded)
+     */
+    function test_Sync_FixedTermDustIL_GainIntoDustBandErasesAndExitsTerm() public {
+        _seedDustILFixedTerm();
+        vm.expectEmit(true, true, true, true, address(accountant));
+        emit IRoycoDayAccountant.FixedTermEnded();
+        vm.expectEmit(true, true, true, true, address(accountant));
+        emit IRoycoDayAccountant.JuniorTrancheImpermanentLossReset(toNAVUnits(uint256(5)));
         _runSyncVector(
             1200e18 - 5,
             ExpectedSync({
                 stEffectiveNAV: 1000e18,
                 jtEffectiveNAV: 200e18 - 5,
-                il: 5,
+                il: 0,
                 ltPrem: 0,
                 stFee: 0,
                 jtFee: 0,
                 ltFee: 0,
-                marketState: MarketState.FIXED_TERM,
-                fixedTermEndTimestamp: uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS)
+                marketState: MarketState.PERPETUAL,
+                fixedTermEndTimestamp: 0
             })
         );
     }
 
     /**
-     * Sync scenario (gain +20e18, sticky dust): the repayment zeroes the dust il and exits the term with fees kept
-     * Derivation: repayment 5 zeroes the il (jtEffectiveNAV 200e18, residual 20e18-5, basis 1200e18):
-     * stGain = floor((20e18-5) * 1000e18 / 1200e18) = 16666666666666666662, jtGain = 3333333333333333333 > dust 7
+     * Sync scenario (gain +20e18, above-dust il): the repayment zeroes the il and exits the term with fees kept
+     * Derivation: repayment 12 zeroes the il (jtEffectiveNAV 200e18, residual 20e18-12, basis 1200e18):
+     * stGain = floor((20e18-12) * 1000e18 / 1200e18) = 16666666666666666656, jtGain = 3333333333333333332 > dust 7
      * books jtFee = 333333333333333333. ST premiums (instantaneous 0.1e18 / 0.05e18):
-     *   jtPrem = 1666666666666666666 (fee 166666666666666666, jtFee total 499999999999999999)
-     *   ltPrem = 833333333333333333, ltFee = 83333333333333333
-     *   st residual = 14166666666666666663, stFee = 1416666666666666666
-     *   jtEffectiveNAV = 200e18 + 3333333333333333333 + 1666666666666666666 = 204999999999999999999
-     *   stEffectiveNAV = 1000e18 + 14166666666666666663 + 833333333333333333 = 1014999999999999999996
+     *   jtPrem = 1666666666666666665 (fee 166666666666666666, jtFee total 499999999999999999)
+     *   ltPrem = 833333333333333332, ltFee = 83333333333333333
+     *   st residual = 14166666666666666659, stFee = 1416666666666666665
+     *   jtEffectiveNAV = 200e18 + 3333333333333333332 + 1666666666666666665 = 204999999999999999997
+     *   stEffectiveNAV = 1000e18 + 14166666666666666659 + 833333333333333332 = 1014999999999999999991
      * il 0 exits to PERPETUAL (end deleted, FixedTermEnded), the organic repayment emits no reset event
      */
     function test_Sync_FixedTermDustIL_Gain20ExitsTermWithFeesKept() public {
@@ -923,13 +951,13 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
         vm.expectEmit(true, true, true, true, address(accountant));
         emit IRoycoDayAccountant.FixedTermEnded();
         _runSyncVector(
-            1220e18 - 5,
+            1220e18 - 12,
             ExpectedSync({
-                stEffectiveNAV: 1015e18 - 4,
-                jtEffectiveNAV: 205e18 - 1,
+                stEffectiveNAV: 1015e18 - 9,
+                jtEffectiveNAV: 205e18 - 3,
                 il: 0,
-                ltPrem: 833_333_333_333_333_333,
-                stFee: 1_416_666_666_666_666_666,
+                ltPrem: 833_333_333_333_333_332,
+                stFee: 1_416_666_666_666_666_665,
                 jtFee: 499_999_999_999_999_999,
                 ltFee: 83_333_333_333_333_333,
                 marketState: MarketState.PERPETUAL,
@@ -939,8 +967,8 @@ contract Test_SyncTrancheAccounting_Accountant is AccountantTestBase {
     }
 
     /**
-     * Sync scenario (gain to 1250e18, sticky dust): the offset gain crosses the repayment into full premium flows
-     * Derivation: the gain is 50e18+5: repayment 5 zeroes the il (jtEffectiveNAV 200e18, residual 50e18,
+     * Sync scenario (gain to 1250e18, above-dust il): the offset gain crosses the repayment into full premium flows
+     * Derivation: the gain is 50e18+12: repayment 12 zeroes the il (jtEffectiveNAV 200e18, residual 50e18,
      * basis 1200e18): stGain = floor(50e18 * 1000e18 / 1200e18) = 41666666666666666666,
      * jtGain = 8333333333333333334 books jtFee = 833333333333333333. ST premiums: jtPrem = 4166666666666666666
      * (fee 416666666666666666, total jtFee 1249999999999999999), ltPrem = 2083333333333333333,

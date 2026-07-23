@@ -451,17 +451,13 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             // The unrealized gain of the underlying investment since the last NAV checkpoint
             NAV_UNIT gain = (_collateralNAV - lastCollateralNAV);
 
-            /// @dev STEP_REPAY_JT_IMPERMANENT_LOSS: The drawdown is repaid off the top of the gain before any distribution
-            // Coverage lends JT value to ST at a depressed mark and inflates ST's proportional claim, so repaying the ledger
-            // before attribution restores JT's claim at its original proportions and makes a dip-and-recover path land on the
-            // same allocation as the direct path: ST can never keep appreciation earned on the coverage it consumed
-            // The repayment is restoration, never yield, so it is never fee'd
+            /// @dev STEP_REPAY_JT_IMPERMANENT_LOSS: Any prior transient loss booked by the JT from coverage provided or its own loss is repaid first
+            // The repayment is restoration, never yield, so it is never has a fee
             if (jtImpermanentLoss != ZERO_NAV_UNITS) {
                 NAV_UNIT jtImpermanentLossRepayment = RoycoUnitsMath.min(gain, jtImpermanentLoss);
                 jtImpermanentLoss = (jtImpermanentLoss - jtImpermanentLossRepayment);
                 jtEffectiveNAV = (jtEffectiveNAV + jtImpermanentLossRepayment);
                 gain = (gain - jtImpermanentLossRepayment);
-                // The restored claims re-anchor the attribution basis so the residual splits at the original proportions
                 lastCollateralNAV = (lastCollateralNAV + jtImpermanentLossRepayment);
             }
 
@@ -470,7 +466,7 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
                 /// @dev STEP_ATTRIBUTE_RESIDUAL_GAIN: Attribute the residual gain to ST in proportion to its effective NAV claim on the collateral, which conservation keeps equal to stEffectiveNAV over lastCollateralNAV
                 // Value marked from a zero collateral NAV has no live claims to split, so it accrues to the senior tranche first
                 // The floor rounds in favor of juniors, routing the leftover wei into the junior residual
-                NAV_UNIT stGain = (lastCollateralNAV == ZERO_NAV_UNITS) ? gain : gain.mulDiv(stEffectiveNAV, lastCollateralNAV, Math.Rounding.Floor);
+                NAV_UNIT stGain = ((lastCollateralNAV == ZERO_NAV_UNITS) ? gain : gain.mulDiv(stEffectiveNAV, lastCollateralNAV, Math.Rounding.Floor));
                 NAV_UNIT jtGain = (gain - stGain);
 
                 /// @dev STEP_APPLY_JT_GAIN: JT's attributed share of the residual gain is pure junior yield (the repayment step consumed the drawdown first)
@@ -556,10 +552,10 @@ contract RoycoDayAccountant is IRoycoDayAccountant, RoycoBase {
             uint256 fixedTermDurationSeconds = $.fixedTermDurationSeconds;
             // The market must be in a perpetual state if any of the following hold:
             // 1. The market is permanently perpetual (fixed-term duration 0), so it never enters a JT protection period
-            // 2. There is no JT impermanent loss, so JT provides its full loss-absorption buffer and needs no protection period
-            // 3. The current fixed-term has elapsed, so the transient JT protection period is complete
-            // 4. The junior buffer is wiped (partially collateralized or a total wipe), so its dead restoration claim is extinguished, ST needs to be able to withdraw to avoid/book losses, and the YDM needs to kick in to reinstate proper collateralization
-            // 5. The JT impermanent loss is within the dust tolerance and the market was perpetual: dust ST or JT losses (eg. rounding in the underlying NAVs) never lock the market
+            // 2. The junior buffer is wiped (partially collateralized or a total wipe), so its dead restoration claim is extinguished, ST needs to be able to withdraw to avoid/book losses, and the YDM needs to kick in to reinstate proper collateralization
+            // 3. The JT impermanent loss is within the dust tolerance (fully repaid or dust-sized), so JT provides its loss-absorption buffer and needs no protection period: dust ST or JT losses (eg. rounding in the underlying NAVs) never lock or keep locking the market
+            // 4. The current fixed-term has elapsed, so the transient JT protection period is complete
+            // 5. The coverage utilization breached the liquidation threshold, so the market forces open senior exits
             if (
                 fixedTermDurationSeconds == 0 || jtEffectiveNAV == ZERO_NAV_UNITS || jtImpermanentLoss <= dustTolerance
                     || (initialMarketState == MarketState.FIXED_TERM && fixedTermEndTimestamp <= block.timestamp)

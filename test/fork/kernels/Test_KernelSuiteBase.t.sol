@@ -3406,8 +3406,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         emit IRoycoDayAccountant.YieldSharesAccrued(
             e.jtYieldShareWAD, e.twJTStart + e.jtYieldShareWAD * e.elapsed, e.ltYieldShareWAD, e.twLTStart + e.ltYieldShareWAD * e.elapsed
         );
+        // The ST protocol fee mint lands first, so the premium mint's post-mint supply carries the fee shares too
         vm.expectEmit(true, false, false, true, address(ST));
-        emit IRoycoSeniorTranche.LiquidityPremiumSharesMinted(address(KERNEL), premShares, stSupplyPre + premShares);
+        emit IRoycoSeniorTranche.LiquidityPremiumSharesMinted(address(KERNEL), premShares, stSupplyPre + stFeeShares + premShares);
         SyncedAccountingState memory state = _syncWithState();
 
         _assertSyncMatchesExpectation(state, e);

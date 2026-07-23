@@ -861,25 +861,26 @@ contract Test_RoycoTestMath is Test {
     }
 
     /**
-     * Dust-IL FIXED_TERM stickiness, the pure case: with a zero delta and an IL of 5 wei inside the dust
-     * tolerance of 7, an initially FIXED_TERM market stays FIXED_TERM with its ORIGINAL end — dust-sized IL
-     * never silently releases a term.
+     * Dust-IL erasure at a FIXED_TERM commit, the pure case: with a zero delta and an IL of 5 wei inside the
+     * dust tolerance of 7, the dust disjunct resolves PERPETUAL, erases the drawdown, and clears the term —
+     * dust noise never keeps a market locked.
      * Checkpoint: stEffectiveNAV 1000e18, jtEffectiveNAV 200e18−5 (collateral 1200e18−5), IL 5, dust 7,
      * FIXED_TERM, end T0+D. coverageUtilizationWAD = ⌈(1200e18−5)·0.1e18/(200e18−5)⌉ = 600000000000000001
      * (the −5 offsets leave a fractional part).
      */
-    function test_SyncTrancheAccounting_DustIL_FixedTermStickiness() public pure {
+    function test_SyncTrancheAccounting_DustIL_ErasedAtFixedTermCommit() public pure {
         RoycoTestMath.SyncInputs memory in_ = _syncInputs(1000e18, 200e18 - 5, 5, RoycoTestMath.MarketState.FIXED_TERM, T0 + DURATION, 7, 0);
         RoycoTestMath.SyncOutputs memory expected;
         expected.collateralNAV = 1200e18 - 5;
         expected.ltRawNAV = 100e18;
         expected.stEffectiveNAV = 1000e18;
         expected.jtEffectiveNAV = 200e18 - 5;
-        expected.jtImpermanentLoss = 5;
+        expected.jtImpermanentLoss = 0;
+        expected.ilErased = 5;
         expected.coverageUtilizationWAD = 600_000_000_000_000_001;
         expected.liquidityUtilizationWAD = 500_000_000_000_000_000;
-        expected.marketState = RoycoTestMath.MarketState.FIXED_TERM;
-        expected.fixedTermEndTimestamp = T0 + DURATION;
+        expected.marketState = RoycoTestMath.MarketState.PERPETUAL;
+        expected.fixedTermEndTimestamp = 0;
         _assertSyncOutputs(RoycoTestMath.syncTrancheAccounting(in_), expected);
     }
 

@@ -200,10 +200,9 @@ abstract contract AccountantTestBase is Test {
      * stEffectiveNAV 1000e18, jtEffectiveNAV 200e18-5, il 5, FIXED_TERM, end kept from the entry sync
      *
      * Staging (all in this block): deploy with dust 7, flat seed, loss sync of 12 (> dust 7) enters FIXED_TERM
-     * (ST attribution floor(12 * 1000e18 / 1200e18) = 10 covered by JT plus a 2 wei JT-leg loss, il 12,
-     * stEffectiveNAV unchanged), then a partial-recovery sync of +7 is fully consumed by il recovery on both
-     * attribution legs (deltaST 5 and deltaJT 2 both recover, no premium block) leaving il 5 in (0, 7] with the
-     * initial state FIXED_TERM: the sticky-dust branch keeps the term and the original end (RoycoDayAccountant)
+     * (the junior buffer absorbs the whole 12 wei loss, il 12, stEffectiveNAV unchanged), landing il just above
+     * the dust tolerance: a FIXED_TERM checkpoint carrying il <= dust is unrepresentable because the dust
+     * disjunct erases it at commit (RoycoDayAccountant)
      */
     function _seedDustILFixedTerm() internal {
         IRoycoDayAccountant.RoycoDayAccountantInitParams memory p = _defaultParams();
@@ -211,15 +210,14 @@ abstract contract AccountantTestBase is Test {
         _deploy(p);
         _seedState(SEED_ST_EFF, SEED_JT_EFF, 0, SEED_LT_RAW, MarketState.PERPETUAL);
         kernel.doPreOp(toNAVUnits(SEED_ST_EFF + SEED_JT_EFF - 12));
-        kernel.doPreOp(toNAVUnits(SEED_ST_EFF + SEED_JT_EFF - 5));
         kernel.doCommit(toNAVUnits(SEED_LT_RAW));
 
         // Self-verify the landed checkpoint so staging misuse is loud
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
-        assertEq(toUint256(s.lastCollateralNAV), 1200e18 - 5, "seed fixed-term dust-IL: collateralNAV");
+        assertEq(toUint256(s.lastCollateralNAV), 1200e18 - 12, "seed fixed-term dust-IL: collateralNAV");
         assertEq(toUint256(s.lastSTEffectiveNAV), 1000e18, "seed fixed-term dust-IL: stEffectiveNAV");
-        assertEq(toUint256(s.lastJTEffectiveNAV), 200e18 - 5, "seed fixed-term dust-IL: jtEffectiveNAV");
-        assertEq(toUint256(s.lastJTImpermanentLoss), 5, "seed fixed-term dust-IL: sticky dust il");
+        assertEq(toUint256(s.lastJTEffectiveNAV), 200e18 - 12, "seed fixed-term dust-IL: jtEffectiveNAV");
+        assertEq(toUint256(s.lastJTImpermanentLoss), 12, "seed fixed-term dust-IL: above-dust il");
         assertEq(uint8(s.lastMarketState), uint8(MarketState.FIXED_TERM), "seed fixed-term dust-IL: market state");
         assertEq(s.fixedTermEndTimestamp, uint32(block.timestamp + DEFAULT_FIXED_TERM_DURATION_SECONDS), "seed fixed-term dust-IL: original end kept");
 
