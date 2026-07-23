@@ -69,7 +69,7 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
         assertEq(yT1, 0.0001e18, "the slammed value is the 0.0001e18 floor, not a decayed curve position");
         // An honest hour of decay leaves at least 98858447488584640 (derivation above), so the slammed value
         // is more than 988x below anywhere a correctly dated adaptation could have taken the curve
-        assertLt(uint256(yT1) * 988, 98858447488584640, "the slammed value sits over 988x below the correct one-hour decay floor");
+        assertLt(uint256(yT1) * 988, 98_858_447_488_584_640, "the slammed value sits over 988x below the correct one-hour decay floor");
 
         // The premium output collapses with it: the trapezoidal average of the yield share at target is
         // (0.1e18 + 0.0001e18 + 2 x 0.0001e18) / 4 = 25075000000000000, and subtracting the full 0.05e18
@@ -158,15 +158,19 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
 
         // Re-sync flat in the SAME block. Zero real time has passed, so this must be a no-op: no service
         // seconds were rendered, so no premium entitlement should accrue and the YDMs should not be consulted
-        kernel.doPreOp(toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW));
+        kernel.doPreOp(toNAVUnits(SEED_ST_EFF + SEED_JT_EFF));
 
         // Past the horizon: elapsed reads block.timestamp - 5000 = 2^32, the elapsed == 0 guard misses, both YDMs
         // are consulted, and each accumulator jumps by 0.1e18 x 4294967296 in a zero-second window
         IRoycoDayAccountant.RoycoDayAccountantState memory s1 = accountant.getState();
         assertEq(jtYDM.yieldShareCallCount(), 1, "the jt YDM is wrongly consulted for a zero-second window");
         assertEq(ltYDM.yieldShareCallCount(), 1, "the lt YDM is wrongly consulted for a zero-second window");
-        assertEq(uint256(s1.twJTYieldShareAccruedWAD), 429_496_729_600_000_000_000_000_000, "jt accumulator jumps by rate x 2^32 despite zero real elapsed time");
-        assertEq(uint256(s1.twLTYieldShareAccruedWAD), 429_496_729_600_000_000_000_000_000, "lt accumulator jumps by rate x 2^32 despite zero real elapsed time");
+        assertEq(
+            uint256(s1.twJTYieldShareAccruedWAD), 429_496_729_600_000_000_000_000_000, "jt accumulator jumps by rate x 2^32 despite zero real elapsed time"
+        );
+        assertEq(
+            uint256(s1.twLTYieldShareAccruedWAD), 429_496_729_600_000_000_000_000_000, "lt accumulator jumps by rate x 2^32 despite zero real elapsed time"
+        );
         assertEq(s1.lastYieldShareAccrualTimestamp, 5000, "the re-stamp truncates back to the same low 32 bits, re-arming the wrap");
     }
 
@@ -201,7 +205,7 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
         // accrues 0.1e18 x 4294967297 per leg. After six: 6 x 0.1e18 x 4294967297 = 2576980378200000000000000000
         for (uint256 i = 1; i <= 6; ++i) {
             vm.warp(t0 + i);
-            kernel.doPreOp(toNAVUnits(SEED_ST_RAW), toNAVUnits(SEED_JT_RAW));
+            kernel.doPreOp(toNAVUnits(SEED_ST_EFF + SEED_JT_EFF));
         }
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
         assertEq(uint256(s.twJTYieldShareAccruedWAD), 2_576_980_378_200_000_000_000_000_000, "jt accumulator holds six phantom 2^32-second accruals");
@@ -213,16 +217,17 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
         jtYDM.setRates(0);
         ltYDM.setRates(0);
 
-        // A modest +10e18 senior gain one second later. With a correctly sized clock the accumulators would hold
-        // six 1-second accruals of 0.1e18 = 0.6e18 per leg over a 7-second window, so each premium would be
-        // floor(10e18 x 0.6e18 / (7 x 1e18)) = 857142857142857142, about 0.086 x the gain per leg — well
+        // A modest +12e18 collateral gain one second later attributes deltaST = floor(12e18 * 1000e18 / 1200e18)
+        // = 10e18 of senior gain. With a correctly sized clock the accumulators would hold six 1-second accruals
+        // of 0.1e18 = 0.6e18 per leg over a 7-second window, so each premium would be
+        // floor(10e18 x 0.6e18 / (7 x 1e18)) = 857142857142857142, about 0.086 x the senior gain per leg — well
         // within the gain. Past the horizon: the window reads block.timestamp - 5000 = 2^32 + 7 = 4294967303 seconds
         // against accumulators of 6 x 0.1e18 x (2^32 + 1), so each leg computes
         // floor(10e18 x 2576980378200000000000000000 / (4294967303 x 1e18)) = 5999999991618096842 and the two
-        // legs sum to 11999999983236193684 > the 10e18 gain, tripping the premiums-exceed-senior-yield guard
+        // legs sum to 11999999983236193684 > the 10e18 senior gain, tripping the premiums-exceed-senior-yield guard
         vm.warp(t0 + 7);
         vm.expectRevert(IRoycoDayAccountant.PREMIUMS_EXCEED_SENIOR_YIELD.selector);
-        kernel.doPreOp(toNAVUnits(SEED_ST_RAW + 10e18), toNAVUnits(SEED_JT_RAW));
+        kernel.doPreOp(toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + 12e18));
 
         // The brick is persistent: the accumulators only reset when premiums are actually paid, and every
         // gain-bearing sync now reverts before paying. The window grows one second per block against a
@@ -230,6 +235,6 @@ contract Test_Uint32ClockWrap is AccountantTestBase {
         // order of 1.2 x 2^32 seconds (about 163 more years). One block later the same gain still reverts
         vm.warp(t0 + 8);
         vm.expectRevert(IRoycoDayAccountant.PREMIUMS_EXCEED_SENIOR_YIELD.selector);
-        kernel.doPreOp(toNAVUnits(SEED_ST_RAW + 10e18), toNAVUnits(SEED_JT_RAW));
+        kernel.doPreOp(toNAVUnits(SEED_ST_EFF + SEED_JT_EFF + 12e18));
     }
 }

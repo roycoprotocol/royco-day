@@ -35,7 +35,7 @@ interface IRoycoVaultTranche is IERC20Metadata {
      * @notice Emitted when a redemption is made from the tranche
      * @param sender The address that initiated the redemption
      * @param receiver The address that received the redeemed assets
-     * @param claims The asset claims received by the receiver, including claims on ST assets, JT assets, and their total NAV value
+     * @param claims The asset claims received by the receiver, including claims on the collateral assets, LT assets, ST shares, and their total NAV value
      * @param shares The amount of shares redeemed
      */
     event Redeem(address indexed sender, address indexed receiver, AssetClaims claims, uint256 shares);
@@ -79,7 +79,7 @@ interface IRoycoVaultTranche is IERC20Metadata {
      * @param _shares The number of shares to redeem
      * @param _receiver The address that will receive the redeemed assets
      * @param _owner The address that owns the shares being redeemed
-     * @return claims The asset claims transferred to the receiver, including claims on ST assets, JT assets, and their total NAV value
+     * @return claims The asset claims transferred to the receiver, including claims on the collateral assets, LT assets, ST shares, and their total NAV value
      */
     function redeem(uint256 _shares, address _receiver, address _owner) external returns (AssetClaims memory claims);
 
@@ -118,7 +118,7 @@ interface IRoycoVaultTranche is IERC20Metadata {
      * @dev NON-VIEW: routes the redemption through its execute-and-revert simulation, which mutates no state net
      * @dev The quote is produced by the actual kernel redemption path, so any revert the redemption would raise bubbles unchanged
      * @param _shares The number of shares to redeem
-     * @return claims The asset claims that would be received, including claims on ST assets, JT assets, and their total NAV value
+     * @return claims The asset claims that would be received, including claims on the collateral assets, LT assets, ST shares, and their total NAV value
      */
     function previewRedeem(uint256 _shares) external returns (AssetClaims memory claims);
 
@@ -131,7 +131,7 @@ interface IRoycoVaultTranche is IERC20Metadata {
      *      Use `previewRedeem` for the accurate redemption quote, which includes the idle slice paid in-kind, the two
      *      coincide exactly when no premium is staged
      * @param _shares The number of shares to convert
-     * @return claims The equivalent asset claims for the specified share amount, including claims on ST assets, JT assets, and their total NAV value
+     * @return claims The equivalent asset claims for the specified share amount, including claims on the collateral assets, LT assets, ST shares, and their total NAV value
      */
     function convertToAssets(uint256 _shares) external view returns (AssetClaims memory claims);
 
@@ -164,17 +164,10 @@ interface IRoycoVaultTranche is IERC20Metadata {
 
     /**
      * @notice Returns the total effective assets held by this tranche
-     * @dev The effective assets include claims on both ST and JT assets after accounting for coverage and yield sharing
-     * @return claims The total asset claims held by this tranche, including claims on ST assets, JT assets, and their total NAV value
+     * @dev The effective assets include the claims on the collateral assets after accounting for coverage and yield sharing
+     * @return claims The total asset claims held by this tranche, including claims on the collateral assets, LT assets, ST shares, and their total NAV value
      */
     function totalAssets() external view returns (AssetClaims memory claims);
-
-    /**
-     * @notice Returns the raw NAV of the tranche's invested assets
-     * @dev The raw NAV represents the pure value of the tranche's assets before any coverage adjustments or yield sharing
-     * @return nav The raw NAV of the tranche's invested assets, denominated in the kernel's NAV units
-     */
-    function getRawNAV() external view returns (NAV_UNIT nav);
 
     /// @notice Returns the address of the underlying base asset for this tranche
     /// @return asset The address of the ERC20 token used as the base asset for deposits into this tranche

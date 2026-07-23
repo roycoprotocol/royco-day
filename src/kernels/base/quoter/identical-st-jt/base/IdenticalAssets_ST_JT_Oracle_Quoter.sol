@@ -8,12 +8,12 @@ import { RoycoDayKernel } from "../../../RoycoDayKernel.sol";
 
 /**
  * @title IdenticalAssets_ST_JT_Oracle_Quoter
- * @notice Quoter to convert tranche units to/from NAV units using an oracle for markets where both tranches use the same tranche units
+ * @notice Quoter to convert tranche units to/from NAV units using an oracle for the coinvested collateral asset both the senior and junior tranches deposit
  * @dev NAV units always have WAD precision
  * @dev The quoter reads the conversion rate from the specified oracle in WAD precision
  *      The kernel admin can optionally override the conversion rate with a fixed value
  *      Supported use-cases include:
- *      - Identical Yield Bearing ERC20 for ST And JT: Yield Bearing ERC20 and Tranche Unit (FalconXUSDC, reUSD, etc.), NAV Unit (USD)
+ *      - Coinvested Yield Bearing ERC20 collateral: Yield Bearing ERC20 and Tranche Unit (FalconXUSDC, reUSD, etc.), NAV Unit (USD)
  */
 abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
     using RoycoUnitsMath for NAV_UNIT;
@@ -44,9 +44,8 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
 
     /// @dev Constructs the identical assets oracle quoter
     constructor() {
-        // The tranche assets are guaranteed identical by the kernel constructor
-        // A single conversion rate prices both tranches, so compute the shared tranche unit scale factor
-        TRANCHE_UNIT_SCALE_FACTOR = 10 ** IERC20Metadata(ST_ASSET).decimals();
+        // A single conversion rate prices the coinvested collateral both tranches deposit, so compute its tranche unit scale factor
+        TRANCHE_UNIT_SCALE_FACTOR = 10 ** IERC20Metadata(COLLATERAL_ASSET).decimals();
     }
 
     /// @notice Initializes the identical assets oracle quoter
@@ -59,23 +58,14 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
     }
 
     /// @inheritdoc RoycoDayKernel
-    function stConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _stAssets) public view override(RoycoDayKernel) returns (NAV_UNIT nav) {
-        return _convertTrancheUnitsToNAVUnits(_stAssets);
+    function convertCollateralAssetsToValue(TRANCHE_UNIT _collateralAssets) public view override(RoycoDayKernel) returns (NAV_UNIT value) {
+        return
+            toNAVUnits(toUint256(_collateralAssets.mulDiv(_getCachedTrancheUnitToNAVUnitConversionRateWAD(), TRANCHE_UNIT_SCALE_FACTOR, Math.Rounding.Floor)));
     }
 
     /// @inheritdoc RoycoDayKernel
-    function jtConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _jtAssets) public view override(RoycoDayKernel) returns (NAV_UNIT nav) {
-        return _convertTrancheUnitsToNAVUnits(_jtAssets);
-    }
-
-    /// @inheritdoc RoycoDayKernel
-    function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _value) public view override(RoycoDayKernel) returns (TRANCHE_UNIT stAssets) {
-        return _convertNAVUnitsToTrancheUnits(_value);
-    }
-
-    /// @inheritdoc RoycoDayKernel
-    function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _value) public view override(RoycoDayKernel) returns (TRANCHE_UNIT jtAssets) {
-        return _convertNAVUnitsToTrancheUnits(_value);
+    function convertValueToCollateralAssets(NAV_UNIT _value) public view override(RoycoDayKernel) returns (TRANCHE_UNIT collateralAssets) {
+        return toTrancheUnits(toUint256(_value.mulDiv(TRANCHE_UNIT_SCALE_FACTOR, _getCachedTrancheUnitToNAVUnitConversionRateWAD(), Math.Rounding.Floor)));
     }
 
     /**
@@ -118,7 +108,7 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
     /// @dev Called at the start of a synchronized operation to cache the tranche unit to NAV unit conversion rate, so every conversion in the operation values against one consistent rate, no teardown is needed, since each operation re-caches and the transient cache auto-clears at transaction end
     function _initializeQuoterCache() internal virtual override {
         // Cache the tranche unit to NAV unit conversion rate for the operation
-        Cache._write(CacheKey.IDENTICAL_ST_JT_TRANCHE_TO_NAV_UNIT_RATE, getTrancheUnitToNAVUnitConversionRateWAD());
+        Cache._write(CacheKey.COLLATERAL_ASSET_RATE, getTrancheUnitToNAVUnitConversionRateWAD());
     }
 
     /**
@@ -128,20 +118,10 @@ abstract contract IdenticalAssets_ST_JT_Oracle_Quoter is RoycoDayKernel {
      */
     function _getCachedTrancheUnitToNAVUnitConversionRateWAD() internal view returns (uint256) {
         // If the cache slot is populated use the cached value
-        (bool cacheHit, uint256 conversionRateWAD) = Cache._read(CacheKey.IDENTICAL_ST_JT_TRANCHE_TO_NAV_UNIT_RATE);
+        (bool cacheHit, uint256 conversionRateWAD) = Cache._read(CacheKey.COLLATERAL_ASSET_RATE);
         if (cacheHit) return conversionRateWAD;
         // Otherwise fall back to querying the rate directly (for view functions)
         return getTrancheUnitToNAVUnitConversionRateWAD();
-    }
-
-    /// @dev Converts tranche units to NAV units for both tranches since they use identical assets, scaled to WAD precision
-    function _convertTrancheUnitsToNAVUnits(TRANCHE_UNIT _assets) internal view returns (NAV_UNIT) {
-        return toNAVUnits(toUint256(_assets.mulDiv(_getCachedTrancheUnitToNAVUnitConversionRateWAD(), TRANCHE_UNIT_SCALE_FACTOR, Math.Rounding.Floor)));
-    }
-
-    /// @dev Converts NAV units to tranche units for both tranches since they use identical assets, scaled to TRANCHE_UNIT precision
-    function _convertNAVUnitsToTrancheUnits(NAV_UNIT _nav) internal view returns (TRANCHE_UNIT) {
-        return toTrancheUnits(toUint256(_nav.mulDiv(TRANCHE_UNIT_SCALE_FACTOR, _getCachedTrancheUnitToNAVUnitConversionRateWAD(), Math.Rounding.Floor)));
     }
 
     /**

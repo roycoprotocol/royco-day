@@ -5,14 +5,12 @@ import { IAccessManaged } from "../../../lib/openzeppelin-contracts/contracts/ac
 import {
     IdenticalAssets_ST_JT_ChainlinkOracle_Quoter
 } from "../../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol";
-import {
-    IdenticalAssets_ST_JT_Oracle_Quoter
-} from "../../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_Oracle_Quoter.sol";
+import { IdenticalAssets_ST_JT_Oracle_Quoter } from "../../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_Oracle_Quoter.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { MockAggregatorV3 } from "../../mocks/MockAggregatorV3.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_AdminAndOracleGates_STJTChainlinkQuoter
@@ -46,15 +44,18 @@ contract Test_AdminAndOracleGates_STJTChainlinkQuoter is DayMarketTestBase {
         kernel.setConversionRate(2e18, true);
 
         assertEq(kernel.getStoredConversionRateWAD(), 2e18, "the stored conversion rate must land in quoter storage");
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2e18, "one whole share must quote at the stored 2.0 rate");
-        assertEq(toUint256(kernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2e18, "the junior side shares the identical stored rate");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 2e18, "one whole share must quote at the stored 2.0 rate");
         // The inverse conversion divides by the same rate: 2e18 NAV / 2.0 = 1e18 shares
-        assertEq(toUint256(kernel.stConvertNAVUnitsToTrancheUnits(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18)))), 1e18, "share -> NAV -> share must round-trip at the stored rate");
+        assertEq(
+            toUint256(kernel.convertValueToCollateralAssets(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18)))),
+            1e18,
+            "share -> NAV -> share must round-trip at the stored rate"
+        );
 
         // Clearing back to the sentinel (0) resumes the oracle-derived rate: vault 1.0 x feed 1.0 = 1e18
         vm.prank(ORACLE_QUOTER_ADMIN);
         kernel.setConversionRate(0, false);
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1e18, "clearing the override must resume the oracle rate");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 1e18, "clearing the override must resume the oracle rate");
     }
 
     // =============================
@@ -70,7 +71,7 @@ contract Test_AdminAndOracleGates_STJTChainlinkQuoter is DayMarketTestBase {
         vm.prank(ORACLE_QUOTER_ADMIN);
         kernel.setChainlinkOracle(address(newFeed), 2 days, true);
 
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 3e18, "one whole share must quote at the new feed's 3.0 price");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 3e18, "one whole share must quote at the new feed's 3.0 price");
         IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.IdenticalAssets_ST_JT_ChainlinkOracle_QuoterState memory config = kernel.getChainlinkOracleConfiguration();
         assertEq(config.oracle, address(newFeed), "the new feed must land in quoter storage");
         assertEq(config.stalenessThresholdSeconds, 2 days, "the new staleness threshold must land in quoter storage");
@@ -86,7 +87,7 @@ contract Test_AdminAndOracleGates_STJTChainlinkQuoter is DayMarketTestBase {
         kernel.setChainlinkOracle(address(0), 1 days, false);
         vm.stopPrank();
         // vault 1.0 x stored 1.5 = 1.5e18, and the null feed is never consulted
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1.5e18, "the stored rate must price with no oracle wired");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 1.5e18, "the stored rate must price with no oracle wired");
     }
 
     /// @notice A null oracle with a zero staleness threshold is now ACCEPTED (the fixed guard only requires a positive
@@ -97,7 +98,7 @@ contract Test_AdminAndOracleGates_STJTChainlinkQuoter is DayMarketTestBase {
         kernel.setConversionRate(1.5e18, false); // admin rate as the price source
         kernel.setChainlinkOracle(address(0), 0, false); // no revert: oracle null, staleness irrelevant
         vm.stopPrank();
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1.5e18, "the stored rate prices with a null oracle and zero staleness");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 1.5e18, "the stored rate prices with a null oracle and zero staleness");
     }
 
     // =============================
@@ -116,9 +117,13 @@ contract Test_AdminAndOracleGates_STJTChainlinkQuoter is DayMarketTestBase {
         stJtVault.setRate(1);
 
         // Forward: floor(1e18 x 1 / 1e18) = 1 wei of NAV for one whole share
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1, "one whole share must quote exactly 1 wei of NAV at the 1-wei composite rate");
+        assertEq(
+            toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))),
+            1,
+            "one whole share must quote exactly 1 wei of NAV at the 1-wei composite rate"
+        );
         // Backward: floor(1 x 1e18 / 1) = 1e18 tranche units for 1 wei of NAV
-        assertEq(toUint256(kernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(1)))), 1e18, "1 wei of NAV must convert back to exactly one whole share");
+        assertEq(toUint256(kernel.convertValueToCollateralAssets(toNAVUnits(uint256(1)))), 1e18, "1 wei of NAV must convert back to exactly one whole share");
     }
 
     // =============================
@@ -162,7 +167,7 @@ contract Test_AdminAndOracleGates_STJTChainlinkQuoter is DayMarketTestBase {
         // Warp one second past the 1-day staleness threshold without refreshing updatedAt
         setOracleMode(ORACLE_MODE_STALE);
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.STALE_PRICE.selector);
-        kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
+        kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18));
     }
 
     /**
@@ -176,26 +181,26 @@ contract Test_AdminAndOracleGates_STJTChainlinkQuoter is DayMarketTestBase {
         priceFeed.setUpdatedAt(block.timestamp);
         vm.warp(block.timestamp + ORACLE_STALENESS_THRESHOLD_SECONDS);
         // Age == threshold: updatedAt + threshold == now, still fresh
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1e18, "an answer aged exactly the threshold must still price");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 1e18, "an answer aged exactly the threshold must still price");
 
         vm.warp(block.timestamp + 1);
         // Age == threshold + 1: one second past the window is stale
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.STALE_PRICE.selector);
-        kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
+        kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18));
     }
 
     /// @notice A zero feed answer is rejected, zero is a broken feed rather than a real price
     function test_RevertIf_OracleAnswerIsZero() public {
         setOracleMode(ORACLE_MODE_ZERO);
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.INVALID_PRICE.selector);
-        kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
+        kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18));
     }
 
     /// @notice A negative feed answer is rejected, the int-shaped Chainlink answer must be strictly positive
     function test_RevertIf_OracleAnswerIsNegative() public {
         setOracleMode(ORACLE_MODE_NEGATIVE);
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.INVALID_PRICE.selector);
-        kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
+        kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18));
     }
 
     /// @notice An answer computed in an earlier round than the latest round is rejected as incomplete
@@ -203,14 +208,14 @@ contract Test_AdminAndOracleGates_STJTChainlinkQuoter is DayMarketTestBase {
         // roundId stays 1 (the constructor's round) while answeredInRound drops to 0
         priceFeed.setAnsweredInRound(0);
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.INCOMPLETE_PRICE.selector);
-        kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
+        kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18));
     }
 
     /// @notice A reverting feed bubbles its revert instead of being swallowed into a default price
     function test_RevertIf_OracleFeedReverts() public {
         setOracleMode(ORACLE_MODE_REVERT);
         vm.expectRevert(MockAggregatorV3.ORACLE_REVERT_MODE.selector);
-        kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
+        kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18));
     }
 
     // =============================
@@ -238,28 +243,28 @@ contract Test_AdminAndOracleGates_STJTChainlinkQuoter is DayMarketTestBase {
         // Sequencer down (answer 1): pricing must halt outright
         sequencerFeed.setAnswer(1);
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.SEQUENCER_DOWN.selector);
-        kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
+        kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18));
 
         // Sequencer restored this very second (startedAt == now): zero elapsed is not > 1 hour, still blocked
         sequencerFeed.setAnswer(0);
         sequencerFeed.setStartedAt(block.timestamp);
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.GRACE_PERIOD_NOT_OVER.selector);
-        kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
+        kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18));
 
         // An uninitialized uptime feed (startedAt 0) is treated as not yet restored, still blocked
         sequencerFeed.setStartedAt(0);
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.GRACE_PERIOD_NOT_OVER.selector);
-        kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
+        kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18));
 
         // One second past the grace period (with the price feed kept fresh) pricing resumes at the 1.0 rate
         sequencerFeed.setStartedAt(block.timestamp);
         _warpAndRefreshFeed(1 hours + 1);
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1e18, "pricing must resume once the grace period elapses");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 1e18, "pricing must resume once the grace period elapses");
 
         // Unwiring the feed (null address, zero grace) disables the check entirely
         vm.prank(ORACLE_QUOTER_ADMIN);
         kernel.setSequencerUptimeFeed(address(0), 0);
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1e18, "pricing must work with the sequencer check disabled");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 1e18, "pricing must work with the sequencer check disabled");
     }
 
     /**
@@ -279,15 +284,11 @@ contract Test_AdminAndOracleGates_STJTChainlinkQuoter is DayMarketTestBase {
         // Elapsed == grace exactly: 1 hours is not > 1 hours, still blocked
         sequencerFeed.setStartedAt(block.timestamp - 1 hours);
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.GRACE_PERIOD_NOT_OVER.selector);
-        kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
+        kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18));
 
         // Elapsed == grace + 1: strictly past the window, pricing resumes at the 1.0 rate
         sequencerFeed.setStartedAt(block.timestamp - 1 hours - 1);
-        assertEq(
-            toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))),
-            1e18,
-            "pricing must resume exactly one second past the grace window"
-        );
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 1e18, "pricing must resume exactly one second past the grace window");
     }
 }
 
@@ -327,11 +328,7 @@ contract Test_ZeroStalenessGuard_STJTChainlinkQuoter is DayMarketTestBase {
 
         // One second later the market is alive: the DoS the rejected pair would have caused cannot happen
         vm.warp(block.timestamp + 1);
-        assertEq(
-            toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))),
-            1e18,
-            "pricing must survive the second after the rejected set"
-        );
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 1e18, "pricing must survive the second after the rejected set");
         vm.prank(SYNC_OPERATOR);
         kernel.syncTrancheAccounting();
     }
@@ -354,6 +351,6 @@ contract Test_ZeroStalenessGuard_STJTChainlinkQuoter is DayMarketTestBase {
 
         // Pricing runs on the stored rate and never consults a feed, so the zero threshold is inert
         vm.warp(block.timestamp + 365 days);
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1e18, "the stored rate must price with no feed set");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 1e18, "the stored rate must price with no feed set");
     }
 }

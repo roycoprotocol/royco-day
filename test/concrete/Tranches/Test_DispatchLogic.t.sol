@@ -2,8 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { AssetClaims } from "../../../src/libraries/Types.sol";
-import { DispatchLogic } from "../../../src/libraries/logic/DispatchLogic.sol";
 import { toNAVUnits, toTrancheUnits } from "../../../src/libraries/Units.sol";
+import { DispatchLogic } from "../../../src/libraries/logic/DispatchLogic.sol";
 import { Assertions } from "../../utils/Assertions.sol";
 
 /**
@@ -154,7 +154,7 @@ contract Test_DispatchLogic is Assertions {
         payloads.push("");
         payloads.push(abi.encode(uint256(42)));
         payloads.push(abi.encode(uint256(1), uint256(2), uint256(3)));
-        payloads.push(abi.encode(AssetClaims(toTrancheUnits(1e18), toTrancheUnits(2e18), toTrancheUnits(3e18), 4e18, toNAVUnits(uint256(5e18)))));
+        payloads.push(abi.encode(AssetClaims(toTrancheUnits(1e18), toTrancheUnits(2e18), 3e18, toNAVUnits(uint256(4e18)))));
         payloads.push(hex"deadbeef");
     }
 
@@ -164,7 +164,9 @@ contract Test_DispatchLogic is Assertions {
 
     /// @notice The pinned literal selector constant equals SIMULATION_RESULT.selector, so the literal cannot drift
     function test_SimulationResultSelectorConstant_MatchesError() public pure {
-        assertEq(DispatchLogic.SIMULATION_RESULT_SELECTOR, DispatchLogic.SIMULATION_RESULT.selector, "the pinned selector literal must equal the error's selector");
+        assertEq(
+            DispatchLogic.SIMULATION_RESULT_SELECTOR, DispatchLogic.SIMULATION_RESULT.selector, "the pinned selector literal must equal the error's selector"
+        );
     }
 
     // =============================
@@ -177,12 +179,16 @@ contract Test_DispatchLogic is Assertions {
         try harness.simulateUnwrapped(address(target), callData) {
             fail("the unwrap depth must reject a returning simulation");
         } catch (bytes memory err) {
-            assertEq(err, abi.encodeWithSelector(DispatchLogic.SIMULATION_CANNOT_MUTATE_STATE.selector), "the unwrap depth must reject with the exact guard error");
+            assertEq(
+                err, abi.encodeWithSelector(DispatchLogic.SIMULATION_CANNOT_MUTATE_STATE.selector), "the unwrap depth must reject with the exact guard error"
+            );
         }
         try harness.simulateWrapped(address(target), callData) {
             fail("the wrapped depth must reject a returning simulation");
         } catch (bytes memory err) {
-            assertEq(err, abi.encodeWithSelector(DispatchLogic.SIMULATION_CANNOT_MUTATE_STATE.selector), "the wrapped depth must reject with the exact guard error");
+            assertEq(
+                err, abi.encodeWithSelector(DispatchLogic.SIMULATION_CANNOT_MUTATE_STATE.selector), "the wrapped depth must reject with the exact guard error"
+            );
         }
     }
 
@@ -192,12 +198,16 @@ contract Test_DispatchLogic is Assertions {
         try harness.simulateUnwrapped(address(target), callData) {
             fail("the unwrap depth must reject a returndata-free returning simulation");
         } catch (bytes memory err) {
-            assertEq(err, abi.encodeWithSelector(DispatchLogic.SIMULATION_CANNOT_MUTATE_STATE.selector), "the unwrap depth must reject with the exact guard error");
+            assertEq(
+                err, abi.encodeWithSelector(DispatchLogic.SIMULATION_CANNOT_MUTATE_STATE.selector), "the unwrap depth must reject with the exact guard error"
+            );
         }
         try harness.simulateWrapped(address(target), callData) {
             fail("the wrapped depth must reject a returndata-free returning simulation");
         } catch (bytes memory err) {
-            assertEq(err, abi.encodeWithSelector(DispatchLogic.SIMULATION_CANNOT_MUTATE_STATE.selector), "the wrapped depth must reject with the exact guard error");
+            assertEq(
+                err, abi.encodeWithSelector(DispatchLogic.SIMULATION_CANNOT_MUTATE_STATE.selector), "the wrapped depth must reject with the exact guard error"
+            );
         }
     }
 
@@ -206,7 +216,9 @@ contract Test_DispatchLogic is Assertions {
         try harness.simulateUnwrapped(address(0xBEEF), abi.encodeCall(DispatchTarget.returnNormally, ())) {
             fail("a codeless target must be rejected as a returning simulation");
         } catch (bytes memory err) {
-            assertEq(err, abi.encodeWithSelector(DispatchLogic.SIMULATION_CANNOT_MUTATE_STATE.selector), "a codeless target must reject with the exact guard error");
+            assertEq(
+                err, abi.encodeWithSelector(DispatchLogic.SIMULATION_CANNOT_MUTATE_STATE.selector), "a codeless target must reject with the exact guard error"
+            );
         }
     }
 

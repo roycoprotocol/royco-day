@@ -133,7 +133,11 @@ contract Test_TrancheTransferWhitelist_Kernel is DayMarketTestBase {
         AssetClaims memory claims = seniorTranche.redeem(40e18, ST_PROVIDER, ST_PROVIDER);
 
         // The burn (receiver address(0)) sailed past the whitelist, and the exit paid exactly the pro-rata slice
-        assertEq(toUint256(claims.stAssets), 39_999_999_999_999_600_000, "the redemption must claim exactly floor(100e18 * 40e18 / (100e18 + 1e6)) vault shares");
+        assertEq(
+            toUint256(claims.collateralAssets),
+            39_999_999_999_999_600_000,
+            "the redemption must claim exactly floor(100e18 * 40e18 / (100e18 + 1e6)) vault shares"
+        );
         assertEq(seniorTranche.balanceOf(ST_PROVIDER), 60e18, "the share balance must drop by exactly the redeemed shares (100e18 - 40e18)");
         assertEq(
             stJtVault.balanceOf(ST_PROVIDER) - vaultSharesBefore,

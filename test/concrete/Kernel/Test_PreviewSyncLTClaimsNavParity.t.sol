@@ -99,8 +99,7 @@ contract Test_PreviewSyncLTClaimsNavParity is DayMarketTestBase {
 
         assertEq(toUint256(quoted.ltAssets), toUint256(settled.ltAssets), "quoted vs settled: ltAssets (BPT slice)");
         assertEq(quoted.stShares, settled.stShares, "quoted vs settled: stShares (idle premium slice)");
-        assertEq(toUint256(quoted.stAssets), toUint256(settled.stAssets), "quoted vs settled: stAssets");
-        assertEq(toUint256(quoted.jtAssets), toUint256(settled.jtAssets), "quoted vs settled: jtAssets");
+        assertEq(toUint256(quoted.collateralAssets), toUint256(settled.collateralAssets), "quoted vs settled: collateralAssets");
         assertEq(toUint256(quoted.nav), toUint256(settled.nav), "quoted vs settled: nav (the leg the stale pre-mint pair broke)");
     }
 }

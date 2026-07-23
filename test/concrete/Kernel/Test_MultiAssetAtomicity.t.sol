@@ -9,11 +9,11 @@ import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.s
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
-import { defaultParams } from "../../utils/MarketParams.sol";
-import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
-import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 import { MockBalancerVault } from "../../mocks/MockBalancerVault.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
+import { defaultParams } from "../../utils/MarketParams.sol";
+import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
+import { cellA } from "../../utils/TokenConfigs.sol";
 
 /**
  * @title Test_MultiAssetAtomicity
@@ -201,8 +201,8 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
         _fundDepositLegs(actor, 1, quoteAssets);
 
         // Pin the two ledgers a silent donation would inflate, alongside the full digest
-        uint256 stOwnedBefore = toUint256(kernel.getState().stOwnedYieldBearingAssets);
-        uint256 stRawNAVBefore = toUint256(accountant.getState().lastSTRawNAV);
+        uint256 collateralOwnedBefore = toUint256(kernel.getState().totalCollateralAssets);
+        uint256 collateralNAVBefore = toUint256(accountant.getState().lastCollateralNAV);
         bytes32 digestBefore = _marketDigest(actor);
 
         vm.prank(actor);
@@ -214,8 +214,12 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
 
         // The revert must roll back the pre-mint 1-wei owned-asset credit along with everything else,
         // so nothing was donated to senior holders and the quote leg went back to the depositor
-        assertEq(toUint256(kernel.getState().stOwnedYieldBearingAssets), stOwnedBefore, "the 1-wei senior credit survived the revert, donating it to senior holders");
-        assertEq(toUint256(accountant.getState().lastSTRawNAV), stRawNAVBefore, "the committed senior raw NAV moved despite the reverted deposit");
+        assertEq(
+            toUint256(kernel.getState().totalCollateralAssets),
+            collateralOwnedBefore,
+            "the 1-wei senior credit survived the revert, donating it to senior holders"
+        );
+        assertEq(toUint256(accountant.getState().lastCollateralNAV), collateralNAVBefore, "the committed collateral NAV moved despite the reverted deposit");
         assertEq(_marketDigest(actor), digestBefore, "a reverted dust-leg deposit left a partial trace on the market");
     }
 
@@ -357,9 +361,8 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
 
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a = accountant.getState();
-        uint256 coverageUtilizationWAD = RoycoTestMath.computeCoverageUtilization(
-            toUint256(a.lastSTRawNAV), toUint256(a.lastJTRawNAV), a.minCoverageWAD, toUint256(a.lastJTEffectiveNAV)
-        );
+        uint256 coverageUtilizationWAD =
+            RoycoTestMath.computeCoverageUtilization(toUint256(a.lastCollateralNAV), a.minCoverageWAD, toUint256(a.lastJTEffectiveNAV));
         uint256 liquidityUtilizationWAD =
             RoycoTestMath.computeLiquidityUtilization(toUint256(a.lastSTEffectiveNAV), a.minLiquidityWAD, toUint256(a.lastLTRawNAV));
         assertLe(coverageUtilizationWAD, WAD, "an enforced deposit left coverage utilization above one hundred percent");
@@ -408,9 +411,8 @@ contract Test_MultiAssetAtomicity is DayMarketTestBase {
         applySTPnL(-6000);
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a = accountant.getState();
-        uint256 coverageUtilizationWAD = RoycoTestMath.computeCoverageUtilization(
-            toUint256(a.lastSTRawNAV), toUint256(a.lastJTRawNAV), a.minCoverageWAD, toUint256(a.lastJTEffectiveNAV)
-        );
+        uint256 coverageUtilizationWAD =
+            RoycoTestMath.computeCoverageUtilization(toUint256(a.lastCollateralNAV), a.minCoverageWAD, toUint256(a.lastJTEffectiveNAV));
         assertGe(coverageUtilizationWAD, a.coverageLiquidationUtilizationWAD, "setup: expected liquidation coverage to read breached");
 
         // The provider's full exit would strand the pool below the senior liquidity floor, and the breach no

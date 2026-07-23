@@ -51,12 +51,12 @@ contract Test_Cache is Test {
      *      "cached zero" with "never computed": if it did, a zero rate would be recomputed on every read and a
      *      reader could not trust the hit flag. The marker bit makes the stored word 0 | 2^255, which is nonzero,
      *      so the slot is distinguishable from the all-zero unset slot. The untouched sibling key proves writes
-     *      are isolated per key: caching the senior share rate must never fabricate a hit for the identical
-     *      ST/JT tranche-to-NAV-unit rate, or a quoter would price off a value meant for a different quantity
+     *      are isolated per key: caching the senior share rate must never fabricate a hit for the collateral
+     *      asset rate, or a quoter would price off a value meant for a different quantity
      */
     function test_WriteZeroThenRead_ReturnsHitWithZero_AndUntouchedKeyReadsMiss() public {
         (bool hit, uint256 value, bool siblingHit, uint256 siblingValue) =
-            this.driveWriteThenReadBothKeys(CacheKey.ST_SHARE_RATE, 0, CacheKey.IDENTICAL_ST_JT_TRANCHE_TO_NAV_UNIT_RATE);
+            this.driveWriteThenReadBothKeys(CacheKey.ST_SHARE_RATE, 0, CacheKey.COLLATERAL_ASSET_RATE);
 
         // The written key: a hit whose payload is exactly the zero that was stored
         assertTrue(hit, "a cached zero must read as a hit, the marker bit keeps the slot nonzero");
@@ -75,8 +75,7 @@ contract Test_Cache is Test {
      *      get the same rate back, or the cache would silently re-price whatever consumed it downstream
      */
     function test_WriteMaxRepresentableValue_RoundTripsExactly() public {
-        (bool hit, uint256 value,,) =
-            this.driveWriteThenReadBothKeys(CacheKey.ST_SHARE_RATE, MAX_CACHEABLE_VALUE, CacheKey.IDENTICAL_ST_JT_TRANCHE_TO_NAV_UNIT_RATE);
+        (bool hit, uint256 value,,) = this.driveWriteThenReadBothKeys(CacheKey.ST_SHARE_RATE, MAX_CACHEABLE_VALUE, CacheKey.COLLATERAL_ASSET_RATE);
 
         assertTrue(hit, "a written slot must read as a hit");
         assertEq(value, MAX_CACHEABLE_VALUE, "the max payload (2^255 - 1) must round-trip bit-exact");

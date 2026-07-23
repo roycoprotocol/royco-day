@@ -20,10 +20,11 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  *         (ii) a deposit into a wiped-to-zero junior tranche (the junior-wipeout dilution state) mints exactly the cap
  *              floor(supply x MAX_MINT_DILUTION_WAD / (WAD - MAX_MINT_DILUTION_WAD)) — near-total capture with
  *              bounded supply growth — with preview parity holding on the clamped branch
- * @dev The wipe uses a -40% shared-rate move: jtRawNAV 30_000e18 -> 18_000e18 absorbs its own 12_000e18 loss, and
- *      coverage for the senior's 40_000e18 loss consumes exactly the remaining 18_000e18, so jtEffectiveNAV
- *      lands at exactly zero with the junior supply still outstanding; the (jtEffectiveNAV == 0 && stEffectiveNAV > 0) arm then
- *      forces PERPETUAL, so deposits stay enabled in the wiped state
+ * @dev The wipe uses a -40% collateral-rate move: the -52_000e18 collateral delta attributes
+ *      floor(52_000e18 * 100_000e18 / 130_000e18) = 40_000e18 to ST with JT taking the 12_000e18 residual, and
+ *      coverage for the senior's 40_000e18 leg consumes exactly the remaining 18_000e18 junior buffer, so
+ *      jtEffectiveNAV lands at exactly zero with the junior supply still outstanding; the
+ *      (jtEffectiveNAV == 0 && stEffectiveNAV > 0) arm then forces PERPETUAL, so deposits stay enabled in the wiped state
  */
 contract Test_MintDilutionClamp_JuniorTranche is DayMarketTestBase {
     address internal jtActor;
@@ -57,7 +58,7 @@ contract Test_MintDilutionClamp_JuniorTranche is DayMarketTestBase {
         uint256 supplyBefore = juniorTranche.totalSupply();
         uint256 jtEffBefore = toUint256(state.jtEffectiveNAV);
         uint256 assets = 1000e18;
-        uint256 value = toUint256(kernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets)));
+        uint256 value = toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(assets)));
 
         uint256 predicted = juniorTranche.previewDeposit(toTrancheUnits(assets));
         uint256 minted = _depositJT(assets);
@@ -84,7 +85,7 @@ contract Test_MintDilutionClamp_JuniorTranche is DayMarketTestBase {
         assertGt(supplyBefore, 0, "the wiped supply must remain outstanding");
 
         uint256 assets = 1e18;
-        uint256 value = toUint256(kernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets)));
+        uint256 value = toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(assets)));
         // The bind holds: value ~ 0.6e18 NAV wei over the 1-wei pinned denominator, far past the ~1e12 bind threshold
         assertGt(value * (WAD - MAX_MINT_DILUTION_WAD), MAX_MINT_DILUTION_WAD, "the dilution deposit must bind the clamp");
         uint256 cap = Math.mulDiv(supplyBefore + VS, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD);

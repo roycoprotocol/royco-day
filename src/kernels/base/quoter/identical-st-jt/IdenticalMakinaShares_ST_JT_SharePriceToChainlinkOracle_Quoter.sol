@@ -11,13 +11,13 @@ import { IdenticalAssets_ST_JT_ChainlinkOracle_Quoter, IdenticalAssets_ST_JT_Ora
  * @title IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter
  * @notice Quoter to convert tranche units (Makina machine shares) to/from NAV units by converting the shares to accounting assets and converting accounting assets to NAV units using a Chainlink (compatible) oracle or an admin set rate
  * @dev Mandates that the accounting asset to NAV units uses a Chainlink (compatible) oracle with an admin set rate override
- * @dev The senior and junior tranches must have the same Makina machine share as their tranche unit
+ * @dev The coinvested collateral asset must be the machine's share token
  * @dev Use case: Convert DUSD (Tranche unit) to USDC (accounting assets) using the machine's convertToAssets and convert USDC to USD (NAV unit) using its Chainlink (compatible) fundamental price feed or an admin set rate
  */
 abstract contract IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter is IdenticalAssets_ST_JT_ChainlinkOracle_Quoter {
     using Math for uint256;
 
-    /// @dev The address of the Makina machine for the ST and JT asset
+    /// @dev The address of the Makina machine for the coinvested collateral asset
     address public immutable MAKINA_MACHINE;
 
     /// @dev The share amount to pass to convertToAssets() such that the result is scaled to WAD precision
@@ -47,11 +47,9 @@ abstract contract IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter
     constructor(address _makinaMachine) {
         // Sanity checks on the Makina machine and Royco market configuration
         require(_makinaMachine != address(0), NULL_ADDRESS());
-        // We only need to check equality against one tranche asset since the parent contract asserts equality of the tranche assets
-        require(IMachine(_makinaMachine).shareToken() == ST_ASSET, TRANCHE_ASSET_MUST_BE_MACHINE_SHARE());
+        require(IMachine(_makinaMachine).shareToken() == COLLATERAL_ASSET, TRANCHE_ASSET_MUST_BE_MACHINE_SHARE());
         MAKINA_MACHINE = _makinaMachine;
 
-        // NOTE: Both tranche assets are identical Makina machine shares
         // Compute the share amount to pass to convertToAssets() such that the result is scaled to WAD precision
         // OUTPUT_DECIMALS = INPUT_DECIMALS + ACCOUNTING_ASSET_DECIMALS - TRANCHE_DECIMALS
         // For OUTPUT_DECIMALS to have WAD_DECIMALS of precision:
@@ -59,7 +57,7 @@ abstract contract IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter
         // OUTPUT_DECIMALS = (WAD_DECIMALS + TRANCHE_DECIMALS - ACCOUNTING_ASSET_DECIMALS) + ACCOUNTING_ASSET_DECIMALS - TRANCHE_DECIMALS
         // OUTPUT_DECIMALS = WAD_DECIMALS
         MACHINE_SHARES_TO_CONVERT_TO_ASSETS =
-            10 ** (WAD_DECIMALS + IERC20Metadata(ST_ASSET).decimals() - IERC20Metadata(IMachine(_makinaMachine).accountingToken()).decimals());
+            10 ** (WAD_DECIMALS + IERC20Metadata(COLLATERAL_ASSET).decimals() - IERC20Metadata(IMachine(_makinaMachine).accountingToken()).decimals());
     }
 
     /// @notice Initializes the identical Makina machine shares Chainlink (compatible) oracle quoter and its inherited contracts

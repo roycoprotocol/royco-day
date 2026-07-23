@@ -72,23 +72,23 @@ contract Test_SyncDispatch_BalancerV3Hooks is DayMarketTestBase {
     // =============================
 
     /**
-     * @notice An externally-routed swap syncs the kernel BEFORE the swap, so unrealized senior PnL lands in the
-     *         committed checkpoint and the swap prices against a fresh senior-leg rate
-     * @dev Expected committed stRaw is hand-derived: ownedAssets x the 1.1 vault rate x the 1.0 feed, floored
+     * @notice An externally-routed swap syncs the kernel BEFORE the swap, so unrealized collateral PnL lands in
+     *         the committed checkpoint and the swap prices against a fresh senior-leg rate
+     * @dev Expected committed collateral NAV is hand-derived: totalCollateralAssets x the 1.1 vault rate x the 1.0 feed, floored
      */
-    function test_OnBeforeSwap_ExternalSwapCommitsPendingSeniorPnL() public {
+    function test_OnBeforeSwap_ExternalSwapCommitsPendingCollateralPnL() public {
         _seedMarket(100e18, 50e18);
         applySTPnL(1000); // +10%: vault rate 1.0 -> 1.1
 
-        uint256 ownedAssets = toUint256(kernel.getState().stOwnedYieldBearingAssets);
-        uint256 expectedStRaw = Math.mulDiv(ownedAssets, 1.1e18, 1e18, Math.Rounding.Floor);
-        assertTrue(toUint256(accountant.getState().lastSTRawNAV) != expectedStRaw, "arrange: the PnL must be uncommitted");
+        uint256 ownedAssets = toUint256(kernel.getState().totalCollateralAssets);
+        uint256 expectedCollateralNAV = Math.mulDiv(ownedAssets, 1.1e18, 1e18, Math.Rounding.Floor);
+        assertTrue(toUint256(accountant.getState().lastCollateralNAV) != expectedCollateralNAV, "arrange: the PnL must be uncommitted");
 
         vm.prank(address(balancerVault));
         bool ok = hooks.onBeforeSwap(_swapParams(EXTERNAL_ROUTER), address(bpt));
 
         assertTrue(ok, "the pre-swap hook must allow the swap after syncing");
-        assertEq(toUint256(accountant.getState().lastSTRawNAV), expectedStRaw, "the sync must commit the senior PnL before the swap");
+        assertEq(toUint256(accountant.getState().lastCollateralNAV), expectedCollateralNAV, "the sync must commit the collateral PnL before the swap");
     }
 
     /**
@@ -100,18 +100,18 @@ contract Test_SyncDispatch_BalancerV3Hooks is DayMarketTestBase {
         _seedMarket(100e18, 50e18);
         applySTPnL(1000); // +10%
 
-        uint256 ownedAssets = toUint256(kernel.getState().stOwnedYieldBearingAssets);
-        uint256 expectedStRaw = Math.mulDiv(ownedAssets, 1.1e18, 1e18, Math.Rounding.Floor);
+        uint256 ownedAssets = toUint256(kernel.getState().totalCollateralAssets);
+        uint256 expectedCollateralNAV = Math.mulDiv(ownedAssets, 1.1e18, 1e18, Math.Rounding.Floor);
 
         vm.prank(address(balancerVault));
         assertTrue(hooks.onBeforeSwap(_swapParams(address(kernel)), address(bpt)), "the kernel-routed swap must still pass");
-        assertEq(toUint256(accountant.getState().lastSTRawNAV), expectedStRaw, "a kernel-routed swap must sync, swaps have no router skip");
+        assertEq(toUint256(accountant.getState().lastCollateralNAV), expectedCollateralNAV, "a kernel-routed swap must sync, swaps have no router skip");
     }
 
     /// @notice Externally-routed add and remove liquidity both sync before the operation, same path as the swap hook
     function test_OnBeforeAddAndRemoveLiquidity_ExternalRouterSyncs() public {
         _seedMarket(100e18, 50e18);
-        uint256 ownedAssets = toUint256(kernel.getState().stOwnedYieldBearingAssets);
+        uint256 ownedAssets = toUint256(kernel.getState().totalCollateralAssets);
 
         applySTPnL(500); // +5%: vault rate 1.0 -> 1.05
         vm.prank(address(balancerVault));
@@ -120,9 +120,9 @@ contract Test_SyncDispatch_BalancerV3Hooks is DayMarketTestBase {
             "the externally-routed add must pass after syncing"
         );
         assertEq(
-            toUint256(accountant.getState().lastSTRawNAV),
+            toUint256(accountant.getState().lastCollateralNAV),
             Math.mulDiv(ownedAssets, 1.05e18, 1e18, Math.Rounding.Floor),
-            "the add hook must commit the +5% senior PnL"
+            "the add hook must commit the +5% collateral PnL"
         );
 
         applySTPnL(500); // a further +5% on the new rate: 1.05 x 1.05 = 1.1025
@@ -132,9 +132,9 @@ contract Test_SyncDispatch_BalancerV3Hooks is DayMarketTestBase {
             "the externally-routed removal must pass after syncing"
         );
         assertEq(
-            toUint256(accountant.getState().lastSTRawNAV),
+            toUint256(accountant.getState().lastCollateralNAV),
             Math.mulDiv(ownedAssets, 1.1025e18, 1e18, Math.Rounding.Floor),
-            "the remove hook must commit the compounded senior PnL"
+            "the remove hook must commit the compounded collateral PnL"
         );
     }
 
@@ -145,19 +145,19 @@ contract Test_SyncDispatch_BalancerV3Hooks is DayMarketTestBase {
     function test_OnBeforeAddAndRemoveLiquidity_KernelRouterSkipsSync() public {
         _seedMarket(100e18, 50e18);
         applySTPnL(1000);
-        uint256 committedBefore = toUint256(accountant.getState().lastSTRawNAV);
+        uint256 committedBefore = toUint256(accountant.getState().lastCollateralNAV);
 
         vm.startPrank(address(balancerVault));
         assertTrue(
             hooks.onBeforeAddLiquidity(address(kernel), address(bpt), AddLiquidityKind.UNBALANCED, new uint256[](2), 0, new uint256[](2), ""),
             "the kernel-routed add must pass without a second sync"
         );
-        assertEq(toUint256(accountant.getState().lastSTRawNAV), committedBefore, "the committed checkpoint must be untouched by the kernel-routed add");
+        assertEq(toUint256(accountant.getState().lastCollateralNAV), committedBefore, "the committed checkpoint must be untouched by the kernel-routed add");
         assertTrue(
             hooks.onBeforeRemoveLiquidity(address(kernel), address(bpt), RemoveLiquidityKind.PROPORTIONAL, 0, new uint256[](2), new uint256[](2), ""),
             "the kernel-routed removal must pass without a second sync"
         );
-        assertEq(toUint256(accountant.getState().lastSTRawNAV), committedBefore, "the committed checkpoint must be untouched by the kernel-routed removal");
+        assertEq(toUint256(accountant.getState().lastCollateralNAV), committedBefore, "the committed checkpoint must be untouched by the kernel-routed removal");
         vm.stopPrank();
     }
 
@@ -214,11 +214,11 @@ contract Test_SyncDispatch_BalancerV3Hooks is DayMarketTestBase {
 
     /**
      * @notice Unpausing the hook restores externally-routed add and remove liquidity, and the restored path still
-     *         syncs, committing pending senior PnL before each operation rather than passing vacuously
+     *         syncs, committing pending collateral PnL before each operation rather than passing vacuously
      */
     function test_ExternalAddAndRemoveLiquidity_RecoverAfterUnpause() public {
         _seedMarket(100e18, 50e18);
-        uint256 ownedAssets = toUint256(kernel.getState().stOwnedYieldBearingAssets);
+        uint256 ownedAssets = toUint256(kernel.getState().totalCollateralAssets);
         hooks.pause();
         hooks.unpause();
 
@@ -229,9 +229,9 @@ contract Test_SyncDispatch_BalancerV3Hooks is DayMarketTestBase {
             "the externally-routed add must pass after the unpause"
         );
         assertEq(
-            toUint256(accountant.getState().lastSTRawNAV),
+            toUint256(accountant.getState().lastCollateralNAV),
             Math.mulDiv(ownedAssets, 1.05e18, 1e18, Math.Rounding.Floor),
-            "the recovered add hook must still commit the pending senior PnL"
+            "the recovered add hook must still commit the pending collateral PnL"
         );
 
         applySTPnL(500); // a further +5% on the new rate: 1.05 x 1.05 = 1.1025
@@ -241,9 +241,9 @@ contract Test_SyncDispatch_BalancerV3Hooks is DayMarketTestBase {
             "the externally-routed removal must pass after the unpause"
         );
         assertEq(
-            toUint256(accountant.getState().lastSTRawNAV),
+            toUint256(accountant.getState().lastCollateralNAV),
             Math.mulDiv(ownedAssets, 1.1025e18, 1e18, Math.Rounding.Floor),
-            "the recovered remove hook must still commit the compounded senior PnL"
+            "the recovered remove hook must still commit the compounded collateral PnL"
         );
     }
 

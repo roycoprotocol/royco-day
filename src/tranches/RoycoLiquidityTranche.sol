@@ -17,7 +17,7 @@ import { RoycoVaultTranche } from "./base/RoycoVaultTranche.sol";
  * @title RoycoLiquidityTranche
  * @author Ankur Dubey, Shivaansh Kapoor
  * @notice Liquidity tranche implementation for Royco markets
- * @dev In addition to the standard LT asset deposit/redeem flows, it exposes multi-asset entrypoints that let an LP enter/exit with ST and quote assets directly (ST assets are involved in minting/redeeming ST shares)
+ * @dev In addition to the standard LT asset deposit/redeem flows, it exposes multi-asset entrypoints that let an LP enter/exit with collateral and quote assets directly (the collateral leg mints/redeems senior shares)
  */
 contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
     using SafeERC20 for IERC20;
@@ -47,7 +47,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
 
     /// @inheritdoc IRoycoLiquidityTranche
     function depositMultiAsset(
-        uint256 _stAssets,
+        uint256 _collateralAssets,
         uint256 _quoteAssets,
         uint256 _minLTAssetsOut,
         address _receiver
@@ -62,18 +62,18 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
 
         // Pull the constituent assets to the kernel (it executes them for the senior mint and the liquidity add)
         address kernel = KERNEL;
-        if (_stAssets != 0) IERC20(IRoycoDayKernel(kernel).ST_ASSET()).safeTransferFrom(msg.sender, kernel, _stAssets);
+        if (_collateralAssets != 0) IERC20(IRoycoDayKernel(kernel).COLLATERAL_ASSET()).safeTransferFrom(msg.sender, kernel, _collateralAssets);
         if (_quoteAssets != 0) IERC20(IRoycoDayKernel(kernel).QUOTE_ASSET()).safeTransferFrom(msg.sender, kernel, _quoteAssets);
 
         // Deposit the constituent assets into the Royco market and price the shares to mint
         TRANCHE_UNIT ltAssetsMinted;
-        (shares, ltAssetsMinted) = _depositMultiAsset(false, _stAssets, _quoteAssets, _minLTAssetsOut);
+        (shares, ltAssetsMinted) = _depositMultiAsset(false, _collateralAssets, _quoteAssets, _minLTAssetsOut);
         ltAssetsOut = toUint256(ltAssetsMinted);
 
         // Mint the shares to the receiver
         _mint(_receiver, shares);
 
-        emit MultiAssetDeposit(msg.sender, _receiver, _stAssets, _quoteAssets, ltAssetsOut, shares);
+        emit MultiAssetDeposit(msg.sender, _receiver, _collateralAssets, _quoteAssets, ltAssetsOut, shares);
     }
 
     /// @inheritdoc IRoycoLiquidityTranche
@@ -113,7 +113,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
     /// @inheritdoc IRoycoLiquidityTranche
     /// @dev Routes the deposit through the execute-and-revert pattern so the quote is produced by the actual kernel multi-asset deposit path under its real semantics
     function previewDepositMultiAsset(
-        uint256 _stAssets,
+        uint256 _collateralAssets,
         uint256 _quoteAssets
     )
         external
@@ -122,7 +122,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         returns (uint256 shares, uint256 ltAssetsOut)
     {
         TRANCHE_UNIT ltAssetsMinted;
-        (shares, ltAssetsMinted) = _depositMultiAsset(true, _stAssets, _quoteAssets, 0);
+        (shares, ltAssetsMinted) = _depositMultiAsset(true, _collateralAssets, _quoteAssets, 0);
         ltAssetsOut = toUint256(ltAssetsMinted);
     }
 
@@ -163,7 +163,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
      * @dev Deposits the constituent assets into the Royco market through the kernel's multi-asset deposit entrypoint and prices the shares to mint
      * @dev Shares are priced at the pre-deposit LT effective NAV per share (the sync mints no LT shares, so the pre-mint supply is current)
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
-     * @param _stAssets The amount of ST underlying to deposit, in the ST asset's native units
+     * @param _collateralAssets The amount of collateral to deposit, in the collateral asset's native units
      * @param _quoteAssets The amount of quote asset to add as the second venue leg
      * @param _minLTAssetsOut The minimum LT tranche assets the liquidity add must mint
      * @return shares The number of shares to mint for the deposit
@@ -171,7 +171,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
      */
     function _depositMultiAsset(
         bool _isPreview,
-        uint256 _stAssets,
+        uint256 _collateralAssets,
         uint256 _quoteAssets,
         uint256 _minLTAssetsOut
     )
@@ -185,7 +185,9 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
         (depositNAV, effectiveNAV, ltAssetsOut) = abi.decode(
             KERNEL._dispatchAndUnwrap(
                 _isPreview,
-                abi.encodeCall(IRoycoDayKernel.ltDepositMultiAsset, (_isPreview, toTrancheUnits(_stAssets), _quoteAssets, toTrancheUnits(_minLTAssetsOut)))
+                abi.encodeCall(
+                    IRoycoDayKernel.ltDepositMultiAsset, (_isPreview, toTrancheUnits(_collateralAssets), _quoteAssets, toTrancheUnits(_minLTAssetsOut))
+                )
             ),
             (NAV_UNIT, NAV_UNIT, TRANCHE_UNIT)
         );
@@ -204,7 +206,7 @@ contract RoycoLiquidityTranche is RoycoVaultTranche, IRoycoLiquidityTranche {
      * @param _shares The number of LT shares to redeem
      * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must yield (slippage bound)
      * @param _minQuoteAssetsOut The minimum quote to receive (slippage bound)
-     * @param _receiver The address that receives the ST underlying and quote
+     * @param _receiver The address that receives the collateral and quote
      * @return stClaims The ST redemption asset claims transferred to the receiver
      * @return quoteAssets The quote transferred to the receiver
      */

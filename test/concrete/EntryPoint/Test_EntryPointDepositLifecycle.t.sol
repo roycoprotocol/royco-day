@@ -23,7 +23,7 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        stUnit = 10 ** uint256(cell.collateralAsset.decimals);
         quoteUnit = 10 ** uint256(cell.quoteAsset.decimals);
         _seedMarket(100 * stUnit, 50 * stUnit);
         _deployEntryPoint();
@@ -116,7 +116,7 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
     }
 
     // ---------------------------------------------------------------------
-    // executeDeposit — timing
+    // executeDeposit: timing
     // ---------------------------------------------------------------------
 
     function test_executeDeposit_revertsBeforeDelayElapses() public {
@@ -149,7 +149,7 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
     }
 
     // ---------------------------------------------------------------------
-    // executeDeposit — self execution
+    // executeDeposit: self execution
     // ---------------------------------------------------------------------
 
     function test_executeDeposit_self_mintsSharesToReceiver_allTranches() public {
@@ -251,7 +251,7 @@ contract Test_EntryPointDepositLifecycle is EntryPointTestBase {
     }
 
     // ---------------------------------------------------------------------
-    // executeDeposit — third-party execution
+    // executeDeposit: third-party execution
     // ---------------------------------------------------------------------
 
     function test_executeDeposit_thirdParty_paysBonusInAssets() public {

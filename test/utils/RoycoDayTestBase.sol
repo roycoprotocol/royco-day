@@ -127,8 +127,8 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     uint64 internal JT_PROTOCOL_FEE_WAD = 0.1e18; // 10% protocol fee
     /**
      * @dev Liquidation coverage utilization threshold. Derivation at this fixture's 20% minimum coverage:
-     *      coverage utilization is exposure x minCoverage / jtEffectiveNAV, where exposure is the combined
-     *      stRawNAV + jtRawNAV. At 6.4667e18 liquidation arms only once the junior buffer covers less than
+     *      coverage utilization is collateralNAV x minCoverage / jtEffectiveNAV. At 6.4667e18
+     *      liquidation arms only once the junior buffer covers less than
      *      ~3.09% (0.2e18 / 6.4667e18) of total exposure, a near-total JT wipeout, far above any utilization
      *      a healthy seeded state in this suite reads
      */
@@ -337,7 +337,7 @@ abstract contract RoycoDayTestBase is Test, Assertions {
     /// @param _assets The assets denominated in ST's tranche units to convert to the kernel's NAV units
     /// @return value The specified assets denominated in ST's tranche units converted to the kernel's NAV units
     function _toSTValue(TRANCHE_UNIT _assets) internal view returns (NAV_UNIT) {
-        return KERNEL.stConvertTrancheUnitsToNAVUnits(_assets);
+        return KERNEL.convertCollateralAssetsToValue(_assets);
     }
 
     /// @notice Returns the fork configuration

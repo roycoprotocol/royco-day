@@ -32,13 +32,10 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     address public immutable override(IRoycoDayKernel) SENIOR_TRANCHE;
 
     /// @inheritdoc IRoycoDayKernel
-    address public immutable override(IRoycoDayKernel) ST_ASSET;
-
-    /// @inheritdoc IRoycoDayKernel
     address public immutable override(IRoycoDayKernel) JUNIOR_TRANCHE;
 
     /// @inheritdoc IRoycoDayKernel
-    address public immutable override(IRoycoDayKernel) JT_ASSET;
+    address public immutable override(IRoycoDayKernel) COLLATERAL_ASSET;
 
     /// @inheritdoc IRoycoDayKernel
     address public immutable override(IRoycoDayKernel) LIQUIDITY_TRANCHE;
@@ -104,24 +101,21 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     /// @param _params The standard construction parameters for the Royco kernel
     constructor(RoycoDayKernelConstructionParams memory _params) {
         // Ensure that the tranche and accountant addresses are not null
+        // The senior and junior tranches are coinvested structurally: both deposit the one collateral asset
         require(
-            _params.seniorTranche != address(0) && _params.stAsset != address(0) && _params.juniorTranche != address(0) && _params.jtAsset != address(0)
-                && _params.accountant != address(0) && _params.liquidityTranche != address(0) && _params.ltAsset != address(0),
+            _params.seniorTranche != address(0) && _params.juniorTranche != address(0) && _params.liquidityTranche != address(0)
+                && _params.collateralAsset != address(0) && _params.ltAsset != address(0) && _params.accountant != address(0),
             NULL_ADDRESS()
         );
 
         // Set the immutable addresses
         SENIOR_TRANCHE = _params.seniorTranche;
-        ST_ASSET = _params.stAsset;
         JUNIOR_TRANCHE = _params.juniorTranche;
-        JT_ASSET = _params.jtAsset;
+        COLLATERAL_ASSET = _params.collateralAsset;
         ACCOUNTANT = _params.accountant;
         LIQUIDITY_TRANCHE = _params.liquidityTranche;
         LT_ASSET = _params.ltAsset;
         ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER = _params.enforceVaultSharesTransferWhitelist;
-
-        // The senior and junior tranches must hold the same yield-bearing asset (coinvestment) so the junior tranche's capital always shares the senior tranche's exposure
-        require(_params.stAsset == _params.jtAsset, TRANCHE_ASSETS_MUST_BE_IDENTICAL());
     }
 
     /**
@@ -130,9 +124,9 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
      * @param _params The standard initialization parameters for the Royco kernel
      */
     function __RoycoDayKernel_init(RoycoDayKernelInitParams memory _params) internal onlyInitializing {
-        // Ensure that the tranches and their corresponding assets in the kernel match
+        // Ensure that the tranches and their corresponding assets in the kernel match: coinvestment is structural, both the senior and junior tranches deposit the one collateral asset
         require(
-            IRoycoVaultTranche(SENIOR_TRANCHE).asset() == ST_ASSET && IRoycoVaultTranche(JUNIOR_TRANCHE).asset() == JT_ASSET
+            IRoycoVaultTranche(SENIOR_TRANCHE).asset() == COLLATERAL_ASSET && IRoycoVaultTranche(JUNIOR_TRANCHE).asset() == COLLATERAL_ASSET
                 && IRoycoVaultTranche(LIQUIDITY_TRANCHE).asset() == LT_ASSET,
             TRANCHE_AND_KERNEL_ASSETS_MISMATCH()
         );
@@ -159,22 +153,16 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     // =============================
 
     /// @inheritdoc IRoycoDayKernel
-    function stConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _stAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
+    function convertCollateralAssetsToValue(TRANCHE_UNIT _collateralAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
 
     /// @inheritdoc IRoycoDayKernel
-    function jtConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _jtAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
+    function convertLTAssetsToValue(TRANCHE_UNIT _ltAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
 
     /// @inheritdoc IRoycoDayKernel
-    function ltConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _ltAssets) public view virtual override(IRoycoDayKernel) returns (NAV_UNIT);
+    function convertValueToCollateralAssets(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
 
     /// @inheritdoc IRoycoDayKernel
-    function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
-
-    /// @inheritdoc IRoycoDayKernel
-    function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
-
-    /// @inheritdoc IRoycoDayKernel
-    function ltConvertNAVUnitsToTrancheUnits(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
+    function convertValueToLTAssets(NAV_UNIT _value) public view virtual override(IRoycoDayKernel) returns (TRANCHE_UNIT);
 
     // =============================
     // Tranche Max Deposit and Redeem Functions
@@ -405,7 +393,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     /// @dev LT multi-asset deposits are enabled in a PERPETUAL market state (granted the market's coverage and liquidity requirements are satisfied against the new senior exposure), and in a fixed-term market only for a quote-only deposit that mints no senior shares
     function ltDepositMultiAsset(
         bool _isPreview,
-        TRANCHE_UNIT _stAssets,
+        TRANCHE_UNIT _collateralAssets,
         uint256 _quoteAssets,
         TRANCHE_UNIT _minLTAssetsOut
     )
@@ -419,7 +407,7 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
         returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT ltAssetsOut)
     {
         return DepositLogic.ltDepositMultiAsset(
-            _getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _isPreview, _stAssets, _quoteAssets, _minLTAssetsOut
+            _getRoycoDayKernelStorage(), _getRoycoDayKernelImmutableState(), _isPreview, _collateralAssets, _quoteAssets, _minLTAssetsOut
         );
     }
 
@@ -560,14 +548,13 @@ abstract contract RoycoDayKernel is IRoycoDayKernel, RoycoBase, ReentrancyGuardT
     /**
      * @notice Builds the immutables carrier threaded into the kernel's delegatecall logic libraries
      * @dev A delegatecalled library cannot read the kernel's immutables directly, so they are passed in via this struct
-     * @return immutables The kernel's senior, junior, and liquidity tranche addresses, their respective assets, and the accountant
+     * @return immutables The kernel's senior, junior, and liquidity tranche addresses, the collateral and LT assets, and the accountant
      */
     function _getRoycoDayKernelImmutableState() internal view returns (RoycoDayKernelImmutableState memory immutables) {
         return RoycoDayKernelImmutableState({
             seniorTranche: SENIOR_TRANCHE,
-            stAsset: ST_ASSET,
             juniorTranche: JUNIOR_TRANCHE,
-            jtAsset: JT_ASSET,
+            collateralAsset: COLLATERAL_ASSET,
             liquidityTranche: LIQUIDITY_TRANCHE,
             ltAsset: LT_ASSET,
             accountant: ACCOUNTANT

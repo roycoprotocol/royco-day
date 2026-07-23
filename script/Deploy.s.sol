@@ -596,8 +596,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         params.ltTranche = IRoycoVaultTranche.RoycoTrancheInitParams({
             name: _config.liquidityTrancheName, symbol: _config.liquidityTrancheSymbol, initialAuthority: address(0)
         });
-        params.stAsset = _config.seniorAsset;
-        params.jtAsset = _config.juniorAsset;
+        params.collateralAsset = _config.collateralAsset;
         params.marketContracts = _marketContracts;
 
         // Accountant init params. `jtYDM`/`ltYDM` are overwritten by the template with the deployed instances. BOTH YDMs get
@@ -614,8 +613,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
             maxJTYieldShareWAD: uint64(1e18), // uncapped at the WAD ceiling; the real JT cap comes from the JT YDM curve
             maxLTYieldShareWAD: 0, // LT liquidity premium disabled in the baseline
             fixedTermDurationSeconds: _config.fixedTermDurationSeconds,
-            stNAVDustTolerance: toNAVUnits(_config.stDustTolerance),
-            jtNAVDustTolerance: toNAVUnits(_config.jtDustTolerance),
+            dustTolerance: toNAVUnits(_config.dustTolerance),
             stProtocolFeeWAD: _config.stProtocolFeeWAD,
             jtProtocolFeeWAD: _config.jtProtocolFeeWAD,
             jtYieldShareProtocolFeeWAD: _config.jtYieldShareProtocolFeeWAD,
@@ -760,7 +758,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     {
         mc.balancerPool = _balancerPool;
         mc.jtImpl = _deployImplWithArgs(
-            "JuniorTranche (impl)   ", type(RoycoJuniorTranche).creationCode, abi.encode(_config.juniorAsset, _kernelProxy), _salt(_marketId, TAG_JT_IMPL)
+            "JuniorTranche (impl)   ", type(RoycoJuniorTranche).creationCode, abi.encode(_config.collateralAsset, _kernelProxy), _salt(_marketId, TAG_JT_IMPL)
         );
         mc.ltImpl = _deployImplWithArgs(
             "LiquidityTranche (impl)", type(RoycoLiquidityTranche).creationCode, abi.encode(_balancerPool, _kernelProxy), _salt(_marketId, TAG_LT_IMPL)
@@ -832,7 +830,7 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
         internal
     {
         (address stImpl, bool stImplExisted) = deployWithSanityChecks(
-            _salt(_marketId, TAG_ST_IMPL), abi.encodePacked(type(RoycoSeniorTranche).creationCode, abi.encode(_config.seniorAsset, _kernelProxy)), false
+            _salt(_marketId, TAG_ST_IMPL), abi.encodePacked(type(RoycoSeniorTranche).creationCode, abi.encode(_config.collateralAsset, _kernelProxy)), false
         );
         _logDeploy("SeniorTranche (impl)   ", stImpl, stImplExisted);
         bytes memory stInitData = abi.encodeCall(
@@ -888,9 +886,8 @@ contract DeployScript is Script, Create2DeployUtils, MarketDeploymentConfig {
     {
         IRoycoDayKernel.RoycoDayKernelConstructionParams memory cp = IRoycoDayKernel.RoycoDayKernelConstructionParams({
             seniorTranche: _factory.predictDeterministicAddress(_salt(_marketId, TAG_ST_PROXY)),
-            stAsset: _config.seniorAsset,
             juniorTranche: _factory.predictDeterministicAddress(_salt(_marketId, TAG_JT_PROXY)),
-            jtAsset: _config.juniorAsset,
+            collateralAsset: _config.collateralAsset,
             accountant: _factory.predictDeterministicAddress(_salt(_marketId, TAG_ACCOUNTANT_PROXY)),
             liquidityTranche: _factory.predictDeterministicAddress(_salt(_marketId, TAG_LT_PROXY)),
             ltAsset: _balancerPool,

@@ -45,15 +45,15 @@ contract PeripheryConfiguratorHarness is EntryPointConfigurer, MarketSyncerConfi
  *      RoycoMarketSyncer wired to the same access manager
  */
 contract Test_PeripheryConfiguration is EntryPointTestBase {
-    uint256 internal stUnit;
+    uint256 internal collateralUnit;
 
     RoycoMarketSyncer internal syncer;
     PeripheryConfiguratorHarness internal harness;
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
-        _seedMarket(100 * stUnit, 50 * stUnit);
+        collateralUnit = 10 ** uint256(cell.collateralAsset.decimals);
+        _seedMarket(100 * collateralUnit, 50 * collateralUnit);
         _deployEntryPoint();
 
         // Deploy a real market syncer wired to the fixture's access manager, then bind its registration selector to

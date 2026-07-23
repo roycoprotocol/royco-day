@@ -21,12 +21,12 @@ contract Test_FixedTermRedemptionGates_Kernel is DayMarketTestBase {
     uint256 internal constant ST_SEED_WHOLE = 100;
     uint256 internal constant JT_SEED_WHOLE = 30;
 
-    uint256 internal stUnit;
+    uint256 internal collateralUnit;
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
-        _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
+        collateralUnit = 10 ** uint256(cell.collateralAsset.decimals);
+        _seedMarket(ST_SEED_WHOLE * collateralUnit, JT_SEED_WHOLE * collateralUnit);
         _enterFixedTerm();
     }
 

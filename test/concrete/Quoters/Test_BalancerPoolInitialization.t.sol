@@ -4,11 +4,11 @@ pragma solidity ^0.8.28;
 import { IERC20MultiTokenErrors } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IERC20MultiTokenErrors.sol";
 import { IVaultErrors } from "../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IVaultErrors.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
+import { MockBalancerVault } from "../../mocks/MockBalancerVault.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
-import { MockBalancerVault } from "../../mocks/MockBalancerVault.sol";
 
 /**
  * @title Test_BalancerPoolInitialization_Kernel
@@ -35,11 +35,11 @@ contract Test_BalancerPoolInitialization_Kernel is DayMarketTestBase {
     function _initializePoolMinimumSupply() internal override { }
 
     /// @dev Funds and approves the LT provider's deposit legs through the production allowance path
-    function _fundDepositLegs(address _actor, uint256 _stAssets, uint256 _quoteAssets) internal {
-        if (_stAssets != 0) stJtVault.mintShares(_actor, _stAssets);
+    function _fundDepositLegs(address _actor, uint256 _collateralAssets, uint256 _quoteAssets) internal {
+        if (_collateralAssets != 0) stJtVault.mintShares(_actor, _collateralAssets);
         if (_quoteAssets != 0) quoteToken.mint(_actor, _quoteAssets);
         vm.startPrank(_actor);
-        if (_stAssets != 0) stJtVault.approve(address(liquidityTranche), _stAssets);
+        if (_collateralAssets != 0) stJtVault.approve(address(liquidityTranche), _collateralAssets);
         if (_quoteAssets != 0) quoteToken.approve(address(liquidityTranche), _quoteAssets);
         vm.stopPrank();
     }
@@ -66,7 +66,7 @@ contract Test_BalancerPoolInitialization_Kernel is DayMarketTestBase {
         assertEq(bpt.balanceOf(address(kernel)), expectedNet, "the kernel must custody exactly the net genesis BPT");
         assertEq(bpt.balanceOf(address(0)), balancerVault.POOL_MINIMUM_TOTAL_SUPPLY(), "the dead minimum must be burned to the null address");
         assertEq(bpt.totalSupply(), 8000e18, "the total supply must be the seed's full fair value including the dead minimum");
-        assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), expectedNet, "the kernel's LT ledger must credit the net BPT");
+        assertEq(toUint256(kernel.getState().totalLTAssets), expectedNet, "the kernel's LT ledger must credit the net BPT");
         assertEq(toUint256(accountant.getState().lastLTRawNAV), expectedNet, "the committed LT raw NAV must be the net genesis value");
         uint256[2] memory poolBalances = balancerVault.getPoolBalances(address(bpt));
         assertEq(poolBalances[stPoolTokenIndex], 0, "no senior leg was seeded");
@@ -137,7 +137,6 @@ contract Test_BalancerPoolInitialization_Kernel is DayMarketTestBase {
         liquidityTranche.depositMultiAsset(0, 1000 * QUOTE_UNIT, 0, LT_PROVIDER);
         assertEq(bpt.balanceOf(address(kernel)) - kernelBptBefore, 990e18, "the follow-up add must route through addLiquidity and pay the haircut");
     }
-
 }
 
 /**
@@ -164,11 +163,11 @@ contract Test_BalancerPoolInitialization_SeniorLeg_Kernel is DayMarketTestBase {
     function _initializePoolMinimumSupply() internal override { }
 
     /// @dev Funds and approves the LT provider's deposit legs through the production allowance path
-    function _fundDepositLegs(address _actor, uint256 _stAssets, uint256 _quoteAssets) internal {
-        if (_stAssets != 0) stJtVault.mintShares(_actor, _stAssets);
+    function _fundDepositLegs(address _actor, uint256 _collateralAssets, uint256 _quoteAssets) internal {
+        if (_collateralAssets != 0) stJtVault.mintShares(_actor, _collateralAssets);
         if (_quoteAssets != 0) quoteToken.mint(_actor, _quoteAssets);
         vm.startPrank(_actor);
-        if (_stAssets != 0) stJtVault.approve(address(liquidityTranche), _stAssets);
+        if (_collateralAssets != 0) stJtVault.approve(address(liquidityTranche), _collateralAssets);
         if (_quoteAssets != 0) quoteToken.approve(address(liquidityTranche), _quoteAssets);
         vm.stopPrank();
     }
@@ -185,20 +184,24 @@ contract Test_BalancerPoolInitialization_SeniorLeg_Kernel is DayMarketTestBase {
      *      1:1
      */
     function test_FirstMultiAssetDeposit_BothLegs_InitializesPool() public {
-        uint256 stAssets = 100e18;
+        uint256 collateralAssets = 100e18;
         uint256 quoteAssets = 100 * QUOTE_UNIT;
         // Offset-derived net genesis NAV (see docstring): 199999999999999999998 gross less the 1e6 dead minimum
-        uint256 expectedNet = 199999999999998999998;
-        _fundDepositLegs(LT_PROVIDER, stAssets, quoteAssets);
+        uint256 expectedNet = 199_999_999_999_998_999_998;
+        _fundDepositLegs(LT_PROVIDER, collateralAssets, quoteAssets);
 
         vm.prank(LT_PROVIDER);
-        (uint256 shares,) = liquidityTranche.depositMultiAsset(stAssets, quoteAssets, expectedNet, LT_PROVIDER);
+        (uint256 shares,) = liquidityTranche.depositMultiAsset(collateralAssets, quoteAssets, expectedNet, LT_PROVIDER);
 
         assertTrue(balancerVault.isPoolInitialized(address(bpt)), "the first deposit must latch the pool initialized");
         assertEq(shares, expectedNet, "the LT bootstrap must mint shares 1:1 with the net genesis deposit NAV");
-        assertEq(seniorTranche.totalSupply(), 1100000000000000099999, "the senior leg must mint exactly the offset-priced deposited vault shares (1000e18 seed + 100000000000000099999)");
+        assertEq(
+            seniorTranche.totalSupply(),
+            1_100_000_000_000_000_099_999,
+            "the senior leg must mint exactly the offset-priced deposited vault shares (1000e18 seed + 100000000000000099999)"
+        );
         uint256[2] memory poolBalances = balancerVault.getPoolBalances(address(bpt));
-        assertEq(poolBalances[stPoolTokenIndex], 100000000000000099999, "the minted senior shares must seed the pool's senior balance");
+        assertEq(poolBalances[stPoolTokenIndex], 100_000_000_000_000_099_999, "the minted senior shares must seed the pool's senior balance");
         assertEq(poolBalances[1 - stPoolTokenIndex], quoteAssets, "the quote leg must seed the pool balance exactly");
     }
 
@@ -211,12 +214,12 @@ contract Test_BalancerPoolInitialization_SeniorLeg_Kernel is DayMarketTestBase {
      *      the 1e6 dead minimum, so the Vault refuses to initialize with the gross figure and the whole deposit unwinds
      */
     function test_RevertIf_GenesisSeedBelowDeadMinimum() public {
-        uint256 stAssets = 1000;
-        _fundDepositLegs(LT_PROVIDER, stAssets, 0);
+        uint256 collateralAssets = 1000;
+        _fundDepositLegs(LT_PROVIDER, collateralAssets, 0);
 
         vm.prank(LT_PROVIDER);
         vm.expectRevert(abi.encodeWithSelector(IERC20MultiTokenErrors.PoolTotalSupplyTooLow.selector, 999));
-        liquidityTranche.depositMultiAsset(stAssets, 0, 0, LT_PROVIDER);
+        liquidityTranche.depositMultiAsset(collateralAssets, 0, 0, LT_PROVIDER);
         assertFalse(balancerVault.isPoolInitialized(address(bpt)), "a dust seed must leave the pool uninitialized");
         assertEq(seniorTranche.totalSupply(), 1000e18, "the reverted seed must unwind its senior leg mint");
     }
@@ -226,7 +229,7 @@ contract Test_BalancerPoolInitialization_SeniorLeg_Kernel is DayMarketTestBase {
      *         the reinvest gate's fair-value conversion to zero, the attempt preemptively returns, the premium stays
      *         idle, and no sync or explicit reinvest can brick or seed the pool. The first genesis deposit then
      *         unblocks the deferred pile end to end
-     * @dev Pins that ltConvertNAVUnitsToTrancheUnits returns zero at zero BPT supply, so the gate's zero-floor
+     * @dev Pins that convertValueToLTAssets returns zero at zero BPT supply, so the gate's zero-floor
      *      early return (not the tolerated-failure path) is what defers: no LiquidityPremiumReinvestmentFailed
      *      state change, no unprotected add, and the pool must never be initialized by a reinvestment
      */
@@ -239,7 +242,7 @@ contract Test_BalancerPoolInitialization_SeniorLeg_Kernel is DayMarketTestBase {
         uint256 idleShares = kernel.getState().ltOwnedSeniorTrancheShares;
         assertGt(idleShares, 0, "the sync must stage the premium as idle senior shares");
         assertFalse(balancerVault.isPoolInitialized(address(bpt)), "the sync's auto-reinvest must never seed the pool");
-        assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), 0, "no BPT may be credited by a deferred reinvest");
+        assertEq(toUint256(kernel.getState().totalLTAssets), 0, "no BPT may be credited by a deferred reinvest");
 
         // An explicit reinvest against the uninitialized pool defers identically, the idle pile is untouched
         vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
@@ -263,26 +266,26 @@ contract Test_BalancerPoolInitialization_SeniorLeg_Kernel is DayMarketTestBase {
      *         ledger, and the initialization latch all unwind, and the same deposit succeeds once the venue recovers
      */
     function test_RevertIf_GenesisSeedVenueForcedRevert_FullyAtomic() public {
-        uint256 stAssets = 100e18;
+        uint256 collateralAssets = 100e18;
         uint256 quoteAssets = 100 * QUOTE_UNIT;
-        _fundDepositLegs(LT_PROVIDER, stAssets, quoteAssets);
+        _fundDepositLegs(LT_PROVIDER, collateralAssets, quoteAssets);
         balancerVault.setRevertMode(MockBalancerVault.RevertMode.ADD);
 
         vm.prank(LT_PROVIDER);
         vm.expectRevert(MockBalancerVault.FORCED_ADD_REVERT.selector);
-        liquidityTranche.depositMultiAsset(stAssets, quoteAssets, 0, LT_PROVIDER);
+        liquidityTranche.depositMultiAsset(collateralAssets, quoteAssets, 0, LT_PROVIDER);
 
         assertFalse(balancerVault.isPoolInitialized(address(bpt)), "the failed seed must unwind the initialization latch");
         assertEq(seniorTranche.totalSupply(), 1000e18, "the failed seed must unwind its senior leg mint");
         assertEq(liquidityTranche.totalSupply(), 0, "the failed seed must mint no LT shares");
         assertEq(bpt.balanceOf(address(kernel)), 0, "the failed seed must credit no BPT");
-        assertEq(stJtVault.balanceOf(LT_PROVIDER), stAssets, "the failed seed must refund the senior leg");
+        assertEq(stJtVault.balanceOf(LT_PROVIDER), collateralAssets, "the failed seed must refund the senior leg");
         assertEq(quoteToken.balanceOf(LT_PROVIDER), quoteAssets, "the failed seed must refund the quote leg");
 
         // The venue recovers and the identical deposit seeds the genesis
         balancerVault.setRevertMode(MockBalancerVault.RevertMode.NONE);
         vm.prank(LT_PROVIDER);
-        liquidityTranche.depositMultiAsset(stAssets, quoteAssets, 0, LT_PROVIDER);
+        liquidityTranche.depositMultiAsset(collateralAssets, quoteAssets, 0, LT_PROVIDER);
         assertTrue(balancerVault.isPoolInitialized(address(bpt)), "the recovered venue must seed the genesis");
     }
 }

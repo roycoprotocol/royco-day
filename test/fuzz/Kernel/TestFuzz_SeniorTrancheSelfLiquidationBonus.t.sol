@@ -15,10 +15,11 @@ import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
  *         bonus on top of its pro-rata claims, and paying that bonus can never increase coverage utilization
  *         (the anti-bank-run property: one LP's exit sweetener must not eat into coverage for those who stay),
  *         both at the deployed 1% config and across the setter's full validated range up to WAD - 1 (~100%)
- * @dev The market is driven into liquidation with a fuzzed shared drawdown at a fixed 30% junior seed ratio.
- *      With jt = 0.3 x st, a drawdown r in [-23%, -20.8%] leaves the junior buffer positive but thin:
- *      jtEffectiveNAV = 0.3 x st x r - st x (1 - r) and coverage utilization 1.3 x st x r x 0.2 / jtEffectiveNAV evaluates to at least
- *      (1.3 x 0.792 x 0.2) / (0.3 x 0.792 - 0.208) = 6.956 at the shallow end, above the 6.4667 liquidation
+ * @dev The market is driven into liquidation with a fuzzed collateral drawdown at a fixed 30% junior seed ratio.
+ *      With jt = 0.3 x st, a drawdown r in [-23%, -20.8%] leaves the junior buffer positive but thin: the
+ *      collateral NAV marks at 1.3 x st x (1 - r), jtEffectiveNAV = collateralNAV - st = st x (1.3 x (1 - r) - 1),
+ *      and coverage utilization 1.3 x (1 - r) x 0.2 / (1.3 x (1 - r) - 1) evaluates to at least
+ *      (1.3 x 0.792 x 0.2) / (1.3 x 0.792 - 1) = 6.956 at the shallow end, above the 6.4667 liquidation
  *      threshold, and the buffer only thins (utilization only grows) as the drawdown deepens toward the
  *      junior-exhaustion point at -23.077%
  */
@@ -28,8 +29,8 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
     /**
      * @dev The liquidation coverage utilization threshold this fixture deploys every market with, pinned against
      *      the live config in each fuzz body. Why the fuzzed drawdown band always breaches it: with a 20% minimum
-     *      coverage and a junior seed of 0.3 x st, a shared drawdown r marks coverage utilization at
-     *      1.3 x (1 - r) x 0.2 / (0.3 x (1 - r) - r), which crosses 6.4667 at r = 20.62% and only grows as the
+     *      coverage and a junior seed of 0.3 x st, a collateral drawdown r marks coverage utilization at
+     *      1.3 x (1 - r) x 0.2 / (1.3 x (1 - r) - 1), which crosses 6.4667 at r = 20.62% and only grows as the
      *      drawdown deepens, so the band's shallow end of r = 20.8% (utilization 0.20592 / 0.0296 = 6.9568)
      *      already sits past the threshold
      */
@@ -42,9 +43,9 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
      * Scenario: a covered drawdown breaches the liquidation threshold (which forces the market PERPETUAL so
      * withdrawals stay open), then a senior LP redeems a fuzzed slice. The payout must be the pro-rata claims
      * plus exactly the mirror-derived bonus - min(1% of the claim NAV, the junior buffer, the largest bonus
-     * that keeps coverage utilization from rising) - sourced from the junior tranche's own assets (the junior
-     * tranche holds no cross-claim on senior raw NAV after paying coverage). Afterwards the committed marks
-     * must show coverage utilization at or below its pre-redemption value.
+     * that keeps coverage utilization from rising) - granted in the one coinvested collateral asset out of the
+     * junior tranche's claim on it. Afterwards the committed marks must show coverage utilization at or below
+     * its pre-redemption value.
      */
     function testFuzz_SeniorTrancheSelfLiquidationBonus_PaysExactBonusAndNeverRaisesCoverageUtilization(
         uint256 _stSeed,
@@ -63,11 +64,17 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         applySTPnL(-int256(drawdownBps));
         SyncedAccountingState memory state = _sync();
 
-        // Committed drawdown marks, pinned against the hand-derived quoter outputs: the loss is fully covered,
-        // so the senior tranche keeps its full effective NAV and the junior buffer absorbs the entire hit
+        // Committed drawdown marks, pinned against the hand-derived quoter output: the collateral mark is ONE
+        // conversion of the coinvested vault shares at the drawn-down rate, the loss is fully covered, so the
+        // senior tranche keeps its full effective NAV and the junior buffer absorbs the entire hit
         uint256 rate = 1e18 - drawdownBps * 1e14;
-        assertEq(toUint256(state.stRawNAV), st.mulDiv(rate, 1e18), "the senior raw mark must be the seed at the drawn-down rate");
+        assertEq(toUint256(state.collateralNAV), (st + jt).mulDiv(rate, 1e18), "the collateral mark must be the whole seed at the drawn-down rate");
         assertEq(toUint256(state.stEffectiveNAV), st, "a fully covered loss leaves the senior effective NAV whole");
+        assertEq(
+            toUint256(state.jtEffectiveNAV),
+            toUint256(state.collateralNAV) - st,
+            "conservation must pin the junior buffer to the collateral mark minus the whole senior claim"
+        );
         uint256 covPre = state.coverageUtilizationWAD;
         // Guard the constant against fixture drift, then confirm the band derivation: every drawdown in
         // [-23%, -20.8%] leaves coverage utilization at 6.9568 or above, past the configured threshold
@@ -75,13 +82,10 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         assertGe(covPre, LIQUIDATION_COVERAGE_THRESHOLD_WAD, "the drawdown must breach the liquidation coverage threshold by construction");
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "a liquidation breach forces the market PERPETUAL so withdrawals stay open");
 
-        // The senior tranche's total claims: its own raw NAV plus the coverage cross-claim on junior raw NAV
-        // (stEffectiveNAV - stRawNAV), each floored through the quoter into vault shares. No mints happened on the loss
-        // sync, so the senior supply is still the seed
+        // The senior tranche's total claims: its effective NAV converted ONCE into collateral tranche units at
+        // the drawn-down rate. No mints happened on the loss sync, so the senior supply is still the seed
         assertEq(seniorTranche.totalSupply(), st, "no premium or fee shares mint on a covered-loss sync");
-        uint256 stClaimOnJTRaw = st - toUint256(state.stRawNAV);
-        uint256 totalSTAssets = toUint256(state.stRawNAV).mulDiv(1e18, rate);
-        uint256 totalJTAssets = stClaimOnJTRaw.mulDiv(1e18, rate);
+        uint256 totalClaimAssets = st.mulDiv(1e18, rate);
 
         // The redeemer's base slice and the exact bonus the production stack must pay on top of it. The dust
         // floor of 1e6 share wei keeps the payout above the zero-asset threshold the accountant rejects
@@ -89,12 +93,10 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         // The base slice floors over the EFFECTIVE senior supply (st + VIRTUAL_SHARES): _scaleAssetClaims runs BEFORE the
         // self-liquidation bonus is layered on (see src RedemptionLogic.stRedeem), so userClaimNAV is this offset-scaled slice
         uint256 baseNav = st.mulDiv(shares, st + 1e6);
-        uint256 baseSTAssets = totalSTAssets.mulDiv(shares, st + 1e6);
-        uint256 baseJTAssets = totalJTAssets.mulDiv(shares, st + 1e6);
+        uint256 baseCollateralAssets = totalClaimAssets.mulDiv(shares, st + 1e6);
         assertEq(kernel.getState().stSelfLiquidationBonusWAD, CONFIGURED_BONUS_WAD, "the deployed bonus config must match the pinned 1% rate");
         RoycoTestMath.SeniorTrancheSelfLiquidationBonusInputs memory bonusIn = RoycoTestMath.SeniorTrancheSelfLiquidationBonusInputs({
-            stRawNAV: toUint256(state.stRawNAV),
-            jtRawNAV: toUint256(state.jtRawNAV),
+            stEffectiveNAV: st,
             jtEffectiveNAV: toUint256(state.jtEffectiveNAV),
             coverageUtilizationWAD: covPre,
             coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_THRESHOLD_WAD,
@@ -102,15 +104,14 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
             userClaimNAV: baseNav
         });
         uint256 expectedBonus = RoycoTestMath.seniorTrancheSelfLiquidationBonus(bonusIn);
-        // The reported bonus is the value of the granted assets, floored through the junior leg's round trip at the drawn-down rate
-        uint256 expectedBonusReported = RoycoTestMath.seniorTrancheSelfLiquidationBonusReported(bonusIn, rate, rate);
+        // The reported bonus is the value of the granted assets, floored through the single collateral round trip at the drawn-down rate
+        uint256 expectedBonusReported = RoycoTestMath.seniorTrancheSelfLiquidationBonusReported(bonusIn, rate);
 
         // Independent caps on the mirrored bonus, derived without re-running the sizing formula: the bonus is a
         // sweetener paid out of the junior buffer, so it can never exceed the configured 1% of the claim NAV nor
-        // the junior buffer itself. Tighter still: by two-term conservation the covered exposure minus the junior
-        // buffer is exactly the senior seed (stRaw + jtRaw - jtEff == stEff == st, since the covered loss just
-        // shuffles value from junior to senior), so the utilization-neutral cap - the redeemed raw exposure times
-        // the junior buffer over what remains covering it - is at most claim x jtEffectiveNAV / st, under 3% of
+        // the junior buffer itself. Tighter still: under conservation the collateral NAV minus the junior buffer
+        // is exactly the senior effective NAV, the whole seed st here (the covered loss just shuffles value from
+        // junior to senior), so the utilization-neutral cap is at most claim x jtEffectiveNAV / st, under 3% of
         // the claim across this whole drawdown band
         assertLe(expectedBonus, baseNav / 100, "the bonus can never exceed the configured 1% of the redeemed claim NAV");
         assertLe(expectedBonus, toUint256(state.jtEffectiveNAV), "the bonus can never exceed the junior buffer that sources it");
@@ -121,30 +122,26 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         );
 
         uint256 balBefore = stJtVault.balanceOf(ST_PROVIDER);
-        _expectBonusBoostedRedeemEvent(baseSTAssets, baseJTAssets, baseNav, expectedBonus, expectedBonusReported, rate, shares);
+        _expectBonusBoostedRedeemEvent(baseCollateralAssets, baseNav, expectedBonus, expectedBonusReported, rate, shares);
         vm.prank(ST_PROVIDER);
         AssetClaims memory claims = seniorTranche.redeem(shares, ST_PROVIDER, ST_PROVIDER);
 
-        // Exact payout: the bonus lands on the junior-asset leg because the junior tranche's claims sit
-        // entirely on its own raw NAV here (it holds no cross-claim on senior raw NAV to source from first)
+        // Exact payout: the bonus lands on the single collateral leg at the drawn-down rate
         assertEq(toUint256(claims.nav), baseNav + expectedBonusReported, "the redeemed NAV must be the pro-rata slice plus exactly the reported bonus");
-        assertEq(toUint256(claims.stAssets), baseSTAssets, "the senior-asset leg must be the unboosted pro-rata slice");
         assertEq(
-            toUint256(claims.jtAssets), baseJTAssets + expectedBonus.mulDiv(1e18, rate), "the junior-asset leg must carry the bonus at the drawn-down rate"
+            toUint256(claims.collateralAssets),
+            baseCollateralAssets + expectedBonus.mulDiv(1e18, rate),
+            "the collateral leg must be the pro-rata slice plus the bonus at the drawn-down rate"
         );
         assertEq(
-            stJtVault.balanceOf(ST_PROVIDER) - balBefore,
-            toUint256(claims.stAssets) + toUint256(claims.jtAssets),
-            "the wallet delta must equal both claimed legs exactly"
+            stJtVault.balanceOf(ST_PROVIDER) - balBefore, toUint256(claims.collateralAssets), "the wallet delta must equal the claimed collateral leg exactly"
         );
 
         // The anti-bank-run property: coverage utilization on the committed post-redemption marks never
         // exceeds its pre-redemption value (up to the unavoidable ceil-rounding envelope), so the bonus can
         // never worsen the remaining LPs' coverage
         uint256 jtEffPost = toUint256(accountant.getState().lastJTEffectiveNAV);
-        uint256 covPost = RoycoTestMath.computeCoverageUtilization(
-            toUint256(accountant.getState().lastSTRawNAV), toUint256(accountant.getState().lastJTRawNAV), 0.2e18, jtEffPost
-        );
+        uint256 covPost = RoycoTestMath.computeCoverageUtilization(toUint256(accountant.getState().lastCollateralNAV), 0.2e18, jtEffPost);
         _assertCoverageUtilizationNeutralWithinCeilRounding(covPre, covPost, jtEffPost);
     }
 
@@ -193,25 +190,24 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         assertEq(toUint256(state.stEffectiveNAV), st, "a fully covered loss leaves the senior effective NAV whole");
         assertEq(seniorTranche.totalSupply(), st, "no premium or fee shares mint on a covered-loss sync");
 
-        // The junior buffer, derived from two-term conservation rather than read blind: the covered loss only
-        // shuffles value from junior to senior, so jtEff == stRaw + jtRaw - stEff with stEff == st, and
-        // equivalently the covered exposure minus the junior buffer is exactly the senior seed
-        uint256 jtEffHand = st.mulDiv(rate, 1e18) + jt.mulDiv(rate, 1e18) - st;
+        // The junior buffer, derived from conservation rather than read blind: the covered loss only shuffles
+        // value from junior to senior, so jtEff == collateralNAV - stEff with stEff == st, the collateral mark
+        // being ONE conversion of the whole coinvested seed at the drawn-down rate
+        uint256 jtEffHand = (st + jt).mulDiv(rate, 1e18) - st;
         assertEq(toUint256(state.jtEffectiveNAV), jtEffHand, "the junior buffer must equal the conservation-derived mark");
 
-        // The redeemer's base slice, pro-rata over the still-whole senior effective NAV. _scaleAssetClaims now floors over
+        // The redeemer's base slice, pro-rata over the still-whole senior effective NAV. _scaleAssetClaims floors over
         // the EFFECTIVE supply (st + VIRTUAL_SHARES), so the slice is floor(st x shares / (st + 1e6)) rather than shares 1:1;
-        // the bonus is applied AFTER this scaling, so this offset-scaled nav is the bonus's userClaimNAV
+        // the bonus is applied AFTER this scaling, so this offset-scaled nav is the bonus's userClaimNAV. The collateral
+        // leg is the tranche's single claim conversion floor(st x 1e18 / rate) scaled by the same slice
         uint256 shares = bound(_sharesSeed, 1e6, st); // dust-to-full-exit slices, small slices exercise the floor paths
         uint256 baseNav = st.mulDiv(shares, st + 1e6);
-        uint256 baseSTAssets = toUint256(state.stRawNAV).mulDiv(1e18, rate).mulDiv(shares, st + 1e6);
-        uint256 baseJTAssets = (st - toUint256(state.stRawNAV)).mulDiv(1e18, rate).mulDiv(shares, st + 1e6);
+        uint256 baseCollateralAssets = st.mulDiv(1e18, rate).mulDiv(shares, st + 1e6);
 
         // The exact bonus the stack must pay: min(desired, junior buffer, utilization-neutral max), mirrored
-        // with the fuzzed above-WAD config in place of the deployed 1% rate
+        // with the fuzzed near-WAD config in place of the deployed 1% rate
         RoycoTestMath.SeniorTrancheSelfLiquidationBonusInputs memory bonusIn = RoycoTestMath.SeniorTrancheSelfLiquidationBonusInputs({
-            stRawNAV: toUint256(state.stRawNAV),
-            jtRawNAV: toUint256(state.jtRawNAV),
+            stEffectiveNAV: st,
             jtEffectiveNAV: jtEffHand,
             coverageUtilizationWAD: covPre,
             coverageLiquidationUtilizationWAD: LIQUIDATION_COVERAGE_THRESHOLD_WAD,
@@ -219,61 +215,58 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
             userClaimNAV: baseNav
         });
         uint256 expectedBonus = RoycoTestMath.seniorTrancheSelfLiquidationBonus(bonusIn);
-        // The reported bonus is the value of the granted assets, floored through the junior leg's round trip at the drawn-down rate
-        uint256 expectedBonusReported = RoycoTestMath.seniorTrancheSelfLiquidationBonusReported(bonusIn, rate, rate);
+        // The reported bonus is the value of the granted assets, floored through the single collateral round trip at the drawn-down rate
+        uint256 expectedBonusReported = RoycoTestMath.seniorTrancheSelfLiquidationBonusReported(bonusIn, rate);
 
         // Independent caps derived without the sizing formula: the config demands up to just under the full
         // claim over again (bonusWAD in [0.5e18, WAD - 1] so desired is 50-100% of baseNav), but the
         // utilization-neutral cap is at most the claim scaled by the junior buffer per unit of senior seed -
-        // under 3% of the claim across this band, because the redeemed raw exposure is at most the claim and
-        // what remains covering the buffer is exactly st. The demanded bonus therefore NEVER pays in full,
-        // and the payout stays inside the junior buffer
+        // under 3% of the claim across this band, because under conservation the collateral NAV minus the
+        // junior buffer is exactly st. The demanded bonus therefore NEVER pays in full, and the payout stays
+        // inside the junior buffer
         assertLe(expectedBonus, baseNav.mulDiv(jtEffHand, st), "the bonus can never exceed the claim scaled by the junior buffer per unit of senior seed");
         assertLe(expectedBonus, jtEffHand, "the bonus can never exceed the junior buffer that sources it");
         assertLt(expectedBonus, baseNav, "a near-100% configured bonus must still pay out only a small fraction of the claim");
 
         uint256 balBefore = stJtVault.balanceOf(ST_PROVIDER);
-        _expectBonusBoostedRedeemEvent(baseSTAssets, baseJTAssets, baseNav, expectedBonus, expectedBonusReported, rate, shares);
+        _expectBonusBoostedRedeemEvent(baseCollateralAssets, baseNav, expectedBonus, expectedBonusReported, rate, shares);
         vm.prank(ST_PROVIDER);
         AssetClaims memory claims = seniorTranche.redeem(shares, ST_PROVIDER, ST_PROVIDER);
 
-        // Exact payout: the clamped bonus lands on the junior-asset leg (the junior tranche holds no cross-claim
-        // on senior raw NAV here to source from first) and the wallet delta matches both legs
+        // Exact payout: the clamped bonus lands on the single collateral leg and the wallet delta matches it
         assertEq(toUint256(claims.nav), baseNav + expectedBonusReported, "the redeemed NAV must be the pro-rata slice plus exactly the reported bonus");
-        assertEq(toUint256(claims.stAssets), baseSTAssets, "the senior-asset leg must be the unboosted pro-rata slice");
         assertEq(
-            toUint256(claims.jtAssets), baseJTAssets + expectedBonus.mulDiv(1e18, rate), "the junior-asset leg must carry the bonus at the drawn-down rate"
+            toUint256(claims.collateralAssets),
+            baseCollateralAssets + expectedBonus.mulDiv(1e18, rate),
+            "the collateral leg must be the pro-rata slice plus the bonus at the drawn-down rate"
         );
         assertEq(
-            stJtVault.balanceOf(ST_PROVIDER) - balBefore,
-            toUint256(claims.stAssets) + toUint256(claims.jtAssets),
-            "the wallet delta must equal both claimed legs exactly"
+            stJtVault.balanceOf(ST_PROVIDER) - balBefore, toUint256(claims.collateralAssets), "the wallet delta must equal the claimed collateral leg exactly"
         );
 
-        // Bank-run neutrality across the whole unvalidated setter range: coverage utilization on the committed
+        // Bank-run neutrality across the whole validated setter range: coverage utilization on the committed
         // post-redemption marks never exceeds its pre-redemption value, so no configured bonus - however
-        // absurd - can worsen the remaining LPs' coverage
+        // aggressive - can worsen the remaining LPs' coverage
         uint256 jtEffPost = toUint256(accountant.getState().lastJTEffectiveNAV);
-        uint256 covPost = RoycoTestMath.computeCoverageUtilization(
-            toUint256(accountant.getState().lastSTRawNAV), toUint256(accountant.getState().lastJTRawNAV), 0.2e18, jtEffPost
-        );
+        uint256 covPost = RoycoTestMath.computeCoverageUtilization(toUint256(accountant.getState().lastCollateralNAV), 0.2e18, jtEffPost);
         _assertCoverageUtilizationNeutralWithinCeilRounding(covPre, covPost, jtEffPost);
     }
 
     /**
      * @notice Asserts the anti-bank-run neutrality property to wei precision, allowing only the settlement-rounding
-     *         envelope the bonus clamp cannot avoid. Coverage utilization is ceil(coveredExposure x minCoverage /
+     *         envelope the bonus clamp cannot avoid. Coverage utilization is ceil(collateralNAV x minCoverage /
      *         jtEffectiveNAV). The bonus clamp floors the utilization-neutral bound, so in exact arithmetic the ratio
      *         is non-increasing, and the junior buffer side settles exactly (the effective NAV bookkeeping removes the
-     *         claim NAV directly, no conversion). The covered exposure side instead settles through floored NAV-to-asset
-     *         conversions, one per payout leg: the senior base leg, the junior base leg, and the bonus split across a
-     *         senior and a junior leg. Each floor pays the redeemer up to one asset wei short and leaves that wei
-     *         invested, so the committed coveredExposure numerator can sit up to 4 wei above the exact utilization-neutral
-     *         exposure (3 in this fixture, where the junior tranche holds no cross-claim on senior raw NAV and the senior
-     *         bonus leg is empty). Each numerator wei lifts the ceil by at most ceil(minCoverage / jtEffectiveNAV), an
-     *         envelope that only turns visible when a near-total exit shrinks jtEffectiveNAV to dust and the ceil goes
-     *         hypersensitive. A GENUINE neutrality breach scales with the paid bonus, a macroscopic fraction of
-     *         jtEffectiveNAV and orders of magnitude past this bound, so it still fails the assertion
+     *         reported bonus NAV directly, no conversion). The collateral side instead settles through floored
+     *         conversions on the single payout leg: the tranche-level claim conversion propagated through the pro-rata
+     *         scaling can under-value the granted base assets by up to one NAV wei, and the committed mark's own
+     *         assets-to-value floor contributes up to one more, so the committed collateralNAV numerator can sit up to
+     *         2 wei above the exact utilization-neutral value (the bonus leg contributes none: the reported bonus IS
+     *         the value of the granted bonus assets by construction). Each numerator wei lifts the ceil by at most
+     *         ceil(minCoverage / jtEffectiveNAV), an envelope that only turns visible when a near-total exit shrinks
+     *         jtEffectiveNAV to dust and the ceil goes hypersensitive. A GENUINE neutrality breach scales with the
+     *         paid bonus, a macroscopic fraction of jtEffectiveNAV and orders of magnitude past this bound, so it
+     *         still fails the assertion
      * @param _covPre The pre-redemption coverage utilization
      * @param _covPost The post-redemption coverage utilization on the committed marks
      * @param _jtEffPost The committed post-redemption junior effective NAV, the ceil-division denominator
@@ -283,8 +276,8 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
         // leaves zero senior effective NAV behind: coverage utilization is then a vacuous type(uint256).max sentinel over
         // no surviving senior claim, so the anti-bank-run property does not govern this state and there is nothing to bound
         if (_jtEffPost == 0) return;
-        // One wei per floored payout conversion: senior base, junior base, senior bonus, junior bonus
-        uint256 roundingSlackWei = 4;
+        // One wei from the scaled claim conversion, one from the committed mark's valuation floor
+        uint256 roundingSlackWei = 2;
         uint256 toleranceWAD = Math.mulDiv(roundingSlackWei, 0.2e18, _jtEffPost, Math.Rounding.Ceil);
         assertLe(
             _covPost, _covPre + toleranceWAD, "paying the self-liquidation bonus must never increase coverage utilization beyond the ceil-rounding envelope"
@@ -292,11 +285,10 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
     }
 
     /// @notice Arms the exact-args Redeem event check: the emitted claims must be the pro-rata slice with the
-    ///         derived bonus landing on the junior-asset leg at the drawn-down rate (kept out of the fuzz body
+    ///         derived bonus landing on the single collateral leg at the drawn-down rate (kept out of the fuzz body
     ///         to stay under the via-ir stack limit)
     function _expectBonusBoostedRedeemEvent(
-        uint256 _baseSTAssets,
-        uint256 _baseJTAssets,
+        uint256 _baseCollateralAssets,
         uint256 _baseNav,
         uint256 _expectedBonus,
         uint256 _expectedBonusReported,
@@ -305,10 +297,9 @@ contract TestFuzz_SeniorTrancheSelfLiquidationBonus_Kernel is MarketFuzzTestBase
     )
         private
     {
-        // The asset leg prices the sized bonus into tranche units, the NAV leg carries the reported value of those granted assets
+        // The asset leg prices the sized bonus into collateral tranche units, the NAV leg carries the reported value of those granted assets
         AssetClaims memory expectedClaims;
-        expectedClaims.stAssets = toTrancheUnits(_baseSTAssets);
-        expectedClaims.jtAssets = toTrancheUnits(_baseJTAssets + _expectedBonus.mulDiv(1e18, _rate));
+        expectedClaims.collateralAssets = toTrancheUnits(_baseCollateralAssets + _expectedBonus.mulDiv(1e18, _rate));
         expectedClaims.nav = toNAVUnits(_baseNav + _expectedBonusReported);
         vm.expectEmit(true, true, true, true, address(seniorTranche));
         emit IRoycoVaultTranche.Redeem(ST_PROVIDER, ST_PROVIDER, expectedClaims, _shares);

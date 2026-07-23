@@ -153,7 +153,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         address lp = _stLp(0);
         uint256 amount = 40_000e18;
 
-        NAV_UNIT depositedValue = _toSTValue(toTrancheUnits(amount));
+        NAV_UNIT depositedValue = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(amount));
         uint256 shares = _depositST(lp, amount);
 
         // A fresh depositor's shares are worth ~what they deposited — no windfall, no theft (down to floor dust).
@@ -181,18 +181,18 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         assertApproxEqAbs(priceAfter, priceBefore, priceTolerance, "a deposit must not move the senior share price beyond floor dust");
     }
 
-    /// @notice A senior deposit raises the live senior raw NAV by exactly the quoted deposit value, and
-    ///         two-term conservation holds on the live marks.
-    function test_deposit_increasesRawNAVByValue() external {
+    /// @notice A senior deposit raises the live collateral NAV (the raw mark BOTH coinvested tranches report)
+    ///         by exactly the quoted deposit value, and conservation holds on the live marks.
+    function test_deposit_increasesCollateralNAVByValue() external {
         _seedJT(200_000e18);
         uint256 amount = 50_000e18;
-        NAV_UNIT value = _toSTValue(toTrancheUnits(amount));
+        NAV_UNIT value = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(amount));
 
-        NAV_UNIT rawBefore = ST.getRawNAV();
+        NAV_UNIT rawBefore = _liveCollateralNAV();
         _depositST(_stLp(0), amount);
-        NAV_UNIT rawAfter = ST.getRawNAV();
+        NAV_UNIT rawAfter = _liveCollateralNAV();
 
-        assertApproxEqAbs(rawAfter, rawBefore + value, maxNAVDelta(), "stRawNAV must rise by the deposited value");
+        assertApproxEqAbs(rawAfter, rawBefore + value, maxNAVDelta(), "the collateral NAV must rise by the deposited value");
         _assertNAVConservation();
     }
 
@@ -409,7 +409,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
     function test_redeem_fullExit() external {
         _seedJT(200_000e18);
         address lp = _stLp(0);
-        NAV_UNIT deposited = _toSTValue(toTrancheUnits(70_000e18));
+        NAV_UNIT deposited = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(70_000e18));
         uint256 shares = _depositST(lp, 70_000e18);
         _sync();
 
@@ -449,8 +449,13 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         }
         _setLiquidationCoverageUtilization(coverageUtilizationWAD - 1);
 
-        AssetClaims memory claims = _redeemST(lp, shares / 4);
-        assertGt(claims.jtAssets, toTrancheUnits(0), "redeemer should receive a JT-funded self-liquidation bonus above the threshold");
+        // The bonus leg no longer has its own claims field: it lands inside the single collateral leg. The
+        // base claim is the exact pro-rata effective-NAV slice, so a payout strictly above that hand-derived
+        // base is the JT-funded bonus.
+        uint256 redeemShares = shares / 4;
+        uint256 baseClaimNAV = (toUint256(ST.totalAssets().nav) * redeemShares) / ST.totalSupply();
+        AssetClaims memory claims = _redeemST(lp, redeemShares);
+        assertGt(toUint256(claims.nav), baseClaimNAV, "redeemer should receive a JT-funded self-liquidation bonus above the threshold");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -471,8 +476,10 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         AssetClaims memory executed = _redeemST(lp, redeemShares);
 
         assertEq(executed.nav, previewed.nav, "previewRedeem nav must equal executed nav");
-        assertEq(executed.stAssets, previewed.stAssets, "previewRedeem stAssets must equal executed");
-        assertEq(executed.jtAssets, previewed.jtAssets, "previewRedeem jtAssets must equal executed");
+        // The st/jt claim legs merged into the one collateral leg, so one field equality covers both.
+        assertEq(executed.collateralAssets, previewed.collateralAssets, "previewRedeem collateralAssets must equal executed");
+        assertEq(executed.ltAssets, previewed.ltAssets, "previewRedeem ltAssets must equal executed");
+        assertEq(executed.stShares, previewed.stShares, "previewRedeem stShares must equal executed");
     }
 
     /// @notice `convertToShares` then `convertToAssets` round-trips a senior value with bounded floor loss and
@@ -482,7 +489,7 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         _depositST(_stLp(0), 60_000e18);
         _sync();
 
-        NAV_UNIT v = _toSTValue(toTrancheUnits(25_000e18));
+        NAV_UNIT v = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(25_000e18));
         uint256 shares = ST.convertToShares(_navToTU(v));
         NAV_UNIT back = ST.convertToAssets(shares).nav;
         assertLe(back, v, "convert round-trip cannot inflate value");
@@ -516,8 +523,8 @@ abstract contract Test_SeniorTrancheDepositWithdrawBase is Identical_ERC4626_Cha
         assertEq(ST.maxRedeem(lp), 0, "maxRedeem must be 0 while paused");
     }
 
-    /// @dev Convert a NAV_UNIT senior value back to TRANCHE_UNIT via the kernel (inverse of `_toSTValue`).
+    /// @dev Convert a NAV_UNIT value back to TRANCHE_UNIT via the kernel (inverse of `convertCollateralAssetsToValue`).
     function _navToTU(NAV_UNIT _value) internal view returns (TRANCHE_UNIT) {
-        return KERNEL.stConvertNAVUnitsToTrancheUnits(_value);
+        return KERNEL.convertValueToCollateralAssets(_value);
     }
 }

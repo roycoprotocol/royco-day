@@ -13,23 +13,22 @@ import {
 import {
     IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
 } from "../../../src/kernels/base/quoter/identical-st-jt/IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
-import {
-    BalancerV3_LT_BPTOracle_Quoter
-} from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
-import { toTrancheUnits, toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { BalancerV3_LT_BPTOracle_Quoter } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
+import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { RoycoJuniorTranche } from "../../../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoSeniorTranche } from "../../../src/tranches/RoycoSeniorTranche.sol";
 import { MockBPT } from "../../mocks/MockBPT.sol";
 import { MockERC20C } from "../../mocks/MockERC20C.sol";
 import { MockERC4626C } from "../../mocks/MockERC4626C.sol";
 import { MockThreeTokenVaultShim } from "../../mocks/MockThreeTokenVaultShim.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_Construction_Kernel
  * @notice Exercises the kernel family's construction- and initialization-time validation: null wiring, the
- *         required ST/JT asset identity, tranche-vs-kernel asset agreement, the liquidity pool's registration
+ *         coinvested tranche-vs-kernel collateral asset agreement, the liquidity pool's registration
  *         and token-pairing checks, and the optional initial conversion-rate seed
  * @dev These checks only ever run at market genesis, but each one guards a wiring mistake that would be
  *      unrecoverable behind the proxy once real deposits land, so every rejection path is pinned here
@@ -46,9 +45,8 @@ contract Test_Construction_Kernel is DayMarketTestBase {
     function _goodConstructionParams() internal view returns (IRoycoDayKernel.RoycoDayKernelConstructionParams memory) {
         return IRoycoDayKernel.RoycoDayKernelConstructionParams({
             seniorTranche: address(seniorTranche),
-            stAsset: address(stJtVault),
             juniorTranche: address(juniorTranche),
-            jtAsset: address(stJtVault),
+            collateralAsset: address(stJtVault),
             accountant: address(accountant),
             liquidityTranche: address(liquidityTranche),
             ltAsset: address(bpt),
@@ -92,19 +90,6 @@ contract Test_Construction_Kernel is DayMarketTestBase {
         IRoycoDayKernel.RoycoDayKernelConstructionParams memory params = _goodConstructionParams();
         params.seniorTranche = address(0);
         vm.expectRevert(IRoycoAuth.NULL_ADDRESS.selector);
-        new DayKernel(params);
-    }
-
-    /**
-     * @notice Distinct ST and JT assets are rejected at construction, both tranches must hold one shared
-     *         yield-bearing asset so the junior tranche's capital carries the senior tranche's exposure
-     * @dev The identity check is a pure address comparison in the base constructor, so it fires before any
-     *      quoter wiring can touch the foreign asset
-     */
-    function test_RevertIf_KernelConstructedWithDistinctTrancheAssets() public {
-        IRoycoDayKernel.RoycoDayKernelConstructionParams memory params = _goodConstructionParams();
-        params.jtAsset = makeAddr("FOREIGN_JT_ASSET");
-        vm.expectRevert(IRoycoDayKernel.TRANCHE_ASSETS_MUST_BE_IDENTICAL.selector);
         new DayKernel(params);
     }
 
@@ -159,17 +144,41 @@ contract Test_Construction_Kernel is DayMarketTestBase {
     // =============================
 
     /**
-     * @notice A kernel whose recorded ST asset disagrees with what the senior tranche actually custodies is rejected at initialization
+     * @notice A kernel whose recorded collateral asset disagrees with what the tranches actually custody is rejected at initialization
      * @dev The constructor cannot see the tranche's asset (the tranche may not exist yet), so the agreement check runs at
      *      initialize, where the tranche is live and queryable
      */
     function test_RevertIf_KernelInitializedWithMismatchedTrancheAsset() public {
-        // A fresh vault share the tranches do NOT custody, wired as the kernel's ST/JT asset
+        // A fresh vault share the tranches do NOT custody, wired as the kernel's collateral asset
         MockERC4626C foreignVault = new MockERC4626C(address(stJtUnderlying), "Foreign Vault Share", "fSHARE", 18);
         foreignVault.setRate(1e18);
         IRoycoDayKernel.RoycoDayKernelConstructionParams memory params = _goodConstructionParams();
-        params.stAsset = address(foreignVault);
-        params.jtAsset = address(foreignVault);
+        params.collateralAsset = address(foreignVault);
+        DayKernel mismatchedImpl = new DayKernel(params);
+
+        (IRoycoDayKernel.RoycoDayKernelInitParams memory standardParams, DayKernel.KernelSpecificInitParams memory specificParams) =
+            _goodInitParams(0, PROTOCOL_FEE_RECIPIENT);
+        bytes memory initData = abi.encodeCall(mismatchedImpl.initialize, (standardParams, specificParams));
+        vm.expectRevert(IRoycoDayKernel.TRANCHE_AND_KERNEL_ASSETS_MISMATCH.selector);
+        new ERC1967Proxy(address(mismatchedImpl), initData);
+    }
+
+    /**
+     * @notice A junior tranche custodying anything other than the kernel's collateral asset is rejected at
+     *         initialization, both tranches must deposit the one coinvested collateral asset so the junior
+     *         tranche's capital carries the senior tranche's exposure
+     * @dev Coinvestment is structural now (the kernel records one COLLATERAL_ASSET), so the old distinct
+     *      ST/JT asset rejection became a per-tranche asset agreement check at initialize, where the
+     *      tranche is live and queryable
+     */
+    function test_RevertIf_KernelInitializedWithForeignJuniorTrancheAsset() public {
+        // A junior tranche custodying a fresh vault share, wired against a kernel whose collateral is the fixture vault
+        MockERC4626C foreignVault = new MockERC4626C(address(stJtUnderlying), "Foreign Vault Share", "fSHARE", 18);
+        foreignVault.setRate(1e18);
+        RoycoJuniorTranche foreignJT = new RoycoJuniorTranche(address(foreignVault), address(kernel));
+
+        IRoycoDayKernel.RoycoDayKernelConstructionParams memory params = _goodConstructionParams();
+        params.juniorTranche = address(foreignJT);
         DayKernel mismatchedImpl = new DayKernel(params);
 
         (IRoycoDayKernel.RoycoDayKernelInitParams memory standardParams, DayKernel.KernelSpecificInitParams memory specificParams) =
@@ -216,10 +225,11 @@ contract Test_Construction_Kernel is DayMarketTestBase {
         DayKernel freshImpl = new DayKernel(_goodConstructionParams());
         (IRoycoDayKernel.RoycoDayKernelInitParams memory standardParams, DayKernel.KernelSpecificInitParams memory specificParams) =
             _goodInitParams(3e18, PROTOCOL_FEE_RECIPIENT);
-        DayKernel seededKernel = DayKernel(address(new ERC1967Proxy(address(freshImpl), abi.encodeCall(freshImpl.initialize, (standardParams, specificParams)))));
+        DayKernel seededKernel =
+            DayKernel(address(new ERC1967Proxy(address(freshImpl), abi.encodeCall(freshImpl.initialize, (standardParams, specificParams)))));
 
         assertEq(seededKernel.getStoredConversionRateWAD(), 3e18, "the initialization seed must land as the stored conversion rate");
-        assertEq(toUint256(seededKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 3e18, "one whole share must quote at the seeded 3.0 rate");
+        assertEq(toUint256(seededKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 3e18, "one whole share must quote at the seeded 3.0 rate");
     }
 }
 
@@ -240,7 +250,7 @@ contract Test_PreGenesisConversions_Kernel is DayMarketTestBase {
 
     /// @notice With zero BPT outstanding both conversion directions return zero, there is no pool value to apportion
     function test_LTConversions_ZeroBptSupplyResolvesToZero() public view {
-        assertEq(toUint256(kernel.ltConvertTrancheUnitsToNAVUnits(toTrancheUnits(5e18))), 0, "BPT -> NAV on an empty pool must be zero");
-        assertEq(toUint256(kernel.ltConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(5e18)))), 0, "NAV -> BPT on an empty pool must be zero");
+        assertEq(toUint256(kernel.convertLTAssetsToValue(toTrancheUnits(5e18))), 0, "BPT -> NAV on an empty pool must be zero");
+        assertEq(toUint256(kernel.convertValueToLTAssets(toNAVUnits(uint256(5e18)))), 0, "NAV -> BPT on an empty pool must be zero");
     }
 }

@@ -6,29 +6,29 @@ import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { AssetClaims, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
-import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 import { MarketFuzzTestBase } from "../../utils/MarketFuzzTestBase.sol";
+import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 
 /**
  * @title TestFuzz_RedemptionClaims_Kernel
  * @notice Fuzzes redemption payouts through the full production stack for all three tranches: a redeemer's
- *         claims must equal the floor-scaled pro-rata slice of its tranche's total claims (each leg derived by
- *         hand from the committed marks and the quoter rate), the tokens received must equal the claims to the
- *         wei, and no redemption can extract value beyond its pro-rata share of the tranche
- * @dev Every scenario first accrues fuzzed up-only yield and syncs, so the redemptions run against a state with
- *      a live cross-claim (the junior risk premium makes jtEffectiveNAV exceed jtRawNAV) and freshly minted
- *      premium and protocol-fee shares in the supplies. The no-extraction half is asserted in cross-multiplied
- *      integer form so no division rounding can hide a leak
+ *         claims must equal the floor-scaled pro-rata slice of its tranche's total claims (the claim NAV is
+ *         the tranche's effective NAV and the collateral leg is that NAV converted ONCE at the quoter rate),
+ *         the tokens received must equal the claims to the wei, and no redemption can extract value beyond
+ *         its pro-rata share of the tranche
+ * @dev Every scenario first accrues fuzzed up-only yield and syncs, so the redemptions run against a state
+ *      where the risk premium has shifted value from the senior to the junior claim and freshly minted
+ *      premium and protocol-fee shares sit in the supplies. The no-extraction half is asserted in
+ *      cross-multiplied integer form so no division rounding can hide a leak
  */
 contract TestFuzz_RedemptionClaims_Kernel is MarketFuzzTestBase {
     using Math for uint256;
 
     /**
-     * Scenario: after fuzzed vault yield and a sync, a senior LP redeems a fuzzed slice. On the gain path the
-     * senior tranche cedes the risk premium to the junior tranche, so its effective NAV is backed entirely by
-     * its own raw NAV: total senior claims are stAssets = floor((stRawNAV - (jtEffectiveNAV - jtRawNAV)) x 1e18 / rate) vault
-     * shares (the junior cross-claim subtracted) and no junior-asset leg. The redeemer receives the floor-scaled
-     * slice of each leg and its wallet delta must match the claims exactly.
+     * Scenario: after fuzzed vault yield and a sync, a senior LP redeems a fuzzed slice. The senior claim IS
+     * its effective NAV: total senior claims are collateralAssets = floor(stEffectiveNAV x 1e18 / rate) vault
+     * shares from the one coinvested pool (a single conversion, no per-leg decomposition). The redeemer
+     * receives the floor-scaled slice of each leg and its wallet delta must match the claims exactly.
      */
     function testFuzz_SeniorRedemption_PaysExactProRataClaims(
         uint256 _stSeed,
@@ -41,7 +41,7 @@ contract TestFuzz_RedemptionClaims_Kernel is MarketFuzzTestBase {
     {
         uint256 st = bound(_stSeed, 1e18, 1e26); // uniform over 8 orders of magnitude of senior seed size
         uint256 jt = bound(_jtSeed, st / 2, 2 * st); // uniform coverage ratios from 2:1 to 1:2
-        uint256 vb = bound(_vaultBps, 1, 10_000); // strictly positive yield so the risk-premium cross-claim is live
+        uint256 vb = bound(_vaultBps, 1, 10_000); // strictly positive yield so the risk premium moves value toward the junior claim
         uint256 elapsed = bound(_elapsed, 1 hours, 365 days); // premium accrual window from an hour to a year
         _seedFlatMarket(st, jt, 0);
 
@@ -50,18 +50,20 @@ contract TestFuzz_RedemptionClaims_Kernel is MarketFuzzTestBase {
         syncVenuePrices();
         SyncedAccountingState memory state = _sync();
 
-        // With the quote at 1.0 the composed quoter rate is just the accrued vault rate, exact
+        // With the quote at 1.0 the composed quoter rate is just the accrued vault rate, exact: the collateral
+        // mark is ONE conversion of the whole coinvested seed at that rate
         uint256 rate = 1e18 + vb * 1e14;
-        assertEq(toUint256(state.stRawNAV), st.mulDiv(rate, 1e18), "the senior raw mark must be the seed at the accrued rate");
-
-        // Decompose the committed marks: the junior cross-claim on senior raw NAV is the ceded risk premium
-        uint256 jtClaimOnSTRaw = toUint256(state.jtEffectiveNAV) - toUint256(state.jtRawNAV);
+        assertEq(toUint256(state.collateralNAV), (st + jt).mulDiv(rate, 1e18), "the collateral mark must be the whole seed at the accrued rate");
+        // Conservation at wei precision on the committed marks: the pool is exactly the sum of the tranche claims
         uint256 stEffectiveNAV = toUint256(state.stEffectiveNAV);
-        assertEq(stEffectiveNAV, toUint256(state.stRawNAV) - jtClaimOnSTRaw, "on the gain path the senior effective NAV is its raw NAV minus the ceded premium");
-        uint256 totalSTAssets = (toUint256(state.stRawNAV) - jtClaimOnSTRaw).mulDiv(1e18, rate);
+        assertEq(
+            stEffectiveNAV + toUint256(state.jtEffectiveNAV), toUint256(state.collateralNAV), "the effective NAVs must conserve the collateral mark exactly"
+        );
+        // The senior claim is its effective NAV converted once into the coinvested collateral asset
+        uint256 totalClaimAssets = stEffectiveNAV.mulDiv(1e18, rate);
 
         // The redeemer's slice: every claim leg floors independently over the EFFECTIVE supply (supply + VIRTUAL_SHARES),
-        // mirroring src _scaleAssetClaims, which now prices each field against totalTrancheShares + 1e6 so the virtual-share
+        // mirroring src _scaleAssetClaims, which prices each field against totalTrancheShares + 1e6 so the virtual-share
         // sliver stays behind (the redemption-side inflation-attack mitigation)
         uint256 supply = seniorTranche.totalSupply();
         // 1e6 share wei up to the full seeded balance: a smaller redemption can floor to a zero-asset payout,
@@ -70,7 +72,7 @@ contract TestFuzz_RedemptionClaims_Kernel is MarketFuzzTestBase {
         uint256 balBefore = stJtVault.balanceOf(ST_PROVIDER);
         // The Redeem event must carry exactly the derived claims (each leg floor-scaled independently over supply + 1e6)
         AssetClaims memory expectedClaims;
-        expectedClaims.stAssets = toTrancheUnits(totalSTAssets.mulDiv(shares, supply + 1e6));
+        expectedClaims.collateralAssets = toTrancheUnits(totalClaimAssets.mulDiv(shares, supply + 1e6));
         expectedClaims.nav = toNAVUnits(stEffectiveNAV.mulDiv(shares, supply + 1e6));
         vm.expectEmit(true, true, true, true, address(seniorTranche));
         emit IRoycoVaultTranche.Redeem(ST_PROVIDER, ST_PROVIDER, expectedClaims, shares);
@@ -78,20 +80,29 @@ contract TestFuzz_RedemptionClaims_Kernel is MarketFuzzTestBase {
         AssetClaims memory claims = seniorTranche.redeem(shares, ST_PROVIDER, ST_PROVIDER);
 
         assertEq(toUint256(claims.nav), stEffectiveNAV.mulDiv(shares, supply + 1e6), "redeemed NAV must be the floor-scaled slice of the senior effective NAV");
-        assertEq(toUint256(claims.stAssets), totalSTAssets.mulDiv(shares, supply + 1e6), "the senior-asset leg must be the floor-scaled slice of the own-raw claim");
-        assertEq(toUint256(claims.jtAssets), 0, "no junior-asset leg exists on the gain path");
-        assertEq(stJtVault.balanceOf(ST_PROVIDER) - balBefore, toUint256(claims.stAssets), "the wallet delta must equal the claimed vault shares exactly");
+        assertEq(
+            toUint256(claims.collateralAssets),
+            totalClaimAssets.mulDiv(shares, supply + 1e6),
+            "the collateral leg must be the floor-scaled slice of the once-converted senior claim"
+        );
+        assertEq(
+            stJtVault.balanceOf(ST_PROVIDER) - balBefore, toUint256(claims.collateralAssets), "the wallet delta must equal the claimed vault shares exactly"
+        );
 
         // No extraction beyond pro-rata: the payout NAV never exceeds the exact fractional slice, so the
         // remaining holders keep at least their prior NAV-per-share (cross-multiplied, no division rounding)
         assertLe(toUint256(claims.nav) * supply, stEffectiveNAV * shares, "the floor-scaled payout can never exceed the exact pro-rata slice");
-        assertGe((stEffectiveNAV - toUint256(claims.nav)) * supply, stEffectiveNAV * (supply - shares), "remaining senior holders must keep at least their prior NAV-per-share");
+        assertGe(
+            (stEffectiveNAV - toUint256(claims.nav)) * supply,
+            stEffectiveNAV * (supply - shares),
+            "remaining senior holders must keep at least their prior NAV-per-share"
+        );
     }
 
     /**
      * Scenario: after fuzzed vault yield and a sync, a junior LP redeems a fuzzed slice bounded by the coverage
-     * gate. The junior tranche's claims span both raw pools: its own full raw NAV plus the risk-premium
-     * cross-claim on senior raw NAV, each converted to vault shares at the accrued rate and floor-scaled.
+     * gate. The junior claim IS its effective NAV (its attributed share of the collateral gain plus the risk
+     * premium the senior ceded), converted ONCE into the coinvested collateral asset and floor-scaled.
      */
     function testFuzz_JuniorRedemption_PaysExactProRataClaims(
         uint256 _stSeed,
@@ -104,7 +115,7 @@ contract TestFuzz_RedemptionClaims_Kernel is MarketFuzzTestBase {
     {
         uint256 st = bound(_stSeed, 1e18, 1e26); // uniform over 8 orders of magnitude of senior seed size
         uint256 jt = bound(_jtSeed, st / 2, 2 * st); // uniform coverage ratios from 2:1 to 1:2, ample surplus for redemption
-        uint256 vb = bound(_vaultBps, 1, 10_000); // strictly positive yield so the cross-claim leg is live
+        uint256 vb = bound(_vaultBps, 1, 10_000); // strictly positive yield so the risk-premium shift is live
         uint256 elapsed = bound(_elapsed, 1 hours, 365 days); // premium accrual window from an hour to a year
         _seedFlatMarket(st, jt, 0);
 
@@ -114,20 +125,20 @@ contract TestFuzz_RedemptionClaims_Kernel is MarketFuzzTestBase {
         SyncedAccountingState memory state = _sync();
 
         uint256 rate = 1e18 + vb * 1e14;
-        uint256 jtClaimOnSTRaw = toUint256(state.jtEffectiveNAV) - toUint256(state.jtRawNAV);
         uint256 jtEffectiveNAV = toUint256(state.jtEffectiveNAV);
-        // The junior tranche's total claims: the ceded premium sits on senior raw NAV, its full own raw backs the rest
-        uint256 totalSTAssets = jtClaimOnSTRaw.mulDiv(1e18, rate);
-        uint256 totalJTAssets = toUint256(state.jtRawNAV).mulDiv(1e18, rate);
+        // Conservation at wei precision on the committed marks, then the junior claim converted once
+        assertEq(
+            toUint256(state.stEffectiveNAV) + jtEffectiveNAV, toUint256(state.collateralNAV), "the effective NAVs must conserve the collateral mark exactly"
+        );
+        uint256 totalClaimAssets = jtEffectiveNAV.mulDiv(1e18, rate);
 
         // Every claim leg floors over the EFFECTIVE supply (supply + VIRTUAL_SHARES), mirroring src _scaleAssetClaims
         uint256 supply = juniorTranche.totalSupply();
         uint256 shares = bound(_sharesSeed, 1e6, juniorTranche.maxRedeem(JT_PROVIDER)); // coverage-respecting slices above the zero-payout dust floor
         uint256 balBefore = stJtVault.balanceOf(JT_PROVIDER);
-        // The Redeem event must carry exactly the derived claims (both asset legs floor-scaled independently over supply + 1e6)
+        // The Redeem event must carry exactly the derived claims (the single collateral leg floor-scaled over supply + 1e6)
         AssetClaims memory expectedClaims;
-        expectedClaims.stAssets = toTrancheUnits(totalSTAssets.mulDiv(shares, supply + 1e6));
-        expectedClaims.jtAssets = toTrancheUnits(totalJTAssets.mulDiv(shares, supply + 1e6));
+        expectedClaims.collateralAssets = toTrancheUnits(totalClaimAssets.mulDiv(shares, supply + 1e6));
         expectedClaims.nav = toNAVUnits(jtEffectiveNAV.mulDiv(shares, supply + 1e6));
         vm.expectEmit(true, true, true, true, address(juniorTranche));
         emit IRoycoVaultTranche.Redeem(JT_PROVIDER, JT_PROVIDER, expectedClaims, shares);
@@ -135,16 +146,21 @@ contract TestFuzz_RedemptionClaims_Kernel is MarketFuzzTestBase {
         AssetClaims memory claims = juniorTranche.redeem(shares, JT_PROVIDER, JT_PROVIDER);
 
         assertEq(toUint256(claims.nav), jtEffectiveNAV.mulDiv(shares, supply + 1e6), "redeemed NAV must be the floor-scaled slice of the junior effective NAV");
-        assertEq(toUint256(claims.stAssets), totalSTAssets.mulDiv(shares, supply + 1e6), "the senior-asset leg must be the floor-scaled premium cross-claim slice");
-        assertEq(toUint256(claims.jtAssets), totalJTAssets.mulDiv(shares, supply + 1e6), "the junior-asset leg must be the floor-scaled own-raw claim slice");
         assertEq(
-            stJtVault.balanceOf(JT_PROVIDER) - balBefore,
-            toUint256(claims.stAssets) + toUint256(claims.jtAssets),
-            "the wallet delta must equal both claimed legs exactly"
+            toUint256(claims.collateralAssets),
+            totalClaimAssets.mulDiv(shares, supply + 1e6),
+            "the collateral leg must be the floor-scaled slice of the once-converted junior claim"
+        );
+        assertEq(
+            stJtVault.balanceOf(JT_PROVIDER) - balBefore, toUint256(claims.collateralAssets), "the wallet delta must equal the claimed vault shares exactly"
         );
 
         assertLe(toUint256(claims.nav) * supply, jtEffectiveNAV * shares, "the floor-scaled payout can never exceed the exact pro-rata slice");
-        assertGe((jtEffectiveNAV - toUint256(claims.nav)) * supply, jtEffectiveNAV * (supply - shares), "remaining junior holders must keep at least their prior NAV-per-share");
+        assertGe(
+            (jtEffectiveNAV - toUint256(claims.nav)) * supply,
+            jtEffectiveNAV * (supply - shares),
+            "remaining junior holders must keep at least their prior NAV-per-share"
+        );
     }
 
     /**
@@ -190,10 +206,8 @@ contract TestFuzz_RedemptionClaims_Kernel is MarketFuzzTestBase {
         // plus the LT fee, both priced against the retained senior NAV (stEffectiveNAV - premium - fee) at the
         // pre-sync supply. No liquidity-tranche shares are minted on a sync.
         uint256 retainedSeniorNAV = toUint256(state.stEffectiveNAV) - toUint256(state.ltLiquidityPremium) - toUint256(state.stProtocolFee);
-        uint256 idleShares =
-            RoycoTestMath.convertToShares(toUint256(state.ltLiquidityPremium) - toUint256(state.ltProtocolFee), retainedSeniorNAV, st);
-        uint256 stProtocolFeeShares =
-            RoycoTestMath.convertToShares(toUint256(state.stProtocolFee) + toUint256(state.ltProtocolFee), retainedSeniorNAV, st);
+        uint256 idleShares = RoycoTestMath.convertToShares(toUint256(state.ltLiquidityPremium) - toUint256(state.ltProtocolFee), retainedSeniorNAV, st);
+        uint256 stProtocolFeeShares = RoycoTestMath.convertToShares(toUint256(state.stProtocolFee) + toUint256(state.ltProtocolFee), retainedSeniorNAV, st);
         uint256 stSupplyAfterMints = st + idleShares + stProtocolFeeShares;
         IRoycoDayKernel.RoycoDayKernelState memory ks = kernel.getState();
         assertEq(ks.ltOwnedSeniorTrancheShares, idleShares, "ltOwnedSeniorTrancheShares must hold exactly the net premium mint");
@@ -222,9 +236,17 @@ contract TestFuzz_RedemptionClaims_Kernel is MarketFuzzTestBase {
 
         assertEq(toUint256(claims.nav), ltEff.mulDiv(shares, supply + 1e6), "redeemed NAV must be the floor-scaled slice of the two-leg LT effective NAV");
         assertEq(toUint256(claims.ltAssets), depth.mulDiv(shares, supply + 1e6), "the BPT leg must be the floor-scaled slice of the pool depth");
-        assertEq(claims.stShares, idleShares.mulDiv(shares, supply + 1e6), "the senior-share leg must be the floor-scaled slice of the idle liquidity premium senior shares");
+        assertEq(
+            claims.stShares,
+            idleShares.mulDiv(shares, supply + 1e6),
+            "the senior-share leg must be the floor-scaled slice of the idle liquidity premium senior shares"
+        );
         assertEq(bpt.balanceOf(LT_PROVIDER) - bptBefore, toUint256(claims.ltAssets), "the BPT wallet delta must equal the claim exactly");
-        assertEq(seniorTranche.balanceOf(LT_PROVIDER) - stSharesBefore, claims.stShares, "the idle liquidity premium senior shares must be sent directly to the redeemer");
+        assertEq(
+            seniorTranche.balanceOf(LT_PROVIDER) - stSharesBefore,
+            claims.stShares,
+            "the idle liquidity premium senior shares must be sent directly to the redeemer"
+        );
 
         assertLe(toUint256(claims.nav) * supply, ltEff * shares, "the floor-scaled payout can never exceed the exact pro-rata slice");
         assertGe(

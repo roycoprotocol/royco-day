@@ -41,7 +41,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * Nominal share mint at realistic post-sync outputs (FeeAndLiquidityPremiumLogic.sol:88-104): the premium
+     * Nominal share mint at realistic post-sync outputs (FeeAndLiquidityPremiumLogic.sol:79-99): the premium
      * and fee mints price jointly against the retained senior NAV, never against each other. At the default
      * residual eps = 1e6 the mint-dilution clamp is provably inert here (bind iff 2.5e18 * 1e6 > (1038.25e18+1) *
      * (1e18 - 1e6), i.e. 2.5e24 > ~1.038e39, false for both legs), so neither leg clamps.
@@ -76,7 +76,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     /**
      * Degenerate premium + fee == stEffectiveNAV (100% of the sync's senior effective NAV minted out as premium and fee, e.g. maximal
      * fees on a pure-gain sync from zero retained base) routes through the share-mint math's 1-wei
-     * denominator branch (ValuationLogic.sol, FeeAndLiquidityPremiumLogic.sol:98), and at the default residual
+     * denominator branch (ValuationLogic.sol:114, FeeAndLiquidityPremiumLogic.sol:94-97), and at the default residual
      * eps = 1e6 both legs BIND the mint-dilution clamp instead of minting unbounded shares.
      * retained = 10e18 - 4e18 - 6e18 = 0 -> the 1-wei denominator branch, and both legs bind:
      *   bind: ceil(4e18 * 1e6 / (1e18 - 1e6)) = ceil(~4.000004e6) > 1 (and likewise for the fee leg)
@@ -101,7 +101,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
 
     /**
      * Zero pre-sync supply with a NONZERO retained backing is the "empty but backed" state the virtual-shares
-     * mitigation deliberately does NOT mint 1:1 (ValuationLogic.sol:120-125): the fresh-tranche exemption fires
+     * mitigation deliberately does NOT mint 1:1 (ValuationLogic.sol:109-122): the fresh-tranche exemption fires
      * only when supply == 0 AND totalValue == 0, but here retained = 1038.25e18 > 0 (a premium/fee staged against
      * an empty senior supply), so each leg falls through to the priced branch and captures the staged backing at
      * the virtual-share floor 1e6 over (retained+1) instead of handing it out one-for-one.
@@ -151,7 +151,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     /**
      * The coverage-neutral premium mint invariant. Across _processFeesAndLiquidityPremium with the nominal
      * joint-pricing inputs above and a slippage-deferred reinvestment (drain 0):
-     * - delta stOwnedYieldBearingAssets == 0 (no senior assets enter or leave, so stRawNAV and coverageUtilization cannot move)
+     * - delta totalCollateralAssets == 0 (no collateral assets enter or leave, so the collateral NAV and coverageUtilization cannot move)
      * - delta ST supply == premShares + feeShares = 2_407_897_905_128_824_945 + 4_093_426_438_719_002_407
      * - delta idle premium share balance == premShares - reinvested = premShares - 0
      * - the reinvestment attempt is called once with (uint256 max, stEffectiveNAV, post-mint supply) so the idle premium senior shares
@@ -163,7 +163,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
      */
     function test_ProcessFeesAndLiquidityPremium_CoverageNeutralMint_IdlesWhenReinvestmentDefers() public {
         flp.ST_LEDGER().setTotalSupply(1000e18);
-        flp.setSTOwnedYieldBearingAssets(1000e18);
+        flp.setTotalCollateralAssets(1000e18);
         flp.setLTOwnedSeniorTrancheShares(5e18);
         flp.setReinvestSharesToDrain(0);
         SyncedAccountingState memory s = _mintState(1045e18, 2.5e18, 4.25e18);
@@ -171,7 +171,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
         flp.processFeesAndLiquidityPremium(s);
 
         // Coverage neutrality: the mint reassigns share ownership only, so every coverageUtilization input is untouched
-        assertEq(flp.stOwnedYieldBearingAssets(), 1000e18, "senior raw assets unchanged by the mint");
+        assertEq(flp.totalCollateralAssets(), 1000e18, "collateral assets unchanged by the mint");
         // Supply delta is exactly the two share mints
         assertEq(flp.ST_LEDGER().totalSupply(), 1_006_501_324_343_847_827_352, "supply grows by premShares + feeShares");
         assertEq(flp.ST_LEDGER().premiumMintCallCount(), 1, "one premium mint");
@@ -285,8 +285,8 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
         (uint256 premMixed, uint256 feeMixed, uint256 supplyMixed) =
             FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(_mintState(1e30, 1e30 - 2, 1), 3);
         assertEq(premMixed, 1_000_002_999_998_999_997, "binding premium leg clamps to floor((3+1e6)*(1e18-1e6)/1e6)");
-        assertEq(feeMixed, 500001, "fair fee leg floors to floor((3+1e6)*1/(1+1)) beside the binding sibling");
-        assertEq(supplyMixed, 3 + 1_000_002_999_998_999_997 + 500001, "supply identity across the mixed mints");
+        assertEq(feeMixed, 500_001, "fair fee leg floors to floor((3+1e6)*1/(1+1)) beside the binding sibling");
+        assertEq(supplyMixed, 3 + 1_000_002_999_998_999_997 + 500_001, "supply identity across the mixed mints");
     }
 
     /*//////////////////////////////////////////////////////////////////////
@@ -294,13 +294,13 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * The LT effective NAV (ValuationLogic.sol:73-91) is the raw pool depth plus the idle premium shares
+     * The LT effective NAV (ValuationLogic.sol:74-92) is the raw pool depth plus the idle premium shares
      * valued at the senior share price, flooring on the idle leg — the claimable leg a redeemer is owed.
      * ltEff = 100e18 + floor((1045e18+1) * 3e18 / (1004e18+1e6)) = 100e18 + 3_122_509_960_159_359_439
      * Edges: idleShares == 0 returns the raw NAV exactly, and stSupply == 0 returns the raw NAV exactly
      */
     function test_LTEffectiveNAV_IdleLegAndEdges() public {
-        flp.setLTOwnedYieldBearingAssets(100e18);
+        flp.setTotalLTAssets(100e18);
         flp.setLTOwnedSeniorTrancheShares(3e18);
         assertEq(
             toUint256(flp.ltEffectiveNAV(toNAVUnits(uint256(1045e18)), 1004e18)), 100e18 + 3_122_509_960_159_359_439, "raw depth plus the floored idle leg"
@@ -315,7 +315,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
         assertEq(toUint256(flp.ltEffectiveNAV(toNAVUnits(uint256(1045e18)), 0)), 100e18, "zero senior supply values the idle leg at zero");
         assertEq(RoycoTestMath.getLiquidityTrancheEffectiveNAV(100e18, 3e18, 1045e18, 0), 100e18, "RTM zero-supply edge");
 
-        // idleShares == 0 edge: pure BPT, the steady state
+        // idleShares == 0 edge: pure deployed inventory, the steady state
         flp.setLTOwnedSeniorTrancheShares(0);
         assertEq(toUint256(flp.ltEffectiveNAV(toNAVUnits(uint256(1045e18)), 1004e18)), 100e18, "no idle leg leaves the raw NAV exactly");
         assertEq(RoycoTestMath.getLiquidityTrancheEffectiveNAV(100e18, 0, 1045e18, 1004e18), 100e18, "RTM zero-idle edge");
@@ -334,7 +334,7 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
      */
     function test_LTProtocolFeeMint_CarvedFromPremiumAsSeniorSharesNoLTShares() public {
         flp.ST_LEDGER().setTotalSupply(1000e18);
-        flp.setSTOwnedYieldBearingAssets(1000e18);
+        flp.setTotalCollateralAssets(1000e18);
         flp.setLTOwnedSeniorTrancheShares(5e18);
         flp.setReinvestSharesToDrain(0);
         SyncedAccountingState memory s = _mintState(1045e18, 2.5e18, 4.25e18);
@@ -365,32 +365,27 @@ contract Test_FeeAndLiquidityPremium_Accountant is AccountantTestBase {
     }
 
     /*//////////////////////////////////////////////////////////////////////
-                ZERO-BPT-SLICE LT REDEMPTION
+                ZERO-LT-ASSET-SLICE LT REDEMPTION
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * An in-kind LT redemption whose proportional BPT slice floors to zero NAV while the idle premium ST-share
-     * slice is positive commits as a NAV-neutral redemption. Handing idle ST shares to the redeemer moves no raw
-     * NAV, only share ownership shifts and no assets leave the vault, so the accountant sees deltaLTRawNAV == 0 AND
-     * totalSTAndJTRedemptionNAV == 0. The LT_REDEEM op-shape require enforces only that a redemption never grows the
-     * LT's deployed raw NAV (deltaLTRawNAV <= 0), which this satisfies, so the operation commits with every raw and
-     * effective NAV untouched and conservation intact. The redeemer's rightful idle-premium claim is delivered, not
-     * stranded on the shape check.
+     * An in-kind LT redemption whose proportional slice of the deployed inventory floors to zero NAV while the
+     * idle premium ST-share slice is positive commits as a NAV-neutral redemption. Handing idle ST shares to the
+     * redeemer moves no raw NAV, only share ownership shifts and no assets leave the vault, so the accountant sees
+     * deltaLTRawNAV == 0 AND totalSTAndJTRedemptionNAV == 0. The LT_REDEEM op-shape require enforces only that a
+     * redemption never grows the LT's deployed raw NAV (deltaLTRawNAV <= 0), which this satisfies, so the operation
+     * commits with the collateral and every effective NAV untouched and conservation intact. The redeemer's
+     * rightful idle-premium claim is delivered, not stranded on the shape check.
      */
-    function test_LTRedeem_ZeroBPTSliceWithIdleSharesOnly_CommitsNavNeutral() public {
+    function test_LTRedeem_ZeroLTSliceWithIdleSharesOnly_CommitsNavNeutral() public {
         _seedSymmetric(1000e18, 200e18, 100e18);
-        SyncedAccountingState memory state = kernel.doPostOp(
-            Operation.LT_REDEEM, toNAVUnits(uint256(1000e18)), toNAVUnits(uint256(200e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, false
-        );
+        SyncedAccountingState memory state =
+            kernel.doPostOp(Operation.LT_REDEEM, toNAVUnits(uint256(1200e18)), toNAVUnits(uint256(100e18)), ZERO_NAV_UNITS, false);
         // No tranche NAV moved: the idle senior shares only changed hands, so every raw and effective NAV is untouched
         assertEq(toUint256(state.ltRawNAV), 100e18, "the LT deployed raw NAV must be untouched (a redemption never grows it)");
         assertEq(toUint256(state.stEffectiveNAV), 1000e18, "senior effective NAV must be untouched (the shares stay in supply)");
         assertEq(toUint256(state.jtEffectiveNAV), 200e18, "junior effective NAV must be untouched");
         // Conservation holds across the commit
-        assertEq(
-            toUint256(state.stRawNAV) + toUint256(state.jtRawNAV),
-            toUint256(state.stEffectiveNAV) + toUint256(state.jtEffectiveNAV),
-            "NAV conservation must hold"
-        );
+        assertEq(toUint256(state.collateralNAV), toUint256(state.stEffectiveNAV) + toUint256(state.jtEffectiveNAV), "NAV conservation must hold");
     }
 }

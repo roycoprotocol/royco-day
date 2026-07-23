@@ -88,7 +88,7 @@ contract TestFuzz_AdminOracleQuoterRateComposition_Kernel is Test {
     /**
      * Scenario: both admin-second-hop kernels are deployed over one set of fuzzed inputs, a Chainlink feed with
      * fuzzed decimals and price for the first, an ERC4626 vault with a fuzzed share rate for the second, both
-     * sharing one fuzzed admin rate, then one fuzzed amount is pushed through each kernel's senior tranche -> NAV
+     * sharing one fuzzed admin rate, then one fuzzed amount is pushed through each kernel's collateral -> NAV
      * conversion.
      *
      * Each forward conversion is pinned to a plain checked-integer composition written out from the raw fuzz inputs.
@@ -166,9 +166,9 @@ contract TestFuzz_AdminOracleQuoterRateComposition_Kernel is Test {
                 "the Chainlink-to-admin composed rate must be floor(feedPrice x adminRate / 10^feedDecimals)"
             );
             assertEq(
-                toUint256(chainlinkKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(amount))),
+                toUint256(chainlinkKernel.convertCollateralAssetsToValue(toTrancheUnits(amount))),
                 expectedNAV,
-                "senior tranche -> NAV through the Chainlink-to-admin quoter must equal the hand-composed two-hop floor derivation"
+                "collateral -> NAV through the Chainlink-to-admin quoter must equal the hand-composed two-hop floor derivation"
             );
         }
 
@@ -194,9 +194,9 @@ contract TestFuzz_AdminOracleQuoterRateComposition_Kernel is Test {
                 "the share-price-to-admin composed rate must be floor(vaultRate x adminRate / 1e18)"
             );
             assertEq(
-                toUint256(erc4626Kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(amount))),
+                toUint256(erc4626Kernel.convertCollateralAssetsToValue(toTrancheUnits(amount))),
                 expectedNAV,
-                "senior tranche -> NAV through the share-price-to-admin quoter must equal the hand-composed two-hop floor derivation"
+                "collateral -> NAV through the share-price-to-admin quoter must equal the hand-composed two-hop floor derivation"
             );
         }
     }
@@ -218,7 +218,7 @@ contract TestFuzz_AdminOracleQuoterRateComposition_Kernel is Test {
      * @return kernel The initialized kernel proxy exposing the quoter's conversion surface
      */
     function _deployChainlinkToAdminKernel(uint8 _feedDecimals, uint256 _feedPrice, uint256 _adminRateWAD) internal returns (ChainlinkToAdminKernel kernel) {
-        // One shared plain ERC20 doubles as BOTH tranche assets (the quoter family mandates identical ST/JT assets)
+        // One plain ERC20 is the market's ONE coinvested collateral asset shared by ST and JT
         MockERC20C trancheAsset = new MockERC20C("ST/JT Asset", "STJT", 18);
         // The constructor stamps the round at the current timestamp, so the answer stays fresh for the whole run
         MockAggregatorV3 feed = new MockAggregatorV3(_feedDecimals, int256(_feedPrice));
@@ -262,7 +262,7 @@ contract TestFuzz_AdminOracleQuoterRateComposition_Kernel is Test {
      */
     function _deployERC4626ToAdminKernel(uint256 _vaultRateWAD, uint256 _adminRateWAD) internal returns (ERC4626ToAdminKernel kernel) {
         MockERC20C underlying = new MockERC20C("Vault Underlying", "UNDR", 6);
-        // The shared vault share doubles as BOTH tranche assets (the quoter family mandates identical ST/JT assets)
+        // The vault share is the market's ONE coinvested collateral asset shared by ST and JT
         MockERC4626C vaultShare = new MockERC4626C(address(underlying), "ST/JT Vault Share", "vSHARE", 18);
         vaultShare.setRate(_vaultRateWAD);
         MarketPlumbing memory plumbing = _deployPlumbing(address(vaultShare), "ERC4626_KERNEL_DEPLOYER");
@@ -315,15 +315,14 @@ contract TestFuzz_AdminOracleQuoterRateComposition_Kernel is Test {
         plumbing.seniorTranche = address(new RoycoSeniorTranche(_stJtAsset, plumbing.predictedKernel));
         plumbing.juniorTranche = address(new RoycoJuniorTranche(_stJtAsset, plumbing.predictedKernel));
         plumbing.liquidityTranche = address(new RoycoLiquidityTranche(address(plumbing.bpt), plumbing.predictedKernel));
-        // The kernel constructor requires identical ST/JT assets
         plumbing.accountant = address(new RoycoDayAccountant(plumbing.predictedKernel));
 
         plumbing.balancerVault.registerPool(address(plumbing.bpt), [IERC20(plumbing.seniorTranche), IERC20(address(quoteToken))]);
     }
 
-    /// @notice Builds the kernel construction params over the deployed plumbing and the shared ST/JT asset
+    /// @notice Builds the kernel construction params over the deployed plumbing and the shared collateral asset
     /// @param _plumbing The deployed market plumbing
-    /// @param _stJtAsset The shared senior/junior tranche asset
+    /// @param _stJtAsset The coinvested collateral asset shared by the senior and junior tranches
     function _constructionParams(
         MarketPlumbing memory _plumbing,
         address _stJtAsset
@@ -334,9 +333,8 @@ contract TestFuzz_AdminOracleQuoterRateComposition_Kernel is Test {
     {
         return IRoycoDayKernel.RoycoDayKernelConstructionParams({
             seniorTranche: _plumbing.seniorTranche,
-            stAsset: _stJtAsset,
             juniorTranche: _plumbing.juniorTranche,
-            jtAsset: _stJtAsset,
+            collateralAsset: _stJtAsset,
             accountant: _plumbing.accountant,
             liquidityTranche: _plumbing.liquidityTranche,
             ltAsset: address(_plumbing.bpt),

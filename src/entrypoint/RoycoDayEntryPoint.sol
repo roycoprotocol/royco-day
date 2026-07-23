@@ -103,7 +103,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
             tranche: _tranche,
             queuedAtTimestamp: uint32(block.timestamp),
             // Snapshot the NAV of the escrowed assets, used to forfeit any yield they accrue during the request lifecycle
-            navAtRequestTime: _convertAssetsToNAV(config.kernel, config.trancheType, _assets),
+            navAtRequestTime: _convertAssetsToValue(config.kernel, config.trancheType, _assets),
             receiver: _receiver,
             executableAtTimestamp: (executableAtTimestamp = uint32(block.timestamp + config.baseConfig.depositDelaySeconds)),
             executorBonusWAD: _executorBonusWAD
@@ -511,7 +511,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
             }
         }
         // Return early without reverting if the maximum redeemable is 0 due to market conditions
-        if (_sharesToRedeem == 0) return (AssetClaims(ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, 0, ZERO_NAV_UNITS), 0);
+        if (_sharesToRedeem == 0) return (AssetClaims(ZERO_TRANCHE_UNITS, ZERO_TRANCHE_UNITS, 0, ZERO_NAV_UNITS), 0);
 
         // Mark the shares as redeemed
         uint256 sharesLeftToRedeem = request.shares - _sharesToRedeem;
@@ -637,7 +637,7 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         // Approve the tranche to pull the assets being deposited
         IERC20(_config.asset).forceApprove(_tranche, toUint256(_assets));
         // Compute the NAV of the assets being deposited at execution time
-        NAV_UNIT navAtExecutionTime = _convertAssetsToNAV(_config.kernel, _config.trancheType, _assets);
+        NAV_UNIT navAtExecutionTime = _convertAssetsToValue(_config.kernel, _config.trancheType, _assets);
         // If no yield accrued on the escrowed assets since placing the request, mint shares directly to the specified receiver
         if (navAtExecutionTime <= _navAtRequestTime) {
             userTrancheShares = IRoycoVaultTranche(_tranche).deposit(_assets, _receiver);
@@ -697,16 +697,17 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
     }
 
     /**
-     * @dev Converts an amount of a tranche's assets to NAV units using the market kernel's asset quoter for that tranche
+     * @dev Converts an amount of a tranche's assets to NAV units using the market kernel's quoter for that asset
+     * @dev The senior and junior tranches price through the single coinvested collateral quoter
      * @param _kernel The kernel of the market that the tranche belongs to
      * @param _trancheType The type of the tranche (senior, junior, or liquidity)
      * @param _assets The amount of assets to convert, denominated in the tranche's base asset units
-     * @return nav The NAV of the specified assets, denominated in the kernel's NAV units
+     * @return value The value of the specified assets, denominated in the kernel's NAV units
      */
-    function _convertAssetsToNAV(address _kernel, TrancheType _trancheType, TRANCHE_UNIT _assets) internal view returns (NAV_UNIT nav) {
-        if (_trancheType == TrancheType.SENIOR) return IRoycoDayKernel(_kernel).stConvertTrancheUnitsToNAVUnits(_assets);
-        else if (_trancheType == TrancheType.JUNIOR) return IRoycoDayKernel(_kernel).jtConvertTrancheUnitsToNAVUnits(_assets);
-        else return IRoycoDayKernel(_kernel).ltConvertTrancheUnitsToNAVUnits(_assets);
+    function _convertAssetsToValue(address _kernel, TrancheType _trancheType, TRANCHE_UNIT _assets) internal view returns (NAV_UNIT value) {
+        return (_trancheType == TrancheType.LIQUIDITY)
+            ? IRoycoDayKernel(_kernel).convertLTAssetsToValue(_assets)
+            : IRoycoDayKernel(_kernel).convertCollateralAssetsToValue(_assets);
     }
 
     /**
@@ -761,29 +762,16 @@ contract RoycoDayEntryPoint is RoycoBase, IRoycoDayEntryPoint {
         // Scale the asset claims to compute the executor bonus and the receiver's portion
         bonusClaims = TrancheClaimsLogic._scaleAssetClaims(_userClaims, _executorBonusWAD, WAD);
         // Deduct the NAV of the bonus claims from the user's claims
-        _userClaims.stAssets = _userClaims.stAssets - bonusClaims.stAssets;
-        _userClaims.jtAssets = _userClaims.jtAssets - bonusClaims.jtAssets;
+        _userClaims.collateralAssets = _userClaims.collateralAssets - bonusClaims.collateralAssets;
         _userClaims.ltAssets = _userClaims.ltAssets - bonusClaims.ltAssets;
         _userClaims.stShares = _userClaims.stShares - bonusClaims.stShares;
         _userClaims.nav = _userClaims.nav - bonusClaims.nav;
 
-        // Transfer the ST and JT asset claims to the executor and receiver respectively
-        if (_userClaims.stAssets != ZERO_TRANCHE_UNITS || _userClaims.jtAssets != ZERO_TRANCHE_UNITS) {
-            // Transfer the ST and JT asset claims to the executor and receiver respectively
-            address stAsset = IRoycoDayKernel(_kernel).ST_ASSET();
-            address jtAsset = IRoycoDayKernel(_kernel).JT_ASSET();
-            // If ST and JT have the same asset, do a batch transfer, else, transfer them separately
-            if (stAsset == jtAsset) {
-                TRANCHE_UNIT totalUserAssets = _userClaims.stAssets + _userClaims.jtAssets;
-                TRANCHE_UNIT totalBonus = bonusClaims.stAssets + bonusClaims.jtAssets;
-                IERC20(stAsset).safeTransfer(_receiver, toUint256(totalUserAssets));
-                if (totalBonus != ZERO_TRANCHE_UNITS) IERC20(stAsset).safeTransfer(msg.sender, toUint256(totalBonus));
-            } else {
-                if (_userClaims.stAssets != ZERO_TRANCHE_UNITS) IERC20(stAsset).safeTransfer(_receiver, toUint256(_userClaims.stAssets));
-                if (_userClaims.jtAssets != ZERO_TRANCHE_UNITS) IERC20(jtAsset).safeTransfer(_receiver, toUint256(_userClaims.jtAssets));
-                if (bonusClaims.stAssets != ZERO_TRANCHE_UNITS) IERC20(stAsset).safeTransfer(msg.sender, toUint256(bonusClaims.stAssets));
-                if (bonusClaims.jtAssets != ZERO_TRANCHE_UNITS) IERC20(jtAsset).safeTransfer(msg.sender, toUint256(bonusClaims.jtAssets));
-            }
+        // Transfer the collateral asset claims to the executor and receiver respectively
+        if (_userClaims.collateralAssets != ZERO_TRANCHE_UNITS) {
+            address collateralAsset = IRoycoDayKernel(_kernel).COLLATERAL_ASSET();
+            IERC20(collateralAsset).safeTransfer(_receiver, toUint256(_userClaims.collateralAssets));
+            if (bonusClaims.collateralAssets != ZERO_TRANCHE_UNITS) IERC20(collateralAsset).safeTransfer(msg.sender, toUint256(bonusClaims.collateralAssets));
         }
         // Transfer the LT asset claims to the executor and receiver respectively
         if (_userClaims.ltAssets != ZERO_TRANCHE_UNITS) {

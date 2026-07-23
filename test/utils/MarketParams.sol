@@ -22,8 +22,7 @@ import { MarketParamsConfig } from "./FixtureTypes.sol";
  *      jtYieldShareProtocolFeeWAD         | {0, 0.1e18, MAX_PROTOCOL_FEE_WAD}
  *      ltYieldShareProtocolFeeWAD         | {0, 0.1e18, MAX_PROTOCOL_FEE_WAD}
  *      fixedTermDurationSeconds           | {0, 1 hours, 2 weeks}
- *      stNAVDustTolerance                 | {0, 1, 1e12}
- *      jtNAVDustTolerance                 | {0, 1, 1e12}
+ *      dustTolerance                      | {0, 1, 1e12}
  *      stSelfLiquidationBonusWAD          | {0, 0.01e18}
  *      maxReinvestmentSlippageWAD         | {0, 0.001e18, WAD-1}
  *      enforceWhitelistOnTransfer         | {false, true}
@@ -52,8 +51,7 @@ function defaultParams() pure returns (MarketParamsConfig memory) {
         ltYieldShareProtocolFeeWAD: 0.1e18,
         // state machine / dust
         fixedTermDurationSeconds: 2 weeks,
-        stNAVDustTolerance: 1,
-        jtNAVDustTolerance: 1,
+        dustTolerance: 1,
         // kernel
         stSelfLiquidationBonusWAD: 0.01e18,
         maxReinvestmentSlippageWAD: 0.001e18,

@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { DeployScript } from "../../../script/Deploy.s.sol";
 import { DeploymentResult } from "../../../script/config/DeploymentTypes.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
+import { MarketState } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { Test_BalancerLPGateReinvestBase } from "../balancer/base/Test_BalancerLPGateReinvestBase.t.sol";
 
@@ -77,14 +78,18 @@ contract Neutrl_snUSD_Scenario is Test_BalancerLPGateReinvestBase {
 
         MarketSnapshot memory s = _snap();
 
-        // 2. Raw NAVs: the live tranche getters agree with the snapshot.
-        assertEq(toUint256(ST.getRawNAV()), toUint256(s.stRawNAV), string.concat(_ctx, ": ST getRawNAV vs snapshot"));
-        assertEq(toUint256(JT.getRawNAV()), toUint256(s.jtRawNAV), string.concat(_ctx, ": JT getRawNAV vs snapshot"));
-        if (testConfig.hasLiquidityTranche) {
-            assertEq(toUint256(LT.getRawNAV()), toUint256(s.ltRawNAV), string.concat(_ctx, ": LT getRawNAV vs snapshot"));
+        // 2. Standing state-machine biconditional: PERPETUAL iff zero IL. Every perpetual commit erases the
+        //    IL ledger and FIXED_TERM always carries il > 0, so the mixed states are unrepresentable.
+        if (s.marketState == MarketState.PERPETUAL) {
+            assertEq(toUint256(s.lastJTImpermanentLoss), 0, string.concat(_ctx, ": PERPETUAL must carry zero JT impermanent loss"));
+        } else {
+            assertGt(toUint256(s.lastJTImpermanentLoss), 0, string.concat(_ctx, ": FIXED_TERM must carry nonzero JT impermanent loss"));
         }
 
-        // 3. Effective NAVs and the full view surface are live (must not revert) after every step.
+        // 3. Raw NAVs: the per-tranche raw NAV surface is retired, the snapshot's single collateral mark and
+        //    LT mark are read straight off the kernel ledger through the production quoter path in _snap
+
+        // 4. Effective NAVs and the full view surface are live (must not revert) after every step.
         _sweepViewSurface(address(ST), string.concat(_ctx, ": ST"));
         _sweepViewSurface(address(JT), string.concat(_ctx, ": JT"));
         if (testConfig.hasLiquidityTranche) _sweepViewSurface(address(LT), string.concat(_ctx, ": LT"));
@@ -146,7 +151,8 @@ contract Neutrl_snUSD_Scenario is Test_BalancerLPGateReinvestBase {
     }
 
     /// @notice LPs entering and exiting around a premium window while liquidity is provisioned, exercising the
-    ///         multi-asset LT flows and a covered senior drawdown that transits FIXED_TERM and back.
+    ///         multi-asset LT flows and a covered senior drawdown plus recovery. snUSD runs permanently
+    ///         perpetual (term duration 0), so every commit resolves PERPETUAL and erases the drawdown's IL.
     function test_Scenario_premiumWindowAndCoveredDrawdown() public whenLT {
         uint256 fund = testConfig.initialFunding / 10;
 
@@ -167,7 +173,7 @@ contract Neutrl_snUSD_Scenario is Test_BalancerLPGateReinvestBase {
         _sync();
         _assertProtocolState("after covered drawdown sync");
 
-        // Recovery: yield restores the drawdown, the market returns to PERPETUAL.
+        // Recovery: yield restores the drawdown (a plain fee-gated gain, the IL was already erased at commit).
         _applySTYield(0.06e18);
         _warpForward(3 days);
         _sync();

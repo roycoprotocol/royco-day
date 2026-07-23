@@ -7,9 +7,9 @@ import {
 import { toTrancheUnits } from "../../../src/libraries/Units.sol";
 import { MockAggregatorV3 } from "../../mocks/MockAggregatorV3.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_OraclePoisonThroughFlow
@@ -25,15 +25,15 @@ contract Test_OraclePoisonThroughFlow is DayMarketTestBase {
     uint256 internal constant ST_SEED_WHOLE = 100;
     uint256 internal constant JT_SEED_WHOLE = 30;
 
-    uint256 internal stUnit;
+    uint256 internal collateralUnit;
     uint256 internal quoteUnit;
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        collateralUnit = 10 ** uint256(cell.collateralAsset.decimals);
         quoteUnit = 10 ** uint256(cell.quoteAsset.decimals);
         // Seed a healthy market (JT + ST + auto-seeded LT depth) so every flow under test is otherwise reachable.
-        _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
+        _seedMarket(ST_SEED_WHOLE * collateralUnit, JT_SEED_WHOLE * collateralUnit);
     }
 
     // ---------------------------------------------------------------------
@@ -55,15 +55,15 @@ contract Test_OraclePoisonThroughFlow is DayMarketTestBase {
     /// @dev Asserts that ST deposit, JT deposit, ST redeem, JT redeem, and a bare sync all revert with `_err`.
     ///      Uses the role-holding ST_PROVIDER/JT_PROVIDER so auth passes and the op reaches the oracle gate.
     function _assertAllSTJTFlowsRevert(bytes4 _err) internal {
-        _fundST(ST_PROVIDER, stUnit);
+        _fundST(ST_PROVIDER, collateralUnit);
         vm.prank(ST_PROVIDER);
         vm.expectRevert(_err);
-        seniorTranche.deposit(toTrancheUnits(stUnit), ST_PROVIDER);
+        seniorTranche.deposit(toTrancheUnits(collateralUnit), ST_PROVIDER);
 
-        _fundJT(JT_PROVIDER, stUnit);
+        _fundJT(JT_PROVIDER, collateralUnit);
         vm.prank(JT_PROVIDER);
         vm.expectRevert(_err);
-        juniorTranche.deposit(toTrancheUnits(stUnit), JT_PROVIDER);
+        juniorTranche.deposit(toTrancheUnits(collateralUnit), JT_PROVIDER);
 
         uint256 stShares = seniorTranche.balanceOf(ST_PROVIDER) / 10;
         vm.prank(ST_PROVIDER);
@@ -83,9 +83,9 @@ contract Test_OraclePoisonThroughFlow is DayMarketTestBase {
     /// @dev A clean deposit + sync succeed, proving the market recovers once the poison clears.
     function _assertFlowsRecover() internal {
         setOracleMode(ORACLE_MODE_NONE);
-        _fundST(ST_PROVIDER, stUnit);
+        _fundST(ST_PROVIDER, collateralUnit);
         vm.prank(ST_PROVIDER);
-        seniorTranche.deposit(toTrancheUnits(stUnit), ST_PROVIDER); // no revert
+        seniorTranche.deposit(toTrancheUnits(collateralUnit), ST_PROVIDER); // no revert
         _sync(); // no revert
     }
 

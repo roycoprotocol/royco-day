@@ -56,10 +56,10 @@ library DepositLogic {
         // The NAV to mint tranche shares at is the pre-deposit senior tranche controlled NAV
         effectiveNAV = state.stEffectiveNAV;
         // The deposit NAV is the value of the deposited assets
-        depositNAV = IRoycoDayKernel(address(this)).stConvertTrancheUnitsToNAVUnits(_assets);
+        depositNAV = IRoycoDayKernel(address(this)).convertCollateralAssetsToValue(_assets);
 
         // Credit the deposited assets to the senior tranche
-        $.stOwnedYieldBearingAssets = $.stOwnedYieldBearingAssets + _assets;
+        $.totalCollateralAssets = $.totalCollateralAssets + _assets;
 
         // Execute a post-deposit sync on accounting and enforce the market's coverage and liquidity requirements against the new senior exposure
         AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.ST_DEPOSIT, ZERO_NAV_UNITS, true);
@@ -98,10 +98,10 @@ library DepositLogic {
         // The NAV to mint tranche shares at is the pre-deposit junior tranche controlled NAV
         effectiveNAV = state.jtEffectiveNAV;
         // The deposit NAV is the value of the deposited assets
-        depositNAV = IRoycoDayKernel(address(this)).jtConvertTrancheUnitsToNAVUnits(_assets);
+        depositNAV = IRoycoDayKernel(address(this)).convertCollateralAssetsToValue(_assets);
 
         // Credit the deposited assets to the junior tranche
-        $.jtOwnedYieldBearingAssets = $.jtOwnedYieldBearingAssets + _assets;
+        $.totalCollateralAssets = $.totalCollateralAssets + _assets;
 
         // Execute a post-deposit sync on accounting. A JT deposit grows the loss-absorption buffer and only improves coverage, so no requirements are enforced
         AccountingSyncLogic._postOpSyncTrancheAccounting($, _immutables, Operation.JT_DEPOSIT, ZERO_NAV_UNITS, false);
@@ -138,10 +138,10 @@ library DepositLogic {
         // The NAV to mint tranche shares at is the pre-deposit liquidity tranche effective NAV (its MM depth in addition to its idle liquidity-premium senior shares the kernel holds)
         effectiveNAV = ValuationLogic._getLiquidityTrancheEffectiveNAV($, state.stEffectiveNAV, IERC20(_immutables.seniorTranche).totalSupply());
         // The deposit NAV is the value of the deposited assets
-        depositNAV = IRoycoDayKernel(address(this)).ltConvertTrancheUnitsToNAVUnits(_assets);
+        depositNAV = IRoycoDayKernel(address(this)).convertLTAssetsToValue(_assets);
 
         // Credit the deposited assets to the liquidity tranche
-        $.ltOwnedYieldBearingAssets = $.ltOwnedYieldBearingAssets + _assets;
+        $.totalLTAssets = $.totalLTAssets + _assets;
 
         // Execute a post-deposit sync on accounting
         // An in-kind LT deposit only adds market-making depth and improves liquidity, so no requirements are enforced
@@ -152,15 +152,15 @@ library DepositLogic {
     }
 
     /**
-     * @notice Atomically enters the liquidity tranche with the LT assets' constituent assets: deposits ST underlying (minting senior
+     * @notice Atomically enters the liquidity tranche with the LT assets' constituent assets: deposits collateral (minting senior
      *         shares), adds (senior shares + quote) into the liquidity venue to mint the LT tranche assets, then deposits them into the LT
-     * @dev Assumes the ST underlying and quote have been transferred to the kernel before this call (by the LT tranche)
+     * @dev Assumes the collateral and quote have been transferred to the kernel before this call (by the LT tranche)
      * @dev Enabled in a PERPETUAL market state, and in a fixed-term market only for a quote-only deposit that mints no senior shares
      * @dev The combined new senior exposure is gated by the market's coverage and liquidity requirements, reverts if either is unsatisfied
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _immutables The immutable storage state of the Royco Kernel that is delegatecalling into this function
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
-     * @param _stAssets The amount of ST underlying (the senior tranche's base asset) to deposit, denominated in ST tranche units
+     * @param _collateralAssets The amount of collateral to deposit for the senior leg, denominated in tranche units
      * @param _quoteAssets The amount of quote asset to add as the second venue leg
      * @param _minLTAssetsOut The minimum LT tranche assets the liquidity add must mint (slippage bound against an unfavorable venue state)
      * @return depositNAV The value of the minted LT tranche assets, denominated in the kernel's NAV units
@@ -171,33 +171,33 @@ library DepositLogic {
         IRoycoDayKernel.RoycoDayKernelState storage $,
         IRoycoDayKernel.RoycoDayKernelImmutableState memory _immutables,
         bool _isPreview,
-        TRANCHE_UNIT _stAssets,
+        TRANCHE_UNIT _collateralAssets,
         uint256 _quoteAssets,
         TRANCHE_UNIT _minLTAssetsOut
     )
         external
         returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT ltAssetsOut)
     {
-        // At least one constituent leg (ST underlying or quote) must be supplied
-        require(_stAssets != ZERO_TRANCHE_UNITS || _quoteAssets != 0, IRoycoDayKernel.MUST_DEPOSIT_NON_ZERO_ASSETS());
+        // At least one constituent leg (collateral or quote) must be supplied
+        require(_collateralAssets != ZERO_TRANCHE_UNITS || _quoteAssets != 0, IRoycoDayKernel.MUST_DEPOSIT_NON_ZERO_ASSETS());
 
         // Execute an accounting sync to reconcile underlying PNL
         (SyncedAccountingState memory state,, uint256 totalSTShares) = AccountingSyncLogic._preOpSyncTrancheAccounting($, _immutables, TrancheType.SENIOR);
         // ST deposits are disabled during a fixed-term market state, so the market only accepts quote-only LT deposits
-        require(state.marketState == MarketState.PERPETUAL || _stAssets == ZERO_TRANCHE_UNITS, IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE());
+        require(state.marketState == MarketState.PERPETUAL || _collateralAssets == ZERO_TRANCHE_UNITS, IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE());
         // The NAV to mint tranche shares at is the pre-deposit liquidity tranche effective NAV (its MM depth plus the idle liquidity-premium senior shares the kernel holds), read before the add moves the venue mark
         effectiveNAV = ValuationLogic._getLiquidityTrancheEffectiveNAV($, state.stEffectiveNAV, totalSTShares);
 
-        // If the ST asset leg is supplied, mint the corresponding non-diluting senior shares (priced at the pre-deposit senior effective NAV and pre-mint supply) to seed the add's senior leg
+        // If the collateral leg is supplied, mint the corresponding non-diluting senior shares (priced at the pre-deposit senior effective NAV and pre-mint supply) to seed the add's senior leg
         uint256 stSharesMinted;
-        if (_stAssets != ZERO_TRANCHE_UNITS) {
+        if (_collateralAssets != ZERO_TRANCHE_UNITS) {
             // Compute the number of senior tranche shares to mint for this ST asset deposit
             stSharesMinted = ValuationLogic._convertToShares(
-                IRoycoDayKernel(address(this)).stConvertTrancheUnitsToNAVUnits(_stAssets), state.stEffectiveNAV, totalSTShares, Math.Rounding.Floor
+                IRoycoDayKernel(address(this)).convertCollateralAssetsToValue(_collateralAssets), state.stEffectiveNAV, totalSTShares, Math.Rounding.Floor
             );
-            // Credit the deposited ST underlying to the senior raw NAV and mint the corresponding senior shares to the kernel (raises supply only)
+            // Credit the deposited collateral to the ledger and mint the corresponding senior shares to the kernel (raises supply only)
             // NOTE: The final post-op accounts for this ST deposit in addition to the subsequent LT deposit in one batch call
-            $.stOwnedYieldBearingAssets = $.stOwnedYieldBearingAssets + _stAssets;
+            $.totalCollateralAssets = $.totalCollateralAssets + _collateralAssets;
             IRoycoVaultTranche(_immutables.seniorTranche).mint(address(this), stSharesMinted);
         }
 
@@ -207,12 +207,12 @@ library DepositLogic {
         (ltAssetsOut, depositNAV, postOpLTRawNAV) = IRoycoDayKernel(address(this)).addLiquidity(_isPreview, stSharesMinted, _quoteAssets, _minLTAssetsOut);
 
         // Credit the minted LT tranche assets to the liquidity tranche
-        $.ltOwnedYieldBearingAssets = $.ltOwnedYieldBearingAssets + ltAssetsOut;
+        $.totalLTAssets = $.totalLTAssets + ltAssetsOut;
 
-        // Execute a post-deposit sync on accounting at the venue-marked LT raw NAV: it commits both the ST-leg deposit (deltaSTRawNAV >= 0) and the new venue depth (deltaLTRawNAV > 0), enforcing the market's coverage and liquidity requirements only when senior exposure was added
+        // Execute a post-deposit sync on accounting at the venue-marked LT raw NAV: it commits both the collateral-leg deposit (deltaCollateralNAV >= 0) and the new venue depth (deltaLTRawNAV > 0), enforcing the market's coverage and liquidity requirements only when senior exposure was added
         // A quote-only deposit mints no senior shares: it cannot worsen coverage and only deepens liquidity, so it is guaranteed to be at least coverage and liquidity neutral
         AccountingSyncLogic._postOpSyncTrancheAccounting(
-            $, _immutables, Operation.LT_MULTI_ASSET_DEPOSIT, postOpLTRawNAV, ZERO_NAV_UNITS, (_stAssets != ZERO_TRANCHE_UNITS)
+            $, _immutables, Operation.LT_MULTI_ASSET_DEPOSIT, postOpLTRawNAV, ZERO_NAV_UNITS, (_collateralAssets != ZERO_TRANCHE_UNITS)
         );
 
         // A preview carries its result out via this revert, unwinding every mutation this flow made
@@ -247,8 +247,9 @@ library DepositLogic {
         if (state.marketState == MarketState.FIXED_TERM) return ZERO_TRANCHE_UNITS;
         // ST deposits are enabled as long as the market's coverage and liquidity requirements are satisfied
         NAV_UNIT stMaxDepositableNAV = IRoycoDayAccountant(_immutables.accountant).maxSTDeposit(state);
-        return
-            ((stMaxDepositableNAV == MAX_NAV_UNITS) ? MAX_TRANCHE_UNITS : IRoycoDayKernel(address(this)).stConvertNAVUnitsToTrancheUnits(stMaxDepositableNAV));
+        // A zero capacity needs no backward conversion, which would divide by a wiped (zero) collateral rate
+        if (stMaxDepositableNAV == ZERO_NAV_UNITS) return ZERO_TRANCHE_UNITS;
+        return ((stMaxDepositableNAV == MAX_NAV_UNITS) ? MAX_TRANCHE_UNITS : IRoycoDayKernel(address(this)).convertValueToCollateralAssets(stMaxDepositableNAV));
     }
 
     /**

@@ -77,7 +77,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         uint256 quoteBal0 = IERC20(testConfig.quoteAsset).balanceOf(_lp);
         uint256 stShareBal0 = ST.balanceOf(_lp);
         _doRedeemLTMulti(_lp, _shares, 0, 0);
-        valueNAV = toUint256(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(IERC20(testConfig.stAsset).balanceOf(_lp) - stAssetBal0)))
+        valueNAV = toUint256(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(IERC20(testConfig.stAsset).balanceOf(_lp) - stAssetBal0)))
             + _quoteToNAV(IERC20(testConfig.quoteAsset).balanceOf(_lp) - quoteBal0) + _stSharesToNAVAtRate(ST.balanceOf(_lp) - stShareBal0, _kernelRate());
     }
 
@@ -90,7 +90,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
     function test_ExternalAddUnbalanced_syncs_kernelLedgerUntouched() public {
         _seedForSwaps();
         _sync();
-        uint256 ltOwned0 = toUint256(KERNEL.getState().ltOwnedYieldBearingAssets);
+        uint256 ltOwned0 = toUint256(KERNEL.getState().totalLTAssets);
         uint256 supply0 = _bptSupply();
 
         address actor = _makeExternalLP("EXTERNAL_UNBALANCED_ADDER");
@@ -103,7 +103,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         (uint256 syncCount,) = _lastLogData(vm.getRecordedLogs(), address(ACCOUNTANT), IRoycoDayAccountant.TrancheAccountingSynced.selector);
 
         assertEq(syncCount, 1, "the before-add hook must sync the kernel exactly once");
-        assertEq(toUint256(KERNEL.getState().ltOwnedYieldBearingAssets), ltOwned0, "an external add must not move the kernel's owned-BPT ledger");
+        assertEq(toUint256(KERNEL.getState().totalLTAssets), ltOwned0, "an external add must not move the kernel's owned-BPT ledger");
         assertEq(IERC20(POOL).balanceOf(actor), bptOut, "the minted BPT must land with the external actor");
         assertEq(_bptSupply(), supply0 + bptOut, "the BPT supply must grow by exactly the external mint");
     }
@@ -121,7 +121,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         _sync();
         uint256 w0 = _stValueShareWAD();
         uint256 spot0 = _spotSTinQuoteWAD();
-        uint256 ltRaw0 = toUint256(LT.getRawNAV());
+        uint256 ltRaw0 = toUint256(_liveLTRawNAV());
 
         address actor = _makeExternalLP("EXTERNAL_SINGLE_SIDED_ADDER");
         uint256 stShares = _rawBalances()[_stPoolIndex()] / 20;
@@ -136,7 +136,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         assertApproxEqAbs(leak, expectedLeak, slack, "the adder's realized leak must match (1-w)*V*(f + (1-q))");
 
         // Oracle-basis sanity: the kernel's LT mark can only gain from an external add.
-        assertGe(toUint256(LT.getRawNAV()) + _tol2(), ltRaw0, "an external add can never dilute the kernel's LT mark");
+        assertGe(toUint256(_liveLTRawNAV()) + _tol2(), ltRaw0, "an external add can never dilute the kernel's LT mark");
     }
 
     /// @notice an external PROPORTIONAL add is value-neutral to everyone else: NAV-per-BPT and the
@@ -145,12 +145,12 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         _seedForSwaps();
         _sync();
         uint256 navPerBPT0 = _navPerBPTWAD();
-        uint256 ltRaw0 = toUint256(LT.getRawNAV());
+        uint256 ltRaw0 = toUint256(_liveLTRawNAV());
 
         _externalProportionalPosition("EXTERNAL_PROPORTIONAL_ADDER", _bptSupply() / 10);
 
         assertGe(_navPerBPTWAD() + 2, navPerBPT0, "a proportional add must not dilute NAV per BPT (rounding favors the pool)");
-        assertApproxEqAbs(toUint256(LT.getRawNAV()), ltRaw0, _tol2(), "a proportional add must leave the kernel's LT mark unchanged");
+        assertApproxEqAbs(toUint256(_liveLTRawNAV()), ltRaw0, _tol2(), "a proportional add must leave the kernel's LT mark unchanged");
     }
 
     /**
@@ -192,7 +192,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         address actor = _externalProportionalPosition("EXTERNAL_SINGLE_EXITER", _bptSupply() / 5);
 
         uint256 navPerBPT0 = _navPerBPTWAD();
-        uint256 ltRaw0 = toUint256(LT.getRawNAV());
+        uint256 ltRaw0 = toUint256(_liveLTRawNAV());
         uint256 spot0 = _spotSTinQuoteWAD();
         uint256 quoteShare0 = WAD - _stValueShareWAD();
         uint256 phi0 = _kernelPoolShareWAD();
@@ -202,7 +202,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         _externalRemoveSingleTokenExactIn(actor, bptIn, testConfig.quoteAsset);
 
         assertGe(_navPerBPTWAD() + 2, navPerBPT0, "a single-token exit must pay the remainers, never dilute them");
-        uint256 ltRaw1 = toUint256(LT.getRawNAV());
+        uint256 ltRaw1 = toUint256(_liveLTRawNAV());
         assertGe(ltRaw1 + _tol2(), ltRaw0, "the kernel's LT mark must weakly gain from the exit fee");
         // Upper bound: the kernel's share of the exit's fee + internal-price leak (the exit-side analogue of
         // the add leak law: the withdrawn single token is priced internally, in [alpha, beta]), padded by the
@@ -331,7 +331,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         // Headroom from the committed checkpoint: util <= WAD  <=>  stEffectiveNAV <= ltRawNAV * WAD / minLiq.
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
         uint256 headroomNAV = Math.mulDiv(toUint256(a.lastLTRawNAV), WAD, a.minLiquidityWAD) - toUint256(a.lastSTEffectiveNAV);
-        uint256 breachAssets = toUint256(KERNEL.stConvertNAVUnitsToTrancheUnits(toNAVUnits(headroomNAV))) * 101 / 100 + 10;
+        uint256 breachAssets = toUint256(KERNEL.convertValueToCollateralAssets(toNAVUnits(headroomNAV))) * 101 / 100 + 10;
 
         vm.startPrank(ST_BOB_ADDRESS);
         IERC20(testConfig.stAsset).approve(address(ST), breachAssets);
@@ -408,7 +408,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         uint256 snapshotId = vm.snapshotState();
         assertTrue(_trySetReinvestmentSlippage(uint64(WAD - 1)), "probe: the slippage seam must open");
         (, uint256 idleValueNAV) = _idleLiquidityPremiumValueNAV();
-        fairBPT = toUint256(KERNEL.ltConvertNAVUnitsToTrancheUnits(toNAVUnits(idleValueNAV)));
+        fairBPT = toUint256(KERNEL.convertValueToLTAssets(toNAVUnits(idleValueNAV)));
         (, uint256 ltAssetsMinted, uint256 eventCount) = _manualReinvestAll();
         assertEq(eventCount, 1, "probe: the wide-open gate must deploy the premium");
         haircutWAD = ltAssetsMinted >= fairBPT ? 0 : WAD - Math.mulDiv(ltAssetsMinted, WAD, fairBPT);
@@ -600,12 +600,12 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
 
         uint256[] memory raw0 = _rawBalances();
         uint256 supply0 = _bptSupply();
-        uint256 ltOwned0 = toUint256(KERNEL.getState().ltOwnedYieldBearingAssets);
+        uint256 ltOwned0 = toUint256(KERNEL.getState().totalLTAssets);
         uint256 redeemerQuote0 = IERC20(testConfig.quoteAsset).balanceOf(LT_ALICE_ADDRESS);
 
         _doRedeemLTMulti(LT_ALICE_ADDRESS, LT.balanceOf(LT_ALICE_ADDRESS) / 4, 0, 0);
 
-        uint256 bptBurned = ltOwned0 - toUint256(KERNEL.getState().ltOwnedYieldBearingAssets);
+        uint256 bptBurned = ltOwned0 - toUint256(KERNEL.getState().totalLTAssets);
         assertGt(bptBurned, 0, "arrange: the redemption must burn a venue slice");
         uint256[] memory raw1 = _rawBalances();
         assertApproxEqAbs(
@@ -639,7 +639,7 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
 
         uint256 shares = LT.balanceOf(LT_ALICE_ADDRESS) / 4;
         uint256 charged = Math.mulDiv(toUint256(LT.totalAssets().nav), shares, LT.totalSupply());
-        uint256 ltOwned0 = toUint256(KERNEL.getState().ltOwnedYieldBearingAssets);
+        uint256 ltOwned0 = toUint256(KERNEL.getState().totalLTAssets);
         uint256 sliceGapCeiling = Math.mulDiv(
             Math.mulDiv(ltOwned0, shares, LT.totalSupply()), // the BPT slice the redemption burns
             _markToMarketAtFeeds() - _poolTVL(),
@@ -687,8 +687,8 @@ abstract contract Test_BalancerLPGateReinvestBase is Test_BalancerSwapRateOracle
         uint256 sharePrice0 = toUint256(LT.previewRedeem(1e18).nav);
 
         uint256 stLeg = _rawBalances()[_stPoolIndex()] / 10;
-        uint256 quoteLeg = _quoteAssetsForValue(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(stLeg)));
-        uint256 contributed = toUint256(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(stLeg))) + _quoteToNAV(quoteLeg);
+        uint256 quoteLeg = _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(stLeg)));
+        uint256 contributed = toUint256(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(stLeg))) + _quoteToNAV(quoteLeg);
 
         uint256 shares = _doDepositLTMulti(LT_ALICE_ADDRESS, stLeg, quoteLeg, 0).shares;
 

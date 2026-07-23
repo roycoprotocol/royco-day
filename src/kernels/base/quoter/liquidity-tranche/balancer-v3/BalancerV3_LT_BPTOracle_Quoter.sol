@@ -135,7 +135,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
      * @dev The oracle is read live on every call rather than through the quoter cache: the kernel mints, joins, and exits the pool
      *      within a single transaction, so a value cached at the start of the operation would be stale by the time it is consumed
      */
-    function ltConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _ltAssets) public view virtual override(RoycoDayKernel) returns (NAV_UNIT) {
+    function convertLTAssetsToValue(TRANCHE_UNIT _ltAssets) public view virtual override(RoycoDayKernel) returns (NAV_UNIT) {
         TRANCHE_UNIT bptTotalSupply = toTrancheUnits(_vault.totalSupply(LT_ASSET));
         if (bptTotalSupply == ZERO_TRANCHE_UNITS) return ZERO_NAV_UNITS;
         NAV_UNIT bptTotalNAV = toNAVUnits(LPOracleBase(_getBalancerV3_LT_BPTOracle_QuoterStorage().bptOracle).computeTVL());
@@ -144,7 +144,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
 
     /// @inheritdoc RoycoDayKernel
     /// @dev Converts the NAV amount to a BPT amount at the same live, manipulation-resistant NAV per BPT, rounding down
-    function ltConvertNAVUnitsToTrancheUnits(NAV_UNIT _value) public view virtual override(RoycoDayKernel) returns (TRANCHE_UNIT) {
+    function convertValueToLTAssets(NAV_UNIT _value) public view virtual override(RoycoDayKernel) returns (TRANCHE_UNIT) {
         TRANCHE_UNIT bptTotalSupply = toTrancheUnits(_vault.totalSupply(LT_ASSET));
         if (bptTotalSupply == ZERO_TRANCHE_UNITS) return ZERO_TRANCHE_UNITS;
         NAV_UNIT bptTotalNAV = toNAVUnits(LPOracleBase(_getBalancerV3_LT_BPTOracle_QuoterStorage().bptOracle).computeTVL());
@@ -173,8 +173,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         if (!cacheHit) {
             // NOTE: The accountant's preview is read directly so pricing the senior leg never recurses back into the liquidity tranche mark
             RoycoDayKernelState storage $ = _getRoycoDayKernelStorage();
-            SyncedAccountingState memory state = IRoycoDayAccountant(ACCOUNTANT)
-                .previewSyncTrancheAccounting(ValuationLogic._getSeniorTrancheRawNAV($), ValuationLogic._getJuniorTrancheRawNAV($));
+            SyncedAccountingState memory state = IRoycoDayAccountant(ACCOUNTANT).previewSyncTrancheAccounting(ValuationLogic._getCollateralNAV($));
             (,, uint256 stTotalSupply) = FeeAndLiquidityPremiumLogic._computeSTFeeAndLiquidityPremiumSharesToMint(state, IERC20(SENIOR_TRANCHE).totalSupply());
 
             // Compute the ST share rate
@@ -298,7 +297,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         returns (uint256 ltAssets, NAV_UNIT depositNAV, NAV_UNIT postOpLTRawNAV)
     {
         return BalancerV3VenueLogic.addBalancerV3Liquidity(
-            _getBalancerV3VenueImmutableState(), _isPreview, _getRoycoDayKernelStorage().ltOwnedYieldBearingAssets, _seniorShares, _quoteAssets, _minLTAssetsOut
+            _getBalancerV3VenueImmutableState(), _isPreview, _getRoycoDayKernelStorage().totalLTAssets, _seniorShares, _quoteAssets, _minLTAssetsOut
         );
     }
 
@@ -318,7 +317,7 @@ abstract contract BalancerV3_LT_BPTOracle_Quoter is RoycoDayKernel, VaultGuard, 
         return BalancerV3VenueLogic.removeBalancerV3Liquidity(
             _getBalancerV3VenueImmutableState(),
             _isPreview,
-            _getRoycoDayKernelStorage().ltOwnedYieldBearingAssets,
+            _getRoycoDayKernelStorage().totalLTAssets,
             _ltAssets,
             _minSTSharesOut,
             _minQuoteAssetsOut,

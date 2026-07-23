@@ -3,9 +3,9 @@ pragma solidity ^0.8.28;
 
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
+import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 
 /**
  * @title TestFuzz_EntryPointAmountsAndBonuses
@@ -18,7 +18,7 @@ contract TestFuzz_EntryPointAmountsAndBonuses is EntryPointTestBase {
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        stUnit = 10 ** uint256(cell.collateralAsset.decimals);
         _seedMarket(1000 * stUnit, 500 * stUnit);
         _deployEntryPoint();
     }
@@ -69,13 +69,14 @@ contract TestFuzz_EntryPointAmountsAndBonuses is EntryPointTestBase {
 
         uint256 executorDelta = stJtVault.balanceOf(EXECUTOR) - executorBefore;
         uint256 receiverDelta = stJtVault.balanceOf(USER_B) - receiverBefore;
-        assertEq(receiverDelta, toUint256(userClaims.stAssets) + toUint256(userClaims.jtAssets), "the receiver must get exactly the reported user claims");
+        assertEq(receiverDelta, toUint256(userClaims.collateralAssets), "the receiver must get exactly the reported user claims");
         assertEq(stJtVault.balanceOf(address(entryPoint)), 0, "no claim assets may remain in the entry point");
         // The executor's slice is the flooring bonus fraction of the total delivered. The bonus is a
-        // _scaleAssetClaims slice priced against the virtual-shares effective denominator (WAD + 1e6), not WAD, so the
-        // derivation divides by (1e18 + 1e6). Conservation of the ACTUAL claim holds exactly (remit sets the receiver
-        // leg to total-minus-bonus with no re-conversion); the 2-wei tolerance is one bonus floor per delivered leg (ST + JT).
-        assertApproxEqAbs(executorDelta, ((executorDelta + receiverDelta) * _bonusWAD) / (1e18 + 1e6), 2, "the bonus split must conserve the total claims");
+        // _scaleAssetClaims slice priced against the virtual-shares effective denominator (WAD + 1e6), not WAD, so
+        // the derivation divides by (1e18 + 1e6). Conservation of the ACTUAL claim holds exactly (remit sets the
+        // receiver leg to total-minus-bonus with no re-conversion), and with the single collateral leg there is
+        // exactly ONE bonus floor, so the split is wei-exact (the old ST + JT two-leg 2-wei envelope collapsed)
+        assertEq(executorDelta, ((executorDelta + receiverDelta) * _bonusWAD) / (1e18 + 1e6), "the bonus split must conserve the total claims exactly");
     }
 
     /// @notice Escrow accounting is exact for any partial execution amount

@@ -8,7 +8,7 @@ import { Math, NAV_UNIT, RoycoUnitsMath, toUint256 } from "../Units.sol";
 /**
  * @title ValuationLogic
  * @author Waymont
- * @notice Tranche NAV valuation for a Royco market: the raw ST/JT/LT NAV reads, the LT effective NAV, and NAV-to-shares conversion
+ * @notice Tranche NAV valuation for a Royco market: the collateral and LT raw NAV reads, the LT effective NAV, and NAV-to-shares conversion
  * @dev Invoked by the kernel via delegatecall
  */
 library ValuationLogic {
@@ -16,23 +16,13 @@ library ValuationLogic {
     using RoycoUnitsMath for uint256;
 
     /**
-     * @notice Returns the raw net asset value of the senior tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
+     * @notice Returns the mark-to-market value of the coinvested collateral backing the senior and junior tranches, denominated in the NAV units (USD, BTC, etc.) for this kernel
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @return stRawNAV The pure net asset value of the senior tranche invested assets
+     * @return collateralNAV The pure value of the held collateral assets
      */
-    function _getSeniorTrancheRawNAV(IRoycoDayKernel.RoycoDayKernelState storage $) internal view returns (NAV_UNIT stRawNAV) {
-        // Get the yield bearing assets owned by ST and convert them to NAV units via the configured quoter
-        return IRoycoDayKernel(address(this)).stConvertTrancheUnitsToNAVUnits($.stOwnedYieldBearingAssets);
-    }
-
-    /**
-     * @notice Returns the raw net asset value of the junior tranche denominated in the NAV units (USD, BTC, etc.) for this kernel
-     * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function
-     * @return jtRawNAV The pure net asset value of the junior tranche invested assets
-     */
-    function _getJuniorTrancheRawNAV(IRoycoDayKernel.RoycoDayKernelState storage $) internal view returns (NAV_UNIT jtRawNAV) {
-        // Get the yield bearing assets owned by JT and convert them to NAV units via the configured quoter
-        return IRoycoDayKernel(address(this)).jtConvertTrancheUnitsToNAVUnits($.jtOwnedYieldBearingAssets);
+    function _getCollateralNAV(IRoycoDayKernel.RoycoDayKernelState storage $) internal view returns (NAV_UNIT collateralNAV) {
+        // Get the held collateral assets and convert them to NAV units via the configured quoter
+        return IRoycoDayKernel(address(this)).convertCollateralAssetsToValue($.totalCollateralAssets);
     }
 
     /**
@@ -42,7 +32,7 @@ library ValuationLogic {
      */
     function _getLiquidityTrancheRawNAV(IRoycoDayKernel.RoycoDayKernelState storage $) internal view returns (NAV_UNIT ltRawNAV) {
         // Get the yield bearing assets owned by LT and convert them to NAV units via the configured quoter
-        return IRoycoDayKernel(address(this)).ltConvertTrancheUnitsToNAVUnits($.ltOwnedYieldBearingAssets);
+        return IRoycoDayKernel(address(this)).convertLTAssetsToValue($.totalLTAssets);
     }
 
     /**

@@ -3,9 +3,9 @@ pragma solidity ^0.8.28;
 
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_OrganicIdleShareRedeem
@@ -17,7 +17,7 @@ import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
  * @dev How the organic state is reached:
  *      1. Venue slippage is armed (setVenueSlippageMode) so the reinvestment gate deterministically defers on
  *         every sync, the liquidity premium accrues as staged idle ST shares (kernel `ltOwnedSeniorTrancheShares`)
- *         and NEVER deploys into BPT, so the pooled BPT count (`ltOwnedYieldBearingAssets`) is frozen at the seed.
+ *         and NEVER deploys into BPT, so the pooled BPT count (`totalLTAssets`) is frozen at the seed.
  *      2. Senior yield is accrued and synced repeatedly. Each sync stages more idle premium (the NET premium after
  *         the LT protocol fee is carved off). A sync mints NO liquidity-tranche shares, so the LT SUPPLY stays frozen
  *         at the seed and tracks the frozen BPT count exactly, while the idle ST-share pile grows without bound.
@@ -32,7 +32,7 @@ contract Test_OrganicIdleShareRedeem is DayMarketTestBase {
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        stUnit = 10 ** uint256(cell.collateralAsset.decimals);
         // Seed the market (JT first, then ST with its auto-seeded minimal LT depth).
         _seedMarket(1000 * stUnit, 500 * stUnit);
         // Arm persistent venue slippage so every reinvestment defers: the premium stages as idle ST shares and
@@ -45,7 +45,7 @@ contract Test_OrganicIdleShareRedeem is DayMarketTestBase {
     }
 
     function _bptCount() internal view returns (uint256) {
-        return toUint256(kernel.getState().ltOwnedYieldBearingAssets);
+        return toUint256(kernel.getState().totalLTAssets);
     }
 
     function _idleShares() internal view returns (uint256) {

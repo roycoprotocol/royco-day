@@ -93,7 +93,7 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
      * @notice Only the kernel can mint liquidity premium shares, and a zero-share premium mint is a
      *         supply-preserving no-op that still reports and emits the current supply
      * @dev The premium mint reassigns senior appreciation to the liquidity tranche, so an open mint gate would let
-     *      anyone dilute every senior holder for free — the kernel-only gate is the entire defense. A sync whose
+     *      anyone dilute every senior holder for free, the kernel-only gate is the entire defense. A sync whose
      *      liquidity premium rounds to zero shares still calls this, so the zero path must change no balance and
      *      no supply, only surface the (unchanged) supply the kernel prices later mints against
      */
@@ -120,7 +120,7 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
 
     /**
      * @notice A paused kernel admits no supply change: every kernel mint path with non-zero shares reverts
-     * @dev The kernel is the market's single pause authority, and a mint is a share movement like any other — if any
+     * @dev The kernel is the market's single pause authority, and a mint is a share movement like any other, so if any
      *      mint slipped through, a paused market's share count could still drift and dilute holders mid-incident. The
      *      fee, premium, and plain mints all route their balance update through the kernel's whenNotPaused hook, so a
      *      paused kernel lands all three on the same EnforcedPause
@@ -253,8 +253,7 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
             ST_DELEGATE,
             ST_DELEGATE,
             AssetClaims({
-                stAssets: toTrancheUnits(9_999_999_999_999_900_000),
-                jtAssets: toTrancheUnits(0),
+                collateralAssets: toTrancheUnits(9_999_999_999_999_900_000),
                 ltAssets: toTrancheUnits(0),
                 stShares: 0,
                 nav: toNAVUnits(uint256(9_999_999_999_999_900_000))
@@ -290,7 +289,7 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
         (AssetClaims memory stClaims, uint256 quoteAssets) = liquidityTranche.redeemMultiAsset(0.5e18, 0, 0, LT_DELEGATE, LT_PROVIDER);
 
         assertEq(quoteAssets, 499_999, "the quote-only pool slice unwinds to 499999 quote-wei, one dust below the naive half");
-        assertEq(toUint256(stClaims.stAssets), 0, "no senior leg exists in the quote-only pool to unwind");
+        assertEq(toUint256(stClaims.collateralAssets), 0, "no senior leg exists in the quote-only pool to unwind");
         assertEq(quoteToken.balanceOf(LT_DELEGATE), 499_999, "the delegate must receive the unwound quote");
         assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 5.5e18, "the owner's LT shares must drop by the delegated 0.5e18");
         assertEq(liquidityTranche.allowance(LT_PROVIDER, LT_DELEGATE), 0, "the delegate's allowance must be fully consumed");
@@ -345,7 +344,7 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
     function test_PreviewRedeemMultiAsset_QuotesProportionalQuoteLeg() public {
         (AssetClaims memory stClaims, uint256 quoteAssets) = liquidityTranche.previewRedeemMultiAsset(1e18);
         assertEq(quoteAssets, 999_999, "the preview quotes 999999 quote-wei, one dust below the naive proportional leg");
-        assertEq(toUint256(stClaims.stAssets), 0, "the quote-only pool has no senior leg to preview");
+        assertEq(toUint256(stClaims.collateralAssets), 0, "the quote-only pool has no senior leg to preview");
     }
 
     // =============================
@@ -392,7 +391,7 @@ contract Test_ShareSurfaces_Tranches is DayMarketTestBase {
  * @title Test_IdleLiquidityPremiumRedemption_LiquidityTranche
  * @notice A holder who redeems in kind while idle liquidity premium senior shares are still held by the kernel
  *         (not yet deployed into the pool) receives its pro-rata slice of those idle shares directly, alongside
- *         its BPT slice — the premium is claimable on exit, never stranded with the kernel
+ *         its BPT slice, the premium is claimable on exit, never stranded with the kernel
  * @dev Runs on zero protocol fees so every fee and liquidity premium share mint literal below stays a two-term
  *      derivation. The venue's slippage mode is armed so the sync's single-sided premium deploy fails and the
  *      whole premium stays idle as ltOwnedSeniorTrancheShares

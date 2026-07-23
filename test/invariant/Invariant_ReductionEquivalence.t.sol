@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+import { Test } from "../../lib/forge-std/src/Test.sol";
 import { IRoycoDayAccountant } from "../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../src/interfaces/IRoycoDayKernel.sol";
 import { toTrancheUnits, toUint256 } from "../../src/libraries/Units.sol";
+import { DayMarketTestBase } from "../utils/DayMarketTestBase.sol";
 import { MarketParamsConfig } from "../utils/FixtureTypes.sol";
 import { defaultParams, zeroLiquidityParams } from "../utils/MarketParams.sol";
-import { cellA } from "../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../utils/DayMarketTestBase.sol";
 import { RoycoTestMath } from "../utils/RoycoTestMath.sol";
-import { Test } from "../../lib/forge-std/src/Test.sol";
+import { cellA } from "../utils/TokenConfigs.sol";
 
 /**
  * @title SeniorJuniorMarketDriver
@@ -24,8 +24,7 @@ contract SeniorJuniorMarketDriver is DayMarketTestBase {
 
     /**
      * @notice Everything the senior/junior engine commits or pays out, read from live state
-     * @custom:field stRawNAV - The committed senior raw NAV
-     * @custom:field jtRawNAV - The committed junior raw NAV
+     * @custom:field collateralNAV - The committed collateral NAV of the coinvested pool
      * @custom:field stEffectiveNAV - The committed senior effective NAV
      * @custom:field jtEffectiveNAV - The committed junior effective NAV
      * @custom:field jtImpermanentLoss - The committed junior impermanent-loss ledger
@@ -39,8 +38,7 @@ contract SeniorJuniorMarketDriver is DayMarketTestBase {
      * @custom:field jtProviderVaultShares - The junior LP's redeemed vault-share holdings outside the market
      */
     struct SeniorJuniorTrajectory {
-        uint256 stRawNAV;
-        uint256 jtRawNAV;
+        uint256 collateralNAV;
         uint256 stEffectiveNAV;
         uint256 jtEffectiveNAV;
         uint256 jtImpermanentLoss;
@@ -157,8 +155,7 @@ contract SeniorJuniorMarketDriver is DayMarketTestBase {
     /// @notice Reads the full senior/junior trajectory from committed state and live balances
     function trajectory() external view returns (SeniorJuniorTrajectory memory t) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = accountant.getState();
-        t.stRawNAV = toUint256(a.lastSTRawNAV);
-        t.jtRawNAV = toUint256(a.lastJTRawNAV);
+        t.collateralNAV = toUint256(a.lastCollateralNAV);
         t.stEffectiveNAV = toUint256(a.lastSTEffectiveNAV);
         t.jtEffectiveNAV = toUint256(a.lastJTEffectiveNAV);
         t.jtImpermanentLoss = toUint256(a.lastJTImpermanentLoss);
@@ -308,8 +305,7 @@ contract Invariant_ReductionEquivalence is Test {
     function _assertTrajectoriesMatch() internal view {
         SeniorJuniorMarketDriver.SeniorJuniorTrajectory memory a = plainMarket.trajectory();
         SeniorJuniorMarketDriver.SeniorJuniorTrajectory memory b = disarmedMarket.trajectory();
-        assertEq(a.stRawNAV, b.stRawNAV, "senior raw NAV diverged");
-        assertEq(a.jtRawNAV, b.jtRawNAV, "junior raw NAV diverged");
+        assertEq(a.collateralNAV, b.collateralNAV, "collateral NAV diverged");
         assertEq(a.stEffectiveNAV, b.stEffectiveNAV, "senior effective NAV diverged");
         assertEq(a.jtEffectiveNAV, b.jtEffectiveNAV, "junior effective NAV diverged");
         assertEq(a.jtImpermanentLoss, b.jtImpermanentLoss, "junior impermanent-loss ledger diverged");

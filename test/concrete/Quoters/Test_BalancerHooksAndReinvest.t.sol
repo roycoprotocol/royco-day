@@ -6,9 +6,9 @@ import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
+import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 
 /**
  * @title Test_ReinvestLiquidityPremiumGate_Kernel
@@ -45,7 +45,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         // ceil(899999999999999999 x 999 / 1000) = 899100000000000000
         uint256 minOut = 0.8991e18;
 
-        uint256 ltOwnedBefore = toUint256(kernel.getState().ltOwnedYieldBearingAssets);
+        uint256 ltOwnedBefore = toUint256(kernel.getState().totalLTAssets);
         uint256 committedLtRawNAVBefore = toUint256(accountant.getState().lastLTRawNAV);
 
         // Side 1: one wei under the gate, the inner add reverts, the failure is tolerated, and NOTHING moves
@@ -53,7 +53,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
         kernel.reinvestLiquidityPremium(type(uint256).max);
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares, "under the gate: the idle pile must be untouched");
-        assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), ltOwnedBefore, "under the gate: no BPT may be credited");
+        assertEq(toUint256(kernel.getState().totalLTAssets), ltOwnedBefore, "under the gate: no BPT may be credited");
         assertEq(toUint256(accountant.getState().lastLTRawNAV), committedLtRawNAVBefore, "under the gate: the committed LT raw NAV must be unmoved");
 
         // Side 2: exactly the gate, the entire pile deploys, exactly minOut BPT is credited, and the event fires
@@ -63,7 +63,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         vm.prank(MARKET_REINVEST_LIQUIDITY_PREMIUM_ADMIN);
         kernel.reinvestLiquidityPremium(type(uint256).max);
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, 0, "at the gate: the entire idle pile must deploy");
-        assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), ltOwnedBefore + minOut, "at the gate: exactly minOut BPT must be credited");
+        assertEq(toUint256(kernel.getState().totalLTAssets), ltOwnedBefore + minOut, "at the gate: exactly minOut BPT must be credited");
     }
 
     /**
@@ -77,7 +77,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         _assertSeededGateFixture(idleShares);
 
         // Deploy the floor-rounded half of the pinned pile: 846660395108192850 / 2 = 423330197554096425
-        uint256 half = 423330197554096425;
+        uint256 half = 423_330_197_554_096_425;
 
         // The gate's floor for the half, hand-derived from the pinned fixture state through the offset-aware
         // _convertToValue: the half values to floor((108e18 + 1) x 423330197554096425 / (101599247412982142050 + 1e6))
@@ -86,7 +86,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         // ceil(449999999999999999 x 999 / 1000) = 449550000000000000
         uint256 minOut = 0.44955e18;
 
-        uint256 ltOwnedBefore = toUint256(kernel.getState().ltOwnedYieldBearingAssets);
+        uint256 ltOwnedBefore = toUint256(kernel.getState().totalLTAssets);
 
         balancerVault.setNextBptOutOverride(minOut);
         vm.expectEmit(address(kernel));
@@ -95,7 +95,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         kernel.reinvestLiquidityPremium(half);
 
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares - half, "the undeployed remainder must stay idle and claimable");
-        assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), ltOwnedBefore + minOut, "exactly the partial add's BPT must be credited");
+        assertEq(toUint256(kernel.getState().totalLTAssets), ltOwnedBefore + minOut, "exactly the partial add's BPT must be credited");
     }
 
     /**
@@ -125,7 +125,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         bptOracle.setMode(MockBPTOracle.Mode.MANUAL);
         bptOracle.setTVL(1e40);
 
-        uint256 ltOwnedBefore = toUint256(kernel.getState().ltOwnedYieldBearingAssets);
+        uint256 ltOwnedBefore = toUint256(kernel.getState().totalLTAssets);
 
         // With a zero fair-value floor the reinvestment returns early before any venue add: it never reaches the
         // Vault, so no fill can occur and the idle pile is left untouched
@@ -133,7 +133,7 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
         kernel.reinvestLiquidityPremium(idleShares);
 
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares, "the idle pile stays idle and claimable when the fair-value floor rounds to zero");
-        assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), ltOwnedBefore, "no BPT is credited: the zero-floor add is deferred, not executed");
+        assertEq(toUint256(kernel.getState().totalLTAssets), ltOwnedBefore, "no BPT is credited: the zero-floor add is deferred, not executed");
     }
 
     /**
@@ -223,7 +223,8 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
      * @dev Pins the exact post-accrual fixture state every hand-computed gate literal in this contract is derived
      *      from, so a fixture drift fails loudly here instead of silently invalidating a pinned floor.
      *      Derivation from the seeded market (100e18 senior, 50e18 junior, +10% vault rate over one day):
-     *      - the senior raw NAV moves 100e18 to 110e18, a 10e18 senior gain, and the junior's pinned 20% risk
+     *      - the collateral NAV moves 150e18 to 165e18 and the pro-rata attribution hands the senior side
+     *        floor(15e18 x 100e18 / 150e18) = 10e18 of the gain, and the junior's pinned 20% risk
      *        premium routes 2e18 of it to the junior side, so the committed senior effective NAV is 108e18
      *      - the liquidity tranche's pinned 10% premium carves 1e18 out of the gain, and the 10% senior protocol
      *        fee takes 0.7e18 (10% of the 7e18 senior residual after the 2e18 and 1e18 carve-outs), so the
@@ -241,11 +242,11 @@ contract Test_ReinvestLiquidityPremiumGate_Kernel is DayMarketTestBase {
      *        plus the genesis backing of the dead minimum supply), so its NAV per BPT is exactly 1.0
      */
     function _assertSeededGateFixture(uint256 _idleShares) internal view {
-        assertEq(_idleShares, 846660395108192850, "fixture pin: the idle premium pile");
+        assertEq(_idleShares, 846_660_395_108_192_850, "fixture pin: the idle premium pile");
         assertEq(toUint256(accountant.getState().lastSTEffectiveNAV), 108e18, "fixture pin: the committed senior effective NAV");
-        assertEq(seniorTranche.totalSupply(), 101599247412982142050, "fixture pin: the post-mint senior supply");
-        assertEq(balancerVault.totalSupply(address(bpt)), 6000001000000000000, "fixture pin: the pool's BPT supply");
-        assertEq(bptOracle.computeTVL(), 6000001000000000000, "fixture pin: the pool's oracle TVL (NAV per BPT exactly 1.0)");
+        assertEq(seniorTranche.totalSupply(), 101_599_247_412_982_142_050, "fixture pin: the post-mint senior supply");
+        assertEq(balancerVault.totalSupply(address(bpt)), 6_000_001_000_000_000_000, "fixture pin: the pool's BPT supply");
+        assertEq(bptOracle.computeTVL(), 6_000_001_000_000_000_000, "fixture pin: the pool's oracle TVL (NAV per BPT exactly 1.0)");
     }
 }
 
@@ -313,19 +314,19 @@ contract Test_MultiAssetPreviewParity_LiquidityTranche is DayMarketTestBase {
      *      price the ST leg at the 1-wei floor, a state production never sees since every user interaction is its
      *      own transaction and syncs pre-op), then previews and executes the same multi-asset deposit in one block
      */
-    function _previewThenExecuteMultiAssetDeposit(uint256 _stLeg, uint256 _quoteLeg) internal returns (uint256 previewShares, uint256 mintedShares) {
+    function _previewThenExecuteMultiAssetDeposit(uint256 _collateralLeg, uint256 _quoteLeg) internal returns (uint256 previewShares, uint256 mintedShares) {
         _seedMarket(100e18, 50e18);
         vm.prank(SYNC_OPERATOR);
         kernel.syncTrancheAccounting();
 
-        stJtVault.mintShares(LT_PROVIDER, _stLeg);
+        stJtVault.mintShares(LT_PROVIDER, _collateralLeg);
         quoteToken.mint(LT_PROVIDER, _quoteLeg);
 
         vm.startPrank(LT_PROVIDER);
-        stJtVault.approve(address(liquidityTranche), _stLeg);
+        stJtVault.approve(address(liquidityTranche), _collateralLeg);
         quoteToken.approve(address(liquidityTranche), _quoteLeg);
-        (previewShares,) = liquidityTranche.previewDepositMultiAsset(_stLeg, _quoteLeg);
-        (mintedShares,) = liquidityTranche.depositMultiAsset(_stLeg, _quoteLeg, 0, LT_PROVIDER);
+        (previewShares,) = liquidityTranche.previewDepositMultiAsset(_collateralLeg, _quoteLeg);
+        (mintedShares,) = liquidityTranche.depositMultiAsset(_collateralLeg, _quoteLeg, 0, LT_PROVIDER);
         vm.stopPrank();
     }
 }

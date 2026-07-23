@@ -16,7 +16,7 @@ import { cellA } from "../../utils/TokenConfigs.sol";
 /**
  * @title Test_EntryPointOracleClockGate
  * @notice The oracle-clock execution gate: a request queued against a tranche with an oracle clock can only execute
- *         once the clock has observed at least one oracle update AFTER the request, on top of the minimum delay —
+ *         once the clock has observed at least one oracle update AFTER the request, on top of the minimum delay,
  *         so execution always happens at max(request + delay, first post-request update)
  * @dev The gate closes the one hole a pure time delay leaves: with deviation/heartbeat-driven oracles, a request can
  *      mature before the next update lands and execute at the same stale mark it was requested at, ahead of a
@@ -29,7 +29,7 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        stUnit = 10 ** uint256(cell.collateralAsset.decimals);
         _seedMarket(100 * stUnit, 50 * stUnit);
         _deployEntryPoint();
         // The market's Chainlink feed is the steppy pricing layer for every tranche in this kernel family
@@ -79,9 +79,7 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
     function test_request_withoutClock_stillStampsQueuedAtTimestamp() public {
         // The stamp carries no clock semantics of its own: it is always the queueing time, clock or no clock
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
-        assertEq(
-            entryPoint.getDepositRequest(USER_A, nonce).baseRequest.queuedAtTimestamp, uint32(block.timestamp), "no clock must not skip the stamp"
-        );
+        assertEq(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.queuedAtTimestamp, uint32(block.timestamp), "no clock must not skip the stamp");
     }
 
     // ---------------------------------------------------------------------
@@ -152,7 +150,7 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
             "the request-time poke must checkpoint the pending change at the queueing time, not after it"
         );
 
-        // The delay elapses with no FURTHER change: still blocked — the pre-request change does not count
+        // The delay elapses with no FURTHER change: still blocked, the pre-request change does not count
         vm.warp(block.timestamp + DEFAULT_DEPOSIT_DELAY + 1);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayEntryPoint.ORACLE_CLOCK_NOT_ADVANCED.selector, nonce));
         vm.prank(USER_A);
@@ -233,7 +231,7 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
     }
 
     function test_deadClock_queuesFine_executionWaitsForRevival() public {
-        // The clock's feed dies after configuration (a zero update timestamp): queueing stays open — a zero reading
+        // The clock's feed dies after configuration (a zero update timestamp): queueing stays open, a zero reading
         // cannot weaken the gate, it conservatively holds execution shut until the feed revives with a genuine update
         MockAggregatorV3 feed2 = new MockAggregatorV3(8, 1e8);
         feed2.setUpdatedAt(block.timestamp);
@@ -256,7 +254,7 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
         uint256 amount = 10 * stUnit;
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), amount, USER_A, 0);
 
-        // Matured but gate-blocked: the escrow must still be recoverable — the gate guards entry, never exit
+        // Matured but gate-blocked: the escrow must still be recoverable, the gate guards entry, never exit
         vm.warp(block.timestamp + DEFAULT_DEPOSIT_DELAY + 1);
         uint256 balanceBefore = stJtVault.balanceOf(USER_A);
         _cancelDeposit(USER_A, nonce, USER_A);
@@ -388,7 +386,7 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
 
     function test_rotationToVirginClock_cannotInstantOpenPendingQueue_thenAutoResumes() public {
         // A queue pending under one clock, rotated to a freshly initialized checkpoint clock: the virgin clock's
-        // baseline recording carries no update timestamp, so the rotation cannot open a single pending request —
+        // baseline recording carries no update timestamp, so the rotation cannot open a single pending request,
         // the queue pauses, then auto-resumes on the new source's first genuine deviation
         _setOracleClock(address(chainlinkClock));
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
@@ -411,7 +409,7 @@ contract Test_EntryPointOracleClockGate is EntryPointTestBase {
 
     function test_rotationToWarmClock_opensOnPostRequestDeviation() public {
         // The rotated-in clock already checkpointed a deviation AFTER the request was queued: that is a genuine
-        // post-request source update, so the pending request opens immediately — correct, not a hole
+        // post-request source update, so the pending request opens immediately, correct, not a hole
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), 10 * stUnit, USER_A, 0);
 
         MockValueSource source = new MockValueSource(1e18);

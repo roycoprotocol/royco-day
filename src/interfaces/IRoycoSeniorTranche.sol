@@ -25,7 +25,7 @@ interface IRoycoSeniorTranche is IRoycoVaultTranche {
      * @notice Mints a kernel-computed number of liquidity premium shares to the specified holder
      * @dev Only callable by the kernel during accounting synchronization
      * @dev The liquidity premium is senior yield routed to the liquidity tranche, minted as senior tranche shares held by
-     *      the kernel on the LT's behalf, this leaves the senior raw NAV (and thus coverage) unchanged, so the mint is
+     *      the kernel on the LT's behalf, this leaves the collateral NAV (and thus coverage) unchanged, so the mint is
      *      coverage-neutral and only reassigns senior appreciation to the LT
      * @dev Takes a precomputed share count, priced jointly with the ST protocol fee so neither carve-out dilutes the other
      * @param _to The account to mint the premium shares to (the kernel, which custodies them for the liquidity tranche)

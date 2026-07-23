@@ -34,7 +34,7 @@ contract Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_K
     /**
      * @notice Constructs the kernel state, pins the Idle CDO, and resolves the quote asset from the liquidity tranche's Balancer V3 pool
      * @param _params The standard construction parameters for the Royco Day kernel
-     * @param _idleCDO The Idle CDO whose AA tranche token is the ST/JT tranche asset
+     * @param _idleCDO The Idle CDO whose AA tranche token is the coinvested collateral asset
      */
     constructor(
         IRoycoDayKernel.RoycoDayKernelConstructionParams memory _params,

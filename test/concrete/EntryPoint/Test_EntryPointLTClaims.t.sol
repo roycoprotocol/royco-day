@@ -10,12 +10,12 @@ import { cellA } from "../../utils/TokenConfigs.sol";
 
 /**
  * @title Test_EntryPointLTClaims
- * @notice Day-specific 5-leg claim semantics through the entry point: an LT redemption pays BOTH a BPT leg
+ * @notice Day-specific multi-leg claim semantics through the entry point: an LT redemption pays BOTH a BPT leg
  *         (ltAssets) and a senior-tranche-share leg (stShares, the idle liquidity premium paid in kind), and the
  *         executor bonus split must scale and forward every leg
  * @dev Also pins the entry point's LT forfeiture quote basis: convertToAssets is the BPT-only raw-NAV floor
  *      (idle premium excluded, stShares == 0), so an idle premium held constant across the request lifecycle
- *      registers no fake yield — the accepted caveat is that a premium REINVESTED into the pool between request
+ *      registers no fake yield. The accepted caveat is that a premium REINVESTED into the pool between request
  *      and execution appears as forfeitable yield under this basis
  */
 contract Test_EntryPointLTClaims is EntryPointTestBase {
@@ -23,7 +23,7 @@ contract Test_EntryPointLTClaims is EntryPointTestBase {
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        stUnit = 10 ** uint256(cell.collateralAsset.decimals);
         _seedMarket(100 * stUnit, 50 * stUnit);
         _deployEntryPoint();
         _stageIdlePremium();
@@ -124,13 +124,18 @@ contract Test_EntryPointLTClaims is EntryPointTestBase {
         assertApproxEqRel(toUint256(redeemed.nav), navAtRequest, 0.001e18, "the LT depositor's redeemable value must be pinned to the request-time NAV");
     }
 
-    function test_stRedemption_coveredLoss_claimsCarryJtAssetsLeg() public {
-        // A covered senior drawdown sources part of ST's claims from JT's raw NAV (the jtAssets leg). The market
-        // enters FIXED_TERM on the covered loss, so redeem after the term recovers... instead pin the leg via preview
+    function test_stClaims_coveredLoss_navHeldWholeByJuniorCoverage() public {
+        // A covered drawdown is absorbed entirely by the junior tranche: the attributed senior loss lands on JT as
+        // impermanent loss, so the senior claim's NAV is byte-identical across the loss while its collateral leg
+        // grows (the same value converts to more of the cheaper collateral). The market enters FIXED_TERM on the
+        // covered loss, so the coverage is pinned via preview rather than an executed redemption
         uint256 shares = _acquireTrancheShares(USER_A, address(seniorTranche), 10 * stUnit);
+        AssetClaims memory before = seniorTranche.convertToAssets(shares);
         applySTPnL(-500);
-        // The ST claims decomposition now sources coverage from JT raw NAV
-        AssetClaims memory preview = seniorTranche.convertToAssets(shares);
-        assertGt(toUint256(preview.jtAssets), 0, "a covered senior loss must carry a jtAssets claim leg");
+        AssetClaims memory previewed = seniorTranche.convertToAssets(shares);
+        assertEq(toUint256(previewed.nav), toUint256(before.nav), "junior coverage must hold the senior claim NAV exactly whole across a covered loss");
+        assertGt(
+            toUint256(previewed.collateralAssets), toUint256(before.collateralAssets), "the whole NAV must convert to strictly more of the cheaper collateral"
+        );
     }
 }

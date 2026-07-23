@@ -9,7 +9,7 @@ import { ValuationLogic } from "../../src/libraries/logic/ValuationLogic.sol";
  * @title LTEffectiveNAVDriver
  * @notice External exposer over both liquidity tranche effective NAV overloads in ValuationLogic, driven
  *         against a real RoycoDayKernelState storage struct without a full kernel deployment
- * @dev The library reads the LT raw NAV through IRoycoDayKernel(address(this)).ltConvertTrancheUnitsToNAVUnits,
+ * @dev The library reads the LT raw NAV through IRoycoDayKernel(address(this)).convertLTAssetsToValue,
  *      so this driver implements that entrypoint as an identity conversion: 1 tranche unit equals 1 NAV unit,
  *      which lets setLTRawNAV pin the LT raw NAV directly in NAV units
  */
@@ -18,7 +18,7 @@ contract LTEffectiveNAVDriver {
 
     /// @notice Pins the LT raw NAV read by the effective NAV computation (identity conversion, so NAV units)
     function setLTRawNAV(uint256 _ltRawNAV) external {
-        kernelState.ltOwnedYieldBearingAssets = toTrancheUnits(_ltRawNAV);
+        kernelState.totalLTAssets = toTrancheUnits(_ltRawNAV);
     }
 
     /// @notice Sets the idle liquidity premium senior shares held on behalf of the liquidity tranche
@@ -52,7 +52,7 @@ contract LTEffectiveNAVDriver {
     }
 
     /// @dev Identity conversion consumed by the library's self-call for the LT raw NAV read
-    function ltConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _ltAssets) external pure returns (NAV_UNIT nav) {
+    function convertLTAssetsToValue(TRANCHE_UNIT _ltAssets) external pure returns (NAV_UNIT value) {
         return toNAVUnits(toUint256(_ltAssets));
     }
 }

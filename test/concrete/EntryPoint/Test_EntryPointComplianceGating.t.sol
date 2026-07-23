@@ -31,7 +31,7 @@ contract Test_EntryPointComplianceGating is EntryPointTestBase {
         MarketParamsConfig memory params = defaultParams();
         params.enforceWhitelistOnTransfer = true;
         _deployMarket(cellA(), params);
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        stUnit = 10 ** uint256(cell.collateralAsset.decimals);
         _seedMarket(100 * stUnit, 50 * stUnit);
         _deployEntryPoint();
         OUTSIDER = makeAddr("OUTSIDER");

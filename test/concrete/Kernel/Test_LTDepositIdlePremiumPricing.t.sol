@@ -28,7 +28,7 @@ contract Test_LTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        stUnit = 10 ** uint256(cell.collateralAsset.decimals);
         quoteUnit = 10 ** uint256(cell.quoteAsset.decimals);
         _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
     }
@@ -147,8 +147,9 @@ contract Test_LTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
         uint256 tvl = bptOracle.computeTVL();
         uint256 bptSupply = balancerVault.totalSupply(address(bpt));
         uint256 depositValue = Math.mulDiv(tvl, depositBpt, bptSupply, Math.Rounding.Floor);
-        uint256 idleValue = Math.mulDiv(idleShares, toUint256(accountant.getState().lastSTEffectiveNAV) + 1, seniorTranche.totalSupply() + 1e6, Math.Rounding.Floor);
-        uint256 ownedBptBefore = toUint256(kernel.getState().ltOwnedYieldBearingAssets);
+        uint256 idleValue =
+            Math.mulDiv(idleShares, toUint256(accountant.getState().lastSTEffectiveNAV) + 1, seniorTranche.totalSupply() + 1e6, Math.Rounding.Floor);
+        uint256 ownedBptBefore = toUint256(kernel.getState().totalLTAssets);
         uint256 ownedValue = Math.mulDiv(tvl, ownedBptBefore, bptSupply, Math.Rounding.Floor);
         uint256 ltSupply = liquidityTranche.totalSupply();
         uint256 expectedShares = Math.mulDiv(ltSupply + 1e6, depositValue, ownedValue + idleValue + 1, Math.Rounding.Floor);
@@ -166,7 +167,7 @@ contract Test_LTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
         assertLt(mintedShares, poolDepthOnlyShares, "idle-leg-inclusive pricing must grant strictly fewer shares than pool-depth-only pricing");
         // Full post-state: the idle pile is untouched, the BPT moved into kernel custody, and the entrant holds only shares
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares, "the idle liquidity premium senior shares must be untouched by the deposit");
-        assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), ownedBptBefore + depositBpt, "the deposited BPT must land in the kernel's LT custody");
+        assertEq(toUint256(kernel.getState().totalLTAssets), ownedBptBefore + depositBpt, "the deposited BPT must land in the kernel's LT custody");
         assertEq(bpt.balanceOf(entrant), 0, "the entrant's BPT must be fully consumed");
         assertEq(liquidityTranche.balanceOf(entrant), mintedShares, "the entrant must hold exactly the minted shares");
     }
@@ -232,9 +233,7 @@ contract Test_LTDepositIdlePremiumPricing_Kernel is DayMarketTestBase {
         // 6e18 pool depth (no premium accrues on a covered loss, so there is no idle premium leg): the quoted
         // shares are convertToShares(1e18, 6e18, ltSupply) = floor((ltSupply + 1e6) x 1e18 / (6e18 + 1)), exactly the execution path's mint
         (uint256 shares,) = liquidityTranche.previewDepositMultiAsset(0, quoteUnit);
-        assertEq(
-            shares, Math.mulDiv(liquidityTranche.totalSupply() + 1e6, 1e18, 6e18 + 1), "the quote-only preview must price at the 6e18 pool depth"
-        );
+        assertEq(shares, Math.mulDiv(liquidityTranche.totalSupply() + 1e6, 1e18, 6e18 + 1), "the quote-only preview must price at the 6e18 pool depth");
     }
 
     // =============================

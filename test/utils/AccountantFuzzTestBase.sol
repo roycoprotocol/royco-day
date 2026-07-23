@@ -48,14 +48,13 @@ abstract contract AccountantFuzzTestBase is AccountantTestBase {
 
     /**
      * @dev Marshals the committed checkpoint plus caller-supplied premium-window values into a complete
-     *      RoycoTestMath.SyncInputs mirror for the sync about to run against (_stRawNew, _jtRawNew, _ltRawNew) marks.
+     *      RoycoTestMath.SyncInputs mirror for the sync about to run against (_collateralNew, _ltRawNew) marks.
      *      The premium-window values are caller-supplied because their bookkeeping differs between the
      *      first-ever sync (both timestamps initialize to now, forcing the instantaneous branch) and every
      *      later one (see _premiumWindow)
      */
     function _mirrorInput(
-        uint256 _stRawNew,
-        uint256 _jtRawNew,
+        uint256 _collateralNew,
         uint256 _ltRawNew,
         uint256 _twJT,
         uint256 _twLT,
@@ -68,15 +67,13 @@ abstract contract AccountantFuzzTestBase is AccountantTestBase {
         returns (RoycoTestMath.SyncInputs memory in_)
     {
         IRoycoDayAccountant.RoycoDayAccountantState memory s = accountant.getState();
-        in_.stRawNAVLast = toUint256(s.lastSTRawNAV);
-        in_.jtRawNAVLast = toUint256(s.lastJTRawNAV);
+        in_.collateralNAVLast = toUint256(s.lastCollateralNAV);
         in_.stEffectiveNAVLast = toUint256(s.lastSTEffectiveNAV);
         in_.jtEffectiveNAVLast = toUint256(s.lastJTEffectiveNAV);
         in_.jtImpermanentLossLast = toUint256(s.lastJTImpermanentLoss);
         in_.marketStateLast = RoycoTestMath.MarketState(uint8(s.lastMarketState));
         in_.fixedTermEndTimestampLast = s.fixedTermEndTimestamp;
-        in_.stRawNAVDelta = int256(_stRawNew) - int256(in_.stRawNAVLast);
-        in_.jtRawNAVDelta = int256(_jtRawNew) - int256(in_.jtRawNAVLast);
+        in_.collateralNAVDelta = int256(_collateralNew) - int256(in_.collateralNAVLast);
         in_.ltRawNAVNew = _ltRawNew;
         in_.jtTwYieldShareAccrual = _twJT;
         in_.ltTwYieldShareAccrual = _twLT;
@@ -93,10 +90,9 @@ abstract contract AccountantFuzzTestBase is AccountantTestBase {
         in_.fixedTermDuration = DEFAULT_FIXED_TERM_DURATION_SECONDS;
         in_.minCoverageWAD = DEFAULT_MIN_COVERAGE_WAD;
         in_.coverageLiquidationUtilizationWAD = DEFAULT_LIQUIDATION_UTILIZATION_WAD;
-        // Read the effective dust the deployed accountant actually enforces (it maintains the field as the sum
-        // of the two configured raw-NAV dust tolerances) instead of hard-coding 0, so a suite that deploys with
-        // nonzero dust tolerances feeds its mirror the same fee/premium dust gate production applies
-        in_.effectiveDust = toUint256(s.effectiveNAVDustTolerance);
+        // Read the dust tolerance the deployed accountant actually enforces instead of hard-coding 0, so a suite
+        // that deploys with a nonzero dust tolerance feeds its mirror the same fee/premium dust gate production applies
+        in_.dustTolerance = toUint256(s.dustTolerance);
         in_.minLiquidityWAD = DEFAULT_MIN_LIQUIDITY_WAD;
     }
 }

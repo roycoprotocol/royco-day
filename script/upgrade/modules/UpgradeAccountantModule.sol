@@ -4,7 +4,6 @@ pragma solidity ^0.8.28;
 import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
-import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT } from "../../../src/libraries/Units.sol";
 
@@ -25,9 +24,9 @@ import { UpgradeModuleBase } from "./UpgradeModuleBase.sol";
  *      `snapshotState()` (post-warp) captures:
  *        - `KERNEL()` immutable
  *        - Full `getState()` (every storage field including fees, coverage, beta, ydm, last*NAV,
- *          lastJTCoverageImpermanentLoss, accrual/distribution timestamps, dust tolerances incl. effectiveNAVDustTolerance)
- *        - `previewSyncTrancheAccounting(stRawNAV, jtRawNAV)` at post-warp time using the kernel's
- *          current raw tranche NAVs — catches any drift in the sync math post-upgrade
+ *          lastJTCoverageImpermanentLoss, accrual/distribution timestamps, dustTolerance)
+ *        - `previewSyncTrancheAccounting(collateralNAV)` at post-warp time using the kernel's
+ *          current collateral NAV — catches any drift in the sync math post-upgrade
  *
  *      `verify()` re-reads all of the above at the same `block.timestamp` and asserts equality.
  */
@@ -51,9 +50,8 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
 
         // Strong type check: call an accountant-specific view. Reverts if the proxy is not actually
         // a `RoycoDayAccountant` (e.g. if an address was mis-entered in `UpgradeConfig`).
-        NAV_UNIT stRawNAV = IRoycoVaultTranche(IRoycoDayKernel(kernel).SENIOR_TRANCHE()).getRawNAV();
-        NAV_UNIT jtRawNAV = IRoycoVaultTranche(IRoycoDayKernel(kernel).JUNIOR_TRANCHE()).getRawNAV();
-        a.previewSyncTrancheAccounting(stRawNAV, jtRawNAV);
+        IRoycoDayKernel k = IRoycoDayKernel(kernel);
+        a.previewSyncTrancheAccounting(k.convertCollateralAssetsToValue(k.getState().totalCollateralAssets));
 
         address oldImpl = _readImplementation(proxy);
 
@@ -86,34 +84,28 @@ contract UpgradeAccountantModule is UpgradeModuleBase {
         IRoycoDayAccountant a = IRoycoDayAccountant(_proxy);
         IRoycoDayKernel kernel = IRoycoDayKernel(a.KERNEL());
 
-        NAV_UNIT stRawNAV = IRoycoVaultTranche(kernel.SENIOR_TRANCHE()).getRawNAV();
-        NAV_UNIT jtRawNAV = IRoycoVaultTranche(kernel.JUNIOR_TRANCHE()).getRawNAV();
+        NAV_UNIT collateralNAV = kernel.convertCollateralAssetsToValue(kernel.getState().totalCollateralAssets);
 
         IRoycoDayAccountant.RoycoDayAccountantState memory state = a.getState();
-        SyncedAccountingState memory sync = a.previewSyncTrancheAccounting(stRawNAV, jtRawNAV);
+        SyncedAccountingState memory sync = a.previewSyncTrancheAccounting(collateralNAV);
 
-        return abi.encode(address(kernel), state, sync, stRawNAV, jtRawNAV);
+        return abi.encode(address(kernel), state, sync, collateralNAV);
     }
 
     /// @inheritdoc UpgradeModuleBase
     function verify(address _proxy, bytes memory _preStateSnapshot) external view override {
-        // Decode the exact tuple `snapshotState` encodes: (kernel, state, sync, stRawNAV, jtRawNAV)
-        (
-            address preKernel,
-            IRoycoDayAccountant.RoycoDayAccountantState memory preState,
-            SyncedAccountingState memory preSync,
-            NAV_UNIT preStRawNAV,
-            NAV_UNIT preJtRawNAV
-        ) = abi.decode(_preStateSnapshot, (address, IRoycoDayAccountant.RoycoDayAccountantState, SyncedAccountingState, NAV_UNIT, NAV_UNIT));
+        // Decode the exact tuple `snapshotState` encodes: (kernel, state, sync, collateralNAV)
+        (address preKernel, IRoycoDayAccountant.RoycoDayAccountantState memory preState, SyncedAccountingState memory preSync, NAV_UNIT preCollateralNAV) =
+            abi.decode(_preStateSnapshot, (address, IRoycoDayAccountant.RoycoDayAccountantState, SyncedAccountingState, NAV_UNIT));
 
         IRoycoDayAccountant a = IRoycoDayAccountant(_proxy);
         require(a.KERNEL() == preKernel, UpgradeAccountantModule__KernelImmutableChanged(preKernel, a.KERNEL()));
 
         _assertStateEqual(a.getState(), preState);
 
-        // Use the SAME raw NAVs captured pre-upgrade so the sync preview is a pure function of
+        // Use the SAME collateral NAV captured pre-upgrade so the sync preview is a pure function of
         // (storage, block.timestamp, inputs) and comparable across the upgrade.
-        SyncedAccountingState memory postSync = a.previewSyncTrancheAccounting(preStRawNAV, preJtRawNAV);
+        SyncedAccountingState memory postSync = a.previewSyncTrancheAccounting(preCollateralNAV);
         _assertSyncEqual(postSync, preSync);
     }
 

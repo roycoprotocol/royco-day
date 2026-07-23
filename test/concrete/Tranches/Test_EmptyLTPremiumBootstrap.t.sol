@@ -28,7 +28,7 @@ contract Test_EmptyLTPremiumBootstrap is DayMarketTestBase {
         p.ltYieldShareProtocolFeeWAD = 0; // no LT protocol fee, so the fee mint does not create the first LT share
         // ltCurve stays non-zero ([0.02, 0.1, 0.3]) so the LDM pays a premium even at zero liquidity utilization
         _deployMarket(cellA(), p);
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        stUnit = 10 ** uint256(cell.collateralAsset.decimals);
         quoteUnit = 10 ** uint256(cell.quoteAsset.decimals);
     }
 
@@ -45,7 +45,7 @@ contract Test_EmptyLTPremiumBootstrap is DayMarketTestBase {
     }
 
     /// @notice Premium ST shares ARE minted for the LT while the LT tranche supply is zero, and the first LT
-    ///         depositor then captures that staged premium 1:1 (bootstrap pricing) — a windfall funded by the
+    ///         depositor then captures that staged premium 1:1 (bootstrap pricing), a windfall funded by the
     ///         dilution of plain ST holders.
     function test_PremiumMintedToEmptyLT_thenFirstDepositorCapturesIt() public {
         // Seed ST/JT only. No LT deposit, and minLiquidity == 0 means none is required for the ST deposit.
@@ -65,7 +65,7 @@ contract Test_EmptyLTPremiumBootstrap is DayMarketTestBase {
         }
 
         uint256 stagedPremium = _idle();
-        uint256 pooledBpt = toUint256(kernel.getState().ltOwnedYieldBearingAssets);
+        uint256 pooledBpt = toUint256(kernel.getState().totalLTAssets);
         emit log_named_uint("staged idle ST shares", stagedPremium);
         emit log_named_uint("pooled BPT held for LT", pooledBpt);
         // KEY OBSERVATION: value (ST shares and/or reinvested BPT) was accrued for the LT while the LT has zero shares.
@@ -74,15 +74,15 @@ contract Test_EmptyLTPremiumBootstrap is DayMarketTestBase {
         assertEq(liquidityTranche.totalSupply(), 0, "the LT tranche still has zero shares (no fee mint, no deposit)");
 
         // The staged premium sits as senior shares custodied by the kernel for a non-existent LT.
-        uint256 premiumNAV = toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(stagedPremium)));
+        uint256 premiumNAV = toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(stagedPremium)));
         assertGt(premiumNAV, 0, "the staged premium has positive NAV");
 
         // Now a first LT depositor arrives with a TINY BPT position and captures the whole staged premium.
         address dave = makeAddr("DAVE_FIRST_LP");
         accessManager.grantRole(LT_LP_ROLE, dave, 0);
-        uint256 daveBpt = 1e18; // one BPT unit — tiny next to the accumulated premium
-        _mintBptTo(dave, daveBpt, quoteUnit); // ~1 quote wei of backing; NAV ~ 1e18
-        uint256 daveDepositNAV = toUint256(kernel.ltConvertTrancheUnitsToNAVUnits(toTrancheUnits(daveBpt)));
+        uint256 daveBpt = 1e18; // one BPT unit, tiny next to the accumulated premium
+        _mintBptTo(dave, daveBpt, quoteUnit); // ~1 quote wei of backing, NAV ~ 1e18
+        uint256 daveDepositNAV = toUint256(kernel.convertLTAssetsToValue(toTrancheUnits(daveBpt)));
 
         vm.startPrank(dave);
         bpt.approve(address(liquidityTranche), daveBpt);

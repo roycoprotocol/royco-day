@@ -243,11 +243,9 @@ struct MarketConfig {
     string liquidityTrancheName;
     string liquidityTrancheSymbol;
     // Assets
-    address seniorAsset;
-    address juniorAsset;
-    // Dust tolerances
-    uint256 stDustTolerance;
-    uint256 jtDustTolerance;
+    address collateralAsset;
+    // Dust tolerance
+    uint256 dustTolerance;
     // Kernel
     KernelType kernelType;
     bytes kernelSpecificParams;

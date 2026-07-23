@@ -126,10 +126,7 @@ contract Test_ChainlinkToAdminMarketDeployment is Test {
         deployScript = new DeployScript();
         am.grantRole(DEPLOYER_ROLE, address(deployScript), 0);
         template = new Identical_Assets_ST_JT_ChainlinkToAdminOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
-            IRoycoFactory(address(factory)),
-            GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY),
-            address(entryPoint),
-            address(syncer)
+            IRoycoFactory(address(factory)), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY), address(entryPoint), address(syncer)
         );
     }
 

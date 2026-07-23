@@ -172,10 +172,10 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         assertTrue(LT.TRANCHE_TYPE() == TrancheType.LIQUIDITY, "LT type");
     }
 
-    /// @notice ST/JT hold the snUSD vault as their asset and the LT holds the Gyro E-CLP BPT
+    /// @notice ST/JT coinvest the snUSD vault as the kernel's single collateral asset and the LT holds the Gyro E-CLP BPT
     function test_Linkage_TrancheAssets() public view {
-        assertEq(KERNEL.ST_ASSET(), SNUSD_VAULT, "kernel ST asset");
-        assertEq(KERNEL.JT_ASSET(), SNUSD_VAULT, "kernel JT asset");
+        // The kernel carries ONE collateral asset for both coinvested tranches (ST_ASSET/JT_ASSET collapsed).
+        assertEq(KERNEL.COLLATERAL_ASSET(), SNUSD_VAULT, "kernel collateral asset");
         assertEq(KERNEL.LT_ASSET(), POOL, "kernel LT asset == pool");
         assertEq(ST.asset(), SNUSD_VAULT, "ST asset");
         assertEq(JT.asset(), SNUSD_VAULT, "JT asset");
@@ -428,8 +428,7 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         // Operational maintenance surface -> ADMIN_MARKET_OPS_ROLE.
         _assertRole(address(KERNEL), IRoycoDayKernel.reinvestLiquidityPremium.selector, ADMIN_MARKET_REINVEST_LIQUIDITY_PREMIUM_ROLE);
         _assertRole(address(KERNEL), IRoycoDayKernel.setRoycoBlacklist.selector, ADMIN_MARKET_OPS_ROLE);
-        _assertRole(address(ACCOUNTANT), IRoycoDayAccountant.setSeniorTrancheDustTolerance.selector, ADMIN_MARKET_OPS_ROLE);
-        _assertRole(address(ACCOUNTANT), IRoycoDayAccountant.setJuniorTrancheDustTolerance.selector, ADMIN_MARKET_OPS_ROLE);
+        _assertRole(address(ACCOUNTANT), IRoycoDayAccountant.setDustTolerance.selector, ADMIN_MARKET_OPS_ROLE);
 
         // Quoter admin surface -> ADMIN_ORACLE_QUOTER_ROLE (previously unbound => silently defaulted to ADMIN_ROLE).
         _assertRole(address(KERNEL), BalancerV3_LT_BPTOracle_Quoter.setBPTOracle.selector, ADMIN_ORACLE_QUOTER_ROLE);
@@ -512,19 +511,19 @@ contract Test_DayMarketDeployment is RoycoDayTestBase {
         // Pinned real-stack behavior: on the freshly deployed, UNSEEDED pool the E-CLP invariant math produces a small
         // negative intermediate on zero balances, so a direct computeTVL() call reverts with a SafeCast int->uint
         // overflow (argument value depends on the curve params, so only the selector is pinned). The kernel is immune:
-        // both ltConvert directions short-circuit to zero on a zero BPT supply BEFORE reading the oracle
-        // (BalancerV3_LT_BPTOracle_Quoter.sol:133-134,142-143) — asserted against the real oracle below.
+        // both LT conversion directions short-circuit to zero on a zero BPT supply BEFORE reading the oracle
+        // (BalancerV3_LT_BPTOracle_Quoter's convertLTAssetsToValue/convertValueToLTAssets), asserted against the real oracle below.
         address bptOracle = BalancerV3_LT_BPTOracle_Quoter(address(KERNEL)).getBalancerV3QuoterState().bptOracle;
         vm.expectPartialRevert(SafeCast.SafeCastOverflowedIntToUint.selector);
         LPOracleBase(bptOracle).computeTVL();
 
         assertEq(
-            TRANCHE_UNIT.unwrap(BalancerV3_LT_BPTOracle_Quoter(address(KERNEL)).ltConvertNAVUnitsToTrancheUnits(NAV_UNIT.wrap(1e18))),
+            TRANCHE_UNIT.unwrap(BalancerV3_LT_BPTOracle_Quoter(address(KERNEL)).convertValueToLTAssets(NAV_UNIT.wrap(1e18))),
             0,
             "zero-supply short-circuit must protect the NAV->BPT direction"
         );
         assertEq(
-            NAV_UNIT.unwrap(BalancerV3_LT_BPTOracle_Quoter(address(KERNEL)).ltConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT.wrap(1e18))),
+            NAV_UNIT.unwrap(BalancerV3_LT_BPTOracle_Quoter(address(KERNEL)).convertLTAssetsToValue(TRANCHE_UNIT.wrap(1e18))),
             0,
             "zero-supply short-circuit must protect the BPT->NAV direction"
         );

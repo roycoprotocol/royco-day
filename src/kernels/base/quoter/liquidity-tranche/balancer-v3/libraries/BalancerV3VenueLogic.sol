@@ -34,7 +34,7 @@ library BalancerV3VenueLogic {
      * @dev The kernel supplies the senior tranche shares and quote assets it already holds and receives the minted BPT for the liquidity tranche
      * @param _immutables The immutable Balancer V3 venue configuration carried in from the kernel mixin
      * @param _isPreview Whether this is a preview, which computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling
-     * @param _ltOwnedYieldBearingAssets The kernel's current LT-owned BPT holdings, the basis of the post-op LT mark
+     * @param _totalLTAssets The kernel's current LT-owned BPT holdings, the basis of the post-op LT mark
      * @param _seniorShares The exact amount of senior tranche shares to add into the pool from this kernel's balance
      * @param _quoteAssets The exact amount of quote assets to add into the pool from this kernel's balance
      * @param _minLTAssetsOut The minimum BPT (LT assets) that must be minted, bounding the add's slippage at the Vault
@@ -45,7 +45,7 @@ library BalancerV3VenueLogic {
     function addBalancerV3Liquidity(
         IBalancerV3VenueCallbacks.BalancerV3VenueImmutableState memory _immutables,
         bool _isPreview,
-        TRANCHE_UNIT _ltOwnedYieldBearingAssets,
+        TRANCHE_UNIT _totalLTAssets,
         uint256 _seniorShares,
         uint256 _quoteAssets,
         TRANCHE_UNIT _minLTAssetsOut
@@ -92,8 +92,8 @@ library BalancerV3VenueLogic {
         }
 
         // Value the minted BPT and the post-op LT holdings against the post-add pool state both modes price and enforce at
-        depositNAV = IRoycoDayKernel(address(this)).ltConvertTrancheUnitsToNAVUnits(toTrancheUnits(ltAssets));
-        postOpLTRawNAV = IRoycoDayKernel(address(this)).ltConvertTrancheUnitsToNAVUnits(_ltOwnedYieldBearingAssets + toTrancheUnits(ltAssets));
+        depositNAV = IRoycoDayKernel(address(this)).convertLTAssetsToValue(toTrancheUnits(ltAssets));
+        postOpLTRawNAV = IRoycoDayKernel(address(this)).convertLTAssetsToValue(_totalLTAssets + toTrancheUnits(ltAssets));
 
         // A preview carries its result out via this revert, unwinding every transient balance change before settlement
         // NOTE: The error's offset and length prefix mirrors the unlock's bytes return so either mode decodes identically
@@ -118,7 +118,7 @@ library BalancerV3VenueLogic {
      * @dev The kernel receives any ST shares withdrawn and is responsible for converting them to the base assets before remitting them to the user
      * @param _immutables The immutable Balancer V3 venue configuration carried in from the kernel mixin
      * @param _isPreview Whether this is a preview, which computes the amounts under the Vault's real semantics and unwinds by reverting with the result instead of settling
-     * @param _ltOwnedYieldBearingAssets The kernel's remaining LT-owned BPT holdings (already debited by the flow), the basis of the post-op LT mark
+     * @param _totalLTAssets The kernel's remaining LT-owned BPT holdings (already debited by the flow), the basis of the post-op LT mark
      * @param _ltAssets The exact BPT amount (LT assets) to burn from this kernel's balance
      * @param _minSTSharesOut The minimum senior tranche shares that must be withdrawn, bounding the removal's slippage at the Vault
      * @param _minQuoteAssetsOut The minimum quote assets that must be withdrawn, bounding the removal's slippage at the Vault
@@ -130,7 +130,7 @@ library BalancerV3VenueLogic {
     function removeBalancerV3Liquidity(
         IBalancerV3VenueCallbacks.BalancerV3VenueImmutableState memory _immutables,
         bool _isPreview,
-        TRANCHE_UNIT _ltOwnedYieldBearingAssets,
+        TRANCHE_UNIT _totalLTAssets,
         TRANCHE_UNIT _ltAssets,
         uint256 _minSTSharesOut,
         uint256 _minQuoteAssetsOut,
@@ -162,7 +162,7 @@ library BalancerV3VenueLogic {
         quoteAssets = amountsOut[_immutables.quoteAssetPoolIndex];
 
         // Value the post-op LT holdings after the removal, which can mutate the invariant, so both modes enforce at the same post-remove state
-        postOpLTRawNAV = IRoycoDayKernel(address(this)).ltConvertTrancheUnitsToNAVUnits(_ltOwnedYieldBearingAssets);
+        postOpLTRawNAV = IRoycoDayKernel(address(this)).convertLTAssetsToValue(_totalLTAssets);
 
         // A preview carries its result out via this revert, unwinding every transient balance change before settlement
         // NOTE: The error's offset and length prefix mirrors the unlock's bytes return so either mode decodes identically
@@ -204,8 +204,8 @@ library BalancerV3VenueLogic {
         // Value the ST shares that need to be reinvested in NAV units at the synced senior share rate (effective NAV over the post-mint supply)
         NAV_UNIT stSharesToReinvestNAV = ValuationLogic._convertToValue(stSharesToReinvest, _totalSTShares, _stEffectiveNAV, Math.Rounding.Floor);
         // Mark that senior NAV to its fair BPT at the manipulation-resistant oracle, discounted by the max tolerated slippage
-        TRANCHE_UNIT minLTAssetsOut = IRoycoDayKernel(address(this)).ltConvertNAVUnitsToTrancheUnits(stSharesToReinvestNAV)
-            .mulDiv((WAD - _maxReinvestmentSlippageWAD), WAD, Math.Rounding.Ceil);
+        TRANCHE_UNIT minLTAssetsOut =
+            IRoycoDayKernel(address(this)).convertValueToLTAssets(stSharesToReinvestNAV).mulDiv((WAD - _maxReinvestmentSlippageWAD), WAD, Math.Rounding.Ceil);
         // Preemptively return if there exists no floor on the reinvested value
         if (minLTAssetsOut == ZERO_TRANCHE_UNITS) return;
 
@@ -230,7 +230,7 @@ library BalancerV3VenueLogic {
 
         // Debit the reinvested ST shares and credit the BPT minted from/to the LT
         $.ltOwnedSeniorTrancheShares = ltOwnedSeniorTrancheShares - stSharesToReinvest;
-        $.ltOwnedYieldBearingAssets = $.ltOwnedYieldBearingAssets + ltAssetsMinted;
+        $.totalLTAssets = $.totalLTAssets + ltAssetsMinted;
 
         emit IRoycoDayKernel.LiquidityPremiumReinvested(stSharesToReinvest, ltAssetsMinted);
     }

@@ -50,15 +50,14 @@ contract Test_ProxyUpgrades_Tranches is DayMarketTestBase {
     function _deployFreshImplementations() internal returns (RoycoSeniorTranche stImpl, DayKernel kernelImpl, RoycoDayAccountant accImpl) {
         stImpl = new RoycoSeniorTranche(address(stJtVault), address(kernel));
         accImpl = new RoycoDayAccountant(address(kernel));
-        // The kernel impl constructor re-validates the live wiring (the identical senior and junior assets and the
+        // The kernel impl constructor re-validates the live wiring (the shared collateral asset and the
         // registered two-token pool pairing the senior share), so a successful deploy is itself proof the
         // upgrade target is built against this exact market
         kernelImpl = new DayKernel(
             IRoycoDayKernel.RoycoDayKernelConstructionParams({
                 seniorTranche: address(seniorTranche),
-                stAsset: address(stJtVault),
                 juniorTranche: address(juniorTranche),
-                jtAsset: address(stJtVault),
+                collateralAsset: address(stJtVault),
                 accountant: address(accountant),
                 liquidityTranche: address(liquidityTranche),
                 ltAsset: address(bpt),
@@ -94,10 +93,15 @@ contract Test_ProxyUpgrades_Tranches is DayMarketTestBase {
 
         // Hand-derived control values under the virtual-shares/value offset: flat market at the 1.0 seed rate, so
         // 10e18 vault shares are 10e18 NAV and mint floor((100e18 + 1e6) x 10e18 / (100e18 + 1)) = 10000000000000099999
-        // shares; redeeming 5e18 of the resulting 110000000000000099999 supply (110e18 vault-share claims) pays
-        // floor(110e18 x 5e18 / (110000000000000099999 + 1e6)) = 4999999999999950000 vault shares
-        assertEq(controlShares, 10000000000000099999, "the control deposit must mint exactly the offset-adjusted quote at the 1.0 seed rate");
-        assertEq(toUint256(controlClaims.stAssets), 4999999999999950000, "the control redemption must claim exactly the offset-adjusted pro-rata vault shares");
+        // shares. Redeeming 5e18 of the resulting 110000000000000099999 supply claims the effective NAV slice
+        // floor(110e18 x 5e18 / (110000000000000099999 + 1e6)) = 4999999999999950000, converted once to collateral
+        // at the identity 1.0 rate
+        assertEq(controlShares, 10_000_000_000_000_099_999, "the control deposit must mint exactly the offset-adjusted quote at the 1.0 seed rate");
+        assertEq(
+            toUint256(controlClaims.collateralAssets),
+            4_999_999_999_999_950_000,
+            "the control redemption must claim exactly the offset-adjusted pro-rata vault shares"
+        );
 
         // Pre-upgrade digests of everything an upgrade must not touch
         address oldStImpl = _implOf(address(seniorTranche));

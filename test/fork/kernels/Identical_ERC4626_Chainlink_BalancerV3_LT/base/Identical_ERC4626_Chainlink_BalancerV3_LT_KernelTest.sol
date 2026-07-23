@@ -4,13 +4,13 @@ pragma solidity ^0.8.28;
 import { IRouter } from "../../../../../lib/balancer-v3-monorepo/pkg/interfaces/contracts/vault/IRouter.sol";
 import { IERC20 } from "../../../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "../../../../../lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import { IRoycoLiquidityTranche } from "../../../../../src/interfaces/IRoycoLiquidityTranche.sol";
 import { AggregatorV3Interface } from "../../../../../src/interfaces/external/chainlink/AggregatorV3Interface.sol";
 import {
     IdenticalAssets_ST_JT_ChainlinkOracle_Quoter
 } from "../../../../../src/kernels/base/quoter/identical-st-jt/base/IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.sol";
-import { Test_KernelSuiteBase } from "../../Test_KernelSuiteBase.t.sol";
-import { IRoycoLiquidityTranche } from "../../../../../src/interfaces/IRoycoLiquidityTranche.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../../../src/libraries/Units.sol";
+import { Test_KernelSuiteBase } from "../../Test_KernelSuiteBase.t.sol";
 
 /// @dev The minimal Permit2 surface the Balancer Router's token pulls require (no permit2 lib is vendored).
 interface IPermit2Like {
@@ -191,22 +191,22 @@ abstract contract Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest is Test_K
         _seedMarket(testConfig.initialFunding / 100, testConfig.initialFunding / 100);
         assertFalse(VAULT.isPoolInitialized(POOL), "precondition: the deploy script must leave the pool uninitialized");
         assertEq(
-            toUint256(KERNEL.ltConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(1e18)))),
+            toUint256(KERNEL.convertValueToLTAssets(toNAVUnits(uint256(1e18)))),
             0,
             "the zero-supply conversion floor must hold on the real vault, the reinvest defer primitive"
         );
 
         // An in-band genesis: value-matched legs, the same shape the ops bootstrap seeds
-        uint256 stAssets = 1e18;
-        uint256 quoteAssets = _quoteAssetsForValue(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(stAssets)));
-        OpReceipt memory r = _doDepositLTMulti(LT_ALICE_ADDRESS, stAssets, quoteAssets, 0);
+        uint256 collateralAssets = 1e18;
+        uint256 quoteAssets = _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(collateralAssets)));
+        OpReceipt memory r = _doDepositLTMulti(LT_ALICE_ADDRESS, collateralAssets, quoteAssets, 0);
 
         assertTrue(VAULT.isPoolInitialized(POOL), "the first production deposit must initialize the pool");
         uint256 dead = IERC20(POOL).balanceOf(address(0));
         assertEq(dead, 1e6, "the real vault must burn the minimum supply to the null address");
         assertEq(IERC20(POOL).balanceOf(address(KERNEL)), IERC20(POOL).totalSupply() - dead, "the kernel must custody every live genesis BPT");
         assertEq(
-            toUint256(KERNEL.getState().ltOwnedYieldBearingAssets),
+            toUint256(KERNEL.getState().totalLTAssets),
             IERC20(POOL).balanceOf(address(KERNEL)),
             "the kernel's LT ledger must credit exactly its custodied genesis BPT"
         );
@@ -229,16 +229,16 @@ abstract contract Identical_ERC4626_Chainlink_BalancerV3_LT_KernelTest is Test_K
         _seedMarket(testConfig.initialFunding / 100, testConfig.initialFunding / 100);
         assertFalse(VAULT.isPoolInitialized(POOL), "precondition: the deploy script must leave the pool uninitialized");
 
-        uint256 stAssets = 1e18;
-        uint256 quoteAssets = _quoteAssetsForValue(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(stAssets)));
+        uint256 collateralAssets = 1e18;
+        uint256 quoteAssets = _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(collateralAssets)));
 
         // The execute-and-revert preview runs the real initialize inside the unlocked Vault and unwinds it whole
-        (uint256 quoted,) = IRoycoLiquidityTranche(address(LT)).previewDepositMultiAsset(stAssets, quoteAssets);
+        (uint256 quoted,) = IRoycoLiquidityTranche(address(LT)).previewDepositMultiAsset(collateralAssets, quoteAssets);
         assertFalse(VAULT.isPoolInitialized(POOL), "the preview must unwind the simulated genesis initialization");
         assertEq(IERC20(POOL).totalSupply(), 0, "the preview must unwind the simulated genesis mint");
 
         // The executed genesis matches the quote to the wei
-        OpReceipt memory r = _doDepositLTMulti(LT_ALICE_ADDRESS, stAssets, quoteAssets, 0);
+        OpReceipt memory r = _doDepositLTMulti(LT_ALICE_ADDRESS, collateralAssets, quoteAssets, 0);
         assertEq(r.shares, quoted, "the preview must quote exactly the executed genesis seed's shares");
     }
 }

@@ -6,9 +6,9 @@ import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/M
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
-import { DispatchLogic } from "../../../src/libraries/logic/DispatchLogic.sol";
 import { AssetClaims, MarketState, Operation, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { DispatchLogic } from "../../../src/libraries/logic/DispatchLogic.sol";
 import { MarketFuzzTestBase } from "../../utils/MarketFuzzTestBase.sol";
 
 /**
@@ -67,10 +67,9 @@ abstract contract SimulationSeamPreviewsTestBase is MarketFuzzTestBase {
         assertEq(a.venueQuoteBalance, _before.venueQuoteBalance, string.concat(_ctx, ": venue quote ledger must be untouched"));
     }
 
-    /// @notice Asserts all five claim legs of an executed redemption equal the same-block preview byte-for-byte
+    /// @notice Asserts all four claim legs of an executed redemption equal the same-block preview byte-for-byte
     function _assertClaimsParity(AssetClaims memory _executed, AssetClaims memory _previewed, string memory _flow) internal pure {
-        assertEq(_executed.stAssets, _previewed.stAssets, string.concat(_flow, ": senior-asset leg must match the preview"));
-        assertEq(_executed.jtAssets, _previewed.jtAssets, string.concat(_flow, ": junior-asset leg must match the preview"));
+        assertEq(_executed.collateralAssets, _previewed.collateralAssets, string.concat(_flow, ": collateral leg must match the preview"));
         assertEq(_executed.ltAssets, _previewed.ltAssets, string.concat(_flow, ": LT-asset leg must match the preview"));
         assertEq(_executed.stShares, _previewed.stShares, string.concat(_flow, ": senior-share leg must match the preview"));
         assertEq(_executed.nav, _previewed.nav, string.concat(_flow, ": claim NAV must match the preview"));
@@ -110,16 +109,16 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
      */
     function test_PreviewDeposit_FreshMarket_ExactQuotesAndExecParity() public {
         uint256 stPreviewed = seniorTranche.previewDeposit(toTrancheUnits(10e18));
-        assertEq(stPreviewed, 10000000000000099999, "the flat-market senior quote must be the exact offset-adjusted mint");
+        assertEq(stPreviewed, 10_000_000_000_000_099_999, "the flat-market senior quote must be the exact offset-adjusted mint");
         assertEq(_depositSenior(10e18), stPreviewed, "the senior deposit must mint exactly the previewed shares");
 
         uint256 jtPreviewed = juniorTranche.previewDeposit(toTrancheUnits(10e18));
-        assertEq(jtPreviewed, 10000000000000333332, "the flat-market junior quote must be the exact offset-adjusted mint");
+        assertEq(jtPreviewed, 10_000_000_000_000_333_332, "the flat-market junior quote must be the exact offset-adjusted mint");
         assertEq(_depositJunior(10e18), jtPreviewed, "the junior deposit must mint exactly the previewed shares");
 
         _mintQuoteBackedBPT(LT_PROVIDER, 5e18, 5e6);
         uint256 ltPreviewed = liquidityTranche.previewDeposit(toTrancheUnits(5e18));
-        assertEq(ltPreviewed, 5000000000000833332, "the flat-market liquidity quote must be the exact offset-adjusted mint");
+        assertEq(ltPreviewed, 5_000_000_000_000_833_332, "the flat-market liquidity quote must be the exact offset-adjusted mint");
         vm.startPrank(LT_PROVIDER);
         bpt.approve(address(liquidityTranche), 5e18);
         assertEq(liquidityTranche.deposit(toTrancheUnits(5e18), LT_PROVIDER), ltPreviewed, "the liquidity deposit must mint exactly the previewed shares");
@@ -172,22 +171,22 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
      */
     function test_PreviewRedeem_FreshMarket_ExactQuotesAndExecParity() public {
         AssetClaims memory stPreviewed = seniorTranche.previewRedeem(10e18);
-        assertEq(stPreviewed.stAssets, toTrancheUnits(9999999999999900000), "the senior quote must claim exactly its pro-rata senior assets");
-        assertEq(stPreviewed.nav, toNAVUnits(uint256(9999999999999900000)), "the senior quote must claim exactly its pro-rata NAV");
+        assertEq(stPreviewed.collateralAssets, toTrancheUnits(9_999_999_999_999_900_000), "the senior quote must claim exactly its pro-rata collateral");
+        assertEq(stPreviewed.nav, toNAVUnits(uint256(9_999_999_999_999_900_000)), "the senior quote must claim exactly its pro-rata NAV");
         vm.prank(ST_PROVIDER);
         AssetClaims memory stClaims = seniorTranche.redeem(10e18, ST_PROVIDER, ST_PROVIDER);
         _assertClaimsParity(stClaims, stPreviewed, "senior redemption");
 
         AssetClaims memory jtPreviewed = juniorTranche.previewRedeem(5e18);
-        assertEq(jtPreviewed.jtAssets, toTrancheUnits(4999999999999833333), "the junior quote must claim exactly its pro-rata junior assets");
-        assertEq(jtPreviewed.nav, toNAVUnits(uint256(4999999999999833333)), "the junior quote must claim exactly its pro-rata NAV");
+        assertEq(jtPreviewed.collateralAssets, toTrancheUnits(4_999_999_999_999_833_333), "the junior quote must claim exactly its pro-rata collateral");
+        assertEq(jtPreviewed.nav, toNAVUnits(uint256(4_999_999_999_999_833_333)), "the junior quote must claim exactly its pro-rata NAV");
         vm.prank(JT_PROVIDER);
         AssetClaims memory jtClaims = juniorTranche.redeem(5e18, JT_PROVIDER, JT_PROVIDER);
         _assertClaimsParity(jtClaims, jtPreviewed, "junior redemption");
 
         AssetClaims memory ltPreviewed = liquidityTranche.previewRedeem(1e18);
-        assertEq(ltPreviewed.ltAssets, toTrancheUnits(999999999999833333), "the liquidity quote must claim exactly its pro-rata BPT");
-        assertEq(ltPreviewed.nav, toNAVUnits(uint256(999999999999833333)), "the liquidity quote must claim exactly its pro-rata NAV");
+        assertEq(ltPreviewed.ltAssets, toTrancheUnits(999_999_999_999_833_333), "the liquidity quote must claim exactly its pro-rata BPT");
+        assertEq(ltPreviewed.nav, toNAVUnits(uint256(999_999_999_999_833_333)), "the liquidity quote must claim exactly its pro-rata NAV");
         vm.prank(LT_PROVIDER);
         AssetClaims memory ltClaims = liquidityTranche.redeem(1e18, LT_PROVIDER, LT_PROVIDER);
         _assertClaimsParity(ltClaims, ltPreviewed, "liquidity redemption");
@@ -242,7 +241,11 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
         assertEq(uint8(state.marketState), uint8(MarketState.PERPETUAL), "a liquidation breach forces the market PERPETUAL so the redemption stays open");
 
         AssetClaims memory previewed = seniorTranche.previewRedeem(10e18);
-        assertEq(previewed.nav, toNAVUnits(uint256(10099999999999898999)), "the quote must carry the base 9999999999999900000 slice plus the asset-quantized 99999999999998999 bonus");
+        assertEq(
+            previewed.nav,
+            toNAVUnits(uint256(10_099_999_999_999_898_999)),
+            "the quote must carry the base 9999999999999900000 slice plus the asset-quantized 99999999999998999 bonus"
+        );
 
         vm.prank(ST_PROVIDER);
         AssetClaims memory claims = seniorTranche.redeem(10e18, ST_PROVIDER, ST_PROVIDER);
@@ -431,9 +434,7 @@ contract Test_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestBase 
         vm.expectPartialRevert(DispatchLogic.SIMULATION_RESULT.selector);
         kernel.ltRedeemMultiAsset(true, 1e18, 0, 0, address(kernel));
 
-        assertEq(
-            keccak256(abi.encode(accountant.getState(), kernel.getState())), digestBefore, "a flagged flow must leave the committed state untouched"
-        );
+        assertEq(keccak256(abi.encode(accountant.getState(), kernel.getState())), digestBefore, "a flagged flow must leave the committed state untouched");
     }
 }
 
@@ -492,7 +493,7 @@ contract Test_SimulationSeamPreviewsFixedTerm_Tranches is SimulationSeamPreviews
     function test_FixedTerm_LiquidityPreviewDepositStillQuotes_ExecParity() public {
         _mintQuoteBackedBPT(LT_PROVIDER, 5e18, 5e6);
         uint256 previewed = liquidityTranche.previewDeposit(toTrancheUnits(5e18));
-        assertEq(previewed, 5000000000000833332, "the fixed-term LT quote must price the exact offset-adjusted mint on the untouched pool");
+        assertEq(previewed, 5_000_000_000_000_833_332, "the fixed-term LT quote must price the exact offset-adjusted mint on the untouched pool");
         vm.startPrank(LT_PROVIDER);
         bpt.approve(address(liquidityTranche), 5e18);
         assertEq(liquidityTranche.deposit(toTrancheUnits(5e18), LT_PROVIDER), previewed, "the fixed-term LT deposit must mint exactly the previewed shares");
@@ -663,7 +664,9 @@ contract TestFuzz_SimulationSeamPreviews_Tranches is SimulationSeamPreviewsTestB
                 _assertClaimsParity(claims, previewed, "liquidity redemption");
             } catch (bytes memory err) {
                 assertEq(
-                    bytes4(err), IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector, "the liquidity redemption preview may only revert on the liquidity gate"
+                    bytes4(err),
+                    IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector,
+                    "the liquidity redemption preview may only revert on the liquidity gate"
                 );
                 _assertSnapshotUnchanged(before, "liquidity previewRedeem");
                 vm.prank(LT_PROVIDER);

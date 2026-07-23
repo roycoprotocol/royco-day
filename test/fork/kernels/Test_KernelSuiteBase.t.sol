@@ -18,7 +18,6 @@ import { IRoycoAuth } from "../../../src/interfaces/IRoycoAuth.sol";
 import { IRoycoBlacklist } from "../../../src/interfaces/IRoycoBlacklist.sol";
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
-import { DispatchLogic } from "../../../src/libraries/logic/DispatchLogic.sol";
 import { IRoycoLiquidityTranche } from "../../../src/interfaces/IRoycoLiquidityTranche.sol";
 import { IRoycoSeniorTranche } from "../../../src/interfaces/IRoycoSeniorTranche.sol";
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
@@ -26,6 +25,7 @@ import { IYDM } from "../../../src/interfaces/IYDM.sol";
 import { MAX_TRANCHE_UNITS, WAD, ZERO_NAV_UNITS, ZERO_TRANCHE_UNITS } from "../../../src/libraries/Constants.sol";
 import { AssetClaims, MarketState, Operation, SyncedAccountingState, TrancheType } from "../../../src/libraries/Types.sol";
 import { NAV_UNIT, TRANCHE_UNIT, toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { DispatchLogic } from "../../../src/libraries/logic/DispatchLogic.sol";
 import { IKernelTestHooks } from "../../utils/IKernelTestHooks.sol";
 import { RoycoDayTestBase } from "../../utils/RoycoDayTestBase.sol";
 
@@ -42,6 +42,9 @@ import { RoycoDayTestBase } from "../../utils/RoycoDayTestBase.sol";
 abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /// @notice The concrete kernel's static test configuration (assets, fork, funding).
     TestConfig internal testConfig;
+
+    /// @notice The single coinvested collateral asset backing both ST and JT (== `KERNEL.COLLATERAL_ASSET()`).
+    address internal COLLATERAL_ASSET;
 
     // ── Day market-topology addresses the script's `DeploymentResult` does not surface ──
     /// @notice The liquidity tranche (holds the Gyro E-CLP BPT).
@@ -119,6 +122,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         // Deploy the market end-to-end through the real script (concrete test selects the config by name).
         _setDeployedMarket(_deployKernelAndMarket());
 
+        // The coinvestment collapse leaves one collateral asset, so the config's two hook assets must be it
+        COLLATERAL_ASSET = KERNEL.COLLATERAL_ASSET();
+        assertEq(testConfig.stAsset, COLLATERAL_ASSET, "setup: the configured ST asset must be the kernel's collateral asset");
+        assertEq(testConfig.jtAsset, COLLATERAL_ASSET, "setup: the configured JT asset must be the kernel's collateral asset");
+
         // Capture the Day LT topology the script result omits, by reading the deployed contracts.
         if (testConfig.hasLiquidityTranche) {
             LT = IRoycoVaultTranche(KERNEL.LIQUIDITY_TRANCHE());
@@ -147,30 +155,41 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         }
     }
 
-    /// @notice Deposits `_amount` (asset units) of the ST asset from `_lp` into the senior tranche, returning the shares.
+    /// @notice Deposits `_amount` (asset units) of the collateral asset from `_lp` into the senior tranche, returning the shares.
     function _depositST(address _lp, uint256 _amount) internal returns (uint256 shares) {
         vm.startPrank(_lp);
-        IERC20(testConfig.stAsset).approve(address(ST), _amount);
+        IERC20(COLLATERAL_ASSET).approve(address(ST), _amount);
         shares = ST.deposit(toTrancheUnits(_amount), _lp);
         vm.stopPrank();
     }
 
-    /// @notice Deposits `_amount` (asset units) of the JT asset from `_lp` into the junior tranche, returning the shares.
+    /// @notice Deposits `_amount` (asset units) of the collateral asset from `_lp` into the junior tranche, returning the shares.
     function _depositJT(address _lp, uint256 _amount) internal returns (uint256 shares) {
         vm.startPrank(_lp);
-        IERC20(testConfig.jtAsset).approve(address(JT), _amount);
+        IERC20(COLLATERAL_ASSET).approve(address(JT), _amount);
         shares = JT.deposit(toTrancheUnits(_amount), _lp);
         vm.stopPrank();
     }
 
-    /// @notice Asserts two-term NAV conservation on the LIVE view marks within the kernel's NAV tolerance.
-    /// @dev Committed-checkpoint conservation is wei-exact and asserted via `_assertCommittedConservation` instead.
+    /// @notice Asserts single-collateral NAV conservation on the LIVE view marks within the kernel's NAV tolerance.
+    /// @dev ST and JT raw NAVs are both the whole coinvested collateral NAV by design, so their equality is
+    ///      asserted wei-exact first. Committed-checkpoint conservation is wei-exact and asserted via
+    ///      `_assertCommittedConservation` instead.
+    /// @notice The live collateral NAV through the production quoter path (the kernel's collateral ledger valued by its quoter)
+    function _liveCollateralNAV() internal view returns (NAV_UNIT) {
+        return KERNEL.convertCollateralAssetsToValue(KERNEL.getState().totalCollateralAssets);
+    }
+
+    /// @notice The live LT raw NAV through the production quoter path (the kernel's LT ledger valued by its quoter)
+    function _liveLTRawNAV() internal view returns (NAV_UNIT) {
+        return KERNEL.convertLTAssetsToValue(KERNEL.getState().totalLTAssets);
+    }
+
     function _assertNAVConservation() internal view {
-        NAV_UNIT stRawNAV = ST.getRawNAV();
-        NAV_UNIT jtRawNAV = JT.getRawNAV();
+        NAV_UNIT collateralNAV = _liveCollateralNAV();
         NAV_UNIT stEffectiveNAV = ST.totalAssets().nav;
         NAV_UNIT jtEffectiveNAV = JT.totalAssets().nav;
-        assertApproxEqAbs(stRawNAV + jtRawNAV, stEffectiveNAV + jtEffectiveNAV, maxNAVDelta(), "NAV conservation");
+        assertApproxEqAbs(collateralNAV, stEffectiveNAV + jtEffectiveNAV, maxNAVDelta(), "NAV conservation");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -195,12 +214,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      */
     struct MarketSnapshot {
         // Live raw NAVs (quoter conversions of owned assets). ltRawNAV is 0 when the market has no LT
-        NAV_UNIT stRawNAV;
-        NAV_UNIT jtRawNAV;
+        NAV_UNIT collateralNAV;
         NAV_UNIT ltRawNAV;
         // Committed accountant checkpoint (ACCOUNTANT.getState())
-        NAV_UNIT lastSTRawNAV;
-        NAV_UNIT lastJTRawNAV;
+        NAV_UNIT lastCollateralNAV;
         NAV_UNIT lastLTRawNAV;
         NAV_UNIT lastSTEffectiveNAV;
         NAV_UNIT lastJTEffectiveNAV;
@@ -219,13 +236,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 jtSupply;
         uint256 ltSupply;
         // Kernel owned-asset accounting (KERNEL.getState())
-        TRANCHE_UNIT stOwned;
-        TRANCHE_UNIT jtOwned;
+        TRANCHE_UNIT collateralOwned;
         TRANCHE_UNIT ltOwned;
         uint256 ltOwnedSeniorTrancheShares;
-        // Kernel token balances (solvency side). When stAsset == jtAsset the two balances mirror each other
-        uint256 kernelSTAssetBal;
-        uint256 kernelJTAssetBal;
+        // Kernel token balances (solvency side)
+        uint256 kernelCollateralBal;
         uint256 kernelBPTBal;
         uint256 kernelSTShareBal;
         // Fee recipient share balances
@@ -240,14 +255,12 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         bool hasLT = testConfig.hasLiquidityTranche;
 
         // Live raw NAVs through the production quoter path
-        s.stRawNAV = ST.getRawNAV();
-        s.jtRawNAV = JT.getRawNAV();
-        if (hasLT) s.ltRawNAV = LT.getRawNAV();
+        s.collateralNAV = _liveCollateralNAV();
+        if (hasLT) s.ltRawNAV = _liveLTRawNAV();
 
         // Committed accountant checkpoint
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        s.lastSTRawNAV = a.lastSTRawNAV;
-        s.lastJTRawNAV = a.lastJTRawNAV;
+        s.lastCollateralNAV = a.lastCollateralNAV;
         s.lastLTRawNAV = a.lastLTRawNAV;
         s.lastSTEffectiveNAV = a.lastSTEffectiveNAV;
         s.lastJTEffectiveNAV = a.lastJTEffectiveNAV;
@@ -260,7 +273,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         s.twLT = a.twLTYieldShareAccruedWAD;
 
         // Utilizations recomputed independently from the committed checkpoint
-        s.coverageUtilizationWAD = _expectedCoverageUtilization(a.lastSTRawNAV, a.lastJTRawNAV, a.minCoverageWAD, a.lastJTEffectiveNAV);
+        s.coverageUtilizationWAD = _expectedCoverageUtilization(a.lastCollateralNAV, a.minCoverageWAD, a.lastJTEffectiveNAV);
         s.liquidityUtilizationWAD = _expectedLiquidityUtilization(a.lastSTEffectiveNAV, a.minLiquidityWAD, a.lastLTRawNAV);
 
         // Supplies
@@ -270,14 +283,12 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         // Kernel owned-asset ledger
         IRoycoDayKernel.RoycoDayKernelState memory k = KERNEL.getState();
-        s.stOwned = k.stOwnedYieldBearingAssets;
-        s.jtOwned = k.jtOwnedYieldBearingAssets;
-        s.ltOwned = k.ltOwnedYieldBearingAssets;
+        s.collateralOwned = k.totalCollateralAssets;
+        s.ltOwned = k.totalLTAssets;
         s.ltOwnedSeniorTrancheShares = k.ltOwnedSeniorTrancheShares;
 
         // Kernel token balances (solvency side)
-        s.kernelSTAssetBal = IERC20(testConfig.stAsset).balanceOf(address(KERNEL));
-        s.kernelJTAssetBal = IERC20(testConfig.jtAsset).balanceOf(address(KERNEL));
+        s.kernelCollateralBal = IERC20(COLLATERAL_ASSET).balanceOf(address(KERNEL));
         if (hasLT) {
             s.kernelBPTBal = IERC20(POOL).balanceOf(address(KERNEL));
             s.kernelSTShareBal = ST.balanceOf(address(KERNEL));
@@ -307,32 +318,25 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /// @notice Asserts kernel token balances cover its owned-asset ledger (>= to tolerate donations).
     function _assertSolvency() internal view {
         IRoycoDayKernel.RoycoDayKernelState memory k = KERNEL.getState();
-        uint256 stAssetBal = IERC20(testConfig.stAsset).balanceOf(address(KERNEL));
-        if (testConfig.stAsset == testConfig.jtAsset) {
-            assertGe(
-                stAssetBal,
-                toUint256(k.stOwnedYieldBearingAssets) + toUint256(k.jtOwnedYieldBearingAssets),
-                "solvency: shared ST/JT asset balance below the owned-asset ledger"
-            );
-        } else {
-            assertGe(stAssetBal, toUint256(k.stOwnedYieldBearingAssets), "solvency: ST asset balance below the owned-asset ledger");
-            assertGe(
-                IERC20(testConfig.jtAsset).balanceOf(address(KERNEL)),
-                toUint256(k.jtOwnedYieldBearingAssets),
-                "solvency: JT asset balance below the owned-asset ledger"
-            );
-        }
+        assertGe(
+            IERC20(COLLATERAL_ASSET).balanceOf(address(KERNEL)), toUint256(k.totalCollateralAssets), "solvency: collateral balance below the owned-asset ledger"
+        );
         if (testConfig.hasLiquidityTranche) {
-            assertGe(IERC20(POOL).balanceOf(address(KERNEL)), toUint256(k.ltOwnedYieldBearingAssets), "solvency: BPT balance below the owned-asset ledger");
+            assertGe(IERC20(POOL).balanceOf(address(KERNEL)), toUint256(k.totalLTAssets), "solvency: BPT balance below the owned-asset ledger");
             assertGe(ST.balanceOf(address(KERNEL)), k.ltOwnedSeniorTrancheShares, "solvency: ST share balance below the idle liquidity premium ledger");
         }
     }
 
-    /// @notice Wei-exact two-term conservation on the COMMITTED checkpoint: `stRaw + jtRaw == stEff + jtEff`
-    ///         holds byte-for-byte, because the waterfall only ever re-labels value between the two tranches.
+    /// @notice Wei-exact conservation on the COMMITTED checkpoint: `collateralNAV == stEff + jtEff` holds
+    ///         byte-for-byte, because the waterfall only ever re-labels value between the two tranches.
+    /// @dev Also asserts the state-machine biconditional: every PERPETUAL commit erases the IL and a
+    ///      FIXED_TERM commit always retains a nonzero IL, so PERPETUAL iff no impermanent loss.
     function _assertCommittedConservation() internal view {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        assertNAVConservation(a.lastSTRawNAV, a.lastJTRawNAV, a.lastSTEffectiveNAV, a.lastJTEffectiveNAV, "committed checkpoint");
+        assertNAVConservation(a.lastCollateralNAV, a.lastSTEffectiveNAV, a.lastJTEffectiveNAV, "committed checkpoint");
+        assertTrue(
+            (a.lastMarketState == MarketState.PERPETUAL) == (a.lastJTImpermanentLoss == ZERO_NAV_UNITS), "state machine: PERPETUAL iff no impermanent loss"
+        );
     }
 
     // ── Actors, roles, gating ──
@@ -399,7 +403,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     ///      shares/value offset, and the mint-dilution clamp (bind iff
     ///      value·(WAD − MAX_MINT_DILUTION) > denominator·MAX_MINT_DILUTION, products fit on the suite domain).
     function _expectedShares(NAV_UNIT _value, uint256 _supply, NAV_UNIT _totalNAV) internal pure returns (uint256) {
-        // A genuinely fresh tranche (no shares AND no backing) mints 1:1; every other state prices through the offset
+        // A genuinely fresh tranche (no shares AND no backing) mints 1:1, every other state prices through the offset
         if (_supply == 0 && toUint256(_totalNAV) == 0) return toUint256(_value);
         uint256 effectiveSupply = _supply + VIRTUAL_SHARES;
         uint256 denominator = toUint256(_totalNAV) + VIRTUAL_VALUE;
@@ -417,21 +421,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /// @notice Independent coverage utilization recomputation (ceil), mirroring `UtilizationLogic._computeCoverageUtilization`.
-    function _expectedCoverageUtilization(
-        NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV,
-        uint64 _minCoverageWAD,
-        NAV_UNIT _jtEffectiveNAV
-    )
-        internal
-        pure
-        returns (uint256)
-    {
-        if (_minCoverageWAD == 0) return 0;
-        uint256 totalCoveredExposure = toUint256(_stRawNAV) + toUint256(_jtRawNAV);
-        if (totalCoveredExposure == 0) return 0;
+    function _expectedCoverageUtilization(NAV_UNIT _collateralNAV, uint64 _minCoverageWAD, NAV_UNIT _jtEffectiveNAV) internal pure returns (uint256) {
+        if (_minCoverageWAD == 0 || toUint256(_collateralNAV) == 0) return 0;
         if (toUint256(_jtEffectiveNAV) == 0) return type(uint256).max;
-        return Math.mulDiv(totalCoveredExposure, _minCoverageWAD, toUint256(_jtEffectiveNAV), Math.Rounding.Ceil);
+        return Math.mulDiv(toUint256(_collateralNAV), _minCoverageWAD, toUint256(_jtEffectiveNAV), Math.Rounding.Ceil);
     }
 
     /// @notice Independent liquidity utilization recomputation (ceil), mirroring `UtilizationLogic._computeLiquidityUtilization`.
@@ -460,18 +453,16 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /**
-     * @notice Input/output packet for the independent two-term tranche accounting sync recomputation.
-     * @dev Inputs are the committed checkpoint, the MEASURED post-simulate raw NAVs, the premium-window
+     * @notice Input/output packet for the independent single-collateral tranche accounting sync recomputation.
+     * @dev Inputs are the committed checkpoint, the MEASURED post-simulate collateral NAV, the premium-window
      *      inputs (the stored time-weighted accumulators plus this sync's YDM previews weighted by the
-     *      accrual window), the fee rates, and the effective dust. Outputs are every committed field the
+     *      accrual window), the fee rates, and the dust tolerance. Outputs are every committed field the
      *      sync produces, filled in by `_expectedSync`.
      */
     struct SyncExpectation {
-        // Inputs: measured raw NAVs + committed checkpoint
-        NAV_UNIT stRawNAVNew;
-        NAV_UNIT jtRawNAVNew;
-        NAV_UNIT lastSTRawNAV;
-        NAV_UNIT lastJTRawNAV;
+        // Inputs: measured collateral NAV + committed checkpoint
+        NAV_UNIT collateralNAVNew;
+        NAV_UNIT lastCollateralNAV;
         NAV_UNIT lastSTEffectiveNAV;
         NAV_UNIT lastJTEffectiveNAV;
         NAV_UNIT lastJTImpermanentLoss;
@@ -487,7 +478,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint64 jtProtocolFeeWAD;
         uint64 jtYieldShareProtocolFeeWAD;
         uint64 ltYieldShareProtocolFeeWAD;
-        NAV_UNIT effectiveDust;
+        NAV_UNIT dustTolerance;
         // Input: whether the resulting market state zeroes the LT premium and all fees
         bool fixedTermActive;
         // Outputs
@@ -504,8 +495,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
     /**
      * @notice Re-derives the full tranche accounting sync from the written accounting rules, independently of production code.
-     * @dev Mirrors `RoycoDayAccountant._previewSyncTrancheAccounting`: claim decomposition, floor-on-magnitude
-     *      attribution with JT absorbing the rounding residual, JT loss/gain booking with the dust-gated JT fee
+     * @dev Mirrors `RoycoDayAccountant._previewSyncTrancheAccounting`: the single collateral delta attributed
+     *      to ST pro-rata to its effective NAV claim (floor on the magnitude) with JT taking the residual so it
+     *      absorbs all rounding drift, JT loss/gain booking with the dust-gated JT fee
      *      (losses book impermanent loss, gains recover it first and only the residual is fee'd),
      *      coverage `min(stLoss, jtEffectiveNAV)`, IL recovery `min(stGain, IL)`, premiums
      *      `floor(stGain * (twStart + yieldShare * elapsed) / (premiumElapsed * WAD))`, the time-weighted
@@ -514,28 +506,25 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      *      (`premiumElapsed == 0`) instantaneous-share path, fee floors, `premiumsPaid = stGain > dust` gating
      *      every fee, the LT premium folded back into stEffectiveNAV, and the FIXED_TERM zeroing of the LT premium plus
      *      all fees (but NOT the JT risk premium, which is already booked into jtEffectiveNAV).
+     *      One collateral asset at one rate means the attributed ST and JT deltas always share the sign of the
+     *      collateral delta, so mixed-sign tranche PnL is unrepresentable here.
      */
     function _expectedSync(SyncExpectation memory _e) internal pure returns (SyncExpectation memory) {
         uint256 stEffectiveNAV = toUint256(_e.lastSTEffectiveNAV);
         uint256 jtEffectiveNAV = toUint256(_e.lastJTEffectiveNAV);
         uint256 jtImpermanentLoss = toUint256(_e.lastJTImpermanentLoss);
-        uint256 dust = toUint256(_e.effectiveDust);
+        uint256 dust = toUint256(_e.dustTolerance);
 
-        // STEP_APPLY_PNL_ATTRIBUTION: decompose the checkpointed claims and attribute each raw delta
+        // STEP_APPLY_PNL_ATTRIBUTION: attribute the single collateral delta to ST, JT takes the residual
+        // Seniority tie-break: a delta marked from a zero collateral checkpoint accrues to the senior tranche first
         int256 dStEff;
         int256 dJtEff;
         {
-            uint256 lastSTRawNAV = toUint256(_e.lastSTRawNAV);
-            uint256 lastJTRawNAV = toUint256(_e.lastJTRawNAV);
-            uint256 stClaimOnJTRaw = stEffectiveNAV > lastSTRawNAV ? stEffectiveNAV - lastSTRawNAV : 0;
-            uint256 jtClaimOnSTRaw = jtEffectiveNAV > lastJTRawNAV ? jtEffectiveNAV - lastJTRawNAV : 0;
-            uint256 stClaimOnSTRaw = lastSTRawNAV - jtClaimOnSTRaw;
-            int256 deltaSTRaw = int256(toUint256(_e.stRawNAVNew)) - int256(lastSTRawNAV);
-            int256 deltaJTRaw = int256(toUint256(_e.jtRawNAVNew)) - int256(lastJTRawNAV);
-            int256 dStOnSTRaw = lastSTRawNAV == 0 ? (stEffectiveNAV > 0 ? deltaSTRaw : int256(0)) : _attributeDelta(deltaSTRaw, stClaimOnSTRaw, lastSTRawNAV);
-            int256 dStOnJTRaw = _attributeDelta(deltaJTRaw, stClaimOnJTRaw, lastJTRawNAV);
-            dStEff = dStOnSTRaw + dStOnJTRaw;
-            dJtEff = (deltaSTRaw + deltaJTRaw) - dStEff;
+            int256 deltaCollateralNAV = int256(toUint256(_e.collateralNAVNew)) - int256(toUint256(_e.lastCollateralNAV));
+            dStEff = _e.lastCollateralNAV == ZERO_NAV_UNITS
+                ? deltaCollateralNAV
+                : _attributeDelta(deltaCollateralNAV, stEffectiveNAV, toUint256(_e.lastCollateralNAV));
+            dJtEff = deltaCollateralNAV - dStEff;
         }
 
         // STEP_APPLY_JT_LOSS / STEP_APPLY_JT_GAIN: losses book impermanent loss, gains recover it first and only the residual is fee'd
@@ -595,12 +584,13 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
             }
         }
 
-        // A FIXED_TERM-resulting sync pays no LT premium and takes no fees
+        // The fee/premium theorem, checked rather than assumed: same-sign attribution means any nonzero fee or
+        // premium requires a gain residual that fully recovered the IL, which resolves PERPETUAL instead
         if (_e.fixedTermActive) {
-            ltLiquidityPremium = 0;
-            stProtocolFee = 0;
-            jtProtocolFee = 0;
-            ltProtocolFee = 0;
+            assertEq(ltLiquidityPremium, 0, "theorem: a FIXED_TERM-resulting sync accrues no LT premium");
+            assertEq(stProtocolFee, 0, "theorem: a FIXED_TERM-resulting sync accrues no ST fee");
+            assertEq(jtProtocolFee, 0, "theorem: a FIXED_TERM-resulting sync accrues no JT fee");
+            assertEq(ltProtocolFee, 0, "theorem: a FIXED_TERM-resulting sync accrues no LT fee");
         }
 
         _e.stEffectiveNAV = toNAVUnits(stEffectiveNAV);
@@ -634,11 +624,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         ltLiquidityPremium = Math.mulDiv(_stGain, twLT, premiumElapsed * WAD);
     }
 
-    /// @notice Floor-on-magnitude proportional attribution, mirroring `RoycoDayAccountant._attributeDeltaToClaimOnRawNAV`.
-    function _attributeDelta(int256 _delta, uint256 _claimOnRaw, uint256 _lastRaw) internal pure returns (int256) {
-        if (_delta == 0 || _claimOnRaw == 0 || _lastRaw == 0) return 0;
+    /// @notice Floor-on-magnitude proportional attribution, mirroring the split inlined in the sync's STEP_APPLY_PNL_ATTRIBUTION.
+    function _attributeDelta(int256 _delta, uint256 _claim, uint256 _lastCollateralNAV) internal pure returns (int256) {
+        if (_delta == 0 || _claim == 0 || _lastCollateralNAV == 0) return 0;
         uint256 absDelta = _delta < 0 ? uint256(-_delta) : uint256(_delta);
-        uint256 attributedMagnitude = Math.mulDiv(absDelta, _claimOnRaw, _lastRaw);
+        uint256 attributedMagnitude = Math.mulDiv(absDelta, _claim, _lastCollateralNAV);
         return _delta < 0 ? -int256(attributedMagnitude) : int256(attributedMagnitude);
     }
 
@@ -719,7 +709,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function _doDepositST(address _lp, uint256 _assets) internal returns (OpReceipt memory r) {
         r.pre = _snap(_actorArray(_lp));
         vm.startPrank(_lp);
-        IERC20(testConfig.stAsset).approve(address(ST), _assets);
+        IERC20(COLLATERAL_ASSET).approve(address(ST), _assets);
         r.shares = ST.deposit(toTrancheUnits(_assets), _lp);
         vm.stopPrank();
         r.post = _snap(_actorArray(_lp));
@@ -730,7 +720,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function _doDepositJT(address _lp, uint256 _assets) internal returns (OpReceipt memory r) {
         r.pre = _snap(_actorArray(_lp));
         vm.startPrank(_lp);
-        IERC20(testConfig.jtAsset).approve(address(JT), _assets);
+        IERC20(COLLATERAL_ASSET).approve(address(JT), _assets);
         r.shares = JT.deposit(toTrancheUnits(_assets), _lp);
         vm.stopPrank();
         r.post = _snap(_actorArray(_lp));
@@ -738,12 +728,12 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /// @notice Executes a multi-asset LT deposit for `_lp` with exact approvals, snapshotting around it.
-    function _doDepositLTMulti(address _lp, uint256 _stAssets, uint256 _quoteAssets, uint256 _minLTAssetsOut) internal returns (OpReceipt memory r) {
+    function _doDepositLTMulti(address _lp, uint256 _collateralAssets, uint256 _quoteAssets, uint256 _minLTAssetsOut) internal returns (OpReceipt memory r) {
         r.pre = _snap(_actorArray(_lp));
         vm.startPrank(_lp);
-        IERC20(testConfig.stAsset).approve(address(LT), _stAssets);
+        IERC20(COLLATERAL_ASSET).approve(address(LT), _collateralAssets);
         IERC20(testConfig.quoteAsset).approve(address(LT), _quoteAssets);
-        (r.shares,) = IRoycoLiquidityTranche(address(LT)).depositMultiAsset(_stAssets, _quoteAssets, _minLTAssetsOut, _lp);
+        (r.shares,) = IRoycoLiquidityTranche(address(LT)).depositMultiAsset(_collateralAssets, _quoteAssets, _minLTAssetsOut, _lp);
         vm.stopPrank();
         r.post = _snap(_actorArray(_lp));
         _assertSolvency();
@@ -794,6 +784,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     // ── Market staging helpers ──
 
     /// @notice Standard ST/JT seed: JT first (the coverage denominator), then ST sized under the coverage gate.
+    /// @dev Both legs deposit the one collateral asset, sized per tranche.
     function _seedMarket(uint256 _stAssets, uint256 _jtAssets) internal {
         _depositJT(JT_ALICE_ADDRESS, _jtAssets);
         _depositST(ST_ALICE_ADDRESS, _stAssets);
@@ -806,28 +797,28 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      *      each unbalanced add's invariant growth (about 5x), so every chunk is capped at roughly 3x the
      *      current depth. The near-peg quote valuation here only sizes the chunks, never an assertion.
      */
-    function _seedLT(address _lp, uint256 _stAssets, uint256 _quoteAssets) internal returns (uint256 shares) {
+    function _seedLT(address _lp, uint256 _collateralAssets, uint256 _quoteAssets) internal returns (uint256 shares) {
         _initializeLTVenueIfNeeded();
         uint256 quoteUnitScale = 10 ** IERC20Metadata(testConfig.quoteAsset).decimals();
-        uint256 stAssetsRemaining = _stAssets;
+        uint256 collateralAssetsRemaining = _collateralAssets;
         uint256 quoteAssetsRemaining = _quoteAssets;
-        for (uint256 i = 0; i < 64 && (stAssetsRemaining != 0 || quoteAssetsRemaining != 0); ++i) {
+        for (uint256 i = 0; i < 64 && (collateralAssetsRemaining != 0 || quoteAssetsRemaining != 0); ++i) {
             // The invariant-ratio bound is against the WHOLE pool, so depth is the full BPT supply's value
-            uint256 depthValue = toUint256(KERNEL.ltConvertTrancheUnitsToNAVUnits(toTrancheUnits(IERC20(POOL).totalSupply())));
-            uint256 remainingValue =
-                toUint256(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(stAssetsRemaining))) + Math.mulDiv(quoteAssetsRemaining, 1e18, quoteUnitScale);
-            uint256 stAssetsChunk = stAssetsRemaining;
+            uint256 depthValue = toUint256(KERNEL.convertLTAssetsToValue(toTrancheUnits(IERC20(POOL).totalSupply())));
+            uint256 remainingValue = toUint256(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(collateralAssetsRemaining)))
+                + Math.mulDiv(quoteAssetsRemaining, 1e18, quoteUnitScale);
+            uint256 collateralAssetsChunk = collateralAssetsRemaining;
             uint256 quoteAssetsChunk = quoteAssetsRemaining;
             uint256 maxChunkValue = 3 * depthValue;
             if (remainingValue > maxChunkValue) {
-                stAssetsChunk = Math.mulDiv(stAssetsRemaining, maxChunkValue, remainingValue);
+                collateralAssetsChunk = Math.mulDiv(collateralAssetsRemaining, maxChunkValue, remainingValue);
                 quoteAssetsChunk = Math.mulDiv(quoteAssetsRemaining, maxChunkValue, remainingValue);
             }
-            shares += _doDepositLTMulti(_lp, stAssetsChunk, quoteAssetsChunk, 0).shares;
-            stAssetsRemaining -= stAssetsChunk;
+            shares += _doDepositLTMulti(_lp, collateralAssetsChunk, quoteAssetsChunk, 0).shares;
+            collateralAssetsRemaining -= collateralAssetsChunk;
             quoteAssetsRemaining -= quoteAssetsChunk;
         }
-        if (stAssetsRemaining != 0 || quoteAssetsRemaining != 0) fail("_seedLT: could not fully seed the LT within the chunk budget");
+        if (collateralAssetsRemaining != 0 || quoteAssetsRemaining != 0) fail("_seedLT: could not fully seed the LT within the chunk budget");
     }
 
     /**
@@ -839,14 +830,13 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function _initializeLTVenueIfNeeded() internal virtual { }
 
     /**
-     * @notice Returns the raw NAV inputs the LAST sync committed (the measured post-simulate raws).
-     * @dev A live pre-sync `getRawNAV()` read can be stale against the transient quoter cache left populated
+     * @notice Returns the collateral NAV the LAST sync committed (the measured post-simulate mark).
+     * @dev A live pre-sync collateral NAV read can be stale against the transient quoter cache left populated
      *      by an earlier kernel op in the same test, while the sync itself re-caches the live rate. Measured
      *      deltas must therefore be read from the committed checkpoint right after the sync under test.
      */
-    function _committedRawNAVs() internal view returns (NAV_UNIT stRawNAV, NAV_UNIT jtRawNAV) {
-        IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        return (a.lastSTRawNAV, a.lastJTRawNAV);
+    function _committedCollateralNAV() internal view returns (NAV_UNIT collateralNAV) {
+        return ACCOUNTANT.getState().lastCollateralNAV;
     }
 
     /// @notice Enables the LT overlay: `setMaxYieldShares(maxJT, maxLT)` then `setMinLiquidity(minLiq)`.
@@ -873,10 +863,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         KERNEL.setSeniorTrancheSelfLiquidationBonus(0.005e18);
     }
 
-    /// @notice Raises ST's dust tolerance via the delay-0 market ops role (held by the kernel admin wallet).
-    function _raiseSTDustTolerance(NAV_UNIT _tol) internal {
+    /// @notice Raises the market's dust tolerance via the delay-0 market ops role (held by the kernel admin wallet).
+    function _raiseDustTolerance(NAV_UNIT _tol) internal {
         vm.prank(KERNEL_ADMIN_ADDRESS);
-        ACCOUNTANT.setSeniorTrancheDustTolerance(_tol);
+        ACCOUNTANT.setDustTolerance(_tol);
     }
 
     /**
@@ -932,7 +922,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
             _applySTLoss(0.05e18);
             _sync();
             IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-            uint256 coverageUtilizationWAD = _expectedCoverageUtilization(a.lastSTRawNAV, a.lastJTRawNAV, a.minCoverageWAD, a.lastJTEffectiveNAV);
+            uint256 coverageUtilizationWAD = _expectedCoverageUtilization(a.lastCollateralNAV, a.minCoverageWAD, a.lastJTEffectiveNAV);
             if (coverageUtilizationWAD >= a.coverageLiquidationUtilizationWAD) return;
         }
         fail("_breachLiquidation: liquidation coverage utilization threshold not reached");
@@ -1072,17 +1062,17 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     // ── Section-local helpers ──
 
     /**
-     * @notice Measures the fresh post-simulate sync inputs (committed raw NAVs and the deposit valuation) under a
-     *         reverted state snapshot, so a pending oracle move is read at the rate execution will actually use.
-     * @dev A live pre-sync `getRawNAV()` view is stale against the transient quoter cache left by an earlier kernel
-     *      op in the same test transaction, so the raws are read from the checkpoint a throwaway sync commits and
-     *      the whole probe is rolled back. Raw NAVs and quoter conversions are sync INPUTS, so this read is not circular with any assertion.
+     * @notice Measures the fresh post-simulate sync inputs (committed collateral NAV and the deposit valuation)
+     *         under a reverted state snapshot, so a pending oracle move is read at the rate execution will actually use.
+     * @dev A live pre-sync collateral NAV read is stale against the transient quoter cache left by an earlier kernel
+     *      op in the same test transaction, so the mark is read from the checkpoint a throwaway sync commits and
+     *      the whole probe is rolled back. The collateral NAV and quoter conversions are sync INPUTS, so this read is not circular with any assertion.
      */
-    function _measureFreshSyncInputs(TRANCHE_UNIT _stAssets) internal returns (NAV_UNIT stRawNAV, NAV_UNIT jtRawNAV, NAV_UNIT stValue) {
+    function _measureFreshSyncInputs(TRANCHE_UNIT _collateralAssets) internal returns (NAV_UNIT collateralNAV, NAV_UNIT depositValue) {
         uint256 snapshotId = vm.snapshotState();
         _sync();
-        (stRawNAV, jtRawNAV) = _committedRawNAVs();
-        stValue = KERNEL.stConvertTrancheUnitsToNAVUnits(_stAssets);
+        collateralNAV = _committedCollateralNAV();
+        depositValue = KERNEL.convertCollateralAssetsToValue(_collateralAssets);
         vm.revertToState(snapshotId);
     }
 
@@ -1093,15 +1083,15 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      *      unwinds itself via its result-carrying revert, whose payload carries the previewed returns.
      */
     function _previewKernelDepositLTMulti(
-        uint256 _stAssets,
+        uint256 _collateralAssets,
         uint256 _quoteAssets
     )
         internal
         returns (NAV_UNIT depositNAV, NAV_UNIT effectiveNAV, TRANCHE_UNIT ltAssetsOut, uint256 ltTotalSupplyAfterMints)
     {
         vm.prank(address(LT), address(0));
-        (bool ok, bytes memory ret) =
-            address(KERNEL).call(abi.encodeCall(IRoycoDayKernel.ltDepositMultiAsset, (true, toTrancheUnits(_stAssets), _quoteAssets, toTrancheUnits(0))));
+        (bool ok, bytes memory ret) = address(KERNEL)
+            .call(abi.encodeCall(IRoycoDayKernel.ltDepositMultiAsset, (true, toTrancheUnits(_collateralAssets), _quoteAssets, toTrancheUnits(0))));
         assertFalse(ok, "the flagged flow must unwind via its result-carrying revert");
         if (bytes4(ret) != DispatchLogic.SIMULATION_RESULT.selector) _bubbleRevert(ret);
         bytes memory simulationResult;
@@ -1117,12 +1107,12 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         return Math.mulDiv(toUint256(_value), 10 ** IERC20Metadata(testConfig.quoteAsset).decimals(), WAD);
     }
 
-    /// @notice Seeds the LT with a value-matched two-leg entry: `_stLegAssets` of the ST asset plus a near-peg quote leg of equal value.
-    function _seedLTBalanced(address _lp, uint256 _stLegAssets) internal returns (uint256 shares) {
-        return _seedLT(_lp, _stLegAssets, _quoteAssetsForValue(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(_stLegAssets))));
+    /// @notice Seeds the LT with a value-matched two-leg entry: `_collateralLegAssets` of the collateral asset plus a near-peg quote leg of equal value.
+    function _seedLTBalanced(address _lp, uint256 _collateralLegAssets) internal returns (uint256 shares) {
+        return _seedLT(_lp, _collateralLegAssets, _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(_collateralLegAssets))));
     }
 
-    /// @notice Seeds the LT with a market-scaled two-leg entry: an ST leg of `initialFunding / 100` and a value-matched quote leg.
+    /// @notice Seeds the LT with a market-scaled two-leg entry: a collateral leg of `initialFunding / 100` and a value-matched quote leg.
     function _seedDefaultLT() internal {
         _setupLTProviders();
         _seedLTBalanced(LT_ALICE_ADDRESS, testConfig.initialFunding / 100);
@@ -1154,16 +1144,15 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /**
-     * @notice Senior-deposit slack (in ST tranche units) whose addition to `stMaxDeposit` guarantees a coverage breach.
-     * @dev Derivation: `maxSTDeposit` under-reports the true breach boundary by exactly the
-     *      two raw-NAV dust tolerances, so a deposit must exceed it by more than `stDust + jtDust` in NAV to
-     *      guarantee `coverageUtilizationWAD > WAD`. Each quoter conversion floors (up to one NAV-per-tranche-unit of error in
-     *      each of the three conversions involved), so the dust sum is converted to tranche units, doubled, and
-     *      padded by six tranche-unit wei to strictly dominate the floor drift and the boundary itself.
+     * @notice Senior-deposit slack (in collateral tranche units) whose addition to `stMaxDeposit` guarantees a coverage breach.
+     * @dev Derivation: `maxSTDeposit` under-reports the true breach boundary by exactly the single collateral
+     *      dust tolerance, so a deposit must exceed it by more than `dustTolerance` in NAV to guarantee
+     *      `coverageUtilizationWAD > WAD`. Each quoter conversion floors (up to one NAV-per-tranche-unit of error
+     *      in each conversion involved), so the dust is converted to tranche units, doubled, and padded by six
+     *      tranche-unit wei to strictly dominate the floor drift and the boundary itself.
      */
     function _stMaxDepositBreachSlackAssets() internal view returns (uint256 slackAssets) {
-        IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        slackAssets = 2 * toUint256(KERNEL.stConvertNAVUnitsToTrancheUnits(a.stNAVDustTolerance + a.jtNAVDustTolerance)) + 6;
+        slackAssets = 2 * toUint256(KERNEL.convertValueToCollateralAssets(ACCOUNTANT.getState().dustTolerance)) + 6;
     }
 
     /// @notice Asserts that a fresh snapshot matches `_pre` on every supply, ledger, checkpoint, and balance field (atomicity check).
@@ -1172,19 +1161,16 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(post.stSupply, _pre.stSupply, "atomicity: ST supply moved");
         assertEq(post.jtSupply, _pre.jtSupply, "atomicity: JT supply moved");
         assertEq(post.ltSupply, _pre.ltSupply, "atomicity: LT supply moved");
-        assertEq(post.stOwned, _pre.stOwned, "atomicity: stOwned moved");
-        assertEq(post.jtOwned, _pre.jtOwned, "atomicity: jtOwned moved");
+        assertEq(post.collateralOwned, _pre.collateralOwned, "atomicity: collateralOwned moved");
         assertEq(post.ltOwned, _pre.ltOwned, "atomicity: ltOwned moved");
         assertEq(post.ltOwnedSeniorTrancheShares, _pre.ltOwnedSeniorTrancheShares, "atomicity: idle liquidity premium shares moved");
-        assertEq(post.lastSTRawNAV, _pre.lastSTRawNAV, "atomicity: committed ST raw NAV moved");
-        assertEq(post.lastJTRawNAV, _pre.lastJTRawNAV, "atomicity: committed JT raw NAV moved");
+        assertEq(post.lastCollateralNAV, _pre.lastCollateralNAV, "atomicity: committed collateral NAV moved");
         assertEq(post.lastLTRawNAV, _pre.lastLTRawNAV, "atomicity: committed LT raw NAV moved");
         assertEq(post.lastSTEffectiveNAV, _pre.lastSTEffectiveNAV, "atomicity: committed ST effective NAV moved");
         assertEq(post.lastJTEffectiveNAV, _pre.lastJTEffectiveNAV, "atomicity: committed JT effective NAV moved");
         assertEq(post.lastJTImpermanentLoss, _pre.lastJTImpermanentLoss, "atomicity: committed JT IL moved");
         assertTrue(post.marketState == _pre.marketState, "atomicity: market state moved");
-        assertEq(post.kernelSTAssetBal, _pre.kernelSTAssetBal, "atomicity: kernel ST asset balance moved");
-        assertEq(post.kernelJTAssetBal, _pre.kernelJTAssetBal, "atomicity: kernel JT asset balance moved");
+        assertEq(post.kernelCollateralBal, _pre.kernelCollateralBal, "atomicity: kernel collateral balance moved");
         assertEq(post.kernelBPTBal, _pre.kernelBPTBal, "atomicity: kernel BPT balance moved");
         assertEq(post.kernelSTShareBal, _pre.kernelSTShareBal, "atomicity: kernel ST share balance moved");
         assertEq(post.feeRecipientSTShares, _pre.feeRecipientSTShares, "atomicity: fee recipient ST shares moved");
@@ -1195,18 +1181,18 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     // ── ST/JT first deposits ──
 
     /**
-     * @notice A first JT deposit mints shares 1:1 with the deposited value and commits `jtRawNAV == jtEffectiveNAV` exactly.
+     * @notice A first JT deposit mints shares 1:1 with the deposited value and commits `collateralNAV == jtEffectiveNAV` exactly.
      * @dev The deposited value is captured through the quoter before the first kernel op of the test, so it is the
      *      same live rate the deposit's own quoter cache resolves.
      */
     function test_JTDeposit_firstDeposit_mintsSharesOneToOne() public {
         uint256 assets = testConfig.initialFunding / 10;
-        NAV_UNIT value = KERNEL.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets));
+        NAV_UNIT value = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(assets));
         assertGt(toUint256(value), 0, "arrange: the deposit value must be nonzero");
         MarketSnapshot memory pre = _snap();
 
         vm.startPrank(JT_ALICE_ADDRESS);
-        IERC20(testConfig.jtAsset).approve(address(JT), assets);
+        IERC20(COLLATERAL_ASSET).approve(address(JT), assets);
         _expectDeposit(address(JT), JT_ALICE_ADDRESS, JT_ALICE_ADDRESS, toTrancheUnits(assets), toUint256(value));
         uint256 shares = JT.deposit(toTrancheUnits(assets), JT_ALICE_ADDRESS);
         vm.stopPrank();
@@ -1215,13 +1201,13 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         MarketSnapshot memory post = _snap();
         assertEq(shares, toUint256(value), "first JT mint must be 1:1 with the deposited value");
         assertEq(JT.balanceOf(JT_ALICE_ADDRESS), shares, "receiver JT share balance");
-        assertEq(post.jtOwned, pre.jtOwned + toTrancheUnits(assets), "jtOwned must grow by the deposited assets");
+        assertEq(post.collateralOwned, pre.collateralOwned + toTrancheUnits(assets), "collateralOwned must grow by the deposited assets");
         assertEq(post.jtSupply, pre.jtSupply + shares, "JT supply must grow by exactly the minted shares");
-        assertEq(post.lastJTRawNAV, value, "committed JT raw NAV must equal the deposited value");
-        assertEq(post.lastJTEffectiveNAV, post.lastJTRawNAV, "committed JT effective NAV must equal its raw NAV");
-        assertEq(post.lastSTRawNAV, ZERO_NAV_UNITS, "committed ST raw NAV must stay zero");
+        // The pre-deposit ledger is empty, so the single-conversion mark is exactly the standalone deposit value
+        assertEq(post.lastCollateralNAV, value, "committed collateral NAV must equal the deposited value");
+        assertEq(post.lastJTEffectiveNAV, post.lastCollateralNAV, "committed JT effective NAV must equal the collateral NAV");
         assertEq(post.lastSTEffectiveNAV, ZERO_NAV_UNITS, "committed ST effective NAV must stay zero");
-        // With jtRawNAV == jtEffectiveNAV the coverage utilization is exactly minCoverage
+        // With collateralNAV == jtEffectiveNAV the coverage utilization is exactly minCoverage
         // The production value is read via a same-block flat sync (a no-op on the committed state), never recomputed by the suite
         uint256 expectedCovUtilWAD = uint256(ACCOUNTANT.getState().minCoverageWAD);
         assertEq(_syncWithState().coverageUtilizationWAD, expectedCovUtilWAD, "production coverage utilization of a JT-only market");
@@ -1234,14 +1220,17 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _depositJT(JT_ALICE_ADDRESS, testConfig.initialFunding / 10);
         // Size the entry from the live coverage headroom so the arrange holds for any configured minimum coverage
         uint256 assets = Math.min((testConfig.initialFunding / 10) * 4, toUint256(ST.maxDeposit(ST_ALICE_ADDRESS)) / 2);
-        NAV_UNIT value = KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets));
+        NAV_UNIT value = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(assets));
         MarketSnapshot memory pre = _snap();
-        uint256 expectedCovUtilWAD =
-            _expectedCoverageUtilization(pre.lastSTRawNAV + value, pre.lastJTRawNAV, ACCOUNTANT.getState().minCoverageWAD, pre.lastJTEffectiveNAV);
-        assertLe(expectedCovUtilWAD, WAD, "arrange: the deposit must satisfy coverage");
+        // The merged-conversion mark can add at most 1 wei over pre + value, immaterial against the half-max headroom
+        assertLe(
+            _expectedCoverageUtilization(pre.lastCollateralNAV + value, ACCOUNTANT.getState().minCoverageWAD, pre.lastJTEffectiveNAV),
+            WAD,
+            "arrange: the deposit must satisfy coverage"
+        );
 
         vm.startPrank(ST_ALICE_ADDRESS);
-        IERC20(testConfig.stAsset).approve(address(ST), assets);
+        IERC20(COLLATERAL_ASSET).approve(address(ST), assets);
         _expectDeposit(address(ST), ST_ALICE_ADDRESS, ST_ALICE_ADDRESS, toTrancheUnits(assets), toUint256(value));
         uint256 shares = ST.deposit(toTrancheUnits(assets), ST_ALICE_ADDRESS);
         vm.stopPrank();
@@ -1250,35 +1239,42 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         MarketSnapshot memory post = _snap();
         assertEq(shares, toUint256(value), "first ST mint must be 1:1 with the deposited value");
         assertEq(ST.balanceOf(ST_ALICE_ADDRESS), shares, "receiver ST share balance");
-        assertEq(post.stOwned, pre.stOwned + toTrancheUnits(assets), "stOwned must grow by the deposited assets");
+        assertEq(post.collateralOwned, pre.collateralOwned + toTrancheUnits(assets), "collateralOwned must grow by the deposited assets");
         assertEq(post.stSupply, pre.stSupply + shares, "ST supply must grow by exactly the minted shares");
-        assertEq(post.lastSTRawNAV, value, "committed ST raw NAV must equal the deposited value");
-        assertEq(post.lastSTEffectiveNAV, value, "committed ST effective NAV must equal the deposited value");
-        assertEq(post.lastJTRawNAV, pre.lastJTRawNAV, "the junior raw NAV must be untouched");
+        // Single-conversion mark: the booked delta is convert(pre + assets) - convert(pre), which can exceed
+        // the standalone convert(assets) by at most 1 wei (floor superadditivity), never undershoot it
+        NAV_UNIT bookedDelta = post.lastCollateralNAV - pre.lastCollateralNAV;
+        assertGe(bookedDelta, value, "the booked collateral delta must cover the standalone deposit value");
+        assertLe(bookedDelta, value + toNAVUnits(uint256(1)), "the merged conversion can add at most 1 wei over the standalone value");
+        assertEq(post.lastSTEffectiveNAV, bookedDelta, "committed ST effective NAV must book the whole deposit delta");
         assertEq(post.lastJTEffectiveNAV, pre.lastJTEffectiveNAV, "the junior effective NAV must be untouched");
         // The production value is read via a same-block flat sync (a no-op on the committed state), never recomputed by the suite
-        assertEq(_syncWithState().coverageUtilizationWAD, expectedCovUtilWAD, "production coverage utilization must match the independent recompute");
+        assertEq(
+            _syncWithState().coverageUtilizationWAD,
+            _expectedCoverageUtilization(post.lastCollateralNAV, ACCOUNTANT.getState().minCoverageWAD, pre.lastJTEffectiveNAV),
+            "production coverage utilization must match the independent recompute"
+        );
         _assertCommittedConservation();
     }
 
     // ── ST deposit pricing, previews, and gates ──
 
     /// @notice After committed yield an ST deposit mints exactly `floor(value * supply / stEffectiveNAV)` shares and the
-    ///         post-op checkpoint books exactly the measured raw-NAV delta into the senior effective NAV.
+    ///         post-op checkpoint books exactly the measured collateral delta into the senior effective NAV.
     function test_STDeposit_exactSharePricing_afterYield() public {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
         _applySTYield(0.05e18);
         _sync();
 
         uint256 assets = testConfig.initialFunding / 10;
-        NAV_UNIT value = KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets));
+        NAV_UNIT value = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(assets));
         uint256 stSupply = ST.totalSupply();
         NAV_UNIT stEffectiveNAV = ACCOUNTANT.getState().lastSTEffectiveNAV;
         uint256 expectedShares = _expectedShares(value, stSupply, stEffectiveNAV);
         MarketSnapshot memory pre = _snap();
 
         vm.startPrank(ST_BOB_ADDRESS);
-        IERC20(testConfig.stAsset).approve(address(ST), assets);
+        IERC20(COLLATERAL_ASSET).approve(address(ST), assets);
         _expectDeposit(address(ST), ST_BOB_ADDRESS, ST_BOB_ADDRESS, toTrancheUnits(assets), expectedShares);
         uint256 shares = ST.deposit(toTrancheUnits(assets), ST_BOB_ADDRESS);
         vm.stopPrank();
@@ -1286,12 +1282,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         MarketSnapshot memory post = _snap();
         assertEq(shares, expectedShares, "deposit shares must match the independent floor pricing exactly");
-        NAV_UNIT measuredRawDelta = post.lastSTRawNAV - pre.lastSTRawNAV;
-        assertEq(post.lastSTEffectiveNAV, pre.lastSTEffectiveNAV + measuredRawDelta, "post ST effective NAV must grow by exactly the measured raw delta");
-        assertApproxEqAbs(measuredRawDelta, value, maxNAVDelta(), "the raw delta must round-trip the deposited value through the quoter");
+        NAV_UNIT measuredDelta = post.lastCollateralNAV - pre.lastCollateralNAV;
+        assertEq(post.lastSTEffectiveNAV, pre.lastSTEffectiveNAV + measuredDelta, "post ST effective NAV must grow by exactly the measured collateral delta");
+        assertApproxEqAbs(measuredDelta, value, maxNAVDelta(), "the collateral delta must round-trip the deposited value through the quoter");
         assertEq(post.stSupply, pre.stSupply + shares, "no fee mint may accompany a same-block deposit");
-        assertEq(post.stOwned, pre.stOwned + toTrancheUnits(assets), "stOwned must grow by the deposited assets");
-        assertEq(post.lastJTRawNAV, pre.lastJTRawNAV, "the junior raw NAV must be untouched");
+        assertEq(post.collateralOwned, pre.collateralOwned + toTrancheUnits(assets), "collateralOwned must grow by the deposited assets");
         assertEq(post.lastJTEffectiveNAV, pre.lastJTEffectiveNAV, "the junior effective NAV must be untouched");
         _assertCommittedConservation();
     }
@@ -1312,19 +1307,21 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _sync();
 
         uint256 assets = testConfig.initialFunding / 20;
-        // The quoter value of the deposited assets, the raw NAV delta the deposit must book
-        NAV_UNIT depositNAV = KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets));
+        // The quoter value of the deposited assets, the collateral delta the deposit must book
+        NAV_UNIT depositNAV = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(assets));
         uint256 previewShares = ST.previewDeposit(toTrancheUnits(assets));
         OpReceipt memory r = _doDepositST(ST_BOB_ADDRESS, assets);
 
         assertEq(r.shares, previewShares, "previewDeposit must equal the executed deposit exactly");
-        assertApproxEqAbs(r.post.lastSTRawNAV - r.pre.lastSTRawNAV, depositNAV, maxNAVDelta(), "the quoter-valued deposit must match the booked raw delta");
+        assertApproxEqAbs(
+            r.post.lastCollateralNAV - r.pre.lastCollateralNAV, depositNAV, maxNAVDelta(), "the quoter-valued deposit must match the booked collateral delta"
+        );
         assertEq(r.post.stSupply, r.pre.stSupply + r.shares, "supply must grow by exactly the minted shares");
         _assertCommittedConservation();
     }
 
     /// @notice A zero-asset ST deposit reverts with the accountant's exact-arg `INVALID_POST_OP_STATE(ST_DEPOSIT)`.
-    /// @dev The post-op sync's `deltaSTRawNAV > 0` requirement fires before the tranche's `INVALID_DEPOSIT_NAV` check can.
+    /// @dev The post-op sync's `deltaCollateralNAV > 0` requirement fires before the tranche's `INVALID_DEPOSIT_NAV` check can.
     function test_RevertIf_STDepositZeroAssets() public {
         vm.prank(ST_ALICE_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.ST_DEPOSIT));
@@ -1348,7 +1345,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         uint256 assets = testConfig.initialFunding / 100;
         vm.startPrank(ST_ALICE_ADDRESS);
-        IERC20(testConfig.stAsset).approve(address(ST), assets);
+        IERC20(COLLATERAL_ASSET).approve(address(ST), assets);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         ST.deposit(toTrancheUnits(assets), ST_ALICE_ADDRESS);
         vm.stopPrank();
@@ -1366,7 +1363,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         uint256 assets = testConfig.initialFunding / 100;
         vm.startPrank(ST_BOB_ADDRESS);
-        IERC20(testConfig.stAsset).approve(address(ST), assets);
+        IERC20(COLLATERAL_ASSET).approve(address(ST), assets);
         vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
         ST.deposit(toTrancheUnits(assets), ST_BOB_ADDRESS);
         vm.stopPrank();
@@ -1383,7 +1380,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         uint256 breachAssets = toUint256(maxAssets) + _stMaxDepositBreachSlackAssets();
         vm.startPrank(ST_BOB_ADDRESS);
-        IERC20(testConfig.stAsset).approve(address(ST), breachAssets);
+        IERC20(COLLATERAL_ASSET).approve(address(ST), breachAssets);
         vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(breachAssets), ST_BOB_ADDRESS);
         vm.stopPrank();
@@ -1405,20 +1402,20 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertLe(pre.liquidityUtilizationWAD, WAD, "arrange: liquidity must start satisfied");
 
         uint256 assets = (testConfig.initialFunding / 10) * 3;
-        NAV_UNIT value = KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets));
+        NAV_UNIT value = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(assets));
         assertGt(
             _expectedLiquidityUtilization(pre.lastSTEffectiveNAV + value, 0.1e18, pre.lastLTRawNAV),
             WAD,
             "arrange: the deposit must breach the liquidity requirement"
         );
         assertLe(
-            _expectedCoverageUtilization(pre.lastSTRawNAV + value, pre.lastJTRawNAV, ACCOUNTANT.getState().minCoverageWAD, pre.lastJTEffectiveNAV),
+            _expectedCoverageUtilization(pre.lastCollateralNAV + value, ACCOUNTANT.getState().minCoverageWAD, pre.lastJTEffectiveNAV),
             WAD,
             "arrange: coverage must not be the binding gate"
         );
 
         vm.startPrank(ST_BOB_ADDRESS);
-        IERC20(testConfig.stAsset).approve(address(ST), assets);
+        IERC20(COLLATERAL_ASSET).approve(address(ST), assets);
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(assets), ST_BOB_ADDRESS);
         vm.stopPrank();
@@ -1443,7 +1440,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         uint256 breachAssets = toUint256(maxAssets) + _stMaxDepositBreachSlackAssets();
         vm.startPrank(ST_BOB_ADDRESS);
-        IERC20(testConfig.stAsset).approve(address(ST), breachAssets);
+        IERC20(COLLATERAL_ASSET).approve(address(ST), breachAssets);
         vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(breachAssets), ST_BOB_ADDRESS);
         vm.stopPrank();
@@ -1454,8 +1451,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      *         reports the independent liquidity-leg recompute: the max-size deposit lands under the gate and the same
      *         deposit plus the documented slack reverts with `LIQUIDITY_REQUIREMENT_VIOLATED`.
      * @dev The liquidity leg mirrors `RoycoDayAccountant.maxSTDeposit`: `floor(ltRawNAV * WAD / minLiquidity) -
-     *      stEffectiveNAV - stDust`. The coverage-derived breach slack strictly dominates the liquidity boundary's
-     *      under-report (the single ST dust tolerance plus conversion floors), so it is reused.
+     *      stEffectiveNAV - dustTolerance`. The coverage-derived breach slack strictly dominates the liquidity
+     *      boundary's under-report (the single dust tolerance plus conversion floors), so it is reused.
      */
     function test_STDeposit_maxDepositExactlyDepositable_liquidityBound() public whenLT {
         _seedMarket(testConfig.initialFunding / 10, testConfig.initialFunding / 2);
@@ -1466,14 +1463,14 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         // Independent two-leg recompute with the liquidity leg binding
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
         uint256 liquidityHeadroomValue =
-            Math.mulDiv(toUint256(a.lastLTRawNAV), WAD, a.minLiquidityWAD) - toUint256(a.lastSTEffectiveNAV) - toUint256(a.stNAVDustTolerance);
-        uint256 coverageHeadroomValue = Math.mulDiv(toUint256(a.lastJTEffectiveNAV), WAD, a.minCoverageWAD)
-            - (toUint256(a.lastJTRawNAV) + toUint256(a.jtNAVDustTolerance)) - (toUint256(a.lastSTRawNAV) + toUint256(a.stNAVDustTolerance));
+            Math.mulDiv(toUint256(a.lastLTRawNAV), WAD, a.minLiquidityWAD) - toUint256(a.lastSTEffectiveNAV) - toUint256(a.dustTolerance);
+        uint256 coverageHeadroomValue =
+            Math.mulDiv(toUint256(a.lastJTEffectiveNAV), WAD, a.minCoverageWAD) - (toUint256(a.lastCollateralNAV) + toUint256(a.dustTolerance));
         assertLt(liquidityHeadroomValue, coverageHeadroomValue, "arrange: liquidity must be the binding leg");
         TRANCHE_UNIT maxAssets = ST.maxDeposit(ST_BOB_ADDRESS);
         assertEq(
             maxAssets,
-            KERNEL.stConvertNAVUnitsToTrancheUnits(toNAVUnits(liquidityHeadroomValue)),
+            KERNEL.convertValueToCollateralAssets(toNAVUnits(liquidityHeadroomValue)),
             "stMaxDeposit must match the independent liquidity-leg recompute"
         );
 
@@ -1486,7 +1483,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         uint256 breachAssets = toUint256(maxAssets) + _stMaxDepositBreachSlackAssets();
         vm.startPrank(ST_BOB_ADDRESS);
-        IERC20(testConfig.stAsset).approve(address(ST), breachAssets);
+        IERC20(COLLATERAL_ASSET).approve(address(ST), breachAssets);
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         ST.deposit(toTrancheUnits(breachAssets), ST_BOB_ADDRESS);
         vm.stopPrank();
@@ -1495,7 +1492,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /**
      * @notice A deposit following unsynced yield emits exact-args `ProtocolFeeSharesMinted` (on ST and JT) and
      *         `Deposit` events, with every value derived from the independent tranche accounting recomputation.
-     * @dev The measured post-simulate raw NAVs and the deposit valuation are read via `_measureFreshSyncInputs`
+     * @dev The measured post-simulate collateral NAV and the deposit valuation are read via `_measureFreshSyncInputs`
      *      (inputs only). The YDM yield-share previews are captured at sync time as accrual inputs.
      */
     function test_STDeposit_emitsDepositEvent() public {
@@ -1510,9 +1507,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         // Build the independent sync expectation for the deposit's inline pre-op sync from measured inputs
         SyncExpectation memory e = _buildSyncExpectation(false);
         assertGt(e.elapsed, 0, "arrange: the accrual window must be nonzero");
-        assertGt(e.stRawNAVNew, e.lastSTRawNAV, "arrange: the senior raw NAV must have appreciated");
+        assertGt(e.collateralNAVNew, e.lastCollateralNAV, "arrange: the collateral NAV must have appreciated");
         uint256 assets = testConfig.initialFunding / 10;
-        (,, NAV_UNIT value) = _measureFreshSyncInputs(toTrancheUnits(assets));
+        (, NAV_UNIT value) = _measureFreshSyncInputs(toTrancheUnits(assets));
         assertTrue(e.premiumsPaid, "arrange: the yield must clear the dust gate");
         assertGt(toUint256(e.stProtocolFee), 0, "arrange: an ST protocol fee must accrue");
         assertGt(toUint256(e.jtProtocolFee), 0, "arrange: a JT yield-share protocol fee must accrue");
@@ -1525,7 +1522,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 feeRecipientJTPre = JT.balanceOf(PROTOCOL_FEE_RECIPIENT_ADDRESS);
 
         vm.startPrank(ST_BOB_ADDRESS);
-        IERC20(testConfig.stAsset).approve(address(ST), assets);
+        IERC20(COLLATERAL_ASSET).approve(address(ST), assets);
         vm.expectEmit(true, false, false, true, address(ST));
         emit IRoycoVaultTranche.ProtocolFeeSharesMinted(PROTOCOL_FEE_RECIPIENT_ADDRESS, stFeeShares, stSupplyPre + premShares + stFeeShares);
         vm.expectEmit(true, false, false, true, address(JT));
@@ -1539,11 +1536,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(ST.balanceOf(PROTOCOL_FEE_RECIPIENT_ADDRESS) - feeRecipientSTPre, stFeeShares, "ST fee shares minted to the recipient");
         assertEq(JT.balanceOf(PROTOCOL_FEE_RECIPIENT_ADDRESS) - feeRecipientJTPre, jtFeeShares, "JT fee shares minted to the recipient");
         IRoycoDayAccountant.RoycoDayAccountantState memory aPost = ACCOUNTANT.getState();
-        assertEq(aPost.lastJTRawNAV, e.jtRawNAVNew, "committed JT raw NAV must equal the measured input");
         assertEq(aPost.lastJTEffectiveNAV, e.jtEffectiveNAV, "committed JT effective NAV must match the independent recomputation");
+        // The deposit's booked delta is the committed collateral NAV over the pre-op sync's measured mark
         assertEq(
             aPost.lastSTEffectiveNAV,
-            e.stEffectiveNAV + (aPost.lastSTRawNAV - e.stRawNAVNew),
+            e.stEffectiveNAV + (aPost.lastCollateralNAV - e.collateralNAVNew),
             "committed ST effective NAV must be the sync output plus the deposit"
         );
         assertEq(aPost.lastJTImpermanentLoss, e.jtImpermanentLoss, "committed IL must match the independent recomputation");
@@ -1551,28 +1548,28 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(uint256(aPost.twJTYieldShareAccruedWAD), 0, "the accrual accumulators must reset after payment");
         // Counterweight independent of the share-pricing mirror: the premium, fee, and deposit mints all pay for
         // real value, so the pre-existing holders' NAV-per-share cannot fall across the whole operation.
-        _assertSeniorMintsNonDilutive(stSupplyPre, e.ltLiquidityPremium + e.stProtocolFee + (aPost.lastSTRawNAV - e.stRawNAVNew));
+        _assertSeniorMintsNonDilutive(stSupplyPre, e.ltLiquidityPremium + e.stProtocolFee + (aPost.lastCollateralNAV - e.collateralNAVNew));
         _assertCommittedConservation();
     }
 
     // ── JT deposit pricing, previews, and gates ──
 
     /// @notice After committed yield a JT deposit mints exactly `floor(value * supply / jtEffectiveNAV)` shares, books exactly
-    ///         the measured junior raw delta, and lowers coverage utilization to the independent recompute.
+    ///         the measured collateral delta into the junior effective NAV, and lowers coverage utilization to the independent recompute.
     function test_JTDeposit_exactSharePricing_afterYield() public {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
         _applyJTYield(0.05e18);
         _sync();
 
         uint256 assets = testConfig.initialFunding / 10;
-        NAV_UNIT value = KERNEL.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets));
+        NAV_UNIT value = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(assets));
         uint256 jtSupply = JT.totalSupply();
         NAV_UNIT jtEffectiveNAV = ACCOUNTANT.getState().lastJTEffectiveNAV;
         uint256 expectedShares = _expectedShares(value, jtSupply, jtEffectiveNAV);
 
         MarketSnapshot memory pre = _snap();
         vm.startPrank(JT_BOB_ADDRESS);
-        IERC20(testConfig.jtAsset).approve(address(JT), assets);
+        IERC20(COLLATERAL_ASSET).approve(address(JT), assets);
         _expectDeposit(address(JT), JT_BOB_ADDRESS, JT_BOB_ADDRESS, toTrancheUnits(assets), expectedShares);
         uint256 shares = JT.deposit(toTrancheUnits(assets), JT_BOB_ADDRESS);
         vm.stopPrank();
@@ -1580,16 +1577,14 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         MarketSnapshot memory post = _snap();
         assertEq(shares, expectedShares, "deposit shares must match the independent floor pricing exactly");
-        NAV_UNIT measuredRawDelta = post.lastJTRawNAV - pre.lastJTRawNAV;
-        assertEq(post.lastJTEffectiveNAV, pre.lastJTEffectiveNAV + measuredRawDelta, "post JT effective NAV must grow by exactly the measured raw delta");
-        assertApproxEqAbs(measuredRawDelta, value, maxNAVDelta(), "the raw delta must round-trip the deposited value through the quoter");
-        assertEq(post.lastSTRawNAV, pre.lastSTRawNAV, "the senior raw NAV must be untouched");
+        NAV_UNIT measuredDelta = post.lastCollateralNAV - pre.lastCollateralNAV;
+        assertEq(post.lastJTEffectiveNAV, pre.lastJTEffectiveNAV + measuredDelta, "post JT effective NAV must grow by exactly the measured collateral delta");
+        assertApproxEqAbs(measuredDelta, value, maxNAVDelta(), "the collateral delta must round-trip the deposited value through the quoter");
         assertEq(post.lastSTEffectiveNAV, pre.lastSTEffectiveNAV, "the senior effective NAV must be untouched");
         assertEq(post.jtSupply, pre.jtSupply + shares, "no fee mint may accompany a same-block deposit");
-        assertEq(post.jtOwned, pre.jtOwned + toTrancheUnits(assets), "jtOwned must grow by the deposited assets");
-        uint256 expectedCovUtilWAD = _expectedCoverageUtilization(
-            pre.lastSTRawNAV, pre.lastJTRawNAV + measuredRawDelta, ACCOUNTANT.getState().minCoverageWAD, pre.lastJTEffectiveNAV + measuredRawDelta
-        );
+        assertEq(post.collateralOwned, pre.collateralOwned + toTrancheUnits(assets), "collateralOwned must grow by the deposited assets");
+        uint256 expectedCovUtilWAD =
+            _expectedCoverageUtilization(pre.lastCollateralNAV + measuredDelta, ACCOUNTANT.getState().minCoverageWAD, pre.lastJTEffectiveNAV + measuredDelta);
         // The production value is read via a same-block flat sync (a no-op on the committed state), never recomputed by the suite
         uint256 productionCovUtilWAD = _syncWithState().coverageUtilizationWAD;
         assertEq(productionCovUtilWAD, expectedCovUtilWAD, "production coverage utilization must match the independent recompute");
@@ -1608,19 +1603,21 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _sync();
 
         uint256 assets = testConfig.initialFunding / 20;
-        // The quoter value of the deposited assets, the raw NAV delta the deposit must book
-        NAV_UNIT depositNAV = KERNEL.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets));
+        // The quoter value of the deposited assets, the collateral delta the deposit must book
+        NAV_UNIT depositNAV = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(assets));
         uint256 previewShares = JT.previewDeposit(toTrancheUnits(assets));
         OpReceipt memory r = _doDepositJT(JT_BOB_ADDRESS, assets);
 
         assertEq(r.shares, previewShares, "previewDeposit must equal the executed deposit exactly");
-        assertApproxEqAbs(r.post.lastJTRawNAV - r.pre.lastJTRawNAV, depositNAV, maxNAVDelta(), "the quoter-valued deposit must match the booked raw delta");
+        assertApproxEqAbs(
+            r.post.lastCollateralNAV - r.pre.lastCollateralNAV, depositNAV, maxNAVDelta(), "the quoter-valued deposit must match the booked collateral delta"
+        );
         assertEq(r.post.jtSupply, r.pre.jtSupply + r.shares, "supply must grow by exactly the minted shares");
         _assertCommittedConservation();
     }
 
     /// @notice A zero-asset JT deposit reverts with the accountant's exact-arg `INVALID_POST_OP_STATE(JT_DEPOSIT)`.
-    /// @dev The post-op sync's `deltaJTRawNAV > 0` requirement fires before the tranche's `INVALID_DEPOSIT_NAV` check can.
+    /// @dev The post-op sync's `deltaCollateralNAV > 0` requirement fires before the tranche's `INVALID_DEPOSIT_NAV` check can.
     function test_RevertIf_JTDepositZeroAssets() public {
         vm.prank(JT_ALICE_ADDRESS);
         vm.expectRevert(abi.encodeWithSelector(IRoycoDayAccountant.INVALID_POST_OP_STATE.selector, Operation.JT_DEPOSIT));
@@ -1635,7 +1632,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         uint256 assets = testConfig.initialFunding / 100;
         vm.startPrank(JT_BOB_ADDRESS);
-        IERC20(testConfig.jtAsset).approve(address(JT), assets);
+        IERC20(COLLATERAL_ASSET).approve(address(JT), assets);
         vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
         JT.deposit(toTrancheUnits(assets), JT_BOB_ADDRESS);
         vm.stopPrank();
@@ -1651,8 +1648,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertLt(maxAssets, MAX_TRANCHE_UNITS, "arrange: coverage must bound the deposit");
         OpReceipt memory rST = _doDepositST(ST_ALICE_ADDRESS, toUint256(maxAssets));
         assertLe(rST.post.coverageUtilizationWAD, WAD, "arrange: coverage must be satisfied at the brink");
-        // Brink floor derivation: stMaxDeposit under-reports the exact coverage boundary only by the two NAV dust
-        // tolerances plus quoter conversion floors, wei-to-dust magnitudes against an exposure seeded from
+        // Brink floor derivation: stMaxDeposit under-reports the exact coverage boundary only by the single dust
+        // tolerance plus quoter conversion floors, wei-to-dust magnitudes against a collateral NAV seeded from
         // `initialFunding`, so the max-size deposit parks utilization within a sliver of 100%. A 99% floor is
         // orders of magnitude above that slack and cleanly separates "at the brink" from a failed arrange.
         assertGt(rST.post.coverageUtilizationWAD, (WAD * 99) / 100, "arrange: coverage utilization must sit at the brink");
@@ -1680,45 +1677,45 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _initializeLTVenueIfNeeded();
         _sync();
 
-        uint256 depthCapAssets =
-            toUint256(KERNEL.stConvertNAVUnitsToTrancheUnits(KERNEL.ltConvertTrancheUnitsToNAVUnits(toTrancheUnits(IERC20(POOL).totalSupply()))));
+        uint256 depthCapAssets = toUint256(KERNEL.convertValueToCollateralAssets(KERNEL.convertLTAssetsToValue(toTrancheUnits(IERC20(POOL).totalSupply()))));
         assertGt(depthCapAssets, 0, "arrange: the initialized venue must carry nonzero depth");
-        uint256 stAssets = Math.min(testConfig.initialFunding / 1_000_000, depthCapAssets);
-        NAV_UNIT stValue = KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(stAssets));
-        uint256 quoteAssets = _quoteAssetsForValue(stValue);
+        uint256 collateralAssets = Math.min(testConfig.initialFunding / 1_000_000, depthCapAssets);
+        NAV_UNIT collateralValue = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(collateralAssets));
+        uint256 quoteAssets = _quoteAssetsForValue(collateralValue);
         assertGt(quoteAssets, 0, "arrange: the quote leg must be nonzero");
-        uint256 expectedSTSharesMinted = _expectedShares(stValue, ST.totalSupply(), ACCOUNTANT.getState().lastSTEffectiveNAV);
-        (NAV_UNIT previewValue,, TRANCHE_UNIT previewLtAssetsOut, uint256 previewLtSupply) = _previewKernelDepositLTMulti(stAssets, quoteAssets);
+        uint256 expectedSTSharesMinted = _expectedShares(collateralValue, ST.totalSupply(), ACCOUNTANT.getState().lastSTEffectiveNAV);
+        (NAV_UNIT previewValue,, TRANCHE_UNIT previewLtAssetsOut, uint256 previewLtSupply) = _previewKernelDepositLTMulti(collateralAssets, quoteAssets);
         assertEq(previewLtSupply, 0, "arrange: the first LT mint must price against zero supply");
         uint256 expectedShares = toUint256(previewValue);
         MarketSnapshot memory pre = _snap();
         uint256 quoteBalPre = IERC20(testConfig.quoteAsset).balanceOf(LT_ALICE_ADDRESS);
 
         vm.startPrank(LT_ALICE_ADDRESS);
-        IERC20(testConfig.stAsset).approve(address(LT), stAssets);
+        IERC20(COLLATERAL_ASSET).approve(address(LT), collateralAssets);
         IERC20(testConfig.quoteAsset).approve(address(LT), quoteAssets);
         vm.expectEmit(true, true, false, true, address(LT));
-        emit IRoycoLiquidityTranche.MultiAssetDeposit(LT_ALICE_ADDRESS, LT_ALICE_ADDRESS, stAssets, quoteAssets, toUint256(previewLtAssetsOut), expectedShares);
-        (uint256 shares,) = IRoycoLiquidityTranche(address(LT)).depositMultiAsset(stAssets, quoteAssets, toUint256(previewLtAssetsOut), LT_ALICE_ADDRESS);
+        emit IRoycoLiquidityTranche.MultiAssetDeposit(
+            LT_ALICE_ADDRESS, LT_ALICE_ADDRESS, collateralAssets, quoteAssets, toUint256(previewLtAssetsOut), expectedShares
+        );
+        (uint256 shares,) =
+            IRoycoLiquidityTranche(address(LT)).depositMultiAsset(collateralAssets, quoteAssets, toUint256(previewLtAssetsOut), LT_ALICE_ADDRESS);
         vm.stopPrank();
         _assertSolvency();
 
         MarketSnapshot memory post = _snap();
         // The independent first-mint pin: shares equal the EXECUTED venue mint valued through the quoter (an
         // input), so a shared preview/execution valuation bug cannot hide. The preview equality below is parity only
-        assertEq(
-            shares, toUint256(KERNEL.ltConvertTrancheUnitsToNAVUnits(post.ltOwned - pre.ltOwned)), "the first LT mint must be 1:1 with the minted BPT value"
-        );
+        assertEq(shares, toUint256(KERNEL.convertLTAssetsToValue(post.ltOwned - pre.ltOwned)), "the first LT mint must be 1:1 with the minted BPT value");
         assertEq(shares, expectedShares, "the previewed depositNAV must equal the executed mint (parity)");
         assertEq(LT.balanceOf(LT_ALICE_ADDRESS), shares, "receiver LT share balance");
         assertEq(post.ltOwned, pre.ltOwned + previewLtAssetsOut, "ltOwned must grow by exactly the previewed venue mint");
-        assertEq(post.stOwned, pre.stOwned + toTrancheUnits(stAssets), "stOwned must grow by the senior leg");
+        assertEq(post.collateralOwned, pre.collateralOwned + toTrancheUnits(collateralAssets), "collateralOwned must grow by the senior leg");
         assertEq(post.stSupply, pre.stSupply + expectedSTSharesMinted, "the senior leg must mint at the committed senior rate");
         assertEq(post.ltSupply, pre.ltSupply + shares, "LT supply must grow by exactly the minted shares");
         assertEq(post.ltOwnedSeniorTrancheShares, pre.ltOwnedSeniorTrancheShares, "no idle liquidity premium may be staged by a deposit");
         assertEq(post.kernelSTShareBal, pre.kernelSTShareBal, "the minted senior shares must all land in the venue");
         assertEq(quoteBalPre - IERC20(testConfig.quoteAsset).balanceOf(LT_ALICE_ADDRESS), quoteAssets, "the quote leg must be pulled exactly");
-        assertEq(post.lastLTRawNAV, KERNEL.ltConvertTrancheUnitsToNAVUnits(post.ltOwned), "committed LT raw NAV must be the fresh venue mark");
+        assertEq(post.lastLTRawNAV, KERNEL.convertLTAssetsToValue(post.ltOwned), "committed LT raw NAV must be the fresh venue mark");
         assertLe(post.liquidityUtilizationWAD, pre.liquidityUtilizationWAD, "an LT deposit can only improve liquidity utilization");
         _assertCommittedConservation();
     }
@@ -1730,12 +1727,12 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _seedDefaultLT();
         _sync();
 
-        uint256 stAssets = testConfig.initialFunding / 500;
-        uint256 quoteAssets = _quoteAssetsForValue(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(stAssets)));
-        uint256 previewShares = _previewDepositLTMulti(stAssets, quoteAssets);
-        (,, TRANCHE_UNIT previewLtAssetsOut,) = _previewKernelDepositLTMulti(stAssets, quoteAssets);
+        uint256 collateralAssets = testConfig.initialFunding / 500;
+        uint256 quoteAssets = _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(collateralAssets)));
+        uint256 previewShares = _previewDepositLTMulti(collateralAssets, quoteAssets);
+        (,, TRANCHE_UNIT previewLtAssetsOut,) = _previewKernelDepositLTMulti(collateralAssets, quoteAssets);
 
-        OpReceipt memory r = _doDepositLTMulti(LT_BOB_ADDRESS, stAssets, quoteAssets, 0);
+        OpReceipt memory r = _doDepositLTMulti(LT_BOB_ADDRESS, collateralAssets, quoteAssets, 0);
         assertEq(r.shares, previewShares, "the previewed shares must equal execution exactly");
         assertEq(r.post.ltOwned, r.pre.ltOwned + previewLtAssetsOut, "the previewed LT assets out must equal the executed venue mint");
         assertEq(r.post.ltSupply, r.pre.ltSupply + r.shares, "LT supply must grow by exactly the minted shares");
@@ -1761,17 +1758,17 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _seedDefaultLT();
         _sync();
 
-        uint256 stAssets = testConfig.initialFunding / 500;
-        uint256 quoteAssets = _quoteAssetsForValue(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(stAssets)));
-        (,, TRANCHE_UNIT previewLtAssetsOut,) = _previewKernelDepositLTMulti(stAssets, quoteAssets);
+        uint256 collateralAssets = testConfig.initialFunding / 500;
+        uint256 quoteAssets = _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(collateralAssets)));
+        (,, TRANCHE_UNIT previewLtAssetsOut,) = _previewKernelDepositLTMulti(collateralAssets, quoteAssets);
         uint256 breachingMinOut = toUint256(previewLtAssetsOut) + 1;
         MarketSnapshot memory pre = _snap();
 
         vm.startPrank(LT_ALICE_ADDRESS);
-        IERC20(testConfig.stAsset).approve(address(LT), stAssets);
+        IERC20(COLLATERAL_ASSET).approve(address(LT), collateralAssets);
         IERC20(testConfig.quoteAsset).approve(address(LT), quoteAssets);
         vm.expectRevert(abi.encodeWithSelector(IVaultErrors.BptAmountOutBelowMin.selector, toUint256(previewLtAssetsOut), breachingMinOut));
-        IRoycoLiquidityTranche(address(LT)).depositMultiAsset(stAssets, quoteAssets, breachingMinOut, LT_ALICE_ADDRESS);
+        IRoycoLiquidityTranche(address(LT)).depositMultiAsset(collateralAssets, quoteAssets, breachingMinOut, LT_ALICE_ADDRESS);
         vm.stopPrank();
         _assertMarketUnchanged(pre);
     }
@@ -1783,7 +1780,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _seedDefaultLT();
         _enterFixedTerm();
 
-        uint256 quoteAssets = _quoteAssetsForValue(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(testConfig.initialFunding / 1000)));
+        uint256 quoteAssets = _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(testConfig.initialFunding / 1000)));
         uint256 ltSupplyPre = LT.totalSupply();
         MarketSnapshot memory pre = _snap();
         assertEq(pre.ltOwnedSeniorTrancheShares, 0, "arrange: no staged premium may exist");
@@ -1791,22 +1788,22 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         OpReceipt memory r = _doDepositLTMulti(LT_BOB_ADDRESS, 0, quoteAssets, 0);
         assertEq(r.shares, previewShares, "the quote-only preview must equal execution");
-        NAV_UNIT depositNAV = KERNEL.ltConvertTrancheUnitsToNAVUnits(r.post.ltOwned - r.pre.ltOwned);
+        NAV_UNIT depositNAV = KERNEL.convertLTAssetsToValue(r.post.ltOwned - r.pre.ltOwned);
         assertEq(r.shares, _expectedShares(depositNAV, ltSupplyPre, pre.lastLTRawNAV), "quote-only shares must price at the pre-deposit LT effective NAV");
         assertEq(r.post.stSupply, r.pre.stSupply, "a quote-only deposit must mint no senior shares");
-        assertEq(r.post.stOwned, r.pre.stOwned, "a quote-only deposit must add no senior assets");
+        assertEq(r.post.collateralOwned, r.pre.collateralOwned, "a quote-only deposit must add no collateral assets");
         assertTrue(r.post.marketState == MarketState.FIXED_TERM, "the market must remain in the fixed term");
 
-        uint256 stAssets = testConfig.initialFunding / 1000;
+        uint256 collateralAssets = testConfig.initialFunding / 1000;
         vm.startPrank(LT_BOB_ADDRESS);
-        IERC20(testConfig.stAsset).approve(address(LT), stAssets);
+        IERC20(COLLATERAL_ASSET).approve(address(LT), collateralAssets);
         IERC20(testConfig.quoteAsset).approve(address(LT), quoteAssets);
         vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
-        IRoycoLiquidityTranche(address(LT)).depositMultiAsset(stAssets, quoteAssets, 0, LT_BOB_ADDRESS);
+        IRoycoLiquidityTranche(address(LT)).depositMultiAsset(collateralAssets, quoteAssets, 0, LT_BOB_ADDRESS);
         vm.stopPrank();
 
         vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
-        IRoycoLiquidityTranche(address(LT)).previewDepositMultiAsset(stAssets, quoteAssets);
+        IRoycoLiquidityTranche(address(LT)).previewDepositMultiAsset(collateralAssets, quoteAssets);
         _assertCommittedConservation();
     }
 
@@ -1824,7 +1821,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(IERC20(POOL).balanceOf(LT_ALICE_ADDRESS), bptAssets, "arrange: the redeemer must hold the BPT");
         _sync();
 
-        NAV_UNIT value = KERNEL.ltConvertTrancheUnitsToNAVUnits(toTrancheUnits(bptAssets));
+        NAV_UNIT value = KERNEL.convertLTAssetsToValue(toTrancheUnits(bptAssets));
         uint256 ltSupply = LT.totalSupply();
         MarketSnapshot memory pre = _snap();
         assertEq(pre.ltOwnedSeniorTrancheShares, 0, "arrange: no staged premium may exist");
@@ -1865,7 +1862,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 inKindShares = LT.deposit(toTrancheUnits(bptAssets / 2), LT_ALICE_ADDRESS);
         vm.stopPrank();
         assertGt(inKindShares, 0, "the in-kind deposit must succeed while breached");
-        uint256 quoteAssets = _quoteAssetsForValue(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(testConfig.initialFunding / 1000)));
+        uint256 quoteAssets = _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(testConfig.initialFunding / 1000)));
         assertGt(_doDepositLTMulti(LT_ALICE_ADDRESS, 0, quoteAssets, 0).shares, 0, "the quote-only deposit must succeed while breached");
 
         // Arrange B: fixed term
@@ -1909,12 +1906,12 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _doDepositST(ST_BOB_ADDRESS, maxAssets - headroomTargetAssets);
 
         uint256 breachAssets = toUint256(ST.maxDeposit(ST_BOB_ADDRESS)) + _stMaxDepositBreachSlackAssets();
-        uint256 quoteAssets = _quoteAssetsForValue(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(breachAssets)));
+        uint256 quoteAssets = _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(breachAssets)));
         MarketSnapshot memory pre = _snap();
         assertLe(pre.liquidityUtilizationWAD, WAD, "arrange: liquidity must not be the binding gate");
 
         vm.startPrank(LT_BOB_ADDRESS);
-        IERC20(testConfig.stAsset).approve(address(LT), breachAssets);
+        IERC20(COLLATERAL_ASSET).approve(address(LT), breachAssets);
         IERC20(testConfig.quoteAsset).approve(address(LT), quoteAssets);
         vm.expectRevert(IRoycoDayAccountant.COVERAGE_REQUIREMENT_VIOLATED.selector);
         IRoycoLiquidityTranche(address(LT)).depositMultiAsset(breachAssets, quoteAssets, 0, LT_BOB_ADDRESS);
@@ -1937,26 +1934,26 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         MarketSnapshot memory pre = _snap();
         assertGt(pre.liquidityUtilizationWAD, WAD, "arrange: the liquidity requirement must be breached");
 
-        uint256 stAssets = testConfig.initialFunding / 1000;
-        NAV_UNIT stValue = KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(stAssets));
-        uint256 quoteAssets = _quoteAssetsForValue(stValue);
+        uint256 collateralAssets = testConfig.initialFunding / 1000;
+        NAV_UNIT collateralValue = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(collateralAssets));
+        uint256 quoteAssets = _quoteAssetsForValue(collateralValue);
         assertLe(
-            _expectedCoverageUtilization(pre.lastSTRawNAV + stValue, pre.lastJTRawNAV, ACCOUNTANT.getState().minCoverageWAD, pre.lastJTEffectiveNAV),
+            _expectedCoverageUtilization(pre.lastCollateralNAV + collateralValue, ACCOUNTANT.getState().minCoverageWAD, pre.lastJTEffectiveNAV),
             WAD,
             "arrange: coverage must not be the binding gate"
         );
         // Even crediting both legs fully to the pooled depth, the post-op utilization stays breached
         assertGt(
-            _expectedLiquidityUtilization(pre.lastSTEffectiveNAV + stValue, 0.9e18, pre.lastLTRawNAV + stValue + stValue),
+            _expectedLiquidityUtilization(pre.lastSTEffectiveNAV + collateralValue, 0.9e18, pre.lastLTRawNAV + collateralValue + collateralValue),
             WAD,
             "arrange: the deposit must not heal the breached requirement"
         );
 
         vm.startPrank(LT_BOB_ADDRESS);
-        IERC20(testConfig.stAsset).approve(address(LT), stAssets);
+        IERC20(COLLATERAL_ASSET).approve(address(LT), collateralAssets);
         IERC20(testConfig.quoteAsset).approve(address(LT), quoteAssets);
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
-        IRoycoLiquidityTranche(address(LT)).depositMultiAsset(stAssets, quoteAssets, 0, LT_BOB_ADDRESS);
+        IRoycoLiquidityTranche(address(LT)).depositMultiAsset(collateralAssets, quoteAssets, 0, LT_BOB_ADDRESS);
         vm.stopPrank();
         _assertMarketUnchanged(pre);
     }
@@ -1969,36 +1966,21 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
     /**
      * @notice Derives a tranche's cumulative asset claims independently from the committed checkpoint plus quoter
-     *         conversions, mirroring `TrancheClaimsLogic._deriveTrancheAssetClaims` on the documented decomposition.
-     * @dev `stClaimOnJTRaw = sat(stEffectiveNAV - stRawNAV)`, `jtClaimOnSTRaw = sat(jtEffectiveNAV - jtRawNAV)`, self-backed legs are the
-     *      raw remainders. The quoter conversions of the claim NAVs are inputs, not the function under test.
+     *         conversions, mirroring `TrancheClaimsLogic._deriveTrancheAssetClaims`.
+     * @dev A tranche's claim IS its effective NAV converted once into the collateral asset, no raw-leg
+     *      decomposition exists. The quoter conversions of the claim NAVs are inputs, not the function under test.
      *      Callers must have synced in the same block so the committed checkpoint equals the live state.
      */
     function _expectedTrancheClaims(TrancheType _trancheType) internal view returns (AssetClaims memory claims) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
         if (_trancheType == TrancheType.LIQUIDITY) {
-            if (a.lastLTRawNAV != ZERO_NAV_UNITS) claims.ltAssets = KERNEL.ltConvertNAVUnitsToTrancheUnits(a.lastLTRawNAV);
+            if (a.lastLTRawNAV != ZERO_NAV_UNITS) claims.ltAssets = KERNEL.convertValueToLTAssets(a.lastLTRawNAV);
             claims.stShares = KERNEL.getState().ltOwnedSeniorTrancheShares;
             claims.nav = a.lastLTRawNAV + _expectedValue(claims.stShares, ST.totalSupply(), a.lastSTEffectiveNAV);
             return claims;
         }
-        uint256 stRawNAV = toUint256(a.lastSTRawNAV);
-        uint256 jtRawNAV = toUint256(a.lastJTRawNAV);
-        uint256 stEffectiveNAV = toUint256(a.lastSTEffectiveNAV);
-        uint256 jtEffectiveNAV = toUint256(a.lastJTEffectiveNAV);
-        uint256 stClaimOnJTRawNAV = stEffectiveNAV > stRawNAV ? stEffectiveNAV - stRawNAV : 0;
-        uint256 jtClaimOnSTRawNAV = jtEffectiveNAV > jtRawNAV ? jtEffectiveNAV - jtRawNAV : 0;
-        if (_trancheType == TrancheType.SENIOR) {
-            uint256 stClaimOnSTRawNAV = stRawNAV - jtClaimOnSTRawNAV;
-            if (stClaimOnSTRawNAV != 0) claims.stAssets = KERNEL.stConvertNAVUnitsToTrancheUnits(toNAVUnits(stClaimOnSTRawNAV));
-            if (stClaimOnJTRawNAV != 0) claims.jtAssets = KERNEL.jtConvertNAVUnitsToTrancheUnits(toNAVUnits(stClaimOnJTRawNAV));
-            claims.nav = a.lastSTEffectiveNAV;
-        } else {
-            uint256 jtClaimOnJTRawNAV = jtRawNAV - stClaimOnJTRawNAV;
-            if (jtClaimOnSTRawNAV != 0) claims.stAssets = KERNEL.stConvertNAVUnitsToTrancheUnits(toNAVUnits(jtClaimOnSTRawNAV));
-            if (jtClaimOnJTRawNAV != 0) claims.jtAssets = KERNEL.jtConvertNAVUnitsToTrancheUnits(toNAVUnits(jtClaimOnJTRawNAV));
-            claims.nav = a.lastJTEffectiveNAV;
-        }
+        claims.nav = _trancheType == TrancheType.SENIOR ? a.lastSTEffectiveNAV : a.lastJTEffectiveNAV;
+        if (claims.nav != ZERO_NAV_UNITS) claims.collateralAssets = KERNEL.convertValueToCollateralAssets(claims.nav);
     }
 
     /// @notice Floor-scales every claims field by `_shares / (_totalShares + VIRTUAL_SHARES)`, mirroring
@@ -2007,8 +1989,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function _scaleExpectedClaims(AssetClaims memory _claims, uint256 _shares, uint256 _totalShares) internal pure returns (AssetClaims memory scaled) {
         uint256 effectiveTotalShares = _totalShares + VIRTUAL_SHARES;
         scaled.nav = toNAVUnits(Math.mulDiv(toUint256(_claims.nav), _shares, effectiveTotalShares));
-        scaled.stAssets = toTrancheUnits(Math.mulDiv(toUint256(_claims.stAssets), _shares, effectiveTotalShares));
-        scaled.jtAssets = toTrancheUnits(Math.mulDiv(toUint256(_claims.jtAssets), _shares, effectiveTotalShares));
+        scaled.collateralAssets = toTrancheUnits(Math.mulDiv(toUint256(_claims.collateralAssets), _shares, effectiveTotalShares));
         scaled.ltAssets = toTrancheUnits(Math.mulDiv(toUint256(_claims.ltAssets), _shares, effectiveTotalShares));
         scaled.stShares = Math.mulDiv(_claims.stShares, _shares, effectiveTotalShares);
     }
@@ -2016,10 +1997,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /**
      * @notice Applies the expected ST self-liquidation bonus to a redeemer's base claims, mirroring
      *         `SelfLiquidationLogic.applySeniorTrancheSelfLiquidationBonus` on the committed checkpoint.
-     * @dev The sized bonus is `min(floor(nav * bonusWAD / WAD), jtEffectiveNAV, maxUtilizationNeutralBonus)` with the
-     *      neutral cap from the library's documented derivation, sourced ST-assets-first, and the returned bonus NAV
-     *      is the value of the assets actually granted (the src quantization). Quoter conversions
-     *      of the claim legs are inputs. Callers must have synced in the same block.
+     * @dev The sized bonus is `min(floor(nav * bonusWAD / WAD), jtEffectiveNAV, maxUtilizationNeutralBonus)` with
+     *      the neutral cap `floor(nav * jtEffectiveNAV / stEffectiveNAV)` (under conservation the collateral NAV
+     *      minus jtEffectiveNAV IS stEffectiveNAV), granted in the collateral asset, and the returned bonus NAV
+     *      is the value of the assets actually granted (a single collateral round trip, the src quantization).
+     *      Quoter conversions of the claim legs are inputs. Callers must have synced in the same block.
      */
     function _expectedClaimsWithSelfLiquidationBonus(AssetClaims memory _userClaims)
         internal
@@ -2027,34 +2009,24 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         returns (AssetClaims memory claimsWithBonus, NAV_UNIT bonusNAV)
     {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        uint256 coverageUtilizationWAD = _expectedCoverageUtilization(a.lastSTRawNAV, a.lastJTRawNAV, a.minCoverageWAD, a.lastJTEffectiveNAV);
+        uint256 coverageUtilizationWAD = _expectedCoverageUtilization(a.lastCollateralNAV, a.minCoverageWAD, a.lastJTEffectiveNAV);
         if (coverageUtilizationWAD < a.coverageLiquidationUtilizationWAD) return (_userClaims, ZERO_NAV_UNITS);
 
         uint256 jtEffectiveNAV = toUint256(a.lastJTEffectiveNAV);
-        uint256 jtRawNAV = toUint256(a.lastJTRawNAV);
         uint256 desiredBonus = Math.mulDiv(toUint256(_userClaims.nav), KERNEL.getState().stSelfLiquidationBonusWAD, WAD);
-        uint256 jtClaimOnSTRawNAV = jtEffectiveNAV > jtRawNAV ? jtEffectiveNAV - jtRawNAV : 0;
 
         // The maximum bonus that does not raise coverage utilization (the bank-run-neutral cap)
         uint256 maxNeutralBonus;
-        if (jtEffectiveNAV != 0) {
-            uint256 exposure = toUint256(a.lastSTRawNAV) + jtRawNAV;
-            uint256 weightedClaimNAV = toUint256(KERNEL.stConvertTrancheUnitsToNAVUnits(_userClaims.stAssets))
-                + toUint256(KERNEL.jtConvertTrancheUnitsToNAVUnits(_userClaims.jtAssets));
-            if (weightedClaimNAV != 0) {
-                maxNeutralBonus = Math.mulDiv(weightedClaimNAV, jtEffectiveNAV, exposure - jtEffectiveNAV);
-            }
+        if (toUint256(_userClaims.nav) != 0) {
+            maxNeutralBonus = Math.mulDiv(toUint256(_userClaims.nav), jtEffectiveNAV, toUint256(a.lastSTEffectiveNAV));
         }
 
         uint256 bonus = Math.min(Math.min(desiredBonus, jtEffectiveNAV), maxNeutralBonus);
         if (bonus == 0) return (_userClaims, ZERO_NAV_UNITS);
-        uint256 bonusFromSTRawNAV = Math.min(bonus, jtClaimOnSTRawNAV);
-        TRANCHE_UNIT stBonusAssets = KERNEL.stConvertNAVUnitsToTrancheUnits(toNAVUnits(bonusFromSTRawNAV));
-        TRANCHE_UNIT jtBonusAssets = KERNEL.jtConvertNAVUnitsToTrancheUnits(toNAVUnits(bonus - bonusFromSTRawNAV));
+        TRANCHE_UNIT bonusAssets = KERNEL.convertValueToCollateralAssets(toNAVUnits(bonus));
         // Report the bonus at the value of the assets actually granted, mirroring the src quantization
-        bonusNAV = KERNEL.stConvertTrancheUnitsToNAVUnits(stBonusAssets) + KERNEL.jtConvertTrancheUnitsToNAVUnits(jtBonusAssets);
-        claimsWithBonus.stAssets = _userClaims.stAssets + stBonusAssets;
-        claimsWithBonus.jtAssets = _userClaims.jtAssets + jtBonusAssets;
+        bonusNAV = KERNEL.convertCollateralAssetsToValue(bonusAssets);
+        claimsWithBonus.collateralAssets = _userClaims.collateralAssets + bonusAssets;
         claimsWithBonus.nav = _userClaims.nav + bonusNAV;
     }
 
@@ -2062,50 +2034,35 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      * @notice The smallest junior redemption NAV guaranteed to leave coverage utilization above WAD, from the
      *         committed checkpoint plus a documented drift margin.
      * @dev Derivation (post coverageUtilizationWAD > WAD, the gate rounds up in favor of breach): redeeming `x` NAV removes
-     *      the full `x` from the covered exposure, so the exact boundary solves `(E - x)*minCov > (J - x)*WAD`, giving
-     *      `x > (J*WAD - E*minCov) / (WAD - minCov)`. The margin adds the two raw-NAV dust tolerances plus four
-     *      `maxNAVDelta()` quoter round-trips (claim NAV -> tranche units -> measured raw delta on each leg) plus two
-     *      wei, so the realized removal strictly dominates the boundary. Requires pre coverageUtilizationWAD <= WAD.
+     *      the full `x` from the collateral NAV `E`, so the exact boundary solves `(E - x)*minCov > (J - x)*WAD`, giving
+     *      `x > (J*WAD - E*minCov) / (WAD - minCov)`. The margin adds the single dust tolerance plus two
+     *      `maxNAVDelta()` quoter round-trips (claim NAV -> collateral assets -> measured collateral delta) plus
+     *      two wei, so the realized removal strictly dominates the boundary. Requires pre coverageUtilizationWAD <= WAD.
      */
     function _jtCoverageBreachRedemptionNAV() internal view returns (uint256 breachNAV) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
         uint256 jtEffectiveNAV = toUint256(a.lastJTEffectiveNAV);
-        uint256 exposure = toUint256(a.lastSTRawNAV) + toUint256(a.lastJTRawNAV);
+        uint256 collateralNAV = toUint256(a.lastCollateralNAV);
 
-        uint256 boundary = Math.ceilDiv(jtEffectiveNAV * WAD - exposure * a.minCoverageWAD, WAD - a.minCoverageWAD);
-        breachNAV = boundary + toUint256(a.stNAVDustTolerance + a.jtNAVDustTolerance) + 4 * toUint256(maxNAVDelta()) + 2;
+        uint256 boundary = Math.ceilDiv(jtEffectiveNAV * WAD - collateralNAV * a.minCoverageWAD, WAD - a.minCoverageWAD);
+        breachNAV = boundary + toUint256(a.dustTolerance) + 2 * toUint256(maxNAVDelta()) + 2;
     }
 
     /// @notice Asserts field-by-field equality of two `AssetClaims`.
     function _assertClaimsEq(AssetClaims memory _actual, AssetClaims memory _expected, string memory _ctx) internal pure {
-        assertEq(_actual.stAssets, _expected.stAssets, string.concat(_ctx, ": stAssets claim"));
-        assertEq(_actual.jtAssets, _expected.jtAssets, string.concat(_ctx, ": jtAssets claim"));
+        assertEq(_actual.collateralAssets, _expected.collateralAssets, string.concat(_ctx, ": collateralAssets claim"));
         assertEq(_actual.ltAssets, _expected.ltAssets, string.concat(_ctx, ": ltAssets claim"));
         assertEq(_actual.stShares, _expected.stShares, string.concat(_ctx, ": stShares claim"));
         assertEq(_actual.nav, _expected.nav, string.concat(_ctx, ": claim NAV"));
     }
 
-    /// @notice Asserts the receiver's token balances grew by exactly the ST and JT asset claims, batching when the
-    ///         two tranches share one asset.
-    function _assertSTAndJTClaimsPaid(address _receiver, uint256 _stAssetBalPre, uint256 _jtAssetBalPre, AssetClaims memory _claims) internal view {
-        if (testConfig.stAsset == testConfig.jtAsset) {
-            assertEq(
-                IERC20(testConfig.stAsset).balanceOf(_receiver) - _stAssetBalPre,
-                toUint256(_claims.stAssets + _claims.jtAssets),
-                "receiver must be paid the combined ST and JT asset claims exactly"
-            );
-        } else {
-            assertEq(
-                IERC20(testConfig.stAsset).balanceOf(_receiver) - _stAssetBalPre,
-                toUint256(_claims.stAssets),
-                "receiver must be paid the ST asset claim exactly"
-            );
-            assertEq(
-                IERC20(testConfig.jtAsset).balanceOf(_receiver) - _jtAssetBalPre,
-                toUint256(_claims.jtAssets),
-                "receiver must be paid the JT asset claim exactly"
-            );
-        }
+    /// @notice Asserts the receiver's collateral balance grew by exactly the collateral asset claim.
+    function _assertCollateralClaimsPaid(address _receiver, uint256 _collateralBalPre, AssetClaims memory _claims) internal view {
+        assertEq(
+            IERC20(COLLATERAL_ASSET).balanceOf(_receiver) - _collateralBalPre,
+            toUint256(_claims.collateralAssets),
+            "receiver must be paid the collateral asset claim exactly"
+        );
     }
 
     /**
@@ -2120,8 +2077,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function _arrangeLTWithStagedIdleLiquidityPremium() internal returns (uint256 idleShares) {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
         _setupLTProviders();
-        uint256 stLegAssets = testConfig.initialFunding / 10_000;
-        _seedLTBalanced(LT_ALICE_ADDRESS, stLegAssets);
+        uint256 collateralLegAssets = testConfig.initialFunding / 10_000;
+        _seedLTBalanced(LT_ALICE_ADDRESS, collateralLegAssets);
         _sync();
         uint64 minLiquidityWAD = _minLiquidityForTargetUtilization(0.8e18);
         _enableLTOverlay(0.1e18, 0.5e18, minLiquidityWAD);
@@ -2132,9 +2089,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     // ── ST redemptions ──
 
     /**
-     * @notice An ST redemption pays exactly the per-field floor-scaled slice of the senior tranche's decomposed
-     *         claims, debits the owned-asset ledgers by the claims, and books the measured redemption NAV out of the
-     *         committed senior effective NAV, with an exact-args `Redeem` event.
+     * @notice An ST redemption pays exactly the per-field floor-scaled slice of the senior tranche's
+     *         single-conversion claims, debits the owned-asset ledger by the claims, and books the measured
+     *         redemption NAV out of the committed senior effective NAV, with an exact-args `Redeem` event.
      */
     function test_STRedeem_exactClaimScaling() public {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
@@ -2144,10 +2101,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 stSupply = ST.totalSupply();
         uint256 shares = ST.balanceOf(ST_ALICE_ADDRESS) / 2;
         AssetClaims memory expectedClaims = _scaleExpectedClaims(_expectedTrancheClaims(TrancheType.SENIOR), shares, stSupply);
-        assertGt(toUint256(expectedClaims.stAssets), 0, "arrange: the redemption must claim senior assets");
+        assertGt(toUint256(expectedClaims.collateralAssets), 0, "arrange: the redemption must claim collateral assets");
         MarketSnapshot memory pre = _snap();
-        uint256 stAssetBalPre = IERC20(testConfig.stAsset).balanceOf(ST_ALICE_ADDRESS);
-        uint256 jtAssetBalPre = IERC20(testConfig.jtAsset).balanceOf(ST_ALICE_ADDRESS);
+        uint256 collateralBalPre = IERC20(COLLATERAL_ASSET).balanceOf(ST_ALICE_ADDRESS);
 
         vm.startPrank(ST_ALICE_ADDRESS);
         _expectRedeem(address(ST), ST_ALICE_ADDRESS, ST_ALICE_ADDRESS, expectedClaims, shares);
@@ -2159,12 +2115,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         // Counterweight independent of the claim-scaling mirror: the payout can never exceed the exact pro-rata
         // slice of the pre-redemption senior effective NAV, so repeated redemptions cannot round-steal value.
         _assertClaimsWithinProRataCeiling(claims, shares, stSupply, pre.lastSTEffectiveNAV);
-        _assertSTAndJTClaimsPaid(ST_ALICE_ADDRESS, stAssetBalPre, jtAssetBalPre, expectedClaims);
+        _assertCollateralClaimsPaid(ST_ALICE_ADDRESS, collateralBalPre, expectedClaims);
         MarketSnapshot memory post = _snap();
         assertEq(post.stSupply, pre.stSupply - shares, "ST supply must fall by exactly the redeemed shares");
-        assertEq(post.stOwned, pre.stOwned - expectedClaims.stAssets, "stOwned must fall by the ST asset claim");
-        assertEq(post.jtOwned, pre.jtOwned - expectedClaims.jtAssets, "jtOwned must fall by the JT asset claim");
-        NAV_UNIT redemptionNAV = (pre.lastSTRawNAV - post.lastSTRawNAV) + (pre.lastJTRawNAV - post.lastJTRawNAV);
+        assertEq(post.collateralOwned, pre.collateralOwned - expectedClaims.collateralAssets, "collateralOwned must fall by the collateral asset claim");
+        NAV_UNIT redemptionNAV = pre.lastCollateralNAV - post.lastCollateralNAV;
         assertEq(post.lastSTEffectiveNAV, pre.lastSTEffectiveNAV - redemptionNAV, "the senior effective NAV must fall by exactly the measured redemption NAV");
         assertEq(post.lastJTEffectiveNAV, pre.lastJTEffectiveNAV, "the junior effective NAV must be untouched with no liquidation bonus");
         assertApproxEqAbs(redemptionNAV, expectedClaims.nav, maxNAVDelta(), "the measured redemption NAV must round-trip the claim NAV");
@@ -2224,8 +2179,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         vm.prank(ST_ALICE_ADDRESS);
         ST.approve(ST_BOB_ADDRESS, shares);
         uint256 aliceSharesPre = ST.balanceOf(ST_ALICE_ADDRESS);
-        uint256 stAssetBalPre = IERC20(testConfig.stAsset).balanceOf(ST_BOB_ADDRESS);
-        uint256 jtAssetBalPre = IERC20(testConfig.jtAsset).balanceOf(ST_BOB_ADDRESS);
+        uint256 collateralBalPre = IERC20(COLLATERAL_ASSET).balanceOf(ST_BOB_ADDRESS);
         vm.prank(ST_BOB_ADDRESS);
         AssetClaims memory claims = ST.redeem(shares, ST_BOB_ADDRESS, ST_ALICE_ADDRESS);
         _assertSolvency();
@@ -2233,7 +2187,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertClaimsEq(claims, expectedClaims, "allowance-path claims");
         assertEq(ST.allowance(ST_ALICE_ADDRESS, ST_BOB_ADDRESS), 0, "the exact allowance must be consumed to zero");
         assertEq(ST.balanceOf(ST_ALICE_ADDRESS), aliceSharesPre - shares, "the owner's shares must be burned");
-        _assertSTAndJTClaimsPaid(ST_BOB_ADDRESS, stAssetBalPre, jtAssetBalPre, expectedClaims);
+        _assertCollateralClaimsPaid(ST_BOB_ADDRESS, collateralBalPre, expectedClaims);
         _assertCommittedConservation();
     }
 
@@ -2264,7 +2218,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _assertClaimsEq(claims, expectedClaims, "bonus-adjusted claims");
         MarketSnapshot memory post = _snap();
         assertEq(post.lastJTEffectiveNAV, pre.lastJTEffectiveNAV - bonusNAV, "the junior effective NAV must fund exactly the bonus");
-        NAV_UNIT redemptionNAV = (pre.lastSTRawNAV - post.lastSTRawNAV) + (pre.lastJTRawNAV - post.lastJTRawNAV);
+        NAV_UNIT redemptionNAV = pre.lastCollateralNAV - post.lastCollateralNAV;
         assertEq(
             post.lastSTEffectiveNAV,
             pre.lastSTEffectiveNAV - (redemptionNAV - bonusNAV),
@@ -2285,10 +2239,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /**
-     * @notice `stMaxRedeem` is bounded only by the global raw NAVs, so a sole senior LP can redeem its full balance
-     *         and the claims stay within the owned-asset ledgers.
-     * @dev Derivation: each per-leg share bound is `T * rawNAV / claimOnLegNAV` with `claimOnLegNAV <= rawNAV`, so
-     *      both bounds are at least the total supply and the owner's balance is the binding term.
+     * @notice `stMaxRedeem` is bounded only by the collateral NAV, so a sole senior LP can redeem its full balance
+     *         and the claims stay within the owned-asset ledger.
+     * @dev Derivation: the share bound is `T * collateralNAV / stEffectiveNAV` with `stEffectiveNAV <= collateralNAV`
+     *      under conservation, so the bound is at least the total supply and the owner's balance is the binding term.
      */
     function test_STRedeem_maxRedeemFullyRedeemable() public {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
@@ -2300,8 +2254,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 stSupply = ST.totalSupply();
         AssetClaims memory expectedClaims = _scaleExpectedClaims(_expectedTrancheClaims(TrancheType.SENIOR), maxShares, stSupply);
         MarketSnapshot memory pre = _snap();
-        assertLe(expectedClaims.stAssets, pre.stOwned, "the ST asset claim must stay within the owned senior assets");
-        assertLe(expectedClaims.jtAssets, pre.jtOwned, "the JT asset claim must stay within the owned junior assets");
+        assertLe(expectedClaims.collateralAssets, pre.collateralOwned, "the collateral asset claim must stay within the owned collateral assets");
 
         OpReceipt memory r = _doRedeemST(ST_ALICE_ADDRESS, maxShares);
         _assertClaimsEq(r.claims, expectedClaims, "max-redemption claims");
@@ -2332,9 +2285,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     // ── JT redemptions ──
 
     /**
-     * @notice A JT redemption pays exactly the per-field floor-scaled slice of the junior tranche's decomposed
-     *         claims, matches `previewRedeem` exactly, and books the measured redemption NAV out of the committed
-     *         junior effective NAV.
+     * @notice A JT redemption pays exactly the per-field floor-scaled slice of the junior tranche's
+     *         single-conversion claims, matches `previewRedeem` exactly, and books the measured redemption NAV
+     *         out of the committed junior effective NAV.
      */
     function test_JTRedeem_exactClaimScaling_andPreviewParity() public {
         _seedMarket(testConfig.initialFunding / 10, testConfig.initialFunding / 2);
@@ -2344,12 +2297,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 jtSupply = JT.totalSupply();
         uint256 shares = JT.balanceOf(JT_ALICE_ADDRESS) / 2;
         AssetClaims memory expectedClaims = _scaleExpectedClaims(_expectedTrancheClaims(TrancheType.JUNIOR), shares, jtSupply);
-        assertGt(toUint256(expectedClaims.jtAssets), 0, "arrange: the redemption must claim junior assets");
+        assertGt(toUint256(expectedClaims.collateralAssets), 0, "arrange: the redemption must claim collateral assets");
         AssetClaims memory previewClaims = JT.previewRedeem(shares);
         _assertClaimsEq(previewClaims, expectedClaims, "previewRedeem vs the independent derivation");
         MarketSnapshot memory pre = _snap();
-        uint256 stAssetBalPre = IERC20(testConfig.stAsset).balanceOf(JT_ALICE_ADDRESS);
-        uint256 jtAssetBalPre = IERC20(testConfig.jtAsset).balanceOf(JT_ALICE_ADDRESS);
+        uint256 collateralBalPre = IERC20(COLLATERAL_ASSET).balanceOf(JT_ALICE_ADDRESS);
 
         vm.startPrank(JT_ALICE_ADDRESS);
         _expectRedeem(address(JT), JT_ALICE_ADDRESS, JT_ALICE_ADDRESS, expectedClaims, shares);
@@ -2361,12 +2313,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         // Counterweight independent of the claim-scaling mirror: the payout can never exceed the exact pro-rata
         // slice of the pre-redemption junior effective NAV.
         _assertClaimsWithinProRataCeiling(claims, shares, jtSupply, pre.lastJTEffectiveNAV);
-        _assertSTAndJTClaimsPaid(JT_ALICE_ADDRESS, stAssetBalPre, jtAssetBalPre, expectedClaims);
+        _assertCollateralClaimsPaid(JT_ALICE_ADDRESS, collateralBalPre, expectedClaims);
         MarketSnapshot memory post = _snap();
         assertEq(post.jtSupply, pre.jtSupply - shares, "JT supply must fall by exactly the redeemed shares");
-        assertEq(post.stOwned, pre.stOwned - expectedClaims.stAssets, "stOwned must fall by the ST asset claim");
-        assertEq(post.jtOwned, pre.jtOwned - expectedClaims.jtAssets, "jtOwned must fall by the JT asset claim");
-        NAV_UNIT redemptionNAV = (pre.lastSTRawNAV - post.lastSTRawNAV) + (pre.lastJTRawNAV - post.lastJTRawNAV);
+        assertEq(post.collateralOwned, pre.collateralOwned - expectedClaims.collateralAssets, "collateralOwned must fall by the collateral asset claim");
+        NAV_UNIT redemptionNAV = pre.lastCollateralNAV - post.lastCollateralNAV;
         assertEq(post.lastJTEffectiveNAV, pre.lastJTEffectiveNAV - redemptionNAV, "the junior effective NAV must fall by exactly the measured redemption NAV");
         assertEq(post.lastSTEffectiveNAV, pre.lastSTEffectiveNAV, "the senior effective NAV must be untouched");
         assertEq(post.lastJTImpermanentLoss, pre.lastJTImpermanentLoss, "no impermanent loss may move on a redemption without IL");
@@ -2462,32 +2413,52 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /**
-     * @notice A JT redemption in PERPETUAL with retained impermanent loss floor-scales the committed IL by the
-     *         junior effective NAV ratio, realizing the redeemer's proportional recovery claim.
-     * @dev Staging note: IL is observable in PERPETUAL only when `0 < IL <= dust`, so the senior dust tolerance is
-     *      raised above a small covered loss before it is taken (with a nonzero fixed-term duration so the erase
-     *      branch does not fire).
+     * @notice A dust-classified loss from PERPETUAL is erased at commit (reset event, market stays PERPETUAL),
+     *         the next gain settles as a plain fee-gated gain rather than a recovery, and a junior redemption
+     *         carries no impermanent loss ledger to scale.
+     * @dev Replaces the retained-dust-IL scaling vector: PERPETUAL with a nonzero IL is unrepresentable (every
+     *      PERPETUAL commit erases), so the old proportional-recovery claim no longer exists to redeem. The
+     *      0.1 percent collateral loss books its whole magnitude as IL inside the waterfall (the JT-attributed
+     *      residual directly, the ST-attributed leg via coverage), so a 1 percent dust tolerance classifies it
+     *      as dust and the commit erases it with the exact-args reset event.
      */
-    function test_JTRedeem_scalesImpermanentLossFloor() public {
+    function test_JTRedeem_dustLossErasedOnPerpetualCommit_noILToScale() public {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 2);
         _setFixedTermDuration(7 days);
         _sync();
-        _raiseSTDustTolerance(toNAVUnits(toUint256(ACCOUNTANT.getState().lastSTRawNAV) / 100));
+        _raiseDustTolerance(toNAVUnits(toUint256(ACCOUNTANT.getState().lastCollateralNAV) / 100));
         _applySTLoss(0.001e18);
-        _sync();
+
+        // The waterfall books the dust loss as IL, then the PERPETUAL commit erases exactly that amount
+        SyncExpectation memory e = _buildSyncExpectation(false);
+        assertGt(toUint256(e.jtImpermanentLoss), 0, "arrange: the dust loss must book an impermanent loss inside the waterfall");
+        assertLe(e.jtImpermanentLoss, ACCOUNTANT.getState().dustTolerance, "arrange: the booked loss must classify as dust");
+        vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
+        emit IRoycoDayAccountant.JuniorTrancheImpermanentLossReset(e.jtImpermanentLoss);
+        SyncedAccountingState memory state = _syncWithState();
+        _assertSyncMatchesExpectation(state, e);
 
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        assertTrue(a.lastMarketState == MarketState.PERPETUAL, "arrange: the dust-classified loss must keep the market perpetual");
-        NAV_UNIT il0 = a.lastJTImpermanentLoss;
-        assertGt(toUint256(il0), 0, "arrange: the impermanent loss must be retained");
-        NAV_UNIT jtEff0 = a.lastJTEffectiveNAV;
+        assertTrue(a.lastMarketState == MarketState.PERPETUAL, "the dust-classified loss must keep the market perpetual");
+        assertEq(a.lastJTImpermanentLoss, ZERO_NAV_UNITS, "the perpetual commit must erase the dust impermanent loss");
+        assertEq(state.jtImpermanentLoss, ZERO_NAV_UNITS, "the returned packet must carry the erased impermanent loss");
 
+        // The next gain is a plain gain, fee-gated on the dust tolerance, never a recovery of the erased IL
+        _warpForward(1 days);
+        _applySTYield(0.05e18);
+        SyncExpectation memory eGain = _buildSyncExpectation(false);
+        assertEq(eGain.lastJTImpermanentLoss, ZERO_NAV_UNITS, "arrange: no impermanent loss may carry into the gain window");
+        assertGt(toUint256(eGain.jtProtocolFee), 0, "the plain junior gain above dust must accrue its fee");
+        SyncedAccountingState memory gainState = _syncWithState();
+        _assertSyncMatchesExpectation(gainState, eGain);
+
+        // A junior redemption settles with no impermanent loss ledger to move
         OpReceipt memory r = _doRedeemJT(JT_ALICE_ADDRESS, JT.balanceOf(JT_ALICE_ADDRESS) / 4);
-        NAV_UNIT redemptionNAV = (r.pre.lastSTRawNAV - r.post.lastSTRawNAV) + (r.pre.lastJTRawNAV - r.post.lastJTRawNAV);
-        NAV_UNIT jtEff1 = r.post.lastJTEffectiveNAV;
-        assertEq(jtEff1, jtEff0 - redemptionNAV, "the junior effective NAV must fall by exactly the measured redemption NAV");
-        NAV_UNIT expectedIL = toNAVUnits(Math.mulDiv(toUint256(il0), toUint256(jtEff1), toUint256(jtEff0)));
-        assertEq(r.post.lastJTImpermanentLoss, expectedIL, "the impermanent loss must floor-scale by the junior effective NAV ratio");
+        NAV_UNIT redemptionNAV = r.pre.lastCollateralNAV - r.post.lastCollateralNAV;
+        assertEq(
+            r.post.lastJTEffectiveNAV, r.pre.lastJTEffectiveNAV - redemptionNAV, "the junior effective NAV must fall by exactly the measured redemption NAV"
+        );
+        assertEq(r.post.lastJTImpermanentLoss, ZERO_NAV_UNITS, "no impermanent loss may exist for a perpetual junior exit");
         _assertCommittedConservation();
     }
 
@@ -2536,9 +2507,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
             "the idle liquidity premium ledger must fall by the paid slice"
         );
         assertEq(post.ltSupply, pre.ltSupply - shares, "LT supply must fall by exactly the redeemed shares");
-        assertEq(post.lastLTRawNAV, KERNEL.ltConvertTrancheUnitsToNAVUnits(post.ltOwned), "the committed LT mark must be the fresh venue mark");
+        assertEq(post.lastLTRawNAV, KERNEL.convertLTAssetsToValue(post.ltOwned), "the committed LT mark must be the fresh venue mark");
         assertLt(post.lastLTRawNAV, pre.lastLTRawNAV, "the committed LT mark must fall");
-        assertEq(post.lastSTRawNAV, pre.lastSTRawNAV, "moving idle senior shares must not move the senior raw NAV");
+        assertEq(post.lastCollateralNAV, pre.lastCollateralNAV, "moving idle senior shares must not move the collateral NAV");
         assertEq(post.lastSTEffectiveNAV, pre.lastSTEffectiveNAV, "moving idle senior shares must not move the senior effective NAV");
         assertLe(post.liquidityUtilizationWAD, WAD, "the redemption must leave the liquidity requirement satisfied");
         _assertCommittedConservation();
@@ -2617,8 +2588,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /**
      * @notice `ltMaxRedeem` inverts the liquidity gate: the max-size redemption lands under it and the same
      *         redemption plus the documented slack reverts.
-     * @dev Breach slack derivation: `maxLTWithdrawal` under-reports the exact boundary by the senior dust
-     *      tolerance plus at most one wei of ceiling drift, and the realized venue-mark drop can undershoot the
+     * @dev Breach slack derivation: `maxLTWithdrawal` under-reports the exact boundary by the dust tolerance
+     *      plus at most one wei of ceiling drift, and the realized venue-mark drop can undershoot the
      *      scaled claim value by up to two quoter round-trips, so the slack is that dust plus two `maxNAVDelta()`
      *      plus two wei, converted to LT shares at the committed mark (ceiling) plus two shares for share floors.
      */
@@ -2641,7 +2612,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         vm.revertToState(snapshotId);
 
         IRoycoDayAccountant.RoycoDayAccountantState memory a2 = ACCOUNTANT.getState();
-        uint256 slackValue = toUint256(a2.stNAVDustTolerance) + 2 * toUint256(maxNAVDelta()) + 2;
+        uint256 slackValue = toUint256(a2.dustTolerance) + 2 * toUint256(maxNAVDelta()) + 2;
         uint256 breachShares = maxShares + Math.mulDiv(slackValue, LT.totalSupply(), toUint256(a2.lastLTRawNAV), Math.Rounding.Ceil) + 2;
         assertLe(breachShares, LT.balanceOf(LT_ALICE_ADDRESS), "arrange: the breach redemption must be affordable");
 
@@ -2672,8 +2643,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         MarketSnapshot memory pre = _snap();
         uint256 quoteBalPre = IERC20(testConfig.quoteAsset).balanceOf(LT_ALICE_ADDRESS);
         uint256 kernelQuoteBalPre = IERC20(testConfig.quoteAsset).balanceOf(address(KERNEL));
-        uint256 stAssetBalPre = IERC20(testConfig.stAsset).balanceOf(LT_ALICE_ADDRESS);
-        uint256 jtAssetBalPre = IERC20(testConfig.jtAsset).balanceOf(LT_ALICE_ADDRESS);
+        uint256 collateralBalPre = IERC20(COLLATERAL_ASSET).balanceOf(LT_ALICE_ADDRESS);
 
         vm.startPrank(LT_ALICE_ADDRESS);
         vm.expectEmit(true, true, true, true, address(LT));
@@ -2688,7 +2658,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         MarketSnapshot memory post = _snap();
         assertEq(IERC20(testConfig.quoteAsset).balanceOf(LT_ALICE_ADDRESS) - quoteBalPre, previewQuoteAssets, "the quote must go straight to the receiver");
         assertEq(IERC20(testConfig.quoteAsset).balanceOf(address(KERNEL)), kernelQuoteBalPre, "the kernel must never custody the quote leg");
-        _assertSTAndJTClaimsPaid(LT_ALICE_ADDRESS, stAssetBalPre, jtAssetBalPre, previewClaims);
+        _assertCollateralClaimsPaid(LT_ALICE_ADDRESS, collateralBalPre, previewClaims);
         assertEq(post.kernelSTShareBal, pre.kernelSTShareBal - expectedLTClaims.stShares, "the kernel's held senior shares must fall by the idle slice");
         assertEq(
             post.ltOwnedSeniorTrancheShares,
@@ -2699,7 +2669,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(post.ltSupply, pre.ltSupply - shares, "LT supply must fall by exactly the redeemed shares");
         uint256 stSharesBurned = pre.stSupply - post.stSupply;
         assertGt(stSharesBurned, expectedLTClaims.stShares, "the venue-withdrawn senior shares must be burned on top of the idle slice");
-        NAV_UNIT redemptionNAV = (pre.lastSTRawNAV - post.lastSTRawNAV) + (pre.lastJTRawNAV - post.lastJTRawNAV);
+        NAV_UNIT redemptionNAV = pre.lastCollateralNAV - post.lastCollateralNAV;
         assertEq(post.lastSTEffectiveNAV, pre.lastSTEffectiveNAV - redemptionNAV, "the senior effective NAV must fall by exactly the measured redemption NAV");
         assertEq(post.lastJTEffectiveNAV, pre.lastJTEffectiveNAV, "the junior effective NAV must be untouched with no liquidation bonus");
         assertApproxEqAbs(redemptionNAV, previewClaims.nav, maxNAVDelta(), "the measured redemption NAV must round-trip the claim NAV");
@@ -2813,12 +2783,12 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
     /**
      * @notice Builds and computes the independent sync expectation for the sync about to execute, from
-     *         the committed checkpoint, the sync-time YDM previews, and the measured raw NAVs.
+     *         the committed checkpoint, the sync-time YDM previews, and the measured collateral NAV.
      * @dev Must be called in the sync's own block, after every warp and simulate, so the previews and the
      *      elapsed window match what the sync will use. The stored time-weighted accumulators and both window
      *      starts are carried as inputs, so a window with residual unpaid accrual (an earlier non-paying sync,
-     *      an admin warp, or a warp-required loss hook) prices exactly like production. Raw NAVs and YDM
-     *      previews are sync inputs, not the code under test.
+     *      an admin warp, or a warp-required loss hook) prices exactly like production. The collateral NAV and
+     *      YDM previews are sync inputs, not the code under test.
      */
     function _buildSyncExpectation(bool _fixedTermActive) internal returns (SyncExpectation memory e) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
@@ -2827,10 +2797,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         e.premiumElapsed = block.timestamp - a.lastPremiumPaymentTimestamp;
 
         e.jtYieldShareWAD = _previewYieldShareAsAccountant(
-            a.jtYDM,
-            a.lastMarketState,
-            _expectedCoverageUtilization(a.lastSTRawNAV, a.lastJTRawNAV, a.minCoverageWAD, a.lastJTEffectiveNAV),
-            a.maxJTYieldShareWAD
+            a.jtYDM, a.lastMarketState, _expectedCoverageUtilization(a.lastCollateralNAV, a.minCoverageWAD, a.lastJTEffectiveNAV), a.maxJTYieldShareWAD
         );
         e.ltYieldShareWAD = a.maxLTYieldShareWAD == 0
             ? 0
@@ -2838,9 +2805,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
                 a.ltYDM, a.lastMarketState, _expectedLiquidityUtilization(a.lastSTEffectiveNAV, a.minLiquidityWAD, a.lastLTRawNAV), a.maxLTYieldShareWAD
             );
         e.elapsed = block.timestamp - a.lastYieldShareAccrualTimestamp;
-        (e.stRawNAVNew, e.jtRawNAVNew,) = _measureFreshSyncInputs(ZERO_TRANCHE_UNITS);
-        e.lastSTRawNAV = a.lastSTRawNAV;
-        e.lastJTRawNAV = a.lastJTRawNAV;
+        (e.collateralNAVNew,) = _measureFreshSyncInputs(ZERO_TRANCHE_UNITS);
+        e.lastCollateralNAV = a.lastCollateralNAV;
         e.lastSTEffectiveNAV = a.lastSTEffectiveNAV;
         e.lastJTEffectiveNAV = a.lastJTEffectiveNAV;
         e.lastJTImpermanentLoss = a.lastJTImpermanentLoss;
@@ -2848,7 +2814,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         e.jtProtocolFeeWAD = a.jtProtocolFeeWAD;
         e.jtYieldShareProtocolFeeWAD = a.jtYieldShareProtocolFeeWAD;
         e.ltYieldShareProtocolFeeWAD = a.ltYieldShareProtocolFeeWAD;
-        e.effectiveDust = a.effectiveNAVDustTolerance;
+        e.dustTolerance = a.dustTolerance;
         e.fixedTermActive = _fixedTermActive;
         e = _expectedSync(e);
     }
@@ -2863,31 +2829,30 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(_state.jtProtocolFee, _e.jtProtocolFee, "returned JT protocol fee vs the independent recomputation");
         assertEq(_state.ltProtocolFee, _e.ltProtocolFee, "returned LT protocol fee vs the independent recomputation");
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        assertEq(a.lastSTRawNAV, _e.stRawNAVNew, "committed ST raw NAV must equal the measured input");
-        assertEq(a.lastJTRawNAV, _e.jtRawNAVNew, "committed JT raw NAV must equal the measured input");
+        assertEq(a.lastCollateralNAV, _e.collateralNAVNew, "committed collateral NAV must equal the measured input");
         assertEq(a.lastSTEffectiveNAV, _e.stEffectiveNAV, "committed ST effective NAV vs the independent recomputation");
         assertEq(a.lastJTEffectiveNAV, _e.jtEffectiveNAV, "committed JT effective NAV vs the independent recomputation");
         _assertCommittedConservation();
 
         // ── Independent counterweights (plain checked integers, no shared formula with the recomputation) ──
         // A sync only re-labels value between tranches: the liquidity premium and every fee are slices carved out
-        // of what the vault marks actually gained since the checkpoint, so none of them can exceed the measured
-        // gross raw gain (each fee additionally bounded by its configured rate on that gain).
-        uint256 grossGain = (toUint256(_e.stRawNAVNew) > toUint256(_e.lastSTRawNAV) ? toUint256(_e.stRawNAVNew) - toUint256(_e.lastSTRawNAV) : 0)
-            + (toUint256(_e.jtRawNAVNew) > toUint256(_e.lastJTRawNAV) ? toUint256(_e.jtRawNAVNew) - toUint256(_e.lastJTRawNAV) : 0);
-        assertLe(toUint256(_state.ltLiquidityPremium), grossGain, "the liquidity premium cannot exceed the measured gross raw gain");
-        assertLe(toUint256(_state.stProtocolFee) * WAD, grossGain * _e.stProtocolFeeWAD, "the ST fee cannot exceed its rate on the measured gross raw gain");
+        // of what the collateral mark actually gained since the checkpoint, so none of them can exceed the measured
+        // gross gain (each fee additionally bounded by its configured rate on that gain).
+        uint256 grossGain =
+            toUint256(_e.collateralNAVNew) > toUint256(_e.lastCollateralNAV) ? toUint256(_e.collateralNAVNew) - toUint256(_e.lastCollateralNAV) : 0;
+        assertLe(toUint256(_state.ltLiquidityPremium), grossGain, "the liquidity premium cannot exceed the measured gross collateral gain");
+        assertLe(toUint256(_state.stProtocolFee) * WAD, grossGain * _e.stProtocolFeeWAD, "the ST fee cannot exceed its rate on the measured gross gain");
         assertLe(
             toUint256(_state.jtProtocolFee) * WAD,
             grossGain * (uint256(_e.jtProtocolFeeWAD) + _e.jtYieldShareProtocolFeeWAD),
-            "the JT fee cannot exceed its combined rates on the measured gross raw gain"
+            "the JT fee cannot exceed its combined rates on the measured gross gain"
         );
         assertLe(
-            toUint256(_state.ltProtocolFee) * WAD, grossGain * _e.ltYieldShareProtocolFeeWAD, "the LT fee cannot exceed its rate on the measured gross raw gain"
+            toUint256(_state.ltProtocolFee) * WAD, grossGain * _e.ltYieldShareProtocolFeeWAD, "the LT fee cannot exceed its rate on the measured gross gain"
         );
-        // Monotonicity: when neither vault mark fell, attribution and the premium split can only move gain between
-        // tranches, no tranche's effective NAV may fall on a no-loss sync.
-        if (toUint256(_e.stRawNAVNew) >= toUint256(_e.lastSTRawNAV) && toUint256(_e.jtRawNAVNew) >= toUint256(_e.lastJTRawNAV)) {
+        // Monotonicity: when the collateral mark did not fall, attribution and the premium split can only move gain
+        // between tranches, no tranche's effective NAV may fall on a no-loss sync.
+        if (toUint256(_e.collateralNAVNew) >= toUint256(_e.lastCollateralNAV)) {
             assertGe(toUint256(a.lastSTEffectiveNAV), toUint256(_e.lastSTEffectiveNAV), "a no-loss sync must not lower the senior effective NAV");
             assertGe(toUint256(a.lastJTEffectiveNAV), toUint256(_e.lastJTEffectiveNAV), "a no-loss sync must not lower the junior effective NAV");
         }
@@ -2903,8 +2868,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function _arrangeStagedPremiumSyncExpectation() internal returns (SyncExpectation memory e) {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
         _setupLTProviders();
-        uint256 stLegAssets = testConfig.initialFunding / 10_000;
-        _seedLTBalanced(LT_ALICE_ADDRESS, stLegAssets);
+        uint256 collateralLegAssets = testConfig.initialFunding / 10_000;
+        _seedLTBalanced(LT_ALICE_ADDRESS, collateralLegAssets);
         _sync();
         uint64 minLiquidityWAD = _minLiquidityForTargetUtilization(0.8e18);
         _enableLTOverlay(0.1e18, 0.5e18, minLiquidityWAD);
@@ -2934,8 +2899,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      */
     function _arrangeReinvestableIdleLiquidityPremium() internal returns (uint256 idleShares) {
         idleShares = _arrangeStagedIdleLiquidityPremium();
-        uint256 stLegAssets = testConfig.initialFunding / 100;
-        _seedLTBalanced(LT_BOB_ADDRESS, stLegAssets);
+        uint256 collateralLegAssets = testConfig.initialFunding / 100;
+        _seedLTBalanced(LT_BOB_ADDRESS, collateralLegAssets);
         assertEq(KERNEL.getState().ltOwnedSeniorTrancheShares, idleShares, "arrange: deepening the pool must not consume the staged premium");
     }
 
@@ -2964,8 +2929,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         MarketSnapshot memory post = _snap();
 
         assertTrue(second.marketState == first.marketState, "the market state must not move");
-        assertEq(second.stRawNAV, first.stRawNAV, "the senior raw NAV must not move");
-        assertEq(second.jtRawNAV, first.jtRawNAV, "the junior raw NAV must not move");
+        assertEq(second.collateralNAV, first.collateralNAV, "the collateral NAV must not move");
         assertEq(second.ltRawNAV, first.ltRawNAV, "the liquidity raw NAV must not move");
         assertEq(second.stEffectiveNAV, first.stEffectiveNAV, "the senior effective NAV must not move");
         assertEq(second.jtEffectiveNAV, first.jtEffectiveNAV, "the junior effective NAV must not move");
@@ -2977,8 +2941,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(second.jtProtocolFee, ZERO_NAV_UNITS, "the second sync must take no JT fee");
         assertEq(second.ltProtocolFee, ZERO_NAV_UNITS, "the second sync must take no LT fee");
 
-        assertEq(post.lastSTRawNAV, pre.lastSTRawNAV, "the committed ST raw NAV must not move");
-        assertEq(post.lastJTRawNAV, pre.lastJTRawNAV, "the committed JT raw NAV must not move");
+        assertEq(post.lastCollateralNAV, pre.lastCollateralNAV, "the committed collateral NAV must not move");
         assertEq(post.lastLTRawNAV, pre.lastLTRawNAV, "the committed LT raw NAV must not move");
         assertEq(post.lastSTEffectiveNAV, pre.lastSTEffectiveNAV, "the committed ST effective NAV must not move");
         assertEq(post.lastJTEffectiveNAV, pre.lastJTEffectiveNAV, "the committed JT effective NAV must not move");
@@ -2997,10 +2960,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /**
-     * @notice A sync over a window with no senior gain pays no premium, takes no fee, and mints nothing: it
-     *         only settles the measured deltas and books the window's time-weighted yield share accrual.
-     * @dev A warp-only window is not guaranteed flat (a streaming underlying, like snUSD, drifts the raw NAV
-     *      up with time), so the measured drift is countered through the yield hook with a one-basis-point
+     * @notice A sync over a window with no collateral gain pays no premium, takes no fee, and mints nothing: it
+     *         only settles the measured delta and books the window's time-weighted yield share accrual.
+     * @dev A warp-only window is not guaranteed flat (a streaming underlying, like snUSD, drifts the collateral
+     *      NAV up with time), so the measured drift is countered through the yield hook with a one-basis-point
      *      overshoot, pinning the window to the deterministic no-gain scenario. The residual small covered loss
      *      settles exactly per the independent recomputation with every fee and premium output zero.
      */
@@ -3009,15 +2972,16 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _sync();
         _warpForward(1 days);
 
-        // Counter any streaming drift so the window nets to no senior gain (a 0 percent move pins the rate)
-        (NAV_UNIT stRawDrifted,,) = _measureFreshSyncInputs(ZERO_TRANCHE_UNITS);
-        NAV_UNIT lastSTRawNAV = ACCOUNTANT.getState().lastSTRawNAV;
-        uint256 driftCounterPctWAD =
-            stRawDrifted > lastSTRawNAV ? Math.mulDiv(toUint256(stRawDrifted - lastSTRawNAV), WAD, toUint256(stRawDrifted), Math.Rounding.Ceil) + 0.0001e18 : 0;
+        // Counter any streaming drift so the window nets to no collateral gain (a 0 percent move pins the rate)
+        (NAV_UNIT collateralDrifted,) = _measureFreshSyncInputs(ZERO_TRANCHE_UNITS);
+        NAV_UNIT lastCollateralNAV = ACCOUNTANT.getState().lastCollateralNAV;
+        uint256 driftCounterPctWAD = collateralDrifted > lastCollateralNAV
+            ? Math.mulDiv(toUint256(collateralDrifted - lastCollateralNAV), WAD, toUint256(collateralDrifted), Math.Rounding.Ceil) + 0.0001e18
+            : 0;
         simulateSTLoss(driftCounterPctWAD);
 
         SyncExpectation memory e = _buildSyncExpectation(false);
-        assertLe(e.stRawNAVNew, e.lastSTRawNAV, "arrange: the countered window must carry no senior gain");
+        assertLe(e.collateralNAVNew, e.lastCollateralNAV, "arrange: the countered window must carry no collateral gain");
         assertGt(e.elapsed, 0, "arrange: the accrual window must be nonzero");
         assertEq(e.ltLiquidityPremium, ZERO_NAV_UNITS, "a no-gain window must pay no liquidity premium");
         assertEq(e.stProtocolFee, ZERO_NAV_UNITS, "a no-gain window must take no ST fee");
@@ -3048,8 +3012,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     /**
      * @notice A senior-gain sync settles the full tranche accounting sync exactly: attribution, JT risk premium, both
      *         protocol fees, exact-args accrual and fee-mint events, and the post-payment accumulator reset.
-     * @dev On coupled-PnL kernels the hook moves both raw NAVs, so the expectation runs on the measured
-     *      deltas. The name describes the hook intent, not a guaranteed delta shape.
+     * @dev The one collateral rate moves the whole pool, so the expectation runs on the measured collateral
+     *      delta. The name describes the hook intent, not a per-tranche delta shape.
      */
     function test_Sync_stGain_exactTrancheAccounting() public {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
@@ -3058,7 +3022,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _applySTYield(0.05e18);
 
         SyncExpectation memory e = _buildSyncExpectation(false);
-        assertGt(e.stRawNAVNew, e.lastSTRawNAV, "arrange: the senior raw NAV must have appreciated");
+        assertGt(e.collateralNAVNew, e.lastCollateralNAV, "arrange: the collateral NAV must have appreciated");
         assertTrue(e.premiumsPaid, "arrange: the gain must clear the dust gate");
         assertGt(toUint256(e.stProtocolFee), 0, "arrange: an ST protocol fee must accrue");
         assertGt(toUint256(e.jtProtocolFee), 0, "arrange: a JT yield-share protocol fee must accrue");
@@ -3105,7 +3069,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         _applySTLoss(0.02e18);
         SyncExpectation memory e = _buildSyncExpectation(false);
-        assertLt(e.stRawNAVNew, e.lastSTRawNAV, "arrange: the senior raw NAV must have depreciated");
+        assertLt(e.collateralNAVNew, e.lastCollateralNAV, "arrange: the collateral NAV must have depreciated");
         assertGt(toUint256(e.jtImpermanentLoss), 0, "arrange: coverage must be applied");
         assertGt(toUint256(e.jtEffectiveNAV), 0, "arrange: the loss must not exhaust the junior tranche");
         assertEq(e.stEffectiveNAV, e.lastSTEffectiveNAV, "the covered loss must leave the senior effective NAV whole");
@@ -3131,8 +3095,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function test_Sync_stLoss_entersFixedTerm_feesAndLTPremiumZeroed() public whenLT {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
         _setupLTProviders();
-        uint256 stLegAssets = testConfig.initialFunding / 100;
-        _seedLTBalanced(LT_ALICE_ADDRESS, stLegAssets);
+        uint256 collateralLegAssets = testConfig.initialFunding / 100;
+        _seedLTBalanced(LT_ALICE_ADDRESS, collateralLegAssets);
         _sync();
         uint64 minLiquidityWAD = _minLiquidityForTargetUtilization(0.8e18);
         _enableLTOverlay(0.1e18, 0.5e18, minLiquidityWAD);
@@ -3143,7 +3107,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _applySTLoss(0.02e18);
 
         SyncExpectation memory e = _buildSyncExpectation(true);
-        assertGt(e.jtImpermanentLoss, e.effectiveDust, "arrange: the coverage applied must exceed the dust tolerance");
+        assertGt(e.jtImpermanentLoss, e.dustTolerance, "arrange: the coverage applied must exceed the dust tolerance");
         assertGt(toUint256(e.jtEffectiveNAV), 0, "arrange: the loss must not exhaust the junior tranche");
         assertGt(e.ltYieldShareWAD, 0, "arrange: a liquidity premium must have been accruing");
         uint32 expectedEndTimestamp = uint32(block.timestamp + 7 days);
@@ -3168,7 +3132,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         uint256 assets = testConfig.initialFunding / 100;
         vm.startPrank(ST_BOB_ADDRESS);
-        IERC20(testConfig.stAsset).approve(address(ST), assets);
+        IERC20(COLLATERAL_ASSET).approve(address(ST), assets);
         vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
         ST.deposit(toTrancheUnits(assets), ST_BOB_ADDRESS);
         vm.stopPrank();
@@ -3246,9 +3210,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /**
-     * @notice A junior-gain sync settles the full tranche accounting sync exactly against the measured deltas.
-     * @dev On coupled-PnL kernels the hook moves both raw NAVs together, so this completes the reachable
-     *      set of reachable delta scenarios alongside the flat, senior-gain, and loss syncs.
+     * @notice A junior-gain sync settles the full tranche accounting sync exactly against the measured delta.
+     * @dev The one collateral rate moves both tranches together, so the JT yield hook drives the same
+     *      collateral-gain pipeline as the senior hook and completes the reachable delta scenarios
+     *      alongside the flat, senior-gain, and loss syncs.
      */
     function test_Sync_jtGain_exactTrancheAccounting() public {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
@@ -3258,7 +3223,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _applyJTYield(0.05e18);
 
         SyncExpectation memory e = _buildSyncExpectation(false);
-        assertGt(e.jtRawNAVNew, e.lastJTRawNAV, "arrange: the junior raw NAV must have appreciated");
+        assertGt(e.collateralNAVNew, e.lastCollateralNAV, "arrange: the collateral NAV must have appreciated");
 
         uint256 stSupplyPre = ST.totalSupply();
         uint256 jtSupplyPre = JT.totalSupply();
@@ -3281,12 +3246,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /**
-     * @notice A junior-loss sync settles the coverage path of the sync exactly against the measured deltas, with
+     * @notice A junior-loss sync settles the coverage path of the sync exactly against the measured delta, with
      *         the forced-perpetual erase on the zero-duration baseline.
-     * @dev The coverage expectation branches on the MEASURED senior delta: on a coupled-PnL kernel (shared
-     *      feed) the junior loss drags the senior raw NAV down too, so coverage
-     *      applies and the erase event fires, while on a decoupled kernel the junior tranche simply absorbs
-     *      its own loss with no coverage touched. Both settle to the same independent recomputation.
+     * @dev The one collateral rate couples the tranches, so the JT loss hook depreciates the whole pool: the
+     *      JT-attributed residual books IL directly and the ST-attributed leg applies coverage on top, so a
+     *      nonzero IL always books and the erase event always fires. A JT-only loss is unrepresentable.
      */
     function test_Sync_jtLoss_exactTrancheAccounting() public {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
@@ -3296,15 +3260,13 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         _applyJTLoss(0.02e18);
         SyncExpectation memory e = _buildSyncExpectation(false);
-        assertLt(e.jtRawNAVNew, e.lastJTRawNAV, "arrange: the junior raw NAV must have depreciated");
+        assertLt(e.collateralNAVNew, e.lastCollateralNAV, "arrange: the collateral NAV must have depreciated");
         assertLt(e.jtEffectiveNAV, e.lastJTEffectiveNAV, "the junior effective NAV must absorb the loss");
+        assertGt(toUint256(e.jtImpermanentLoss), 0, "the coupled loss must book an impermanent loss");
+        assertEq(e.stEffectiveNAV, e.lastSTEffectiveNAV, "coverage must leave the senior effective NAV whole");
 
-        if (toUint256(e.jtImpermanentLoss) > 0) {
-            // Coupled hooks: the senior raw NAV depreciated alongside, so coverage applied and is erased
-            assertLt(e.stRawNAVNew, e.lastSTRawNAV, "a nonzero coverage application requires a measured senior depreciation");
-            vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
-            emit IRoycoDayAccountant.JuniorTrancheImpermanentLossReset(e.jtImpermanentLoss);
-        }
+        vm.expectEmit(false, false, false, true, address(ACCOUNTANT));
+        emit IRoycoDayAccountant.JuniorTrancheImpermanentLossReset(e.jtImpermanentLoss);
         SyncedAccountingState memory state = _syncWithState();
 
         _assertSyncMatchesExpectation(state, e);
@@ -3325,14 +3287,16 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 16);
         _sync();
 
-        // Size the loss from the measured committed ratio so it strictly exceeds the junior buffer
+        // Size the loss from the measured committed ratio so it strictly exceeds the junior buffer: a rate
+        // loss of fraction p removes about p of each tranche's attributed slice, so JT exhausts once
+        // p * stEff >= (1 - p) * jtEff, that is p >= jtEff / collateralNAV, padded 2 percent
         IRoycoDayAccountant.RoycoDayAccountantState memory a0 = ACCOUNTANT.getState();
-        uint256 lossPctWAD = Math.mulDiv(toUint256(a0.lastJTEffectiveNAV), WAD, toUint256(a0.lastSTRawNAV), Math.Rounding.Ceil) + 0.02e18;
+        uint256 lossPctWAD = Math.mulDiv(toUint256(a0.lastJTEffectiveNAV), WAD, toUint256(a0.lastCollateralNAV), Math.Rounding.Ceil) + 0.02e18;
         assertLt(lossPctWAD, WAD, "arrange: the exhausting loss must be representable");
         _applySTLoss(lossPctWAD);
 
         SyncExpectation memory e = _buildSyncExpectation(false);
-        assertLt(e.stRawNAVNew, e.lastSTRawNAV, "arrange: the senior raw NAV must have depreciated");
+        assertLt(e.collateralNAVNew, e.lastCollateralNAV, "arrange: the collateral NAV must have depreciated");
         assertEq(e.jtEffectiveNAV, ZERO_NAV_UNITS, "the coverage application must exhaust the junior effective NAV to exactly zero");
         assertLt(e.stEffectiveNAV, e.lastSTEffectiveNAV, "the residual loss must fall on the senior effective NAV");
         assertGt(toUint256(e.jtImpermanentLoss), 0, "arrange: the applied coverage must book an impermanent loss");
@@ -3417,12 +3381,13 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
         _flushPremiumAccrual();
 
-        // Window 1: warp, counter the streaming drift so no senior gain books, and sync (accrues, pays nothing)
+        // Window 1: warp, counter the streaming drift so no collateral gain books, and sync (accrues, pays nothing)
         _warpForward(1 days);
-        (NAV_UNIT stRawDrifted,,) = _measureFreshSyncInputs(ZERO_TRANCHE_UNITS);
-        NAV_UNIT lastSTRawNAV = ACCOUNTANT.getState().lastSTRawNAV;
-        uint256 driftCounterPctWAD =
-            stRawDrifted > lastSTRawNAV ? Math.mulDiv(toUint256(stRawDrifted - lastSTRawNAV), WAD, toUint256(stRawDrifted), Math.Rounding.Ceil) + 0.0001e18 : 0;
+        (NAV_UNIT collateralDrifted,) = _measureFreshSyncInputs(ZERO_TRANCHE_UNITS);
+        NAV_UNIT lastCollateralNAV = ACCOUNTANT.getState().lastCollateralNAV;
+        uint256 driftCounterPctWAD = collateralDrifted > lastCollateralNAV
+            ? Math.mulDiv(toUint256(collateralDrifted - lastCollateralNAV), WAD, toUint256(collateralDrifted), Math.Rounding.Ceil) + 0.0001e18
+            : 0;
         simulateSTLoss(driftCounterPctWAD);
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a1 = ACCOUNTANT.getState();
@@ -3479,7 +3444,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     }
 
     /**
-     * @notice The premium mint is coverage-neutral: it moves no raw NAV, grows senior supply by exactly the
+     * @notice The premium mint is coverage-neutral: it moves no collateral NAV, grows senior supply by exactly the
      *         premium and fee share mints, keeps the premium inside the senior effective NAV, and leaves the production
      *         coverage utilization equal to the independent recompute.
      */
@@ -3493,13 +3458,12 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         SyncedAccountingState memory state = _syncWithState();
 
         MarketSnapshot memory post = _snap();
-        assertEq(post.lastSTRawNAV, e.stRawNAVNew, "the mint must move no senior raw NAV");
-        assertEq(post.lastJTRawNAV, e.jtRawNAVNew, "the mint must move no junior raw NAV");
+        assertEq(post.lastCollateralNAV, e.collateralNAVNew, "the mint must move no collateral NAV");
         assertEq(post.stSupply, stSupplyPre + premShares + stFeeShares, "senior supply must grow by exactly the premium and fee shares");
         assertEq(post.lastSTEffectiveNAV, e.stEffectiveNAV, "the senior effective NAV must include the minted premium");
         assertEq(
             state.coverageUtilizationWAD,
-            _expectedCoverageUtilization(e.stRawNAVNew, e.jtRawNAVNew, ACCOUNTANT.getState().minCoverageWAD, e.jtEffectiveNAV),
+            _expectedCoverageUtilization(e.collateralNAVNew, ACCOUNTANT.getState().minCoverageWAD, e.jtEffectiveNAV),
             "the production coverage utilization must match the independent recompute"
         );
         // Counterweight independent of the share-pricing mirror: the coverage-neutral mint reassigns senior
@@ -3514,11 +3478,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 idleShares = _arrangeLTWithStagedIdleLiquidityPremium();
 
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        assertEq(
-            a.lastLTRawNAV,
-            KERNEL.ltConvertTrancheUnitsToNAVUnits(KERNEL.getState().ltOwnedYieldBearingAssets),
-            "the committed LT raw NAV must be the BPT mark only"
-        );
+        assertEq(a.lastLTRawNAV, KERNEL.convertLTAssetsToValue(KERNEL.getState().totalLTAssets), "the committed LT raw NAV must be the BPT mark only");
         NAV_UNIT idleValue = _expectedValue(idleShares, ST.totalSupply(), a.lastSTEffectiveNAV);
         assertGt(toUint256(idleValue), 0, "arrange: the staged premium must carry value");
         assertApproxEqAbs(LT.totalAssets().nav, a.lastLTRawNAV + idleValue, maxNAVDelta(), "the LT effective NAV must include the claimable idle leg");
@@ -3579,7 +3539,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
             _expectedPremiumShares(e.ltLiquidityPremium, e.stProtocolFee, e.ltProtocolFee, e.stEffectiveNAV, stSupplyPre);
         assertGt(premShares, 0, "arrange: the premium must mint shares");
         NAV_UNIT premiumValue = _expectedValue(premShares, stSupplyPre + premShares + stFeeShares, e.stEffectiveNAV);
-        uint256 minLtAssetsOut = Math.mulDiv(toUint256(KERNEL.ltConvertNAVUnitsToTrancheUnits(premiumValue)), WAD - slippageWAD, WAD, Math.Rounding.Ceil);
+        uint256 minLtAssetsOut = Math.mulDiv(toUint256(KERNEL.convertValueToLTAssets(premiumValue)), WAD - slippageWAD, WAD, Math.Rounding.Ceil);
         assertGt(minLtAssetsOut, 0, "arrange: the gate minimum must be nonzero");
         MarketSnapshot memory pre = _snap();
         assertEq(pre.ltOwnedSeniorTrancheShares, 0, "arrange: nothing may be staged before the sync");
@@ -3602,7 +3562,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(ltAssetsMinted, ownedDeltaAssets, "the reported venue mint must match the owned-ledger delta");
         assertEq(post.kernelBPTBal - pre.kernelBPTBal, ownedDeltaAssets, "the kernel's BPT balance must grow by exactly the venue mint");
         assertGe(ownedDeltaAssets, minLtAssetsOut, "the inline mint must clear the slippage gate's derived minimum");
-        assertEq(post.lastLTRawNAV, KERNEL.ltConvertTrancheUnitsToNAVUnits(post.ltOwned), "the freshly deployed depth must be re-committed");
+        assertEq(post.lastLTRawNAV, KERNEL.convertLTAssetsToValue(post.ltOwned), "the freshly deployed depth must be re-committed");
         assertGt(post.lastLTRawNAV, pre.lastLTRawNAV, "the committed depth must grow");
         _assertSolvency();
         _assertCommittedConservation();
@@ -3622,7 +3582,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
         NAV_UNIT idleValue = _expectedValue(idleShares, ST.totalSupply(), a.lastSTEffectiveNAV);
-        uint256 minLtAssetsOut = Math.mulDiv(toUint256(KERNEL.ltConvertNAVUnitsToTrancheUnits(idleValue)), WAD - slippageWAD, WAD, Math.Rounding.Ceil);
+        uint256 minLtAssetsOut = Math.mulDiv(toUint256(KERNEL.convertValueToLTAssets(idleValue)), WAD - slippageWAD, WAD, Math.Rounding.Ceil);
         assertGt(minLtAssetsOut, 0, "arrange: the gate minimum must be nonzero");
         MarketSnapshot memory pre = _snap();
 
@@ -3667,7 +3627,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         // The same min-out derivation as the full-amount test, applied to the partial share count
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
         NAV_UNIT partialValue = _expectedValue(partialShares, ST.totalSupply(), a.lastSTEffectiveNAV);
-        uint256 minLtAssetsOut = Math.mulDiv(toUint256(KERNEL.ltConvertNAVUnitsToTrancheUnits(partialValue)), WAD - slippageWAD, WAD, Math.Rounding.Ceil);
+        uint256 minLtAssetsOut = Math.mulDiv(toUint256(KERNEL.convertValueToLTAssets(partialValue)), WAD - slippageWAD, WAD, Math.Rounding.Ceil);
         assertGt(minLtAssetsOut, 0, "arrange: the gate minimum must be nonzero");
         MarketSnapshot memory pre = _snap();
 
@@ -3752,8 +3712,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function test_Sync_maxYieldSharesCapBinds() public whenLT {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 16);
         _setupLTProviders();
-        uint256 stLegAssets = testConfig.initialFunding / 100;
-        _seedLTBalanced(LT_ALICE_ADDRESS, stLegAssets);
+        uint256 collateralLegAssets = testConfig.initialFunding / 100;
+        _seedLTBalanced(LT_ALICE_ADDRESS, collateralLegAssets);
         _sync();
         uint64 minLiquidityWAD = _minLiquidityForTargetUtilization(0.8e18);
         uint64 capJTWAD = 1e12;
@@ -3765,7 +3725,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         // Arrange guard: both raw curve outputs must exceed the configured caps at the committed utilizations
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        uint256 coverageUtilizationWAD = _expectedCoverageUtilization(a.lastSTRawNAV, a.lastJTRawNAV, a.minCoverageWAD, a.lastJTEffectiveNAV);
+        uint256 coverageUtilizationWAD = _expectedCoverageUtilization(a.lastCollateralNAV, a.minCoverageWAD, a.lastJTEffectiveNAV);
         uint256 liquidityUtilizationWAD = _expectedLiquidityUtilization(a.lastSTEffectiveNAV, a.minLiquidityWAD, a.lastLTRawNAV);
         vm.prank(address(ACCOUNTANT));
         uint256 rawJTYieldShareWAD = IYDM(a.jtYDM).previewYieldShare(a.lastMarketState, coverageUtilizationWAD);
@@ -3822,8 +3782,8 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     function _expectedMaxSTDepositAssets() internal view returns (TRANCHE_UNIT assets) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
         uint256 totalCoveredValue = Math.mulDiv(toUint256(a.lastJTEffectiveNAV), WAD, a.minCoverageWAD);
-        uint256 requiredValue = toUint256(a.lastJTRawNAV) + toUint256(a.jtNAVDustTolerance) + toUint256(a.lastSTRawNAV) + toUint256(a.stNAVDustTolerance);
-        return KERNEL.stConvertNAVUnitsToTrancheUnits(toNAVUnits(totalCoveredValue > requiredValue ? totalCoveredValue - requiredValue : 0));
+        uint256 requiredValue = toUint256(a.lastCollateralNAV) + toUint256(a.dustTolerance);
+        return KERNEL.convertValueToCollateralAssets(toNAVUnits(totalCoveredValue > requiredValue ? totalCoveredValue - requiredValue : 0));
     }
 
     /**
@@ -3833,7 +3793,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
      */
     function _expectedMaxLTWithdrawalNAV() internal view returns (NAV_UNIT) {
         IRoycoDayAccountant.RoycoDayAccountantState memory a = ACCOUNTANT.getState();
-        uint256 requiredValue = Math.mulDiv((toUint256(a.lastSTEffectiveNAV) + toUint256(a.stNAVDustTolerance)), a.minLiquidityWAD, WAD, Math.Rounding.Ceil);
+        uint256 requiredValue = Math.mulDiv((toUint256(a.lastSTEffectiveNAV) + toUint256(a.dustTolerance)), a.minLiquidityWAD, WAD, Math.Rounding.Ceil);
         uint256 ltRawValue = toUint256(a.lastLTRawNAV);
         return toNAVUnits(ltRawValue > requiredValue ? ltRawValue - requiredValue : 0);
     }
@@ -3913,9 +3873,9 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
     // ── Donations are inert ──
 
     /**
-     * @notice A direct ST-asset transfer to the kernel is inert: the live and committed raw NAVs read the owned-asset
-     *         ledger, share pricing is unchanged from a pre-donation expectation, and the donation only strengthens
-     *         solvency.
+     * @notice A direct collateral-asset transfer to the kernel is inert: the live and committed collateral NAV
+     *         read the owned-asset ledger, share pricing is unchanged from a pre-donation expectation, and the
+     *         donation only strengthens solvency.
      * @dev The donation is a real ERC20 transfer from a funded provider, never a forge `deal` (which would overwrite
      *      the balance instead of modeling a donation).
      */
@@ -3926,62 +3886,56 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         // Pre-donation share-pricing expectation for the post-donation deposit
         uint256 assets = testConfig.initialFunding / 20;
-        NAV_UNIT value = KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets));
+        NAV_UNIT value = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(assets));
         uint256 expectedShares = _expectedShares(value, ST.totalSupply(), ACCOUNTANT.getState().lastSTEffectiveNAV);
-        NAV_UNIT stRawBefore = ST.getRawNAV();
+        NAV_UNIT collateralRawBefore = _liveCollateralNAV();
         MarketSnapshot memory pre = _snap();
 
         uint256 donationAssets = testConfig.initialFunding / 10;
         vm.prank(ST_CHARLIE_ADDRESS);
-        IERC20(testConfig.stAsset).transfer(address(KERNEL), donationAssets);
+        IERC20(COLLATERAL_ASSET).transfer(address(KERNEL), donationAssets);
 
-        assertEq(ST.getRawNAV(), stRawBefore, "the live senior raw NAV must ignore the donated balance");
+        assertEq(_liveCollateralNAV(), collateralRawBefore, "the live collateral NAV must ignore the donated balance");
         _sync();
         MarketSnapshot memory post = _snap();
-        assertEq(post.lastSTRawNAV, pre.lastSTRawNAV, "the committed senior raw NAV must ignore the donation");
-        assertEq(post.lastJTRawNAV, pre.lastJTRawNAV, "the committed junior raw NAV must ignore the donation");
+        assertEq(post.lastCollateralNAV, pre.lastCollateralNAV, "the committed collateral NAV must ignore the donation");
         assertEq(post.lastSTEffectiveNAV, pre.lastSTEffectiveNAV, "the committed senior effective NAV must ignore the donation");
         assertEq(post.lastJTEffectiveNAV, pre.lastJTEffectiveNAV, "the committed junior effective NAV must ignore the donation");
         assertEq(post.stSupply, pre.stSupply, "no shares may mint against a donation");
 
         // Solvency is now strictly overcollateralized by exactly the donated balance
-        IRoycoDayKernel.RoycoDayKernelState memory k = KERNEL.getState();
-        uint256 ledgerAssets = toUint256(k.stOwnedYieldBearingAssets) + (testConfig.stAsset == testConfig.jtAsset ? toUint256(k.jtOwnedYieldBearingAssets) : 0);
-        assertGe(IERC20(testConfig.stAsset).balanceOf(address(KERNEL)) - ledgerAssets, donationAssets, "the donation must sit above the owned-asset ledger");
+        uint256 ledgerAssets = toUint256(KERNEL.getState().totalCollateralAssets);
+        assertGe(IERC20(COLLATERAL_ASSET).balanceOf(address(KERNEL)) - ledgerAssets, donationAssets, "the donation must sit above the owned-asset ledger");
 
         OpReceipt memory r = _doDepositST(ST_BOB_ADDRESS, assets);
         assertEq(r.shares, expectedShares, "share pricing must be unchanged by the donation");
         _assertCommittedConservation();
     }
 
-    /// @notice Direct asset transfers to the tranche contracts are inert: tranches never custody assets, so raw NAVs,
-    ///         sync, and share pricing are all unchanged.
+    /// @notice Direct asset transfers to the tranche contracts are inert: tranches never custody assets, so the
+    ///         collateral NAV, sync, and share pricing are all unchanged.
     function test_Donation_toTranches_isInert() public {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 10);
         _sync();
 
         uint256 assets = testConfig.initialFunding / 20;
-        NAV_UNIT stValue = KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets));
-        NAV_UNIT jtValue = KERNEL.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets));
-        uint256 expectedSTShares = _expectedShares(stValue, ST.totalSupply(), ACCOUNTANT.getState().lastSTEffectiveNAV);
-        uint256 expectedJTShares = _expectedShares(jtValue, JT.totalSupply(), ACCOUNTANT.getState().lastJTEffectiveNAV);
-        NAV_UNIT stRawBefore = ST.getRawNAV();
-        NAV_UNIT jtRawBefore = JT.getRawNAV();
+        NAV_UNIT value = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(assets));
+        uint256 expectedSTShares = _expectedShares(value, ST.totalSupply(), ACCOUNTANT.getState().lastSTEffectiveNAV);
+        uint256 expectedJTShares = _expectedShares(value, JT.totalSupply(), ACCOUNTANT.getState().lastJTEffectiveNAV);
+        NAV_UNIT collateralNAVBefore = _liveCollateralNAV();
         MarketSnapshot memory pre = _snap();
 
         uint256 donationAssets = testConfig.initialFunding / 10;
         vm.prank(ST_CHARLIE_ADDRESS);
-        IERC20(testConfig.stAsset).transfer(address(ST), donationAssets);
+        IERC20(COLLATERAL_ASSET).transfer(address(ST), donationAssets);
         vm.prank(JT_CHARLIE_ADDRESS);
-        IERC20(testConfig.jtAsset).transfer(address(JT), donationAssets);
-        assertGe(IERC20(testConfig.stAsset).balanceOf(address(ST)), donationAssets, "arrange: the senior tranche must hold the donated balance");
+        IERC20(COLLATERAL_ASSET).transfer(address(JT), donationAssets);
+        assertGe(IERC20(COLLATERAL_ASSET).balanceOf(address(ST)), donationAssets, "arrange: the senior tranche must hold the donated balance");
 
-        assertEq(ST.getRawNAV(), stRawBefore, "the live senior raw NAV must ignore assets donated to the tranche");
-        assertEq(JT.getRawNAV(), jtRawBefore, "the live junior raw NAV must ignore assets donated to the tranche");
+        assertEq(_liveCollateralNAV(), collateralNAVBefore, "the live collateral NAV must ignore assets donated to the tranches");
         _sync();
         MarketSnapshot memory post = _snap();
-        assertEq(post.lastSTRawNAV, pre.lastSTRawNAV, "the committed senior raw NAV must ignore the donations");
-        assertEq(post.lastJTRawNAV, pre.lastJTRawNAV, "the committed junior raw NAV must ignore the donations");
+        assertEq(post.lastCollateralNAV, pre.lastCollateralNAV, "the committed collateral NAV must ignore the donations");
         assertEq(post.lastSTEffectiveNAV, pre.lastSTEffectiveNAV, "the committed senior effective NAV must ignore the donations");
         assertEq(post.lastJTEffectiveNAV, pre.lastJTEffectiveNAV, "the committed junior effective NAV must ignore the donations");
 
@@ -4005,7 +3959,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         // Pre-donation pricing expectation for an in-kind deposit of half of the withdrawn BPT
         uint256 bptDepositAssets = bptAssets / 2;
-        NAV_UNIT value = KERNEL.ltConvertTrancheUnitsToNAVUnits(toTrancheUnits(bptDepositAssets));
+        NAV_UNIT value = KERNEL.convertLTAssetsToValue(toTrancheUnits(bptDepositAssets));
         MarketSnapshot memory pre = _snap();
         assertEq(pre.ltOwnedSeniorTrancheShares, 0, "arrange: no staged premium may exist");
         uint256 expectedShares = _expectedShares(value, LT.totalSupply(), pre.lastLTRawNAV);
@@ -4024,7 +3978,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(post.lastLTRawNAV, pre.lastLTRawNAV, "the committed LT mark must ignore the donated BPT");
         assertEq(post.ltOwnedSeniorTrancheShares, pre.ltOwnedSeniorTrancheShares, "the idle liquidity premium ledger must ignore the donated senior shares");
         assertEq(post.ltOwned, pre.ltOwned, "the owned BPT ledger must ignore the donation");
-        assertEq(post.lastSTRawNAV, pre.lastSTRawNAV, "the committed senior raw NAV must ignore the share donation");
+        assertEq(post.lastCollateralNAV, pre.lastCollateralNAV, "the committed collateral NAV must ignore the share donation");
         assertEq(post.kernelBPTBal, pre.kernelBPTBal + bptDonationAssets, "the kernel must hold the donated BPT above the ledger");
         assertEq(post.kernelSTShareBal, pre.kernelSTShareBal + stShareDonation, "the kernel must hold the donated shares above the idle ledger");
 
@@ -4048,13 +4002,13 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _seedDefaultLT();
         _sync();
 
-        uint256 donationQuoteAssets = _quoteAssetsForValue(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(testConfig.initialFunding / 1000)));
+        uint256 donationQuoteAssets = _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(testConfig.initialFunding / 1000)));
         assertGt(donationQuoteAssets, 0, "arrange: the quote donation must be nonzero");
         vm.prank(LT_BOB_ADDRESS);
         IERC20(testConfig.quoteAsset).transfer(POOL, donationQuoteAssets);
 
         _sync();
-        uint256 quoteDepositAssets = _quoteAssetsForValue(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(testConfig.initialFunding / 1000)));
+        uint256 quoteDepositAssets = _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(testConfig.initialFunding / 1000)));
         assertGt(_doDepositLTMulti(LT_BOB_ADDRESS, 0, quoteDepositAssets, 0).shares, 0, "an LT deposit must still succeed after the donation");
         OpReceipt memory r = _doRedeemLT(LT_ALICE_ADDRESS, LT.balanceOf(LT_ALICE_ADDRESS) / 10);
         assertGt(toUint256(r.claims.ltAssets), 0, "an LT redemption must still pay out after the donation");
@@ -4074,28 +4028,31 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         // The attacker enters with the smallest deposit carrying nonzero value
         uint256 attackerAssets = 1;
-        while (toUint256(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(attackerAssets))) == 0) {
+        while (toUint256(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(attackerAssets))) == 0) {
             attackerAssets *= 10;
         }
         OpReceipt memory rAttacker = _doDepositST(ST_BOB_ADDRESS, attackerAssets);
         assertGt(rAttacker.shares, 0, "arrange: the attacker must hold shares");
 
-        // The attacker transfer-donates a large ST-asset balance to the kernel
+        // The attacker transfer-donates a large collateral balance to the kernel
         uint256 donationAssets = testConfig.initialFunding / 10;
         vm.prank(ST_BOB_ADDRESS);
-        IERC20(testConfig.stAsset).transfer(address(KERNEL), donationAssets);
+        IERC20(COLLATERAL_ASSET).transfer(address(KERNEL), donationAssets);
         _sync();
 
         // The victim's expectation prices off the committed (donation-free) checkpoint
         uint256 victimAssets = testConfig.initialFunding / 10;
-        NAV_UNIT victimValue = KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(victimAssets));
+        NAV_UNIT victimValue = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(victimAssets));
         uint256 expectedVictimShares = _expectedShares(victimValue, ST.totalSupply(), ACCOUNTANT.getState().lastSTEffectiveNAV);
         assertGt(expectedVictimShares, 0, "the victim's shares must not floor to zero");
 
         OpReceipt memory rVictim = _doDepositST(ST_ALICE_ADDRESS, victimAssets);
         assertEq(rVictim.shares, expectedVictimShares, "the donation must not move the victim's share pricing");
         assertApproxEqAbs(
-            rVictim.post.lastSTRawNAV - rAttacker.post.lastSTRawNAV, victimValue, maxNAVDelta(), "the committed raw NAV must grow only by the victim's deposit"
+            rVictim.post.lastCollateralNAV - rAttacker.post.lastCollateralNAV,
+            victimValue,
+            maxNAVDelta(),
+            "the committed collateral NAV must grow only by the victim's deposit"
         );
         NAV_UNIT victimHoldingValue = _expectedValue(rVictim.shares, rVictim.post.stSupply, rVictim.post.lastSTEffectiveNAV);
         assertApproxEqAbs(victimHoldingValue, victimValue, maxNAVDelta(), "the victim's holding must round-trip its deposit value");
@@ -4114,7 +4071,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _sync();
 
         OpReceipt memory rIn = _doDepositST(ST_BOB_ADDRESS, testConfig.initialFunding / 10);
-        uint256 valueIn = toUint256(rIn.post.lastSTRawNAV - rIn.pre.lastSTRawNAV);
+        uint256 valueIn = toUint256(rIn.post.lastCollateralNAV - rIn.pre.lastCollateralNAV);
         uint256 supplyAfterDeposit = rIn.post.stSupply;
         uint256 stEffAfterDeposit = toUint256(rIn.post.lastSTEffectiveNAV);
 
@@ -4148,7 +4105,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 idleShares = _arrangeStagedIdleLiquidityPremium();
 
         uint256 ltSupply = LT.totalSupply();
-        uint256 ltOwnedAssets = toUint256(KERNEL.getState().ltOwnedYieldBearingAssets);
+        uint256 ltOwnedAssets = toUint256(KERNEL.getState().totalLTAssets);
         // The largest share count whose proportional BPT slice floors to zero
         uint256 shares = (ltSupply - 1) / ltOwnedAssets;
         assertGt(shares, 0, "arrange: the BPT-per-share ratio must make a zero-BPT slice representable");
@@ -4180,10 +4137,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         _seedMarket(testConfig.initialFunding / 2, testConfig.initialFunding / 16);
         _sync();
 
-        // A loss large enough that coverage exhausts the junior effective NAV to exactly zero, sized from the
-        // measured committed ratio so the arrange holds whatever the two assets' relative per-unit values are
+        // A loss large enough that coverage exhausts the junior effective NAV to exactly zero: a rate loss of
+        // fraction p exhausts JT once p >= jtEff / collateralNAV (the residual-loss test's derivation), padded 2 percent
         IRoycoDayAccountant.RoycoDayAccountantState memory a0 = ACCOUNTANT.getState();
-        uint256 lossPctWAD = Math.mulDiv(toUint256(a0.lastJTEffectiveNAV), WAD, toUint256(a0.lastSTRawNAV), Math.Rounding.Ceil) + 0.02e18;
+        uint256 lossPctWAD = Math.mulDiv(toUint256(a0.lastJTEffectiveNAV), WAD, toUint256(a0.lastCollateralNAV), Math.Rounding.Ceil) + 0.02e18;
         assertLt(lossPctWAD, WAD, "arrange: the exhausting loss must be representable");
         _applySTLoss(lossPctWAD);
         _sync();
@@ -4197,7 +4154,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         // The zero-NAV denominator branch prices the deposit (ValuationLogic substitutes one NAV wei) and the
         // clamp binds: the deposit's NAV value dwarfs the 1-wei denominator's bind threshold (~1e12 wei)
         uint256 assets = testConfig.initialFunding / 1000;
-        NAV_UNIT value = KERNEL.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(assets));
+        NAV_UNIT value = KERNEL.convertCollateralAssetsToValue(toTrancheUnits(assets));
         uint256 expectedShares = _expectedShares(value, jtSupplyPre, ZERO_NAV_UNITS);
         assertGt(toUint256(value) * (WAD - MAX_MINT_DILUTION), MAX_MINT_DILUTION, "arrange: the dilution deposit must bind the clamp");
         // The clamp cap now prices against the effective supply (jtSupplyPre + VIRTUAL_SHARES) per the offset
@@ -4317,7 +4274,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         uint256 assets = testConfig.initialFunding / 100;
 
         vm.startPrank(ST_ALICE_ADDRESS);
-        IERC20(testConfig.stAsset).approve(address(ST), assets);
+        IERC20(COLLATERAL_ASSET).approve(address(ST), assets);
         vm.expectRevert(staleSelector);
         ST.deposit(toTrancheUnits(assets), ST_ALICE_ADDRESS);
         vm.stopPrank();
@@ -4328,7 +4285,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         // The view surface keeps pricing at the transient cached rate inside this transaction (current behavior pin)
         (SyncedAccountingState memory previewState,,) = KERNEL.previewSyncTrancheAccounting(TrancheType.SENIOR);
-        assertGt(toUint256(previewState.stRawNAV), 0, "the cached-rate preview must keep answering within the transaction");
+        assertGt(toUint256(previewState.collateralNAV), 0, "the cached-rate preview must keep answering within the transaction");
 
         // A brick, not a corruption: a fresh oracle update resumes the market
         _refreshOraclesAfterWarp();
@@ -4357,7 +4314,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(JT.maxRedeem(JT_ALICE_ADDRESS), 0, "jtMaxRedeem must report zero while paused");
 
         vm.startPrank(ST_ALICE_ADDRESS);
-        IERC20(testConfig.stAsset).approve(address(ST), assets);
+        IERC20(COLLATERAL_ASSET).approve(address(ST), assets);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         ST.deposit(toTrancheUnits(assets), ST_ALICE_ADDRESS);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
@@ -4365,7 +4322,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         vm.stopPrank();
 
         vm.startPrank(JT_ALICE_ADDRESS);
-        IERC20(testConfig.jtAsset).approve(address(JT), assets);
+        IERC20(COLLATERAL_ASSET).approve(address(JT), assets);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         JT.deposit(toTrancheUnits(assets), JT_ALICE_ADDRESS);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
@@ -4417,7 +4374,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         // Deposits to the blacklisted receiver are screened at the mint
         vm.startPrank(ST_ALICE_ADDRESS);
-        IERC20(testConfig.stAsset).approve(address(ST), assets);
+        IERC20(COLLATERAL_ASSET).approve(address(ST), assets);
         vm.expectRevert(blacklistedError);
         ST.deposit(toTrancheUnits(assets), eve);
         vm.stopPrank();
@@ -4466,7 +4423,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         // Junior tranche: deposit-to, transfer-out, and redeem are all screened, and the max views zero
         vm.startPrank(JT_ALICE_ADDRESS);
-        IERC20(testConfig.jtAsset).approve(address(JT), assets);
+        IERC20(COLLATERAL_ASSET).approve(address(JT), assets);
         vm.expectRevert(blacklistedError);
         JT.deposit(toTrancheUnits(assets), eve);
         vm.stopPrank();
@@ -4481,7 +4438,7 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
 
         if (testConfig.hasLiquidityTranche) {
             // A roled LT depositor is still screened at the share mint: it cannot mint to a blacklisted receiver
-            uint256 quoteAssets = _quoteAssetsForValue(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(testConfig.initialFunding / 1000)));
+            uint256 quoteAssets = _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(testConfig.initialFunding / 1000)));
             vm.startPrank(LT_BOB_ADDRESS);
             IERC20(testConfig.quoteAsset).approve(address(LT), quoteAssets);
             vm.expectRevert(blacklistedError);
@@ -4584,11 +4541,11 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
             KERNEL.attemptLiquidityPremiumReinvestment(1, ZERO_NAV_UNITS, 0);
         }
         vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
-        ACCOUNTANT.preOpSyncTrancheAccounting(ZERO_NAV_UNITS, ZERO_NAV_UNITS);
+        ACCOUNTANT.preOpSyncTrancheAccounting(ZERO_NAV_UNITS);
         vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
         ACCOUNTANT.commitLiquidityTrancheRawNAV(ZERO_NAV_UNITS);
         vm.expectRevert(IRoycoDayAccountant.ONLY_ROYCO_KERNEL.selector);
-        ACCOUNTANT.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
+        ACCOUNTANT.postOpSyncTrancheAccounting(Operation.ST_DEPOSIT, ZERO_NAV_UNITS, ZERO_NAV_UNITS, ZERO_NAV_UNITS, false);
         vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
         ST.mint(outsider, 1);
         vm.expectRevert(IRoycoVaultTranche.ONLY_KERNEL.selector);
@@ -4751,11 +4708,10 @@ abstract contract Test_KernelSuiteBase is RoycoDayTestBase, IKernelTestHooks {
         assertEq(maxDepositBefore, _expectedMaxSTDepositAssets(), "stMaxDeposit must match the independent recompute");
         assertLt(maxDepositBefore, MAX_TRANCHE_UNITS, "arrange: coverage must bound the deposit");
         // Counterweight independent of the max-deposit mirror: the reported maximum, valued through the quoter,
-        // must itself fit under the coverage gate's defining inequality, depositing it leaves the covered
-        // exposure times the minimum coverage within the junior effective NAV (plain cross-multiplied integers).
+        // must itself fit under the coverage gate's defining inequality, depositing it leaves the collateral
+        // NAV times the minimum coverage within the junior effective NAV (plain cross-multiplied integers).
         assertLe(
-            (toUint256(a0.lastSTRawNAV) + toUint256(KERNEL.stConvertTrancheUnitsToNAVUnits(maxDepositBefore)) + toUint256(a0.lastJTRawNAV))
-                * uint256(a0.minCoverageWAD),
+            (toUint256(a0.lastCollateralNAV) + toUint256(KERNEL.convertCollateralAssetsToValue(maxDepositBefore))) * uint256(a0.minCoverageWAD),
             toUint256(a0.lastJTEffectiveNAV) * WAD,
             "the reported max deposit must satisfy the coverage gate's defining inequality"
         );

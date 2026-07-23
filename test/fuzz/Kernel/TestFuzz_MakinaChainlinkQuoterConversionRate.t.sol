@@ -9,6 +9,9 @@ import { IERC20 } from "../../../lib/openzeppelin-contracts/contracts/token/ERC2
 import { RoycoDayAccountant } from "../../../src/accountant/RoycoDayAccountant.sol";
 import { IRoycoDayKernel } from "../../../src/interfaces/IRoycoDayKernel.sol";
 import {
+    Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel as MakinaChainlinkKernel
+} from "../../../src/kernels/Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
+import {
     IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter
 } from "../../../src/kernels/base/quoter/identical-st-jt/IdenticalMakinaShares_ST_JT_SharePriceToChainlinkOracle_Quoter.sol";
 import { BalancerV3_LT_BPTOracle_Quoter } from "../../../src/kernels/base/quoter/liquidity-tranche/balancer-v3/BalancerV3_LT_BPTOracle_Quoter.sol";
@@ -16,9 +19,6 @@ import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Un
 import { RoycoJuniorTranche } from "../../../src/tranches/RoycoJuniorTranche.sol";
 import { RoycoLiquidityTranche } from "../../../src/tranches/RoycoLiquidityTranche.sol";
 import { RoycoSeniorTranche } from "../../../src/tranches/RoycoSeniorTranche.sol";
-import {
-    Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel as MakinaChainlinkKernel
-} from "../../../src/kernels/Identical_Makina_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel.sol";
 import { MockAggregatorV3 } from "../../mocks/MockAggregatorV3.sol";
 import { MockBPT } from "../../mocks/MockBPT.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
@@ -34,10 +34,10 @@ import { MockMakinaMachine } from "../../mocks/MockMakinaMachine.sol";
  *         supersedes the feed entirely
  * @dev The quoter is the market's sole pricing seam: every deposit, redemption, coverage check, and sync marks
  *      tranche value through these conversions, so a composed-rate error silently misprices every tranche. The
- *      forward conversion is pinned to an independently floor-composed derivation, the junior side is pinned to
- *      the senior side (one shared machine share, one shared rate), the NAV -> tranche -> NAV round trip is
- *      bounded by its input, and a stored nonzero override must price the second hop instead of the feed for
- *      every fuzzed feed configuration
+ *      forward conversion is pinned to an independently floor-composed derivation (the senior and junior
+ *      tranches share the ONE collateral converter, so identical pricing is structural rather than asserted),
+ *      the NAV -> collateral -> NAV round trip is bounded by its input, and a stored nonzero override must
+ *      price the second hop instead of the feed for every fuzzed feed configuration
  */
 contract TestFuzz_MakinaChainlinkQuoterConversionRate_Kernel is Test {
     /// @dev The staleness threshold given to the Chainlink hop, generous so the constructor-stamped round stays fresh for the whole run
@@ -79,7 +79,7 @@ contract TestFuzz_MakinaChainlinkQuoterConversionRate_Kernel is Test {
         internal
         returns (MakinaChainlinkKernel kernel, MockAggregatorV3 feed)
     {
-        // The machine share doubles as BOTH tranche assets (the quoter family mandates identical ST/JT assets)
+        // The machine share is the market's ONE coinvested collateral asset shared by ST and JT
         MockERC20C shareToken = new MockERC20C("Machine Share", "mSHARE", _trancheDecimals);
         MockERC20C accountingToken = new MockERC20C("Machine Accounting", "mACCT", _accountingDecimals);
         MockMakinaMachine machine = new MockMakinaMachine(address(shareToken), address(accountingToken), _sharePriceWAD);
@@ -101,7 +101,6 @@ contract TestFuzz_MakinaChainlinkQuoterConversionRate_Kernel is Test {
         RoycoSeniorTranche seniorTranche = new RoycoSeniorTranche(address(shareToken), predictedKernel);
         RoycoJuniorTranche juniorTranche = new RoycoJuniorTranche(address(shareToken), predictedKernel);
         RoycoLiquidityTranche liquidityTranche = new RoycoLiquidityTranche(address(bpt), predictedKernel);
-        // The kernel constructor requires identical ST/JT assets
         RoycoDayAccountant accountant = new RoycoDayAccountant(predictedKernel);
 
         balancerVault.registerPool(address(bpt), [IERC20(address(seniorTranche)), IERC20(address(quoteToken))]);
@@ -109,9 +108,8 @@ contract TestFuzz_MakinaChainlinkQuoterConversionRate_Kernel is Test {
         MakinaChainlinkKernel impl = new MakinaChainlinkKernel(
             IRoycoDayKernel.RoycoDayKernelConstructionParams({
                 seniorTranche: address(seniorTranche),
-                stAsset: address(shareToken),
                 juniorTranche: address(juniorTranche),
-                jtAsset: address(shareToken),
+                collateralAsset: address(shareToken),
                 accountant: address(accountant),
                 liquidityTranche: address(liquidityTranche),
                 ltAsset: address(bpt),
@@ -152,11 +150,11 @@ contract TestFuzz_MakinaChainlinkQuoterConversionRate_Kernel is Test {
      * amount is pushed through the tranche -> NAV conversion and one value through the NAV -> tranche -> NAV
      * round trip.
      *
-     * Three properties are pinned, none of them by re-running the quoter's own code:
-     * (a) the forward conversion equals a floor composition derived by hand from the raw fuzz inputs,
-     * (b) the junior conversions equal the senior conversions on identical inputs (one shared machine share,
-     *     one shared feed, so any divergence would let the two tranches mark the same asset differently), and
-     * (c) the NAV -> tranche -> NAV round trip never exceeds its input (two floor divisions can only lose value,
+     * Two properties are pinned, neither by re-running the quoter's own code (the old junior-equals-senior
+     * conjunct is now structural: both tranches price through the single collateral converter, so divergent
+     * per-tranche marks are unrepresentable):
+     * (a) the forward conversion equals a floor composition derived by hand from the raw fuzz inputs, and
+     * (b) the NAV -> collateral -> NAV round trip never exceeds its input (two floor divisions can only lose value,
      *     and a round trip that came back higher would let a redeem-redeposit loop print NAV out of rounding).
      */
     function testFuzz_MakinaChainlinkConversionRoundTrip_NeverExceedsInputAndMatchesTwoHopDerivation(
@@ -220,24 +218,16 @@ contract TestFuzz_MakinaChainlinkQuoterConversionRate_Kernel is Test {
         // (a) Forward conversion: NAV = floor(amount x composedRate / 10^trancheDecimals), the second and only other
         // floor of the forward path. Largest intermediate is 1e30 x 1e36 = 1e66, still comfortably below 2^256
         uint256 expectedNAV = (amount * expectedRateWAD) / (10 ** uint256(trancheDecimals));
-        uint256 stForwardNAV = toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(amount)));
+        uint256 forwardNAV = toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(amount)));
         assertEq(kernel.getTrancheUnitToNAVUnitConversionRateWAD(), expectedRateWAD, "the composed rate must be floor(sharePrice x feedRateWAD / 1e18)");
-        assertEq(stForwardNAV, expectedNAV, "senior tranche -> NAV must equal the hand-composed two-hop floor derivation");
+        assertEq(forwardNAV, expectedNAV, "collateral -> NAV must equal the hand-composed two-hop floor derivation");
 
-        // (b) Identical-assets symmetry, forward direction: the junior tranche holds the very same machine share
-        // priced through the very same feed, so a junior mark differing from the senior mark by even one wei
-        // would value one asset two ways inside a single market
-        assertEq(toUint256(kernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(amount))), stForwardNAV, "junior forward conversion must equal senior");
-
-        // (c) Round trip: NAV -> tranche floors once, tranche -> NAV floors again, so the value coming back can
-        // never exceed what went in. This is the no-closed-form bound: whatever the rate and decimals, a holder
-        // converting a NAV claim to tranche units and marking it back must never come out ahead
-        uint256 trancheUnitsOut = toUint256(kernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(navValue)));
-        uint256 navRoundTrip = toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(trancheUnitsOut)));
-        assertLe(navRoundTrip, navValue, "NAV -> tranche -> NAV must never exceed the original value");
-
-        // (b) Identical-assets symmetry, inverse direction: the shared rate must also divide identically
-        assertEq(toUint256(kernel.jtConvertNAVUnitsToTrancheUnits(toNAVUnits(navValue))), trancheUnitsOut, "junior inverse conversion must equal senior");
+        // (b) Round trip: NAV -> collateral floors once, collateral -> NAV floors again, so the value coming back
+        // can never exceed what went in. This is the no-closed-form bound: whatever the rate and decimals, a holder
+        // converting a NAV claim to collateral units and marking it back must never come out ahead
+        uint256 trancheUnitsOut = toUint256(kernel.convertValueToCollateralAssets(toNAVUnits(navValue)));
+        uint256 navRoundTrip = toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(trancheUnitsOut)));
+        assertLe(navRoundTrip, navValue, "NAV -> collateral -> NAV must never exceed the original value");
     }
 
     /**
@@ -302,7 +292,7 @@ contract TestFuzz_MakinaChainlinkQuoterConversionRate_Kernel is Test {
         // Forward conversion prices through the override-composed rate: floor(amount x rate / 10^trancheDecimals),
         // at most 1e30 x 1e36 = 1e66 before the division
         uint256 expectedNAV = (amount * overrideComposedRateWAD) / (10 ** uint256(trancheDecimals));
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(amount))), expectedNAV, "forward conversion must price through the override");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(amount))), expectedNAV, "forward conversion must price through the override");
 
         // Kill the feed two ways: a zero answer (INVALID_PRICE if consulted) and then full revert mode. If the
         // quoter touched _queryChainlinkOracle with the override stored, these asserts would revert rather than
@@ -312,7 +302,7 @@ contract TestFuzz_MakinaChainlinkQuoterConversionRate_Kernel is Test {
         assertEq(kernel.getTrancheUnitToNAVUnitConversionRateWAD(), overrideComposedRateWAD, "a zeroed feed must not affect an override-priced quote");
         feed.setRevertMode(true);
         assertEq(kernel.getTrancheUnitToNAVUnitConversionRateWAD(), overrideComposedRateWAD, "a reverting feed must not affect an override-priced quote");
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(amount))), expectedNAV, "conversions must keep pricing through a dead feed");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(amount))), expectedNAV, "conversions must keep pricing through a dead feed");
 
         // Zero RESTORES the Chainlink path: this quoter dispatches setConversionRate to the permissive root setter
         // (zero is the query-the-feed sentinel, not a rejected value like in the admin sibling). The feed must be

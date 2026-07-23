@@ -68,7 +68,9 @@ contract TestFuzz_Valuation_Logic is Test {
             assertEq(shares, _value, "a fresh tranche mints 1:1");
         } else if (_binds(_value, _totalValue)) {
             assertEq(
-                shares, Math.mulDiv(effectiveSupply, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD), "a binding mint clamps to the cap on the effective supply"
+                shares,
+                Math.mulDiv(effectiveSupply, MAX_MINT_DILUTION_WAD, WAD - MAX_MINT_DILUTION_WAD),
+                "a binding mint clamps to the cap on the effective supply"
             );
         } else {
             assertEq(shares, Math.mulDiv(effectiveSupply, _value, _totalValue + VA, Math.Rounding.Floor), "fair mint == floor((S + VS) * v / (T + VA))");

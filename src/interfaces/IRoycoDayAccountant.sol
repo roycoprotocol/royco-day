@@ -19,8 +19,7 @@ interface IRoycoDayAccountant {
      * @custom:field maxJTYieldShareWAD - The maximum JT yield share (risk premium) as a percentage of senior appreciation, scaled to WAD precision
      * @custom:field maxLTYieldShareWAD - The maximum LT yield share (liquidity premium) as a percentage of senior appreciation, scaled to WAD precision
      * @custom:field fixedTermDurationSeconds - The duration of a fixed term for this market in seconds
-     * @custom:field stNAVDustTolerance - The worst case dust tolerance for stRawNAV from underlying NAV quoting/rounding
-     * @custom:field jtNAVDustTolerance - The worst case dust tolerance for jtRawNAV from underlying NAV quoting/rounding
+     * @custom:field dustTolerance - The worst case dust tolerance for collateralNAV from underlying NAV quoting/rounding
      * @custom:field stProtocolFeeWAD - The market's configured protocol fee percentage taken from yield earned by the senior tranche, scaled to WAD precision
      * @custom:field jtProtocolFeeWAD - The market's configured protocol fee percentage taken from yield earned by the junior tranche, scaled to WAD precision
      * @custom:field jtYieldShareProtocolFeeWAD - The market's configured protocol fee percentage taken from the yield share (risk premium) payed from the senior tranche yield to the junior tranche, scaled to WAD precision
@@ -42,9 +41,8 @@ interface IRoycoDayAccountant {
         uint64 maxLTYieldShareWAD;
         // Fixed term duration
         uint24 fixedTermDurationSeconds;
-        // Dust tolerances
-        NAV_UNIT stNAVDustTolerance;
-        NAV_UNIT jtNAVDustTolerance;
+        // Dust tolerance
+        NAV_UNIT dustTolerance;
         // Protocol fees
         uint64 stProtocolFeeWAD;
         uint64 jtProtocolFeeWAD;
@@ -73,15 +71,12 @@ interface IRoycoDayAccountant {
      * @custom:field lastYieldShareAccrualTimestamp - The timestamp at which the time-weighted yield share accumulators were last updated
      * @custom:field lastPremiumPaymentTimestamp - The timestamp at which the last premium payments occurred (the risk and liquidity premiums are always paid together)
      * @custom:field coverageLiquidationUtilizationWAD - The liquidation coverageUtilization threshold for this market, scaled to WAD precision
-     * @custom:field lastSTRawNAV - The last recorded pure NAV (excluding any coverage taken and yield shared) of the senior tranche
-     * @custom:field lastJTRawNAV - The last recorded pure NAV (excluding any coverage given and yield shared) of the junior tranche
+     * @custom:field lastCollateralNAV - The last recorded pure value of the coinvested collateral backing the senior and junior tranches
      * @custom:field lastSTEffectiveNAV - The last recorded effective NAV (including any prior applied coverage, ST yield distribution, and uncovered losses) of the senior tranche
      * @custom:field lastJTEffectiveNAV - The last recorded effective NAV (including any prior provided coverage, JT yield, ST yield distribution, and JT losses) of the junior tranche
      * @custom:field lastJTImpermanentLoss - The junior tranche's impermanent loss: JT's recoverable drawdown, deepened by JT losses and provided coverage, repaid by JT gains and JT's first claim on ST appreciation
      * @custom:field lastLTRawNAV - The last recorded raw NAV of the liquidity tranche: the mark-to-market value of its invested assets
-     * @custom:field stNAVDustTolerance - The worst case dust tolerance for stRawNAV from underlying NAV quoting/rounding
-     * @custom:field jtNAVDustTolerance - The worst case dust tolerance for jtRawNAV from underlying NAV quoting/rounding
-     * @custom:field effectiveNAVDustTolerance - Effective NAV deltas are claim-weighted linear combinations of stRawNAV and jtRawNAV deltas, so the worst-case dust is bounded by the sum of the raw NAV dust tolerances
+     * @custom:field dustTolerance - The worst case dust tolerance for collateralNAV from underlying NAV quoting/rounding, effective NAV deltas are pro-rata attributions of the collateral NAV delta so it bounds their dust too
      */
     struct RoycoDayAccountantState {
         // Slot 0
@@ -107,17 +102,14 @@ interface IRoycoDayAccountant {
         // Slot 5
         uint192 twLTYieldShareAccruedWAD;
         uint64 maxLTYieldShareWAD;
-        // Slot 6-16
+        // Slot 6-12
         uint256 coverageLiquidationUtilizationWAD;
-        NAV_UNIT lastSTRawNAV;
-        NAV_UNIT lastJTRawNAV;
+        NAV_UNIT lastCollateralNAV;
         NAV_UNIT lastSTEffectiveNAV;
         NAV_UNIT lastJTEffectiveNAV;
         NAV_UNIT lastJTImpermanentLoss;
         NAV_UNIT lastLTRawNAV;
-        NAV_UNIT stNAVDustTolerance;
-        NAV_UNIT jtNAVDustTolerance;
-        NAV_UNIT effectiveNAVDustTolerance;
+        NAV_UNIT dustTolerance;
     }
 
     /**
@@ -169,13 +161,9 @@ interface IRoycoDayAccountant {
     /// @param fixedTermDurationSeconds The new fixed term duration for this market in seconds
     event FixedTermDurationUpdated(uint24 fixedTermDurationSeconds);
 
-    /// @notice Emitted when ST's dust tolerance is updated
-    /// @param stNAVDustTolerance The dust tolerance in NAV units to account for minuscule deltas in the ST's underlying NAV calculations
-    event SeniorTrancheDustToleranceUpdated(NAV_UNIT stNAVDustTolerance);
-
-    /// @notice Emitted when JT's dust tolerance is updated
-    /// @param jtNAVDustTolerance The dust tolerance in NAV units to account for minuscule deltas in the JT's underlying NAV calculations
-    event JuniorTrancheDustToleranceUpdated(NAV_UNIT jtNAVDustTolerance);
+    /// @notice Emitted when the dust tolerance is updated
+    /// @param dustTolerance The dust tolerance in NAV units to account for minuscule deltas in the collateral's underlying NAV calculations
+    event DustToleranceUpdated(NAV_UNIT dustTolerance);
 
     /// @notice Emitted when JT's coverage loss is realized and reset to zero when transitioning from a fixed term state to a perpetual state
     /// @param jtImpermanentLossErased The amount of JT impermanent loss erased, effectively marking the JT losses as realized
@@ -225,7 +213,7 @@ interface IRoycoDayAccountant {
     /// @param data The return data of the reverting YDM initialization
     error FAILED_TO_INITIALIZE_YDM(bytes data);
 
-    /// @notice Thrown when the sum of the raw NAVs don't equal the sum of the effective NAVs of both tranches
+    /// @notice Thrown when the collateral NAV doesn't equal the sum of the effective NAVs of both tranches
     error NAV_CONSERVATION_VIOLATION();
 
     /// @notice Thrown when the combined risk and liquidity premiums exceed the senior gain they are drawn from: the JT and LT yield shares must sum to at most 100% of senior appreciation
@@ -249,15 +237,14 @@ interface IRoycoDayAccountant {
      * @dev Must be called before any NAV mutating operation
      * @dev Accrues the JT and LT yield shares over time based on the market's JT and LT YDM outputs
      * @dev Persists updated NAV and impermanent loss checkpoints for the next sync to use as reference
-     * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
-     * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
+     * @param _collateralNAV The current pure value of the coinvested collateral backing the senior and junior tranches
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      * @dev The returned state's ltRawNAV and liquidityUtilizationWAD are zero placeholders: this sync does not mark the liquidity
      *      tranche
      *      The kernel commits the freshly marked liquidity tranche raw NAV via commitLiquidityTrancheRawNAV after minting the
      *      fee shares, then refreshes both fields in the state packet in memory
      */
-    function preOpSyncTrancheAccounting(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external returns (SyncedAccountingState memory state);
+    function preOpSyncTrancheAccounting(NAV_UNIT _collateralNAV) external returns (SyncedAccountingState memory state);
 
     /**
      * @notice Commits the liquidity tranche's freshly marked raw NAV
@@ -276,16 +263,15 @@ interface IRoycoDayAccountant {
 
     /**
      * @notice Previews a synchronization of the effective NAVs and impermanent losses of both tranches by marking them to market
-     * @param _stRawNAV The senior tranche's current raw NAV: the pure value of its invested assets
-     * @param _jtRawNAV The junior tranche's current raw NAV: the pure value of its invested assets
+     * @param _collateralNAV The current pure value of the coinvested collateral backing the senior and junior tranches
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      * @dev The returned state's ltRawNAV and liquidityUtilizationWAD are zero placeholders (this sync does not mark the liquidity tranche), the kernel preview refreshes them in memory
      */
-    function previewSyncTrancheAccounting(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external view returns (SyncedAccountingState memory state);
+    function previewSyncTrancheAccounting(NAV_UNIT _collateralNAV) external view returns (SyncedAccountingState memory state);
 
     /**
-     * @notice Applies post-operation (deposit or redemption) raw NAV deltas to effective NAV checkpoints, commits the liquidity tranche's fresh raw NAV, and optionally enforces the market requirement(s) the operation can worsen
-     * @dev Strictly interprets NAV deltas as deposits/redemptions instead of PNL
+     * @notice Applies the post-operation (deposit or redemption) collateral NAV delta to the effective NAV checkpoints, commits the liquidity tranche's fresh raw NAV, and optionally enforces the market requirement(s) the operation can worsen
+     * @dev Strictly interprets the collateral NAV delta as a deposit/redemption instead of PNL
      * @dev Unlike the pre-op sync, the post-op sync runs no waterfall and pays no premium, so it can commit the liquidity tranche raw NAV
      *      directly (the kernel marks it after the operation's pool mutation has settled) and report the resulting liquidity utilization
      * @dev When enforcement is requested, fails fast on the coverage requirement for operations that can worsen coverage (add senior exposure or
@@ -297,8 +283,7 @@ interface IRoycoDayAccountant {
      *      only block healing capital mid-breach
      *      Intermediate multi-asset sub-syncs pass false, deferring enforcement to the final post-op sync that books the combined exposure
      * @param _op The operation being executed in between the pre and post operation synchronizations
-     * @param _stRawNAV The post-op senior tranche's raw NAV
-     * @param _jtRawNAV The post-op junior tranche's raw NAV
+     * @param _collateralNAV The post-op pure value of the coinvested collateral backing the senior and junior tranches
      * @param _ltRawNAV The post-op liquidity tranche's freshly marked raw NAV (the oracle value of the AMM or another market-making venue), committed by this call
      * @param _stSelfLiquidationBonusNAV The self-liquidation bonus remitted to an ST LP on redemption after the liquidation coverageUtilization threshold has been breached, sourced from JT effective NAV
      * @param _enforceCoverageAndLiquidityRequirements Whether to enforce the market's coverage and liquidity requirements applicable to the operation
@@ -306,8 +291,7 @@ interface IRoycoDayAccountant {
      */
     function postOpSyncTrancheAccounting(
         Operation _op,
-        NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV,
+        NAV_UNIT _collateralNAV,
         NAV_UNIT _ltRawNAV,
         NAV_UNIT _stSelfLiquidationBonusNAV,
         bool _enforceCoverageAndLiquidityRequirements
@@ -421,20 +405,12 @@ interface IRoycoDayAccountant {
     function setFixedTermDuration(uint24 _fixedTermDurationSeconds) external;
 
     /**
-     * @notice Updates ST's dust tolerance in NAV units to account for minuscule deltas in the underlying protocol's NAV calculations, due to rounding
+     * @notice Updates the dust tolerance in NAV units to account for minuscule deltas in the underlying protocol's NAV calculations, due to rounding
      * @dev Can be safely set to 0 if the underlying investments do not exhibit rounding behavior
      * @dev Only callable by a designated admin
-     * @param _stNAVDustTolerance The ST NAV tolerance for rounding discrepancies
+     * @param _dustTolerance The collateral NAV tolerance for rounding discrepancies
      */
-    function setSeniorTrancheDustTolerance(NAV_UNIT _stNAVDustTolerance) external;
-
-    /**
-     * @notice Updates JT's dust tolerance in NAV units to account for minuscule deltas in the underlying protocol's NAV calculations, due to rounding
-     * @dev Can be safely set to 0 if the underlying investments do not exhibit rounding behavior
-     * @dev Only callable by a designated admin
-     * @param _jtNAVDustTolerance The JT NAV tolerance for rounding discrepancies
-     */
-    function setJuniorTrancheDustTolerance(NAV_UNIT _jtNAVDustTolerance) external;
+    function setDustTolerance(NAV_UNIT _dustTolerance) external;
 
     /// @notice Returns the state of the accountant
     /// @return state The state of the accountant

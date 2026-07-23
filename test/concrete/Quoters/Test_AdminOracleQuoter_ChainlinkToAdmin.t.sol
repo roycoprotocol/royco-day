@@ -162,8 +162,8 @@ contract Test_AdminOracleQuoter_ChainlinkToAdmin is DayMarketTestBase {
     // =============================
 
     /**
-     * @notice One whole tranche unit quotes at the Chainlink price times the admin rate, on both tranches, and the
-     *         inverse conversion round-trips back to one whole unit
+     * @notice One whole tranche unit quotes at the Chainlink price times the admin rate through the one collateral
+     *         converter both tranches share, and the inverse conversion round-trips back to one whole unit
      * @dev Hand-composed: the 8-decimal feed at 2e8 is a 2.0 tranche-asset-to-reference price, the admin second hop
      *      is 1.5, so 1 tranche unit = 2.0 x 1.5 = 3.0 NAV units, i.e. exactly 3e18 for one 18-decimal unit.
      *      Neither hop alone (2e18 or 1.5e18) is the right answer, so this pins that both hops are actually composed
@@ -175,15 +175,11 @@ contract Test_AdminOracleQuoter_ChainlinkToAdmin is DayMarketTestBase {
         adminKernel.setConversionRate(1.5e18, false);
 
         // Composed rate: 2e8 x 1.5e18 / 1e8 = 3e18, so one whole unit is 1e18 x 3e18 / 1e18 = 3e18 NAV
-        assertEq(toUint256(adminKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 3e18, "one whole senior unit must quote 2.0 x 1.5 = 3.0 NAV");
-        assertEq(toUint256(adminKernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 3e18, "the junior side shares the identical composed rate");
+        assertEq(toUint256(adminKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 3e18, "one whole collateral unit must quote 2.0 x 1.5 = 3.0 NAV");
 
         // The inverse divides by the same composed rate: 3e18 NAV x 1e18 / 3e18 = 1e18 tranche units, an exact round-trip
         assertEq(
-            toUint256(adminKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(3e18)))), 1e18, "3.0 NAV must invert to exactly one whole senior unit"
-        );
-        assertEq(
-            toUint256(adminKernel.jtConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(3e18)))), 1e18, "3.0 NAV must invert to exactly one whole junior unit"
+            toUint256(adminKernel.convertValueToCollateralAssets(toNAVUnits(uint256(3e18)))), 1e18, "3.0 NAV must invert to exactly one whole collateral unit"
         );
     }
 
@@ -204,18 +200,18 @@ contract Test_AdminOracleQuoter_ChainlinkToAdmin is DayMarketTestBase {
 
         // At exactly the staleness threshold the answer still prices: feed 1.0 x admin 1.0 = 1e18 per whole unit
         vm.warp(block.timestamp + ORACLE_STALENESS_THRESHOLD_SECONDS);
-        assertEq(toUint256(adminKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1e18, "an answer aged exactly the threshold must still price");
+        assertEq(toUint256(adminKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 1e18, "an answer aged exactly the threshold must still price");
 
         // One second past the threshold the staleness gate bites, admin rate or not
         vm.warp(block.timestamp + 1);
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.STALE_PRICE.selector);
-        adminKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
+        adminKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18));
 
         // A fresh but zero answer is a broken feed, not a price of zero, and must also revert through the stored rate
         priceFeed.setUpdatedAt(block.timestamp);
         priceFeed.setAnswer(0);
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.INVALID_PRICE.selector);
-        adminKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
+        adminKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18));
     }
 
     // =============================
@@ -234,7 +230,7 @@ contract Test_AdminOracleQuoter_ChainlinkToAdmin is DayMarketTestBase {
         adminKernel.setConversionRate(2e18, true);
 
         assertEq(adminKernel.getStoredConversionRateWAD(), 2e18, "the new second-hop rate must land in quoter storage");
-        assertEq(toUint256(adminKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2e18, "one whole unit must quote feed 1.0 x admin 2.0 = 2e18");
+        assertEq(toUint256(adminKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 2e18, "one whole unit must quote feed 1.0 x admin 2.0 = 2e18");
     }
 
     /**
@@ -288,11 +284,11 @@ contract Test_AdminOracleQuoter_ChainlinkToAdmin is DayMarketTestBase {
         // Access manager, admin'd by the fixture so role wiring needs no schedule/execute dance
         accessManager = new AccessManager(address(this));
 
-        // Tokens: quote stable + one shared vault share for both ST and JT (the quoter family requires identical assets)
+        // Tokens: quote stable + one vault share as the coinvested collateral both tranches deposit
         quoteToken = _deployERC20("Quote Stable", "QUOTE", cell.quoteAsset);
-        stJtUnderlying = _deployERC20("ST/JT Underlying", "UNDR", _toUnderlyingConfig(cell.stAsset));
-        stJtVault = new MockERC4626C(address(stJtUnderlying), "ST/JT Vault Share", "vSHARE", cell.stAsset.decimals);
-        stJtVault.setRate(cell.stAsset.initialRateWAD);
+        stJtUnderlying = _deployERC20("ST/JT Underlying", "UNDR", _toUnderlyingConfig(cell.collateralAsset));
+        stJtVault = new MockERC4626C(address(stJtUnderlying), "ST/JT Vault Share", "vSHARE", cell.collateralAsset.decimals);
+        stJtVault.setRate(cell.collateralAsset.initialRateWAD);
 
         // Oracles: the tranche-asset-to-reference-asset feed at 1.0 (8 decimals), sequencer checks disabled at init
         priceFeed = new MockAggregatorV3(PRICE_FEED_DECIMALS, PRICE_FEED_INITIAL_ANSWER);
@@ -342,9 +338,8 @@ contract Test_AdminOracleQuoter_ChainlinkToAdmin is DayMarketTestBase {
         // THE SWAPPED STEP: the Chainlink-to-admin kernel impl instead of the shipped share-price-to-Chainlink kernel
         kernelConstructionParams = IRoycoDayKernel.RoycoDayKernelConstructionParams({
             seniorTranche: address(seniorTranche),
-            stAsset: address(stJtVault),
             juniorTranche: address(juniorTranche),
-            jtAsset: address(stJtVault),
+            collateralAsset: address(stJtVault),
             accountant: address(accountant),
             liquidityTranche: address(liquidityTranche),
             ltAsset: address(bpt),

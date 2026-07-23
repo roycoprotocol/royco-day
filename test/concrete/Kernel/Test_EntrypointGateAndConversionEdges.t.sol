@@ -48,7 +48,7 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        stUnit = 10 ** uint256(cell.collateralAsset.decimals);
         quoteUnit = 10 ** uint256(cell.quoteAsset.decimals);
     }
 
@@ -100,11 +100,12 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
      *      accountant's JT_REDEEM coverage gate and LT_REDEEM liquidity gate (RoycoDayAccountant.sol:316-323) both
      *      fire in the wind-down state. An in-kind LT redeem only shrinks the pool depth, so unlike a multi-asset
      *      redeem it cannot relax its own liquidity floor and is gated whenever it would breach it
-     * @dev Breach derivation (shared -21% rate on the seeded 100/30 market): stRawNAV = 79e18, jtRawNAV = 23.7e18,
-     *      the 21e18 ST loss is fully covered so stEffectiveNAV = 100e18 and jtEffectiveNAV = 30e18 - 6.3e18 -
-     *      21e18 = 2.7e18, coverageUtilizationWAD = ceil((79e18 + 23.7e18) x 0.2e18 / 2.7e18) =
-     *      7607407407407407408 >= 6.4667e18, which takes the forced-PERPETUAL liquidation branch
-     *      (RoycoDayAccountant.sol:666-678) and erases the IL
+     * @dev Breach derivation (shared -21% rate on the seeded 100/30 market): collateralNAV = 130 whole shares x
+     *      0.79 = 102.7e18, delta = -27.3e18 attributed floor(27.3e18 x 100e18 / 130e18) = 21e18 to ST (exact) and
+     *      the 6.3e18 residual to JT. The 21e18 ST loss is fully covered so stEffectiveNAV = 100e18 and
+     *      jtEffectiveNAV = 30e18 - 6.3e18 - 21e18 = 2.7e18, coverageUtilizationWAD =
+     *      ceil(102.7e18 x 0.2e18 / 2.7e18) = 7607407407407407408 >= 6.4667e18, which takes the forced-PERPETUAL
+     *      liquidation branch and erases the IL
      * @dev LT gate derivation: redeeming 3e18 of the 6e18 LT shares would leave ltRawNAV = 3e18, and the post-op
      *      liquidityUtilizationWAD = ceil(100e18 x 0.05e18 / 3e18) = 1666666666666666667 > WAD, so the liquidity
      *      gate fires even though coverage is in liquidation
@@ -115,8 +116,8 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
 
         // Commit the liquidation breach: forced PERPETUAL with the IL erased
         SyncedAccountingState memory pre = _sync();
-        assertEq(toUint256(pre.stRawNAV), 79e18, "stRawNAV must be 100 whole shares x 0.79 x 1.0");
-        assertEq(toUint256(pre.jtRawNAV), 23.7e18, "jtRawNAV must be 30 whole shares x 0.79 x 1.0");
+        assertEq(toUint256(pre.collateralNAV), 102.7e18, "collateralNAV must be 130 whole shares x 0.79 x 1.0");
+        assertEq(toUint256(pre.stEffectiveNAV), 100e18, "stEffectiveNAV must stay whole, the 21e18 ST loss is fully covered");
         assertEq(toUint256(pre.jtEffectiveNAV), 2.7e18, "jtEffectiveNAV must be 30e18 - 6.3e18 own loss - 21e18 coverage");
         assertEq(pre.coverageUtilizationWAD, 7_607_407_407_407_407_408, "coverageUtilizationWAD must be ceil(102.7e18 x 0.2e18 / 2.7e18)");
         assertGe(pre.coverageUtilizationWAD, pre.coverageLiquidationUtilizationWAD, "the liquidation threshold must be breached");
@@ -146,7 +147,7 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
      *         setter's withSyncedAccounting modifier (RoycoDayAccountant.sol:42-45) calls the kernel's
      *         whenNotPaused syncTrancheAccounting (RoycoDayKernel.sol:309-320), which reverts while paused
      * @dev During a pause the three admin roles cannot adjust fees, coverage, liquidity, the liquidation
-     *      threshold, term duration, or dust tolerances (only the two YDM swap setters survive, via a tolerated
+     *      threshold, term duration, or the dust tolerance (only the two YDM swap setters survive, via a tolerated
      *      raw call). Unpausing the kernel is the remediation, after which the same call lands
      */
     function test_accountantSetters_revertEnforcedPause_whileKernelPaused() public {
@@ -165,10 +166,10 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         accountant.setSeniorTrancheProtocolFee(0);
 
-        // MARKET_OPS_ADMIN surface (the two dust tolerance setters)
+        // MARKET_OPS_ADMIN surface (the dust tolerance setter)
         vm.prank(MARKET_OPS_ADMIN);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        accountant.setSeniorTrancheDustTolerance(toNAVUnits(uint256(1)));
+        accountant.setDustTolerance(toNAVUnits(uint256(1)));
 
         // Control: unpausing the kernel is the only remediation, after which the same call lands
         vm.prank(UNPAUSER);
@@ -298,9 +299,9 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
         assertEq(quoteToken.balanceOf(LT_PROVIDER), 0, "no quote assets may reach the redeemer from a worthless pool");
         assertEq(bpt.balanceOf(LT_PROVIDER), 0, "the worthless pool position pays out no BPT either");
 
-        // The fair idle premium slice is paid: the idle senior shares are unwound to the yield-bearing asset at the 1.1 rate
-        assertEq(toUint256(stClaims.stAssets), 818_181_818_181_681_816, "the idle slice must unwind to its virtual-share-scaled vault shares");
-        assertEq(toUint256(stClaims.jtAssets), 0, "a healthy market's senior claim has no junior-asset leg");
+        // The fair idle premium slice is paid: the idle senior shares are unwound to the collateral asset at the 1.1 rate
+        assertEq(toUint256(stClaims.collateralAssets), 818_181_818_181_681_816, "the idle slice must unwind to its virtual-share-scaled vault shares");
+        assertEq(toUint256(stClaims.ltAssets), 0, "a senior claim carries no LT-asset leg");
         assertEq(stJtVault.balanceOf(LT_PROVIDER), 818_181_818_181_681_816, "the unwound vault shares must land on the redeemer");
 
         // The shares are burned and the kernel state reflects a completed redemption: the idle pile drains to its
@@ -316,9 +317,7 @@ contract Test_EntrypointGateAndConversionEdges is DayMarketTestBase {
             "the idle pile drains to its virtual-share sliver: idleShares minus floor(idleShares x 6e18 / (6e18 + 1e6))"
         );
         assertEq(
-            toUint256(kernel.getState().ltOwnedYieldBearingAssets),
-            SEEDED_LT_RAW_NAV,
-            "the pooled BPT must remain in kernel custody, the zero-unit removal moves nothing"
+            toUint256(kernel.getState().totalLTAssets), SEEDED_LT_RAW_NAV, "the pooled BPT must remain in kernel custody, the zero-unit removal moves nothing"
         );
     }
 }

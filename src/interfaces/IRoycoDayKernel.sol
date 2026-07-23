@@ -13,9 +13,8 @@ interface IRoycoDayKernel {
     /**
      * @notice Construction parameters for the Royco Kernel
      * @custom:field seniorTranche - The address of the Royco senior tranche associated with this kernel
-     * @custom:field stAsset - The address of the base asset of the senior tranche
      * @custom:field juniorTranche - The address of the Royco junior tranche associated with this kernel
-     * @custom:field jtAsset - The address of the base asset of the junior tranche
+     * @custom:field collateralAsset - The address of the coinvested collateral asset both the senior and junior tranches deposit
      * @custom:field accountant - The address of the accountant for the Royco market
      * @custom:field liquidityTranche - The address of the Royco liquidity tranche associated with this kernel
      * @custom:field ltAsset - The base asset of the liquidity tranche (the liquidity venue's market-making position token)
@@ -23,9 +22,8 @@ interface IRoycoDayKernel {
      */
     struct RoycoDayKernelConstructionParams {
         address seniorTranche;
-        address stAsset;
         address juniorTranche;
-        address jtAsset;
+        address collateralAsset;
         address accountant;
         address liquidityTranche;
         address ltAsset;
@@ -51,38 +49,34 @@ interface IRoycoDayKernel {
      * @custom:storage-location erc7201:Royco.storage.RoycoDayKernelState
      * @custom:field protocolFeeRecipient - The market's configured protocol fee recipient
      * @custom:field stSelfLiquidationBonusWAD - The market's configured ST self-liquidation bonus remitted to redeeming ST LPs when liquidation coverageUtilization threshold has been breached, scaled to WAD precision
-     * @custom:field stOwnedYieldBearingAssets - The yield bearing assets held by the senior tranche, in ST's asset units
-     * @custom:field jtOwnedYieldBearingAssets - The yield bearing assets held by the junior tranche, in JT's asset units
-     * @custom:field ltOwnedYieldBearingAssets - The yield bearing assets held by the liquidity tranche, in LT's asset units
+     * @custom:field totalCollateralAssets - The coinvested collateral assets held for the senior and junior tranches, in the collateral asset's units
+     * @custom:field totalLTAssets - The yield bearing assets held by the liquidity tranche, in LT's asset units
      * @custom:field ltOwnedSeniorTrancheShares - The senior tranche shares held by the liquidity tranche (accumulated liquidity premium payments)
      * @custom:field roycoBlacklist - The market's blacklist contract consulted on tranche balance updates (the null address disables blacklist screening)
      */
     struct RoycoDayKernelState {
         address protocolFeeRecipient;
         uint64 stSelfLiquidationBonusWAD;
-        TRANCHE_UNIT stOwnedYieldBearingAssets;
-        TRANCHE_UNIT jtOwnedYieldBearingAssets;
-        TRANCHE_UNIT ltOwnedYieldBearingAssets;
+        TRANCHE_UNIT totalCollateralAssets;
+        TRANCHE_UNIT totalLTAssets;
         uint256 ltOwnedSeniorTrancheShares;
         address roycoBlacklist;
     }
 
     /**
-     * @notice Immutables carrier passed to the kernel's delegatecall logic libraries so a moved body can reach the seven
+     * @notice Immutables carrier passed to the kernel's delegatecall logic libraries so a moved body can reach the six
      *         kernel-level addresses it would otherwise read from an immutable (which a delegatecalled library cannot see)
      * @custom:field seniorTranche - The address of the Royco senior tranche associated with the kernel
-     * @custom:field stAsset - The address of the base asset of the senior tranche
      * @custom:field juniorTranche - The address of the Royco junior tranche associated with the kernel
-     * @custom:field jtAsset - The address of the base asset of the junior tranche
+     * @custom:field collateralAsset - The address of the coinvested collateral asset both the senior and junior tranches deposit
      * @custom:field liquidityTranche - The address of the Royco liquidity tranche associated with the kernel
      * @custom:field ltAsset - The base asset of the liquidity tranche (the liquidity venue's market-making position token)
      * @custom:field accountant - The address of the accountant for the Royco market
      */
     struct RoycoDayKernelImmutableState {
         address seniorTranche;
-        address stAsset;
         address juniorTranche;
-        address jtAsset;
+        address collateralAsset;
         address liquidityTranche;
         address ltAsset;
         address accountant;
@@ -118,9 +112,6 @@ interface IRoycoDayKernel {
     /// @notice Thrown when the tranche and the kernel's corresponding tranche assets don't match
     error TRANCHE_AND_KERNEL_ASSETS_MISMATCH();
 
-    /// @notice Thrown when the senior and junior tranches are not the same yield-bearing asset, since the junior tranche's capital must share the senior tranche's exposure
-    error TRANCHE_ASSETS_MUST_BE_IDENTICAL();
-
     /// @notice Thrown when the caller of a permissioned function isn't the market's senior tranche
     error ONLY_SENIOR_TRANCHE();
 
@@ -145,24 +136,20 @@ interface IRoycoDayKernel {
     /// @notice Thrown when the senior tranche self-liquidation bonus is set above 100% (WAD)
     error INVALID_SELF_LIQUIDATION_BONUS();
 
-    /// @notice Thrown when an LT multi-asset deposit is made with zero of both constituent assets (ST underlying and quote)
+    /// @notice Thrown when an LT multi-asset deposit is made with zero of both constituent assets (collateral and quote)
     error MUST_DEPOSIT_NON_ZERO_ASSETS();
 
     /// @notice Retrieves the senior tranche address
     /// @return seniorTranche The address of the senior tranche for this Royco market
     function SENIOR_TRANCHE() external view returns (address seniorTranche);
 
-    /// @notice Retrieves the ST asset address
-    /// @return stAsset The senior tranche's base asset address
-    function ST_ASSET() external view returns (address stAsset);
-
     /// @notice Retrieves the junior tranche address
     /// @return juniorTranche The address of the junior tranche for this Royco market
     function JUNIOR_TRANCHE() external view returns (address juniorTranche);
 
-    /// @notice Retrieves the JT asset address
-    /// @return jtAsset The junior tranche's base asset address
-    function JT_ASSET() external view returns (address jtAsset);
+    /// @notice Retrieves the coinvested collateral asset address
+    /// @return collateralAsset The address of the coinvested collateral asset both the senior and junior tranches deposit
+    function COLLATERAL_ASSET() external view returns (address collateralAsset);
 
     /// @notice Retrieves the liquidity tranche address
     /// @return liquidityTranche The address of the liquidity tranche for this Royco market
@@ -185,46 +172,32 @@ interface IRoycoDayKernel {
     function ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER() external view returns (bool enforced);
 
     /**
-     * @notice Converts the specified ST assets denominated in its tranche units to the kernel's NAV units
-     * @param _stAssets The ST assets denominated in tranche units to convert to the kernel's NAV units
-     * @return nav The specified ST assets denominated in its tranche units converted to the kernel's NAV units
+     * @notice Converts the specified collateral assets denominated in tranche units to their value in the kernel's NAV units
+     * @param _collateralAssets The collateral assets denominated in tranche units to convert to the kernel's NAV units
+     * @return value The specified collateral assets denominated in tranche units converted to the kernel's NAV units
      */
-    function stConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _stAssets) external view returns (NAV_UNIT nav);
+    function convertCollateralAssetsToValue(TRANCHE_UNIT _collateralAssets) external view returns (NAV_UNIT value);
 
     /**
-     * @notice Converts the specified JT assets denominated in its tranche units to the kernel's NAV units
-     * @param _jtAssets The JT assets denominated in tranche units to convert to the kernel's NAV units
-     * @return nav The specified JT assets denominated in its tranche units converted to the kernel's NAV units
-     */
-    function jtConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _jtAssets) external view returns (NAV_UNIT nav);
-
-    /**
-     * @notice Converts the specified LT assets denominated in its tranche units to the kernel's NAV units
+     * @notice Converts the specified LT assets denominated in its tranche units to their value in the kernel's NAV units
      * @param _ltAssets The LT assets denominated in tranche units to convert to the kernel's NAV units
-     * @return nav The specified LT assets denominated in its tranche units converted to the kernel's NAV units
+     * @return value The specified LT assets denominated in its tranche units converted to the kernel's NAV units
      */
-    function ltConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _ltAssets) external view returns (NAV_UNIT nav);
+    function convertLTAssetsToValue(TRANCHE_UNIT _ltAssets) external view returns (NAV_UNIT value);
 
     /**
-     * @notice Converts the specified assets denominated in the kernel's NAV units to assets denominated in ST's tranche units
-     * @param _value The NAV of the assets denominated in the kernel's NAV units to convert to assets denominated in ST's tranche units
-     * @return stAssets The specified NAV of the assets denominated in the kernel's NAV units converted to assets denominated in ST's tranche units
+     * @notice Converts the specified value denominated in the kernel's NAV units to collateral assets denominated in tranche units
+     * @param _value The value denominated in the kernel's NAV units to convert to collateral assets denominated in tranche units
+     * @return collateralAssets The specified value denominated in the kernel's NAV units converted to collateral assets denominated in tranche units
      */
-    function stConvertNAVUnitsToTrancheUnits(NAV_UNIT _value) external view returns (TRANCHE_UNIT stAssets);
+    function convertValueToCollateralAssets(NAV_UNIT _value) external view returns (TRANCHE_UNIT collateralAssets);
 
     /**
-     * @notice Converts the specified assets denominated in the kernel's NAV units to assets denominated in JT's tranche units
-     * @param _value The NAV of the assets denominated in the kernel's NAV units to convert to assets denominated in JT's tranche units
-     * @return jtAssets The specified NAV of the assets denominated in the kernel's NAV units converted to assets denominated in JT's tranche units
+     * @notice Converts the specified value denominated in the kernel's NAV units to assets denominated in LT's tranche units
+     * @param _value The value denominated in the kernel's NAV units to convert to assets denominated in LT's tranche units
+     * @return ltAssets The specified value denominated in the kernel's NAV units converted to assets denominated in LT's tranche units
      */
-    function jtConvertNAVUnitsToTrancheUnits(NAV_UNIT _value) external view returns (TRANCHE_UNIT jtAssets);
-
-    /**
-     * @notice Converts the specified assets denominated in the kernel's NAV units to assets denominated in LT's tranche units
-     * @param _value The NAV of the assets denominated in the kernel's NAV units to convert to assets denominated in LT's tranche units
-     * @return ltAssets The specified NAV of the assets denominated in the kernel's NAV units converted to assets denominated in LT's tranche units
-     */
-    function ltConvertNAVUnitsToTrancheUnits(NAV_UNIT _value) external view returns (TRANCHE_UNIT ltAssets);
+    function convertValueToLTAssets(NAV_UNIT _value) external view returns (TRANCHE_UNIT ltAssets);
 
     /**
      * @notice Returns the maximum amount of assets that can be deposited into the senior tranche
@@ -236,7 +209,7 @@ interface IRoycoDayKernel {
     /**
      * @notice Returns the maximum amount of assets that can be withdrawn from the senior tranche
      * @param _owner The address that is withdrawing the assets
-     * @return stClaimNAV The senior tranche's total notional claim on the market's raw NAVs, denominated in kernel's NAV units
+     * @return stClaimNAV The senior tranche's total notional claim on the collateral NAV, denominated in kernel's NAV units
      * @return stMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the senior tranche, denominated in the kernel's NAV units
      * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the senior tranche after the post-sync mint of its protocol fee shares and liquidity premium shares
      */
@@ -255,7 +228,7 @@ interface IRoycoDayKernel {
     /**
      * @notice Returns the maximum amount of assets that can be withdrawn from the junior tranche
      * @param _owner The address that is withdrawing the assets
-     * @return jtClaimNAV The junior tranche's total notional claim on the market's raw NAVs, denominated in kernel's NAV units
+     * @return jtClaimNAV The junior tranche's total notional claim on the collateral NAV, denominated in kernel's NAV units
      * @return jtMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the junior tranche, denominated in the kernel's NAV units
      * @return totalTrancheSharesAfterMintingFees The total number of shares that exist in the junior tranche after minting any protocol fee shares post-sync
      */
@@ -318,7 +291,7 @@ interface IRoycoDayKernel {
      * @dev Does not mutate any state
      * @param _trancheType An enumerator indicating which tranche to execute this preview for
      * @return state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
-     * @return claims The claims on ST and JT assets that the specified tranche has denominated in tranche-native units
+     * @return claims The asset claims that the specified tranche has denominated in tranche-native units
      * @return totalTrancheShares The total number of shares that exist in the specified tranche after the post-sync mint of its accrued shares: the protocol fee shares for the senior and junior tranches, plus the liquidity premium shares for the senior tranche (the liquidity tranche mints none)
      */
     function previewSyncTrancheAccounting(TrancheType _trancheType)
@@ -340,7 +313,7 @@ interface IRoycoDayKernel {
 
     /**
      * @notice Processes the redemption of a specified number of shares from the senior tranche
-     * @dev The function is expected to transfer the senior and junior assets directly to the receiver, based on the redemption claims
+     * @dev The function is expected to transfer the collateral assets directly to the receiver, based on the redemption claims
      * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _shares The number of shares to redeem
@@ -363,7 +336,7 @@ interface IRoycoDayKernel {
 
     /**
      * @notice Processes the redemption of a specified number of shares from the junior tranche
-     * @dev The function is expected to transfer the senior and junior assets directly to the receiver, based on the redemption claims
+     * @dev The function is expected to transfer the collateral assets directly to the receiver, based on the redemption claims
      * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _shares The number of shares to redeem
@@ -395,14 +368,14 @@ interface IRoycoDayKernel {
     function ltRedeem(bool _isPreview, uint256 _shares, address _receiver) external returns (AssetClaims memory userAssetClaims);
 
     /**
-     * @notice Atomically enters the liquidity tranche with the LT assets' constituent assets: deposits ST underlying (minting senior
+     * @notice Atomically enters the liquidity tranche with the LT assets' constituent assets: deposits collateral (minting senior
      *         shares), adds (senior shares + quote) into the liquidity venue to mint the LT tranche assets, then deposits them into the LT
-     * @dev Assumes the ST underlying and quote have been transferred to the kernel before this call (by the LT tranche)
-     * @dev Enabled in a PERPETUAL market state, and in a fixed-term market only for a quote-only deposit (_stAssets == 0) that mints no senior shares, an ST-leg deposit reverts in a fixed-term market
+     * @dev Assumes the collateral and quote have been transferred to the kernel before this call (by the LT tranche)
+     * @dev Enabled in a PERPETUAL market state, and in a fixed-term market only for a quote-only deposit (_collateralAssets == 0) that mints no senior shares, an ST-leg deposit reverts in a fixed-term market
      * @dev The combined new senior exposure is gated by the market's coverage and liquidity requirements, reverts if either is unsatisfied
      * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
-     * @param _stAssets The amount of ST underlying (the senior tranche's base asset) to deposit, denominated in ST tranche units
+     * @param _collateralAssets The amount of collateral to deposit for the senior leg, denominated in tranche units
      * @param _quoteAssets The amount of quote asset to add as the second venue leg
      * @param _minLTAssetsOut The minimum LT tranche assets the liquidity add must mint (slippage bound against an unfavorable venue state)
      * @return depositNAV The value of the minted LT tranche assets, denominated in the kernel's NAV units
@@ -411,7 +384,7 @@ interface IRoycoDayKernel {
      */
     function ltDepositMultiAsset(
         bool _isPreview,
-        TRANCHE_UNIT _stAssets,
+        TRANCHE_UNIT _collateralAssets,
         uint256 _quoteAssets,
         TRANCHE_UNIT _minLTAssetsOut
     )
@@ -420,14 +393,14 @@ interface IRoycoDayKernel {
 
     /**
      * @notice Atomically exits the liquidity tranche to the LT assets' constituent assets: proportionally removes the LT-asset slice,
-     *         redeems the venue-held senior shares to ST underlying, and returns (ST underlying + quote) to the receiver
+     *         redeems the venue-held senior shares to collateral, and returns (collateral + quote) to the receiver
      * @dev A preview never returns: the flow unwinds every mutation by reverting with SIMULATION_RESULT carrying the ABI encoded return values
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _ltShares The number of LT shares being redeemed (used to size the proportional LT-asset slice)
      * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must return (slippage bound)
      * @param _minQuoteAssetsOut The minimum quote to return (slippage bound)
-     * @param _receiver The address that receives the ST underlying and quote
-     * @return stClaims The ST redemption asset claims transferred to the receiver (its ST/JT asset legs)
+     * @param _receiver The address that receives the collateral and quote
+     * @return stClaims The ST redemption asset claims transferred to the receiver (its collateral asset leg)
      * @return quoteAssets The quote assets returned to the receiver
      */
     function ltRedeemMultiAsset(

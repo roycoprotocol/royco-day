@@ -36,9 +36,10 @@ import { MockIdleCDO } from "../../mocks/MockIdleCDO.sol";
  *      Makina composition there is no second hop and no probe-amount coupling to the tranche decimals: the
  *      multiplier depends only on the underlying decimals and the rate seam is an exact checked multiplication
  *      with no floor. The forward conversion is pinned to an independently derived rate from the raw fuzz
- *      inputs, the junior side is pinned to the senior side (one shared AA tranche token, one shared rate), the
- *      NAV -> tranche -> NAV round trip is bounded by its input, and a stored nonzero override must be the
- *      ENTIRE rate regardless of the virtual price for every fuzzed CDO configuration
+ *      inputs (the senior and junior tranches share the ONE collateral converter, so identical pricing is
+ *      structural rather than asserted), the NAV -> collateral -> NAV round trip is bounded by its input, and a
+ *      stored nonzero override must be the ENTIRE rate regardless of the virtual price for every fuzzed CDO
+ *      configuration
  */
 contract TestFuzz_IdleCDOVirtualPriceQuoterConversionRate_Kernel is Test {
     /// @notice The authority every fuzz-deployed kernel is initialized with
@@ -73,7 +74,7 @@ contract TestFuzz_IdleCDOVirtualPriceQuoterConversionRate_Kernel is Test {
         internal
         returns (IdleCDOKernel kernel, MockIdleCDO cdo)
     {
-        // The AA tranche token doubles as BOTH tranche assets (the quoter family mandates identical ST/JT assets)
+        // The AA tranche token is the market's ONE coinvested collateral asset shared by ST and JT
         MockERC20C aaTranche = new MockERC20C("AA Tranche", "AA_TRANCHE", _trancheDecimals);
         MockERC20C underlyingToken = new MockERC20C("CDO Underlying", "UNDER", _underlyingDecimals);
         // The CDO is the one-hop oracle: virtualPrice is the whole tranche-to-NAV rate in underlying decimals
@@ -93,7 +94,6 @@ contract TestFuzz_IdleCDOVirtualPriceQuoterConversionRate_Kernel is Test {
         RoycoSeniorTranche seniorTranche = new RoycoSeniorTranche(address(aaTranche), predictedKernel);
         RoycoJuniorTranche juniorTranche = new RoycoJuniorTranche(address(aaTranche), predictedKernel);
         RoycoLiquidityTranche liquidityTranche = new RoycoLiquidityTranche(address(bpt), predictedKernel);
-        // The kernel constructor requires identical ST/JT assets
         RoycoDayAccountant accountant = new RoycoDayAccountant(predictedKernel);
 
         balancerVault.registerPool(address(bpt), [IERC20(address(seniorTranche)), IERC20(address(quoteToken))]);
@@ -101,9 +101,8 @@ contract TestFuzz_IdleCDOVirtualPriceQuoterConversionRate_Kernel is Test {
         IdleCDOKernel impl = new IdleCDOKernel(
             IRoycoDayKernel.RoycoDayKernelConstructionParams({
                 seniorTranche: address(seniorTranche),
-                stAsset: address(aaTranche),
                 juniorTranche: address(juniorTranche),
-                jtAsset: address(aaTranche),
+                collateralAsset: address(aaTranche),
                 accountant: address(accountant),
                 liquidityTranche: address(liquidityTranche),
                 ltAsset: address(bpt),
@@ -140,13 +139,13 @@ contract TestFuzz_IdleCDOVirtualPriceQuoterConversionRate_Kernel is Test {
      * rate so the rate is genuinely virtual-price-primary, then one amount is pushed through the tranche -> NAV
      * conversion and one value through the NAV -> tranche -> NAV round trip.
      *
-     * Three properties are pinned, none of them by re-running the quoter's own code:
+     * Two properties are pinned, neither by re-running the quoter's own code (the old junior-equals-senior
+     * conjunct is now structural: both tranches price through the single collateral converter, so divergent
+     * per-tranche marks are unrepresentable):
      * (a) the rate and the forward conversion equal a derivation composed by hand from the raw fuzz inputs, and
      *     the rate itself is pinned EXACTLY because the one-hop seam is a lossless checked multiplication with
-     *     no floor, unlike the Makina composition where the two-hop re-normalization floors,
-     * (b) the junior conversions equal the senior conversions on identical inputs (one shared AA tranche token,
-     *     one shared CDO, so any divergence would let the two tranches mark the same asset differently), and
-     * (c) the NAV -> tranche -> NAV round trip never exceeds its input (two floor divisions can only lose value,
+     *     no floor, unlike the Makina composition where the two-hop re-normalization floors, and
+     * (b) the NAV -> collateral -> NAV round trip never exceeds its input (two floor divisions can only lose value,
      *     and a round trip that came back higher would let a redeem-redeposit loop print NAV out of rounding).
      */
     function testFuzz_IdleCDOVirtualPriceConversionRoundTrip_NeverExceedsInputAndMatchesOneHopDerivation(
@@ -195,26 +194,18 @@ contract TestFuzz_IdleCDOVirtualPriceQuoterConversionRate_Kernel is Test {
         // (a) Forward conversion: NAV = floor(amount x rateWAD / 10^trancheDecimals), the forward path's ONLY
         // floor. Largest intermediate is 1e30 x 1e27 = 1e57, comfortably below 2^256
         uint256 expectedNAV = (amount * expectedRateWAD) / (10 ** uint256(trancheDecimals));
-        uint256 stForwardNAV = toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(amount)));
+        uint256 forwardNAV = toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(amount)));
         assertEq(
             kernel.getTrancheUnitToNAVUnitConversionRateWAD(), expectedRateWAD, "the one-hop rate must be exactly virtualPrice x 10^(18 - underlyingDecimals)"
         );
-        assertEq(stForwardNAV, expectedNAV, "senior tranche -> NAV must equal the hand-derived one-hop floor derivation");
+        assertEq(forwardNAV, expectedNAV, "collateral -> NAV must equal the hand-derived one-hop floor derivation");
 
-        // (b) Identical-assets symmetry, forward direction: the junior tranche holds the very same AA tranche
-        // token priced through the very same CDO, so a junior mark differing from the senior mark by even one
-        // wei would value one asset two ways inside a single market
-        assertEq(toUint256(kernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(amount))), stForwardNAV, "junior forward conversion must equal senior");
-
-        // (c) Round trip: NAV -> tranche floors once, tranche -> NAV floors again, so the value coming back can
-        // never exceed what went in. This is the no-closed-form bound: whatever the rate and decimals, a holder
-        // converting a NAV claim to tranche units and marking it back must never come out ahead
-        uint256 trancheUnitsOut = toUint256(kernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(navValue)));
-        uint256 navRoundTrip = toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(trancheUnitsOut)));
-        assertLe(navRoundTrip, navValue, "NAV -> tranche -> NAV must never exceed the original value");
-
-        // (b) Identical-assets symmetry, inverse direction: the shared rate must also divide identically
-        assertEq(toUint256(kernel.jtConvertNAVUnitsToTrancheUnits(toNAVUnits(navValue))), trancheUnitsOut, "junior inverse conversion must equal senior");
+        // (b) Round trip: NAV -> collateral floors once, collateral -> NAV floors again, so the value coming back
+        // can never exceed what went in. This is the no-closed-form bound: whatever the rate and decimals, a holder
+        // converting a NAV claim to collateral units and marking it back must never come out ahead
+        uint256 trancheUnitsOut = toUint256(kernel.convertValueToCollateralAssets(toNAVUnits(navValue)));
+        uint256 navRoundTrip = toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(trancheUnitsOut)));
+        assertLe(navRoundTrip, navValue, "NAV -> collateral -> NAV must never exceed the original value");
     }
 
     /**
@@ -275,7 +266,7 @@ contract TestFuzz_IdleCDOVirtualPriceQuoterConversionRate_Kernel is Test {
         // Forward conversion prices through the override: floor(amount x override / 10^trancheDecimals),
         // at most 1e30 x 1e27 = 1e57 before the division
         uint256 expectedNAV = (amount * overrideRateWAD) / (10 ** uint256(trancheDecimals));
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(amount))), expectedNAV, "forward conversion must price through the override");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(amount))), expectedNAV, "forward conversion must price through the override");
 
         // Kill the CDO two ways: a zero virtual price (a zero rate if consulted) and then full revert mode. If
         // the quoter touched _getConversionRateFromOracleWAD with the override stored, these asserts would move
@@ -285,7 +276,7 @@ contract TestFuzz_IdleCDOVirtualPriceQuoterConversionRate_Kernel is Test {
         assertEq(kernel.getTrancheUnitToNAVUnitConversionRateWAD(), overrideRateWAD, "a zeroed virtual price must not affect an override-priced quote");
         cdo.setRevertMode(true);
         assertEq(kernel.getTrancheUnitToNAVUnitConversionRateWAD(), overrideRateWAD, "a reverting CDO must not affect an override-priced quote");
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(amount))), expectedNAV, "conversions must keep pricing through a dead CDO");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(amount))), expectedNAV, "conversions must keep pricing through a dead CDO");
 
         // Zero RESTORES the virtual price path: zero is always the resume-the-CDO sentinel here, there is no
         // oracle-presence invariant because the CDO immutable guarantees the live path exists. The CDO must be

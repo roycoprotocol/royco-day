@@ -10,7 +10,7 @@ import { IdenticalAssets_ST_JT_ChainlinkOracle_Quoter, IdenticalAssets_ST_JT_Ora
  * @title IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter
  * @notice Quoter to convert tranche units (ERC4626 vault shares) to/from NAV units by converting the shares to base assets and converting base assets to NAV units using a Chainlink (compatible) oracle or an admin set rate
  * @dev Mandates that the base asset to NAV units uses a Chainlink (compatible) oracle with an admin set rate override
- * @dev The senior and junior tranches must have the same ERC4626 vault share as their tranche unit
+ * @dev The coinvested collateral asset must be an ERC4626 vault share
  * @dev Use case: Convert sNUSD (Tranche unit) to NUSD (base assets) using ERC4626's convertToAssets and convert NUSD to USD (NAV unit) using its Redstone fundamental price feed or an admin set rate
  */
 abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quoter is IdenticalAssets_ST_JT_ChainlinkOracle_Quoter {
@@ -37,14 +37,14 @@ abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quote
 
     /// @notice Constructs the ERC4626 vault shares oracle quoter
     constructor() {
-        // NOTE: Both tranche assets are identical ERC4626 vault shares
         // Compute the share amount to pass to convertToAssets() such that the result is scaled to WAD precision
         // OUTPUT_DECIMALS = INPUT_DECIMALS + BASE_ASSET_DECIMALS - TRANCHE_DECIMALS
         // For OUTPUT_DECIMALS to have WAD_DECIMALS of precision:
         // INPUT_DECIMALS = WAD_DECIMALS + TRANCHE_DECIMALS - BASE_ASSET_DECIMALS
         // OUTPUT_DECIMALS = (WAD_DECIMALS + TRANCHE_DECIMALS - BASE_ASSET_DECIMALS) + BASE_ASSET_DECIMALS - TRANCHE_DECIMALS
         // OUTPUT_DECIMALS = WAD_DECIMALS
-        ERC4626_SHARES_TO_CONVERT_TO_ASSETS = 10 ** (WAD_DECIMALS + IERC4626(ST_ASSET).decimals() - IERC20Metadata(IERC4626(ST_ASSET).asset()).decimals());
+        ERC4626_SHARES_TO_CONVERT_TO_ASSETS =
+            10 ** (WAD_DECIMALS + IERC4626(COLLATERAL_ASSET).decimals() - IERC20Metadata(IERC4626(COLLATERAL_ASSET).asset()).decimals());
     }
 
     /// @notice Initializes the identical ERC4626 vault shares Chainlink (compatible) oracle quoter and its inherited contracts
@@ -70,7 +70,7 @@ abstract contract IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_Quote
         returns (uint256 trancheToNAVUnitConversionRateWAD)
     {
         // Fetch the conversion rate from the tranche asset (ERC4626 share) to its underlying asset, scaled to WAD precision
-        uint256 trancheUnitToBaseAssetsConversionRateWAD = IERC4626(ST_ASSET).convertToAssets(ERC4626_SHARES_TO_CONVERT_TO_ASSETS);
+        uint256 trancheUnitToBaseAssetsConversionRateWAD = IERC4626(COLLATERAL_ASSET).convertToAssets(ERC4626_SHARES_TO_CONVERT_TO_ASSETS);
 
         // Resolve the vault base asset to NAV unit conversion rate, scaled to WAD precision
         uint256 baseAssetToNAVUnitConversionRateWAD = getStoredConversionRateWAD();

@@ -52,12 +52,12 @@ contract FeeAndLiquidityPremiumHarness {
     }
 
     /// @dev The LT raw NAV read routes through the identity conversion, so this sets ltRawNAV directly in NAV units
-    function setLTOwnedYieldBearingAssets(uint256 _assets) external {
-        kernelState.ltOwnedYieldBearingAssets = toTrancheUnits(_assets);
+    function setTotalLTAssets(uint256 _assets) external {
+        kernelState.totalLTAssets = toTrancheUnits(_assets);
     }
 
-    function setSTOwnedYieldBearingAssets(uint256 _assets) external {
-        kernelState.stOwnedYieldBearingAssets = toTrancheUnits(_assets);
+    function setTotalCollateralAssets(uint256 _assets) external {
+        kernelState.totalCollateralAssets = toTrancheUnits(_assets);
     }
 
     function setReinvestSharesToDrain(uint256 _shares) external {
@@ -68,8 +68,8 @@ contract FeeAndLiquidityPremiumHarness {
         return kernelState.ltOwnedSeniorTrancheShares;
     }
 
-    function stOwnedYieldBearingAssets() external view returns (uint256) {
-        return toUint256(kernelState.stOwnedYieldBearingAssets);
+    function totalCollateralAssets() external view returns (uint256) {
+        return toUint256(kernelState.totalCollateralAssets);
     }
 
     /*//////////////////////////////////////////////////////////////////////
@@ -101,8 +101,8 @@ contract FeeAndLiquidityPremiumHarness {
         kernelState.ltOwnedSeniorTrancheShares = idleShares - drained;
     }
 
-    /// @dev Identity conversion so the harness LT raw NAV equals ltOwnedYieldBearingAssets in NAV units
-    function ltConvertTrancheUnitsToNAVUnits(TRANCHE_UNIT _ltAssets) external pure returns (NAV_UNIT nav) {
+    /// @dev Identity conversion so the harness LT raw NAV equals totalLTAssets in NAV units
+    function convertLTAssetsToValue(TRANCHE_UNIT _ltAssets) external pure returns (NAV_UNIT value) {
         return toNAVUnits(toUint256(_ltAssets));
     }
 

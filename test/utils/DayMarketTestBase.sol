@@ -67,9 +67,8 @@ import { FixtureCell, MarketParamsConfig, TokenConfig } from "./FixtureTypes.sol
  *      BalancerV3_GyroECLP_LT_DeploymentTemplate._buildRoleBindings minus the Balancer-governance targets
  * @dev PnL injection mutates mock rates and oracle answers, never `deal`, so PnL flows through the same quoter
  *      paths production uses. applySTPnL and applyJTPnL are documented aliases over the SHARED ERC4626 rate:
- *      this kernel family prices ST and JT off one vault share rate, so single-tranche PnL isolation is
- *      impossible at the kernel layer and independent (stRawNAV, jtRawNAV) tuples are driven at the mock-kernel
- *      accountant layer (AccountantTestBase)
+ *      the market prices its one coinvested collateral off one vault share rate, so single-tranche PnL
+ *      isolation is unrepresentable and both aliases move the same collateral NAV
  */
 abstract contract DayMarketTestBase is Assertions {
     using Math for uint256;
@@ -120,10 +119,20 @@ abstract contract DayMarketTestBase is Assertions {
     /// @notice The underlying of the shared ST/JT ERC4626 vault
     MockERC20C internal stJtUnderlying;
 
+    /// @notice The live collateral NAV through the production quoter path (the kernel's collateral ledger valued by its quoter)
+    function _liveCollateralNAV() internal view returns (uint256) {
+        return toUint256(kernel.convertCollateralAssetsToValue(kernel.getState().totalCollateralAssets));
+    }
+
+    /// @notice The live LT raw NAV through the production quoter path (the kernel's LT ledger valued by its quoter)
+    function _liveLTRawNAV() internal view returns (uint256) {
+        return toUint256(kernel.convertLTAssetsToValue(kernel.getState().totalLTAssets));
+    }
+
     /**
-     * @notice The single ERC4626 vault share serving as BOTH the ST and JT asset
-     * @dev The shipped quoter family requires ST_ASSET == JT_ASSET (IdenticalAssets_ST_JT_Oracle_Quoter.sol,
-     *      TRANCHE_ASSETS_MUST_BE_IDENTICAL), so one instance backs both tranches and its rate is the shared PnL feed
+     * @notice The single ERC4626 vault share serving as the coinvested collateral asset
+     * @dev Coinvestment is structural (the kernel holds one COLLATERAL_ASSET both tranches deposit), so one
+     *      instance backs both tranches and its rate is the market's PnL feed
      */
     MockERC4626C internal stJtVault;
 
@@ -231,7 +240,7 @@ abstract contract DayMarketTestBase is Assertions {
      * @param _params The market parameterization to deploy
      */
     function _deployMarket(FixtureCell memory _cell, MarketParamsConfig memory _params) internal virtual {
-        // The kernel family requires identical ST/JT assets, which the kernel constructor enforces
+        // The tranches coinvest one collateral asset, which the kernel initializer enforces
         _validateFixtureCell(_cell);
 
         cell = _cell;
@@ -243,9 +252,9 @@ abstract contract DayMarketTestBase is Assertions {
 
         // 2. Tokens: quote stable + ONE ERC4626 vault share over a mock underlying for both ST and JT
         quoteToken = _deployERC20("Quote Stable", "QUOTE", _cell.quoteAsset);
-        stJtUnderlying = _deployERC20("ST/JT Underlying", "UNDR", _toUnderlyingConfig(_cell.stAsset));
-        stJtVault = new MockERC4626C(address(stJtUnderlying), "ST/JT Vault Share", "vSHARE", _cell.stAsset.decimals);
-        stJtVault.setRate(_cell.stAsset.initialRateWAD);
+        stJtUnderlying = _deployERC20("ST/JT Underlying", "UNDR", _toUnderlyingConfig(_cell.collateralAsset));
+        stJtVault = new MockERC4626C(address(stJtUnderlying), "ST/JT Vault Share", "vSHARE", _cell.collateralAsset.decimals);
+        stJtVault.setRate(_cell.collateralAsset.initialRateWAD);
         vm.label(address(stJtVault), "MockERC4626C_STJT");
 
         // 3. Oracles: price feed at 1.0, plus a spare sequencer feed handle (sequencer checks are skipped at init)
@@ -320,9 +329,8 @@ abstract contract DayMarketTestBase is Assertions {
         DayKernel kernelImpl = new DayKernel(
             IRoycoDayKernel.RoycoDayKernelConstructionParams({
                 seniorTranche: address(seniorTranche),
-                stAsset: address(stJtVault),
                 juniorTranche: address(juniorTranche),
-                jtAsset: address(stJtVault),
+                collateralAsset: address(stJtVault),
                 accountant: address(accountant),
                 liquidityTranche: address(liquidityTranche),
                 ltAsset: address(bpt),
@@ -382,9 +390,8 @@ abstract contract DayMarketTestBase is Assertions {
 
     /**
      * @notice Applies senior PnL by accruing the shared ST/JT vault rate
-     * @dev SHARED-FEED ALIAS: raw NAVs in this kernel family are ownedAssets x the shared 4626/Chainlink rate, so
-     *      this moves ST and JT raw NAV proportionally. Single-tranche isolation is impossible at the kernel layer,
-     *      independent (stRawNAV, jtRawNAV) tuples are driven at the mock-kernel accountant layer (AccountantTestBase)
+     * @dev SHARED-FEED ALIAS: the collateral NAV is totalCollateralAssets x the shared 4626/Chainlink rate, so
+     *      this moves the one coinvested pool and the sync attributes the delta pro-rata across the tranches
      * @param _bps The signed basis-point move applied to the vault rate
      */
     function applySTPnL(int256 _bps) internal virtual {
@@ -525,9 +532,9 @@ abstract contract DayMarketTestBase is Assertions {
         uint256 minLiquidityWAD = params.minLiquidityWAD;
         if (minLiquidityWAD == 0) return;
 
-        uint256 stEffAfter = toUint256(seniorTranche.totalAssets().nav) + toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(_stAssets)));
+        uint256 stEffAfter = toUint256(seniorTranche.totalAssets().nav) + toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(_stAssets)));
         uint256 requiredLtRawNAV = stEffAfter.mulDiv(minLiquidityWAD, WAD, Math.Rounding.Ceil);
-        uint256 currentLtRawNAV = toUint256(liquidityTranche.getRawNAV());
+        uint256 currentLtRawNAV = _liveLTRawNAV();
         if (currentLtRawNAV >= requiredLtRawNAV) return;
 
         uint256 quoteUnit = 10 ** uint256(cell.quoteAsset.decimals);
@@ -604,7 +611,7 @@ abstract contract DayMarketTestBase is Assertions {
         if (supply == 0) navNeeded = _shares;
         else navNeeded = _shares.mulDiv(toUint256(seniorTranche.totalAssets().nav), supply, Math.Rounding.Ceil);
 
-        uint256 vaultShares = toUint256(kernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(navNeeded))) + 1;
+        uint256 vaultShares = toUint256(kernel.convertValueToCollateralAssets(toNAVUnits(navNeeded))) + 1;
         // This deposit is itself liquidity-gated, top up quote-only depth first (never recurses, the auto-seed leg has no senior side)
         _ensureLiquidityCapacityForSTDeposit(vaultShares);
         uint256 balanceBefore = seniorTranche.balanceOf(address(this));
@@ -637,14 +644,8 @@ abstract contract DayMarketTestBase is Assertions {
 
     /// @notice Validates the token shape satisfies the kernel family's structural constraints
     function _validateFixtureCell(FixtureCell memory _cell) internal pure {
-        require(_cell.stAsset.erc4626 && _cell.jtAsset.erc4626, "DayMarketTestBase: ST/JT assets must be ERC4626 vault shares for this kernel family");
+        require(_cell.collateralAsset.erc4626, "DayMarketTestBase: the collateral asset must be an ERC4626 vault share for this kernel family");
         require(!_cell.quoteAsset.erc4626, "DayMarketTestBase: the quote asset must be a plain ERC20");
-        require(
-            _cell.stAsset.decimals == _cell.jtAsset.decimals && _cell.stAsset.underlyingDecimals == _cell.jtAsset.underlyingDecimals
-                && _cell.stAsset.initialRateWAD == _cell.jtAsset.initialRateWAD && _cell.stAsset.behaviors == _cell.jtAsset.behaviors
-                && _cell.stAsset.feeBps == _cell.jtAsset.feeBps,
-            "DayMarketTestBase: ST and JT token configs must be identical (one shared vault instance)"
-        );
     }
 
     /// @notice Deploys a configurable ERC20 and applies the token config's behavior bitmap and fee
@@ -728,8 +729,7 @@ abstract contract DayMarketTestBase is Assertions {
             maxJTYieldShareWAD: _params.maxJTYieldShareWAD,
             maxLTYieldShareWAD: _params.maxLTYieldShareWAD,
             fixedTermDurationSeconds: _params.fixedTermDurationSeconds,
-            stNAVDustTolerance: toNAVUnits(_params.stNAVDustTolerance),
-            jtNAVDustTolerance: toNAVUnits(_params.jtNAVDustTolerance),
+            dustTolerance: toNAVUnits(_params.dustTolerance),
             stProtocolFeeWAD: _params.stProtocolFeeWAD,
             jtProtocolFeeWAD: _params.jtProtocolFeeWAD,
             jtYieldShareProtocolFeeWAD: _params.jtYieldShareProtocolFeeWAD,
@@ -799,11 +799,7 @@ abstract contract DayMarketTestBase is Assertions {
             ),
             ADMIN_PROTOCOL_FEE_SETTER_ROLE
         );
-        accessManager.setTargetFunctionRole(
-            a,
-            _sels(IRoycoDayAccountant.setSeniorTrancheDustTolerance.selector, IRoycoDayAccountant.setJuniorTrancheDustTolerance.selector),
-            ADMIN_MARKET_OPS_ROLE
-        );
+        accessManager.setTargetFunctionRole(a, _sels(IRoycoDayAccountant.setDustTolerance.selector), ADMIN_MARKET_OPS_ROLE);
         accessManager.setTargetFunctionRole(a, _sels(IRoycoAuth.pause.selector), ADMIN_PAUSER_ROLE);
         accessManager.setTargetFunctionRole(a, _sels(IRoycoAuth.unpause.selector), ADMIN_UNPAUSER_ROLE);
         accessManager.setTargetFunctionRole(a, _sels(UUPSUpgradeable.upgradeToAndCall.selector), ADMIN_UPGRADER_ROLE);

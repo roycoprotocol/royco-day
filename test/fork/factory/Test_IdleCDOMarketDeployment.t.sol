@@ -134,10 +134,7 @@ contract Test_IdleCDOMarketDeployment is Test {
         deployScript = new DeployScript();
         am.grantRole(DEPLOYER_ROLE, address(deployScript), 0);
         template = new Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3GyroECLP_LT_DeploymentTemplate(
-            IRoycoFactory(address(factory)),
-            GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY),
-            address(entryPoint),
-            address(syncer)
+            IRoycoFactory(address(factory)), GyroECLPPoolFactory(GYRO_ECLP_POOL_FACTORY), address(entryPoint), address(syncer)
         );
     }
 
@@ -148,13 +145,12 @@ contract Test_IdleCDOMarketDeployment is Test {
         factory.registerTemplate(address(template));
     }
 
-    /// @dev Clones the snUSD market config in memory and swaps in the ST/JT asset plus the Idle CDO kernel type +
+    /// @dev Clones the snUSD market config in memory and swaps in the collateral asset plus the Idle CDO kernel type +
     ///      params blob. No config file entry exists for this kernel yet, so the test IS the params source
     ///      (MarketDeploymentConfig untouched).
     function _marketConfig(address _idleCDO, address _stJtAsset) internal view returns (MarketConfig memory cfg) {
         cfg = deployScript.getMarketConfig("snUSD");
-        cfg.seniorAsset = _stJtAsset;
-        cfg.juniorAsset = _stJtAsset;
+        cfg.collateralAsset = _stJtAsset;
         cfg.kernelType = KernelType.Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_BalancerV3_BPTOracle_LT_Kernel;
         cfg.kernelSpecificParams = abi.encode(
             Identical_AA_IdleCDO_ST_JT_VirtualPriceOracle_QuoterKernelParams({

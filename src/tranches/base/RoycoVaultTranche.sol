@@ -181,10 +181,9 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
     /// @inheritdoc IRoycoVaultTranche
     function convertToShares(TRANCHE_UNIT _assets) public view virtual override(IRoycoVaultTranche) returns (uint256 shares) {
         // Value the assets specified in NAV units
-        NAV_UNIT value;
-        if (TRANCHE_TYPE() == TrancheType.SENIOR) value = IRoycoDayKernel(KERNEL).stConvertTrancheUnitsToNAVUnits(_assets);
-        else if (TRANCHE_TYPE() == TrancheType.JUNIOR) value = IRoycoDayKernel(KERNEL).jtConvertTrancheUnitsToNAVUnits(_assets);
-        else value = IRoycoDayKernel(KERNEL).ltConvertTrancheUnitsToNAVUnits(_assets);
+        NAV_UNIT value = (TRANCHE_TYPE() == TrancheType.LIQUIDITY)
+            ? IRoycoDayKernel(KERNEL).convertLTAssetsToValue(_assets)
+            : IRoycoDayKernel(KERNEL).convertCollateralAssetsToValue(_assets);
 
         // Get the post-sync tranche state
         (SyncedAccountingState memory state, AssetClaims memory trancheClaims, uint256 trancheTotalShares) =
@@ -231,14 +230,6 @@ abstract contract RoycoVaultTranche is IRoycoVaultTranche, RoycoBase, ERC20Burna
     /// @inheritdoc IRoycoVaultTranche
     function totalAssets() external view virtual override(IRoycoVaultTranche) returns (AssetClaims memory claims) {
         (, claims,) = IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
-    }
-
-    /// @inheritdoc IRoycoVaultTranche
-    function getRawNAV() external view virtual override(IRoycoVaultTranche) returns (NAV_UNIT nav) {
-        (SyncedAccountingState memory state,,) = IRoycoDayKernel(KERNEL).previewSyncTrancheAccounting(TRANCHE_TYPE());
-        if (TRANCHE_TYPE() == TrancheType.SENIOR) return state.stRawNAV;
-        else if (TRANCHE_TYPE() == TrancheType.JUNIOR) return state.jtRawNAV;
-        else return state.ltRawNAV;
     }
 
     /// @inheritdoc IRoycoVaultTranche

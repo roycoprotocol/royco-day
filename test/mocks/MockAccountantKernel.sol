@@ -19,8 +19,7 @@ contract MockAccountantKernel {
     IRoycoDayAccountant public accountant;
     SyncMode public syncMode;
     uint256 public syncCallCount;
-    NAV_UNIT public syncStRawNAV;
-    NAV_UNIT public syncJTRawNAV;
+    NAV_UNIT public syncCollateralNAV;
     IRoycoDayAccountant.RoycoDayAccountantState internal _stateAtLastSync;
 
     function setAccountant(address _accountant) external {
@@ -31,10 +30,9 @@ contract MockAccountantKernel {
         syncMode = _mode;
     }
 
-    /// @dev The NAVs a SYNC-mode syncTrancheAccounting will pre-op sync with
-    function setSyncNAVs(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external {
-        syncStRawNAV = _stRawNAV;
-        syncJTRawNAV = _jtRawNAV;
+    /// @dev The collateral NAV a SYNC-mode syncTrancheAccounting will pre-op sync with
+    function setSyncNAV(NAV_UNIT _collateralNAV) external {
+        syncCollateralNAV = _collateralNAV;
     }
 
     /// @dev The accountant state snapshotted at the moment of the last syncTrancheAccounting call
@@ -47,12 +45,12 @@ contract MockAccountantKernel {
         if (syncMode == SyncMode.REVERT) revert KERNEL_SYNC_REVERTED();
         syncCallCount++;
         _stateAtLastSync = accountant.getState();
-        if (syncMode == SyncMode.SYNC) state = accountant.preOpSyncTrancheAccounting(syncStRawNAV, syncJTRawNAV);
+        if (syncMode == SyncMode.SYNC) state = accountant.preOpSyncTrancheAccounting(syncCollateralNAV);
     }
 
     /// @dev Passthrough so msg.sender == kernel for the pre-op sync
-    function doPreOp(NAV_UNIT _stRawNAV, NAV_UNIT _jtRawNAV) external returns (SyncedAccountingState memory) {
-        return accountant.preOpSyncTrancheAccounting(_stRawNAV, _jtRawNAV);
+    function doPreOp(NAV_UNIT _collateralNAV) external returns (SyncedAccountingState memory) {
+        return accountant.preOpSyncTrancheAccounting(_collateralNAV);
     }
 
     /// @dev Passthrough so msg.sender == kernel for the LT raw NAV commit
@@ -63,8 +61,7 @@ contract MockAccountantKernel {
     /// @dev Passthrough so msg.sender == kernel for the post-op sync
     function doPostOp(
         Operation _op,
-        NAV_UNIT _stRawNAV,
-        NAV_UNIT _jtRawNAV,
+        NAV_UNIT _collateralNAV,
         NAV_UNIT _ltRawNAV,
         NAV_UNIT _stSelfLiquidationBonusNAV,
         bool _enforce
@@ -72,6 +69,6 @@ contract MockAccountantKernel {
         external
         returns (SyncedAccountingState memory)
     {
-        return accountant.postOpSyncTrancheAccounting(_op, _stRawNAV, _jtRawNAV, _ltRawNAV, _stSelfLiquidationBonusNAV, _enforce);
+        return accountant.postOpSyncTrancheAccounting(_op, _collateralNAV, _ltRawNAV, _stSelfLiquidationBonusNAV, _enforce);
     }
 }

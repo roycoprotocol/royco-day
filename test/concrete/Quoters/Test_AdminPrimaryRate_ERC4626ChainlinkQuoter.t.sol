@@ -66,12 +66,12 @@ abstract contract AdminPrimaryRateMarketTestBase is DayMarketTestBase {
         // Access manager, admin'd by this fixture so role wiring needs no schedule/execute dance
         accessManager = new AccessManager(address(this));
 
-        // Tokens: quote stable + ONE ERC4626 vault share over a mock underlying for both ST and JT (the quoter
-        // family requires ST_ASSET == JT_ASSET). No Chainlink feed is deployed, admin-primary wires the null oracle
+        // Tokens: quote stable + ONE ERC4626 vault share over a mock underlying as the coinvested collateral both
+        // tranches deposit (the kernel prices it as COLLATERAL_ASSET). No Chainlink feed is deployed, admin-primary wires the null oracle
         quoteToken = _deployERC20("Quote Stable", "QUOTE", _shape.quoteAsset);
-        stJtUnderlying = _deployERC20("ST/JT Underlying", "UNDR", _toUnderlyingConfig(_shape.stAsset));
-        stJtVault = new MockERC4626C(address(stJtUnderlying), "ST/JT Vault Share", "vSHARE", _shape.stAsset.decimals);
-        stJtVault.setRate(_shape.stAsset.initialRateWAD);
+        stJtUnderlying = _deployERC20("ST/JT Underlying", "UNDR", _toUnderlyingConfig(_shape.collateralAsset));
+        stJtVault = new MockERC4626C(address(stJtUnderlying), "ST/JT Vault Share", "vSHARE", _shape.collateralAsset.decimals);
+        stJtVault.setRate(_shape.collateralAsset.initialRateWAD);
         vm.label(address(stJtVault), "MockERC4626C_STJT");
 
         // Venue: mock Balancer vault, the BPT it ledgers, and the BPT oracle (the LT quoter is unchanged here)
@@ -120,9 +120,8 @@ abstract contract AdminPrimaryRateMarketTestBase is DayMarketTestBase {
         kernelImpl = new ShippedKernel(
             IRoycoDayKernel.RoycoDayKernelConstructionParams({
                 seniorTranche: address(seniorTranche),
-                stAsset: address(stJtVault),
                 juniorTranche: address(juniorTranche),
-                jtAsset: address(stJtVault),
+                collateralAsset: address(stJtVault),
                 accountant: address(accountant),
                 liquidityTranche: address(liquidityTranche),
                 ltAsset: address(bpt),
@@ -225,7 +224,7 @@ contract Test_SharePriceTimesAdminPrimaryRate_ERC4626ChainlinkQuoter is AdminPri
         // The rejected sentinel must not have clobbered the initialization-time 2.0 rate
         assertEq(kernel.getStoredConversionRateWAD(), 2e18, "the stored rate must be untouched by the rejected sentinel");
         // Pricing still works off the surviving rate: 1e18 units x (vault 1.0 x admin 2.0) = 2e18 NAV
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2e18, "pricing must still run off the surviving stored rate");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 2e18, "pricing must still run off the surviving stored rate");
 
         // Contrast: the same setter accepts any NONZERO rate, pinning that the guard rejects the value, not the caller
         vm.expectEmit(address(kernel));
@@ -240,7 +239,8 @@ contract Test_SharePriceTimesAdminPrimaryRate_ERC4626ChainlinkQuoter is AdminPri
     // =============================
 
     /**
-     * @notice One whole share quotes at exactly (vault rate x admin rate) on both tranches, and the inverse round-trips
+     * @notice One whole share quotes at exactly (vault rate x admin rate) through the one collateral converter both
+     *         tranches share, and the inverse round-trips
      * @dev Hop 1 (live): convertToAssets(1e18 share-wei) at a 1.2 vault rate = 1.2e18 base-asset value in WAD.
      *      Hop 2 (static): x stored admin rate 2e18 / 1e18 = 2.4e18 NAV per whole share.
      *      One whole 18-decimal share is 1e18 tranche-unit wei: 1e18 x 2.4e18 / 1e18 = 2.4e18 NAV
@@ -248,15 +248,13 @@ contract Test_SharePriceTimesAdminPrimaryRate_ERC4626ChainlinkQuoter is AdminPri
     function test_TrancheUnitPricing_SharePriceTimesAdminPrimaryRate() public {
         stJtVault.setRate(1.2e18);
 
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2.4e18, "one whole share must quote vault 1.2 x admin 2.0 = 2.4 NAV");
-        assertEq(toUint256(kernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2.4e18, "the junior side prices through the identical composed rate");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 2.4e18, "one whole share must quote vault 1.2 x admin 2.0 = 2.4 NAV");
 
         // 1 share-wei floors: 1 x 2.4e18 / 1e18 = 2.4, floored to 2 NAV-wei
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1))), 2, "a 1-wei quote must floor 2.4 down to 2 NAV-wei");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1))), 2, "a 1-wei quote must floor 2.4 down to 2 NAV-wei");
 
         // The inverse divides by the same composed rate: 2.4e18 NAV x 1e18 / 2.4e18 = 1e18 share-wei, an exact round-trip
-        assertEq(toUint256(kernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(2.4e18)))), 1e18, "NAV -> share must invert the composed rate exactly");
-        assertEq(toUint256(kernel.jtConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(2.4e18)))), 1e18, "the junior inverse shares the identical composed rate");
+        assertEq(toUint256(kernel.convertValueToCollateralAssets(toNAVUnits(uint256(2.4e18)))), 1e18, "NAV -> share must invert the composed rate exactly");
     }
 
     /**
@@ -267,15 +265,12 @@ contract Test_SharePriceTimesAdminPrimaryRate_ERC4626ChainlinkQuoter is AdminPri
      */
     function test_VaultAppreciationRepricesWithoutAdminAction() public {
         // Deployment state: vault rate 1.0, admin rate 2.0 -> 1e18 x 2e18 / 1e18 = 2e18 NAV per whole share
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2e18, "the pre-accrual quote must be vault 1.0 x admin 2.0");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 2e18, "the pre-accrual quote must be vault 1.0 x admin 2.0");
 
         // The vault appreciates 10%: ONLY the ERC4626 rate moves, no kernel setter is touched
         stJtVault.setRate(1.1e18);
 
-        assertEq(
-            toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2.2e18, "the quote must track the live vault rate with no setter call"
-        );
-        assertEq(toUint256(kernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2.2e18, "the junior side must reprice identically");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 2.2e18, "the quote must track the live vault rate with no setter call");
         // The static hop really is static: the stored admin rate did not move
         assertEq(kernel.getStoredConversionRateWAD(), 2e18, "the stored admin rate must be untouched by vault accrual");
     }
@@ -298,7 +293,7 @@ contract Test_SharePriceTimesAdminPrimaryRate_ERC4626ChainlinkQuoter is AdminPri
 
         assertEq(kernel.getStoredConversionRateWAD(), 2e18, "the stored rate must be untouched by the failed attempt");
         // And quotes still price off the initialization-time rate: 1e18 x (vault 1.0 x admin 2.0) = 2e18
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2e18, "pricing must still run off the original rate");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 2e18, "pricing must still run off the original rate");
     }
 
     /**
@@ -350,7 +345,7 @@ contract Test_SharePriceTimesAdminPrimaryRate_LowDecimalShares_ERC4626ChainlinkQ
     function setUp() public {
         TokenConfig memory vaultShare = _vaultToken(6, 18);
         _deployAdminPrimaryMarket(
-            FixtureCell({ name: "AdminPrimaryLowDecimalShares", stAsset: vaultShare, jtAsset: vaultShare, quoteAsset: _plainToken(6) }), defaultParams(), 0.8e18
+            FixtureCell({ name: "AdminPrimaryLowDecimalShares", collateralAsset: vaultShare, quoteAsset: _plainToken(6) }), defaultParams(), 0.8e18
         );
     }
 
@@ -365,14 +360,13 @@ contract Test_SharePriceTimesAdminPrimaryRate_LowDecimalShares_ERC4626ChainlinkQ
         stJtVault.setRate(1.5e18);
 
         assertEq(
-            toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e6))), 1.2e18, "one whole 6-dec share must quote vault 1.5 x admin 0.8 = 1.2 NAV"
+            toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e6))), 1.2e18, "one whole 6-dec share must quote vault 1.5 x admin 0.8 = 1.2 NAV"
         );
-        assertEq(toUint256(kernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e6))), 1.2e18, "the junior side prices through the identical composed rate");
 
         // 1 share-wei is a millionth of a whole share: 1 x 1.2e18 / 1e6 = 1.2e12 NAV-wei exactly (no flooring loss)
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1))), 1.2e12, "a 1-wei quote must scale by the 6-dec tranche unit exactly");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1))), 1.2e12, "a 1-wei quote must scale by the 6-dec tranche unit exactly");
 
         // The inverse divides by the same composed rate: 1.2e18 NAV x 1e6 / 1.2e18 = 1e6 share-wei, an exact round-trip
-        assertEq(toUint256(kernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(1.2e18)))), 1e6, "NAV -> share must invert the composed rate exactly");
+        assertEq(toUint256(kernel.convertValueToCollateralAssets(toNAVUnits(uint256(1.2e18)))), 1e6, "NAV -> share must invert the composed rate exactly");
     }
 }

@@ -54,7 +54,7 @@ abstract contract IdleCDOVirtualPriceMarketTestBase is DayMarketTestBase {
     /// @notice The kernel implementation, kept so tests can attempt fresh proxy initializations against it
     IdleCDOKernel internal cdoKernelImpl;
 
-    /// @notice The plain ERC20 AA tranche token serving as BOTH the ST and JT asset (the quoter family requires ST_ASSET == JT_ASSET)
+    /// @notice The plain ERC20 AA tranche token serving as the coinvested collateral asset (the kernel prices it as COLLATERAL_ASSET)
     MockERC20C internal aaTranche;
 
     /// @notice The CDO's underlying token, whose decimals denominate the raw virtual price
@@ -82,9 +82,7 @@ abstract contract IdleCDOVirtualPriceMarketTestBase is DayMarketTestBase {
     {
         // The base fixture's ERC4626 shape validation does not apply here: the tranche asset is a PLAIN ERC20
         // AA tranche token, only the quote-asset decimals are consumed by the base's pool-genesis helper
-        cell = FixtureCell({
-            name: "IdleCDOVirtualPrice", stAsset: _plainToken(_trancheDecimals), jtAsset: _plainToken(_trancheDecimals), quoteAsset: _plainToken(6)
-        });
+        cell = FixtureCell({ name: "IdleCDOVirtualPrice", collateralAsset: _plainToken(_trancheDecimals), quoteAsset: _plainToken(6) });
         params = _params;
 
         // Access manager, admin'd by this fixture so role wiring needs no schedule/execute dance
@@ -172,9 +170,8 @@ abstract contract IdleCDOVirtualPriceMarketTestBase is DayMarketTestBase {
     function _cdoConstructionParams() internal view returns (IRoycoDayKernel.RoycoDayKernelConstructionParams memory) {
         return IRoycoDayKernel.RoycoDayKernelConstructionParams({
             seniorTranche: address(seniorTranche),
-            stAsset: address(aaTranche),
             juniorTranche: address(juniorTranche),
-            jtAsset: address(aaTranche),
+            collateralAsset: address(aaTranche),
             accountant: address(accountant),
             liquidityTranche: address(liquidityTranche),
             ltAsset: address(bpt),
@@ -240,11 +237,11 @@ contract Test_VirtualPriceOneHopRate_IdleCDOVirtualPriceOracleQuoter is IdleCDOV
     }
 
     /**
-     * @notice Constructing the kernel with a CDO whose AA tranche token is not the ST/JT asset is rejected
+     * @notice Constructing the kernel with a CDO whose AA tranche token is not the collateral asset is rejected
      * @dev The quoter prices the TRANCHE asset through the CDO's virtual price, so the tranche asset must BE the
      *      CDO's AA tranche token: pricing token X off CDO Y's virtual price would mark every senior and junior
-     *      NAV against an unrelated instrument. One equality check against ST_ASSET suffices because the parent
-     *      quoter already forces ST_ASSET == JT_ASSET
+     *      NAV against an unrelated instrument. One equality check against COLLATERAL_ASSET suffices because both
+     *      tranches deposit the one collateral asset
      */
     function test_RevertIf_TrancheAssetIsNotTheCDOAATrancheToken() public {
         // A CDO over a foreign AA tranche token, everything else identical to the live wiring
@@ -297,11 +294,10 @@ contract Test_VirtualPriceOneHopRate_IdleCDOVirtualPriceOracleQuoter is IdleCDOV
 
         // One hop: virtualPrice 1e6 x multiplier 1e12 = 1e18, an exact multiplication with no floor
         assertEq(cdoKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 1e18, "the rate must price through the virtual price with no stored rate");
-        // One whole 18-decimal AA tranche token is 1e18 tranche-wei: 1e18 x 1e18 / 1e18 = 1e18 NAV, identically on both tranches
-        assertEq(toUint256(cdoKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1e18, "one whole tranche token must quote 1.0 NAV through the CDO");
-        assertEq(toUint256(cdoKernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1e18, "the junior side prices through the identical CDO rate");
+        // One whole 18-decimal AA tranche token is 1e18 tranche-wei: 1e18 x 1e18 / 1e18 = 1e18 NAV through the one collateral converter both tranches share
+        assertEq(toUint256(cdoKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 1e18, "one whole tranche token must quote 1.0 NAV through the CDO");
         // The inverse divides by the same rate: 1e18 NAV x 1e18 / 1e18 = 1e18 tranche-wei
-        assertEq(toUint256(cdoKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(1e18)))), 1e18, "NAV -> tranche must invert the virtual price rate");
+        assertEq(toUint256(cdoKernel.convertValueToCollateralAssets(toNAVUnits(uint256(1e18)))), 1e18, "NAV -> tranche must invert the virtual price rate");
 
         // A FRESH proxy over the live impl also initializes cleanly at rate 0, pinning the sentinel as a
         // first-class deploy configuration rather than an accident of the setUp market
@@ -329,21 +325,20 @@ contract Test_VirtualPriceOneHopRate_IdleCDOVirtualPriceOracleQuoter is IdleCDOV
 
         // The override IS the whole rate: exactly 2e18, not the CDO's 1.5e18 and not any composition of the two
         assertEq(cdoKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 2e18, "the rate must be the stored 2.0 exactly, not the virtual price path");
-        // One whole tranche token: 1e18 x 2e18 / 1e18 = 2e18 NAV, identically on both tranches
+        // One whole tranche token: 1e18 x 2e18 / 1e18 = 2e18 NAV through the one collateral converter both tranches share
         assertEq(
-            toUint256(cdoKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2e18, "one whole tranche token must quote through the genesis override"
+            toUint256(cdoKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 2e18, "one whole tranche token must quote through the genesis override"
         );
-        assertEq(toUint256(cdoKernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2e18, "the junior side prices through the identical override");
         // The inverse: 2e18 NAV x 1e18 / 2e18 = 1e18 tranche-wei, an exact round-trip
-        assertEq(toUint256(cdoKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(2e18)))), 1e18, "NAV -> tranche must invert the override rate");
+        assertEq(toUint256(cdoKernel.convertValueToCollateralAssets(toNAVUnits(uint256(2e18)))), 1e18, "NAV -> tranche must invert the override rate");
 
         // Arm the CDO to revert outright: if the init-stored rate did not short-circuit the live query these quotes
         // would revert, so surviving them proves the genesis override never consults the CDO even though no setter
         // call ever ran
         cdo.setRevertMode(true);
         assertEq(cdoKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 2e18, "a dead CDO must not block a genesis-overridden rate");
-        assertEq(toUint256(cdoKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2e18, "forward quotes must run off the genesis override");
-        assertEq(toUint256(cdoKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(2e18)))), 1e18, "inverse quotes must run off the genesis override");
+        assertEq(toUint256(cdoKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 2e18, "forward quotes must run off the genesis override");
+        assertEq(toUint256(cdoKernel.convertValueToCollateralAssets(toNAVUnits(uint256(2e18)))), 1e18, "inverse quotes must run off the genesis override");
 
         // Clearing to the sentinel hands pricing back to the CDO. The CDO must be healthy again first, since the
         // setter's post-set re-cache prices through the now-live rate
@@ -374,24 +369,18 @@ contract Test_VirtualPriceOneHopRate_IdleCDOVirtualPriceOracleQuoter is IdleCDOV
         // Multiplier is 10^(18-6) = 1e12. Rate: 1.05e6 x 1e12 = 1.05e18 exactly
         _deployIdleCDOVirtualPriceMarket(18, 6, 1.05e6, defaultParams(), 0);
         assertEq(cdoKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 1.05e18, "shape 1: the rate must be the virtual price lifted by 1e12 exactly");
-        // One whole 18-decimal tranche token is 1e18 tranche-wei: 1e18 x 1.05e18 / 1e18 = 1.05e18 NAV, on both tranches
-        assertEq(toUint256(cdoKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1.05e18, "shape 1: one whole tranche token must quote 1.05 NAV");
-        assertEq(
-            toUint256(cdoKernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1.05e18, "shape 1: the junior side prices through the identical rate"
-        );
+        // One whole 18-decimal tranche token is 1e18 tranche-wei: 1e18 x 1.05e18 / 1e18 = 1.05e18 NAV through the shared collateral converter
+        assertEq(toUint256(cdoKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 1.05e18, "shape 1: one whole tranche token must quote 1.05 NAV");
         // 1 tranche-wei: floor(1 x 1.05e18 / 1e18) = 1 NAV-wei, the fractional 0.05 floors away at the root's division
-        assertEq(toUint256(cdoKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1))), 1, "shape 1: a 1-wei quote must floor 1.05 down to 1 NAV-wei");
+        assertEq(toUint256(cdoKernel.convertCollateralAssetsToValue(toTrancheUnits(1))), 1, "shape 1: a 1-wei quote must floor 1.05 down to 1 NAV-wei");
         // The inverse divides by the same rate: 1.05e18 NAV x 1e18 / 1.05e18 = 1e18 tranche-wei, an exact round-trip
-        assertEq(toUint256(cdoKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(1.05e18)))), 1e18, "shape 1: NAV -> tranche must invert the rate");
-        assertEq(
-            toUint256(cdoKernel.jtConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(1.05e18)))), 1e18, "shape 1: the junior inverse shares the identical rate"
-        );
+        assertEq(toUint256(cdoKernel.convertValueToCollateralAssets(toNAVUnits(uint256(1.05e18)))), 1e18, "shape 1: NAV -> tranche must invert the rate");
 
         // CDO yield reprices with NO admin action, the live path: virtual price 1.05 -> 2.0 moves the rate to
         // 2e6 x 1e12 = 2e18, while the stored rate stays at the sentinel
         cdo.setVirtualPrice(2e6);
         assertEq(cdoKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 2e18, "shape 1: CDO yield must reprice the rate to 2.0 with no admin action");
-        assertEq(toUint256(cdoKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2e18, "shape 1: quotes must track the live virtual price");
+        assertEq(toUint256(cdoKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 2e18, "shape 1: quotes must track the live virtual price");
         assertEq(cdoKernel.getStoredConversionRateWAD(), 0, "shape 1: the stored rate must remain the sentinel through CDO yield");
 
         // ---- Shape 2: 18-decimal AA tranche over an 18-decimal underlying, virtual price 1e18 + 1 ----
@@ -404,13 +393,10 @@ contract Test_VirtualPriceOneHopRate_IdleCDOVirtualPriceOracleQuoter is IdleCDOV
         );
         // One whole tranche token: floor(1e18 x (1e18 + 1) / 1e18) = 1e18 + 1 NAV-wei, the excess wei is whole at this size
         assertEq(
-            toUint256(cdoKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1e18 + 1, "shape 2: one whole tranche token must carry the 1-wei excess"
-        );
-        assertEq(
-            toUint256(cdoKernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1e18 + 1, "shape 2: the junior side prices through the identical rate"
+            toUint256(cdoKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 1e18 + 1, "shape 2: one whole tranche token must carry the 1-wei excess"
         );
         // The inverse floors at the root's division: floor((1e18 + 1) x 1e18 / (1e18 + 1)) = 1e18 tranche-wei
-        assertEq(toUint256(cdoKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(1e18 + 1)))), 1e18, "shape 2: NAV -> tranche must invert the rate");
+        assertEq(toUint256(cdoKernel.convertValueToCollateralAssets(toNAVUnits(uint256(1e18 + 1)))), 1e18, "shape 2: NAV -> tranche must invert the rate");
 
         // ---- Shape 3: 6-decimal AA tranche over an 18-decimal underlying, virtual price 2.5 ----
         // Multiplier is again 1 (the underlying pins the multiplier, tranche decimals never enter the exponent).
@@ -418,18 +404,15 @@ contract Test_VirtualPriceOneHopRate_IdleCDOVirtualPriceOracleQuoter is IdleCDOV
         _deployIdleCDOVirtualPriceMarket(6, 18, 2.5e18, defaultParams(), 0);
         assertEq(cdoKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 2.5e18, "shape 3: the rate must be the 18-decimal virtual price verbatim");
         // One whole 6-decimal tranche token is 1e6 tranche-wei: 1e6 x 2.5e18 / 1e6 = 2.5e18 NAV
-        assertEq(toUint256(cdoKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e6))), 2.5e18, "shape 3: one whole 6-dec tranche token must quote 2.5 NAV");
-        assertEq(
-            toUint256(cdoKernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e6))), 2.5e18, "shape 3: the junior side prices through the identical rate"
-        );
+        assertEq(toUint256(cdoKernel.convertCollateralAssetsToValue(toTrancheUnits(1e6))), 2.5e18, "shape 3: one whole 6-dec tranche token must quote 2.5 NAV");
         // 1 tranche-wei is a millionth of a whole token: 1 x 2.5e18 / 1e6 = 2.5e12 NAV-wei exactly (no flooring loss)
         assertEq(
-            toUint256(cdoKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1))),
+            toUint256(cdoKernel.convertCollateralAssetsToValue(toTrancheUnits(1))),
             2.5e12,
             "shape 3: a 1-wei quote must scale by the 6-dec tranche unit exactly"
         );
         // The inverse: 2.5e18 NAV x 1e6 / 2.5e18 = 1e6 tranche-wei, an exact round-trip
-        assertEq(toUint256(cdoKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(2.5e18)))), 1e6, "shape 3: NAV -> tranche must invert the rate");
+        assertEq(toUint256(cdoKernel.convertValueToCollateralAssets(toNAVUnits(uint256(2.5e18)))), 1e6, "shape 3: NAV -> tranche must invert the rate");
     }
 
     /**
@@ -446,11 +429,11 @@ contract Test_VirtualPriceOneHopRate_IdleCDOVirtualPriceOracleQuoter is IdleCDOV
         assertEq(cdoKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 0, "a zero virtual price must zero the whole one-hop rate");
 
         // One whole tranche token marks to ZERO NAV with no revert, the silent-zeroing surface itself
-        assertEq(toUint256(cdoKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 0, "one whole tranche token must mark to zero NAV with no revert");
+        assertEq(toUint256(cdoKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 0, "one whole tranche token must mark to zero NAV with no revert");
 
         // The inverse divides by the zero rate and panics, the only loud failure anywhere on this path
         vm.expectRevert(stdError.divisionError);
-        cdoKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(1e18)));
+        cdoKernel.convertValueToCollateralAssets(toNAVUnits(uint256(1e18)));
     }
 
     // =============================
@@ -485,13 +468,10 @@ contract Test_VirtualPriceOneHopRate_IdleCDOVirtualPriceOracleQuoter is IdleCDOV
         // A REVERTING CDO must not block pricing while overridden (the override never queries the CDO)
         cdo.setRevertMode(true);
         assertEq(cdoKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 2e18, "a reverting CDO must not block an overridden rate");
+        assertEq(toUint256(cdoKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 2e18, "forward quotes must run off the override through a dead CDO");
         assertEq(
-            toUint256(cdoKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2e18, "forward quotes must run off the override through a dead CDO"
+            toUint256(cdoKernel.convertValueToCollateralAssets(toNAVUnits(uint256(2e18)))), 1e18, "inverse quotes must run off the override through a dead CDO"
         );
-        assertEq(
-            toUint256(cdoKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(2e18)))), 1e18, "inverse quotes must run off the override through a dead CDO"
-        );
-        assertEq(toUint256(cdoKernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2e18, "the junior side must also price off the override");
 
         // Heal the CDO at 5.0, then clear the override: the live path resumes at 5e6 x 1e12 = 5e18
         cdo.setRevertMode(false);
@@ -584,6 +564,6 @@ contract Test_VirtualPriceOneHopRate_IdleCDOVirtualPriceOracleQuoter is IdleCDOV
         assertEq(cdoKernel.getStoredConversionRateWAD(), 0, "the stored rate must be untouched by the failed attempt");
 
         // Pricing still runs off the legitimate virtual price path: 1e6 x 1e12 = 1e18 per whole tranche token
-        assertEq(toUint256(cdoKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1e18, "pricing must still run off the legitimate configuration");
+        assertEq(toUint256(cdoKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 1e18, "pricing must still run off the legitimate configuration");
     }
 }

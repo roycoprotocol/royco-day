@@ -20,7 +20,7 @@ library FeeAndLiquidityPremiumLogic {
     /**
      * @notice Mints the protocol fee shares and the liquidity premium shares accrued by a pre-op sync
      * @dev The liquidity premium is senior yield routed to the LT: it is minted as senior tranche shares the kernel holds for the
-     *      liquidity tranche, leaving the senior raw NAV (and thus coverage) unchanged, so the mint is coverage-neutral
+     *      liquidity tranche, leaving the collateral NAV (and thus coverage) unchanged, so the mint is coverage-neutral
      * @dev The premium and ST protocol fee are priced jointly against the pre-sync senior supply, so neither dilutes the other
      * @dev The LT protocol fee is carved out of the liquidity premium and remitted as senior shares to the protocol, so the LT receives the premium net of the fee and no LT shares are minted
      * @param $ The mutable storage state of the Royco Kernel that is delegatecalling into this function

@@ -20,7 +20,7 @@ contract Test_EntryPointYieldForfeiture is EntryPointTestBase {
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        stUnit = 10 ** uint256(cell.collateralAsset.decimals);
         _seedMarket(100 * stUnit, 50 * stUnit);
         _deployEntryPoint();
     }
@@ -120,7 +120,7 @@ contract Test_EntryPointYieldForfeiture is EntryPointTestBase {
 
     function test_depositForfeiture_thirdPartyExecution_bonusScaledSnapshotStaysNeutral() public {
         // The gain x executor-bonus quadrant: the bonus is paid from the escrowed assets FIRST, so the neutrality pin
-        // for the receiver is the snapshot scaled by the post-bonus remainder — the one line reconciling the two
+        // for the receiver is the snapshot scaled by the post-bonus remainder, the one line reconciling the two
         // mechanisms (the navAtRequestTime rescale on the third-party path) is only observable here
         uint256 amount = 10 * stUnit;
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), amount, USER_A, DEFAULT_EXECUTOR_BONUS);
@@ -183,7 +183,7 @@ contract Test_EntryPointYieldForfeiture is EntryPointTestBase {
 
     function test_depositForfeiture_partialThirdPartyExecutions_composeBothRescalings() public {
         // The partial+bonus quadrant: each third-party slice composes the pro-rata storage rescale of the
-        // nav snapshot with the per-slice bonus rescale — the receiver's total must still land on the
+        // nav snapshot with the per-slice bonus rescale, the receiver's total must still land on the
         // bonus-scaled request-time NAV
         uint256 amount = 10 * stUnit;
         (uint256 nonce,) = _requestDeposit(USER_A, address(juniorTranche), amount, USER_A, DEFAULT_EXECUTOR_BONUS);
@@ -294,8 +294,7 @@ contract Test_EntryPointYieldForfeiture is EntryPointTestBase {
         _warpPastDepositDelay();
         _executeDeposit(USER_A, USER_A, nonce, amount - 50);
         require(
-            toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime) == 0,
-            "arrange: the remainder's snapshot must floor to zero"
+            toUint256(entryPoint.getDepositRequest(USER_A, nonce).baseRequest.navAtRequestTime) == 0, "arrange: the remainder's snapshot must floor to zero"
         );
 
         // The mark recovers: the remainder reads as pure yield, forfeits whole, and settles without a user transfer

@@ -46,7 +46,7 @@ abstract contract MarketFuzzTestBase is DayMarketTestBase {
         // _extraQuote = 0 the seeded depth is exactly 1_050_001e12 NAV wei
         uint256 autoQuote = ((_st + 19) / 20 + (QUOTE_TO_NAV_SCALE - 1)) / QUOTE_TO_NAV_SCALE + 1e6;
         ltRawNAV = (autoQuote + _extraQuote) * QUOTE_TO_NAV_SCALE;
-        assertEq(toUint256(liquidityTranche.getRawNAV()), ltRawNAV, "seeded LT depth must match the derived quote-backed BPT value");
+        assertEq(_liveLTRawNAV(), ltRawNAV, "seeded LT depth must match the derived quote-backed BPT value");
     }
 
     /// @notice Mints vault shares to ST_PROVIDER and deposits them into the senior tranche

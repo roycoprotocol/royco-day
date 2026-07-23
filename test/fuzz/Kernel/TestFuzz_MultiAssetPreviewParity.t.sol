@@ -114,7 +114,11 @@ contract TestFuzz_MultiAssetPreviewParity_Kernel is MarketFuzzTestBase {
         // When the multi-asset relief is zero the two share the same NAV inputs (W_multi == W_inkind), so the in-kind
         // bound can sit ABOVE the multi-asset bound purely by the offset: inKind - multi <= 1e6*W/(claimNAV+1) < VIRTUAL_SHARES
         // (W <= claimNAV). Any nonzero relief only lifts the multi bound further, so VIRTUAL_SHARES bounds the shortfall.
-        assertGe(maxShares + 1e6, liquidityTranche.maxRedeem(LT_PROVIDER), "the multi-asset bound must weakly dominate the in-kind bound up to the virtual-shares offset");
+        assertGe(
+            maxShares + 1e6,
+            liquidityTranche.maxRedeem(LT_PROVIDER),
+            "the multi-asset bound must weakly dominate the in-kind bound up to the virtual-shares offset"
+        );
         if (maxShares < 1e6) return; // no liquidity-respecting redemption capacity this run
         uint256 shares = bound(_sharesSeed, 1e6, maxShares); // dust floor avoids a zero-asset payout the accountant rejects
 
@@ -123,8 +127,7 @@ contract TestFuzz_MultiAssetPreviewParity_Kernel is MarketFuzzTestBase {
         (AssetClaims memory claims, uint256 quoteOut) = liquidityTranche.redeemMultiAsset(shares, 0, 0, LT_PROVIDER, LT_PROVIDER);
 
         assertEq(quoteOut, previewQuote, "multi-asset redeem: quote leg must match the preview");
-        assertEq(claims.stAssets, previewClaims.stAssets, "multi-asset redeem: senior-asset leg must match the preview");
-        assertEq(claims.jtAssets, previewClaims.jtAssets, "multi-asset redeem: junior-asset leg must match the preview");
+        assertEq(claims.collateralAssets, previewClaims.collateralAssets, "multi-asset redeem: collateral leg must match the preview");
         assertEq(claims.ltAssets, previewClaims.ltAssets, "multi-asset redeem: LT-asset leg must match the preview");
         assertEq(claims.stShares, previewClaims.stShares, "multi-asset redeem: senior-share leg must match the preview");
         assertEq(claims.nav, previewClaims.nav, "multi-asset redeem: claim NAV must match the preview");
@@ -136,8 +139,8 @@ contract TestFuzz_MultiAssetPreviewParity_Kernel is MarketFuzzTestBase {
      * execution exactly on all five claim legs plus the quote leg. In ltRedeemMultiAsset the bonus lands on the
      * claims immediately before the preview's early return, so a regression reordering those two lines would
      * silently under-quote every bonus-regime preview while exec stays correct, this arm is the multi-asset
-     * analog of the dedicated senior in-kind bonus-parity fuzz. A small pre-drawdown ST-leg deposit puts senior
-     * shares in the pool so the removal's venue leg withdraws shares the bonus rides on. The drawdown band
+     * analog of the dedicated senior in-kind bonus-parity fuzz. A small pre-drawdown collateral-leg deposit puts
+     * senior shares in the pool so the removal's venue leg withdraws shares the bonus rides on. The drawdown band
      * [-20.8%, -22.5%] at the 30% junior ratio (plus the 0.5% ST leg) always breaches the liquidation threshold
      * without exhausting the junior buffer (exhaustion sits at -22.99%), mirroring the senior arm's band.
      */
@@ -146,8 +149,8 @@ contract TestFuzz_MultiAssetPreviewParity_Kernel is MarketFuzzTestBase {
         uint256 drawdownBps = bound(_drawdownBps, 2080, 2250); // always past the liquidation threshold, buffer never exhausted
         _seedFlatMarket(st, st * 3 / 10, 0);
 
-        // An ST-leg deposit worth 0.5% of the senior seed puts senior shares in the quote-only pool, so the
-        // later removal's venue leg withdraws senior shares for the bonus to boost
+        // A collateral-leg deposit worth 0.5% of the senior seed puts senior shares in the quote-only pool, so
+        // the later removal's venue leg withdraws senior shares for the bonus to boost
         uint256 stLeg = st / 200;
         stJtVault.mintShares(LT_PROVIDER, stLeg);
         vm.startPrank(LT_PROVIDER);
@@ -173,8 +176,7 @@ contract TestFuzz_MultiAssetPreviewParity_Kernel is MarketFuzzTestBase {
         (AssetClaims memory claims, uint256 quoteOut) = liquidityTranche.redeemMultiAsset(shares, 0, 0, LT_PROVIDER, LT_PROVIDER);
 
         assertEq(quoteOut, previewQuote, "bonus-regime multi-asset redeem: quote leg must match the preview");
-        assertEq(claims.stAssets, previewClaims.stAssets, "bonus-regime multi-asset redeem: senior-asset leg must match the preview");
-        assertEq(claims.jtAssets, previewClaims.jtAssets, "bonus-regime multi-asset redeem: junior-asset leg must match the preview");
+        assertEq(claims.collateralAssets, previewClaims.collateralAssets, "bonus-regime multi-asset redeem: collateral leg must match the preview");
         assertEq(claims.ltAssets, previewClaims.ltAssets, "bonus-regime multi-asset redeem: LT-asset leg must match the preview");
         assertEq(claims.stShares, previewClaims.stShares, "bonus-regime multi-asset redeem: senior-share leg must match the preview");
         assertEq(claims.nav, previewClaims.nav, "bonus-regime multi-asset redeem: claim NAV must match the preview");

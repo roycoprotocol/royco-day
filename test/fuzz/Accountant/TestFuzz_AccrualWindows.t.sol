@@ -6,18 +6,18 @@ import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant
 import { ZERO_NAV_UNITS } from "../../../src/libraries/Constants.sol";
 import { Operation, SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toNAVUnits, toUint256 } from "../../../src/libraries/Units.sol";
-import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 import { AccountantFuzzTestBase } from "../../utils/AccountantFuzzTestBase.sol";
+import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 
 /**
  * @title TestFuzz_AccrualWindows_Accountant
  * @notice Fuzz properties for the premium accrual bookkeeping under interleaved syncs, deposits, and warps:
  *         the time-weighted accumulators integrate the capped yield share over a contiguous window that
  *         starts at the last premium payment, extends to the last sync with no gaps and no double-counting,
- *         and resets exactly when a sync pays the premiums — never on losses, flat syncs, or deposits
+ *         and resets exactly when a sync pays the premiums - never on losses, flat syncs, or deposits
  * @dev The model tracks the expected accumulators and timestamps step by step, with each sync's
  *      premiums-paid outcome taken from the independent RoycoTestMath mirror sync rather than from
- *      production. The model lives in contract storage purely to keep stack frames small — every fuzz run
+ *      production. The model lives in contract storage purely to keep stack frames small - every fuzz run
  *      starts from a fresh state, so no data leaks between runs
  */
 contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
@@ -31,9 +31,8 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
     uint256 internal modelLastAccrual;
     uint256 internal modelLastPayment;
 
-    /// @dev The running raw marks the next step moves from
-    uint256 internal stRawNAV;
-    uint256 internal jtRawNAV;
+    /// @dev The running marks the next step moves from
+    uint256 internal collateralNAV;
     uint256 internal ltRawNAV;
 
     /**
@@ -44,11 +43,11 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
      * double-counted one over-pays them out of the senior gain, and a reset without a payment silently
      * forfeits accrued premium. After every step the accountant's accumulators and both timestamps must match
      * a step-by-step model, and the accumulator must equal the capped constant share integrated over exactly
-     * [last premium payment, last accrual] — the closed form only a contiguous window satisfies.
+     * [last premium payment, last accrual] - the closed form only a contiguous window satisfies.
      */
     function testFuzz_AccrualWindows_ContiguousAndResetOnlyWhenPremiumsPay(
-        uint256 _stRaw0,
-        uint256 _jtRaw0,
+        uint256 _stEff0,
+        uint256 _jtEff0,
         uint256 _ltRaw0,
         uint256 _jtRate,
         uint256 _ltRate,
@@ -58,7 +57,7 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
     )
         public
     {
-        _prepareMarket(_stRaw0, _jtRaw0, _ltRaw0, _jtRate, _ltRate);
+        _prepareMarket(_stEff0, _jtEff0, _ltRaw0, _jtRate, _ltRate);
         for (uint256 i = 0; i < 8; ++i) {
             _step(_warps[i], _actions[i], _moves[i]);
         }
@@ -69,11 +68,11 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
      * premiums, hoping the spent accrual window is read twice and the junior and liquidity tranches are paid
      * twice out of one senior gain. Zero elapsed time means zero fresh accrual, so the accumulators must not
      * grow between the two syncs and the second sync's premium must be derived from an empty (or unchanged)
-     * window — never from re-reading the accrual the first sync already consumed.
+     * window - never from re-reading the accrual the first sync already consumed.
      */
     function testFuzz_AccrualWindows_SameBlockRepeatGainSyncCannotReuseTheSpentWindow(
-        uint256 _stRaw0,
-        uint256 _jtRaw0,
+        uint256 _stEff0,
+        uint256 _jtEff0,
         uint256 _ltRaw0,
         uint256 _jtRate,
         uint256 _ltRate,
@@ -83,7 +82,7 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
     )
         public
     {
-        _prepareMarket(_stRaw0, _jtRaw0, _ltRaw0, _jtRate, _ltRate);
+        _prepareMarket(_stEff0, _jtEff0, _ltRaw0, _jtRate, _ltRate);
 
         // A real accrual window from one second to the ten-year suite ceiling, then the first gain sync
         vm.warp(block.timestamp + bound(_window, 1, MAX_ELAPSED));
@@ -118,12 +117,12 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
     /**
      * Scenario: nothing touches the market for the full ten-year fuzz ceiling, then a gain sync lands. The
      * accumulator entering that sync must equal the capped constant share integrated over exactly the whole
-     * idle stretch — a decade of inactivity neither forfeits accrued premium (an under-read) nor inflates it
-     * (an overflow or double-count) — and the sync must settle its payout from exactly that window.
+     * idle stretch - a decade of inactivity neither forfeits accrued premium (an under-read) nor inflates it
+     * (an overflow or double-count) - and the sync must settle its payout from exactly that window.
      */
     function testFuzz_AccrualWindows_MaxElapsedWindowAccruesExactlyThenSettles(
-        uint256 _stRaw0,
-        uint256 _jtRaw0,
+        uint256 _stEff0,
+        uint256 _jtEff0,
         uint256 _ltRaw0,
         uint256 _jtRate,
         uint256 _ltRate,
@@ -131,7 +130,7 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
     )
         public
     {
-        _prepareMarket(_stRaw0, _jtRaw0, _ltRaw0, _jtRate, _ltRate);
+        _prepareMarket(_stEff0, _jtEff0, _ltRaw0, _jtRate, _ltRate);
 
         // The first-ever sync only initializes the accrual clock (it accrues nothing by construction)
         _stepSync(0);
@@ -152,9 +151,9 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
     }
 
     /// @dev Bounds the seed inputs, deploys the market with the pinned YDM rates, seeds it, and starts the model
-    function _prepareMarket(uint256 _stRaw0, uint256 _jtRaw0, uint256 _ltRaw0, uint256 _jtRate, uint256 _ltRate) internal {
-        stRawNAV = bound(_stRaw0, 0, MAX_NAV); // full NAV range incl. the empty-tranche edge
-        jtRawNAV = bound(_jtRaw0, 0, MAX_NAV); // full NAV range incl. the uncovered-market edge
+    function _prepareMarket(uint256 _stEff0, uint256 _jtEff0, uint256 _ltRaw0, uint256 _jtRate, uint256 _ltRate) internal {
+        uint256 stEff0 = bound(_stEff0, 0, MAX_NAV); // full NAV range incl. the empty-tranche edge
+        uint256 jtEff0 = bound(_jtEff0, 0, MAX_NAV); // full NAV range incl. the uncovered-market edge
         ltRawNAV = bound(_ltRaw0, 0, MAX_NAV); // full NAV range incl. the no-depth edge
         pinnedJTRate = bound(_jtRate, 0, WAD); // full YDM output range, the accountant caps it at the configured max
         pinnedLTRate = bound(_ltRate, 0, WAD); // full YDM output range, the accountant caps it at the configured max
@@ -162,7 +161,8 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
         _deploy(_defaultParams());
         jtYDM.setRates(pinnedJTRate);
         ltYDM.setRates(pinnedLTRate);
-        _seedSymmetric(stRawNAV, jtRawNAV, ltRawNAV);
+        _seedSymmetric(stEff0, jtEff0, ltRawNAV);
+        collateralNAV = stEff0 + jtEff0;
     }
 
     /// @dev Warps, dispatches one fuzzed step (sync or deposit), and asserts the window bookkeeping after it
@@ -187,23 +187,21 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
     }
 
     /**
-     * @dev Runs one pre-op sync moving both raws by the same signed basis points, asserting the sync output
+     * @dev Runs one pre-op sync moving the collateral by the signed basis points, asserting the sync output
      *      against the mirror driven by the modeled window, then applies the mirror's premiums-paid outcome
      *      to the model: accumulators zero and the payment timestamp advances only when premiums pay
      */
     function _stepSync(int256 _bps) internal {
-        uint256 stRawNew = _afterMove(stRawNAV, _bps);
-        uint256 jtRawNew = _afterMove(jtRawNAV, _bps);
+        uint256 collateralNew = _afterMove(collateralNAV, _bps);
         _modelAccrual();
 
         // The reset rule: paid premiums close the window, anything else leaves it accruing
-        if (_syncAndAssertPayout(stRawNew, jtRawNew)) {
+        if (_syncAndAssertPayout(collateralNew)) {
             modelTwJT = 0;
             modelTwLT = 0;
             modelLastPayment = block.timestamp;
         }
-        stRawNAV = stRawNew;
-        jtRawNAV = jtRawNew;
+        collateralNAV = collateralNew;
     }
 
     /**
@@ -211,12 +209,12 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
      *      the sync plus the liquidity commit, asserts the premium-bearing fields, and returns whether the
      *      mirror says this sync paid the premiums
      */
-    function _syncAndAssertPayout(uint256 _stRawNew, uint256 _jtRawNew) internal returns (bool premiumsPaid) {
+    function _syncAndAssertPayout(uint256 _collateralNew) internal returns (bool premiumsPaid) {
         RoycoTestMath.SyncOutputs memory out = RoycoTestMath.syncTrancheAccounting(
-            _mirrorInput(_stRawNew, _jtRawNew, ltRawNAV, modelTwJT, modelTwLT, block.timestamp - modelLastPayment, pinnedJTRate, pinnedLTRate)
+            _mirrorInput(_collateralNew, ltRawNAV, modelTwJT, modelTwLT, block.timestamp - modelLastPayment, pinnedJTRate, pinnedLTRate)
         );
 
-        SyncedAccountingState memory st = kernel.doPreOp(toNAVUnits(_stRawNew), toNAVUnits(_jtRawNew));
+        SyncedAccountingState memory st = kernel.doPreOp(toNAVUnits(_collateralNew));
         kernel.doCommit(toNAVUnits(ltRawNAV));
 
         // The premiums folded into the effective NAVs tie the accrued window to the sync's actual payout
@@ -244,15 +242,9 @@ contract TestFuzz_AccrualWindows_Accountant is AccountantFuzzTestBase {
 
     /// @dev Runs one post-op deposit through the kernel passthrough, which must not touch the accrual bookkeeping
     function _stepDeposit(bool _seniorSide, uint256 _add) internal {
-        Operation op;
-        if (_seniorSide) {
-            op = Operation.ST_DEPOSIT;
-            stRawNAV += _add;
-        } else {
-            op = Operation.JT_DEPOSIT;
-            jtRawNAV += _add;
-        }
-        kernel.doPostOp(op, toNAVUnits(stRawNAV), toNAVUnits(jtRawNAV), toNAVUnits(ltRawNAV), ZERO_NAV_UNITS, false);
+        Operation op = _seniorSide ? Operation.ST_DEPOSIT : Operation.JT_DEPOSIT;
+        collateralNAV += _add;
+        kernel.doPostOp(op, toNAVUnits(collateralNAV), toNAVUnits(ltRawNAV), ZERO_NAV_UNITS, false);
     }
 
     /// @dev Asserts the accountant's window bookkeeping equals the model and satisfies the contiguity closed form

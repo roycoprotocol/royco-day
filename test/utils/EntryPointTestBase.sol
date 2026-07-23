@@ -375,7 +375,7 @@ abstract contract EntryPointTestBase is DayMarketTestBase {
 
     /// @notice Asserts every leg of an AssetClaims is zero
     function assertAssetClaimsZero(AssetClaims memory _claims, string memory _err) internal pure {
-        assertEq(toUint256(_claims.stAssets) + toUint256(_claims.jtAssets) + toUint256(_claims.ltAssets) + _claims.stShares + toUint256(_claims.nav), 0, _err);
+        assertEq(toUint256(_claims.collateralAssets) + toUint256(_claims.ltAssets) + _claims.stShares + toUint256(_claims.nav), 0, _err);
     }
 }
 

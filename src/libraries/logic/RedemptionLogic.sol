@@ -32,7 +32,7 @@ library RedemptionLogic {
 
     /**
      * @notice Processes the redemption of a specified number of shares from the senior tranche
-     * @dev The function is expected to transfer the senior and junior assets directly to the receiver, based on the redemption claims
+     * @dev The function is expected to transfer the collateral assets directly to the receiver, based on the redemption claims
      * @dev ST redemptions are enabled if the market is in a PERPETUAL state
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _shares The number of shares to redeem
@@ -79,7 +79,7 @@ library RedemptionLogic {
 
     /**
      * @notice Processes the redemption of a specified number of shares from the junior tranche
-     * @dev The function is expected to transfer the senior and junior assets directly to the receiver, based on the redemption claims
+     * @dev The function is expected to transfer the collateral assets directly to the receiver, based on the redemption claims
      * @dev JT redemptions are enabled only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-redemption
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _shares The number of shares to redeem
@@ -164,14 +164,14 @@ library RedemptionLogic {
 
     /**
      * @notice Atomically exits the liquidity tranche to the LT assets' constituent assets: proportionally removes the LT-asset slice,
-     *         redeems the venue-held senior shares to ST underlying, and returns (ST underlying + quote) to the receiver
+     *         redeems the venue-held senior shares to collateral, and returns (collateral + quote) to the receiver
      * @dev LT multi-asset redemptions are enabled only in a PERPETUAL market state, granted the market's liquidity requirement is satisfied post-redemption
      * @param _isPreview Whether this is a preview of the operation which must not mutate state
      * @param _ltShares The number of LT shares being redeemed (used to size the proportional LT-asset slice)
      * @param _minSTSharesOut The minimum senior tranche shares the proportional removal must return (slippage bound)
      * @param _minQuoteAssetsOut The minimum quote to return (slippage bound)
-     * @param _receiver The address that receives the ST underlying and quote
-     * @return stClaims The ST redemption asset claims transferred to the receiver (its ST/JT asset legs)
+     * @param _receiver The address that receives the collateral and quote
+     * @return stClaims The ST redemption asset claims transferred to the receiver (its collateral asset leg)
      * @return quoteAssets The quote assets returned to the receiver
      */
     function ltRedeemMultiAsset(
@@ -198,30 +198,29 @@ library RedemptionLogic {
         // An LT share claims both LT effective-NAV legs: the deployed LT assets and the idle liquidity-premium senior shares
         // Compute the LT assets
         AssetClaims memory userAssetClaims = TrancheClaimsLogic._scaleAssetClaims(ltClaims, _ltShares, totalLTShares);
+        // Mark the user's LT asset claims as withdrawn
+        TrancheClaimsLogic._withdrawAssets($, _immutables, userAssetClaims, address(this));
 
-        // Derive the ST total claims and supply from the synced state
-        stClaims = TrancheClaimsLogic._deriveTrancheAssetClaims($, _immutables, TrancheType.SENIOR, state);
-        uint256 totalSTShares = IERC20(_immutables.seniorTranche).totalSupply();
-
-        // Debit both LT legs from the kernel's holdings: the LT-asset slice and the idle premium senior shares
         // Remove the liquidity equivalent to the LT assets the user has a claim on
         uint256 stSharesWithdrawn;
-        if (userAssetClaims.stShares != 0) $.ltOwnedSeniorTrancheShares -= userAssetClaims.stShares;
-        $.ltOwnedYieldBearingAssets = $.ltOwnedYieldBearingAssets - userAssetClaims.ltAssets;
         NAV_UNIT postOpLTRawNAV;
         (stSharesWithdrawn, quoteAssets, postOpLTRawNAV) =
             IRoycoDayKernel(address(this)).removeLiquidity(_isPreview, userAssetClaims.ltAssets, _minSTSharesOut, _minQuoteAssetsOut, _receiver);
 
-        // Redeem all of the redeemer's senior shares from the venue and from the premium
+        // Redeem all of the redeemer's senior shares from the venue and from the uninvested liquidity premium
         uint256 stSharesToRedeem = stSharesWithdrawn + userAssetClaims.stShares;
-        stClaims = TrancheClaimsLogic._scaleAssetClaims(stClaims, stSharesToRedeem, totalSTShares);
+        stClaims = TrancheClaimsLogic._scaleAssetClaims(
+            TrancheClaimsLogic._deriveTrancheAssetClaims($, _immutables, TrancheType.SENIOR, state),
+            stSharesToRedeem,
+            IERC20(_immutables.seniorTranche).totalSupply()
+        );
 
         // Apply any ST self-liquidation bonus to the redeeming user's ST shares claims and retrieve the bonus NAV applied
         NAV_UNIT stSelfLiquidationBonusNAV;
         (stClaims, stSelfLiquidationBonusNAV) = SelfLiquidationLogic.applySeniorTrancheSelfLiquidationBonus($, state, stClaims);
 
         // Burn the redeemed senior shares and withdraw the bonus-adjusted ST claims to the receiver
-        // The quote assets were remitted in the venue removal above
+        // The quote assets were remitted in the liquidity removal above
         // A preview skips only the burn: the withdrawn senior shares never settled to this kernel and the burn feeds no post-op input
         // NOTE: The final post-op accounts for this ST redemption in addition to the preceding LT redemption in one batch call
         if (!_isPreview) ERC20BurnableUpgradeable(_immutables.seniorTranche).burn(stSharesToRedeem);
@@ -242,7 +241,7 @@ library RedemptionLogic {
      * @notice Returns the maximum amount of assets that can be withdrawn from the senior tranche
      * @dev ST redemptions are allowed in PERPETUAL market states
      * @param _owner The address that is withdrawing the assets
-     * @return stClaimNAV The senior tranche's total notional claim on the market's raw NAVs, denominated in kernel's NAV units
+     * @return stClaimNAV The senior tranche's total notional claim on the collateral NAV, denominated in kernel's NAV units
      * @return stMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the senior tranche, denominated in the kernel's NAV units
      * @return totalTrancheShares The total number of shares that exist in the senior tranche after the post-sync mint of its protocol fee shares and liquidity premium shares
      */
@@ -266,7 +265,7 @@ library RedemptionLogic {
         // ST redemptions are disabled during a fixed-term market state
         if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
-        // ST redemptions are otherwise unrestricted in a PERPETUAL state: the senior claim on each raw NAV pool never exceeds that pool, so its entire effective NAV is withdrawable
+        // ST redemptions are otherwise unrestricted in a PERPETUAL state: the senior claim never exceeds the collateral NAV under conservation, so its entire effective NAV is withdrawable
         stClaimNAV = state.stEffectiveNAV;
         stMaxWithdrawableNAV = state.stEffectiveNAV;
     }
@@ -275,7 +274,7 @@ library RedemptionLogic {
      * @notice Returns the maximum amount of assets that can be withdrawn from the junior tranche
      * @dev JT redemptions are allowed only in a PERPETUAL market state, granted that the market's coverage requirement is satisfied post-redemption
      * @param _owner The address that is withdrawing the assets
-     * @return jtClaimNAV The junior tranche's total notional claim on the market's raw NAVs, denominated in kernel's NAV units
+     * @return jtClaimNAV The junior tranche's total notional claim on the collateral NAV, denominated in kernel's NAV units
      * @return jtMaxWithdrawableNAV The maximum amount of assets that can be withdrawn from the junior tranche, denominated in the kernel's NAV units
      * @return totalTrancheShares The total number of shares that exist in the junior tranche after minting any protocol fee shares post-sync
      */
@@ -300,7 +299,7 @@ library RedemptionLogic {
         // JT redemptions are disabled during a fixed-term market state
         if (state.marketState == MarketState.FIXED_TERM) return (ZERO_NAV_UNITS, ZERO_NAV_UNITS, 0);
 
-        // The junior tranche's total claim on the market's raw NAVs is exactly its effective NAV, since its claims on the ST and JT raw NAVs sum to it under NAV conservation
+        // The junior tranche's total claim on the collateral NAV is exactly its effective NAV under NAV conservation
         jtClaimNAV = state.jtEffectiveNAV;
 
         // Get the max withdrawable JT assets in NAV units from the accountant considering the coverage requirement

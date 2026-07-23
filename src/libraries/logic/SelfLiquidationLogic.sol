@@ -5,7 +5,6 @@ import { IRoycoDayKernel } from "../../interfaces/IRoycoDayKernel.sol";
 import { WAD, ZERO_NAV_UNITS } from "../Constants.sol";
 import { AssetClaims, SyncedAccountingState } from "../Types.sol";
 import { Math, NAV_UNIT, RoycoUnitsMath, TRANCHE_UNIT } from "../Units.sol";
-import { TrancheClaimsLogic } from "./TrancheClaimsLogic.sol";
 
 /**
  * @title SelfLiquidationLogic
@@ -16,7 +15,7 @@ library SelfLiquidationLogic {
     using RoycoUnitsMath for NAV_UNIT;
 
     /**
-     * @notice Computes and applies the self-liquidation bonus for ST redemptions when the liquidation coverage utilization threshold is breached, sourced from JT asset claims
+     * @notice Computes and applies the self-liquidation bonus for ST redemptions when the liquidation coverage utilization threshold is breached, sourced from JT's claim on the collateral
      * @dev The bonus incentivizes ST to self-liquidate by redeeming to delever the market
      * @dev After exiting the market, the bonus affords ST LPs the ability to:
      *      1. Absorb discounts/losses on secondary markets when liquidating the withdrawn exposure
@@ -26,7 +25,7 @@ library SelfLiquidationLogic {
      * @param _state The synced NAV, impermanent loss, and fee accounting containing all mark-to-market accounting data
      * @param _stUserClaims The claims of the redeeming ST user
      * @return stUserClaimsWithBonus The claims of the redeeming ST user after applying the self-liquidation bonus
-     * @return stSelfLiquidationBonusNAV Bonus sourced from JT's claims on ST and JT assets
+     * @return stSelfLiquidationBonusNAV Bonus sourced from JT's claim on the collateral
      */
     function applySeniorTrancheSelfLiquidationBonus(
         IRoycoDayKernel.RoycoDayKernelState storage $,
@@ -49,21 +48,12 @@ library SelfLiquidationLogic {
         // Preemptively return if there is no remaining bonus capital to remit
         if (stSelfLiquidationBonusNAV == ZERO_NAV_UNITS) return (_stUserClaims, ZERO_NAV_UNITS);
 
-        // Decompose the NAV claims for the Junior Tranche to get the NAV claims for sourcing the bonus
-        (,, NAV_UNIT jtClaimOnSTRawNAV,) = TrancheClaimsLogic._computeSTandJTClaimsOnRawNAVs(_state);
-        // Compute the bonus NAV sourced from JT's claims on each tranche's NAV: prioritize ST assets over JT assets for sourcing
-        // stSelfLiquidationBonusNAV <= (jtClaimOnSTRawNAV + jtClaimOnJTRawNAV) since it was bounded by JT effective NAV already
-        NAV_UNIT bonusFromJTClaimOnSTRawNAV = RoycoUnitsMath.min(stSelfLiquidationBonusNAV, jtClaimOnSTRawNAV);
-        NAV_UNIT bonusFromJTClaimOnJTRawNAV = (stSelfLiquidationBonusNAV - bonusFromJTClaimOnSTRawNAV);
-
-        // Apply the derived bonus to the user's asset claims
-        TRANCHE_UNIT stBonusAssets = IRoycoDayKernel(address(this)).stConvertNAVUnitsToTrancheUnits(bonusFromJTClaimOnSTRawNAV);
-        TRANCHE_UNIT jtBonusAssets = IRoycoDayKernel(address(this)).jtConvertNAVUnitsToTrancheUnits(bonusFromJTClaimOnJTRawNAV);
+        // Apply the derived bonus to the user's asset claims, granted in the coinvested collateral asset
+        TRANCHE_UNIT bonusAssets = IRoycoDayKernel(address(this)).convertValueToCollateralAssets(stSelfLiquidationBonusNAV);
         // Report the bonus at the value of the assets actually granted
-        stSelfLiquidationBonusNAV = IRoycoDayKernel(address(this)).stConvertTrancheUnitsToNAVUnits(stBonusAssets)
-            + IRoycoDayKernel(address(this)).jtConvertTrancheUnitsToNAVUnits(jtBonusAssets);
-        stUserClaimsWithBonus.stAssets = _stUserClaims.stAssets + stBonusAssets;
-        stUserClaimsWithBonus.jtAssets = _stUserClaims.jtAssets + jtBonusAssets;
+        stSelfLiquidationBonusNAV = IRoycoDayKernel(address(this)).convertCollateralAssetsToValue(bonusAssets);
+        // Update the claims with the granted bonus
+        stUserClaimsWithBonus.collateralAssets = _stUserClaims.collateralAssets + bonusAssets;
         stUserClaimsWithBonus.nav = _stUserClaims.nav + stSelfLiquidationBonusNAV;
     }
 
@@ -72,15 +62,14 @@ library SelfLiquidationLogic {
      * @dev Prevents bank run dynamics by ensuring one LP's bonus doesn't reduce coverage for remaining LPs
      * @dev Derivation:
      *      Post-redemption coverage utilization must not exceed original coverage utilization:
-     *      COVERED_EXPOSURE = (ST_RAW_NAV + JT_RAW_NAV)
-     *      U = Current coverage utilization = (COVERED_EXPOSURE * MIN_COVERAGE) / JT_EFFECTIVE_NAV
+     *      U = Current coverage utilization = (COLLATERAL_NAV * MIN_COVERAGE) / JT_EFFECTIVE_NAV
      *      U' = Post-redemption coverage utilization (including bonus)
      *      Post-redemption coverage utilization:
-     *      U' = ((COVERED_EXPOSURE - ST_REDEMPTION_NAV - BONUS_NAV) * MIN_COVERAGE) / (JT_EFFECTIVE_NAV - BONUS_NAV)
+     *      U' = ((COLLATERAL_NAV - ST_REDEMPTION_NAV - BONUS_NAV) * MIN_COVERAGE) / (JT_EFFECTIVE_NAV - BONUS_NAV)
      *
      *      NOTE: INVARIANT: U' == U
      *      Result after simplification:
-     *      BONUS_MAX = (ST_REDEMPTION_NAV * JT_EFFECTIVE_NAV) / (COVERED_EXPOSURE - JT_EFFECTIVE_NAV)
+     *      BONUS_MAX = (ST_REDEMPTION_NAV * JT_EFFECTIVE_NAV) / (COLLATERAL_NAV - JT_EFFECTIVE_NAV)
      *                = (ST_REDEMPTION_NAV * JT_EFFECTIVE_NAV) / ST_EFFECTIVE_NAV
      *
      * @param _state The synced accounting state

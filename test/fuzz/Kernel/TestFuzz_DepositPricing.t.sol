@@ -5,8 +5,8 @@ import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/M
 import { IRoycoVaultTranche } from "../../../src/interfaces/IRoycoVaultTranche.sol";
 import { SyncedAccountingState } from "../../../src/libraries/Types.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
-import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 import { MarketFuzzTestBase } from "../../utils/MarketFuzzTestBase.sol";
+import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 
 /**
  * @title TestFuzz_DepositPricing_Kernel
@@ -66,7 +66,7 @@ contract TestFuzz_DepositPricing_Kernel is MarketFuzzTestBase {
 
         // The hand-composed quoter rate must price one whole vault share exactly (the composition pin)
         uint256 composedRate = (1e18 + vb * 1e14).mulDiv((1e8 + qb * 1e4) * 1e10, 1e18);
-        assertEq(toUint256(kernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), composedRate, "quoter must price 1 share at the composed rate");
+        assertEq(toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), composedRate, "quoter must price 1 share at the composed rate");
 
         // Bound the deposit by the live capacity so the gates cannot interfere with the pricing property
         uint256 assets = bound(_amountSeed, 1e12, toUint256(seniorTranche.maxDeposit(ST_PROVIDER))); // dust-to-max deposit sizes
@@ -104,9 +104,9 @@ contract TestFuzz_DepositPricing_Kernel is MarketFuzzTestBase {
 
     /**
      * Scenario: identical setup to the senior case, but the deposit lands in the junior tranche, whose supply
-     * includes the protocol-fee shares the sync minted against the junior gain. The junior quoter shares the
-     * senior's composed rate (identical assets), so value = floor(assets x composedRate / 1e18) and the mint is
-     * floor(value x jtSupply / jtEffectiveNAV).
+     * includes the protocol-fee shares the sync minted against the junior gain. Both tranches deposit the ONE
+     * coinvested collateral asset priced by the single collateral converter, so value = floor(assets x composedRate / 1e18)
+     * and the mint is floor(value x jtSupply / jtEffectiveNAV).
      */
     function testFuzz_JuniorDeposit_MintsFloorPricedSharesAndDepositorNeverGains(
         uint256 _stSeed,
@@ -133,7 +133,9 @@ contract TestFuzz_DepositPricing_Kernel is MarketFuzzTestBase {
         SyncedAccountingState memory state = _sync();
 
         uint256 composedRate = (1e18 + vb * 1e14).mulDiv((1e8 + qb * 1e4) * 1e10, 1e18);
-        assertEq(toUint256(kernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), composedRate, "junior quoter must share the composed rate");
+        assertEq(
+            toUint256(kernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), composedRate, "the single collateral converter must price the composed rate"
+        );
 
         uint256 value = assets.mulDiv(composedRate, 1e18);
         uint256 supplyBefore = juniorTranche.totalSupply();
@@ -202,7 +204,7 @@ contract TestFuzz_DepositPricing_Kernel is MarketFuzzTestBase {
 
         // The LT prices its shares at its pre-deposit effective NAV: the kernel-owned BPT at the same oracle
         // mark, with no idle liquidity premium senior shares in a flat market
-        uint256 ltOwnedBPT = toUint256(kernel.getState().ltOwnedYieldBearingAssets);
+        uint256 ltOwnedBPT = toUint256(kernel.getState().totalLTAssets);
         uint256 ltEffBefore = poolTVL.mulDiv(ltOwnedBPT, bptSupply);
         uint256 supplyBefore = liquidityTranche.totalSupply();
         // The clamp-aware mirror proves the clamp is inert at live-market deposit sizes; the fair branch is the
@@ -222,7 +224,9 @@ contract TestFuzz_DepositPricing_Kernel is MarketFuzzTestBase {
         // so a down-repriced quote leg can leave the fresh position beyond the liquidity-respecting max. The
         // unwind is asserted whenever it is executable, and an unexecutable unwind returns the depositor nothing
         if (minted <= liquidityTranche.maxRedeem(LT_PROVIDER)) {
-            assertLe(toUint256(liquidityTranche.previewRedeem(minted).nav), value, "immediately redeeming the minted shares must never exceed the deposited value");
+            assertLe(
+                toUint256(liquidityTranche.previewRedeem(minted).nav), value, "immediately redeeming the minted shares must never exceed the deposited value"
+            );
         }
         // Incumbent side at the same oracle mark, offset-aware (redemption prices against supply + VIRTUAL_SHARES):
         // the pot grew by at least the value the mint was priced on
@@ -252,8 +256,9 @@ contract TestFuzz_DepositPricing_Kernel is MarketFuzzTestBase {
     {
         uint256 st = bound(_stSeed, 1e18, 1e26); // uniform over 8 orders of magnitude of senior seed size
         // Coverage ratios from 1:1 to 1:2 keep the coverage gate clear for a deposit of up to st after a
-        // +100% shared move: st <= jtRaw, so exposure = stRaw + d + jtRaw <= 3 x st + jtRaw <= 4 x jtRaw and the
-        // required coverage 0.2 x exposure <= 0.8 x jtRaw <= jtEffectiveNAV keeps utilization at or below 100%
+        // +100% shared move: with st <= jt the post-deposit collateralNAV <= 2 x (st + jt) + st = 3 x st + 2 x jt
+        // <= 5 x jt, so the required coverage 0.2 x collateralNAV <= jt <= jtEffectiveNAV (an up-only move never
+        // shrinks the junior claim) keeps utilization at or below 100%
         uint256 jt = bound(_jtSeed, st, 2 * st);
         uint256 vb = bound(_vaultBps, 1, 10_000); // strictly positive unsynced yield: the value the attacker is after
         uint256 elapsed = bound(_elapsed, 1, 365 days); // staleness window from 1 second to a year
@@ -280,9 +285,7 @@ contract TestFuzz_DepositPricing_Kernel is MarketFuzzTestBase {
         uint256 mintedSandwich = _depositSenior(assets);
 
         assertEq(mintedSandwich, mintedAfterSync, "front-running the keeper's sync must mint exactly the honest post-sync share count");
-        assertEq(
-            toUint256(seniorTranche.previewRedeem(mintedSandwich).nav), exitAfterSync, "the sandwich exit value must equal the honest-path exit value"
-        );
+        assertEq(toUint256(seniorTranche.previewRedeem(mintedSandwich).nav), exitAfterSync, "the sandwich exit value must equal the honest-path exit value");
         assertEq(
             toUint256(accountant.getState().lastSTEffectiveNAV),
             stEffAfterSyncPath,

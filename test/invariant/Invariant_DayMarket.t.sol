@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import { DayMarketHandler } from "./handlers/DayMarketHandler.sol";
 import { StdInvariant } from "../../lib/forge-std/src/StdInvariant.sol";
 import { Test } from "../../lib/forge-std/src/Test.sol";
 import { console2 } from "../../lib/forge-std/src/console2.sol";
+import { DayMarketHandler } from "./handlers/DayMarketHandler.sol";
 
 /**
  * @title Invariant_DayMarket
@@ -91,15 +91,27 @@ contract Invariant_DayMarket is StdInvariant, Test {
     }
 
     /**
-     * @notice The two-term NAV conservation identity at wei precision after every op:
-     *         stRawNAV + jtRawNAV == stEffectiveNAV + jtEffectiveNAV
+     * @notice The NAV conservation identity at wei precision after every op:
+     *         collateralNAV == stEffectiveNAV + jtEffectiveNAV
      * @dev Load-bearing because the liquidity premium is minted as covered senior shares inside
      *      stEffectiveNAV, never a third NAV leg: if the fee and liquidity premium share mint (or any
      *      sync arm) ever created or destroyed a wei of NAV, this is where it would surface. On a breach
      *      the full committed checkpoint is dumped in the failure message
      */
-    function invariant_stRawPlusJtRawEqualsStEffPlusJtEff() public view {
+    function invariant_collateralNAVEqualsStEffPlusJtEff() public view {
         (bool holds, string memory report) = handler.conservationCheckpointReport();
+        assertTrue(holds, report);
+    }
+
+    /**
+     * @notice The state-machine biconditional after every op: the market is PERPETUAL iff the committed
+     *         impermanent-loss ledger is zero
+     * @dev Load-bearing because every PERPETUAL commit erases the IL ledger and the FIXED_TERM branch
+     *      never zeroes it: a breach in either direction means a sync committed a state the two-branch
+     *      machine cannot produce
+     */
+    function invariant_perpetualIffZeroImpermanentLoss() public view {
+        (bool holds, string memory report) = handler.stateMachineCheckpointReport();
         assertTrue(holds, report);
     }
 
@@ -143,10 +155,7 @@ contract Invariant_DayMarket is StdInvariant, Test {
     /// @dev One line of the per-op anti-vacuity ledger: calls, successes, and predicted gate rejections
     function _logOpLedger(string memory _op) internal view {
         console2.log(
-            string.concat("op ", _op, " calls/successes/predicted-rejections"),
-            handler.opCalls(_op),
-            handler.opSuccesses(_op),
-            handler.opPredictedReverts(_op)
+            string.concat("op ", _op, " calls/successes/predicted-rejections"), handler.opCalls(_op), handler.opSuccesses(_op), handler.opPredictedReverts(_op)
         );
     }
 }

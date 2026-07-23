@@ -266,7 +266,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         _sync();
         IRoycoDayAccountant.RoycoDayAccountantState memory a = accountant.getState();
         uint256 coverageUtilizationWAD =
-            RoycoTestMath.computeCoverageUtilization(toUint256(a.lastSTRawNAV), toUint256(a.lastJTRawNAV), a.minCoverageWAD, toUint256(a.lastJTEffectiveNAV));
+            RoycoTestMath.computeCoverageUtilization(toUint256(a.lastCollateralNAV), a.minCoverageWAD, toUint256(a.lastJTEffectiveNAV));
         assertGe(coverageUtilizationWAD, a.coverageLiquidationUtilizationWAD, "setup: expected liquidation coverage to read breached");
 
         // The breach no longer waives the liquidity gate: the multi-asset maximum is a bounded surplus below the
@@ -346,7 +346,7 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
     ///         rounding, not on the accountant's absorber
     function test_RedeemMultiAsset_MaxBoundary_HoldsWithZeroDustTolerance() public {
         MarketParamsConfig memory params = defaultParams();
-        params.stNAVDustTolerance = 0;
+        params.dustTolerance = 0;
         _deployMarket(cellA(), params);
         _seedMarket(100_000e18, 30_000e18);
         _seedLT(10_000e18, 2000e18, 8000 * QUOTE_UNIT);
@@ -447,7 +447,9 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         assertEq(inKindClaims.stShares, expectedIdleSlice, "the in-kind redeem must pay exactly the pro-rata idle senior share slice");
         assertEq(toUint256(inKindClaims.ltAssets), 0, "the wiped BPT leg must pay nothing in kind");
         assertEq(seniorTranche.balanceOf(LT_PROVIDER) - seniorBeforeInKind, expectedIdleSlice, "the redeemer must receive exactly its idle senior share slice");
-        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleBeforeInKind - expectedIdleSlice, "the kernel's idle pile must drop by exactly the redeemed slice");
+        assertEq(
+            kernel.getState().ltOwnedSeniorTrancheShares, idleBeforeInKind - expectedIdleSlice, "the kernel's idle pile must drop by exactly the redeemed slice"
+        );
         assertEq(bpt.balanceOf(LT_PROVIDER), 0, "no BPT can be delivered against a zero pool-depth mark");
     }
 
@@ -471,10 +473,10 @@ contract Test_MultiAssetMaxRedeemBoundary is DayMarketTestBase {
         vm.stopPrank();
 
         assertEq(quoteToken.balanceOf(LT_PROVIDER) - quoteBefore, previewQuote, "the quote leg must land exactly as previewed");
-        // The ST and JT assets are the same shared vault share in this kernel family, so the two legs land as one delta
+        // The senior unwind pays the one coinvested collateral asset, so it lands as a single delta
         assertEq(
             stJtVault.balanceOf(LT_PROVIDER) - vaultSharesBefore,
-            toUint256(previewClaims.stAssets) + toUint256(previewClaims.jtAssets),
+            toUint256(previewClaims.collateralAssets),
             "the senior unwind's vault shares must land exactly as previewed"
         );
         assertEq(quoteOut, previewQuote, "the returned quote must match the preview");

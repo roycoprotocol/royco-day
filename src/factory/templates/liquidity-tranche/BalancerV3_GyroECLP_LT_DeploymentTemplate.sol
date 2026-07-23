@@ -68,7 +68,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
 
     /**
      * @notice The externally (script) deployed market contracts the template wires into proxies and verifies
-     * @custom:field jtImpl - The junior tranche implementation (immutables `(jtAsset, kernel)` pinned at deployment)
+     * @custom:field jtImpl - The junior tranche implementation (immutables `(collateralAsset, kernel)` pinned at deployment)
      * @custom:field ltImpl - The liquidity tranche implementation (immutables `(balancerPool, kernel)` pinned at deployment)
      * @custom:field accountantImpl - The accountant implementation (immutable `kernel` pinned at deployment)
      * @custom:field kernelImpl - The Day kernel implementation for this market's kernel family
@@ -106,8 +106,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
      * @custom:field marketId - A caller-supplied identifier for the market, mixed into the deterministic deployment salts
      * @custom:field jtTranche - The junior tranche initialization params
      * @custom:field ltTranche - The liquidity tranche initialization params
-     * @custom:field stAsset - The senior tranche's underlying yield-bearing asset
-     * @custom:field jtAsset - The junior tranche's underlying yield-bearing asset (must be the same asset as the senior tranche)
+     * @custom:field collateralAsset - The coinvested collateral asset underlying both the senior and junior tranches
      * @custom:field accountant - The accountant initialization params (coverage, premiums, and state machine config)
      * @custom:field marketContracts - The externally (script) deployed implementations, YDMs, and Gyro E-CLP pool the template wires and verifies
      * @custom:field protocolFeeRecipient - The market's protocol fee recipient
@@ -125,8 +124,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         bytes32 marketId;
         IRoycoVaultTranche.RoycoTrancheInitParams jtTranche;
         IRoycoVaultTranche.RoycoTrancheInitParams ltTranche;
-        address stAsset;
-        address jtAsset;
+        address collateralAsset;
         IRoycoDayAccountant.RoycoDayAccountantInitParams accountant;
         MarketContracts marketContracts;
         address protocolFeeRecipient;
@@ -375,13 +373,13 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         // Senior tranche: type, kernel binding, asset, and unseeded
         require(IRoycoVaultTranche(_r.seniorTranche).TRANCHE_TYPE() == TrancheType.SENIOR, MARKET_WIRING_VERIFICATION_FAILED(_r.seniorTranche));
         require(IRoycoVaultTranche(_r.seniorTranche).KERNEL() == _r.kernel, MARKET_WIRING_VERIFICATION_FAILED(_r.seniorTranche));
-        require(IRoycoVaultTranche(_r.seniorTranche).asset() == _p.stAsset, MARKET_WIRING_VERIFICATION_FAILED(_r.seniorTranche));
+        require(IRoycoVaultTranche(_r.seniorTranche).asset() == _p.collateralAsset, MARKET_WIRING_VERIFICATION_FAILED(_r.seniorTranche));
         require(IERC20(_r.seniorTranche).totalSupply() == 0, MARKET_WIRING_VERIFICATION_FAILED(_r.seniorTranche));
 
         // Junior tranche: type, kernel binding, asset
         require(IRoycoVaultTranche(_r.juniorTranche).TRANCHE_TYPE() == TrancheType.JUNIOR, MARKET_WIRING_VERIFICATION_FAILED(_r.juniorTranche));
         require(IRoycoVaultTranche(_r.juniorTranche).KERNEL() == _r.kernel, MARKET_WIRING_VERIFICATION_FAILED(_r.juniorTranche));
-        require(IRoycoVaultTranche(_r.juniorTranche).asset() == _p.jtAsset, MARKET_WIRING_VERIFICATION_FAILED(_r.juniorTranche));
+        require(IRoycoVaultTranche(_r.juniorTranche).asset() == _p.collateralAsset, MARKET_WIRING_VERIFICATION_FAILED(_r.juniorTranche));
 
         // Liquidity tranche: type, kernel binding, asset is the pool BPT
         require(IRoycoVaultTranche(_r.liquidityTranche).TRANCHE_TYPE() == TrancheType.LIQUIDITY, MARKET_WIRING_VERIFICATION_FAILED(_r.liquidityTranche));
@@ -394,8 +392,7 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         require(kernel.JUNIOR_TRANCHE() == _r.juniorTranche, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
         require(kernel.LIQUIDITY_TRANCHE() == _r.liquidityTranche, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
         require(kernel.ACCOUNTANT() == _r.accountant, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
-        require(kernel.ST_ASSET() == _p.stAsset, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
-        require(kernel.JT_ASSET() == _p.jtAsset, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
+        require(kernel.COLLATERAL_ASSET() == _p.collateralAsset, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
         require(kernel.LT_ASSET() == pool, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
         require(kernel.ENFORCE_TRANCHE_WHITELIST_ON_TRANSFER() == _p.enforceVaultSharesTransferWhitelist, MARKET_WIRING_VERIFICATION_FAILED(_r.kernel));
 
@@ -545,8 +542,8 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
     }
 
     function _accountantBinding() private pure returns (bytes4[] memory s, uint64[] memory r) {
-        s = new bytes4[](16);
-        r = new uint64[](16);
+        s = new bytes4[](15);
+        r = new uint64[](15);
         s[0] = IRoycoDayAccountant.setJuniorTrancheYDM.selector;
         r[0] = ADMIN_ACCOUNTANT_ROLE;
         s[1] = IRoycoDayAccountant.setLiquidityTrancheYDM.selector;
@@ -575,10 +572,8 @@ abstract contract BalancerV3_GyroECLP_LT_DeploymentTemplate is BaseDeploymentTem
         r[12] = ADMIN_UNPAUSER_ROLE;
         s[13] = UUPSUpgradeable.upgradeToAndCall.selector;
         r[13] = ADMIN_UPGRADER_ROLE;
-        s[14] = IRoycoDayAccountant.setSeniorTrancheDustTolerance.selector;
+        s[14] = IRoycoDayAccountant.setDustTolerance.selector;
         r[14] = ADMIN_MARKET_OPS_ROLE;
-        s[15] = IRoycoDayAccountant.setJuniorTrancheDustTolerance.selector;
-        r[15] = ADMIN_MARKET_OPS_ROLE;
     }
 
     function _balancerVaultBinding() private pure returns (bytes4[] memory s, uint64[] memory r) {

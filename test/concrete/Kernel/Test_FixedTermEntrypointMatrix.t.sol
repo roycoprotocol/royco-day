@@ -23,14 +23,14 @@ contract Test_FixedTermEntrypointMatrix is DayMarketTestBase {
     uint256 internal constant ST_SEED_WHOLE = 100;
     uint256 internal constant JT_SEED_WHOLE = 30;
 
-    uint256 internal stUnit;
+    uint256 internal collateralUnit;
     uint256 internal quoteUnit;
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        collateralUnit = 10 ** uint256(cell.collateralAsset.decimals);
         quoteUnit = 10 ** uint256(cell.quoteAsset.decimals);
-        _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
+        _seedMarket(ST_SEED_WHOLE * collateralUnit, JT_SEED_WHOLE * collateralUnit);
         _enterFixedTerm();
     }
 
@@ -57,33 +57,33 @@ contract Test_FixedTermEntrypointMatrix is DayMarketTestBase {
     // All tranche deposits are role-gated (restricted); use the seeded role-holders (or grant the LT role to
     // fresh actors) so auth passes and the op reaches the FIXED_TERM gate.
     function test_RevertIf_STDepositInFixedTerm() public {
-        stJtVault.mintShares(ST_PROVIDER, stUnit);
+        stJtVault.mintShares(ST_PROVIDER, collateralUnit);
         vm.startPrank(ST_PROVIDER);
-        stJtVault.approve(address(seniorTranche), stUnit);
+        stJtVault.approve(address(seniorTranche), collateralUnit);
         vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
-        seniorTranche.deposit(toTrancheUnits(stUnit), ST_PROVIDER);
+        seniorTranche.deposit(toTrancheUnits(collateralUnit), ST_PROVIDER);
         vm.stopPrank();
     }
 
     function test_RevertIf_JTDepositInFixedTerm() public {
-        stJtVault.mintShares(JT_PROVIDER, stUnit);
+        stJtVault.mintShares(JT_PROVIDER, collateralUnit);
         vm.startPrank(JT_PROVIDER);
-        stJtVault.approve(address(juniorTranche), stUnit);
+        stJtVault.approve(address(juniorTranche), collateralUnit);
         vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
-        juniorTranche.deposit(toTrancheUnits(stUnit), JT_PROVIDER);
+        juniorTranche.deposit(toTrancheUnits(collateralUnit), JT_PROVIDER);
         vm.stopPrank();
     }
 
     function test_RevertIf_MultiAssetLTDepositWithSTLegInFixedTerm() public {
         address a = makeAddr("FT_LT_STLEG");
         accessManager.grantRole(LT_LP_ROLE, a, 0);
-        stJtVault.mintShares(a, stUnit);
+        stJtVault.mintShares(a, collateralUnit);
         quoteToken.mint(a, 10 * quoteUnit);
         vm.startPrank(a);
-        stJtVault.approve(address(liquidityTranche), stUnit);
+        stJtVault.approve(address(liquidityTranche), collateralUnit);
         quoteToken.approve(address(liquidityTranche), 10 * quoteUnit);
         vm.expectRevert(IRoycoDayKernel.DISABLED_IN_FIXED_TERM_STATE.selector);
-        liquidityTranche.depositMultiAsset(stUnit, 10 * quoteUnit, 0, a);
+        liquidityTranche.depositMultiAsset(collateralUnit, 10 * quoteUnit, 0, a);
         vm.stopPrank();
     }
 

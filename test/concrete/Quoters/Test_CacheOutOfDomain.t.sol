@@ -19,7 +19,7 @@ import { Cache, CacheKey } from "../../../src/libraries/Cache.sol";
  */
 contract Test_CacheOutOfDomain is Test {
     /// @dev 2^255, the populated-marker bit the cache ORs into every stored slot. Hand literal: half of 2^256
-    uint256 internal constant TOP_BIT = 57896044618658097711785492504343953926634992332820282019728792003956564819968;
+    uint256 internal constant TOP_BIT = 57_896_044_618_658_097_711_785_492_504_343_953_926_634_992_332_820_282_019_728_792_003_956_564_819_968;
 
     /// @dev External wrapper so vm.expectRevert can catch a revert raised by the internal library write
     function writeExternal(CacheKey _key, uint256 _value) external {

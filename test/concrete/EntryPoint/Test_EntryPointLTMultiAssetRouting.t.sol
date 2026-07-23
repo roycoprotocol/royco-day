@@ -16,7 +16,7 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  * @title Test_EntryPointLTMultiAssetRouting
  * @notice The entry point's internal LT exit maximizer: liquidity tranche redemptions exit in-kind by default, a
  *         maximal redemption is sized by the dominant multi-asset bound, and any amount the in-kind gate cannot
- *         admit falls back to the multi-asset exit — nothing is exposed to the user, the route is decided from
+ *         admit falls back to the multi-asset exit. Nothing is exposed to the user, the route is decided from
  *         the two bounds alone, and equal bounds always resolve in-kind
  * @dev The fixture binds the liquidity requirement against the escrowed position: a senior-share-heavy pool leg
  *      keeps the multi-asset bound strictly wider than the in-kind bound, and the seeded LT position is handed to
@@ -64,7 +64,7 @@ contract Test_EntryPointLTMultiAssetRouting is EntryPointTestBase {
         uint256 receiverVaultSharesBefore = stJtVault.balanceOf(USER_B);
         (AssetClaims memory claims, uint256 quoteAssets) = _executeRedemptionMaxWithQuote(USER_A, USER_A, nonce);
 
-        // The executed size must be the multi-asset bound — strictly past everything in-kind could admit
+        // The executed size must be the multi-asset bound, strictly past everything in-kind could admit
         uint256 sharesExecuted = escrowedShares - entryPoint.getRedemptionRequest(USER_A, nonce).shares;
         assertEq(sharesExecuted, maxMultiAssetShares, "the maximal execution must be sized by the multi-asset bound");
         assertGt(sharesExecuted, maxInKindShares, "the execution must cross strictly past the in-kind bound");
@@ -77,8 +77,8 @@ contract Test_EntryPointLTMultiAssetRouting is EntryPointTestBase {
         assertEq(quoteToken.balanceOf(USER_B), previewQuote, "the quote leg must land exactly as the tranche previews");
         assertEq(
             stJtVault.balanceOf(USER_B) - receiverVaultSharesBefore,
-            toUint256(previewClaims.stAssets) + toUint256(previewClaims.jtAssets),
-            "the constituent legs must land exactly as the tranche previews"
+            toUint256(previewClaims.collateralAssets),
+            "the constituent leg must land exactly as the tranche previews"
         );
     }
 
@@ -177,8 +177,8 @@ contract Test_EntryPointLTMultiAssetRouting is EntryPointTestBase {
         (uint256 nonce,, uint256 maxMultiAssetShares) = _requestWholePosition(0);
 
         // The slack covers the accountant's one-NAV-wei dust tolerance plus the flow's quote and share quantization floors
-        uint256 breachShares = maxMultiAssetShares
-            + Math.mulDiv(2e12 + 1, liquidityTranche.totalSupply(), toUint256(accountant.getState().lastLTRawNAV), Math.Rounding.Ceil) + 2;
+        uint256 breachShares =
+            maxMultiAssetShares + Math.mulDiv(2e12 + 1, liquidityTranche.totalSupply(), toUint256(accountant.getState().lastLTRawNAV), Math.Rounding.Ceil) + 2;
         vm.prank(USER_A);
         vm.expectRevert(IRoycoDayAccountant.LIQUIDITY_REQUIREMENT_VIOLATED.selector);
         entryPoint.executeRedemption(USER_A, nonce, breachShares);
@@ -204,11 +204,7 @@ contract Test_EntryPointLTMultiAssetRouting is EntryPointTestBase {
 
         // The constituent legs split like every claims leg
         assertGt(stJtVault.balanceOf(EXECUTOR), 0, "the executor must receive its constituent bonus slice");
-        assertEq(
-            stJtVault.balanceOf(USER_B),
-            toUint256(userClaims.stAssets) + toUint256(userClaims.jtAssets),
-            "the receiver must get the post-bonus constituent legs"
-        );
+        assertEq(stJtVault.balanceOf(USER_B), toUint256(userClaims.collateralAssets), "the receiver must get the post-bonus constituent leg");
 
         // Nothing may be left stranded in the entry point
         assertEq(quoteToken.balanceOf(address(entryPoint)), 0, "no quote may remain in the entry point after the split");
@@ -321,9 +317,7 @@ contract Test_EntryPointLTMultiAssetRouting is EntryPointTestBase {
         // One quote quantum plus one share's NAV of slack covers the flow's floor roundings
         uint256 dust = 1e12 + toUint256(liquidityTranche.convertToAssets(1).nav) + 1;
         assertLe(settledNAV, (navAtRequest - navLeft) + dust, "the settled value must never exceed the executed slice of the snapshot");
-        assertGt(
-            entryPoint.getProtocolFeeSharesPendingCollection(address(liquidityTranche)), 0, "the queued yield must land as protocol fee shares"
-        );
+        assertGt(entryPoint.getProtocolFeeSharesPendingCollection(address(liquidityTranche)), 0, "the queued yield must land as protocol fee shares");
     }
 
     /// @notice Mixed-route partials conserve the snapshot: an explicit in-kind fill floor-scales the remaining
@@ -365,7 +359,7 @@ contract Test_EntryPointLTMultiAssetRouting is EntryPointTestBase {
     }
 
     /// @notice A venue that cannot even be previewed fails the maximal redemption shut: a market whose venue is
-    ///         broken is not one to move funds through, and the failure bubbles verbatim — while an explicit
+    ///         broken is not one to move funds through, and the failure bubbles verbatim, while an explicit
     ///         in-kind amount, which never touches the venue, remains the deliberate escape hatch
     /// @notice A venue that reverts the multi-asset probe never bricks the maximal redemption, the probe is a
     ///         low-level call whose failure demotes the multi-asset bound to zero, so the maximizer falls back to
@@ -398,8 +392,7 @@ contract Test_EntryPointLTMultiAssetRouting is EntryPointTestBase {
         _warpPastRedemptionDelay();
         _executeRedemptionWithQuote(USER_A, USER_A, nonce, requestedShares - 1);
         require(
-            toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).baseRequest.navAtRequestTime) == 0,
-            "setup: the remainder's snapshot must floor to zero"
+            toUint256(entryPoint.getRedemptionRequest(USER_A, nonce).baseRequest.navAtRequestTime) == 0, "setup: the remainder's snapshot must floor to zero"
         );
 
         // The mark appreciates: the whole remainder reads as yield and is forfeited, settling without a redeem

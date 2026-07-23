@@ -11,11 +11,11 @@ import { IdenticalAssets_ST_JT_Oracle_Quoter } from "./base/IdenticalAssets_ST_J
  * @notice Quoter to convert tranche units (Idle CDO AA tranche tokens) to/from NAV units using the CDO's virtual price scaled to WAD precision or an admin set rate
  * @dev The CDO's virtualPrice is the full tranche unit to NAV unit oracle in a single hop, so this quoter inherits the root oracle quoter directly with no Chainlink layer
  * @dev A nonzero admin set rate overrides the live virtual price entirely and the zero sentinel resumes it (the CDO is a constructor immutable so the live path can never be absent)
- * @dev The senior and junior tranches must have the same AA tranche token as their tranche unit
+ * @dev The coinvested collateral asset must be the CDO's AA tranche token
  * @dev Use case: Convert AA_FalconXUSDC (Tranche unit) to USD (NAV unit) using the Pareto CDO's virtualPrice or an admin set rate
  */
 abstract contract IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter is IdenticalAssets_ST_JT_Oracle_Quoter {
-    /// @dev The address of the Idle CDO whose AA tranche token is the ST and JT asset
+    /// @dev The address of the Idle CDO whose AA tranche token is the coinvested collateral asset
     address public immutable IDLE_CDO;
 
     /// @dev The multiplier that scales the CDO's virtual price from the underlying token's decimals to WAD precision
@@ -35,11 +35,9 @@ abstract contract IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter is 
     constructor(address _idleCDO) {
         // Sanity checks on the Idle CDO and Royco market configuration
         require(_idleCDO != address(0), NULL_ADDRESS());
-        // We only need to check equality against one tranche asset since the parent contract asserts equality of the tranche assets
-        require(IIdleCDO(_idleCDO).AATranche() == ST_ASSET, TRANCHE_ASSET_MUST_BE_CDO_AA_TRANCHE());
+        require(IIdleCDO(_idleCDO).AATranche() == COLLATERAL_ASSET, TRANCHE_ASSET_MUST_BE_CDO_AA_TRANCHE());
         IDLE_CDO = _idleCDO;
 
-        // NOTE: Both tranche assets are identical Idle CDO AA tranche assets
         // virtualPrice returns the value of one whole AA tranche token scaled to the CDO underlying token's decimals
         // OUTPUT_DECIMALS = UNDERLYING_DECIMALS + MULTIPLIER_EXPONENT
         // For OUTPUT_DECIMALS to have WAD_DECIMALS of precision:
@@ -58,6 +56,6 @@ abstract contract IdenticalIdleCDOAATranches_ST_JT_VirtualPriceOracle_Quoter is 
     /// @return trancheToNAVUnitConversionRateWAD The value of one whole AA tranche token in NAV units, scaled to WAD precision
     function _getConversionRateFromOracleWAD() internal view override(IdenticalAssets_ST_JT_Oracle_Quoter) returns (uint256 trancheToNAVUnitConversionRateWAD) {
         // The virtual price is returned in the CDO underlying token's decimals, the multiplier lifts it to WAD precision exactly
-        return IIdleCDO(IDLE_CDO).virtualPrice(ST_ASSET) * CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION;
+        return IIdleCDO(IDLE_CDO).virtualPrice(COLLATERAL_ASSET) * CDO_VIRTUAL_PRICE_MULTIPLIER_FOR_WAD_PRECISION;
     }
 }

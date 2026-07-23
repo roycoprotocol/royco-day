@@ -94,12 +94,13 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
         assertEq(syncCount, 1, "the before-swap hook must sync the kernel exactly once");
 
         IRoycoDayAccountant.RoycoDayAccountantState memory committed = ACCOUNTANT.getState();
-        assertEq(committed.lastSTRawNAV, expected.lastSTRawNAV, "committed ST raw NAV must equal the pre-swap explicit-sync probe");
-        assertEq(committed.lastJTRawNAV, expected.lastJTRawNAV, "committed JT raw NAV must equal the pre-swap explicit-sync probe");
+        // The two per-tranche raw NAVs collapsed into the one coinvested collateral mark, so one checkpoint
+        // equality carries what the two raw-NAV asserts did.
+        assertEq(committed.lastCollateralNAV, expected.lastCollateralNAV, "committed collateral NAV must equal the pre-swap explicit-sync probe");
         assertEq(committed.lastSTEffectiveNAV, expected.lastSTEffectiveNAV, "committed ST effective NAV must equal the pre-swap explicit-sync probe");
         assertEq(committed.lastJTEffectiveNAV, expected.lastJTEffectiveNAV, "committed JT effective NAV must equal the pre-swap explicit-sync probe");
         assertEq(committed.lastLTRawNAV, expected.lastLTRawNAV, "committed LT raw NAV must be the PRE-swap pool mark (sync-before-swap ordering)");
-        assertGt(toUint256(LT.getRawNAV()), toUint256(committed.lastLTRawNAV), "the swap's fee must land in the pool AFTER the commit");
+        assertGt(toUint256(_liveLTRawNAV()), toUint256(committed.lastLTRawNAV), "the swap's fee must land in the pool AFTER the commit");
     }
 
     /**
@@ -135,16 +136,16 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
         _seedForSwaps();
         _sync();
         uint256 tvl0 = _poolTVL();
-        uint256 ltRaw0 = toUint256(LT.getRawNAV());
-        uint256 ltOwnedBPT = toUint256(KERNEL.getState().ltOwnedYieldBearingAssets);
+        uint256 ltRaw0 = toUint256(_liveLTRawNAV());
+        uint256 ltOwnedBPT = toUint256(KERNEL.getState().totalLTAssets);
         uint256 supply0 = _bptSupply();
 
         (address swapper, uint256 amountIn) = _armSwapper(testConfig.quoteAsset, 0.25e18);
         _swapExactIn(swapper, testConfig.quoteAsset, address(ST), amountIn, 0);
 
-        assertEq(toUint256(KERNEL.getState().ltOwnedYieldBearingAssets), ltOwnedBPT, "a swap must not move the kernel's owned-BPT ledger");
+        assertEq(toUint256(KERNEL.getState().totalLTAssets), ltOwnedBPT, "a swap must not move the kernel's owned-BPT ledger");
         uint256 expectedGain = Math.mulDiv(_poolTVL() - tvl0, ltOwnedBPT, supply0);
-        assertApproxEqAbs(toUint256(LT.getRawNAV()) - ltRaw0, expectedGain, _tol2(), "LT raw NAV must gain its pool share of the accrued fee");
+        assertApproxEqAbs(toUint256(_liveLTRawNAV()) - ltRaw0, expectedGain, _tol2(), "LT raw NAV must gain its pool share of the accrued fee");
     }
 
     /**
@@ -175,7 +176,7 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
         _pauseHook();
 
         uint256 stLeg = testConfig.initialFunding / 1000;
-        uint256 quoteLeg = _quoteAssetsForValue(KERNEL.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(stLeg)));
+        uint256 quoteLeg = _quoteAssetsForValue(KERNEL.convertCollateralAssetsToValue(toTrancheUnits(stLeg)));
         uint256 shares = _doDepositLTMulti(LT_ALICE_ADDRESS, stLeg, quoteLeg, 0).shares;
         assertGt(shares, 0, "the kernel-routed multi-asset deposit must succeed while the hook is paused");
 
@@ -575,9 +576,9 @@ abstract contract Test_BalancerSwapRateOracleBase is BalancerVenueForkBase {
     function test_LTConversions_roundTripFloor_onLiveTVL() public {
         _seedForSwaps();
         _sync();
-        uint256 x = toUint256(KERNEL.getState().ltOwnedYieldBearingAssets) / 3;
-        uint256 nav = toUint256(KERNEL.ltConvertTrancheUnitsToNAVUnits(toTrancheUnits(x)));
-        uint256 back = toUint256(KERNEL.ltConvertNAVUnitsToTrancheUnits(toNAVUnits(nav)));
+        uint256 x = toUint256(KERNEL.getState().totalLTAssets) / 3;
+        uint256 nav = toUint256(KERNEL.convertLTAssetsToValue(toTrancheUnits(x)));
+        uint256 back = toUint256(KERNEL.convertValueToLTAssets(toNAVUnits(nav)));
         assertLe(back, x, "the round trip must never create BPT");
         uint256 maxGap = Math.mulDiv(_bptSupply(), 1, _poolTVL()) + 2; // one NAV-wei of BPT + the two floors
         assertLe(x - back, maxGap, "the round-trip floor loss must stay within one NAV-wei of BPT");

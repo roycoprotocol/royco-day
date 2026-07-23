@@ -49,6 +49,6 @@ contract Test_MarketLifecycle_8DecQuote_NonStandardTokens is Test_MarketLifecycl
         );
         // The kernel-owned depth those wei back is the same shape-independent WAD mark every shape seeds:
         // 6e8 wei x 1e18 / 1e8 = 6e18 plus the 20e18 explicit BPT = 26e18
-        assertEq(toUint256(liquidityTranche.getRawNAV()), SEEDED_LT_RAW_NAV, "the 8-decimal quote leg must still mark 26e18 WAD of seeded depth");
+        assertEq(_liveLTRawNAV(), SEEDED_LT_RAW_NAV, "the 8-decimal quote leg must still mark 26e18 WAD of seeded depth");
     }
 }

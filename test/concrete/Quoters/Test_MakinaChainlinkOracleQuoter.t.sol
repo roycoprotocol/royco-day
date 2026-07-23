@@ -58,7 +58,7 @@ abstract contract MakinaChainlinkMarketTestBase is DayMarketTestBase {
     /// @notice The kernel implementation, kept so tests can attempt fresh proxy initializations against it
     MakinaChainlinkKernel internal makinaKernelImpl;
 
-    /// @notice The plain ERC20 machine share serving as BOTH the ST and JT asset (the quoter family requires ST_ASSET == JT_ASSET)
+    /// @notice The plain ERC20 machine share serving as the coinvested collateral asset (the kernel prices it as COLLATERAL_ASSET)
     MockERC20C internal machineShare;
 
     /// @notice The machine's accounting token, the intermediate asset of the two-hop NAV conversion
@@ -115,9 +115,7 @@ abstract contract MakinaChainlinkMarketTestBase is DayMarketTestBase {
     {
         // The base fixture's ERC4626 shape validation does not apply here: the tranche asset is a PLAIN ERC20
         // machine share, only the quote-asset decimals are consumed by the base's pool-genesis helper
-        cell = FixtureCell({
-            name: "MakinaChainlink", stAsset: _plainToken(_trancheDecimals), jtAsset: _plainToken(_trancheDecimals), quoteAsset: _plainToken(6)
-        });
+        cell = FixtureCell({ name: "MakinaChainlink", collateralAsset: _plainToken(_trancheDecimals), quoteAsset: _plainToken(6) });
         params = _params;
         initSequencerUptimeFeed = _sequencerUptimeFeed;
 
@@ -208,9 +206,8 @@ abstract contract MakinaChainlinkMarketTestBase is DayMarketTestBase {
     function _makinaConstructionParams() internal view returns (IRoycoDayKernel.RoycoDayKernelConstructionParams memory) {
         return IRoycoDayKernel.RoycoDayKernelConstructionParams({
             seniorTranche: address(seniorTranche),
-            stAsset: address(machineShare),
             juniorTranche: address(juniorTranche),
-            jtAsset: address(machineShare),
+            collateralAsset: address(machineShare),
             accountant: address(accountant),
             liquidityTranche: address(liquidityTranche),
             ltAsset: address(bpt),
@@ -290,11 +287,11 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
     }
 
     /**
-     * @notice Constructing the kernel with a machine whose share token is not the ST/JT asset is rejected
+     * @notice Constructing the kernel with a machine whose share token is not the collateral asset is rejected
      * @dev The quoter prices the TRANCHE asset through the machine's share price, so the tranche asset must BE the
      *      machine's share token: pricing token X off machine Y's share price would mark every senior and junior
-     *      NAV against an unrelated instrument. One equality check against ST_ASSET suffices because the parent
-     *      quoter already forces ST_ASSET == JT_ASSET
+     *      NAV against an unrelated instrument. One equality check against COLLATERAL_ASSET suffices because both
+     *      tranches deposit the one collateral asset
      */
     function test_RevertIf_TrancheAssetIsNotMakinaChainlinkMachineShareToken() public {
         // A machine over a foreign share token, everything else identical to the live wiring
@@ -345,11 +342,10 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
 
         // Composed: machine 1.0 x feed floor(1e8 x 1e18 / 1e8) = 1e18, so floor(1e18 x 1e18 / 1e18) = 1e18
         assertEq(makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 1e18, "the composed rate must price through the feed with no stored rate");
-        // One whole 18-decimal share is 1e18 tranche-wei: 1e18 x 1e18 / 1e18 = 1e18 NAV, identically on both tranches
-        assertEq(toUint256(makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1e18, "one whole share must quote 1.0 NAV through the feed");
-        assertEq(toUint256(makinaKernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1e18, "the junior side prices through the identical feed rate");
+        // One whole 18-decimal share is 1e18 tranche-wei: 1e18 x 1e18 / 1e18 = 1e18 NAV through the one collateral converter both tranches share
+        assertEq(toUint256(makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 1e18, "one whole share must quote 1.0 NAV through the feed");
         // The inverse divides by the same composed rate: 1e18 NAV x 1e18 / 1e18 = 1e18 share-wei
-        assertEq(toUint256(makinaKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(1e18)))), 1e18, "NAV -> share must invert the feed-composed rate");
+        assertEq(toUint256(makinaKernel.convertValueToCollateralAssets(toNAVUnits(uint256(1e18)))), 1e18, "NAV -> share must invert the feed-composed rate");
 
         // A FRESH proxy over the live impl also initializes cleanly at rate 0, the exact call shape the admin
         // sibling pins as an INVALID_CONVERSION_RATE revert
@@ -379,13 +375,10 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
         // machine 1.5 x feed 1.0 = 1.5e18 and the stored rate alone is 2e18, so 3e18 proves the genesis override is
         // the second hop of a genuine two-hop composition, not a passthrough of either value
         assertEq(makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 3e18, "the composed rate must be machine 1.5 x stored 2.0, not the feed path");
-        // One whole share: 1e18 x 3e18 / 1e18 = 3e18 NAV, identically on both tranches
-        assertEq(toUint256(makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 3e18, "one whole share must quote through the genesis override");
-        assertEq(toUint256(makinaKernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 3e18, "the junior side prices through the identical override");
+        // One whole share: 1e18 x 3e18 / 1e18 = 3e18 NAV through the one collateral converter both tranches share
+        assertEq(toUint256(makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 3e18, "one whole share must quote through the genesis override");
         // The inverse: 3e18 NAV x 1e18 / 3e18 = 1e18 share-wei, an exact round-trip
-        assertEq(
-            toUint256(makinaKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(3e18)))), 1e18, "NAV -> share must invert the override-composed rate"
-        );
+        assertEq(toUint256(makinaKernel.convertValueToCollateralAssets(toNAVUnits(uint256(3e18)))), 1e18, "NAV -> share must invert the override-composed rate");
 
         // Poison the feed BOTH ways (stale by warp AND armed to revert outright): if the init-stored rate did not
         // short-circuit _queryChainlinkOracle these quotes would revert, so surviving them proves the genesis
@@ -393,8 +386,8 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
         vm.warp(block.timestamp + ORACLE_STALENESS_THRESHOLD_SECONDS + 1);
         accountingFeed.setRevertMode(true);
         assertEq(makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 3e18, "a dead feed must not block a genesis-overridden rate");
-        assertEq(toUint256(makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 3e18, "forward quotes must run off the genesis override");
-        assertEq(toUint256(makinaKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(3e18)))), 1e18, "inverse quotes must run off the genesis override");
+        assertEq(toUint256(makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 3e18, "forward quotes must run off the genesis override");
+        assertEq(toUint256(makinaKernel.convertValueToCollateralAssets(toNAVUnits(uint256(3e18)))), 1e18, "inverse quotes must run off the genesis override");
 
         // Clearing to the sentinel hands the second hop back to the feed. The feed must be healthy again first,
         // since the setter's post-set re-cache prices through the now-feed-driven rate
@@ -441,11 +434,10 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
         assertEq(fresh.getStoredConversionRateWAD(), 2e18, "the admin-primary rate must land in quoter storage");
         assertEq(fresh.getChainlinkOracleConfiguration().oracle, address(0), "the oracle slot must be null in the admin-primary configuration");
 
-        // Composed: machine 1.0 x stored 2.0 = 2e18, priced with no feed in existence, on both tranches and inverse
+        // Composed: machine 1.0 x stored 2.0 = 2e18, priced with no feed in existence, forward and inverse
         assertEq(fresh.getTrancheUnitToNAVUnitConversionRateWAD(), 2e18, "the composed rate must run off the stored rate with no oracle wired");
-        assertEq(toUint256(fresh.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2e18, "one whole share must quote through the admin-primary rate");
-        assertEq(toUint256(fresh.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2e18, "the junior side prices through the identical rate");
-        assertEq(toUint256(fresh.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(2e18)))), 1e18, "NAV -> share must invert the admin-primary rate");
+        assertEq(toUint256(fresh.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 2e18, "one whole share must quote through the admin-primary rate");
+        assertEq(toUint256(fresh.convertValueToCollateralAssets(toNAVUnits(uint256(2e18)))), 1e18, "NAV -> share must invert the admin-primary rate");
     }
 
     /**
@@ -510,33 +502,27 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
         // Feed hop: floor(0.8e8 x 1e18 / 1e8) = 0.8e18. Composed: floor(1.5e18 x 0.8e18 / 1e18) = 1.2e18 NAV per whole share
         _deployMakinaChainlinkMarket(18, 6, 1.5e18, 8, 0.8e8, defaultParams(), 0);
         assertEq(makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 1.2e18, "shape 1: the composed rate must be 1.5 x 0.8 = 1.2");
-        // One whole 18-decimal share is 1e18 tranche-wei: 1e18 x 1.2e18 / 1e18 = 1.2e18 NAV, identically on both tranches
-        assertEq(toUint256(makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1.2e18, "shape 1: one whole share must quote 1.2 NAV");
-        assertEq(
-            toUint256(makinaKernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1.2e18, "shape 1: the junior side prices through the identical rate"
-        );
+        // One whole 18-decimal share is 1e18 tranche-wei: 1e18 x 1.2e18 / 1e18 = 1.2e18 NAV through the one collateral converter both tranches share
+        assertEq(toUint256(makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 1.2e18, "shape 1: one whole share must quote 1.2 NAV");
         // 1 share-wei: floor(1 x 1.2e18 / 1e18) = 1 NAV-wei, the fractional 0.2 floors away
-        assertEq(toUint256(makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1))), 1, "shape 1: a 1-wei quote must floor 1.2 down to 1 NAV-wei");
+        assertEq(toUint256(makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1))), 1, "shape 1: a 1-wei quote must floor 1.2 down to 1 NAV-wei");
         // The inverse divides by the same composed rate: 1.2e18 NAV x 1e18 / 1.2e18 = 1e18 share-wei, an exact round-trip
         assertEq(
-            toUint256(makinaKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(1.2e18)))), 1e18, "shape 1: NAV -> share must invert the composed rate"
-        );
-        assertEq(
-            toUint256(makinaKernel.jtConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(1.2e18)))), 1e18, "shape 1: the junior inverse shares the identical rate"
+            toUint256(makinaKernel.convertValueToCollateralAssets(toNAVUnits(uint256(1.2e18)))), 1e18, "shape 1: NAV -> share must invert the composed rate"
         );
 
         // Machine yield reprices with NO admin action, the live first hop: share price 1.5 -> 2.0 moves the composed
         // rate to floor(2e18 x 0.8e18 / 1e18) = 1.6e18, while the stored rate stays at the sentinel
         machine.setSharePriceWAD(2e18);
         assertEq(makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 1.6e18, "shape 1: machine yield must reprice the composed rate to 2.0 x 0.8 = 1.6");
-        assertEq(toUint256(makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1.6e18, "shape 1: quotes must track the live machine hop");
+        assertEq(toUint256(makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 1.6e18, "shape 1: quotes must track the live machine hop");
         assertEq(makinaKernel.getStoredConversionRateWAD(), 0, "shape 1: the stored rate must remain the sentinel through machine yield");
 
         // The FEED reprices with NO admin action either, the live second hop (setAnswer never touches freshness):
         // answer 0.8e8 -> 1.5e8 composes to floor(2e18 x 1.5e18 / 1e18) = 3e18
         accountingFeed.setAnswer(1.5e8);
         assertEq(makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 3e18, "shape 1: a feed move must reprice the composed rate to 2.0 x 1.5 = 3.0");
-        assertEq(toUint256(makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 3e18, "shape 1: quotes must track the live feed hop");
+        assertEq(toUint256(makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 3e18, "shape 1: quotes must track the live feed hop");
         assertEq(makinaKernel.getStoredConversionRateWAD(), 0, "shape 1: the stored rate must remain the sentinel through feed moves");
 
         // ---- Shape 2: 18-decimal shares over an 18-decimal accounting token, 18-decimal feed (share price 1e18 + 1, feed 0.5) ----
@@ -547,20 +533,15 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
         _deployMakinaChainlinkMarket(18, 18, 1e18 + 1, 18, 0.5e18, defaultParams(), 0);
         assertEq(makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 5e17, "shape 2: the 1-wei share-price excess must floor out of the composed rate");
         // One whole share: 1e18 x 5e17 / 1e18 = 5e17 NAV
-        assertEq(toUint256(makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 5e17, "shape 2: one whole share must quote 0.5 NAV");
-        assertEq(
-            toUint256(makinaKernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 5e17, "shape 2: the junior side prices through the identical rate"
-        );
+        assertEq(toUint256(makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 5e17, "shape 2: one whole share must quote 0.5 NAV");
         // The inverse: 5e17 NAV x 1e18 / 5e17 = 1e18 share-wei, an exact round-trip
-        assertEq(
-            toUint256(makinaKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(5e17)))), 1e18, "shape 2: NAV -> share must invert the composed rate"
-        );
+        assertEq(toUint256(makinaKernel.convertValueToCollateralAssets(toNAVUnits(uint256(5e17)))), 1e18, "shape 2: NAV -> share must invert the composed rate");
 
         // Feed hop reprice on the 18-decimal feed: answer -> 2e18 composes to floor((1e18 + 1) x 2e18 / 1e18) =
         // 2e18 + 2, the machine's 1-wei excess now survives the floor because 2.0 doubles it into whole wei
         accountingFeed.setAnswer(2e18);
         assertEq(makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 2e18 + 2, "shape 2: the feed move must reprice the composed rate to (1e18 + 1) x 2.0");
-        assertEq(toUint256(makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2e18 + 2, "shape 2: quotes must carry the doubled 1-wei excess");
+        assertEq(toUint256(makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 2e18 + 2, "shape 2: quotes must carry the doubled 1-wei excess");
 
         // ---- Shape 3: 6-decimal shares over an 18-decimal accounting token, 8-decimal feed (share price 2.5, feed 2.0) ----
         // convertToAssets input is 10^(18+6-18) = 1e6 share-wei (one whole share), the answer is the WAD share
@@ -568,18 +549,15 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
         _deployMakinaChainlinkMarket(6, 18, 2.5e18, 8, 2e8, defaultParams(), 0);
         assertEq(makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 5e18, "shape 3: the composed rate must be 2.5 x 2.0 = 5.0");
         // One whole 6-decimal share is 1e6 tranche-wei: 1e6 x 5e18 / 1e6 = 5e18 NAV
-        assertEq(toUint256(makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e6))), 5e18, "shape 3: one whole 6-dec share must quote 5.0 NAV");
-        assertEq(
-            toUint256(makinaKernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e6))), 5e18, "shape 3: the junior side prices through the identical rate"
-        );
+        assertEq(toUint256(makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e6))), 5e18, "shape 3: one whole 6-dec share must quote 5.0 NAV");
         // 1 share-wei is a millionth of a whole share: 1 x 5e18 / 1e6 = 5e12 NAV-wei exactly (no flooring loss)
         assertEq(
-            toUint256(makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1))),
+            toUint256(makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1))),
             5e12,
             "shape 3: a 1-wei quote must scale by the 6-dec tranche unit exactly"
         );
         // The inverse: 5e18 NAV x 1e6 / 5e18 = 1e6 share-wei, an exact round-trip
-        assertEq(toUint256(makinaKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(5e18)))), 1e6, "shape 3: NAV -> share must invert the composed rate");
+        assertEq(toUint256(makinaKernel.convertValueToCollateralAssets(toNAVUnits(uint256(5e18)))), 1e6, "shape 3: NAV -> share must invert the composed rate");
 
         // Machine yield reprice: share price -> 3.0 composes to floor(3e18 x 2e18 / 1e18) = 6e18, no admin action
         machine.setSharePriceWAD(3e18);
@@ -605,10 +583,10 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
         // produce 2.5e18 + 1. Composed: floor(1e18 x 2.5e18 / 1e18) = 2.5e18
         assertEq(makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 2.5e18, "the sub-WAD feed remainder must floor out of the composed rate");
         // One whole share: 1e18 x 2.5e18 / 1e18 = 2.5e18 NAV
-        assertEq(toUint256(makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2.5e18, "one whole share must quote off the floored rate");
+        assertEq(toUint256(makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 2.5e18, "one whole share must quote off the floored rate");
         // The inverse: 2.5e18 NAV x 1e18 / 2.5e18 = 1e18 share-wei, an exact round-trip off the floored rate
         assertEq(
-            toUint256(makinaKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(2.5e18)))), 1e18, "NAV -> share must invert the floored composed rate"
+            toUint256(makinaKernel.convertValueToCollateralAssets(toNAVUnits(uint256(2.5e18)))), 1e18, "NAV -> share must invert the floored composed rate"
         );
     }
 
@@ -645,10 +623,10 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
         vm.warp(block.timestamp + ORACLE_STALENESS_THRESHOLD_SECONDS + 1);
         assertEq(makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 2e18, "a stale feed must not block an overridden rate");
         assertEq(
-            toUint256(makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2e18, "forward quotes must run off the override through a stale feed"
+            toUint256(makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 2e18, "forward quotes must run off the override through a stale feed"
         );
         assertEq(
-            toUint256(makinaKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(2e18)))),
+            toUint256(makinaKernel.convertValueToCollateralAssets(toNAVUnits(uint256(2e18)))),
             1e18,
             "inverse quotes must run off the override through a stale feed"
         );
@@ -660,7 +638,11 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
         // A REVERTING feed must not block pricing while overridden
         accountingFeed.setRevertMode(true);
         assertEq(makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 2e18, "a reverting feed must not block an overridden rate");
-        assertEq(toUint256(makinaKernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 2e18, "the junior side must also price off the override");
+        assertEq(
+            toUint256(makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))),
+            2e18,
+            "forward quotes must run off the override through a reverting feed"
+        );
 
         // Restore the feed to healthy at 5.0, then clear the override: the feed path resumes at machine 1.0 x 5.0
         accountingFeed.setRevertMode(false);
@@ -737,11 +719,9 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.STALE_PRICE.selector);
         makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD();
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.STALE_PRICE.selector);
-        makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
+        makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18));
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.STALE_PRICE.selector);
-        makinaKernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
-        vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.STALE_PRICE.selector);
-        makinaKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(1e18)));
+        makinaKernel.convertValueToCollateralAssets(toNAVUnits(uint256(1e18)));
 
         // A fresh but ZERO answer is a broken feed, not a price of zero: INVALID_PRICE on the rate read, the
         // depositor-facing forward quote, and the redeemer-facing inverse quote alike
@@ -750,16 +730,16 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.INVALID_PRICE.selector);
         makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD();
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.INVALID_PRICE.selector);
-        makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
+        makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18));
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.INVALID_PRICE.selector);
-        makinaKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(1e18)));
+        makinaKernel.convertValueToCollateralAssets(toNAVUnits(uint256(1e18)));
 
         // A NEGATIVE answer is equally broken: INVALID_PRICE on both conversion directions
         accountingFeed.setAnswer(-1);
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.INVALID_PRICE.selector);
-        makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
+        makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18));
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.INVALID_PRICE.selector);
-        makinaKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(1e18)));
+        makinaKernel.convertValueToCollateralAssets(toNAVUnits(uint256(1e18)));
 
         // A healthy answer computed in an OLDER round than the latest (answeredInRound < roundId): INCOMPLETE_PRICE
         // on the rate read and on both depositor-facing and redeemer-facing quotes
@@ -768,9 +748,9 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.INCOMPLETE_PRICE.selector);
         makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD();
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.INCOMPLETE_PRICE.selector);
-        makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
+        makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18));
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.INCOMPLETE_PRICE.selector);
-        makinaKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(1e18)));
+        makinaKernel.convertValueToCollateralAssets(toNAVUnits(uint256(1e18)));
 
         // Restoring round completeness restores pricing at machine 1.0 x feed 1.0
         accountingFeed.setAnsweredInRound(1);
@@ -796,9 +776,9 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.GRACE_PERIOD_NOT_OVER.selector);
         makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD();
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.GRACE_PERIOD_NOT_OVER.selector);
-        makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
+        makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18));
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.GRACE_PERIOD_NOT_OVER.selector);
-        makinaKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(1e18)));
+        makinaKernel.convertValueToCollateralAssets(toNAVUnits(uint256(1e18)));
 
         // The sequencer reporting DOWN (answer 1) bites before any grace-period reasoning, again on the rate read
         // and on both conversion directions
@@ -806,9 +786,9 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.SEQUENCER_DOWN.selector);
         makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD();
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.SEQUENCER_DOWN.selector);
-        makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18));
+        makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18));
         vm.expectRevert(IdenticalAssets_ST_JT_ChainlinkOracle_Quoter.SEQUENCER_DOWN.selector);
-        makinaKernel.stConvertNAVUnitsToTrancheUnits(toNAVUnits(uint256(1e18)));
+        makinaKernel.convertValueToCollateralAssets(toNAVUnits(uint256(1e18)));
 
         // An UNINITIALIZED uptime feed (startedAt == 0) must read as not-yet-trustworthy, never as up-since-genesis
         seqFeed.setAnswer(0);
@@ -827,7 +807,7 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
         // gate was ever in play
         vm.warp(block.timestamp + 1);
         assertEq(makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 1e18, "the composed rate must price once the grace period fully elapses");
-        assertEq(toUint256(makinaKernel.jtConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1e18, "the junior side must price through the passed gate");
+        assertEq(toUint256(makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 1e18, "quotes must price through the passed gate");
     }
 
     // =============================
@@ -869,7 +849,7 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
 
         // The composed rate reprices through the new feed with NO other action: machine 1.0 x floor(3e18 x 1e18 / 1e18) = 3e18
         assertEq(makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 3e18, "the swap must reprice the composed rate through the new feed");
-        assertEq(toUint256(makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 3e18, "quotes must track the new feed");
+        assertEq(toUint256(makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 3e18, "quotes must track the new feed");
 
         // The old feed is fully detached: poisoning it must not move the composed rate
         accountingFeed.setAnswer(0);
@@ -910,7 +890,7 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
 
         // The composed rate immediately prices through the replacement: machine 1.0 x floor(3e8 x 1e18 / 1e8) = 3e18
         assertEq(makinaKernel.getTrancheUnitToNAVUnitConversionRateWAD(), 3e18, "the rescued market must price through the new feed immediately");
-        assertEq(toUint256(makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 3e18, "quotes must run off the new feed after the rescue");
+        assertEq(toUint256(makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 3e18, "quotes must run off the new feed after the rescue");
     }
 
     /**
@@ -1002,6 +982,6 @@ contract Test_MachineSharePriceTimesChainlinkRate_MakinaChainlinkOracleQuoter is
         assertEq(makinaKernel.getChainlinkOracleConfiguration().oracle, address(accountingFeed), "the wired oracle must be untouched by the failed attempt");
 
         // Pricing still runs off the legitimate feed path: machine 1.0 x feed 1.0 = 1e18 per whole share
-        assertEq(toUint256(makinaKernel.stConvertTrancheUnitsToNAVUnits(toTrancheUnits(1e18))), 1e18, "pricing must still run off the legitimate configuration");
+        assertEq(toUint256(makinaKernel.convertCollateralAssetsToValue(toTrancheUnits(1e18))), 1e18, "pricing must still run off the legitimate configuration");
     }
 }

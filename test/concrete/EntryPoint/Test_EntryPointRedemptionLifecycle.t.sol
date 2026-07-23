@@ -21,7 +21,7 @@ contract Test_EntryPointRedemptionLifecycle is EntryPointTestBase {
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        stUnit = 10 ** uint256(cell.collateralAsset.decimals);
         _seedMarket(100 * stUnit, 50 * stUnit);
         _deployEntryPoint();
     }
@@ -98,7 +98,7 @@ contract Test_EntryPointRedemptionLifecycle is EntryPointTestBase {
     }
 
     // ---------------------------------------------------------------------
-    // executeRedemption — self execution
+    // executeRedemption: self execution
     // ---------------------------------------------------------------------
 
     function test_executeRedemption_self_deliversClaimsToReceiver() public {
@@ -109,7 +109,7 @@ contract Test_EntryPointRedemptionLifecycle is EntryPointTestBase {
         AssetClaims memory claims = _executeRedemptionMax(USER_A, USER_A, nonce);
 
         assertGt(toUint256(claims.nav), 0, "the redemption must produce claims");
-        uint256 assetsDelivered = toUint256(claims.stAssets) + toUint256(claims.jtAssets);
+        uint256 assetsDelivered = toUint256(claims.collateralAssets);
         assertEq(stJtVault.balanceOf(USER_B) - receiverAssetsBefore, assetsDelivered, "the claims must be delivered directly to the receiver");
         assertEq(entryPoint.getRedemptionRequest(USER_A, nonce).shares, 0, "fully executed request must be deleted");
     }
@@ -163,7 +163,7 @@ contract Test_EntryPointRedemptionLifecycle is EntryPointTestBase {
     }
 
     // ---------------------------------------------------------------------
-    // executeRedemption — third-party execution
+    // executeRedemption: third-party execution
     // ---------------------------------------------------------------------
 
     function test_executeRedemption_thirdParty_splitsClaimsBetweenExecutorAndReceiver() public {
@@ -177,7 +177,7 @@ contract Test_EntryPointRedemptionLifecycle is EntryPointTestBase {
         uint256 executorDelta = stJtVault.balanceOf(EXECUTOR) - executorBefore;
         uint256 receiverDelta = stJtVault.balanceOf(USER_B) - receiverBefore;
         assertGt(executorDelta, 0, "the executor must receive its bonus slice of the claims");
-        assertEq(receiverDelta, toUint256(userClaims.stAssets) + toUint256(userClaims.jtAssets), "the receiver must get the post-bonus user claims");
+        assertEq(receiverDelta, toUint256(userClaims.collateralAssets), "the receiver must get the post-bonus user claims");
         // Bonus conservation: the executor's slice is ~1% of the total delivered claims (floor rounding per leg).
         // The bonus is a _scaleAssetClaims slice priced against the virtual-shares effective denominator (WAD + 1e6),
         // so the derivation divides by (1e18 + 1e6), not WAD.

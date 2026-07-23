@@ -5,8 +5,8 @@ import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/M
 import { IRoycoDayAccountant } from "../../../src/interfaces/IRoycoDayAccountant.sol";
 import { WAD } from "../../../src/libraries/Constants.sol";
 import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
-import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 import { MarketFuzzTestBase } from "../../utils/MarketFuzzTestBase.sol";
+import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 
 /**
  * @title TestFuzz_MaxDepositAndWithdrawal_Kernel
@@ -14,14 +14,13 @@ import { MarketFuzzTestBase } from "../../utils/MarketFuzzTestBase.sol";
  *         executing exactly the reported max succeeds and leaves both the coverage and liquidity gates at or below
  *         100%, and one wei (or share) beyond the max plus its derived dust slack reverts on the derived gate
  * @dev Every market is seeded flat at a 1.0 vault rate and 1.0 prices, so one vault-share wei == one BPT wei ==
- *      one NAV wei on the seed. Default parameters throughout: 20% minimum coverage, 5% minimum liquidity, 1 wei
- *      ST and JT NAV dust tolerances. The senior-deposit max is a NAV amount and stays exact integer algebra, but
- *      the two redemption maxes are SHARE counts: maxRedeem converts its NAV bound to shares through the virtual-shares
- *      offset primitive (supply + VIRTUAL_SHARES over claimNAV + VIRTUAL_VALUE), so shares and NAV no longer coincide.
- *      Each redemption gate binds on the WITHDRAWN NAV (floor(claimNAV x shares / (supply + 1e6))), so the tests invert
- *      that floor to the largest gate-respecting share count and check one share past it reverts:
- *      - senior deposit, coverage leg: stDust + jtDust = 2 wei of NAV slack
- *      - senior deposit, liquidity leg: stDust = 1 wei of NAV slack
+ *      one NAV wei on the seed. Default parameters throughout: 20% minimum coverage, 5% minimum liquidity, the
+ *      single 1 wei collateral NAV dust tolerance. The senior-deposit max is a NAV amount and stays exact integer
+ *      algebra, but the two redemption maxes are SHARE counts: maxRedeem converts its NAV bound to shares through
+ *      the virtual-shares offset primitive (supply + VIRTUAL_SHARES over claimNAV + VIRTUAL_VALUE), so shares and
+ *      NAV no longer coincide. Each redemption gate binds on the WITHDRAWN NAV (floor(claimNAV x shares / (supply + 1e6))),
+ *      so the tests invert that floor to the largest gate-respecting share count and check one share past it reverts:
+ *      - senior deposit: the single dustTolerance = 1 wei of NAV slack on each leg
  *      - junior redemption: the reported share max sits at or below the inverted coverage boundary sStar
  *      - liquidity redemption: the reported share max sits at or below the inverted liquidity boundary sStar
  */
@@ -32,12 +31,12 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
      * that binds. This is the no-overfill guarantee: the advertised max is achievable and nothing beyond the
      * boundary can enter.
      *
-     * Derivation (flat marks stRawNAV = stEffectiveNAV = st, jtRawNAV = jtEffectiveNAV = jt, ltRawNAV = depth, exact because 0.2e18 and
-     * 0.05e18 divide WAD):
-     *   coverage gate:  ceil((st + d + jt) * 0.2e18 / jt) <= WAD  <=>  d <= 4*jt - st            (covBound)
+     * Derivation (flat marks collateralNAV = st + jt with stEffectiveNAV = st, jtEffectiveNAV = jt, ltRawNAV = depth,
+     * exact because 0.2e18 and 0.05e18 divide WAD):
+     *   coverage gate:  ceil((st + jt + d) * 0.2e18 / jt) <= WAD  <=>  d <= 4*jt - st            (covBound)
      *   liquidity gate: ceil((st + d) * 0.05e18 / depth) <= WAD   <=>  d <= 20*depth - st        (liqBound)
-     *   reported max = min(covBound - stDust - jtDust, liqBound - stDust) = min(covBound - 2, liqBound - 1)
-     * so the slack to the true boundary B = min(covBound, liqBound) is 1 or 2 wei, and B + 1 wei must revert:
+     *   reported max = min(covBound - dustTolerance, liqBound - dustTolerance) = min(covBound, liqBound) - 1
+     * so the slack to the true boundary B = min(covBound, liqBound) is exactly 1 wei, and B + 1 wei must revert:
      * on the coverage error when covBound <= liqBound (coverage is checked first), else on the liquidity error.
      */
     function testFuzz_MaxSeniorDeposit_FillsCapacityExactlyAndOneMoreWeiReverts(uint256 _stSeed, uint256 _jtSeed, uint256 _extraQuoteSeed) public {
@@ -47,30 +46,44 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         uint256 extraQuote = bound(_extraQuoteSeed, 1, 4 * st / QUOTE_TO_NAV_SCALE);
         uint256 depth = _seedFlatMarket(st, jt, extraQuote);
 
-        // The algebraic gate boundaries and the production max with its per-leg dust slack (derivation above)
+        // The algebraic gate boundaries and the production max with its dust slack (derivation above)
         uint256 covBound = 4 * jt - st;
         uint256 liqBound = 20 * depth - st;
-        uint256 expectedMax = Math.min(covBound - 2, liqBound - 1);
+        uint256 expectedMax = Math.min(covBound, liqBound) - 1;
         uint256 reportedMax = toUint256(seniorTranche.maxDeposit(ST_PROVIDER));
-        assertEq(reportedMax, expectedMax, "reported max senior deposit must equal min(4jt - st - 2, 20depth - st - 1)");
-        assertEq(
-            RoycoTestMath.maxSTDeposit(st, jt, st, jt, depth, 0.2e18, 0.05e18, 1, 1), expectedMax, "independent mirror must agree with the reported max"
-        );
+        assertEq(reportedMax, expectedMax, "reported max senior deposit must equal min(4jt - st, 20depth - st) - 1");
+        assertEq(RoycoTestMath.maxSTDeposit(st + jt, st, jt, depth, 0.2e18, 0.05e18, 1), expectedMax, "independent mirror must agree with the reported max");
 
         // Filling exactly the reported max must succeed and leave both gates at or below 100%
         _depositSenior(reportedMax);
         IRoycoDayAccountant.RoycoDayAccountantState memory acct = accountant.getState();
-        assertEq(toUint256(acct.lastSTRawNAV), st + reportedMax, "the max deposit must land wei-exactly on the senior raw mark");
-        assertLe(RoycoTestMath.computeCoverageUtilization(st + reportedMax, jt, 0.2e18, jt), WAD, "coverage utilization must hold at or below 100% after filling the max");
-        assertLe(RoycoTestMath.computeLiquidityUtilization(st + reportedMax, 0.05e18, depth), WAD, "liquidity utilization must hold at or below 100% after filling the max");
+        assertEq(toUint256(acct.lastCollateralNAV), st + jt + reportedMax, "the max deposit must land wei-exactly on the collateral mark");
+        assertLe(
+            RoycoTestMath.computeCoverageUtilization(st + jt + reportedMax, 0.2e18, jt),
+            WAD,
+            "coverage utilization must hold at or below 100% after filling the max"
+        );
+        assertLe(
+            RoycoTestMath.computeLiquidityUtilization(st + reportedMax, 0.05e18, depth),
+            WAD,
+            "liquidity utilization must hold at or below 100% after filling the max"
+        );
 
         // Consuming the dust slack lands exactly on the algebraic boundary and still passes
         uint256 boundary = Math.min(covBound, liqBound);
         uint256 slack = boundary - reportedMax;
         _depositSenior(slack);
-        assertEq(toUint256(accountant.getState().lastSTRawNAV), st + boundary, "the slack deposit must land exactly on the algebraic gate boundary");
-        assertLe(RoycoTestMath.computeCoverageUtilization(st + boundary, jt, 0.2e18, jt), WAD, "coverage utilization must sit at or below 100% exactly at the boundary");
-        assertLe(RoycoTestMath.computeLiquidityUtilization(st + boundary, 0.05e18, depth), WAD, "liquidity utilization must sit at or below 100% exactly at the boundary");
+        assertEq(toUint256(accountant.getState().lastCollateralNAV), st + jt + boundary, "the slack deposit must land exactly on the algebraic gate boundary");
+        assertLe(
+            RoycoTestMath.computeCoverageUtilization(st + jt + boundary, 0.2e18, jt),
+            WAD,
+            "coverage utilization must sit at or below 100% exactly at the boundary"
+        );
+        assertLe(
+            RoycoTestMath.computeLiquidityUtilization(st + boundary, 0.05e18, depth),
+            WAD,
+            "liquidity utilization must sit at or below 100% exactly at the boundary"
+        );
 
         // One wei past the boundary trips whichever gate binds: coverage is checked before liquidity, so the
         // coverage error surfaces whenever covBound <= liqBound, otherwise only liquidity is violated
@@ -91,8 +104,9 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
      * up to the algebraic coverage boundary, and one more share reverts on the coverage gate. This guarantees the
      * junior tranche can always exit down to the senior tranche's required coverage floor but never through it.
      *
-     * Algebraic boundary (flat marks, JT holds no cross-claim, so the junior supply == jt effNAV, but redeeming s
-     * shares withdraws floor(jt * s / (jt + VIRTUAL_SHARES)) NAV under the redemption-side offset):
+     * Algebraic boundary (flat marks, the junior supply == jt effNAV, but redeeming s shares withdraws
+     * floor(jt * s / (jt + VIRTUAL_SHARES)) NAV under the redemption-side offset; a JT withdrawal removes its
+     * NAV from the coinvested collateral too):
      *   post-redemption coverage gate for a total withdrawal w: ceil((st + jt - w) * 0.2e18 / (jt - w)) <= WAD
      *   <=> 4w <= 4*jt - st <=> w <= floor((4jt - st)/4). Inverting the withdrawn-NAV floor at that boundary gives the
      *   largest gate-respecting share count sStar; the dust-held-back reported max sits at or below it, and one share
@@ -106,7 +120,7 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         // The independent mirror pins the exact reported max. maxRedeem now converts the NAV bound to shares through
         // the offset-aware primitive (supply + VIRTUAL_SHARES over effNAV + VIRTUAL_VALUE), capped by the balance, so
         // the reported max is a SHARE count that no longer equals the withdrawable NAV 1:1 (flat seed: jt supply == jt effNAV)
-        uint256 maxWithdrawNAV = RoycoTestMath.maxJTWithdrawal(st, jt, jt, 0.2e18, 1, 1);
+        uint256 maxWithdrawNAV = RoycoTestMath.maxJTWithdrawal(st + jt, jt, 0.2e18, 1);
         uint256 reportedMax = juniorTranche.maxRedeem(JT_PROVIDER);
         assertEq(
             reportedMax,
@@ -115,9 +129,10 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         );
 
         // The coverage gate binds on the WITHDRAWN NAV, not the share count: redeeming s shares withdraws
-        // floor(jt x s / (jt + VIRTUAL_SHARES)) NAV (flat marks, junior holds no cross-claim), and the post-redemption
-        // coverage requirement caps that at w <= floor((4jt - st)/4). Inverting the floor at that boundary gives the
-        // largest redeemable share count sStar; one share past it withdraws boundary + 1 NAV and breaches coverage
+        // floor(jt x s / (jt + VIRTUAL_SHARES)) NAV (flat marks, the junior claim is its effective NAV), and the
+        // post-redemption coverage requirement caps that at w <= floor((4jt - st)/4). Inverting the floor at that
+        // boundary gives the largest redeemable share count sStar; one share past it withdraws boundary + 1 NAV
+        // and breaches coverage
         uint256 boundaryNAV = (4 * jt - st) / 4;
         uint256 sStar = ((boundaryNAV + 1) * (jt + 1e6) - 1) / jt;
         // The dust-held-back advisory max must never exceed the true coverage-bounded share max
@@ -136,10 +151,10 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         // landing on or just under the algebraic boundary (the offset granularity may leave it a wei short of exact)
         vm.prank(JT_PROVIDER);
         juniorTranche.redeem(sStar, JT_PROVIDER, JT_PROVIDER);
-        uint256 jtRawAfter = toUint256(accountant.getState().lastJTRawNAV);
-        assertLe(jt - jtRawAfter, boundaryNAV, "the max redemption's withdrawn NAV must respect the algebraic coverage boundary");
+        uint256 jtEffAfter = toUint256(accountant.getState().lastJTEffectiveNAV);
+        assertLe(jt - jtEffAfter, boundaryNAV, "the max redemption's withdrawn NAV must respect the algebraic coverage boundary");
         assertLe(
-            RoycoTestMath.computeCoverageUtilization(st, jtRawAfter, 0.2e18, jtRawAfter),
+            RoycoTestMath.computeCoverageUtilization(toUint256(accountant.getState().lastCollateralNAV), 0.2e18, jtEffAfter),
             WAD,
             "coverage utilization must hold at or below 100% after the max redemption"
         );
@@ -205,6 +220,8 @@ contract TestFuzz_MaxDepositAndWithdrawal_Kernel is MarketFuzzTestBase {
         liquidityTranche.redeem(sStar, LT_PROVIDER, LT_PROVIDER);
         uint256 ltRawAfter = toUint256(accountant.getState().lastLTRawNAV);
         assertGe(ltRawAfter, requiredFloor, "the max redemption must leave the required liquidity floor in the pool");
-        assertLe(RoycoTestMath.computeLiquidityUtilization(st, 0.05e18, ltRawAfter), WAD, "liquidity utilization must hold at or below 100% after the max redemption");
+        assertLe(
+            RoycoTestMath.computeLiquidityUtilization(st, 0.05e18, ltRawAfter), WAD, "liquidity utilization must hold at or below 100% after the max redemption"
+        );
     }
 }

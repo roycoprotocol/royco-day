@@ -228,10 +228,8 @@ abstract contract MarketDeploymentConfig {
             juniorTrancheSymbol: _juniorTrancheSymbol(SNUSD),
             liquidityTrancheName: _liquidityTrancheName(SNUSD),
             liquidityTrancheSymbol: _liquidityTrancheSymbol(SNUSD),
-            seniorAsset: 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313,
-            juniorAsset: 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313,
-            stDustTolerance: 5,
-            jtDustTolerance: 5,
+            collateralAsset: 0x08EFCC2F3e61185D0EA7F8830B3FEc9Bfa2EE313,
+            dustTolerance: 5,
             kernelType: KernelType.Identical_ERC4626_ST_JT_SharePriceToChainlinkOracle_BalancerV3_BPTOracle_LT_Kernel,
             kernelSpecificParams: abi.encode(
                 IdenticalERC4626Shares_ST_JT_SharePriceToChainlinkOracle_QuoterKernelParams({

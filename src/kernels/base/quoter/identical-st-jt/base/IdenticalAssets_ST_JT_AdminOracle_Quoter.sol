@@ -5,7 +5,7 @@ import { IdenticalAssets_ST_JT_Oracle_Quoter } from "./IdenticalAssets_ST_JT_Ora
 
 /**
  * @title IdenticalAssets_ST_JT_AdminOracle_Quoter
- * @notice Quoter to convert tranche units to/from NAV units using an admin controlled oracle for markets where both tranches use the same tranche units
+ * @notice Quoter to convert tranche units to/from NAV units using an admin controlled oracle for the coinvested collateral asset both the senior and junior tranches deposit
  * @dev The conversion rate is set purely by an admin
  */
 abstract contract IdenticalAssets_ST_JT_AdminOracle_Quoter is IdenticalAssets_ST_JT_Oracle_Quoter {

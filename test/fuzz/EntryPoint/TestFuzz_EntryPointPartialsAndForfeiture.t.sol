@@ -3,9 +3,9 @@ pragma solidity ^0.8.28;
 
 import { AssetClaims } from "../../../src/libraries/Types.sol";
 import { toUint256 } from "../../../src/libraries/Units.sol";
+import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 import { defaultParams } from "../../utils/MarketParams.sol";
 import { cellA } from "../../utils/TokenConfigs.sol";
-import { EntryPointTestBase } from "../../utils/EntryPointTestBase.sol";
 
 /**
  * @title TestFuzz_EntryPointPartialsAndForfeiture
@@ -18,7 +18,7 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        stUnit = 10 ** uint256(cell.collateralAsset.decimals);
         _seedMarket(1000 * stUnit, 500 * stUnit);
         _deployEntryPoint();
     }
@@ -56,7 +56,11 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
         // The user's share value is pinned to the request-time NAV: forfeiture flooring may leave them dust above,
         // bounded by one share-wei of NAV, so assert the hard gain-direction ceiling plus a tight relative envelope
         uint256 userNav = toUint256(juniorTranche.convertToAssets(userShares).nav);
-        assertLe(userNav, navAtRequest + toUint256(juniorTranche.convertToAssets(1).nav) + 1, "the depositor must never clear more than the snapshot plus rounding dust");
+        assertLe(
+            userNav,
+            navAtRequest + toUint256(juniorTranche.convertToAssets(1).nav) + 1,
+            "the depositor must never clear more than the snapshot plus rounding dust"
+        );
         assertApproxEqRel(userNav, navAtRequest, 0.001e18, "the depositor's proceeds must be pinned to the request-time NAV");
         assertGt(entryPoint.getProtocolFeeSharesPendingCollection(address(juniorTranche)), 0, "a queued gain must always forfeit");
     }
@@ -78,7 +82,11 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
         AssetClaims memory claims = _executeRedemptionMax(USER_A, USER_A, nonce);
 
         assertApproxEqRel(toUint256(claims.nav), navAtRequest, 0.001e18, "the redeemer's proceeds must be pinned to the request-time NAV");
-        assertLe(toUint256(claims.nav), navAtRequest + toUint256(juniorTranche.convertToAssets(1).nav) + 1, "the redeemer must never clear more than the snapshot plus rounding dust");
+        assertLe(
+            toUint256(claims.nav),
+            navAtRequest + toUint256(juniorTranche.convertToAssets(1).nav) + 1,
+            "the redeemer must never clear more than the snapshot plus rounding dust"
+        );
     }
 
     /// @notice The deposit-side forfeiture must pin the depositor to the request-time NAV at ANY pool share:
@@ -95,7 +103,11 @@ contract TestFuzz_EntryPointPartialsAndForfeiture is EntryPointTestBase {
         uint256 userShares = _executeDepositMax(USER_A, USER_A, nonce);
 
         uint256 userNav = toUint256(juniorTranche.convertToAssets(userShares).nav);
-        assertLe(userNav, navAtRequest + toUint256(juniorTranche.convertToAssets(1).nav) + 1, "the depositor must never clear more than the snapshot plus rounding dust");
+        assertLe(
+            userNav,
+            navAtRequest + toUint256(juniorTranche.convertToAssets(1).nav) + 1,
+            "the depositor must never clear more than the snapshot plus rounding dust"
+        );
         assertApproxEqRel(userNav, navAtRequest, 0.001e18, "the depositor's share value must be pinned to the request-time NAV");
     }
 

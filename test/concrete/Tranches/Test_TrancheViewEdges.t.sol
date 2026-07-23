@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Math } from "../../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
 import { AssetClaims } from "../../../src/libraries/Types.sol";
-import { toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
+import { toNAVUnits, toTrancheUnits, toUint256 } from "../../../src/libraries/Units.sol";
 import { MockBPTOracle } from "../../mocks/MockBPTOracle.sol";
 import { DayMarketTestBase } from "../../utils/DayMarketTestBase.sol";
 import { MarketParamsConfig } from "../../utils/FixtureTypes.sol";
@@ -57,7 +57,9 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
         // tranche's first mint is 1:1 with value, so the quote is exactly 1e18 shares
         assertEq(juniorTranche.convertToShares(toTrancheUnits(1e18)), 1e18, "the empty junior tranche must quote the 1:1 bootstrap mint without reverting");
         // The pool's genesis seed pins NAV-per-BPT at exactly 1.0, so 1e18 BPT is worth 1e18 NAV and mints 1:1
-        assertEq(liquidityTranche.convertToShares(toTrancheUnits(1e18)), 1e18, "the empty liquidity tranche must quote the 1:1 bootstrap mint without reverting");
+        assertEq(
+            liquidityTranche.convertToShares(toTrancheUnits(1e18)), 1e18, "the empty liquidity tranche must quote the 1:1 bootstrap mint without reverting"
+        );
     }
 
     // =============================
@@ -106,7 +108,11 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
         assertEq(inKindClaims.stShares, expectedInKindSlice, "the in-kind redeem must pay exactly the pro-rata idle senior share slice");
         assertEq(toUint256(inKindClaims.ltAssets), 0, "the wiped BPT leg must pay nothing in kind");
         assertEq(seniorTranche.balanceOf(LT_PROVIDER), expectedInKindSlice, "the redeemer must receive exactly its idle senior share slice in kind");
-        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleBeforeInKind - expectedInKindSlice, "the kernel's idle pile must drop by exactly the in-kind slice");
+        assertEq(
+            kernel.getState().ltOwnedSeniorTrancheShares,
+            idleBeforeInKind - expectedInKindSlice,
+            "the kernel's idle pile must drop by exactly the in-kind slice"
+        );
         assertEq(bpt.balanceOf(LT_PROVIDER), 0, "no BPT can be delivered against a zero pool-depth mark");
 
         // The multi-asset path delivers the remaining premium by burning it against the senior pool: the idle slice
@@ -117,7 +123,7 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
         uint256 expectedMultiSlice = Math.mulDiv(remaining, idleBeforeMulti, supplyBeforeMulti + 1e6, Math.Rounding.Floor);
         assertGt(expectedMultiSlice, 0, "the multi-asset idle slice must be nonzero");
         uint256 stSupplyBefore = seniorTranche.totalSupply();
-        uint256 stOwnedBefore = toUint256(kernel.getState().stOwnedYieldBearingAssets);
+        uint256 stEffBefore = toUint256(accountant.getState().lastSTEffectiveNAV);
         uint256 vaultSharesBefore = stJtVault.balanceOf(LT_PROVIDER);
 
         vm.prank(LT_PROVIDER);
@@ -125,24 +131,30 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
 
         // Exactly the pro-rata idle senior-share slice was burned: the senior supply and the kernel's idle pile both
         // drop by it, so no premium is stranded on the exit
-        assertEq(stSupplyBefore - seniorTranche.totalSupply(), expectedMultiSlice, "the multi-asset redeem must burn exactly the pro-rata idle senior share slice");
-        assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleBeforeMulti - expectedMultiSlice, "the kernel's idle pile must drop by exactly the burned slice");
+        assertEq(
+            stSupplyBefore - seniorTranche.totalSupply(), expectedMultiSlice, "the multi-asset redeem must burn exactly the pro-rata idle senior share slice"
+        );
+        assertEq(
+            kernel.getState().ltOwnedSeniorTrancheShares, idleBeforeMulti - expectedMultiSlice, "the kernel's idle pile must drop by exactly the burned slice"
+        );
         assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 0, "the remaining balance must have been burned");
 
         // Nothing but the idle leg moved: the pool marks zero so no venue removal ran, no quote came back, and the
         // kernel's pooled BPT inventory is untouched across both redemptions
         assertEq(quoteAssets, 0, "no quote assets can come back while the pool-depth mark is zero");
         assertEq(bpt.balanceOf(LT_PROVIDER), 0, "the redeemer must receive no BPT against a zero pool-depth mark");
-        assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), LT_SEED_BPT, "the kernel's pooled BPT inventory must be untouched");
+        assertEq(toUint256(kernel.getState().totalLTAssets), LT_SEED_BPT, "the kernel's pooled BPT inventory must be untouched");
 
-        // The multi-asset slice paid out as the ST yield-bearing asset, bounded from first principles rather than
-        // re-quoted: a senior share can claim at most its raw pro-rata slice of the senior pool (part of the +10%
-        // gain was paid away as risk and liquidity premiums, never more)
+        // The multi-asset slice paid out as the collateral vault share, bounded from the committed checkpoint rather
+        // than re-quoted: a senior share can claim at most its pro-rata slice of the senior effective NAV converted
+        // once to collateral. The bound is un-offset (denominator stSupply, not stSupply + 1e6) so the actual
+        // offset-diluted payout sits at or below it
         uint256 received = stJtVault.balanceOf(LT_PROVIDER) - vaultSharesBefore;
-        uint256 rawProRataSlice = Math.mulDiv(expectedMultiSlice, stOwnedBefore, stSupplyBefore, Math.Rounding.Floor);
-        assertEq(received, toUint256(stClaims.stAssets), "the reported ST asset claim must equal the vault shares actually delivered");
-        assertGt(received, 0, "the redeemed slice must pay out a nonzero amount of the senior yield-bearing asset");
-        assertLe(received, rawProRataSlice, "no senior share can claim more than its raw pro-rata slice of the senior pool");
+        uint256 effProRataSlice =
+            toUint256(kernel.convertValueToCollateralAssets(toNAVUnits(Math.mulDiv(expectedMultiSlice, stEffBefore + 1, stSupplyBefore, Math.Rounding.Floor))));
+        assertEq(received, toUint256(stClaims.collateralAssets), "the reported collateral claim must equal the vault shares actually delivered");
+        assertGt(received, 0, "the redeemed slice must pay out a nonzero amount of the collateral vault share");
+        assertLe(received, effProRataSlice, "no senior share can claim more than its pro-rata slice of the senior effective NAV");
     }
 
     /**
@@ -161,7 +173,7 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
         // Pre-redeem ledgers. The pool is quote-only (the senior gain lives in the vault rate, not the pool), so
         // its value never moved and NAV-per-BPT is still exactly 1.0: the pooled inventory is the seeded 5e18 BPT
         // and the BPT-to-NAV round trip is wei-exact, making the ledger slice below exact rather than approximate
-        uint256 ownedBpt = toUint256(kernel.getState().ltOwnedYieldBearingAssets);
+        uint256 ownedBpt = toUint256(kernel.getState().totalLTAssets);
         assertEq(ownedBpt, LT_SEED_BPT, "the pooled inventory must be exactly the seeded BPT (the failed reinvestment deployed nothing)");
         uint256 balance = liquidityTranche.balanceOf(LT_PROVIDER);
         uint256 totalSupply = liquidityTranche.totalSupply();
@@ -186,7 +198,7 @@ contract Test_TrancheViewEdges_Tranches is DayMarketTestBase {
         assertEq(seniorTranche.balanceOf(LT_PROVIDER), expectedIdleSlice, "the redeemer must hold exactly its idle senior share slice");
         assertEq(liquidityTranche.balanceOf(LT_PROVIDER), 0, "the full balance must have been burned");
         // The kernel's ledgers drop by exactly the paid slices, so the fee-share holders retain the remainders
-        assertEq(toUint256(kernel.getState().ltOwnedYieldBearingAssets), ownedBpt - expectedBptSlice, "the pooled inventory must drop by exactly the BPT slice");
+        assertEq(toUint256(kernel.getState().totalLTAssets), ownedBpt - expectedBptSlice, "the pooled inventory must drop by exactly the BPT slice");
         assertEq(kernel.getState().ltOwnedSeniorTrancheShares, idleShares - expectedIdleSlice, "the idle pile must drop by exactly the senior share slice");
     }
 

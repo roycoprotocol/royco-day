@@ -24,14 +24,14 @@ contract Test_KernelPauseAndRevertBranches is DayMarketTestBase {
     uint256 internal constant ST_SEED_WHOLE = 100;
     uint256 internal constant JT_SEED_WHOLE = 30;
 
-    uint256 internal stUnit;
+    uint256 internal collateralUnit;
     uint256 internal quoteUnit;
 
     function setUp() public {
         _deployMarket(cellA(), defaultParams());
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        collateralUnit = 10 ** uint256(cell.collateralAsset.decimals);
         quoteUnit = 10 ** uint256(cell.quoteAsset.decimals);
-        _seedMarket(ST_SEED_WHOLE * stUnit, JT_SEED_WHOLE * stUnit);
+        _seedMarket(ST_SEED_WHOLE * collateralUnit, JT_SEED_WHOLE * collateralUnit);
     }
 
     function _pauseKernel() internal {
@@ -52,23 +52,23 @@ contract Test_KernelPauseAndRevertBranches is DayMarketTestBase {
     // ---------------------------------------------------------------------
 
     function test_PausedKernel_bricksSTDeposit() public {
-        stJtVault.mintShares(ST_PROVIDER, stUnit);
+        stJtVault.mintShares(ST_PROVIDER, collateralUnit);
         vm.prank(ST_PROVIDER);
-        stJtVault.approve(address(seniorTranche), stUnit);
+        stJtVault.approve(address(seniorTranche), collateralUnit);
         _pauseKernel();
         vm.prank(ST_PROVIDER);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        seniorTranche.deposit(toTrancheUnits(stUnit), ST_PROVIDER);
+        seniorTranche.deposit(toTrancheUnits(collateralUnit), ST_PROVIDER);
     }
 
     function test_PausedKernel_bricksJTDeposit() public {
-        stJtVault.mintShares(JT_PROVIDER, stUnit);
+        stJtVault.mintShares(JT_PROVIDER, collateralUnit);
         vm.prank(JT_PROVIDER);
-        stJtVault.approve(address(juniorTranche), stUnit);
+        stJtVault.approve(address(juniorTranche), collateralUnit);
         _pauseKernel();
         vm.prank(JT_PROVIDER);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        juniorTranche.deposit(toTrancheUnits(stUnit), JT_PROVIDER);
+        juniorTranche.deposit(toTrancheUnits(collateralUnit), JT_PROVIDER);
     }
 
     function test_PausedKernel_bricksInKindLTDeposit() public {
@@ -257,10 +257,10 @@ contract Test_KernelPauseAndRevertBranches is DayMarketTestBase {
         _pauseKernel();
         vm.prank(UNPAUSER);
         kernel.unpause();
-        stJtVault.mintShares(ST_PROVIDER, stUnit);
+        stJtVault.mintShares(ST_PROVIDER, collateralUnit);
         vm.startPrank(ST_PROVIDER);
-        stJtVault.approve(address(seniorTranche), stUnit);
-        seniorTranche.deposit(toTrancheUnits(stUnit), ST_PROVIDER); // no revert
+        stJtVault.approve(address(seniorTranche), collateralUnit);
+        seniorTranche.deposit(toTrancheUnits(collateralUnit), ST_PROVIDER); // no revert
         vm.stopPrank();
         _sync(); // no revert
     }

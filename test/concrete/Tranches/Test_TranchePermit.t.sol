@@ -99,7 +99,11 @@ contract Test_TranchePermit_Tranches is DayMarketTestBase {
 
         vm.prank(ST_DELEGATE);
         seniorTranche.redeem(10e18, ST_DELEGATE, PERMIT_OWNER);
-        assertEq(stJtVault.balanceOf(ST_DELEGATE), 9999999999999900000, "the delegate must receive exactly floor(100e18 x 10e18 / (100e18 + 1e6)) = 9999999999999900000 vault shares");
+        assertEq(
+            stJtVault.balanceOf(ST_DELEGATE),
+            9_999_999_999_999_900_000,
+            "the delegate must receive exactly floor(100e18 x 10e18 / (100e18 + 1e6)) = 9999999999999900000 vault shares"
+        );
         assertEq(seniorTranche.balanceOf(PERMIT_OWNER), 0, "the owner's senior shares must be fully redeemed through the permit allowance");
         assertEq(seniorTranche.allowance(PERMIT_OWNER, ST_DELEGATE), 0, "the delegated redemption must consume the permit allowance in full");
 
@@ -114,7 +118,11 @@ contract Test_TranchePermit_Tranches is DayMarketTestBase {
 
         vm.prank(JT_DELEGATE);
         juniorTranche.redeem(3e18, JT_DELEGATE, PERMIT_OWNER);
-        assertEq(stJtVault.balanceOf(JT_DELEGATE), 2999999999999900000, "the delegate must receive exactly floor(30e18 x 3e18 / (30e18 + 1e6)) = 2999999999999900000 vault shares");
+        assertEq(
+            stJtVault.balanceOf(JT_DELEGATE),
+            2_999_999_999_999_900_000,
+            "the delegate must receive exactly floor(30e18 x 3e18 / (30e18 + 1e6)) = 2999999999999900000 vault shares"
+        );
         assertEq(juniorTranche.balanceOf(PERMIT_OWNER), 0, "the owner's junior shares must be fully redeemed through the permit allowance");
         assertEq(juniorTranche.allowance(PERMIT_OWNER, JT_DELEGATE), 0, "the delegated junior redemption must consume the permit allowance in full");
 
@@ -128,7 +136,11 @@ contract Test_TranchePermit_Tranches is DayMarketTestBase {
 
         vm.prank(LT_DELEGATE);
         liquidityTranche.redeem(0.5e18, LT_DELEGATE, PERMIT_OWNER);
-        assertEq(bpt.balanceOf(LT_DELEGATE), 499999999999916666, "the delegate must receive exactly floor(6e18 x 0.5e18 / (6e18 + 1e6)) = 499999999999916666 BPT in kind");
+        assertEq(
+            bpt.balanceOf(LT_DELEGATE),
+            499_999_999_999_916_666,
+            "the delegate must receive exactly floor(6e18 x 0.5e18 / (6e18 + 1e6)) = 499999999999916666 BPT in kind"
+        );
         assertEq(liquidityTranche.balanceOf(PERMIT_OWNER), 0, "the owner's liquidity shares must be fully redeemed through the permit allowance");
         assertEq(liquidityTranche.allowance(PERMIT_OWNER, LT_DELEGATE), 0, "the delegated liquidity redemption must consume the permit allowance in full");
     }

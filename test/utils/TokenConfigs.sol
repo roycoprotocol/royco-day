@@ -10,8 +10,8 @@ import { FixtureCell, TokenConfig } from "./FixtureTypes.sol";
  * @notice Canonical token shapes for the parameterized market fixture, keyed by the internal identifiers A..I
  *         (the "cell" letters survive only in this file, as internal identifiers)
  * @dev Hard rule, no test instantiates token mocks directly, tokens come exclusively from these builders
- * @dev Every shipped ST/JT quoter is in the IdenticalAssets family and the kernel constructor requires ST_ASSET == JT_ASSET,
- *      so every shape uses ONE MockERC4626C instance for both ST and JT and the stAsset/jtAsset configs are always identical
+ * @dev Coinvestment is structural: the kernel holds one COLLATERAL_ASSET both tranches deposit,
+ *      so every shape uses ONE MockERC4626C instance as the coinvested collateral
  * @dev Cell D contributes the 8-decimal-shares axis
  */
 
@@ -30,19 +30,19 @@ function _vaultToken(uint8 _shareDecimals, uint8 _underlyingDecimals) pure retur
 /// @notice Cell A, the baseline cell, 4626(18,18) ST/JT shares against a 6-decimal quote stable
 function cellA() pure returns (FixtureCell memory) {
     TokenConfig memory vault = _vaultToken(18, 18);
-    return FixtureCell({ name: "A", stAsset: vault, jtAsset: vault, quoteAsset: _plainToken(6) });
+    return FixtureCell({ name: "A", collateralAsset: vault, quoteAsset: _plainToken(6) });
 }
 
 /// @notice Cell B, low-decimal shares, 4626(6,6) ST/JT shares against an 18-decimal quote stable
 function cellB() pure returns (FixtureCell memory) {
     TokenConfig memory vault = _vaultToken(6, 6);
-    return FixtureCell({ name: "B", stAsset: vault, jtAsset: vault, quoteAsset: _plainToken(18) });
+    return FixtureCell({ name: "B", collateralAsset: vault, quoteAsset: _plainToken(18) });
 }
 
 /// @notice Cell C, decimal-skewed vault, 4626(18,6) shares (18-dec shares over a 6-dec underlying) against a 6-decimal quote
 function cellC() pure returns (FixtureCell memory) {
     TokenConfig memory vault = _vaultToken(18, 6);
-    return FixtureCell({ name: "C", stAsset: vault, jtAsset: vault, quoteAsset: _plainToken(6) });
+    return FixtureCell({ name: "C", collateralAsset: vault, quoteAsset: _plainToken(6) });
 }
 
 /**
@@ -51,7 +51,7 @@ function cellC() pure returns (FixtureCell memory) {
  */
 function cellD() pure returns (FixtureCell memory) {
     TokenConfig memory vault = _vaultToken(8, 8);
-    return FixtureCell({ name: "D", stAsset: vault, jtAsset: vault, quoteAsset: _plainToken(6) });
+    return FixtureCell({ name: "D", collateralAsset: vault, quoteAsset: _plainToken(6) });
 }
 
 /// @notice Cell E, hostile-transfer semantics, REVERT_ON_ZERO on the ST/JT vault underlying and BLOCKLIST on the quote
@@ -60,7 +60,7 @@ function cellE() pure returns (FixtureCell memory) {
     vault.behaviors = MockBehaviors.BEHAVIOR_REVERT_ON_ZERO;
     TokenConfig memory quote = _plainToken(6);
     quote.behaviors = MockBehaviors.BEHAVIOR_BLOCKLIST;
-    return FixtureCell({ name: "E", stAsset: vault, jtAsset: vault, quoteAsset: quote });
+    return FixtureCell({ name: "E", collateralAsset: vault, quoteAsset: quote });
 }
 
 /// @notice Cell F, USDT-shaped quote, NO_RETURN_VALUE (empty returndata) on the quote stable's transfer paths
@@ -68,7 +68,7 @@ function cellF() pure returns (FixtureCell memory) {
     TokenConfig memory vault = _vaultToken(18, 18);
     TokenConfig memory quote = _plainToken(6);
     quote.behaviors = MockBehaviors.BEHAVIOR_NO_RETURN_VALUE;
-    return FixtureCell({ name: "F", stAsset: vault, jtAsset: vault, quoteAsset: quote });
+    return FixtureCell({ name: "F", collateralAsset: vault, quoteAsset: quote });
 }
 
 /// @notice Cell G, fee-on-transfer underlying at 10bps, an EXPECTED-FAILURE cell probing balance-vs-accounting drift
@@ -76,18 +76,18 @@ function cellG() pure returns (FixtureCell memory) {
     TokenConfig memory vault = _vaultToken(18, 18);
     vault.behaviors = MockBehaviors.BEHAVIOR_FEE_ON_TRANSFER;
     vault.feeBps = 10;
-    return FixtureCell({ name: "G", stAsset: vault, jtAsset: vault, quoteAsset: _plainToken(6) });
+    return FixtureCell({ name: "G", collateralAsset: vault, quoteAsset: _plainToken(6) });
 }
 
 /// @notice Cell H, rebasing underlying, balance reads scale by a settable index on the ST/JT vault underlying
 function cellH() pure returns (FixtureCell memory) {
     TokenConfig memory vault = _vaultToken(18, 18);
     vault.behaviors = MockBehaviors.BEHAVIOR_REBASING;
-    return FixtureCell({ name: "H", stAsset: vault, jtAsset: vault, quoteAsset: _plainToken(6) });
+    return FixtureCell({ name: "H", collateralAsset: vault, quoteAsset: _plainToken(6) });
 }
 
 /// @notice Cell I, 8-decimal quote stable against the baseline 4626(18,18) ST/JT shares
 function cellI() pure returns (FixtureCell memory) {
     TokenConfig memory vault = _vaultToken(18, 18);
-    return FixtureCell({ name: "I", stAsset: vault, jtAsset: vault, quoteAsset: _plainToken(8) });
+    return FixtureCell({ name: "I", collateralAsset: vault, quoteAsset: _plainToken(8) });
 }

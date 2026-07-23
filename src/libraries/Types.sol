@@ -28,17 +28,15 @@ enum MarketState {
 
 /**
  * @title AssetClaims
- * @dev A struct representing claims on senior tranche assets, junior tranche assets, liquidity tranche assets, senior tranche shares, and NAV
- * @custom:field stAssets - The claim on senior tranche assets denominated in ST's tranche units (only applicable for the ST and JT)
- * @custom:field jtAssets - The claim on junior tranche assets denominated in JT's tranche units (only applicable for the ST and JT)
+ * @dev A struct representing claims on collateral assets, liquidity tranche assets, senior tranche shares, and NAV
+ * @custom:field collateralAssets - The claim on the coinvested collateral assets denominated in tranche units (only applicable for the ST and JT)
  * @custom:field ltAssets - The claim on liquidity tranche assets denominated in LT's tranche units (only applicable for the LT)
  * @custom:field stShares - The claim on senior tranche shares (only applicable for the LT)
  * @custom:field nav - The net asset value of these claims in NAV units
  */
 struct AssetClaims {
     // ST and JT claims
-    TRANCHE_UNIT stAssets;
-    TRANCHE_UNIT jtAssets;
+    TRANCHE_UNIT collateralAssets;
     // LT claims
     TRANCHE_UNIT ltAssets;
     uint256 stShares;
@@ -50,11 +48,10 @@ struct AssetClaims {
  * @title SyncedAccountingState
  * @dev Contains all current mark-to-market NAV accounting data for the market's tranches
  * @custom:field marketState - The current state of the Royco market (perpetual or fixed term)
- * @custom:field stRawNAV - The senior tranche's current raw NAV: the pure value of its invested assets
- * @custom:field jtRawNAV - The junior tranche's current raw NAV: the pure value of its invested assets
- * @custom:field ltRawNAV - The liquidity tranche's current raw NAV: the pure value of its invested assets
- * @custom:field stEffectiveNAV - Senior tranche effective NAV: includes applied coverage, its share of ST yield, and uncovered losses
- * @custom:field jtEffectiveNAV - Junior tranche effective NAV: includes provided coverage, JT yield, its share of ST yield, and JT losses
+ * @custom:field collateralNAV - The pure value of the coinvested collateral backing the senior and junior tranches, always equal to stEffectiveNAV + jtEffectiveNAV
+ * @custom:field ltRawNAV - The liquidity tranche's current raw NAV: the mark-to-market value of its market making inventory
+ * @custom:field stEffectiveNAV - Senior tranche effective NAV: its claim on the collateral, includes applied coverage, its share of ST yield, and uncovered losses
+ * @custom:field jtEffectiveNAV - Junior tranche effective NAV: its claim on the collateral, includes provided coverage, JT yield, its share of ST yield, and JT losses
  * @custom:field jtImpermanentLoss - The junior tranche's impermanent loss: JT's recoverable drawdown, deepened by JT losses and provided coverage, repaid by JT gains and JT's first claim on ST appreciation
  * @custom:field ltLiquidityPremium - The liquidity premium accrued to the liquidity tranche on this sync: LT's share of senior yield, minted as senior tranche shares to LT (coverage-neutral)
  * @custom:field stProtocolFee - Protocol fee taken on ST yield on this sync
@@ -71,8 +68,7 @@ struct SyncedAccountingState {
     // The market's current operating state (PERPETUAL or FIXED_TERM)
     MarketState marketState;
     // The market's marked-to-market NAVs, JT impermanent loss, LT liquidity premium, and fees
-    NAV_UNIT stRawNAV;
-    NAV_UNIT jtRawNAV;
+    NAV_UNIT collateralNAV;
     NAV_UNIT ltRawNAV;
     NAV_UNIT stEffectiveNAV;
     NAV_UNIT jtEffectiveNAV;

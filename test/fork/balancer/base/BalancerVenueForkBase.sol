@@ -196,7 +196,7 @@ abstract contract BalancerVenueForkBase is Identical_ERC4626_Chainlink_BalancerV
 
     /// @notice The kernel's share of the BPT supply (WAD): the slice of pool TVL that is the LT's.
     function _kernelPoolShareWAD() internal view returns (uint256) {
-        return Math.mulDiv(toUint256(KERNEL.getState().ltOwnedYieldBearingAssets), WAD, _bptSupply());
+        return Math.mulDiv(toUint256(KERNEL.getState().totalLTAssets), WAD, _bptSupply());
     }
 
     /// @notice The feed-price mark-to-market backing one BPT (WAD). The economics basis for adder/redeemer

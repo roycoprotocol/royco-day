@@ -17,7 +17,7 @@ import { MockValueSource } from "../../mocks/MockValueSource.sol";
  * @notice Unit-pins both oracle clock implementations: the Chainlink (compatible) passthrough clock and the checkpoint
  *         clock's change-detection semantics (baseline recording, thresholds, the zero-value edge, and read-failure behavior)
  * @dev The load-bearing property for the entry point's execution gate is that a clock NEVER reports a timestamp without
- *      a genuine observed source update behind it — a manufactured timestamp would open the gate without new information,
+ *      a genuine observed source update behind it, a manufactured timestamp would open the gate without new information,
  *      so initialization records the baseline value and stamps nothing
  */
 contract Test_OracleClocks is Test {
@@ -83,7 +83,7 @@ contract Test_OracleClocks is Test {
     function test_chainlinkClock_constructionIsUncheckedPassthrough() public {
         // The clock is a stateless passthrough with no construction validation: a broken oracle fails loudly at
         // the first poke instead (the entry point pokes at configuration and request time), and a zero update
-        // timestamp is reported as-is — the execution gate treats it as no-update-yet and conservatively holds shut
+        // timestamp is reported as-is, the execution gate treats it as no-update-yet and conservatively holds shut
         ChainlinkOracleClock nullClock = new ChainlinkOracleClock(address(0));
         vm.expectRevert();
         nullClock.poke();
@@ -95,7 +95,7 @@ contract Test_OracleClocks is Test {
     }
 
     // ---------------------------------------------------------------------
-    // OracleCheckpointClockBase — initialization and administration
+    // OracleCheckpointClockBase: initialization and administration
     // ---------------------------------------------------------------------
 
     function test_checkpointClock_initializeRecordsBaselineWithoutStamping() public {
@@ -177,7 +177,7 @@ contract Test_OracleClocks is Test {
     }
 
     // ---------------------------------------------------------------------
-    // OracleCheckpointClockBase — change detection
+    // OracleCheckpointClockBase: change detection
     // ---------------------------------------------------------------------
 
     function test_checkpointClock_unchangedValueNeverAdvances() public {
@@ -229,7 +229,7 @@ contract Test_OracleClocks is Test {
     function test_checkpointClock_zeroCheckpointWithThreshold_failsShutOnEveryPoke() public {
         // A relative deviation from a zero checkpoint is undefined: under a nonzero threshold the deviation check
         // fails shut (division panic) on every poke, so a zero-baselined clock can never stamp a manufactured
-        // timestamp — the tranche's queue reverts loudly until the clock is rotated
+        // timestamp, the tranche's queue reverts loudly until the clock is rotated
         source.setValue(0);
         MockCheckpointClock clock = _deployCheckpointClock(0.01e18);
         assertEq(clock.getOracleCheckpointClockState().lastUpdatedAt, 0, "a zero baseline must not stamp at initialization");
@@ -252,7 +252,7 @@ contract Test_OracleClocks is Test {
 
     function test_checkpointClock_midLifeZeroCrossing_dropCheckpointsThenFailsShut() public {
         // A mid-life wipeout checkpoints the drop to zero as a full deviation, but the zero checkpoint then makes
-        // every further thresholded deviation check fail shut (division panic): the clock stays bricked — loudly —
+        // every further thresholded deviation check fail shut (division panic): the clock stays bricked, loudly,
         // until rotated, rather than ever stamping off an undefined relative base
         MockCheckpointClock clock = _deployCheckpointClock(0.01e18);
 
@@ -270,7 +270,7 @@ contract Test_OracleClocks is Test {
         MockCheckpointClock clock = _deployCheckpointClock(0);
 
         // The value changes and reverts with nobody poking in between: the round trip is unobservable, and the
-        // clock must NOT advance — the failure mode is conservative (the gate stays shut), never a false open
+        // clock must NOT advance, the failure mode is conservative (the gate stays shut), never a false open
         vm.warp(block.timestamp + 1 hours);
         source.setValue(2e18);
         source.setValue(1e18);

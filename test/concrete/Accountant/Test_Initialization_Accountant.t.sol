@@ -251,8 +251,8 @@ contract Test_Initialization_Accountant is AccountantTestBase {
     }
 
     /**
-     * initialize emits the accountant's 13 configuration events with exact args in slot-grouped order
-     * NOTE: an earlier count said 17 init events, the accountant itself emits 13 (the other
+     * initialize emits the accountant's 12 configuration events with exact args in slot-grouped order
+     * NOTE: an earlier count said 17 init events, the accountant itself emits 12 (the other
      * observable logs are OZ's AuthorityUpdated and Initialized, which are not accountant configuration events)
      */
     function test_Initialize_emitsAllInitEvents() public {
@@ -281,9 +281,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
         vm.expectEmit(true, true, true, true, address(acct));
         emit IRoycoDayAccountant.LiquidationCoverageUtilizationUpdated(p.coverageLiquidationUtilizationWAD);
         vm.expectEmit(true, true, true, true, address(acct));
-        emit IRoycoDayAccountant.SeniorTrancheDustToleranceUpdated(p.stNAVDustTolerance);
-        vm.expectEmit(true, true, true, true, address(acct));
-        emit IRoycoDayAccountant.JuniorTrancheDustToleranceUpdated(p.jtNAVDustTolerance);
+        emit IRoycoDayAccountant.DustToleranceUpdated(p.dustTolerance);
         acct.initialize(p, address(authority));
     }
 
@@ -297,8 +295,7 @@ contract Test_Initialization_Accountant is AccountantTestBase {
         p.maxJTYieldShareWAD = 0.25e18;
         p.maxLTYieldShareWAD = 0.35e18;
         p.fixedTermDurationSeconds = 12_345;
-        p.stNAVDustTolerance = toNAVUnits(uint256(3));
-        p.jtNAVDustTolerance = toNAVUnits(uint256(4));
+        p.dustTolerance = toNAVUnits(uint256(7));
         p.stProtocolFeeWAD = 0.11e18;
         p.jtProtocolFeeWAD = 0.12e18;
         p.jtYieldShareProtocolFeeWAD = 0.13e18;
@@ -324,15 +321,12 @@ contract Test_Initialization_Accountant is AccountantTestBase {
         assertEq(s.twLTYieldShareAccruedWAD, 0, "twLTYieldShareAccruedWAD");
         assertEq(s.maxLTYieldShareWAD, 0.35e18, "maxLTYieldShareWAD");
         assertEq(s.coverageLiquidationUtilizationWAD, 1.7e18, "coverageLiquidationUtilizationWAD");
-        assertEq(toUint256(s.lastSTRawNAV), 0, "lastSTRawNAV");
-        assertEq(toUint256(s.lastJTRawNAV), 0, "lastJTRawNAV");
+        assertEq(toUint256(s.lastCollateralNAV), 0, "lastCollateralNAV");
         assertEq(toUint256(s.lastSTEffectiveNAV), 0, "lastSTEffectiveNAV");
         assertEq(toUint256(s.lastJTEffectiveNAV), 0, "lastJTEffectiveNAV");
         assertEq(toUint256(s.lastJTImpermanentLoss), 0, "lastJTImpermanentLoss");
         assertEq(toUint256(s.lastLTRawNAV), 0, "lastLTRawNAV");
-        assertEq(toUint256(s.stNAVDustTolerance), 3, "stNAVDustTolerance");
-        assertEq(toUint256(s.jtNAVDustTolerance), 4, "jtNAVDustTolerance");
-        assertEq(toUint256(s.effectiveNAVDustTolerance), 7, "effectiveNAVDustTolerance == st + jt");
+        assertEq(toUint256(s.dustTolerance), 7, "dustTolerance");
     }
 
     /// a second initialize on the proxy reverts via the initializer guard

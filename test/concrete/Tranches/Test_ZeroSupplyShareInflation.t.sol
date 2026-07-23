@@ -23,14 +23,14 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  *           - LT: the liquidity premium (senior shares the kernel stages for the LT) accrues even with zero LT holders
  *           - JT: the risk premium is booked into jtEffectiveNAV independent of JT tranche supply
  *         The senior tranche has no such amplifier: its NAV basis is its own underlying (which scales with its shares)
- *         plus loss cross-claims, and the kernel accounts assets internally (`stOwnedYieldBearingAssets`, not
- *         `balanceOf`), so a raw ERC20 donation cannot inflate it — ST is documented non-vulnerable in ROOT_A_note.
+ *         plus loss cross-claims, and the kernel accounts assets internally (`totalCollateralAssets`, not
+ *         `balanceOf`), so a raw ERC20 donation cannot inflate it. ST is documented non-vulnerable in ROOT_A_note.
  *
- * @dev Every finding test asserts the DESIRED (safe) invariant and FAILS against current code by design; they go
+ * @dev Every finding test asserts the DESIRED (safe) invariant and FAILS against current code by design. They go
  *      green when the primitive is hardened (virtual shares/offset, seeding the first mint against the live NAV
  *      basis, or routing pre-existing backing away from the bootstrap depositor). The safe invariants, none
- *      design-specific: (a) no windfall — a depositor's position NAV must not exceed its deposit NAV beyond dust;
- *      (b) no DoS/robbery — after a bootstrap mint, a normal depositor must still enter and keep ~its deposit value.
+ *      design-specific: (a) no windfall, a depositor's position NAV must not exceed its deposit NAV beyond dust,
+ *      (b) no DoS/robbery, after a bootstrap mint, a normal depositor must still enter and keep ~its deposit value.
  * @dev The sibling `totalValue == 0, supply > 0` branch (`shares = supply * value`) is NOT reproduced here: the
  *      mint-dilution clamp (MAX_MINT_DILUTION_WAD) already bounds it, verified by the passing assertion in
  *      `test_ZeroBacking_ClampAlreadyBoundsIt` below.
@@ -44,7 +44,7 @@ contract Test_ZeroSupplyShareInflation is DayMarketTestBase {
         p.minLiquidityWAD = 0; // decouple deposits from a liquidity gate so a bare bootstrap deposit lands
         p.ltYieldShareProtocolFeeWAD = 0; // no LT protocol fee, so the fee mint does not create a phantom first LT share
         _deployMarket(cellA(), p);
-        stUnit = 10 ** uint256(cell.stAsset.decimals);
+        stUnit = 10 ** uint256(cell.collateralAsset.decimals);
         quoteUnit = 10 ** uint256(cell.quoteAsset.decimals);
     }
 
@@ -53,7 +53,7 @@ contract Test_ZeroSupplyShareInflation is DayMarketTestBase {
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * ROOT (fails today) — zero supply against a nonzero backing NAV: the first mint must not hand the depositor a
+     * ROOT (fails today): zero supply against a nonzero backing NAV: the first mint must not hand the depositor a
      * claim on the pre-existing backing. `_convertToShares(1 wei, 1000e18 backing, supply 0)` returns 1 share today,
      * so that 1 share owns the whole 1000e18 backing the depositor never funded. This is the single primitive every
      * tranche deposit prices through, so hardening it fixes ST/JT/LT at once.
@@ -63,14 +63,14 @@ contract Test_ZeroSupplyShareInflation is DayMarketTestBase {
         uint256 depositNAV = 1e18;
         // A first deposit into a tranche that already has `backingNAV` of unowned backing
         uint256 shares = ValuationLogic._convertToShares(toNAVUnits(depositNAV), toNAVUnits(backingNAV), 0, Math.Rounding.Floor);
-        // The minted shares, valued back against the post-deposit tranche, must claim no more than the deposit — the
+        // The minted shares, valued back against the post-deposit tranche, must claim no more than the deposit, the
         // pre-existing backing must NOT be captured (pre-fix the 1:1 bootstrap made these shares own backing + deposit)
         NAV_UNIT roundTrip = ValuationLogic._convertToValue(shares, shares, toNAVUnits(backingNAV + depositNAV), Math.Rounding.Floor);
         assertLe(toUint256(roundTrip), depositNAV + depositNAV / 100, "ROOT: a bootstrap mint must claim no more than its deposit");
     }
 
     /**
-     * CONTROL (passes today, documents the boundary) — the sibling zero-backing branch is already bounded by the
+     * CONTROL (passes today, documents the boundary): the sibling zero-backing branch is already bounded by the
      * mint-dilution clamp, so `shares < supply * value`. This is why only the zero-supply branch above is a live bug.
      */
     function test_ZeroBacking_ClampAlreadyBoundsIt() public pure {
@@ -81,11 +81,11 @@ contract Test_ZeroSupplyShareInflation is DayMarketTestBase {
     }
 
     /*//////////////////////////////////////////////////////////////////////
-                LT — PREMIUM STAGED FOR AN EMPTY TRANCHE (windfall)
+                LT PREMIUM STAGED FOR AN EMPTY TRANCHE (windfall)
     //////////////////////////////////////////////////////////////////////*/
 
     /**
-     * INSTANCE LT-WINDFALL (fails today) — the liquidity premium (ST shares staged for the LT) accrues while the LT
+     * INSTANCE LT-WINDFALL (fails today): the liquidity premium (ST shares staged for the LT) accrues while the LT
      * tranche has ZERO shares (minLiquidity 0, LT yield-share curve nonzero), so `_getLiquidityTrancheEffectiveNAV`
      * is positive with LT supply 0. The first LT depositor mints 1:1 and captures the entire staged premium.
      * DESIRED: the first LT depositor's position is worth ~its deposit, not deposit + staged premium
@@ -110,7 +110,7 @@ contract Test_ZeroSupplyShareInflation is DayMarketTestBase {
         accessManager.grantRole(LT_LP_ROLE, dave, 0);
         uint256 daveBpt = 1e18;
         _mintBptTo(dave, daveBpt, quoteUnit);
-        uint256 daveDepositNAV = toUint256(kernel.ltConvertTrancheUnitsToNAVUnits(toTrancheUnits(daveBpt)));
+        uint256 daveDepositNAV = toUint256(kernel.convertLTAssetsToValue(toTrancheUnits(daveBpt)));
 
         vm.startPrank(dave);
         bpt.approve(address(liquidityTranche), daveBpt);
@@ -123,9 +123,9 @@ contract Test_ZeroSupplyShareInflation is DayMarketTestBase {
         assertLe(daveClaimNAV, daveDepositNAV + daveDepositNAV / 100, "LT-WINDFALL: first LT depositor must not capture the staged premium");
     }
     // NOTE: the "wiped JT + fresh deposit captures the recovery" scenario is intentionally NOT a test here. Once
-    // jtEffectiveNAV hits zero the existing JT shares back zero NAV and are correctly diluted; a fresh depositor
+    // jtEffectiveNAV hits zero the existing JT shares back zero NAV and are correctly diluted, a fresh depositor
     // providing the only real backing SHOULD own the tranche and capture yield from then on (standard vault
-    // semantics, unchanged by virtual shares — at zero backing there is nothing to strand). The only questionable
+    // semantics, unchanged by virtual shares, at zero backing there is nothing to strand). The only questionable
     // part, a ~zero-buffer JT earning the MAXIMUM risk premium (jtEff == 0 -> coverageUtilization == max -> yield
     // share cap), is a YDM/accountant policy question tracked by the coverage cross-claim findings, not a
     // share-pricing bug.

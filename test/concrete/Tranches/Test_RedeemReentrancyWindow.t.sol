@@ -44,10 +44,10 @@ import { cellA } from "../../utils/TokenConfigs.sol";
  *         entrypoint is sealed by the kernel's transient reentrancy guard, and the one state change the guard
  *         cannot stop (moving the not-yet-burned shares with a plain ERC20 transfer) makes the outer redemption
  *         itself revert at the burn, unwinding the payout with it
- * @dev The shipped fixture's senior asset is an ERC4626 share with no transfer callback, so a receiver can never
- *      run code during its payout. To open the window this suite deploys the identical-plain-assets kernel
+ * @dev The shipped fixture's collateral asset is an ERC4626 share with no transfer callback, so a receiver can
+ *      never run code during its payout. To open the window this suite deploys the plain-asset kernel
  *      composition (the Chainlink-to-admin quoter, which prices the tranche asset off a feed and an admin rate
- *      and works over any ERC20) with the senior/junior asset being the hookable MockERC20C underlying directly.
+ *      and works over any ERC20) with the collateral asset being the hookable MockERC20C underlying directly.
  *      The deployment mirrors the shipped fixture's order and role wiring with only the kernel implementation
  *      and the tranche asset swapped. Feed 1.0 x admin rate 1.0 pins one token = one NAV unit, and the market
  *      runs at zero minimum liquidity with no PnL so every payout below is a wei-exact 1:1 literal
@@ -96,19 +96,25 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
      *      Every literal carries the virtual-shares/value offset at the pinned 1.0 rate with no PnL and no fee
      *      mints (fees accrue only on gains): control redeem 10e18 of 100e18 shares pays
      *      floor(100e18 x 10e18 / (100e18 + 1e6)) = 9999999999999900000 tokens (the kernel retains the virtual
-     *      dust, so its ST ledger lands at 90000000000000100000 over a 90e18 supply); the probe's 5e18-token
-     *      deposit then mints floor((90e18 + 1e6) x 5e18 / (90000000000000100000 + 1)) = 5000000000000049999
-     *      shares; and the hooked redeem of 10e18 of the resulting 95000000000000049999 supply against the
-     *      95000000000000100000 ledger pays floor(95000000000000100000 x 10e18 / (95000000000000049999 + 1e6)) =
-     *      9999999999999900000 tokens, byte-identical to the control payout
+     *      dust, so the senior effective NAV lands at 90000000000000100000 over a 90e18 supply). The probe's
+     *      5e18-token deposit then mints floor((90e18 + 1e6) x 5e18 / (90000000000000100000 + 1)) =
+     *      5000000000000049999 shares. The hooked redeem of 10e18 of the resulting 95000000000000049999 supply
+     *      against the 95000000000000100000 senior effective NAV pays
+     *      floor(95000000000000100000 x 10e18 / (95000000000000049999 + 1e6)) = 9999999999999900000 tokens,
+     *      byte-identical to the control payout. At the 1.0 rate the value-to-collateral conversion is the
+     *      identity, so the single-conversion claim equals the old pins wei-for-wei
      */
     function test_RevertIf_RedeemPayoutReentersKernelMutatingFlows() public {
         // Control run, no hook armed: the clean-path payout every hooked delta below must match exactly
         address controlReceiver = makeAddr("CONTROL_RECEIVER");
         vm.prank(ST_PROVIDER);
         AssetClaims memory controlClaims = seniorTranche.redeem(10e18, controlReceiver, ST_PROVIDER);
-        assertEq(toUint256(controlClaims.stAssets), 9999999999999900000, "the control redemption must pay floor(100e18 x 10e18 / (100e18 + 1e6)) = 9999999999999900000 tokens");
-        assertEq(stJtUnderlying.balanceOf(controlReceiver), 9999999999999900000, "the control receiver must hold exactly the 9999999999999900000 payout");
+        assertEq(
+            toUint256(controlClaims.collateralAssets),
+            9_999_999_999_999_900_000,
+            "the control redemption must pay floor(100e18 x 10e18 / (100e18 + 1e6)) = 9999999999999900000 tokens"
+        );
+        assertEq(stJtUnderlying.balanceOf(controlReceiver), 9_999_999_999_999_900_000, "the control receiver must hold exactly the 9999999999999900000 payout");
 
         // Qualify the probe before arming the hook: 6e18 tokens minted, 5e18 deposited (minting the offset-adjusted
         // quote against the post-control 90000000000000100000 claims over 90e18 shares), 1e18 kept to fund the reentrant deposit
@@ -119,7 +125,7 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
         vm.stopPrank();
         assertEq(
             seniorTranche.balanceOf(address(probe)),
-            5000000000000049999,
+            5_000_000_000_000_049_999,
             "the probe's qualifying deposit must mint floor((90e18 + 1e6) x 5e18 / (90000000000000100000 + 1)) = 5000000000000049999 senior shares"
         );
 
@@ -146,23 +152,26 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
         }
 
         // The outer redemption must settle byte-identically to the control run: same claims, same payout, and the
-        // same one-for-one deltas on shares and the kernel's senior asset ledger (-10e18 each, like the control)
-        assertEq(toUint256(hookedClaims.stAssets), toUint256(controlClaims.stAssets), "the hooked redemption's claims must equal the control run's");
+        // same one-for-one deltas on shares and the kernel's collateral ledger (-10e18 each, like the control)
+        assertEq(
+            toUint256(hookedClaims.collateralAssets), toUint256(controlClaims.collateralAssets), "the hooked redemption's claims must equal the control run's"
+        );
         assertEq(
             stJtUnderlying.balanceOf(address(probe)),
-            10999999999999900000,
+            10_999_999_999_999_900_000,
             "the probe must hold its kept 1e18 plus exactly the control-equal 9999999999999900000 payout"
         );
         assertEq(seniorTranche.balanceOf(ST_PROVIDER), 80e18, "the owner's shares must drop 100e18 -> 90e18 -> 80e18, 10e18 per redemption");
         assertEq(
             seniorTranche.totalSupply(),
-            85000000000000049999,
+            85_000_000_000_000_049_999,
             "supply must be 100e18 - 10e18 + 5000000000000049999 - 10e18 = 85000000000000049999, no phantom mint or burn"
         );
+        // The collateral ledger carries the seeded ST 100e18 + JT 30e18, minus the two 9999999999999900000 payouts,
+        // plus the probe's 5e18 deposit: 135e18 - 19999999999999800000 = 115000000000000200000 (each redemption
+        // retains a 1e5-token virtual-dust sliver), untouched by the rejected reentries
         assertEq(
-            toUint256(kernel.getState().stOwnedYieldBearingAssets),
-            85000000000000200000,
-            "the kernel's senior asset ledger runs the supply plus the retained virtual dust (two redemptions each leaving a 1e5-token sliver), untouched by the rejected reentries"
+            toUint256(kernel.getState().totalCollateralAssets), 115_000_000_000_000_200_000, "the kernel's collateral ledger must land at 115000000000000200000"
         );
     }
 
@@ -188,21 +197,25 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
         vm.stopPrank();
         assertEq(
             seniorTranche.balanceOf(address(probe)),
-            20000000000000199999,
+            20_000_000_000_000_199_999,
             "the probe's deposit must mint floor((100e18 + 1e6) x 20e18 / (100e18 + 1)) = 20000000000000199999 senior shares"
         );
 
         // Arm the share exfiltration and wire the hook AFTER the qualifying deposit so setup transfers stay silent.
         // Ship the probe's ENTIRE offset-inflated balance so the post-payout burn of 20e18 finds a zero balance
         address accomplice = makeAddr("ACCOMPLICE");
-        probe.armCall(address(seniorTranche), abi.encodeCall(seniorTranche.transfer, (accomplice, 20000000000000199999)));
+        probe.armCall(address(seniorTranche), abi.encodeCall(seniorTranche.transfer, (accomplice, 20_000_000_000_000_199_999)));
         stJtUnderlying.setTransferHook(address(probe));
         stJtUnderlying.setBehaviors(MockBehaviors.BEHAVIOR_HOOK_ON_TRANSFER);
 
         // Pre-attack ledgers: the burn must find the shares gone (balance 0 against the 20e18 burn), so the whole
         // transaction must roll every one of these back to exactly these values
         assertEq(stJtUnderlying.balanceOf(address(kernel)), 150e18, "the kernel must custody the seeded 100e18 + 30e18 plus the probe's 20e18");
-        assertEq(seniorTranche.totalSupply(), 120000000000000199999, "the pre-attack senior supply is the seeded 100e18 plus the probe's offset-adjusted 20000000000000199999 shares");
+        assertEq(
+            seniorTranche.totalSupply(),
+            120_000_000_000_000_199_999,
+            "the pre-attack senior supply is the seeded 100e18 plus the probe's offset-adjusted 20000000000000199999 shares"
+        );
 
         // The full-balance redemption: the kernel debits its ledger and pays 20e18 tokens, the hook ships the
         // unburned shares to the accomplice, and the tranche's burn then reverts on the emptied balance
@@ -214,13 +227,13 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
         // back too): shares back with the probe, nothing with the accomplice, payout back in the kernel
         assertFalse(probe.fired(), "the probe's fired latch must have been rolled back with the reverted transaction");
         assertEq(probe.outcomeCount(), 0, "the probe's recorded outcomes must have been rolled back with the reverted transaction");
-        assertEq(seniorTranche.balanceOf(address(probe)), 20000000000000199999, "the owner's shares must be fully restored by the unwind");
+        assertEq(seniorTranche.balanceOf(address(probe)), 20_000_000_000_000_199_999, "the owner's shares must be fully restored by the unwind");
         assertEq(seniorTranche.balanceOf(accomplice), 0, "the accomplice must be left with nothing");
         assertEq(stJtUnderlying.balanceOf(address(probe)), 0, "the payout must be unwound, the redeemer cannot keep assets AND shares");
         assertEq(stJtUnderlying.balanceOf(address(kernel)), 150e18, "the kernel's asset custody must be byte-identical to the pre-attack value");
-        assertEq(toUint256(kernel.getState().stOwnedYieldBearingAssets), 120e18, "the kernel's senior asset ledger debit must be unwound");
-        assertEq(toUint256(kernel.getState().jtOwnedYieldBearingAssets), 30e18, "the kernel's junior asset ledger must be untouched");
-        assertEq(seniorTranche.totalSupply(), 120000000000000199999, "no share may be burned by a redemption that failed to settle");
+        // ST 120e18 + JT 30e18: the unwound debit restores the whole coinvested ledger, JT leg included
+        assertEq(toUint256(kernel.getState().totalCollateralAssets), 150e18, "the kernel's collateral ledger debit must be unwound");
+        assertEq(seniorTranche.totalSupply(), 120_000_000_000_000_199_999, "no share may be burned by a redemption that failed to settle");
     }
 
     // =============================
@@ -229,7 +242,7 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
 
     /**
      * @notice Deploys the full Day market exactly like the shipped fixture, swapping in the plain-asset kernel and
-     *         making the hookable MockERC20C underlying the senior/junior tranche asset directly
+     *         making the hookable MockERC20C underlying the collateral asset directly
      * @dev Mirrors the base deployment order 1:1 (tokens, oracles, venue, YDMs, predicted kernel address, impls,
      *      tranche and accountant proxies, pool registration, kernel impl, kernel proxy, role wiring) so the payout
      *      window under test runs behind production-shaped proxies and roles. Zero minimum liquidity keeps the
@@ -242,10 +255,10 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
         // Access manager, admin'd by the fixture so role wiring needs no schedule/execute dance
         accessManager = new AccessManager(address(this));
 
-        // Tokens: quote stable + ONE hookable plain ERC20 serving as BOTH the ST and JT asset (the quoter family
-        // requires identical assets, and this composition prices any ERC20 off the feed and the admin rate)
+        // Tokens: quote stable + ONE hookable plain ERC20 serving as the coinvested collateral asset (this
+        // composition prices any ERC20 off the feed and the admin rate)
         quoteToken = _deployERC20("Quote Stable", "QUOTE", cell.quoteAsset);
-        stJtUnderlying = _deployERC20("ST/JT Plain Asset", "UNDR", _toUnderlyingConfig(cell.stAsset));
+        stJtUnderlying = _deployERC20("ST/JT Plain Asset", "UNDR", _toUnderlyingConfig(cell.collateralAsset));
 
         // Oracles: the tranche-asset-to-reference-asset feed at 1.0 (8 decimals), sequencer checks disabled at init
         priceFeed = new MockAggregatorV3(PRICE_FEED_DECIMALS, PRICE_FEED_INITIAL_ANSWER);
@@ -298,9 +311,8 @@ contract Test_RedeemReentrancyWindow_Tranches is DayMarketTestBase {
         PlainAssetKernel kernelImpl = new PlainAssetKernel(
             IRoycoDayKernel.RoycoDayKernelConstructionParams({
                 seniorTranche: address(seniorTranche),
-                stAsset: address(stJtUnderlying),
                 juniorTranche: address(juniorTranche),
-                jtAsset: address(stJtUnderlying),
+                collateralAsset: address(stJtUnderlying),
                 accountant: address(accountant),
                 liquidityTranche: address(liquidityTranche),
                 ltAsset: address(bpt),

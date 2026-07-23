@@ -9,8 +9,8 @@ import { RoycoTestMath } from "../../utils/RoycoTestMath.sol";
 
 /**
  * @title TestFuzz_TrancheClaims_Logic
- * @notice Fuzz properties for the pro-rata claim scaling a redemption applies to all five claim legs
- *         (ST assets, JT assets, LT assets, idle liquidity premium senior shares, NAV): exact five-field
+ * @notice Fuzz properties for the pro-rata claim scaling a redemption applies to all four claim legs
+ *         (collateral assets, LT assets, idle liquidity premium senior shares, NAV): exact four-field
  *         equality against the independent RoycoTestMath mirror, the pro-rata ceiling, and floor-dust
  *         conservation when the whole supply redeems in parts
  * @dev Pure-library layer, no market deploy. Production is asserted against RoycoTestMath or a hand-derived
@@ -23,19 +23,17 @@ contract TestFuzz_TrancheClaims_Logic is Test {
     /// @notice The virtual-shares offset every claim slice is priced against (mirrors src Constants.VIRTUAL_SHARES)
     uint256 internal constant VIRTUAL_SHARES = 1e6;
 
-    /// @dev Wraps five raw claim totals into the production AssetClaims struct
-    function _claims(uint256 _st, uint256 _jt, uint256 _lt, uint256 _stShares, uint256 _nav) internal pure returns (AssetClaims memory c) {
-        c.stAssets = toTrancheUnits(_st);
-        c.jtAssets = toTrancheUnits(_jt);
+    /// @dev Wraps four raw claim totals into the production AssetClaims struct
+    function _claims(uint256 _collateral, uint256 _lt, uint256 _stShares, uint256 _nav) internal pure returns (AssetClaims memory c) {
+        c.collateralAssets = toTrancheUnits(_collateral);
         c.ltAssets = toTrancheUnits(_lt);
         c.stShares = _stShares;
         c.nav = toNAVUnits(_nav);
     }
 
-    /// @dev Asserts all five fields of a production-scaled AssetClaims equal the RoycoTestMath mirror exactly
+    /// @dev Asserts all four fields of a production-scaled AssetClaims equal the RoycoTestMath mirror exactly
     function _assertFieldsEq(AssetClaims memory _got, RoycoTestMath.Claims memory _want, string memory _leg) internal pure {
-        assertEq(toUint256(_got.stAssets), _want.stAssets, string.concat(_leg, ": stAssets == RoycoTestMath.scaleClaims"));
-        assertEq(toUint256(_got.jtAssets), _want.jtAssets, string.concat(_leg, ": jtAssets == RoycoTestMath.scaleClaims"));
+        assertEq(toUint256(_got.collateralAssets), _want.collateralAssets, string.concat(_leg, ": collateralAssets == RoycoTestMath.scaleClaims"));
         assertEq(toUint256(_got.ltAssets), _want.ltAssets, string.concat(_leg, ": ltAssets == RoycoTestMath.scaleClaims"));
         assertEq(_got.stShares, _want.stShares, string.concat(_leg, ": stShares == RoycoTestMath.scaleClaims"));
         assertEq(toUint256(_got.nav), _want.nav, string.concat(_leg, ": nav == RoycoTestMath.scaleClaims"));
@@ -43,15 +41,14 @@ contract TestFuzz_TrancheClaims_Logic is Test {
 
     /**
      * A redeemer burning `shares` of a `totalShares` supply is owed the same fraction of every claim leg,
-     * floored — including the idle liquidity premium senior shares an LT redeemer receives directly — so no leg can
-     * be scaled by a different rule and quietly favor one side. Property (TrancheClaimsLogic.sol:117-131):
-     *   scaled == floor(claim * shares / (totalShares + VIRTUAL_SHARES)) == RoycoTestMath.scaleClaims(...)  [exact, all five]
+     * floored - including the idle liquidity premium senior shares an LT redeemer receives directly - so no leg can
+     * be scaled by a different rule and quietly favor one side. Property:
+     *   scaled == floor(claim * shares / (totalShares + VIRTUAL_SHARES)) == RoycoTestMath.scaleClaims(...)  [exact, all four]
      * and the floor direction caps the redeemer at pro-rata: scaled <= total per field whenever
      * shares <= totalShares (the virtual-shares offset only lowers the slice, so the cap holds a fortiori)
      */
     function testFuzz_ScaleClaims_MatchesMirrorAllFields(
-        uint256 _st,
-        uint256 _jt,
+        uint256 _collateral,
         uint256 _lt,
         uint256 _stShares,
         uint256 _nav,
@@ -61,25 +58,23 @@ contract TestFuzz_TrancheClaims_Logic is Test {
         public
         pure
     {
-        _st = bound(_st, 0, MAX_NAV); // uniform over the full tranche-unit range incl. the 0 edge
-        _jt = bound(_jt, 0, MAX_NAV); // uniform over the full tranche-unit range incl. the 0 edge
+        _collateral = bound(_collateral, 0, MAX_NAV); // uniform over the full tranche-unit range incl. the 0 edge
         _lt = bound(_lt, 0, MAX_NAV); // uniform over the full tranche-unit range incl. the 0 edge
         _stShares = bound(_stShares, 0, MAX_NAV); // uniform over the full idle-share range incl. the 0 edge
         _nav = bound(_nav, 0, MAX_NAV); // uniform over the full NAV range incl. the 0 edge
         _totalShares = bound(_totalShares, 1, MAX_NAV); // a redeemer only exists against a live supply
         _shares = bound(_shares, 0, _totalShares); // full redeemer slice range: 0 through the entire supply
 
-        AssetClaims memory total = _claims(_st, _jt, _lt, _stShares, _nav);
+        AssetClaims memory total = _claims(_collateral, _lt, _stShares, _nav);
         AssetClaims memory scaled = TrancheClaimsLogic._scaleAssetClaims(total, _shares, _totalShares);
 
         RoycoTestMath.Claims memory want = RoycoTestMath.scaleClaims(
-            RoycoTestMath.Claims({ stAssets: _st, jtAssets: _jt, ltAssets: _lt, stShares: _stShares, nav: _nav }), _shares, _totalShares
+            RoycoTestMath.Claims({ collateralAssets: _collateral, ltAssets: _lt, stShares: _stShares, nav: _nav }), _shares, _totalShares
         );
         _assertFieldsEq(scaled, want, "scaled slice");
 
         // Floor direction: the scaled slice never exceeds the total on any field (shares <= totalShares)
-        assertLe(toUint256(scaled.stAssets), _st, "pro-rata cap: stAssets");
-        assertLe(toUint256(scaled.jtAssets), _jt, "pro-rata cap: jtAssets");
+        assertLe(toUint256(scaled.collateralAssets), _collateral, "pro-rata cap: collateralAssets");
         assertLe(toUint256(scaled.ltAssets), _lt, "pro-rata cap: ltAssets");
         assertLe(scaled.stShares, _stShares, "pro-rata cap: stShares");
         assertLe(toUint256(scaled.nav), _nav, "pro-rata cap: nav");
@@ -87,18 +82,17 @@ contract TestFuzz_TrancheClaims_Logic is Test {
 
     /**
      * Three redeemers together burning the entire supply (s1 + s2 + s3 == totalShares) collectively receive the
-     * whole pot minus (a) the virtual-share sliver the offset permanently withholds and (b) at most floor dust —
+     * whole pot minus (a) the virtual-share sliver the offset permanently withholds and (b) at most floor dust -
      * over-payment would drain the tranche. Each slice is floor(claim * s_i / (totalShares + VIRTUAL_SHARES)), so the
      * exact pro-rata terms sum to claim * totalShares / (totalShares + VIRTUAL_SHARES), short of the total by the
      * virtual-share portion V = claim * VIRTUAL_SHARES / (totalShares + VIRTUAL_SHARES). Per field the redeemed sum obeys
      *   total - ceil(V) - 2 <= sum of the three slices <= total
      * Upper side: each slice floors sub-total terms, so the sum never exceeds the total. Lower side (derived):
      * sum = total - V - Σfrac with Σfrac in [0, 3), and ceil(V) + 2 bounds V + Σfrac from above for the integer sum.
-     * The withheld virtual-share sliver stays permanently behind — the donation/premium extraction guard.
+     * The withheld virtual-share sliver stays permanently behind - the donation/premium extraction guard.
      */
     function testFuzz_ScaleClaims_FullSupplyPartitionFloorDust(
-        uint256 _st,
-        uint256 _jt,
+        uint256 _collateral,
         uint256 _lt,
         uint256 _stShares,
         uint256 _nav,
@@ -109,8 +103,7 @@ contract TestFuzz_TrancheClaims_Logic is Test {
         public
         pure
     {
-        _st = bound(_st, 0, MAX_NAV); // uniform over the full tranche-unit range incl. the 0 edge
-        _jt = bound(_jt, 0, MAX_NAV); // uniform over the full tranche-unit range incl. the 0 edge
+        _collateral = bound(_collateral, 0, MAX_NAV); // uniform over the full tranche-unit range incl. the 0 edge
         _lt = bound(_lt, 0, MAX_NAV); // uniform over the full tranche-unit range incl. the 0 edge
         _stShares = bound(_stShares, 0, MAX_NAV); // uniform over the full idle-share range incl. the 0 edge
         _nav = bound(_nav, 0, MAX_NAV); // uniform over the full NAV range incl. the 0 edge
@@ -119,15 +112,19 @@ contract TestFuzz_TrancheClaims_Logic is Test {
         _sharesB = bound(_sharesB, 0, _totalShares - _sharesA); // second slice: uniform over the remainder incl. both edges
         uint256 sharesC = _totalShares - _sharesA - _sharesB; // third slice completes the exact partition
 
-        AssetClaims memory total = _claims(_st, _jt, _lt, _stShares, _nav);
+        AssetClaims memory total = _claims(_collateral, _lt, _stShares, _nav);
         AssetClaims memory a = TrancheClaimsLogic._scaleAssetClaims(total, _sharesA, _totalShares);
         AssetClaims memory b = TrancheClaimsLogic._scaleAssetClaims(total, _sharesB, _totalShares);
         AssetClaims memory c = TrancheClaimsLogic._scaleAssetClaims(total, sharesC, _totalShares);
 
         // Per-field bound: the withheld virtual-share sliver ceil(field*VIRTUAL_SHARES/(totalShares+VIRTUAL_SHARES))
         // plus < 3 floor dust from the three slices (integer bound + 2).
-        _assertPartitionField(toUint256(a.stAssets) + toUint256(b.stAssets) + toUint256(c.stAssets), _st, _partitionDustBound(_st, _totalShares), "stAssets");
-        _assertPartitionField(toUint256(a.jtAssets) + toUint256(b.jtAssets) + toUint256(c.jtAssets), _jt, _partitionDustBound(_jt, _totalShares), "jtAssets");
+        _assertPartitionField(
+            toUint256(a.collateralAssets) + toUint256(b.collateralAssets) + toUint256(c.collateralAssets),
+            _collateral,
+            _partitionDustBound(_collateral, _totalShares),
+            "collateralAssets"
+        );
         _assertPartitionField(toUint256(a.ltAssets) + toUint256(b.ltAssets) + toUint256(c.ltAssets), _lt, _partitionDustBound(_lt, _totalShares), "ltAssets");
         _assertPartitionField(a.stShares + b.stShares + c.stShares, _stShares, _partitionDustBound(_stShares, _totalShares), "stShares");
         _assertPartitionField(toUint256(a.nav) + toUint256(b.nav) + toUint256(c.nav), _nav, _partitionDustBound(_nav, _totalShares), "nav");

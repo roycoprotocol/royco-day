@@ -13,13 +13,13 @@ import { NAV_UNIT, toNAVUnits } from "../../src/libraries/Units.sol";
  * @dev The kernel address is constructor-supplied so a test can act as the kernel for the pre-op and post-op
  *      sync entrypoints (call them directly with the kernel set to the test contract, or prank as the configured
  *      kernel address)
- * @dev seedCheckpoint bypasses initialize entirely: it writes the full accountant state field set (checkpointed
- *      raw and effective NAVs, the JT impermanent loss ledger, the time-weighted yield share
+ * @dev seedCheckpoint bypasses initialize entirely: it writes the full accountant state field set (the checkpointed
+ *      collateral NAV, the effective NAVs, the JT impermanent loss ledger, the time-weighted yield share
  *      accumulators, the max yield shares, all four protocol fee percentages, the market state and fixed-term
- *      fields, the accrual and premium payment clocks, the YDM addresses, and the dust tolerances) so any
+ *      fields, the accrual and premium payment clocks, the YDM addresses, and the dust tolerance) so any
  *      reachable or hypothetical checkpoint can be pinned exactly
  * @dev The maxSTDeposit, maxJTWithdrawal, and maxLTWithdrawal views are already external on the accountant and
- *      read the seeded dust tolerances from storage, so they are driven directly with a marshaled state struct
+ *      read the seeded dust tolerance from storage, so they are driven directly with a marshaled state struct
  */
 contract WaterfallSyncDriver is RoycoDayAccountant {
     constructor(address _kernel) RoycoDayAccountant(_kernel) { }
@@ -51,23 +51,19 @@ contract WaterfallSyncDriver is RoycoDayAccountant {
         $.twLTYieldShareAccruedWAD = _seed.twLTYieldShareAccruedWAD;
         $.maxLTYieldShareWAD = _seed.maxLTYieldShareWAD;
         // Checkpointed NAVs and the JT impermanent loss ledger
-        $.lastSTRawNAV = _seed.lastSTRawNAV;
-        $.lastJTRawNAV = _seed.lastJTRawNAV;
+        $.lastCollateralNAV = _seed.lastCollateralNAV;
         $.lastSTEffectiveNAV = _seed.lastSTEffectiveNAV;
         $.lastJTEffectiveNAV = _seed.lastJTEffectiveNAV;
         $.lastJTImpermanentLoss = _seed.lastJTImpermanentLoss;
         $.lastLTRawNAV = _seed.lastLTRawNAV;
-        // Dust tolerances
-        $.stNAVDustTolerance = _seed.stNAVDustTolerance;
-        $.jtNAVDustTolerance = _seed.jtNAVDustTolerance;
-        $.effectiveNAVDustTolerance = _seed.effectiveNAVDustTolerance;
+        // Dust tolerance
+        $.dustTolerance = _seed.dustTolerance;
     }
 
     /**
      * @notice Runs the sync waterfall preview against the seeded checkpoint with explicitly supplied
      *         time-weighted yield share accumulators, without committing the result
-     * @param _stRawNAV The senior tranche's fresh raw NAV
-     * @param _jtRawNAV The junior tranche's fresh raw NAV
+     * @param _collateralNAV The fresh mark-to-market value of the coinvested collateral
      * @param _twJTYieldShareAccruedWAD The time-weighted JT yield share since the last premium payment, scaled to WAD precision
      * @param _twLTYieldShareAccruedWAD The time-weighted LT yield share since the last premium payment, scaled to WAD precision
      * @return state The post-sync accounting state the waterfall produces
@@ -76,8 +72,7 @@ contract WaterfallSyncDriver is RoycoDayAccountant {
      * @return jtImpermanentLossErased The JT impermanent loss the sync erased
      */
     function runSync(
-        uint256 _stRawNAV,
-        uint256 _jtRawNAV,
+        uint256 _collateralNAV,
         uint256 _twJTYieldShareAccruedWAD,
         uint256 _twLTYieldShareAccruedWAD
     )
@@ -85,14 +80,13 @@ contract WaterfallSyncDriver is RoycoDayAccountant {
         view
         returns (SyncedAccountingState memory state, MarketState initialMarketState, bool premiumsPaid, NAV_UNIT jtImpermanentLossErased)
     {
-        return _previewSyncTrancheAccounting(toNAVUnits(_stRawNAV), toNAVUnits(_jtRawNAV), _twJTYieldShareAccruedWAD, _twLTYieldShareAccruedWAD);
+        return _previewSyncTrancheAccounting(toNAVUnits(_collateralNAV), _twJTYieldShareAccruedWAD, _twLTYieldShareAccruedWAD);
     }
 
     /// @notice Totality twin of runSync via an external self-call, surfacing a revert anywhere in the waterfall as a false success flag
     /// @dev On failure the returned state is the zero-initialized struct and must not be inspected
     function tryRunSync(
-        uint256 _stRawNAV,
-        uint256 _jtRawNAV,
+        uint256 _collateralNAV,
         uint256 _twJTYieldShareAccruedWAD,
         uint256 _twLTYieldShareAccruedWAD
     )
@@ -100,7 +94,7 @@ contract WaterfallSyncDriver is RoycoDayAccountant {
         view
         returns (bool success, SyncedAccountingState memory state)
     {
-        try this.runSync(_stRawNAV, _jtRawNAV, _twJTYieldShareAccruedWAD, _twLTYieldShareAccruedWAD) returns (
+        try this.runSync(_collateralNAV, _twJTYieldShareAccruedWAD, _twLTYieldShareAccruedWAD) returns (
             SyncedAccountingState memory synced, MarketState, bool, NAV_UNIT
         ) {
             return (true, synced);
